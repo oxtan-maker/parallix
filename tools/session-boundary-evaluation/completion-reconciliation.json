@@ -1,0 +1,30 @@
+{
+  "mission": "px-0008",
+  "recordedAt": "2026-11-01T08:19:59.506769+00:00",
+  "authority": "User requested completion of PX paperwork after rebase main, 2026-11-01; earlier explicit instructions closed expansions with documented shortfalls and authorized the later studies. This reconciles recorded plans to delivered research, without claiming target sample counts were achieved.",
+  "scopeResolution": "Research only. Later explicitly authorized checkpoint, reviewer and rebase experiments are included; no new experiments or production changes authorized by this reconciliation. Original scope and checkpoint versions remain in Mission history.",
+  "checkpoints": {
+    "CP-4": "Closed with documented sample shortfall: 20 Compact/Continue pairs rather than planned 28; subsequent Fresh-only additions completed 20 matched triplets. Preserve frozen cohorts and original attempts. No more runs required.",
+    "CP-5": "Completed one matched independent reviewer re-review pilot on TASK-2626 with pinned claude-sonnet-5-5 and reviewer-only prior prefix. Both approved; Fresh 43237 tokens versus Continue 33693. One purposive case, no population quality claim.",
+    "CP-6": "Close extension with documented shortfall, not 28 additional pairs. Original pooled 24-pair analysis is superseded for treatment claims by boundary audits: 16 valid original Fresh/Continue pairs kept separately; nine new-era matched triplets (27 arms) repair treatment contamination. Earlier checkpoint compaction allowed, boundary treatments distinct, safeguards retained. No repair-loop cost mixed into rebase effort. No further runs required."
+  },
+  "advice": "Checkpoint Fresh costs more aggregate tokens in 20 matched triplets; Compact versus Continue not established superior. Corrected rebase data favour Fresh effort, without establishing quality superiority. Reviewer-context pilot remains inconclusive. Keep model, backend era, censoring, historical reconstruction and exploratory-test limitations. Article worktree untouched.",
+  "files": {
+    "strata-no-context-20/final-summary.json": {
+      "bytes": 2086,
+      "sha256": "709c7b018fb3cbf836bb339157c7321e09cb7522a1190820be3155bec295c824"
+    },
+    "checkpoint-fresh-addon-nine-extension/independent-completion-audit.json": {
+      "bytes": 42766,
+      "sha256": "87a9f2fe811a7de8a5c33df1fafa69e50f7b46625ec5b601ab694df7a857f523"
+    },
+    "reviewer-context/summary.json": {
+      "bytes": 1331,
+      "sha256": "29d97c3a6a3a83cba5b2128278276a1915bb6265f2f72eb5c4047feeb41be969"
+    },
+    "rebase-treatment-repair-20261029/repair-final-report.json": {
+      "bytes": 10894,
+      "sha256": "098686f96146ba3318534f63993d2118550baa94778eae1a6e0600036787fb02"
+    }
+  }
+}

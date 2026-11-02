@@ -99,10 +99,9 @@ function populated(): WebBoardSnapshot {
       ...emptyMetrics,
       agentAvailability: [
         metric({ family: agentFamily('codex'), runningSessions: 0 }),
-        metric({ family: agentFamily('claude'), available: false, blockedForMs: 90_000, reason: 'usage limit hit', runningSessions: null }),
+        metric({ family: agentFamily('claude'), available: false, blockedForMs: 90_000, reason: 'usage limit hit', runningSessions: 1 }),
         metric({ family: agentFamily('mistral'), available: false, blockedForMs: Number.POSITIVE_INFINITY, reason: 'manual block' }),
       ],
-      unattributedRunningSessions: null,
       weeklyCumulativeFlow: { series: [{ at: '2026-08-30T23:59:59.999Z', counts: { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 21 }, observationCount: 21 }], missingHistoryFallback: 'estimate', window: { startDate: '2026-08-24', endDate: '2026-08-30', label: '2026-08-24 → 2026-08-30' } },
     },
   });
@@ -448,7 +447,7 @@ test('an unidentified agent omits the implementer label and its activity dot', (
 test('running-agent summaries retain observed counts without command-session wording', () => {
   const html = render(populated());
   assert.match(html, /codex<\/span><span[^>]*>0<\/span>/, 'an observed zero remains beside its agent');
-  assert.match(html, /claude<\/span><span[^>]*>blocked · 1m 30s · unknown<\/span>/, 'unknown liveness remains explicit');
+  assert.match(html, /claude<\/span><span[^>]*>blocked · 1m 30s · 1<\/span>/, 'a confirmed count follows the block');
   assert.doesNotMatch(html, /command sessions?/, 'agent summaries omit the command-session phrase');
   assert.doesNotMatch(html, /unattributed sessions unknown/);
 });
@@ -498,7 +497,7 @@ test('the audited reference treatment omits non-reference source and attribution
 });
 
 test('activity, coordinator recovery evidence, and reduced motion stay truthful', () => {
-  const live = makeCard({ execution: { observedAt: '2026-10-16T10:00:00Z', complete: true, limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agentFamily('codex') }] }, id: fixtureMissionId('task-1111') as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: fixtureMissionId('task-1111') as MissionCard['id'], family: agentFamily('codex') } });
+  const live = makeCard({ execution: { observedAt: '2026-10-16T10:00:00Z', limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agentFamily('codex') }] }, id: fixtureMissionId('task-1111') as MissionCard['id'], currentWork: { operationId: 'op', phase: 'implement', summary: 'live work', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00.000Z', freshness: 'live' }, liveSession: { missionId: fixtureMissionId('task-1111') as MissionCard['id'], family: agentFamily('codex') } });
   const uncertain = makeCard({ id: fixtureMissionId('task-1112') as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'unverified' } });
   const stale = makeCard({ id: fixtureMissionId('task-1113') as MissionCard['id'], currentWork: { ...live.currentWork!, freshness: 'stale' }, liveSession: { missionId: fixtureMissionId('task-1113') as MissionCard['id'], family: agentFamily('codex') } });
   const blocked = makeCard({ id: fixtureMissionId('task-1114') as MissionCard['id'], blockingReason: 'waiting' });
@@ -521,7 +520,7 @@ test('fans retain the pre-TASK-2576 work behavior independently of agent identit
   for (const freshness of ['live', 'unverified', 'stale'] as const) {
     for (const agent of [null, agentFamily('codex')]) {
       for (const liveSession of [undefined, null, { missionId: fixtureMissionId('task-9999') as MissionCard['id'], family: agentFamily('codex') }]) {
-        const card = makeCard({ execution: freshness !== 'stale' && agent !== null ? { observedAt: '2026-10-16T10:00:00Z', complete: true, limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agent }] } : undefined, currentWork: { operationId: 'op', phase: 'integrate', summary: 'work in progress', agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness }, liveSession });
+        const card = makeCard({ execution: freshness !== 'stale' && agent !== null ? { observedAt: '2026-10-16T10:00:00Z', limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agent }] } : undefined, currentWork: { operationId: 'op', phase: 'integrate', summary: 'work in progress', agent, updatedAt: '2026-08-30T00:00:00.000Z', freshness }, liveSession });
         const snapshot = snapshotOf({ stages: makeProjection({ active: [card] }).stages });
         const webCard = snapshot.stages.flatMap(stage => stage.cards)[0];
         const html = render(snapshot);
@@ -559,7 +558,7 @@ test('flight headers omit work badges and agent dots in every flight lane (TASK-
       for (const agent of [null, agentFamily('codex')]) {
         const card = makeCard({
           lane, status: lane, agent,
-          execution: (state === 'live' || state === 'unverified') && agent !== null ? { observedAt: '2026-10-16T10:00:00Z', complete: true, limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agent }] } : undefined,
+          execution: (state === 'live' || state === 'unverified') && agent !== null ? { observedAt: '2026-10-16T10:00:00Z', limitations: [], invocations: [{ runId: 'execute-codex-a1-test', operationId: 'op', family: agent }] } : undefined,
           blockingReason: state === 'blocked' ? 'waiting' : null,
           currentWork: state === 'idle' || state === 'blocked' ? null : {
             operationId: 'op', phase: 'integrate', summary: 'work in progress',
@@ -619,8 +618,13 @@ test('each card renders projected action availability without inventing a runnab
   for (const button of buttons) {
     assert.match(button, /aria-disabled="(?:true|false)"/, `action states availability: ${button}`);
   }
-  assert.match(html, /px active task-0001/, "the server's display string is rendered verbatim");
+  assert.match(html, /px active task-0001/, "the server's explicit display string is rendered verbatim");
   assert.match(html, /aria-label="px active task-0001 — unavailable: command is not eligible for this mission"/, 'the unavailable projected control retains the server reason');
+  const reviewCard = makeCard({ lane: 'review', status: 'review', blockingReason: 'Workflow exited with status 1',
+    commands: [{ command: 'review', enabled: true, reason: null }] });
+  const reviewHtml = render(toWebBoardSnapshot({ ...makeProjection({ review: [reviewCard] }),
+    attentionQueue: [makeAttentionItem(reviewCard, { kind: 'blocking', detail: reviewCard.blockingReason! }, 1)] }));
+  assert.match(reviewHtml, /aria-label="px review task-9999 — enabled"/, 'production-derived review recovery is rendered verbatim (TASK-2814)');
 });
 
 test('advertised actions dispatch directly without a confirmation dialog', () => {
@@ -992,4 +996,14 @@ test('attention rail shows manual blocker and lead investigation next step witho
   assert.match(html, /lead investigation/);
   assert.doesNotMatch(html, /data-action-kind="manual"/);
   assert.doesNotMatch(html, /px integrate task-human/);
+});
+
+test('a failed provider observation is rendered as a dated diagnostic on its own mission only (px-0027 F2)', () => {
+  const failing = makeCard({ id: fixtureMissionId('task-diag-a') as MissionCard['id'], lane: 'active', status: 'active',
+    execution: { observedAt: '2026-11-02T10:00:00.000Z', limitations: ['execute-codex-a1-x: provider process probe unavailable'], invocations: [] } });
+  const healthy = makeCard({ id: fixtureMissionId('task-diag-b') as MissionCard['id'], lane: 'active', status: 'active',
+    execution: { observedAt: '2026-11-02T10:00:00.000Z', limitations: [], invocations: [] } });
+  const html = render(snapshotOf({ stages: makeProjection({ active: [failing, healthy] }).stages }));
+  assert.equal((html.match(/data-execution-diagnostic/g) ?? []).length, 1, 'only the failing mission carries the diagnostic');
+  assert.match(html, /Provider observation at 2026-11-02T10:00:00\.000Z: execute-codex-a1-x: provider process probe unavailable/);
 });

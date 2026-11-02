@@ -82,6 +82,9 @@ export const reviewerOutputRenderers = {
     output.error(fmt.status('FAIL', `Could not launch reviewer agent (${event.reviewer}): ${event.message}`));
     return;
   }),
+  'reviewer-artifact-incomplete': reviewEventRenderer('reviewer-artifact-incomplete', (event, output) => {
+    output.log(fmt.status('WARN', event.diagnostic));
+  }),
   'reviewer-artifact-infra': reviewEventRenderer('reviewer-artifact-infra', (event, output) => {
     output.error(fmt.status('FAIL', `Reviewer artifact infrastructure failure: ${event.diagnostic}`));
     return;
@@ -91,7 +94,7 @@ export const reviewerOutputRenderers = {
     return;
   }),
   'reviewer-recovery-exhausted': reviewEventRenderer('reviewer-recovery-exhausted', (event, output) => {
-    output.error(fmt.status('FAIL', `Reviewer artifact recovery exhausted its ${event.maxAttempts}-attempt budget for ${event.slug}.`));
+    output.error(fmt.status('FAIL', `Reviewer artifact recovery exhausted its ${event.maxAttempts}-attempt budget for ${event.slug}: ${event.diagnostic}. Retry with px review ${event.slug}.`));
     return;
   }),
   'reviewer-artifacts-recovered': reviewEventRenderer('reviewer-artifacts-recovered', (event, output) => {

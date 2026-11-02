@@ -1,7 +1,7 @@
+import { operatorSourceFor, decisionSourceFor } from './review-decision-source.js';
 import { requireReviewPhase } from '../../domain/review-phase-policy.js';
-import { parseIntegrationRepairAssessment, parseHistoricalApprovalSource } from '../../domain/integration-repair-record.js';
+import { parseIntegrationRepairAssessment } from '../../domain/integration-repair-record.js';
 import { agentFamily } from '../../domain/agents.js';
-import { assertClassifierReviewSource, clearingLabel } from '../../domain/classifier-review.js';
 import type { CheckpointData, GoalCheckRow } from '../../domain/checkpoint.js';
 import { externalTaskRef, type ExternalTaskRef } from '../../domain/external-task.js';
 import { isCheckpointName } from '../../domain/checkpoint.js';
@@ -117,6 +117,7 @@ export interface MissionReviewRoundRecord {
   readonly decision_kind: string | null;
   readonly decided_at: string | null;
   readonly decision_comment: string | null;
+  readonly operator_author?: string | null;
   readonly classifier_source?: string | null;
   readonly integration_repair_assessment?: string | null;
   readonly mechanical_source?: string | null;
@@ -352,6 +353,7 @@ function decisionFor(
   row: MissionReviewRoundRecord,
   records: MissionReviewRecords,
 ): ReviewerDecision | null {
+  const operatorSource = operatorSourceFor(row);
   if (row.decision_kind === null) {
     return null;
   }
@@ -370,6 +372,7 @@ function decisionFor(
       revision: typeof row.decided_revision === 'string' ? changeRevision(row.decided_revision) : null,
       comment: row.decision_comment,
       findings,
+      ...operatorSource,
     };
   }
   if (row.decision_kind !== 'approved') {
@@ -422,25 +425,6 @@ function resolutionsFor(
     });
 }
 
-function mechanicalDecisionFor(row: MissionReviewRoundRecord, stored: ReviewerDecision | null): ReviewerDecision | null {
-  if (!row.mechanical_source) { return stored; }
-  if (!row.integration_repair_assessment || stored?.kind !== 'approved' || row.classifier_source) { throw new Error('Invalid persisted mechanical source'); }
-  const assessment = parseIntegrationRepairAssessment(row.integration_repair_assessment);
-  const source = parseHistoricalApprovalSource(row.mechanical_source, assessment.priorRestoration ?? assessment, row.decided_revision ?? undefined);
-  return { ...stored, source };
-}
-
-function classifierDecisionFor(row: MissionReviewRoundRecord, records: MissionReviewRecords): ReviewerDecision | null {
-  const decision = mechanicalDecisionFor(row, decisionFor(row, records));
-  if (!decision || !row.classifier_source) { return decision; }
-  const source = JSON.parse(row.classifier_source) as import('../../domain/classifier-review.js').ClassifierReviewSource;
-  assertClassifierReviewSource(source);
-  if (source.candidateRevision !== (row.decided_revision ?? source.candidateRevision) || clearingLabel(source) !== (decision.kind === 'approved')) {
-    throw new Error('Invalid persisted classifier provenance');
-  }
-  return { ...decision, classifier: source };
-}
-
 function reviewRoundFrom(
   row: MissionReviewRoundRecord,
   records: MissionReviewRecords,
@@ -485,7 +469,7 @@ function reviewRoundFrom(
     reviewer: agentFamily(row.reviewer),
     implementer: agentFamily(row.implementer),
     startedAt: requiredText(row.started_at, 'review start time'),
-    decision: classifierDecisionFor(row, records),
+    decision: decisionSourceFor(row, decisionFor(row, records)),
     response,
     phase: reviewPhaseFrom(row.phase),
     disposition: reviewDispositionFrom(row.disposition),

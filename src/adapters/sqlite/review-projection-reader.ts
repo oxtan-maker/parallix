@@ -59,13 +59,19 @@ export class SqliteReviewProjectionReader {
     const findingsByMission = byMission(findings);
     const resolutionsByMission = byMission(resolutions);
     const eventsByMission = byMission(reviewEvents);
-    return new Map(ids.map((id) => {
-      const review = hydrateReviewProjection({
-        reviewRounds: roundsByMission.get(id) ?? [],
-        findings: findingsByMission.get(id) ?? [],
-        resolutions: resolutionsByMission.get(id) ?? [],
-        reviewEvents: eventsByMission.get(id) ?? [],
-      });
+    return new Map(ids.map((id): [MissionId, ReviewProjectionFact] => {
+      let review: ReturnType<typeof hydrateReviewProjection>;
+      try {
+        review = hydrateReviewProjection({
+          reviewRounds: roundsByMission.get(id) ?? [],
+          findings: findingsByMission.get(id) ?? [],
+          resolutions: resolutionsByMission.get(id) ?? [],
+          reviewEvents: eventsByMission.get(id) ?? [],
+        });
+      } catch (error) {
+        // One unreadable review history stays on its own mission; it must not fail the board.
+        return [id, { review: null, approval: null, unreadable: `Review history unreadable: ${error instanceof Error ? error.message : String(error)}` }];
+      }
       const current = review?.rounds.at(-1);
       const approval = current?.phase === 'approved'
         ? { subject: current.subject, approvedAt: current.decision?.kind === 'approved' ? current.decision.decidedAt : null }

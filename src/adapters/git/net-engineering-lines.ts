@@ -1,4 +1,5 @@
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { CommandOutputLimitError } from './git.js';
 import {
   BUCKET_MEDIUM_MAX,
   BUCKET_SMALL_MAX,
@@ -60,27 +61,44 @@ export function isExcluded(filePath: string): boolean {
   return EXCLUSION_PATTERNS.some(pattern => patternMatches(normalized, pattern));
 }
 
-export function computeNEL(range: string, options: { cwd?: string } = {}): number {
+export const NEL_DIFF_MAX_BUFFER = 50 * 1024 * 1024;
+
+/** A diff range is a local revision expression; anything else never reaches a diagnostic. */
+function safeRange(range: string): string {
+  return /^[A-Za-z0-9._@^~+/-]{1,200}$/.test(range) ? range : '<unprintable range>';
+}
+
+/** A truncated --numstat read would fabricate a statistic rather than report an empty diff. */
+function rejectTruncatedDiff(result: SpawnSyncReturns<string>, range: string, limitBytes: number): void {
+  const code = (result.error as { code?: string } | undefined)?.code ?? '';
+  if (code !== 'ENOBUFS' && code !== 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') { return; }
+  throw new CommandOutputLimitError(`git diff --numstat ${safeRange(range)}`, code, limitBytes,
+    'net engineering lines cannot be counted from truncated diff output; narrow the range');
+}
+
+/** One numstat row's counted lines; excluded, binary and malformed rows count as zero. */
+function numstatRowLines(row: string): number {
+  if (!row.trim()) { return 0; }
+  const [additions, deletions, ...pathParts] = row.split('\t');
+  if (!additions || !deletions || pathParts.length === 0) { return 0; }
+  if (additions === '-' || deletions === '-') { return 0; }
+  if (isExcluded(pathParts.join('\t'))) { return 0; }
+  return (Number.parseInt(additions, 10) || 0) + (Number.parseInt(deletions, 10) || 0);
+}
+
+export function computeNEL(range: string, options: { cwd?: string; maxBuffer?: number } = {}): number {
+  const limitBytes = options.maxBuffer ?? NEL_DIFF_MAX_BUFFER;
   const result = spawnSync('git', ['diff', '--numstat', '-w', range], {
     cwd: options.cwd || process.cwd(),
     encoding: 'utf8',
-    maxBuffer: 50 * 1024 * 1024,
+    maxBuffer: limitBytes,
   });
+  rejectTruncatedDiff(result, range, limitBytes);
   if (result.status !== 0) { return 0; }
-
-  let total = 0;
-  for (const line of (result.stdout || '').split('\n')) {
-    if (!line.trim()) { continue; }
-    const [additions, deletions, ...pathParts] = line.split('\t');
-    if (!additions || !deletions || pathParts.length === 0) { continue; }
-    if (additions === '-' || deletions === '-') { continue; }
-    if (isExcluded(pathParts.join('\t'))) { continue; }
-    total += (Number.parseInt(additions, 10) || 0) + (Number.parseInt(deletions, 10) || 0);
-  }
-  return total;
+  return (result.stdout || '').split('\n').reduce((total, row) => total + numstatRowLines(row), 0);
 }
 
-export function computeNELRecord(range: string, options: { cwd?: string } = {}) {
+export function computeNELRecord(range: string, options: { cwd?: string; maxBuffer?: number } = {}) {
   const nel = computeNEL(range, options);
   return { nel, bucket: classifyBucket(nel) };
 }

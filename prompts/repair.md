@@ -72,7 +72,7 @@ Make the Git hook pass when Parallix commits or rebases this mission. {{repairAu
 
 ## rebase
 
-Review shared conflicts semantically in the mission worktree. Preserve newer base behavior, completed work and unique mission intent; do not resurrect retired metadata or use blanket ours/theirs. Stage every resolved path and continue through successive pauses until Git reports no rebase and no unmerged paths. Stop on ambiguous intent or a human-only decision.
+Review shared conflicts semantically in the mission worktree. Before resolving unexpectedly replayed inherited work, inspect the target branch, Git history and actual diffs. Preserve intended Mission changes and current base behavior, including relocations and completed work; do not restore obsolete code or task metadata merely to apply an old commit or use blanket ours/theirs. Use ordinary Git rebase tools when the intended range is clear; otherwise explain the specific uncertainty with paths and evidence. Stage every resolved path and continue through successive pauses until Git reports no rebase and no unmerged paths. Stop on ambiguous intent or a human-only decision.
 
 ## review-preparation
 

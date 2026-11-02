@@ -10,7 +10,7 @@ import type { MissionLoadResult } from '../domain-ports.js';
 
 export type RetentionOutcome = 'retained' | 'changed' | 'blocked' | 'not-pending';
 interface RetentionRequest {
-  slug: string; services: IntegrationMissionServices; evidence: IntegrationApprovalEvidencePort;
+  slug: string; services: Pick<IntegrationMissionServices, 'store' | 'lifecycle'>; evidence: IntegrationApprovalEvidencePort;
   candidate: { revision: string; baseline: string }; worktree?: string; head(): string | null;
 }
 

@@ -15,7 +15,7 @@ import { C, REVIEW, SPACE, TRACK, TYPE } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
 import { ReasonDisclosure } from './reason-disclosure.js';
 import { ActorLine, AgentLabel } from './card-activity.js';
-import { actorLine, coordinatorText, executingFamily, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
+import { actorLine, coordinatorText, executingFamily, executionDiagnosticText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -231,6 +231,9 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
         )}
         {card.flags.length > 0 && (
           <p style={{ color: C.amber, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>▲ {card.flags.join(' · ')}</p>
+        )}
+        {executionDiagnosticText(card) !== null && (
+          <p data-execution-diagnostic style={{ color: C.amber, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>▲ {executionDiagnosticText(card)}</p>
         )}
         {card.blockingReason !== null && (
           <div style={{ color: C.red, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>{actorLine(card).text === card.blockingReason

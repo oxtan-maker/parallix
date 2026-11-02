@@ -67,7 +67,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A reviewer decision is rejected unless the review is awaiting one, and request-changes is rejected without at least one identified finding carrying an id and summary.',
     fileLocation: 'src/domain/review.ts',
-    line: 775,
+    line: 736,
     anchor: 'export function applyReviewerCommand',
   },
   MissionOutcome: {

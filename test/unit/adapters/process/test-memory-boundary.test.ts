@@ -1,3 +1,4 @@
+import { assertRunnerHealth, RunnerHealthError, RUNNER_HEALTH_MIN_BYTES } from '../../../../src/adapters/process/test-memory-cgroup.js';
 // Policy, capability and report contracts of the test-runner memory boundary
 // (TASK-2722). The real cgroup behavior is proven by
 // test/integration/test-harness/runner-memory-containment.test.ts; these cases
@@ -178,3 +179,56 @@ test('scope watching keeps the latest sample, signals a breach once and survives
   assert.equal(breaches, 1);
   assert.equal(dirLookups, 1);
 });
+
+// Runner admission belongs with the existing memory enforcement contract.
+for (const failed of ['runtime', 'temp', 'scope', 'enforcement', 'inodes', 'unavailable', 'healthy'] as const) {
+  test(`runner health checks ${failed} before admission (TASK-2815)`, () => {
+    let scopes = 0;
+    const check = () => assertRunnerHealth(512, {
+      runtimeDir: '/runtime', tempDir: '/temp', now: () => '2026-11-01T12:00:00Z',
+      capacity: directory => {
+        if (failed === 'unavailable') { throw new Error('EACCES'); }
+        return { availableBytes: directory === `/${failed}` ? 0 : RUNNER_HEALTH_MIN_BYTES, freeInodes: failed === 'inodes' ? 0 : 10 };
+      },
+      spawn: () => { scopes++; return { status: failed === 'scope' ? 1 : 0, stdout: failed === 'enforcement' ? 'max\n0' : `${512 * 1048576}\n0`, stderr: 'scope unavailable' }; },
+    });
+    if (failed === 'healthy') { check(); assert.equal(scopes, 1); }
+    else {
+      assert.throws(check, error => {
+        assert.ok(error instanceof RunnerHealthError);
+        assert.match(error.message, /infrastructure: operation=.*resource=.*observedAt=2026-11-01T12:00:00Z.*remediation=/);
+        assert.deepEqual(error.failureReason, { version: 1, code: 'infrastructure' });
+        return true;
+      });
+      assert.equal(scopes, failed === 'scope' || failed === 'enforcement' ? 1 : 0);
+    }
+  });
+}
+
+test('verification admission precedes build and test scratch setup with infrastructure status (TASK-2815)', () => {
+  const verifier = fs.readFileSync('scripts/verify-local.sh', 'utf8');
+  const runner = fs.readFileSync('test/run-default-tests.ts', 'utf8');
+  assert.ok(verifier.indexOf('check-runner-health.ts') < verifier.indexOf('gate_all()'));
+  assert.match(verifier, /check-runner-health\.ts" \|\| exit \$\?/);
+  assert.ok(runner.indexOf('assertRunnerHealth(') < runner.indexOf('coverageScratchDir = fs.'));
+  assert.ok(runner.indexOf('assertRunnerHealth(') < runner.indexOf('cpuSupervisor(executionRoot)'));
+  assert.match(runner, /process\.exit\(RUNNER_HEALTH_EXIT_STATUS\)/);
+});
+
+for (const tempAvailable of [true, false]) {
+  test(`uncontained runner checks only temp capacity: ${tempAvailable} (TASK-2815 F2)`, () => {
+    const checked: string[] = [];
+    const check = () => assertRunnerHealth(null, {
+      runtimeDir: '/nonexistent/runtime', tempDir: '/temp',
+      capacity: directory => {
+        checked.push(directory);
+        assert.equal(directory, '/temp', 'off mode must not require a user-manager runtime');
+        return { availableBytes: tempAvailable ? RUNNER_HEALTH_MIN_BYTES : 0, freeInodes: 1 };
+      },
+      spawn: () => assert.fail('off mode must not create a scope'),
+    });
+    if (tempAvailable) { check(); }
+    else { assert.throws(check, /resource=\/temp/); }
+    assert.deepEqual(checked, ['/temp']);
+  });
+}

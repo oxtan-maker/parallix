@@ -20,7 +20,7 @@
  * never in a mission worktree or the caller's cwd.
  */
 import * as fmt from '../presentation/cli-format.js';
-import type { IntegrateGitRunner } from '../ports/integrate-workflow.js';
+import type { IntegrateGitPort, IntegrateGitRunner } from '../ports/integrate-workflow.js';
 
 /**
  * The trailing, slug-agnostic half of the integration-stash marker. This is the
@@ -82,16 +82,15 @@ function listMarkerStashes(stdout: string): { index: number; ref: string }[] {
 /**
  * True when a live rebase is in progress in the given worktree.
  *
- * Uses `git rebase --show-current` — the canonical in-progress signal that
- * covers both the rebase-merge and rebase-apply formats — rather than stat-ing
- * the `.git/rebase-*` directory: the application layer is forbidden from
- * importing `node:fs` (boundary guard), and this is git's own answer to the
- * same question. Non-empty stdout means a rebase is replaying; empty means the
- * worktree is clean. The exit code is irrelevant here — only stdout is read.
+ * Delegates to the rebase-state owner (`IntegrateGitPort['detectRebaseState']`), which answers
+ * from the `.git/rebase-*` directory, the REBASE_HEAD metadata ref and the unmerged index. The
+ * previous probe, `git rebase --show-current`, is git's unambiguous prefix match for
+ * `--show-current-patch`: it buffered the entire current commit patch and failed with ENOBUFS on
+ * a large change (TASK-2828). The application layer stays free of `node:fs` because the adapter
+ * owns the filesystem read behind the port.
  */
-function liveRebaseInProgress(baseWorktree: string, git: IntegrateGitRunner): boolean {
-  const showCurrent = git(['-C', baseWorktree, 'rebase', '--show-current']);
-  return showCurrent.status === 0 && showCurrent.stdout.trim().length > 0;
+function liveRebaseInProgress(baseWorktree: string, detectRebaseState: IntegrateGitPort['detectRebaseState']): boolean {
+  return detectRebaseState(baseWorktree).inProgress;
 }
 
 /**
@@ -125,10 +124,13 @@ export async function repairBaseWorktree(
   {
     baseWorktree,
     git,
+    detectRebaseState,
     dryRun = false,
   }: {
     baseWorktree: string;
     git: IntegrateGitRunner;
+    /** Rebase-state owner for the base worktree; supplied by the composition root. */
+    detectRebaseState: IntegrateGitPort['detectRebaseState'];
     /**
      * Detect-only: report what would be repaired without mutating the base
      * worktree. `px integrate --dry-run` passes this so the non-mutating
@@ -141,7 +143,7 @@ export async function repairBaseWorktree(
   let markerStashesDropped = 0;
 
   if (dryRun) {
-    return detectOnlyReport({ baseWorktree, git });
+    return detectOnlyReport({ baseWorktree, git, detectRebaseState });
   }
 
   const listResult = git(['-C', baseWorktree, 'stash', 'list']);
@@ -166,9 +168,9 @@ export async function repairBaseWorktree(
   }
 
   let rebaseAborted = false;
-  // ponytail: the live-rebase check re-runs `git rebase --show-current`; it is
-  // cheap and git's own in-progress signal, so a second call here is fine.
-  if (liveRebaseInProgress(baseWorktree, git)) {
+  // The live-rebase check re-queries the rebase-state owner: it is metadata only, so a
+  // second call here stays cheap and never reads a patch.
+  if (liveRebaseInProgress(baseWorktree, detectRebaseState)) {
     fmt.log.info(`[REPAIR] Live rebase detected in ${baseWorktree}; aborting the interrupted integration rebase.`);
     const abort = git(['-C', baseWorktree, 'rebase', '--abort']);
     if (abort.status !== 0) {
@@ -193,7 +195,7 @@ export async function repairBaseWorktree(
  * this is what `px integrate --dry-run` exercises so the non-mutating contract
  * holds (F2, task-2532 round 1).
  */
-async function detectOnlyReport({ baseWorktree, git }: { baseWorktree: string; git: IntegrateGitRunner }): Promise<{ markerStashesDropped: number; rebaseAborted: boolean }> {
+async function detectOnlyReport({ baseWorktree, git, detectRebaseState }: { baseWorktree: string; git: IntegrateGitRunner, detectRebaseState: IntegrateGitPort['detectRebaseState'] }): Promise<{ markerStashesDropped: number; rebaseAborted: boolean }> {
   let detectedStashes = 0;
   const listResult = git(['-C', baseWorktree, 'stash', 'list']);
   if (listResult.status === 0) {
@@ -204,7 +206,7 @@ async function detectOnlyReport({ baseWorktree, git }: { baseWorktree: string; g
   }
 
   let detectedRebase = false;
-  if (liveRebaseInProgress(baseWorktree, git)) {
+  if (liveRebaseInProgress(baseWorktree, detectRebaseState)) {
     detectedRebase = true;
     fmt.log.info(`[REPAIR:dry-run] Would abort live rebase in ${baseWorktree} and clear the unmerged index.`);
   }

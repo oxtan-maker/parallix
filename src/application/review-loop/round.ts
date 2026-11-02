@@ -44,6 +44,7 @@ export interface LoopContext {
 /** Round-local scratch; nothing here is persisted. */
 export class ReviewRound {
   used = 0;
+  reviewerLaunch: ReviewAgentLaunchResult | null | undefined;
   providerApproval: ProviderApproval | undefined;
   reviewBaseline: string | undefined;
   /** True when a repair's verification already re-ran the rebase and gate this round. */

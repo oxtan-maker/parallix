@@ -128,13 +128,13 @@ describe("git adapter wrappers", () => {
       pathModule,
       gitRunner(args) {
         calls.push(args);
-        if (args.includes('rev-parse')) {
+        if (args.includes('rev-parse') && args.includes('--git-dir')) {
           return { signal: null,  status: 0, stdout: '.git\n', stderr: '' };
         }
         if (args.includes('symbolic-ref')) {
           return { signal: null,  status: 1, stdout: '', stderr: 'fatal: ref HEAD is not a symbolic ref' };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) {
+        if (args.includes('rev-parse') && args.includes('REBASE_HEAD')) {
           return { signal: null,  status: 0, stdout: 'abc123def456\n', stderr: '' };
         }
         if (args.includes('ls-files') && args.includes('-u')) {
@@ -171,14 +171,14 @@ describe("git adapter wrappers", () => {
       fsModule: { existsSync: () => false },
       pathModule: _require('path'),
       gitRunner(args) {
-        if (args.includes('rev-parse')) {
+        if (args.includes('rev-parse') && args.includes('--git-dir')) {
           return { signal: null,  status: 0, stdout: '.git\n', stderr: '' };
         }
         if (args.includes('symbolic-ref')) {
           return { signal: null,  status: 0, stdout: 'mission/task-1328\n', stderr: '' };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) {
-          return { signal: null,  status: 0, stdout: '\n', stderr: '' };
+        if (args.includes('rev-parse') && args.includes('REBASE_HEAD')) {
+          return { signal: null,  status: 1, stdout: '', stderr: '' };
         }
         if (args.includes('ls-files') && args.includes('-u')) {
           return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -201,14 +201,14 @@ describe("git adapter wrappers", () => {
       fsModule: { existsSync: () => false },
       pathModule: _require('path'),
       gitRunner(args) {
-        if (args.includes('rev-parse')) {
+        if (args.includes('rev-parse') && args.includes('--git-dir')) {
           return { signal: null,  status: 0, stdout: '.git\n', stderr: '' };
         }
         if (args.includes('symbolic-ref')) {
           return { signal: null,  status: 0, stdout: 'mission/task-1328\n', stderr: '' };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) {
-          return { signal: null,  status: 0, stdout: '', stderr: '' };
+        if (args.includes('rev-parse') && args.includes('REBASE_HEAD')) {
+          return { signal: null,  status: 1, stdout: '', stderr: '' };
         }
         if (args.includes('ls-files') && args.includes('-u')) {
           return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -221,6 +221,119 @@ describe("git adapter wrappers", () => {
     assert.equal(result.detached, false);
     assert.equal(result.rebaseDir, null);
     assert.deepEqual(result.unmergedFiles, []);
+  });
+
+  // TASK-2828.1 reproduction (red on the parent commit): `git rebase --show-current` is git's
+  // unambiguous-prefix match for `--show-current-patch`, so it buffers the whole current commit
+  // patch. On task-2822 that patch was 2,320,623 bytes and the default 1 MiB spawnSync buffer
+  // failed with `spawnSync git ENOBUFS`, which crashed rebase-state detection and therefore
+  // conflict classification. The commit identity is available from REBASE_HEAD metadata alone.
+  test('detectRebaseState identifies the paused rebase without reading the oversized current patch (TASK-2828.1)', () => {
+    const CURRENT_PATCH_BYTES = 2_320_623;
+    const DEFAULT_MAX_BUFFER_BYTES = 1024 * 1024;
+    const rebaseHeadSha = 'a97318f5e6ce664b2d443445735139a551115564';
+    const calls: string[][] = [];
+
+    const result = git.detectRebaseState('/tmp/repo', {
+      fsModule: { existsSync: (target: string) => target === '/tmp/repo/.git/rebase-merge' },
+      pathModule: _require('path'),
+      gitRunner(args) {
+        calls.push(args);
+        if (args.includes('rev-parse') && args.includes('--git-dir')) {
+          return { signal: null, status: 0, stdout: '.git\n', stderr: '' };
+        }
+        if (args.includes('rev-parse') && args.includes('REBASE_HEAD')) {
+          return { signal: null, status: 0, stdout: `${rebaseHeadSha}\n`, stderr: '' };
+        }
+        if (args.includes('symbolic-ref')) {
+          return { signal: null, status: 1, stdout: '', stderr: 'fatal: ref HEAD is not a symbolic ref' };
+        }
+        if (args.includes('rebase') && args.includes('--show-current')) {
+          // The patch query overflows the default buffer: spawnSync reports the error with only
+          // the truncated prefix of stdout, and git() rethrows it because status is null.
+          const error = Object.assign(new Error('spawnSync git ENOBUFS'), {
+            code: 'ENOBUFS',
+            stdout: Buffer.alloc(DEFAULT_MAX_BUFFER_BYTES, 'x'),
+            patchedBytes: CURRENT_PATCH_BYTES
+          });
+          throw error;
+        }
+        if (args.includes('ls-files') && args.includes('-u')) {
+          return { signal: null, status: 0, stdout: '100644 aaaaa 1\tsrc/adapters/git/git.ts', stderr: '' };
+        }
+        throw new Error(`Unexpected git args: ${args.join(' ')}`);
+      }
+    });
+
+    assert.equal(result.rebaseHead, rebaseHeadSha);
+    assert.equal(result.inProgress, true);
+    assert.equal(result.detached, true);
+    assert.equal(result.rebaseDir, '/tmp/repo/.git/rebase-merge');
+    assert.deepEqual(result.unmergedFiles, ['src/adapters/git/git.ts']);
+    assert.ok(
+      !calls.some(args => args.includes('--show-current')),
+      `rebase-state detection must not request the current patch to identify the commit: ${JSON.stringify(calls)}`
+    );
+  });
+
+  test('detectRebaseState reports no rebase head when REBASE_HEAD metadata is missing (TASK-2828.2)', () => {
+    const calls: string[][] = [];
+    const result = git.detectRebaseState('/tmp/repo', {
+      fsModule: { existsSync: () => false },
+      pathModule: _require('path'),
+      gitRunner(args) {
+        calls.push(args);
+        if (args.includes('rev-parse') && args.includes('--git-dir')) {
+          return { signal: null, status: 0, stdout: '.git\n', stderr: '' };
+        }
+        if (args.includes('rev-parse') && args.includes('REBASE_HEAD')) {
+          return { signal: null, status: 1, stdout: '', stderr: '' };
+        }
+        if (args.includes('symbolic-ref')) {
+          return { signal: null, status: 0, stdout: 'mission/task-2828\n', stderr: '' };
+        }
+        if (args.includes('ls-files') && args.includes('-u')) {
+          return { signal: null, status: 0, stdout: '', stderr: '' };
+        }
+        throw new Error(`Unexpected git args: ${args.join(' ')}`);
+      }
+    });
+
+    assert.equal(result.rebaseHead, '');
+    assert.equal(result.inProgress, false);
+    assert.equal(result.detached, false);
+    assert.equal(result.rebaseDir, null);
+    assert.ok(!calls.some(args => args.includes('--show-current')));
+  });
+
+  // Regression guard for the metadata swap: git clears `.git/rebase-merge` when `rebase
+  // --continue` finishes but leaves REBASE_HEAD resolvable, so the ref alone must never be
+  // read as a live operation. Reading it that way would keep handing back an already
+  // finished rebase and block publication.
+  test('detectRebaseState does not treat a lingering REBASE_HEAD as a live rebase (TASK-2828.2)', () => {
+    const result = git.detectRebaseState('/tmp/repo', {
+      fsModule: { existsSync: () => false },
+      pathModule: _require('path'),
+      gitRunner(args) {
+        if (args.includes('rev-parse') && args.includes('--git-dir')) {
+          return { signal: null, status: 0, stdout: '.git\n', stderr: '' };
+        }
+        if (args.includes('rev-parse') && args.includes('REBASE_HEAD')) {
+          return { signal: null, status: 0, stdout: 'a97318f5e6ce664b2d443445735139a551115564\n', stderr: '' };
+        }
+        if (args.includes('symbolic-ref')) {
+          return { signal: null, status: 0, stdout: 'mission/task-2828\n', stderr: '' };
+        }
+        if (args.includes('ls-files') && args.includes('-u')) {
+          return { signal: null, status: 0, stdout: '', stderr: '' };
+        }
+        throw new Error(`Unexpected git args: ${args.join(' ')}`);
+      }
+    });
+
+    assert.equal(result.rebaseDir, null);
+    assert.equal(result.inProgress, false, 'a completed rebase must not stay reported as in progress');
+    assert.equal(result.rebaseHead, 'a97318f5e6ce664b2d443445735139a551115564', 'the replayed commit stays identifiable as metadata');
   });
 
   test('getLastCommit parses sha, date, and subject', async () => {
@@ -292,7 +405,7 @@ describe("git pure helpers", () => {
       gitRunner: (args) => {
         if (args.includes('--git-dir')) return { stderr: '', signal: null,  status: 0, stdout: '.git' };
         if (args.includes('symbolic-ref')) return { stderr: '', signal: null,  status: 0, stdout: 'main' };
-        return { stderr: '', signal: null,  status: 1, stdout: '' }; // show-current + ls-files: nothing in progress
+        return { stderr: '', signal: null,  status: 1, stdout: '' }; // REBASE_HEAD verify + ls-files -u: nothing in progress
       },
       fsModule: { existsSync: () => false },
       pathModule: { isAbsolute: (p) => p.startsWith('/'), join: (...p) => p.join('/') },

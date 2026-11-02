@@ -1,8 +1,8 @@
 ---
 id: TASK-2806
 title: Finish review workflows after completed recovery work
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-22 09:52'
 labels:
   - bug

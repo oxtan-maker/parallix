@@ -66,6 +66,25 @@ The one automatic exception is GitHub-hosted runners, which are disposable and
 have no delegated user manager: there the boundary is off with a printed notice.
 Other platforms must opt out explicitly.
 
+## Runner health before verification
+
+Before expensive local verification or a test run starts, a fresh preflight
+creates a memory-limited scope and reads back its memory limit and zero swap
+cap. It also requires at least 64 MiB of available capacity and one free inode
+on the runtime filesystem (`XDG_RUNTIME_DIR`, or `/run/user/<uid>`) and the test
+temporary filesystem (`TMPDIR`, or the system temporary directory). This is an
+admission minimum, not a guarantee that a workload will fit. When the boundary
+is off, including the existing GitHub-hosted exception, preflight still checks
+temporary capacity but does not require a user manager or its runtime directory.
+
+A failed check exits with status `75` and a `[runner-health] infrastructure`
+diagnostic naming the operation, resource, observation time and remediation.
+Verification stops before builds or tests start. The workflow returns this
+infrastructure blocker to the operator without spending implementer repair
+attempts. Restore capacity or the user manager as directed, then rerun the
+original verification command: recovery requires a fresh healthy preflight and
+successful verification. Parallix does not remove runtime data automatically.
+
 ## What is not contained
 
 The boundary belongs to the runner. Invoking Node's test runner directly

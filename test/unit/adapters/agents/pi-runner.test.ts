@@ -840,3 +840,25 @@ test('first and later fresh SDK repairs create independent sessions (TASK-2700)'
     pi.__setCreateAgentSessionForTest(null);
   }
 });
+
+test('Pi output-token-limit stop reaches the review launch caller (TASK-2827)', async () => {
+  let listener: ((event: PiStreamEvent) => void) | undefined;
+  pi.__setCreateAgentSessionForTest(async () => ({ session: {
+    subscribe: callback => { listener = callback; return () => { listener = undefined; }; },
+    prompt: async () => { listener?.({ type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'length' }] }); },
+    getLastAssistantText: () => 'unfinished verdict',
+  } }));
+  const launch: import('../../../../src/application/ports/review-round.js').ReviewAgentLaunchResult = {
+    agent: 'pi', result: await pi.startPiAgent({ prompt: 'Review', worktree: '/tmp/pi-stop' }).resultPromise,
+  };
+  assert.equal(launch.result?.stopReason, 'output-token-limit');
+  assert.equal(launch.result?.status, 0);
+  const { fakeReviewLoopPorts } = await import('../../../helpers/review-loop-ports.js');
+  const { runReviewLoop } = await import('../../../../src/application/review-loop/review-loop.js');
+  const fake = fakeReviewLoopPorts({
+    slug: 'task-2827-pi', provider: {}, agents: { launch: async () => launch },
+    routing: { eligibleFamilies: () => ['custom'], nominate: () => 'custom' },
+  });
+  await runReviewLoop({ slug: 'task-2827-pi', maxAttempts: 1 }, fake.ports);
+  assert.match([...fake.logs, ...fake.errors].join(' | '), /Incomplete reviewer artifact.*output-token-limit/);
+});

@@ -8,12 +8,6 @@ export interface AgentAvailabilityRow {
   readonly reason?: string | null;
   readonly expiresAtMs?: number | null;
   readonly limit?: string | null;
-  /**
-   * Confirmed provider invocations for this family, or `null` when execution
-   * could not be observed. executionComplete=false makes positives lower bounds. Null means unknown and must not be shown as zero.
-   */
-  readonly runningSessions?: number | null;
-  readonly executionComplete?: boolean;
 }
 
 /** One mission whose agent is running right now, and the family running it. */
@@ -26,9 +20,7 @@ export interface RunningAgentSession {
 export function projectAgentAvailability(
   agents: readonly AgentAvailability[],
   nowMs: number,
-  runningSessions: readonly RunningAgentSession[] | null = null,
 ): AgentAvailabilityRow[] {
-  const runningByFamily = countByFamily(runningSessions);
   return agents.map((agent) => {
     const remaining = blockedForMs(agent.block, nowMs);
     return {
@@ -38,35 +30,8 @@ export function projectAgentAvailability(
       reason: unavailableReason(agent, remaining),
       expiresAtMs: remaining > 0 && agent.block.kind === 'until' ? agent.block.untilMs : null,
       limit: remaining > 0 && agent.block.kind !== 'none' ? agent.block.reason : null,
-      runningSessions: runningByFamily === null ? null : runningByFamily.get(agent.family) ?? 0,
     };
   });
-}
-
-/**
- * Running sessions that no source could attribute to a family, or `null` when
- * liveness was not observed at all. Counting them keeps the strip's total
- * honest when a `px review` or `px resolve-conflict` process cannot say which
- * family it is running.
- */
-export function countUnattributedSessions(
-  sessions: readonly RunningAgentSession[] | null,
-): number | null {
-  if (sessions === null) { return null; }
-  return sessions.filter((session) => session.family === null).length;
-}
-
-/** Running sessions per family, or null when liveness was not observed. */
-function countByFamily(
-  sessions: readonly RunningAgentSession[] | null,
-): ReadonlyMap<AgentFamily, number> | null {
-  if (sessions === null) { return null; }
-  const counts = new Map<AgentFamily, number>();
-  for (const session of sessions) {
-    if (session.family === null) { continue; }
-    counts.set(session.family, (counts.get(session.family) ?? 0) + 1);
-  }
-  return counts;
 }
 
 /**

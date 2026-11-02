@@ -1,5 +1,10 @@
 // review intervention resume.integration.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
+import { recordApproval } from '../../../src/adapters/review/review-round.js';
+import { readReviewState } from '../../../src/adapters/review/review-state.js';
+import { currentReviewRound } from '../../../src/domain/review.js';
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
+import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { describe, afterEach, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -424,4 +429,190 @@ it('first review recovers acknowledged criteria correction without a persisted R
 
 it('inferred recovery stops for a newly reported blocker (TASK-2810)', { timeout: 10000 }, async t => {
   await retainedRepairCase('new-blocker', false, t);
+});
+
+// Exercise the real state, revocation and observation adapters across closed
+// database connections; provider evidence is persisted separately from Mission.
+
+it('retries a persisted operator correction after failed revocation and a database restart (px-0001)', async () => {
+  const review = applyReviewerCommand(startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('approved-head') },
+    REVIEWER, IMPLEMENTER, '2026-10-01T09:00:00Z', reviewerEligibility,
+  ), { type: 'approve', decidedAt: '2026-10-01T10:00:00Z', comment: 'Approved', source: { kind: 'local' } });
+  const { root, store: seedStore } = await seedRoot(review);
+  const seeded = await seedStore.load(missionId(SLUG));
+  assert.equal(seeded.kind, 'found');
+  if (seeded.kind !== 'found') { throw new Error('Missing fixture'); }
+  fs.writeFileSync(path.join(root, 'feature.txt'), 'approved feature\n');
+  await seedStore.save({ ...seeded.mission, status: 'integration', closedAt: null, assignee: IMPLEMENTER,
+    checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1',
+      goalCheck: [{ criterion: 'Retain the approved feature', evidence: 'feature.txt' }],
+      nextActionText: 'Exercise correction retry and independent review' }],
+  }, seeded.version);
+  const providerFile = path.join(root, 'provider-review.json');
+  fs.writeFileSync(providerFile, JSON.stringify([{
+    kind: 'review', id: '7', user: 'operator', state: 'REQUEST_CHANGES',
+    created: '2026-10-01T11:00:00Z', body: 'Preserve the requested retry correction.',
+  }, {
+    kind: 'inline-comment', id: '7', reviewId: '7', user: 'operator', state: 'REQUEST_CHANGES',
+    created: '2026-10-01T11:00:01Z', body: 'Preserve its inline obligation too.',
+  }]));
+  const findingIds = ['human-review-7', 'human-inline-comment-7'];
+  const summaries = ['Preserve the requested retry correction.', 'Preserve its inline obligation too.'];
+  const applied: string[] = [];
+  let launches = 0;
+  let approvalRevoked = false;
+  let expectedSource: string | undefined;
+
+  async function restart(failRevocation: boolean, failDecision = false) {
+    // No Mission, ReviewState, feedback object or connection survives a restart.
+    for (const database of databases.splice(0)) { await database.close(); }
+    const database = new SqliteDatabaseAdapter();
+    databases.push(database);
+    await database.open({ path: databasePathOf(root) });
+    const store = new SqliteMissionStore(database);
+    const lifecycle = new MissionLifecycleService(store);
+    const errors: string[] = [], entryExits: number[] = [];
+    let preparations = 0;
+    const real = createReviewLoopPorts(SLUG, { worktree: root }, {
+      missionStore: store, lifecycleService: lifecycle,
+      isProviderEnabled: () => true, readToken: () => 'fixture-token',
+      getComments: async () => JSON.parse(fs.readFileSync(providerFile, 'utf8')),
+      log: () => {}, error: message => { errors.push(message); },
+    });
+    const fake: ReturnType<typeof fakeReviewLoopPorts> = fakeReviewLoopPorts({
+      slug: SLUG, worktree: root, missionStore: store, lifecycle,
+      stateport: { ...real.state,
+        recordRequestedChanges: async (state, observation) => {
+          if (failDecision) { throw new Error('injected decision write failure'); }
+          await real.state.recordRequestedChanges(state, observation);
+          applied.push(...observation.findings.map(finding => finding.id));
+        },
+      },
+      routing: { eligibleFamilies: () => [REVIEWER, IMPLEMENTER] },
+      reviewPreparation: { reviewPreparation: async () => {
+        preparations++;
+        const state = await real.state.read();
+        assert.ok(state);
+        assert.equal(state.phase, 'reviewing', 'operator continuation opened the next round');
+        const gate = await fake.ports.preReview.runGate();
+        assert.equal(gate.ok, true);
+        assert.equal(await real.state.openRound(state), true, errors.join('\n'));
+        return { ok: true };
+      } },
+      preReview: { head: () => 'approved-head' },
+      agents: { launch: async launch => {
+        const loaded = await store.load(missionId(SLUG));
+        assert.equal(loaded.kind, 'found');
+        if (loaded.kind !== 'found') { throw new Error('Missing mission'); }
+        if (launch.role === 'reviewer') {
+          assert.equal(launches, 1, 'review follows the single correction application');
+          assert.equal(preparations, 1, 'review preparation must finish before the reviewer starts');
+          assert.equal(loaded.mission.status, 'review');
+          assert.equal(reviewStatus(loaded.mission.review!), 'awaiting-review');
+          const result = await recordApproval(SLUG, {
+            revision: 'approved-head', decidedAt: new Date().toISOString(),
+            comment: 'Operator-resolved correction independently reviewed', source: { kind: 'local' },
+          }, { missionStore: store, lifecycleService: lifecycle });
+          assert.equal(result.outcome, 'recorded');
+          return { agent: REVIEWER };
+        }
+        assert.equal(launch.role, 'implementer');
+        assert.equal(approvalRevoked, true);
+        assert.equal(loaded.mission.status, 'active');
+        const decision = currentReviewRound(loaded.mission.review!).decision;
+        assert.equal(decision?.kind, 'changes-requested', 'the correction must be durable before launching implementation');
+        if (decision?.kind !== 'changes-requested') { throw new Error('Missing correction decision'); }
+        assert.deepEqual(decision.findings.map(f => f.summary), summaries);
+        assert.deepEqual(decision.findings.map(f => f.id), findingIds);
+        assert.deepEqual(decision.source, { kind: 'operator', author: 'operator' });
+        launches++;
+        return { agent: IMPLEMENTER };
+      } },
+      artifacts: { consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'BLOCKED', changedRevision: true }) },
+    });
+    const reconcile = real.humanFeedback.reconcile;
+    const humanFeedback = { ...real.humanFeedback, reconcile: async (state: Parameters<typeof reconcile>[0]) => {
+      const feedback = await reconcile(state);
+      if (feedback) {
+        expectedSource ??= feedback.source;
+        assert.equal(feedback.source, expectedSource, 'restart must recover the original provider identity');
+        assert.equal(feedback.reason, summaries.join('\n'));
+      }
+      return feedback;
+    } };
+    const ports = {
+      ...fake.ports, humanFeedback,
+      approvalRevocation: { revoke: async (request: Parameters<NonNullable<typeof real.approvalRevocation>['revoke']>[0]) => {
+        if (failRevocation) { return { ok: false, diagnostic: 'injected version conflict' }; }
+        const result = await real.approvalRevocation!.revoke(request);
+        approvalRevoked = result.ok;
+        return result;
+      } },
+    };
+    await new ReviewCommandUseCase(createReviewWorkflowAdapter({
+      missionStore: store, operatorResume: bindReviewOperatorResume(store, true, {}),
+      inferSlugFn: () => SLUG, resolveWorktreeFn: () => root,
+      readReviewStateFn: async () => readReviewState(SLUG, root, store), reviewLoopMechanisms: () => ports,
+      log: () => {}, error: message => { errors.push(message); }, exit: code => { entryExits.push(code); },
+    })).execute([SLUG, '--actor', 'operator']);
+    return { store, ports, preparations, roles: fake.launches.map(launch => launch.role),
+      exits: [...entryExits, ...fake.exits], errors: [...errors, ...fake.errors], stops: fake.stops };
+  }
+
+  const first = await restart(true);
+  const failed = await first.store.load(missionId(SLUG));
+  assert.equal(failed.kind, 'found');
+  if (failed.kind !== 'found') { throw new Error('Missing failed mission'); }
+  assert.equal(reviewStatus(failed.mission.review!), 'approved');
+  assert.equal(failed.mission.review!.rounds[0].decision?.kind === 'approved'
+    && failed.mission.review!.rounds[0].decision.revocation, undefined);
+  assert.equal(launches, 0);
+  assert.deepEqual(applied, []);
+  assert.equal(failed.mission.review!.reviewEvents.filter(e => e.followUpReference?.startsWith('forgejo:')).length, 0);
+  assert.match(fs.readFileSync(providerFile, 'utf8'), /Preserve the requested retry correction/);
+
+  const decisionFailure = await restart(false, true);
+  assert.deepEqual(decisionFailure.exits, [1]);
+  assert.match(decisionFailure.errors.join('\n'), /injected decision write failure.*px review/);
+  assert.equal(launches, 0);
+  const retried = await restart(false);
+  assert.equal(launches, 1);
+  assert.deepEqual(applied, findingIds);
+  assert.deepEqual(retried.exits, []);
+  assert.deepEqual(retried.errors, []);
+  assert.deepEqual(retried.roles, ['implementer']);
+  const recovered = await retried.store.load(missionId(SLUG));
+  assert.equal(recovered.kind, 'found');
+  if (recovered.kind !== 'found') { throw new Error('Missing recovered mission'); }
+  assert.equal(recovered.mission.review!.rounds.length, 2);
+  const correctionDecision = recovered.mission.review!.rounds[1].decision;
+  assert.ok(correctionDecision?.kind === 'changes-requested');
+  assert.deepEqual(correctionDecision.source, { kind: 'operator', author: 'operator' }, 'operator provenance survives reopening SQLite');
+  assert.equal(recovered.mission.review!.rounds[0].decision?.kind === 'approved'
+    && recovered.mission.review!.rounds[0].decision.revocation?.revokedBy, 'operator');
+  assert.equal(recovered.mission.review!.reviewEvents.filter(e => e.followUpReference?.startsWith(expectedSource!)).length, 1);
+  assert.equal(recovered.mission.review!.reviewEvents.filter(e => e.followUpReference?.startsWith('forgejo:')).length, 2);
+  const state = await retried.ports.state.read();
+  assert.ok(state);
+  assert.equal(await retried.ports.humanFeedback.reconcile(state!), null);
+  // A later process reads the consumed source from SQLite, not an old state object.
+  const last = await restart(false);
+  const lastState = await last.ports.state.read();
+  assert.ok(lastState);
+  assert.equal(await last.ports.humanFeedback.reconcile(lastState!), null);
+  assert.equal(launches, 1, 'replaying the review command cannot launch the consumed correction twice');
+  assert.deepEqual(applied, findingIds, 'continuation cannot apply the consumed correction again');
+  assert.deepEqual(last.exits, [], 'the final command must complete without an unsuccessful loop exit');
+  assert.deepEqual(last.errors, [], 'the final command must not hide a preparation failure');
+  assert.deepEqual(last.stops, []);
+  assert.equal(last.preparations, 1);
+  assert.deepEqual(last.roles, ['reviewer']);
+  const completed = await last.store.load(missionId(SLUG));
+  assert.equal(completed.kind, 'found');
+  if (completed.kind !== 'found') { throw new Error('Missing completed mission'); }
+  assert.equal(completed.mission.status, 'integration');
+  assert.equal(reviewStatus(completed.mission.review!), 'approved');
+  assert.equal(completed.mission.review!.rounds.length, 3);
+  assert.equal(completed.mission.review!.reviewEvents.filter(e => e.followUpReference?.startsWith('forgejo:')).length, 2);
 });

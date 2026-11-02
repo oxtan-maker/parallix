@@ -19,7 +19,7 @@ interface Edges { readonly hasEarlier: boolean; readonly atEnd: boolean; readonl
 const NO_EDGES: Edges = { hasEarlier: false, atEnd: true, running: false };
 
 function operationLabel(operation: HistoryOperation): string {
-  const outcome = operation.state === 'running' ? (operation.family === null ? 'capturing' : `capturing · agent ${operation.execution === 'live' ? 'live' : operation.execution === 'stopped' ? 'stopped' : 'unconfirmed'}`)
+  const outcome = operation.state === 'running' ? (operation.family === null ? 'capturing' : `capturing · agent ${operation.execution}`)
     : operation.state === 'interrupted' ? 'interrupted'
     : `exit ${operation.exitCode ?? operation.signal ?? '?'}`;
   return `${operation.role} · ${operation.family === null ? 'workflow' : `${operation.family} #${operation.attempt}`} · ${operation.startedAt.slice(0, 19).replace('T', ' ')} · ${outcome}${operation.terminalHost === 'pipe' ? ' · pipe' : ''}`;

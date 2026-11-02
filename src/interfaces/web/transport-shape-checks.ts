@@ -211,14 +211,13 @@ export function checkLogEntry(object: unknown, path: string, problems: string[])
 
 export function checkAgentAvailability(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['family', 'available', 'blockedFor', 'reason', 'runningSessions', 'executionComplete'],
+  checkKeys(object, ['family', 'available', 'blockedFor', 'reason', 'runningSessions'],
     ['family', 'available', 'blockedFor', 'reason'], path, problems);
   checkString(object, 'family', path, problems);
   checkBoolean(object, 'available', path, problems);
   checkDuration(object.blockedFor, `${path}.blockedFor`, problems);
   checkNullableString(object, 'reason', path, problems);
-  checkOptionalNullableNumber(object, 'runningSessions', path, problems);
-  if (object.executionComplete !== undefined) { checkBoolean(object, 'executionComplete', path, problems); }
+  if (object.runningSessions !== undefined) { checkFiniteNumber(object, 'runningSessions', path, problems); }
 }
 
 export function checkSourceFact(object: unknown, path: string, problems: string[]): void {

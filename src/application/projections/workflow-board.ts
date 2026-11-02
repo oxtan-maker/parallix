@@ -35,5 +35,5 @@ function ownershipBlocker(owner: WorkflowOperation): string | null {
 
 function executionEvidence(card: MissionCard, owner: WorkflowOperation): MissionCard['execution'] {
   if (!card.execution || !owner.providerStarted || card.execution.recordedOperationIds?.includes(owner.id)) { return card.execution; }
-  return { ...card.execution, complete: false, limitations: [...card.execution.limitations, 'Provider started but its run metadata is unavailable'] };
+  return { ...card.execution, limitations: [...card.execution.limitations, 'Provider started but its run metadata is unavailable'] };
 }

@@ -113,18 +113,22 @@ export function familyAccent(family: string | null): string {
   return FAMILY_ACCENT[family] ?? derivedAccent(family);
 }
 
+/** Dated provider-observation failures on this mission; null when the last observation had none. */
+export function executionDiagnosticText(card: WebMissionCard): string | null {
+  const execution = card.execution;
+  if (!execution || execution.limitations.length === 0) { return null; }
+  return `Provider observation at ${execution.observedAt}: ${execution.limitations.join('; ')}`;
+}
+
 /**
  * The agent pill's session text. An omitted `runningSessions` key means no
- * liveness probe ran and prints nothing; `null` prints unknown; `0` prints the
- * observed zero. None of the three is ever shown as another.
+ * execution reader ran and prints nothing; a number prints the confirmed count.
  */
 export function sessionsText(metric: WebAgentAvailability): string {
   const parts: string[] = [];
   if (!metric.available) {
     parts.push(`blocked · ${durationText(metric.blockedFor)}`);
   }
-  if ('runningSessions' in metric) {
-    parts.push(metric.runningSessions === null ? 'unknown' : `${metric.runningSessions}${metric.executionComplete === false ? '+' : ''}`);
-  }
+  if (metric.runningSessions !== undefined) { parts.push(String(metric.runningSessions)); }
   return parts.join(' · ');
 }

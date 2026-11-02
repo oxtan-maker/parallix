@@ -30,8 +30,8 @@ import type { ReviewPreparationWorkflowPorts } from '../../../src/application/po
 test("review preparation use case completes the full workflow over mocked ports", async () => {
   const recorder = makeRecorder();
   const ports = makePorts(recorder);
-  const recordGateCommand = ports.process.spawnSync;
-  ports.process.spawnSync = (...args) => {
+  const recordGateCommand = ports.process.run;
+  ports.process.run = async (...args) => {
     assert.ok(recorder.log.some(line => line.includes(`Running mission-declared gates for ${SLUG}.`)),
       'mission gate context is visible before its command executes');
     return recordGateCommand(...args);
@@ -710,7 +710,7 @@ test('a failing declared gate returns its process evidence and blocks review (TA
   const recorder = makeRecorder();
   const ports = makePorts(recorder, {
     process: {
-      spawnSync: (_cmd: string, args: string[]) => {
+      run: async (_cmd: string, args: string[]) => {
         recorder.spawned.push(args[1]);
         return { status: 2, stdout: ' gate stdout ', stderr: ' gate stderr ' };
       },

@@ -153,12 +153,8 @@ export interface AgentAvailabilityMetric {
   readonly blockedForMs: number;
   /** Why the family is blocked, when the block carries a reason. */
   readonly reason?: string | null;
-  /**
-   * Confirmed provider invocations for this family, or `null` when execution
-   * could not be observed. executionComplete=false makes positives lower bounds. Null is unknown and must not be rendered as zero.
-   */
-  readonly runningSessions?: number | null;
-  readonly executionComplete?: boolean;
+  /** Confirmed provider invocations for this family; zero means none were confirmed. Absent only before an execution reader ran. */
+  readonly runningSessions?: number;
 }
 
 /** A fixed, projection-owned explanation of the constraint identified by FLOW. */
@@ -215,12 +211,6 @@ export interface BoardMetrics {
    */
   readonly decisionWindow?: DecisionWindowComparison;
   readonly cumulativeFlow: MetricSeries;
-  /**
-   * Running agent sessions that could not be attributed to a family, or `null`
-   * when liveness was not observed. Kept beside `agentAvailability` so the
-   * per-family counts never have to absorb a session they cannot claim.
-   */
-  readonly unattributedRunningSessions?: number | null;
   readonly cumulativeFlowByState: StateFlowSeries;
   /**
    * Cumulative flow scoped to the current rolling reporting window. Optional
@@ -292,6 +282,11 @@ export function attentionReason(card: MissionCard): AttentionReason {
   return { kind: 'none' };
 }
 
+function hasHumanOnlyAttentionBlocker(card: MissionCard, reason: AttentionReason): boolean {
+  return reason.kind === 'blocking' && Boolean(card.blockerRequiresOperator || card.blocker
+    || hasExplicitHumanOnlyDiagnostic(card.blockingReason ?? ''));
+}
+
 /**
  * The typed command an attention item resolves to.
  *
@@ -300,9 +295,16 @@ export function attentionReason(card: MissionCard): AttentionReason {
  */
 export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction | null {
   if (card.workflowOperation) { return null; }
-  if (reason.kind === 'blocking' && (card.blockerRequiresOperator || card.blocker
-    || hasExplicitHumanOnlyDiagnostic(card.blockingReason ?? '')
-    || !card.commands.some(action => action.command === 'active' && action.enabled))) {
+  const humanOnlyBlocker = hasHumanOnlyAttentionBlocker(card, reason);
+  // Diagnostics explain why attention is needed; the lane owns its recovery.
+  if (card.lane === 'review' && card.reviewPhase !== 'fixing'
+    && !humanOnlyBlocker) {
+    return card.commands.some(action => action.command === 'review' && action.enabled)
+      ? { kind: 'review:submit', display: `px review ${card.id}` }
+      : null;
+  }
+  if (humanOnlyBlocker || (reason.kind === 'blocking'
+    && !card.commands.some(action => action.command === 'active' && action.enabled))) {
     return { kind: 'manual', display: `px lead ${card.id} --once` };
   }
   const command = card.lane === 'integration' ? 'integrate' : card.lane === 'review' && card.reviewPhase !== 'fixing' ? 'review' : 'active';
@@ -419,6 +421,7 @@ export function buildBoardProjection(
   const stages = allLanes.map((lane) => buildBoardStage(lane, cards));
 
   const ranked = cards.flatMap((card) => {
+    if (card.lane === 'review' && agentIsWorking(card)) { return []; }
     const reason = attentionReason(card);
     if (reason.kind === 'none') { return []; }
     const action = attentionAction(card, reason);

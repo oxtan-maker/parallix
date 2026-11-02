@@ -22,11 +22,12 @@ const inherited = { PATH: '/toolchain/bin', HOME: '/operator', NODE_OPTIONS: '--
   PARALLIX_WORKFLOW_OPERATION: 'parent-workflow', PARALLIX_WORKFLOW_GENERATION: '3' };
 
 test('retained repair verification isolates its write fence and preserves command and failure evidence (TASK-2750)', async () => {
-  mock.method(git, 'run', (bin: string, args: string[], options: GitOptions) => {
+  // Output capture belongs to runToExit, which returns when the check itself exits (TASK-2806).
+  mock.method(git, 'runToExit', (bin: string, args: string[], options: GitOptions) => {
     assert.equal(bin, 'bash');
     assert.deepEqual(args, ['-lc', 'npm test']);
     assert.equal(options.cwd, '/checkout');
-    assert.equal(options.stdio, 'pipe');
+    assert.equal(options.stdio, undefined);
     assert.deepEqual(options.env, verificationEnvironment(inherited));
     return { status: 1, stdout: 'failed assertion', stderr: 'diagnostic' };
   });
@@ -36,6 +37,20 @@ test('retained repair verification isolates its write fence and preserves comman
   assert.equal(result.command, 'npm test');
   assert.equal(typeof result.diagnostic, 'string');
   assert.match(result.diagnostic!, /failed assertion\ndiagnostic/);
+});
+
+test('retained verification whose stream cannot be captured is a failed gate, not a crash (TASK-2828.3)', async () => {
+  mock.method(git, 'runToExit', async () => {
+    throw new git.CommandOutputLimitError('bash', 'ENOBUFS', 10 * 1024 * 1024,
+      'the incomplete output was rejected instead of accepted; narrow the query or read it in bounded parts');
+  });
+  const port = retainedRepairPort('task-parent', '/checkout', {} as never, resolveConfiguration(inherited));
+  const result = await port.verify('npm test', '/checkout');
+  assert.equal(result.ok, false, 'an uncapturable stream can never certify that verification ran');
+  assert.match(result.diagnostic!, /bash produced more output than its 10485760 byte capture limit allows/);
+  assert.ok(result.reason && result.reason.kind === 'gate-failure', 'the failure maps onto the structured gate reason');
+  assert.deepEqual(result.reason.failureReason, { version: 1, code: 'gate-failed' });
+  assert.equal(result.reason.exitCode, null, 'no exit code is claimed for an uncapturable stream');
 });
 
 for (const phase of ['handoff', 'review', 'integration'] as const) {
@@ -59,18 +74,19 @@ test('verification children compose isolated services while workflow children re
   } finally { configureMissionWriteAuthorization(null); }
 });
 
-test("declared review preparation gates keep their command and checkout without parent ownership (TASK-2750)", () => {
+test('declared review preparation gates keep their command and checkout without parent ownership (TASK-2750)', async () => {
   const command = 'npm test -- --integration owning-suite.test.ts';
   const configuration = resolveConfiguration(inherited);
   const calls: unknown[] = [];
-  mock.method(git, 'run', (bin: string, args: string[], options: GitOptions) => {
+  mock.method(git, 'runToExit', (bin: string, args: string[], options: GitOptions) => {
     calls.push([bin, args, options.cwd]);
+    assert.equal(options.stdio, undefined);
     assert.deepEqual(options.env, verificationEnvironment(inherited));
     return { status: 0, stdout: '', stderr: '' };
   });
-  // Application process port is backed by the injected git.run double above.
-  const { spawnSync: runDeclaredGate } = createReviewPreparationPorts(configuration).process;
-  const result = runDeclaredGate('bash', ['-c', command], { cwd: '/checkout', encoding: 'utf8', stdio: 'pipe' });
+  // Application process port is backed by the injected runToExit double above.
+  const { run: runDeclaredGate } = createReviewPreparationPorts(configuration).process;
+  const result = await runDeclaredGate('bash', ['-c', command], { cwd: '/checkout' });
   assert.equal(result.status, 0);
   assert.deepEqual(calls, [['bash', ['-c', command], '/checkout']]);
 });
@@ -92,6 +108,17 @@ test('repository verification preserves command, toolchain and output mode (TASK
   });
   assert.equal(calls, 1);
   assert.equal(result.status, 7, 'failure still propagates');
+});
+
+test('a repository gate whose output exceeds the capture limit fails closed instead of passing (TASK-2828.3)', () => {
+  mock.method(product, 'loadAdapterConfig', () => ({ verification: { command: 'verify {{area}}', defaultArea: 'all' } }));
+  const result = runVerificationGate('integration', { rootDir: '/checkout', env: inherited, stdio: 'pipe',
+    runFn: () => { throw new git.CommandOutputLimitError('bash', 'ENOBUFS', 10 * 1024 * 1024,
+      'the incomplete output was rejected instead of accepted; narrow the query or read it in bounded parts'); },
+  });
+  assert.notEqual(result.status, 0, 'a truncated gate stream is never a pass');
+  assert.match(String(result.stderr), /bash produced more output than its 10485760 byte capture limit allows/);
+  assert.equal(result.failureReason?.code, 'gate-failed');
 });
 
 test('integration environment retains changed areas and dry-run policy without writer authority (TASK-2750)', () => {

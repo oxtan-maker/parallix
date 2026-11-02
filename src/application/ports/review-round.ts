@@ -1,4 +1,4 @@
-import type { ReviewDisposition, ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
+import type { OperatorReviewSource, ReviewDisposition, ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
 /**
  * Mechanism ports for the application-owned autonomous review loop.
  *
@@ -166,6 +166,7 @@ export interface ProviderApproval {
 export type ProviderReviewObservation = ProviderApproval | ProviderReviewChanges;
 
 export interface ProviderReviewChanges {
+  readonly source?: OperatorReviewSource;
   readonly disposition: Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'>;
   readonly findings: readonly ReviewFinding[];
   readonly comment: string;
@@ -182,6 +183,7 @@ export interface ProviderResolution {
 
 /** The configured external review provider; null when the provider is disabled. */
 export interface ReviewProviderPort {
+  dismissApproval(_approvedRevision: string, _reason: string): Promise<void>;
   /** Probe, and bootstrap once when unreachable; false after the diagnostic. */
   ensureReachable(): Promise<boolean>;
   /** The open review pull request for the mission branch, if one exists. */
@@ -205,6 +207,8 @@ export interface HumanReviewFeedback {
   readonly approval: boolean;
   readonly reason: string;
   readonly findings: readonly { id: string; summary: string }[];
+  /** Provider records combined into this correction, retained for consumption after its decision commits. */
+  readonly records?: readonly { readonly source: string; readonly author: string; readonly reason: string }[];
 }
 
 /**
@@ -213,6 +217,8 @@ export interface HumanReviewFeedback {
  */
 export interface HumanFeedbackPort {
   reconcile(_state: ReviewLoopState): Promise<HumanReviewFeedback | null>;
+  /** Consume only after the authoritative request-changes decision and lane transition succeed. */
+  acknowledge(_state: ReviewLoopState, _feedback: HumanReviewFeedback): Promise<void>;
 }
 
 /**
@@ -267,7 +273,7 @@ export interface ReviewAgentLaunch {
 export interface ReviewAgentLaunchResult {
   /** The family the launcher actually ran (differs after a capacity fallback). */
   readonly agent?: string | null;
-  readonly result?: { telemetry?: { provider?: string | null; cost_usd?: number } | null; status?: number | null; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
+  readonly result?: { telemetry?: { provider?: string | null; cost_usd?: number } | null; status?: number | null; stopReason?: string; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
 }
 
 export interface ReviewAgentPort {
@@ -368,6 +374,7 @@ export interface ReviewControllerLock {
  * ------------------------------------------------------------------ */
 
 export interface ReviewLoopPorts {
+  readonly integrationApprovalEvidence?: import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
   readonly retainedRepair?: RetainedRepairPort;
   readonly branch: string;
   /** The mission worktree, quoted in repair prompts. */

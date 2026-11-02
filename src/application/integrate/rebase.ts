@@ -21,7 +21,7 @@ export interface IntegrationRebasePrediction {
   wouldConflict: boolean;
 }
 
-export function createIntegrationRebase({ missionPaths, rebase, landing }: IntegrateWorkflowPorts) {
+export function createIntegrationRebase({ missionPaths, rebase, landing, git: gitPorts }: IntegrateWorkflowPorts) {
   /**
    * Rebase the mission onto its resolved local primary/parent (ADR 0043) before
    * integration gates run and before the probe merge, so gates and the merge see
@@ -68,9 +68,9 @@ export function createIntegrationRebase({ missionPaths, rebase, landing }: Integ
     // The workflow reports a completed rebase with exit 0 and dead-ends with any
     // non-zero code, but a clean-start round that pauses on conflicts exits 0
     // with the rebase still in progress. Treat anything other than 0 as a dead
-    // end, then confirm the rebase actually finished: no `rebase --show-current`
-    // and the resolved primary branch is an ancestor of the mission HEAD. Only
-    // then announce the rebase and continue to the gates (F1 / task-2506).
+    // end, then confirm the rebase actually finished: no rebase state reported by
+    // the rebase-state owner and the resolved primary branch is an ancestor of the
+    // mission HEAD. Only then announce the rebase and continue to the gates (F1 / task-2506).
     if (rebaseExitCode !== 0) {
       throw abortWith(landing, `Integration-time rebase dead-ended with exit code ${rebaseExitCode}.`);
     }
@@ -79,7 +79,10 @@ export function createIntegrationRebase({ missionPaths, rebase, landing }: Integ
     // worktree here always reports clean mid-rebase; check the mission worktree
     // so a paused rebase is caught instead of reported as complete (SC7 / AC8).
     const missionWorktree = missionPaths.conventionalWorktreePath(slug);
-    const rebaseInProg = git(['-C', missionWorktree, 'rebase', '--show-current']).stdout.trim().length > 0;
+    // TASK-2828: the metadata-only rebase-state owner replaces `rebase --show-current`,
+    // which git prefix-matches to `--show-current-patch` and buffers the whole current
+    // commit patch.
+    const rebaseInProg = gitPorts.detectRebaseState(missionWorktree).inProgress;
     const missionSha = git(['-C', baseWorktree, 'rev-parse', missionPaths.missionBranchName(slug, baseWorktree)]).stdout.trim();
     const baseSha = git(['-C', baseWorktree, 'rev-parse', baseBranch]).stdout.trim();
     // Base ancestry: the resolved primary must be an ancestor of the mission HEAD

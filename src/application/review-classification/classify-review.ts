@@ -157,6 +157,10 @@ function unavailableReason(context: LoopContext): { reason: string; message: str
   return !store || !lifecycle || !context.ports.provider ? { reason: 'ports-unavailable', message: 'ineligible due to review context' } : null;
 }
 
+function changedIntegrationPatch(review: Review): boolean {
+  return review.rounds.at(-2)?.integrationRepairAssessment?.outcome === 'mission-change-differs';
+}
+
 /** Why the stored round lacks the data its obligations need, or null when it can be judged. */
 function dataSkip(context: LoopContext, review: Review, shape: ReturnType<typeof reviewShape>, mission: Mission): { reason: string; message: string } | null {
   const current = review.rounds.at(-1)!;
@@ -165,6 +169,9 @@ function dataSkip(context: LoopContext, review: Review, shape: ReturnType<typeof
   }
   if (current.decision || current.number !== context.state.round) {
     return { reason: 'review-evidence-unavailable', message: 'ineligible because review evidence is unavailable' };
+  }
+  if (changedIntegrationPatch(review)) {
+    return { reason: 'changed-integration-patch', message: 'changed integration patch requires the repository reviewer' };
   }
   if (shape.repairCause && !shape.verifiedRepair) {
     return { reason: 'integration-repair-unverified', message: 'ineligible integration repair lacks verified revision evidence' };

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="How Parallix lead watches stopped coding-agent workflows, resumes supported work, and uses bounded judgment and fresh recovery while leaving integration to a human.">
+  <meta name="color-scheme" content="light">
+  <meta name="author" content="Magnus Ekdahl">
+  <title>Who restarts the coding agents? How px lead works — Magnus Ekdahl</title>
+  <link rel="canonical" href="https://oxtan-maker.github.io/parallix/articles/px-lead/">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Who restarts the coding agents? How px lead works">
+  <meta property="og:description" content="Fleet supervision, bounded recovery, and the decisions that stay with the operator.">
+  <meta property="og:url" content="https://oxtan-maker.github.io/parallix/articles/px-lead/">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip-link" href="#article">Skip to article</a>
+<header class="masthead"><a class="masthead-title" href="../../index.html">Engineering notes</a><span>Magnus Ekdahl</span></header>
+<main id="article" tabindex="-1">
+<article aria-labelledby="title">
+<header class="article-header">
+  <h1 id="title">Who restarts the coding agents?</h1>
+  <p class="standfirst">Running several coding agents creates another job: noticing which workflow stopped, finding out why, and getting it moving again. Parallix’s <code>px lead</code> watches that queue and handles supported continuations, with bounded recovery when the normal command is not enough.</p>
+  <p class="byline">Magnus Ekdahl · <time datetime="2026-11-02">2 November 2026</time></p>
+</header>
+<nav class="article-nav" aria-label="In this article"><a href="#loop">The supervision loop</a><a href="#scenarios">Worked scenarios</a><a href="#operate">Try it</a><a href="#tradeoffs">Costs and limits</a><a href="#sources">Sources</a></nav>
+
+<p>A coding agent can stop without finishing its job. A process exits, a workflow command fails, or an approved review remains parked before its next transition. The operator returns to a board of missions and has to reconstruct what happened: is someone still working, which command owns the next step, and is it safe to run it?</p>
+<p>With parallel missions, this becomes repeated supervision work. Each interruption asks for a small investigation and often a routine restart. The useful automation is to keep eligible work moving while bringing back a specific question when progress depends on a person.</p>
+<p>In <a href="https://github.com/oxtan-maker/parallix">Parallix</a>, lead takes its work from the same “needs your attention” queue the operator sees. It supervises active, review, and integration missions. Refined missions still wait for operator activation. Lead uses the existing workflow commands and their admission rules; it does not maintain a separate lifecycle or decide that every quiet mission is stuck. <a href="#source-supervision" aria-label="Supervision sources, note 1">[1]</a></p>
+
+<figure class="article-figure">
+  <picture><source media="(max-width: 620px)" srcset="assets/lifecycle-mobile.svg"><img src="assets/lifecycle.svg" width="796" height="532" alt="An operator activates a mission; implementation leads to agent review and human integration. Lead watches attention in active, review and integration lanes and resumes eligible implementation or review. It never integrates. Command-local repair handles known failures inside a running command."></picture>
+  <figcaption><strong>Lead fills the gaps between workflow owners.</strong> The implementer, reviewer, and integration command keep their own responsibilities. Lead can restart eligible work and finish a lost transition after an existing approval; the reviewer still owns the verdict and the human still owns landing.</figcaption>
+</figure>
+
+<h2 id="loop">Read the queue, act, then look again</h2>
+<p>The board supplies both the reason for attention and a typed action. For eligible active work, lead forwards to <code>px active</code>; for review work, to <code>px review</code>. Long active and review workflows run without holding up supervision of the other missions. If the board asks for integration, lead leaves that item for the operator. <a href="#source-dispatch" aria-label="Dispatch and review sources, note 2">[2]</a></p>
+<p>Before dispatching, lead reads the mission’s current execution activity again. This matters even when the mission appears on the attention queue: a failed gate or blocking reason can outrank live work in the board’s presentation. A worker may already be repairing the problem. Starting another command onto it would create a collision.</p>
+<p>Lead remembers the board action it has pressed against those facts during the run. If the same item persists, it does not press that action forever. Transient command errors have bounded retries; a still-stopped workflow can then reach fresh recovery. A manual blocker has no lifecycle command to dispatch and goes directly to the recovery decision.</p>
+<p>Recovery first claims the mission against competing supervisor runs and rechecks liveness. It then asks the configured decision provider for a bounded judgment: continue, wait, request evidence, or escalate. A continuation must refer to current mission, operation, progress, and evidence identities. The application checks the proposal against refreshed authority; it checks again at the prepared recovery launch boundary. A plausible model answer is insufficient when the underlying facts have changed. <a href="#source-judgment" aria-label="Judgment sources, note 3">[3]</a></p>
+<p>An admitted continuation starts a fresh agent context in the mission’s existing worktree. The agent receives the board diagnostic, any action already attempted, and the recovery constraints. The diagnostic is evidence to investigate, rather than an asserted root cause. The launcher avoids resuming the failed conversation and preserves the implementer’s session identity. <a href="#source-recovery" aria-label="Fresh recovery sources, note 4">[4]</a></p>
+
+<figure class="article-figure">
+  <picture><source media="(max-width: 620px)" srcset="assets/attention-loop-mobile.svg"><img src="assets/attention-loop.svg" width="796" height="776" alt="Read board attention, recheck liveness, run a supported action, and if still stuck obtain bounded judgment before fresh recovery. Live work waits; landing stays human. Manual blockers skip lifecycle dispatch. Missing admission or exhausted budgets lead to waiting or escalation. Re-read the board after action or recovery; the agent’s exit status alone is not proof."></picture>
+  <figcaption><strong>Every action returns to observation.</strong> This is a logical path across passes, not a promise that a single pass repairs the mission. Lead rechecks work around judgment and launch. Human boundaries, stale evidence, and exhausted budgets can stop the path before another agent starts.</figcaption>
+</figure>
+
+<p>The next observation decides what happened. A recovery agent saying “done,” or exiting successfully, does not clear the item. Lead reads the board again; if the item disappears while credible work is running, it keeps watching. It records clearance only when the item is off the queue and the work observation is idle. Clearance means that attention condition has cleared, not that the mission is complete or approved.</p>
+<p>This is different from command-local repair. The rebound kernel handles a known failure inside the command that encountered it—for example, a failed validation step with diagnostics available to that operation. Lead handles a workflow that still asks for attention between commands, when no running owner remains to repair it. A lead-started command can itself use its normal repair path. These layers answer different questions and share the existing workflow authorities. <a href="#source-rebound" aria-label="Command-local recovery source, note 5">[5]</a></p>
+
+<h2 id="scenarios">Three situations that look similar from a distance</h2>
+<p class="source-note">The following are illustrative traces of supported behavior, not reports of production recoveries or fresh experiments. The linked assertions exercise the decisions described; they do not establish a recovery rate.</p>
+<div class="scenario">
+<h3>A stopped active workflow can resume</h3>
+<p>Suppose an active mission has no credible worker and the board offers its active command. Lead rechecks liveness and starts that command in the target worktree. If normal execution resumes, lead watches it while continuing around the fleet.</p>
+<p>If the same attention condition remains after the command has stopped, lead may claim recovery. With current evidence and an admitted continue decision, a fresh agent investigates the retained diagnostic and repository state, then runs the supported continuation. On a later pass the board no longer asks for attention and the worker is idle: lead can report the item cleared. If the item survives its recovery budget, the result is escalation with the observed steps. <a href="#source-supervision">[1]</a></p>
+</div>
+<div class="scenario">
+<h3>A failed gate with a live worker must wait</h3>
+<p>Now suppose the board still shows a failed gate, but the implementer is already running a repair or recheck. Lead’s liveness read sees credible work and dispatches neither the board command nor a recovery agent. The same rule applies if work starts after the queue was read, or while judgment is in flight. An unreadable activity authority is not permission to assume idleness. The operator saves a needless restart, and the existing worker retains ownership. <a href="#source-supervision">[1]</a></p>
+</div>
+<div class="scenario">
+<h3>An approved review still needs a human</h3>
+<p>A reviewer has approved a round, but its move out of the review lane was interrupted. Lead can finish that already-authorized transition. If the round is undecided, it forwards to the review workflow so the configured reviewer decides. It cannot manufacture approval or review its own repair.</p>
+<p>Once the board offers integration, the operator takes over: inspect the change and review evidence, make the landing decision, and invoke the integration workflow with its checks. If there is instead a recorded contract or operator decision blocker, recovery may investigate eligible active or review work but cannot acknowledge or clear that reserved decision. Integration-lane judgment cannot admit fresh continuation. An unresolved decision must return with evidence, options, and a recommended next step. <a href="#source-dispatch">[2]</a> <a href="#source-judgment">[3]</a></p>
+</div>
+
+<h2 id="operate">Start by observing</h2>
+<p>From a configured Parallix repository, inspect the public command help and preview the queue:</p>
+<pre><code>px --help
+px lead --dry-run</code></pre>
+<p>The dry run prints eligible attention items and their offered actions without dispatching commands, consulting judgment, or launching recovery. An empty queue is a valid result. This is the first check to make before allowing lead to act.</p>
+<p>Then choose the operating window. These are separate alternatives; substitute an existing mission slug where shown:</p>
+<pre><code># One pass over the fleet’s eligible queue
+px lead --once
+
+# One pass restricted to an existing mission
+px lead &lt;slug&gt; --once
+
+# Continuous supervision with explicit polling and recovery budget
+px lead --poll 60 --budget 2</code></pre>
+<p><code>--once</code> takes one queue pass; it is not a guarantee to drive a mission through recovery and completion. An item may remain open. Lead waits for steps it started and forwarded commands to settle, but a single pass does not provide the later board observation needed to confirm clearance. Without it, lead keeps watching until stopped, including when the queue has no actionable work. Polling controls when an otherwise waiting loop looks again; work finishing can wake it sooner. <a href="#source-cli" aria-label="CLI sources, note 6">[6]</a></p>
+<p>The last command explicitly chooses the current default polling interval and fresh-recovery attempt budget. The attempt budget is per failure during that supervisor run, rather than a lifetime quota per mission. A genuinely different failure has its own attempts; minor changes to digits or whitespace in a diagnostic do not automatically create a new failure. Restarting lead starts new run bookkeeping. <code>--budget 0</code> disables fresh recovery attempts but still permits eligible board-command dispatch—it is not a dry run. <a href="#source-cli">[6]</a></p>
+<p>When lead escalates, use the reported steps and the durable mission evidence to inspect what remains:</p>
+<pre><code>px status &lt;slug&gt;
+px history &lt;slug&gt; list</code></pre>
+<p>Resolve any reserved operator decision through its supported workflow before retrying. Interrupting lead stops supervision; inspect the target mission for outstanding owned work and use <code>px stop &lt;slug&gt;</code> when that work also needs stopping. Stopping the watcher is not a substitute for checking the worker. <a href="#source-cli">[6]</a></p>
+
+<h2 id="tradeoffs">Trading model work for fewer attention switches</h2>
+<p>The intended saving is concrete: the operator need not repeatedly open each stopped mission, identify its supported next command, and restart a safe continuation. Lead can carry out that routine supervision and return the cases that need authority or more evidence. That can reduce the delay until eligible work resumes, especially while several missions progress in parallel.</p>
+<p>It adds work too. Judgment uses the configured model provider; fresh recovery spends agent tokens and time rebuilding context from the repository and mission evidence. Forwarded workflows retain their own checks and review costs. Polling introduces observation delay. Provider latency and failed attempts can make recovery slower or more expensive than an operator’s quick diagnosis.</p>
+<p>The budgets limit repeated spending, rather than predicting success. Judgment has finite invocation and elapsed-time bounds, rejects stale or invented evidence references, and does not repeatedly consult the model on unchanged evidence. Missing authorities, unavailable judgment, malformed proposals, or insufficient evidence can force escalation before any recovery runs. A request for evidence is surfaced for attention rather than granting permission to proceed. <a href="#source-judgment">[3]</a></p>
+<p>These protections depend on the evidence available. A stale activity record can misrepresent work; a board reason can describe a symptom rather than its cause. Rechecks and recovery claims reduce collisions, but they cannot make every diagnosis correct. The recovery agent must preserve mission scope, gates, tests, review authority, and operator decisions. A defect outside the mission’s scope belongs back with the operator, rather than being silently absorbed into the repair. <a href="#source-recovery">[4]</a></p>
+<p>No attention-saving percentage or end-to-end productivity gain is established here. The existing assertions support the control flow and boundaries; the scenarios explain how those contracts can help. The <a href="../fresh-context-recovery/index.html">context article’s paired experiments</a> concern context choices at specific workflow stages, and the <a href="../jev-review-evidence/index.html">Jev article</a> concerns review work. Neither measures the benefit of fleet supervision. Measuring lead would require recording operator interventions, unresolved cases, added usage, and time to useful progress across comparable workloads.</p>
+<p>The engineering choice is to automate repeated, evidence-backed continuation while keeping uncertainty visible. A useful supervisor moves work when it has authority, leaves a live worker alone, and returns a precise decision when only a person can make it.</p>
+
+<footer class="article-footer" id="sources">
+<h2>Sources and behavior boundaries</h2>
+<p>Behavior checked against the repository revision archived in the <a href="sources.html">source appendix</a>. These exact source and assertion snapshots remain available with the article, so a later implementation change does not silently change its basis. Command help in your installed version remains the place to check current usage.</p>
+<ol>
+<li id="source-supervision"><strong>Board and supervision.</strong> <a href="sources.html#src-application-recovery-supervisor-ts">Supervisor implementation</a>, <a href="sources.html#src-application-recovery-contract-ts">recovery contract</a>, and <a href="sources.html#test-integration-mission-recovery-supervisor-test-ts">owning assertions</a> cover queue order, refined exclusion, live-worker protection, repeated observation, per-failure attempts, and escalation. The assertion module uses controlled board and agent fixtures; it is not a production outcome study.</li>
+<li id="source-dispatch"><strong>Dispatch and review authority.</strong> <a href="sources.html#src-composition-lead-supervisor-ts">Production composition</a>, <a href="sources.html#src-interfaces-cli-lead-ts">public action mapping</a>, and <a href="sources.html#test-integration-integrate-lead-review-forwarding-test-ts">review-forwarding assertions</a> distinguish an existing approval’s lost transition from a reviewer decision. <a href="sources.html#test-unit-composition-lead-supervisor-test-ts">Composition assertions</a> cover borrowed workflow ownership and unavailable activity authority.</li>
+<li id="source-judgment"><strong>Bounded judgment and admission.</strong> <a href="sources.html#src-application-operator-judgment-ts">Judgment service</a>, <a href="sources.html#src-composition-lead-operator-judgment-ts">configured authority readers</a>, and <a href="sources.html#test-unit-application-operator-judgment-test-ts">owning assertions</a> cover current-state admission, finite budgets, stale evidence, provider failures, and forbidden continuation. The supervisor assertions in note 1 also cover manual blockers and integration-lane refusal.</li>
+<li id="source-recovery"><strong>Fresh context and constraints.</strong> <a href="sources.html#src-composition-cli-command-registry-ts">Launch composition</a>, <a href="sources.html#src-application-fresh-session-marker-port-ts">fresh-session behavior</a>, and the <a href="sources.html#src-application-recovery-contract-ts">recovery instruction</a> establish the launch context and explicit limits. <a href="sources.html#test-integration-mission-recovery-supervisor-test-ts">Recovery assertions</a> check the instruction and the need for a later board observation.</li>
+<li id="source-rebound"><strong>Command-local repair.</strong> The <a href="sources.html#src-application-rebound-kernel-ts">rebound kernel</a> and <a href="sources.html#test-unit-application-rebound-kernel-contract-test-ts">kernel contract assertions</a> own repair within a command. The supervisor’s separate responsibility is stated and implemented in note 1.</li>
+<li id="source-cli"><strong>Operator interface.</strong> The <a href="sources.html#src-interfaces-cli-lead-ts">public CLI implementation</a> and <a href="sources.html#test-integration-mission-recovery-supervisor-test-ts">CLI assertions</a> cover dry run, single pass, polling, budgets, and scope filters. The displayed defaults come from <a href="sources.html#src-application-recovery-contract-ts">recovery constants</a> and the <a href="sources.html#src-domain-rebound-policy-ts">shared attempt default</a>; they are configuration facts, not measured performance. Examples were checked against public <code>px --help</code>; <code>px lead --dry-run</code> was exercised without dispatching work.</li>
+</ol>
+<p><a href="../../index.html">More engineering notes</a></p>
+</footer>
+</article>
+</main>
+</body>
+</html>

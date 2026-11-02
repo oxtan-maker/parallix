@@ -408,10 +408,17 @@ export async function runRebaseWorkflow(
 
   // Rebase succeeded (status 0) or was already up to date.
   if (continueSucceeded(rebaseResult)) {
-    if (gitFn(['-C', executionRoot, 'rebase', '--show-current']).stdout.trim()) {
-      // `rebase --show-current` returned something but status was 0 — incomplete.
+    // TASK-2828: the rebase-state owner answers this with metadata only. The previous
+    // `rebase --show-current` probe is git's prefix match for `--show-current-patch`,
+    // which buffers the whole current commit patch and fails past the default buffer.
+    // REBASE_HEAD is the commit identity that patch was being read to obtain; git keeps it
+    // resolvable after a `--continue` finishes, so it only means "mid-replay" together with
+    // live rebase state.
+    const postRoundState = port.detectRebaseState(executionRoot);
+    if (postRoundState.inProgress && postRoundState.rebaseHead) {
+      // The round reported success but the worktree still holds rebase state — incomplete.
       fmt.log.pass('Rebase round completed.');
-      fmt.log.warn('Rebase is still in progress (non-empty --show-current). Skipping automatic push.');
+      fmt.log.warn('Rebase is still in progress. Skipping automatic push.');
       fmt.log.info('Verification: the workflow handles integration checks.');
       fmt.log.info(`Next: ${fmt.command('git rebase --continue')}`);
       port.exit(0);

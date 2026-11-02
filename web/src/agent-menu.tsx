@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { WebAgentAvailability } from '../../src/interfaces/web/transport.js';
+import { durationText } from './format.js';
 
 export const AgentFamilies = createContext<readonly WebAgentAvailability[]>([]);
 export const AGENT_HOLD_MS = 450;
@@ -69,6 +70,8 @@ export function useAgentMenu(enabled: boolean, invoke: (family: string, control:
         }}
         style={{ display: 'block', width: '100%', textAlign: 'left', padding: 8, background: 'transparent', border: 0, color: selectable(family) ? 'inherit' : '#8a95a2', cursor: selectable(family) ? 'pointer' : 'not-allowed' }}>
         {family.family} — {selectable(family) ? 'available' : family.reason ?? 'unavailable'}
+        {!selectable(family) && family.blockedFor.kind === 'finite' && family.blockedFor.ms > 0
+          && ` · ${durationText(family.blockedFor)}`}
       </button>)}
     </div>, document.body) : null;
   return {

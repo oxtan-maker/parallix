@@ -9,6 +9,7 @@
  * victim kill take the whole scope with it.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 
@@ -95,6 +96,63 @@ export function assertCgroupEnforcement(limitMiB: number, spawnImpl: SpawnSyncLi
   }
   if (swapMax !== '0') {
     throw new MemoryBoundaryUnavailableError(`the scope reported memory.swap.max=${swapMax}; swap is not capped, so a breach would thrash the host instead of being killed`);
+  }
+}
+
+/** Infrastructure status shared by public verification entry points. */
+export const RUNNER_HEALTH_EXIT_STATUS = 75;
+export const RUNNER_HEALTH_MIN_BYTES = 64 * MIB;
+
+export class RunnerHealthError extends Error {
+  readonly failureReason = { version: 1, code: 'infrastructure' } as const;
+  readonly operation: string;
+  readonly resource: string;
+  readonly observedAt: string;
+  constructor(operation: string, resource: string, observedAt: string, detail: string, remediation: string) {
+    super(`[runner-health] infrastructure: operation=${operation}; resource=${resource}; observedAt=${observedAt}; ${detail}; remediation=${remediation}`);
+    this.name = 'RunnerHealthError';
+    this.operation = operation;
+    this.resource = resource;
+    this.observedAt = observedAt;
+  }
+}
+
+type FilesystemCapacity = (directory: string) => { availableBytes: number; freeInodes: number };
+
+function assertFilesystemCapacity(directory: string, observedAt: string, capacity: FilesystemCapacity): void {
+  try {
+    const available = capacity(directory);
+    if (!(available.availableBytes >= RUNNER_HEALTH_MIN_BYTES) || !(available.freeInodes > 0)) {
+      throw new Error(`availableBytes=${available.availableBytes}, freeInodes=${available.freeInodes}, minimumBytes=${RUNNER_HEALTH_MIN_BYTES}, minimumFreeInodes=1`);
+    }
+  } catch (error) {
+    throw new RunnerHealthError('check-filesystem-capacity', directory, observedAt, String(error),
+      'Restore writable free space and inodes on this filesystem, then rerun the original verification command');
+  }
+}
+
+/** Fresh admission check; never cached or inherited as proof for a later run. */
+export function assertRunnerHealth(limitMiB: number | null, options: {
+  runtimeDir?: string; tempDir?: string; now?: () => string;
+  spawn?: SpawnSyncLike;
+  capacity?: FilesystemCapacity;
+} = {}): void {
+  const observedAt = (options.now ?? (() => new Date().toISOString()))();
+  const runtimeDir = options.runtimeDir ?? `/run/user/${process.getuid?.() ?? 'unknown'}`;
+  const capacity = options.capacity ?? ((directory: string) => {
+    const stats = fs.statfsSync(directory);
+    return { availableBytes: stats.bavail * stats.bsize, freeInodes: stats.ffree };
+  });
+  for (const directory of [...(limitMiB === null ? [] : [runtimeDir]), options.tempDir ?? os.tmpdir()]) {
+    assertFilesystemCapacity(directory, observedAt, capacity);
+  }
+  if (limitMiB !== null) {
+    try { assertCgroupEnforcement(limitMiB, options.spawn); }
+    catch (error) {
+      throw new RunnerHealthError('create-and-read-memory-limited-scope', `systemd user manager (${runtimeDir})`, observedAt,
+        error instanceof Error ? error.message.split('\n')[0] : String(error),
+        'Restore the user systemd manager and delegated memory controller, then rerun the original verification command');
+    }
   }
 }
 

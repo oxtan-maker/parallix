@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { subscribeToBoardProjection } from '../../../../src/application/projections/board-subscription.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 
 test('SC35: a slow board refresh never overlaps or accumulates a timer backlog', async () => {
@@ -42,11 +43,11 @@ test('SC33 and SC34: each completed timer tick rebuilds the authority projection
   unsubscribe();
 });
 
-test('SC6: a recovery-only state change (unattributed running sessions) repaints the board', async () => {
+test('SC6: a recovery-only state change (confirmed provider count) repaints the board', async () => {
   let builds = 0;
   const projections: Array<() => BoardProjection> = [
-    () => withUnattributed(0),
-    () => withUnattributed(3),
+    () => withProviderCount(0),
+    () => withProviderCount(3),
   ];
   let changes = 0;
   const timers: Array<() => void> = [];
@@ -60,15 +61,15 @@ test('SC6: a recovery-only state change (unattributed running sessions) repaints
   assert.equal(changes, 1, 'the first rebuild publishes');
   timers.shift()!();
   await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(changes, 2, 'a change limited to unattributed running sessions triggers a repaint');
+  assert.equal(changes, 2, 'a change limited to the confirmed provider count triggers a repaint');
   unsubscribe();
 });
 
-function withUnattributed(count: number): BoardProjection {
+function withProviderCount(count: number): BoardProjection {
   const projection = makeProjection();
   (projection as { metrics: BoardProjection['metrics'] }).metrics = {
     ...projection.metrics,
-    unattributedRunningSessions: count,
+    agentAvailability: [{ family: agentFamily('codex'), available: true, blockedForMs: 0, runningSessions: count }],
   };
   return projection;
 }

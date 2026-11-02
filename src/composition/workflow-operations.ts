@@ -51,12 +51,12 @@ export async function composeWorkflowOperations(root: string, configuration: Par
     const history = (await loadTerminal()).history(operation.missionId);
     if (!history.ok) { return false; }
     return history.runs.filter(run => run.record.operationId === operation.id && run.record.captureKind === 'agent')
-      .every(run => run.execution === 'stopped');
+      .every(run => run.execution === 'stopped' && !run.executionProbeUnavailable);
   }, async operation => {
     const history = (await loadTerminal()).history(operation.missionId);
     if (!history.ok) { return false; }
     const settled = await Promise.all(history.runs.filter(run => run.record.operationId === operation.id
-      && run.record.captureKind === 'agent' && run.execution !== 'stopped').map(async run => {
+      && run.record.captureKind === 'agent' && (run.execution !== 'stopped' || run.executionProbeUnavailable)).map(async run => {
       const execution = run.record.execution;
       return Boolean(execution?.processIdentity && await processes.stop({ pid: execution.pid, identity: execution.processIdentity }));
     }));

@@ -144,11 +144,9 @@ export function boardFingerprint(
           available: agent.available,
           countdown: agent.available || agent.blockedForMs <= 0 ? null : formatCountdown(agent.blockedForMs),
           reason: agent.reason ?? null,
-          runningSessions: agent.runningSessions ?? null,
-          executionComplete: agent.executionComplete,
+          runningSessions: agent.runningSessions,
         }))
       : projection.metrics.agentAvailability,
-    unattributedRunningSessions: projection.metrics.unattributedRunningSessions,
     sourceFacts: projection.sourceFacts,
   });
 }

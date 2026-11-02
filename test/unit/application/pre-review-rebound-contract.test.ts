@@ -348,6 +348,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
       worktree,
       routing: { eligibleFamilies: () => ['codex', 'claude'] },
       provider: { pollReview: async () => 'APPROVED', pollDisposition: async () => 'CHANGES_MADE' },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
       stateport: { read: async () => persisted.value, persist: async state => { persisted.value = state; } },
       task: { mirror: async lane => { transitions.push(lane); } },
       preReview: {

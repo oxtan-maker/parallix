@@ -77,7 +77,11 @@ describe("verify-local integrate gate", () => {
     const diagnostic = path.join(tmpDir, 'compiler-diagnostic');
     fs.mkdirSync(binDir);
     fs.writeFileSync(diagnostic, compilerDiagnostic);
-    fs.writeFileSync(nodePath, `#!/bin/sh\nexec ${process.execPath} "$@"\n`);
+    // These contracts own shell stage/status forwarding, not runner-health
+    // probing. Stub admission like the analysis tools, but record the call so
+    // the shell must still admit each invocation before reaching those tools.
+    // Real health checks belong to test-memory-boundary and verifier-shell.
+    fs.writeFileSync(nodePath, `#!/bin/sh\nif [ "$1" = '${repoRoot}/scripts/check-runner-health.ts' ]; then\n  printf 'healthy\\n' >> '${tmpDir}/runner-health-calls'\n  exit 0\nfi\nexec ${process.execPath} "$@"\n`);
     fs.writeFileSync(path.join(binDir, 'npx'), `#!/bin/sh\ncase "$*" in *eslint*) exit ${npxStatus} ;; esac\nexit 0\n`);
     fs.writeFileSync(path.join(binDir, 'npm'), `#!/bin/sh\ncat '${diagnostic}'\nexit ${npmStatus}\n`);
     for (const command of ['node', 'npx', 'npm']) { fs.chmodSync(path.join(binDir, command), 0o755); }
@@ -105,6 +109,7 @@ describe("verify-local integrate gate", () => {
         }
         const result = await jobs.run(['static-analysis'], env);
         const output = result.stdout + result.stderr;
+        assert.equal(fs.readFileSync(path.join(root, 'runner-health-calls'), 'utf8'), 'healthy\n');
         if (scenario.diagnostic === null) {
           assert.equal(result.status, 0, output);
           assert.match(output, /ALL STAGES PASSED/);

@@ -73,6 +73,7 @@ export interface ReviewLoopFake {
 export function fakeProvider(overrides: Partial<ReviewProviderPort> = {}): ReviewProviderPort {
   return {
     ensureReachable: async () => true,
+    dismissApproval: async () => {},
     openPullRequest: () => ({ kind: 'pull-request' as const, provider: 'forgejo', id: '7', url: null, sourceBranch: 'mission/fake', targetBranch: 'main' }),
     readRequestedChanges: async (_reviewer, since) => ({ disposition: 'REQUEST_CHANGES',
       findings: [{ id: reviewFindingId('F1'), summary: 'Provider fixture finding', location: null }], comment: 'Provider fixture finding', revision: null, decidedAt: since }),
@@ -124,7 +125,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
     },
     reviewPreparation: overrides.reviewPreparation ?? null,
     provider: overrides.provider === undefined || overrides.provider === null ? null : fakeProvider(overrides.provider),
-    humanFeedback: { reconcile: async () => null, ...overrides.humanFeedback },
+    humanFeedback: { reconcile: async () => null, acknowledge: async () => {}, ...overrides.humanFeedback },
     routing: {
       eligibleFamilies: () => ['codex', 'claude'],
       launcherStatus: () => ({ supported: true, detail: '' }),

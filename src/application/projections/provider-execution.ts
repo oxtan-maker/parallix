@@ -8,15 +8,16 @@ import { MAX_RUNS_PER_MISSION, runCaptureKind } from '../run-history-types.js';
 /** One current metadata/probe reading, never a cached positive or workflow state. */
 export interface ProviderExecutionFacts {
   readonly observedAt: string;
-  readonly complete: boolean;
   readonly invocations: readonly { readonly runId: string; readonly operationId: string | null; readonly family: AgentFamily }[];
+  /** Scoped diagnostics for the invocations or probes that failed; they never change another mission's counts. */
   readonly limitations: readonly string[];
   readonly recordedOperationIds?: readonly string[];
 }
 export interface ProviderExecutionReader {
   observe(_scope: MissionTerminalScope, _currentOperationId?: string): ProviderExecutionFacts;
 }
-export const unknownExecution = (): ProviderExecutionFacts => ({ observedAt: new Date().toISOString(), complete: false, invocations: [], limitations: ['Provider execution could not be observed'] });
+/** A reader failure keeps its diagnostic on the mission it failed for and reports no confirmed provider. */
+export const failedExecution = (reason = 'Provider execution observation failed'): ProviderExecutionFacts => ({ observedAt: new Date().toISOString(), invocations: [], limitations: [reason] });
 
 /** Read only owned metadata, with existing invocation identity and process-start probes. */
 export function observeProviderExecution(store: MissionHistoryStorePort, identity: MissionTerminalScope, currentOperationId?: string): ProviderExecutionFacts {
@@ -38,12 +39,13 @@ export function observeProviderExecution(store: MissionHistoryStorePort, identit
     runs.sort((left, right) => priority(right) - priority(left));
     for (const run of runs) {
       probeLimited = false;
-      const execution = observeRunExecution(run.record, run.state, { executionAlive });
-      collectInvocation({ ...run, execution }, invocations, recordedOperationIds, limitations, currentOperationId, isAlive);
+      let inconclusive = false;
+      const execution = observeRunExecution(run.record, run.state, { executionAlive, onInconclusive: () => { inconclusive = true; } });
+      collectInvocation({ ...run, execution }, invocations, recordedOperationIds, limitations, inconclusive && potentiallyCurrent(run, currentOperationId, isAlive));
       if (probeLimited && potentiallyCurrent(run, currentOperationId, isAlive)) { limitations.push(`${run.record.runId}: provider execution probe budget reached`); }
     }
   } catch { limitations.push('Provider execution probe failed'); }
-  return { observedAt: new Date().toISOString(), complete: limitations.length === 0, invocations, limitations, recordedOperationIds: [...recordedOperationIds] };
+  return { observedAt: new Date().toISOString(), invocations, limitations, recordedOperationIds: [...recordedOperationIds] };
 }
 
 function readProviders(store: MissionHistoryStorePort, identity: MissionTerminalScope, limitations: string[], isAlive: (_pid: number) => boolean): RunSummary[] {
@@ -88,35 +90,31 @@ function boundedExecutionProbe(store: MissionHistoryStorePort, onLimit: () => vo
       return null;
     }
     remaining--;
-    return store.executionAlive?.(execution) ?? null;
+    // A throwing probe is that invocation's unavailable probe, not a failure of its siblings.
+    try { return store.executionAlive?.(execution) ?? null; } catch { return null; }
   };
 }
 
-function collectInvocation(run: import('../run-history.js').RunSummary, invocations: ProviderExecutionFacts['invocations'][number][], operations: Set<string>, limitations: string[], currentOperationId: string | undefined, isAlive: (_pid: number) => boolean) {
+function collectInvocation(run: RunSummary, invocations: ProviderExecutionFacts['invocations'][number][], operations: Set<string>, limitations: string[], probeUnavailable: boolean) {
   const { record, execution } = run;
   if (runCaptureKind(record) !== 'agent') { return; }
   if (record.operationId) { operations.add(record.operationId); }
-  if (execution === 'stopped') { return; }
   if (execution === 'live' && record.family) {
     invocations.push({ runId: record.runId, operationId: record.operationId ?? null, family: record.family });
-  } else if (execution === 'unknown' && potentiallyCurrent(run, currentOperationId, isAlive)
-    && (record.execution !== null || record.family === 'pi' || run.state === 'interrupted' || record.state === 'exited')) {
-    limitations.push(`${record.runId}: provider execution unknown`);
+  } else if (execution === 'live') {
+    limitations.push(`${record.runId}: live provider has no recorded agent family`);
+  } else if (probeUnavailable) {
+    limitations.push(`${record.runId}: provider process probe unavailable`);
   }
 }
 
-function potentiallyCurrent(run: import('../run-history.js').RunSummary, currentOperationId: string | undefined, isAlive: (_pid: number) => boolean): boolean {
+function potentiallyCurrent(run: RunSummary, currentOperationId: string | undefined, isAlive: (_pid: number) => boolean): boolean {
   return (currentOperationId !== undefined && run.record.operationId === currentOperationId)
     || isAlive(run.record.supervisorPid);
 }
 
-export function providerFamilyCount(facts: ProviderExecutionFacts, family: string): number | null {
-  const count = facts.invocations.filter(run => run.family === family).length;
-  return !facts.complete && count === 0 ? null : count;
-}
-
 export function readProviderExecution(reader: ProviderExecutionReader, scope: MissionTerminalScope, currentOperationId?: string): ProviderExecutionFacts {
-  try { return reader.observe(scope, currentOperationId); } catch { return unknownExecution(); }
+  try { return reader.observe(scope, currentOperationId); } catch { return failedExecution(); }
 }
 
 /** Apply one repository observation to both surfaces, independent of workflow activity. */
@@ -129,14 +127,11 @@ export function projectProviderExecution(board: import('./board.js').BoardProjec
 }
 
 export function projectExecutionMetrics(board: import('./board.js').BoardProjection): import('./board.js').BoardProjection {
-  const facts = board.stages.flatMap(stage => stage.cards.map(card => card.execution ?? unknownExecution()));
-  const all: ProviderExecutionFacts = { observedAt: new Date().toISOString(), complete: facts.every(fact => fact.complete),
-    invocations: facts.flatMap(fact => fact.invocations), limitations: facts.flatMap(fact => fact.limitations) };
+  const invocations = board.stages.flatMap(stage => stage.cards.flatMap(card => card.execution?.invocations ?? []));
   const families = new Map(board.metrics.agentAvailability.map(agent => [agent.family, agent]));
-  for (const run of all.invocations) { if (!families.has(run.family)) { families.set(run.family, { family: run.family, available: false, blockedForMs: 0, reason: 'Family not configured for new launches' }); } }
+  for (const run of invocations) { if (!families.has(run.family)) { families.set(run.family, { family: run.family, available: false, blockedForMs: 0, reason: 'Family not configured for new launches' }); } }
   return { ...board, metrics: { ...board.metrics,
     agentAvailability: [...families.values()].map(agent => ({ ...agent,
-      runningSessions: providerFamilyCount(all, agent.family), executionComplete: all.complete })),
-    unattributedRunningSessions: all.complete ? 0 : null,
+      runningSessions: invocations.filter(run => run.family === agent.family).length })),
   } };
 }

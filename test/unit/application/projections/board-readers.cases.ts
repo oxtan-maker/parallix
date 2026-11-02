@@ -792,15 +792,14 @@ test('board and focused reads pass the current owner into execution while done h
       providerExecution: { observe(scope, currentOperationId) {
         calls.push(`observe:${scope.missionId}`);
         assert.equal(currentOperationId, scope.missionId === id1 ? owner.id : undefined);
-        return { observedAt: new Date().toISOString(), complete: true, limitations: [], recordedOperationIds: [owner.id],
+        return { observedAt: new Date().toISOString(), limitations: [], recordedOperationIds: [owner.id],
           invocations: scope.missionId === id1 ? [{ runId: 'execute-codex-a1-current', family: agentFamily('codex'), operationId: owner.id }] : [] };
       } },
     },
   );
   const board = await builder.build();
   assert.equal(board.metrics.agentAvailability[0].runningSessions, 1);
-  assert.equal(board.metrics.agentAvailability[0].executionComplete, true);
-  assert.equal(board.stages.flatMap(stage => stage.cards).find(card => card.id === id2)?.execution?.complete, true);
+  assert.equal(board.stages.flatMap(stage => stage.cards).find(card => card.id === id2)?.execution?.limitations.length, 0);
   assert.equal(calls[0], 'owners');
   calls.length = 0;
   assert.equal((await builder.buildMissionCard(id1))?.execution?.invocations.length, 1);

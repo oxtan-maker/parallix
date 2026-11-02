@@ -1,8 +1,8 @@
 ---
 id: TASK-2814
 title: Keep failed review workflows visible to px lead
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-23 19:50'
 labels:
   - bug

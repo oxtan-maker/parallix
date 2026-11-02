@@ -1,5 +1,7 @@
 // Regression provenance: TASK-2357.c.
 // Historical regression provenance: TASK-2357, task-201, task-202, task-203, task-204.
+import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
+import { reviewFindingId } from '../../../src/domain/review.js';
 import { before, describe, it } from 'node:test';
 import { prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 before(prepareMigratedSchema);
@@ -294,5 +296,34 @@ it('obligation shadow probabilities and aggregate survive SQLite readback (TASK-
       obligations: [{ id: 'F1', selected: 'addresses', probabilities: { addresses: 0.97, does_not_address: 0.02, insufficient_evidence: 0.01 }, failure: null }] });
     await store.recordCall(sample);
     assert.deepEqual(await new SqliteReviewClassificationStore(db).calls('parallix'), [sample]);
+  });
+});
+
+it('operator-only corrections retain their author and do not count as reviewer decisions (px-0020)', async () => {
+  await withStatisticsDatabase(async ({ db }) => {
+    const store = new SqliteMissionStore(db);
+    const telemetry = new SqliteReviewClassificationStore(db);
+    for (const operator of [true, false]) {
+      const slug = operator ? 'operator-correction' : 'reviewer-correction';
+      const template = currentReviewRound(repeatReview());
+      const pending = startReview({ ...template.subject, change: { ...template.subject.change, sourceBranch: `mission/${slug}` } },
+        template.reviewer, template.implementer, template.startedAt,
+        ConfiguredReviewerEligibility.fromReviewStep({ eligible: [template.reviewer], strategy: 'random' }));
+      const review = applyReviewerCommand(pending, { type: 'request-changes', decidedAt: '2026-10-06T00:00:00Z',
+        comment: 'Preserve attribution before acknowledgment', findings: [{ id: reviewFindingId('F1'), summary: 'Fix the regression', location: null }],
+        ...(operator ? { source: { kind: 'operator' as const, author: 'human-reviewer' } } : {}),
+      });
+      await store.save(fixtureMission(slug, { repositoryId: REPO, status: 'active', review }), null);
+      const loaded = await new SqliteMissionStore(db).load(missionId(slug));
+      assert.equal(loaded.kind, 'found');
+      if (loaded.kind !== 'found') { assert.fail('Missing persisted correction'); }
+      const decision = currentReviewRound(loaded.mission.review!).decision;
+      assert.ok(decision?.kind === 'changes-requested');
+      assert.deepEqual(decision.source, operator ? { kind: 'operator', author: 'human-reviewer' } : undefined);
+      assert.equal(reviewStatistics(loaded.mission.review).prFixRounds, operator ? 0 : 1);
+    }
+    const read = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
+    assert.deepEqual(read.decisions.map(d => [d.mission, d.source, d.outcome]), [['reviewer-correction', 'reviewer', 'implementer']]);
+    assert.equal(read.coverage, 'complete');
   });
 });

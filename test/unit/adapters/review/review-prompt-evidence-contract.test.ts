@@ -252,8 +252,9 @@ describe('human review reconciliation', { concurrency: false }, () => {
       { kind: 'review', id: 'agent-request', user: 'codex', isBot: false, created: '2026-10-05T10:00:00Z', updated: '2026-10-05T10:00:00Z', state: 'REQUEST_CHANGES', body: 'request changes' },
       { kind: 'review', id: 'bot-request', user: 'forgejo[bot]', isBot: true, created: '2026-10-05T10:01:00Z', updated: '2026-10-05T10:01:00Z', state: 'REQUEST_CHANGES', body: 'request changes' },
       { kind: 'issue-comment', id: 'issue-request', user: 'operator', isBot: false, created: '2026-10-05T10:02:00Z', updated: '2026-10-05T10:02:00Z', body: 'please change this' },
-      { kind: 'review', id: 'human-review', user: 'operator', isBot: false, created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Preserve the correction.' },
-      { kind: 'inline-comment', id: 'human-inline', reviewId: 'human-review', user: 'operator', isBot: false, created: '2026-10-05T10:03:01Z', updated: '2026-10-05T10:03:01Z', state: 'REQUEST_CHANGES', location: 'src/a.ts:4', body: 'Keep this branch.' },
+      { kind: 'review', id: 'old', user: 'operator', isBot: false, created: '2026-10-05T10:02:30Z', updated: '2026-10-05T10:02:30Z', state: 'REQUEST_CHANGES', body: 'Superseded correction' },
+      { kind: 'review', id: '7', user: 'operator', isBot: false, created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Preserve the correction.' },
+      { kind: 'inline-comment', id: '7', reviewId: '7', user: 'operator', isBot: false, created: '2026-10-05T10:03:01Z', updated: '2026-10-05T10:03:01Z', state: 'REQUEST_CHANGES', location: 'src/a.ts:4', body: 'Keep this branch.' },
     ];
     const ports = createReviewLoopPorts('task-2641', { worktree: repoRoot }, {
       isProviderEnabled: () => true,
@@ -266,37 +267,36 @@ describe('human review reconciliation', { concurrency: false }, () => {
       log: () => {}, error: () => {},
     });
     const state = new ReviewState('task-2641', { reviewer: 'claude', implementer: 'codex' });
-
     const first = await ports.humanFeedback.reconcile(state);
     assert.equal(first?.author, 'operator');
     assert.equal(first?.disposition, 'REQUEST_CHANGES');
     assert.deepEqual(first?.findings.map(finding => finding.summary), ['Preserve the correction.', 'Keep this branch.']);
-    assert.equal(events.length, 2, 'only the human review body and inline comment become audit events');
-    assert.match(events[0]?.reference ?? '', /forgejo:review:human-review:2026-10-05T10:03:00Z:/);
+    assert.deepEqual(first?.findings.map(finding => finding.id), ['human-review-7', 'human-inline-comment-7'], 'provider record kinds have independent ID spaces (px-0001)');
+    assert.equal(events.length, 0, 'observing the correction does not consume it before a decision commits');
+    await ports.humanFeedback.acknowledge(state, first!);
+    assert.equal(events.length, 3, 'audit the superseded request with the applied review and inline comment');
+    assert.match(events[1]?.reference ?? '', /forgejo:review:7:2026-10-05T10:03:00Z:/);
     assert.ok(Array.isArray(state.metadata.humanFeedbackHistory));
-    assert.equal(state.metadata.humanFeedbackHistory.length, 2);
+    assert.equal(state.metadata.humanFeedbackHistory.length, 3);
     assert.equal(await ports.humanFeedback.reconcile(state), null, 'a current request is consumed instead of re-launching repair every round');
-
     const reloaded = ReviewState.from('task-2641', reviewStateDataFrom({
       rounds: [{ number: 1, reviewer: fixtureAgentFamily('claude'), implementer: fixtureAgentFamily('codex'), startedAt: '2026-10-05T10:00:00Z', phase: 'reviewing', disposition: null, subject: { change: { kind: 'local-branch', sourceBranch: 'mission/task-2641', targetBranch: 'main' }, revision: fixtureRevision('head') }, decision: null, response: null, reviewerRetryCount: 0, implementerRetryCount: 0 }],
       intervention: null, stageLaunches: [],
       reviewEvents: events.map((event, position) => ({ position, eventType: 'human_note', roundNumber: 1, phase: 'reviewing' as const, actor: event.actor ?? null, content: event.content ?? '', disposition: null, verdict: null, itemDispositions: null, blockedReason: null, followUpReference: event.reference ?? null, createdAt: '2026-10-05T10:00:00Z' })),
     }));
     assert.equal(await ports.humanFeedback.reconcile(reloaded), null, 'consumed sources survive a Review aggregate state reload');
-
     // Forgejo invalidates inline comments after a push and updates their
     // timestamps without editing their content (TASK-2750).
-    comments[4] = { ...comments[4], updated: '2026-10-05T10:04:00Z' };
+    comments[5] = { ...comments[5], updated: '2026-10-05T10:04:00Z' };
     assert.equal(await ports.humanFeedback.reconcile(state), null, 'timestamp-only updates do not replay human corrections');
     assert.equal(await ports.humanFeedback.reconcile(reloaded), null, 'historical source identities also suppress timestamp-only updates after reload');
-    assert.equal(events.length, 2);
-
-    comments[3] = { ...comments[3], updated: '2026-10-05T10:05:00Z', body: 'Preserve the corrected implementation.' };
+    assert.equal(events.length, 3);
+    comments[4] = { ...comments[4], updated: '2026-10-05T10:05:00Z', body: 'Preserve the corrected implementation.' };
     const edited = await ports.humanFeedback.reconcile(state);
     assert.equal(edited?.reason, 'Preserve the corrected implementation.');
-    assert.equal(events.length, 3, 'an edited review has a new provider revision identity and is retained');
+    await ports.humanFeedback.acknowledge(state, edited!);
+    assert.equal(events.length, 4, 'an edited review has a new provider revision identity and is retained');
   });
-
   test('a current human correction on an approved round stays unrecorded and unconsumed until handled (TASK-2679)', async () => {
     const events: Array<{ reference?: string }> = [];
     const comments: NonNullable<Awaited<ReturnType<typeof getComments>>> = [{ kind: 'review', id: 'late-request', user: 'operator', isBot: false, created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Late correction.' }];
@@ -308,18 +308,18 @@ describe('human review reconciliation', { concurrency: false }, () => {
       log: () => {}, error: () => {},
     });
     const approved = new ReviewState('task-2679', { reviewer: 'claude', implementer: 'codex', phase: 'approved', round: 1 });
-
     assert.equal((await ports.humanFeedback.reconcile(approved))?.reason, 'Late correction.');
     assert.equal((await ports.humanFeedback.reconcile(approved))?.reason, 'Late correction.', 'a retry re-observes the same correction');
     assert.equal(events.length, 0, 'no durable audit event may consume the source while the approval is effective');
     assert.deepEqual(approved.metadata.humanFeedbackSources ?? [], []);
-
     const revoked = new ReviewState('task-2679', { reviewer: 'claude', implementer: 'codex', phase: 'reviewing', round: 2 });
-    assert.equal((await ports.humanFeedback.reconcile(revoked))?.reason, 'Late correction.');
+    const correction = await ports.humanFeedback.reconcile(revoked);
+    assert.equal(correction?.reason, 'Late correction.');
+    assert.equal(events.length, 0, 'revocation alone does not apply the correction');
+    await ports.humanFeedback.acknowledge(revoked, correction!);
     assert.equal(events.length, 1, 'once the approval no longer covers the round the correction is recorded');
     assert.equal(await ports.humanFeedback.reconcile(revoked), null);
   });
-
   // Regression provenance: TASK-2679.
   describe('approval revocation binding', () => {
     const approvedReview = applyReviewerCommand(startReview(

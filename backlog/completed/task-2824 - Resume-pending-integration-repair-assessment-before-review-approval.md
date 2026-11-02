@@ -1,8 +1,8 @@
 ---
 id: TASK-2824
 title: Review repaired revision instead of resuming stale approval
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-31 14:45'
 updated_date: '2026-10-31 14:46'
 labels:

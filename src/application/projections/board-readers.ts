@@ -22,7 +22,7 @@ import {
   type MissionOperationalFacts,
 } from './mission-board.js';
 import type { MetricsReadAdapter } from './metrics-read-adapter.js';
-import { countUnattributedSessions, projectAgentAvailability, type RunningAgentSession } from './agent-status.js';
+import { projectAgentAvailability, type RunningAgentSession } from './agent-status.js';
 import {
   ACTIVITY_OBSERVATION_TTL_MS,
   projectExecutionActivity,
@@ -57,6 +57,8 @@ export interface ReviewReadAdapter {
 export interface ReviewProjectionFact {
   readonly review: Review | null;
   readonly approval: { subject: ReviewedRevision; approvedAt: string | null } | null;
+  /** Why this mission's review history could not be read; scoped to the mission, never the board. */
+  readonly unreadable?: string;
 }
 
 /** Read port for the gate that applies to a mission, from the verification authority. */
@@ -231,16 +233,13 @@ export class BoardProjectionBuilder {
     const availableActions = this.deriveAvailableActions(cards);
 
     // Build metrics from event history (or use provided/default)
-    const metrics = {
-      ...await this.buildMetrics(
-        repositoryId,
-        missions,
-        projectAgentAvailability(agentAvailability, nowMs, runningSessions),
-        nowMs,
-        deliveries,
-      ),
-      unattributedRunningSessions: countUnattributedSessions(runningSessions),
-    };
+    const metrics = await this.buildMetrics(
+      repositoryId,
+      missions,
+      projectAgentAvailability(agentAvailability, nowMs),
+      nowMs,
+      deliveries,
+    );
 
     const board = alignDoneCohort(buildBoardProjection(
       repositoryId,
@@ -340,7 +339,7 @@ export class BoardProjectionBuilder {
       currentWork: work.currentWork,
       activityOperationId: work.operationId,
       liveSession,
-      blockingReason: contractStop ?? work.blockingReason,
+      blockingReason: contractStop ?? work.blockingReason ?? reviewFact.unreadable ?? null,
       blockerRequiresOperator: contractStop !== null,
       flags: [],
       approvalCoverage,

@@ -10,13 +10,28 @@ interface JsonManifest { version: unknown; packages?: Record<string, { version: 
 const manifest = (raw: string): JsonManifest => JSON.parse(raw) as JsonManifest;
 const execute = promisify(execFile);
 type Execute = (_file: string, _args: readonly string[], _options: { encoding: 'utf8'; timeout: number; maxBuffer: number }) => Promise<{ stdout: string }>;
+const OVERSIZE = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+const READ_LIMIT_BYTES = 4_000_000;
+
+/** Names the Git read that could not complete, so a blocked retention says what to narrow. */
+function readFailure(args: readonly string[], error: unknown): Error {
+  const code = (error as { code?: string } | undefined)?.code ?? '';
+  const message = code === OVERSIZE
+    ? `git ${args[0]} output exceeds the ${READ_LIMIT_BYTES} byte read limit; the mission patch cannot be compared completely`
+    : `git ${args[0]} failed`;
+  return new Error(message, { cause: error });
+}
 
 /** Object-only reads; NUL paths and literal pathspecs preserve spaces and arbitrary filenames. */
 export class GitMissionPatchComparison {
   constructor(private readonly _root: string, private readonly _execute: Execute = execute as Execute) {}
   private async read(args: readonly string[]): Promise<string> {
-    return (await this._execute('git', ['--literal-pathspecs', '-C', this._root, ...args],
-      { encoding: 'utf8', timeout: 10_000, maxBuffer: 4_000_000 })).stdout;
+    try {
+      return (await this._execute('git', ['--literal-pathspecs', '-C', this._root, ...args],
+        { encoding: 'utf8', timeout: 10_000, maxBuffer: READ_LIMIT_BYTES })).stdout;
+    } catch (error) {
+      throw readFailure(args, error);
+    }
   }
   async samePatch(before: MissionRevision, after: MissionRevision): Promise<boolean> {
     const [left, right] = await Promise.all([this.patch(before), this.patch(after)]);
@@ -80,9 +95,9 @@ export class GitMissionPatchComparison {
       const left = join(scratch, 'before'), right = join(scratch, 'after');
       await Promise.all([writeFile(left, baselineText), writeFile(right, tipText)]);
       const normalized = await this._execute('git', ['diff', '--no-index', '--no-ext-diff', '--no-textconv', '--unified=3', left, right],
-        { encoding: 'utf8', timeout: 10_000, maxBuffer: 4_000_000 }).then(r => r.stdout, (error: { code?: unknown; stdout?: string }) => {
+        { encoding: 'utf8', timeout: 10_000, maxBuffer: READ_LIMIT_BYTES }).then(r => r.stdout, (error: { code?: unknown; stdout?: string }) => {
         if (error.code === 1 && typeof error.stdout === 'string') { return error.stdout; }
-        throw error;
+        throw readFailure(['diff', '--no-index'], error);
       });
       if (!normalized) { return ''; }
       // Use the actual repository headers; temporary file names never enter patch identity.

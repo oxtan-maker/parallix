@@ -43,7 +43,7 @@ function operation(value: ObjectValue, problems: string[]) {
   strings(value, ['runId', 'role', 'startedAt'], problems);
   for (const key of ['operationId', 'family', 'endedAt', 'signal']) { checkNullableString(value, key, 'operation', problems); }
   enums(value, 'captureKind', ['agent', 'coordinator'], problems);
-  enums(value, 'execution', ['live', 'stopped', 'unknown'], problems);
+  enums(value, 'execution', ['live', 'stopped'], problems);
   enums(value, 'state', ['running', 'exited', 'interrupted'], problems);
   enums(value, 'terminalHost', ['pipe', 'tmux'], problems);
   for (const key of ['legacy', 'redacted']) { checkBoolean(value, key, 'operation', problems); }

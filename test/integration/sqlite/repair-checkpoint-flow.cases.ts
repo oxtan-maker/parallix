@@ -59,7 +59,7 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
         lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const, value: reviewPreparationTransitionValue(missionVersion(10)) }) },
         nel: { recordNel: async () => ({ durableEvidence: [],  status: 'completed' as const }) },
       }),
-      process: { spawnSync: (cmd: string, args: string[], options: object) => {
+      process: { run: async (cmd: string, args: string[], options: object) => {
         gateRuns++;
         return spawnSync(cmd, args, { ...options, cwd: root, encoding: 'utf8', timeout: 2000 });
       } },

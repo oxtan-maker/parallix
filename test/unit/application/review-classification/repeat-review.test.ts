@@ -987,3 +987,12 @@ test('required omission metadata overflow falls back before any panel call (px-0
   assert.equal(s.attempts[0].panel!.calls, 0);
   assert.deepEqual(s.published, []);
 });
+test('changed-patch retention assessment requires the repository reviewer (TASK-2824)', async () => {
+  const s = gateRepairScenario();
+  const prior = s.store.mission().review!.rounds[0];
+  Object.assign(prior, { integrationRepairAssessment: { outcome: 'mission-change-differs' } });
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.deepEqual(s.attempts.map(a => a.reason), ['changed-integration-patch']);
+  assert.deepEqual(s.published, []);
+  assert.equal(s.store.mission().review!.rounds.at(-1)!.decision, null);
+});

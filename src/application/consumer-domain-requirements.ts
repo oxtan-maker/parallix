@@ -307,7 +307,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-loop-round-progression',
     family: 'review',
     fileLocation: 'src/application/review-loop/review-loop.ts',
-    line: 231,
+    line: 238,
     anchor: 'function runOwnedReviewLoop',
     reads: ['Review', 'Mission'],
     requirement:
@@ -355,7 +355,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-agent-status',
     family: 'ui-board',
     fileLocation: 'src/application/projections/agent-status.ts',
-    line: 26,
+    line: 20,
     anchor: 'function projectAgentAvailability',
     reads: ['AgentBlock'],
     requirement:

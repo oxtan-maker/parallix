@@ -149,10 +149,10 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
     await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries before escalation (got ${reviewerLaunches(fake)} reviewer launches)`);
-    assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('No usable review outcome')),
-      `should escalate with the recovery dossier and root timeout evidence. Errors: ${fake.errors.join(' | ')}`);
-    assert.ok(fake.logs.some(l => l.includes('human review required') && l.includes('REVIEWER_NON_APPROVAL')),
-      `should log human review escalation with REVIEWER_NON_APPROVAL. Logs: ${fake.logs.join(' | ')}`);
+    assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
+      `should escalate with the recovery dossier and incomplete-artifact cause. Errors: ${fake.errors.join(' | ')}`);
+    assert.ok(fake.logs.some(l => l.includes('human review required') && l.includes('REVIEWER_ARTIFACT_RETRY_EXHAUSTED')),
+      `should log human review escalation with REVIEWER_ARTIFACT_RETRY_EXHAUSTED. Logs: ${fake.logs.join(' | ')}`);
   });
 
   test('reviewer-non-submission: null poll result breaks recovery loop prematurely (forgejoEnabled=true, poll returns null)', async () => {
@@ -160,7 +160,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
     await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries even when poll returns null (got ${reviewerLaunches(fake)} reviewer launches)`);
-    assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('No usable review outcome')),
+    assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
       `should escalate with the recovery dossier, not a bare non-submission error. Errors: ${fake.errors.join(' | ')}`);
   });
 
@@ -169,7 +169,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
     await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries with forgejoEnabled=false (got ${reviewerLaunches(fake)} reviewer launches)`);
-    assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('No usable review outcome')),
+    assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
       `should escalate with the recovery dossier. Errors: ${fake.errors.join(' | ')}`);
   });
 
@@ -301,4 +301,56 @@ describe("human correction on an approved round", { concurrency: false }, () => 
     assert.equal(implementerLaunches(fake).length, 0);
     assert.deepEqual(fake.current()?.metadata.humanFeedbackSources ?? [], [], 'nothing consumed the correction before the failed write');
   });
+});
+
+describe('exited reviewer artifacts', () => {
+  for (const stopReason of [undefined, 'length', 'output-token-limit']) {
+    test(`exited reviewer ${stopReason ?? 'normal'} recovers without full provider timeout (TASK-2827)`, async () => {
+      const requests: import('../../../../src/application/ports/review-round.js').ProviderPollRequest[] = [];
+      const fake = fakeReviewLoopPorts({
+        slug: 'task-2827-repro',
+        routing: { eligibleFamilies: () => ['codex', 'custom'], nominate: () => 'codex' },
+        agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0, stopReason } }) },
+        provider: { pollReview: async (_reviewer, _since, request) => { requests.push(request); return POLL_TIMEOUT; } },
+        artifacts: { consumeReviewer: async () => ({ consumed: false }) },
+      });
+      await runReviewLoop({ slug: 'task-2827-repro', maxAttempts: 1 }, fake.ports);
+      assert.ok(requests.every(request => request.quick === true), `full timeout polls: ${JSON.stringify(requests)}`);
+      const warning = fake.logs.findIndex(message => /Incomplete reviewer artifact/.test(message));
+      const rebound = fake.logs.findIndex(message => /Bouncing to reviewer/.test(message));
+      assert.ok(warning >= 0 && warning < rebound, fake.logs.join(' | '));
+      const diagnostics = [...fake.logs, ...fake.errors].join(' | ');
+      assert.match(diagnostics, /incomplete.*review.*artifact/i);
+      if (stopReason) { assert.match(diagnostics, /output-token-limit/); }
+      assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 3);
+      assert.match(diagnostics, /px review task-2827-repro/);
+    });
+  }
+});
+
+
+test('exited reviewer recovery respects the per-round cap and reports its final cause (TASK-2827)', async () => {
+  let launches = 0;
+  const fake = fakeReviewLoopPorts({
+    slug: 'task-2827-cap',
+    routing: { eligibleFamilies: () => ['custom'], nominate: () => 'custom' },
+    agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0, stopReason: ++launches > 1 ? 'output-token-limit' : 'stop' } }) },
+    provider: { pollReview: async () => { assert.fail('exited reviewer must not wait for provider'); } },
+  });
+  await runReviewLoop({ slug: 'task-2827-cap', maxAttempts: 1, reboundsPerRound: 1 }, fake.ports);
+  assert.equal(launches, 2);
+  assert.deepEqual(fake.stops, ['REBOUNDS_PER_ROUND_EXHAUSTED']);
+  assert.match(fake.errors.join(' | '), /Incomplete reviewer artifact.*output-token-limit.*px review task-2827-cap/);
+});
+
+
+test('an already spent round budget still reports the missing artifact cause and recovery command (TASK-2827)', async () => {
+  const fake = fakeReviewLoopPorts({
+    slug: 'task-2827-spent', provider: {},
+    agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0, stopReason: 'output-token-limit' } }) },
+  });
+  await runReviewLoop({ slug: 'task-2827-spent', maxAttempts: 1, reboundsPerRound: 0 }, fake.ports);
+  assert.equal(fake.launches.length, 1);
+  assert.deepEqual(fake.stops, ['REBOUNDS_PER_ROUND_EXHAUSTED']);
+  assert.match(fake.errors.join(' | '), /Incomplete reviewer artifact.*output-token-limit.*px review task-2827-spent/);
 });

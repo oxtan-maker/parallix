@@ -90,3 +90,41 @@ test("review preparation, declared gates and pre-review share candidate verifica
     fs.rmSync(proofHome, { recursive: true, force: true });
   }
 });
+
+test('a pre-review gate whose output exceeds the capture limit fails closed instead of passing (TASK-2828.3)', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2828-gate-capture-'));
+  const proofHome = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2828-gate-home-'));
+  const slug = 'task-2828-gate-capture';
+  const missionDir = path.join(root, 'missions', slug);
+  const priorHome = process.env.PARALLIX_HOME;
+  try {
+    childProcess.execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
+    childProcess.execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+    childProcess.execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+    fs.writeFileSync(path.join(root, 'README.md'), 'fixture\n');
+    childProcess.execFileSync('git', ['add', '.'], { cwd: root });
+    childProcess.execFileSync('git', ['commit', '-m', 'fixture'], { cwd: root, stdio: 'pipe' });
+    fs.mkdirSync(missionDir, { recursive: true });
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'verify {{area}}', defaultArea: 'all' } } }));
+    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission\n\n## Gates\n- [ ] verify all\n');
+    process.env.PARALLIX_HOME = proofHome;
+    t.mock.method(missionUtils, 'findMissionDir', () => missionDir);
+    t.mock.method(missionUtils, 'findMissionArea', () => null);
+    const result = await runPreReviewGate(slug, root, {
+      runFn: () => {
+        throw new git.CommandOutputLimitError('bash', 'ENOBUFS', 10 * 1024 * 1024,
+          'the incomplete output was rejected instead of accepted; narrow the query or read it in bounded parts');
+      },
+      log: () => {}, error: () => {},
+    });
+    assert.equal(result.ok, false, 'a gate stream that cannot be captured is never a pass');
+    assert.equal(result.exitCode, null, 'no exit code is claimed for an uncapturable stream');
+    assert.match(result.stderr, /bash produced more output than its 10485760 byte capture limit allows/);
+    assert.equal(result.failureReason?.code, 'gate-failed');
+  } finally {
+    if (priorHome === undefined) delete process.env.PARALLIX_HOME;
+    else process.env.PARALLIX_HOME = priorHome;
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(proofHome, { recursive: true, force: true });
+  }
+});

@@ -45,9 +45,11 @@ describe('rebase agent completion', () => {
     for (const prompt of prompts) {
       for (const text of [...Object.values(brief).flat(), 'Preserve current base behavior', 'Mission worktree: /worktree',
         'Captured mission branch: mission/task-2503', 'Resolved local rebase base: local-feature']) { assert.ok(prompt.includes(text), text); }
-      assert.match(prompt, /Preserve unique mission changes/);
+      assert.match(prompt, /Before resolving unexpectedly replayed inherited work, inspect the target branch, Git history and actual diffs/);
+      assert.match(prompt, /Preserve intended Mission changes and current base behavior/);
+      assert.match(prompt, /Do not restore obsolete code or task metadata merely to apply an old commit/);
       assert.match(prompt, /never apply blanket ours\/theirs/);
-      assert.match(prompt, /ambiguous.*stop with the current paths and evidence/);
+      assert.match(prompt, /Use ordinary Git rebase tools when the intended range is clear\. If unclear, explain the specific uncertainty with paths and evidence; stop for ambiguous intent or a human decision/);
       assert.match(prompt, /Stage every resolved file with git add before each git rebase --continue/);
       assert.doesNotMatch(prompt, /stale-output\.ts/);
     }

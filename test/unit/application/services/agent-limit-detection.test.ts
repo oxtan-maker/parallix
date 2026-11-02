@@ -14,6 +14,37 @@ import { getPatternsForAgent, findLimitHitMatch, clipContext, parseIsoOffset, pa
 import { shouldPersistLaunchFailureBlock, startAgent } from '../../../../src/adapters/agents/agents.js';
 
 describe('Limit-hit detection', () => {
+  for (const [variant, apostrophe] of [['straight', "'"], ['curly', '’']]) {
+    test(`Claude 5-hour diagnostic keeps failure and quotation guards with a ${variant} apostrophe (px-0026)`, () => {
+      const phrase = `You${apostrophe}ve hit your 5-hour limit`;
+      for (const invocation of [
+        { status: 0, stderr: `${phrase} · resets 10:50am (Europe/Stockholm)` },
+        { status: 1, stderr: `Review mentions "${phrase}" · resets 10:50am (Europe/Stockholm)` },
+        { status: 1, stderr: `Review mentions “${phrase}” · resets 10:50am (Europe/Stockholm)` },
+        { status: 1, stderr: `Review mentions "${phrase} · resets 10:50am (Europe/Stockholm)"` },
+        { status: 1, stderr: `Review mentions “${phrase} · resets 10:50am (Europe/Stockholm)”` },
+        { status: 1, stderr: 'Connection refused by provider' },
+        { status: 1, stderr: phrase, failureReason: { version: 1, code: 'process-terminated' } },
+      ]) {
+        assert.equal(detectLimitHit({ agent: 'claude', ...invocation, log: () => {} }), null);
+        assert.equal(shouldPersistLaunchFailureBlock('claude', invocation), false);
+      }
+    });
+
+    test(`Claude 5-hour diagnostic parses the Stockholm reset with a ${variant} apostrophe (px-0026)`, () => {
+      // Run with TZ=Europe/Stockholm to verify the observed provider timezone.
+      // Local clock construction also keeps this contract portable on UTC CI.
+      const hit = detectLimitHit({
+        agent: 'claude', status: 1,
+        stderr: `You${apostrophe}ve hit your 5-hour limit · resets 10:50am (Europe/Stockholm)`,
+        now: new Date(2026, 10, 2, 9), log: () => {},
+      });
+      assert.ok(hit && !hit.reroute);
+      assert.equal(hit.source, 'parsed');
+      assert.equal(hit.until, '2026-11-02 11');
+    });
+  }
+
   // ---------- getPatternsForAgent ----------
 
   test('getPatternsForAgent returns patterns for claude', () => {

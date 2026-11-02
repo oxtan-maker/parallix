@@ -282,6 +282,34 @@ test('computeNEL returns 0 for non-existent range', () => {
   assert.strictEqual(nel, 0);
 });
 
+// TASK-2828.3: a capture overflow truncates `git diff --numstat`, and the old `status !== 0`
+// guard turned that into a fabricated NEL of 0, which then landed as a Small bucket statistic.
+test('computeNEL rejects a truncated numstat read instead of reporting a zero count (TASK-2828.3)', () => {
+  const tmpDir = createTempGitRepo();
+  try {
+    fs.mkdirSync(path.join(tmpDir, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'src/a.js'), 'a\n');
+    spawnSync('git', ['add', '.'], { cwd: tmpDir, stdio: 'pipe' });
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: tmpDir, stdio: 'pipe' });
+    for (let index = 0; index < 40; index++) {
+      fs.writeFileSync(path.join(tmpDir, `src/f${index}.js`), `export const v${index} = ${index};\n`.repeat(20));
+    }
+    spawnSync('git', ['add', '.'], { cwd: tmpDir, stdio: 'pipe' });
+    spawnSync('git', ['commit', '-m', 'many files'], { cwd: tmpDir, stdio: 'pipe' });
+
+    assert.ok(computeNEL('HEAD~1..HEAD', { cwd: tmpDir }) > 0, 'the same diff counts when the limit fits');
+    let thrown: (Error & { code?: string }) | undefined;
+    try { computeNEL('HEAD~1..HEAD', { cwd: tmpDir, maxBuffer: 64 }); } catch (error) { thrown = error as Error & { code?: string }; }
+    assert.ok(thrown, 'a truncated numstat read must not report a count');
+    assert.equal(thrown.name, 'CommandOutputLimitError');
+    assert.equal(thrown.code, 'ENOBUFS');
+    assert.match(thrown.message, /git diff --numstat HEAD~1\.\.HEAD/);
+    assert.match(thrown.message, /net engineering lines cannot be counted from truncated diff output/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('computeNELRecord returns nel and bucket', () => {
   const rec = computeNELRecord('HEAD..HEAD');
   assert.ok(typeof rec.nel === 'number', 'nel should be a number');

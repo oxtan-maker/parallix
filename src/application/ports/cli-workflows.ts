@@ -105,6 +105,8 @@ export interface StatusMissionData {
    * `px status` and the agent strip from drifting into contradicting each other.
    */
   readonly activity?: MissionActivity | null;
+  /** The mission's last provider observation, so its dated failures reach `px status`. */
+  readonly providerObservation?: { readonly observedAt: string; readonly limitations: readonly string[] } | null;
   /**
    * The recorded brief. `px status` is the one reporting surface for a Mission,
    * so it lives here rather than in a second projection command: an agent reads

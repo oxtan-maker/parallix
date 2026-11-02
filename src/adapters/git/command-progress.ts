@@ -50,25 +50,49 @@ function startAnimation(label: string, started: number): () => void {
   };
 }
 
-/** Preserve captured command evidence; progress is written only to stderr. */
-export function withCommandProgress<T extends { status: number | null }>(
-  label: string,
-  command: () => T,
-  options: CommandProgressOptions = {},
-): T {
+function beginCommandProgress(label: string, options: CommandProgressOptions): (_passed: boolean) => void {
   const write = options.write ?? ((message: string) => { process.stderr.write(message); });
   const now = options.now ?? Date.now;
   const started = now();
   const animate = options.animate ?? (process.stderr.isTTY ? startAnimation : undefined);
   if (animate) { write(`[ ] ${label}`); }
   const stop = animate ? animate(label, started) : undefined;
+  return passed => {
+    stop?.();
+    write(`${passed ? '[✓]' : '[✗]'} ${label} (${((now() - started) / 1000).toFixed(1)}s)\n`);
+  };
+}
+
+/** Preserve captured command evidence; progress is written only to stderr. */
+export function withCommandProgress<T extends { status: number | null }>(
+  label: string,
+  command: () => T,
+  options: CommandProgressOptions = {},
+): T {
+  const end = beginCommandProgress(label, options);
   let passed = false;
   try {
     const result = command();
     passed = result.status === 0;
     return result;
   } finally {
-    stop?.();
-    write(`${passed ? '[✓]' : '[✗]'} ${label} (${((now() - started) / 1000).toFixed(1)}s)\n`);
+    end(passed);
+  }
+}
+
+/** The same presentation for a command the event loop keeps running. */
+export async function withAsyncCommandProgress<T extends { status: number | null }>(
+  label: string,
+  command: () => Promise<T>,
+  options: CommandProgressOptions = {},
+): Promise<T> {
+  const end = beginCommandProgress(label, options);
+  let passed = false;
+  try {
+    const result = await command();
+    passed = result.status === 0;
+    return result;
+  } finally {
+    end(passed);
   }
 }

@@ -6,7 +6,7 @@ import { isWorkflowCommand } from '../../domain/workflow-operation.js';
 
 import type { WebStreamError } from './stream.js';
 import { SUPPORTED_WEB_TRANSPORT_VERSIONS, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebCommandRequestKind, type WebCommandRequestValidation } from './transport-types.js';
-import { LANES, TERMINAL_STATUSES, ERROR_KINDS, EVIDENCE_SOURCES, COMMAND_REQUEST_KINDS, isPlainObject, checkKeys, checkString, checkFiniteNumber, checkEnum, checkOptString, checkOptionalNullableNumber, checkJsonValue, type WebTransportValidation } from './transport-validation-primitives.js';
+import { LANES, TERMINAL_STATUSES, ERROR_KINDS, EVIDENCE_SOURCES, COMMAND_REQUEST_KINDS, isPlainObject, checkKeys, checkString, checkFiniteNumber, checkEnum, checkOptString, checkJsonValue, type WebTransportValidation } from './transport-validation-primitives.js';
 import { checkCommandAction, checkMissionCard, checkAttentionItem, checkLogEntry, checkAgentAvailability, checkSourceFact, checkMetrics } from './transport-shape-checks.js';
 
 function validateWithVersion<T>(
@@ -47,7 +47,7 @@ export function validateWebBoardSnapshot(payload: unknown): WebTransportValidati
     checkKeys(p,
       ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
         'availableActions', 'wipCounts', 'inFlightWip', 'operationLog', 'agentAvailability', 'metrics',
-        'unattributedRunningSessions', 'sourceFacts'],
+        'sourceFacts'],
       ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
         'availableActions', 'wipCounts', 'inFlightWip', 'operationLog', 'agentAvailability', 'metrics', 'sourceFacts'],
       'snapshot', problems);
@@ -106,7 +106,6 @@ export function validateWebBoardSnapshot(payload: unknown): WebTransportValidati
     } else {
       problems.push('snapshot.agentAvailability must be an array');
     }
-    checkOptionalNullableNumber(p, 'unattributedRunningSessions', 'snapshot', problems);
     if (Array.isArray(p.sourceFacts)) {
       p.sourceFacts.forEach((fact, index) => checkSourceFact(fact, `snapshot.sourceFacts[${index}]`, problems));
     } else {

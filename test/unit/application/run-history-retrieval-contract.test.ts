@@ -1,4 +1,4 @@
-import { observeProviderExecution, providerFamilyCount } from '../../../src/application/projections/provider-execution.js';
+import { observeProviderExecution, projectExecutionMetrics } from '../../../src/application/projections/provider-execution.js';
 /**
  * Agent-run history capture and bounded retrieval contract (TASK-2643).
  *
@@ -11,6 +11,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { missionId } from '../../../src/domain/mission.js';
+import { makeCard, makeProjection } from '../../fixtures/board-projection.js';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import { agentRunId, agentRunIdentity } from '../../../src/domain/agent-run.js';
 import { createRunHistoryStore, correlateRunOperation, missionRunsDir, openRunCapture, preserveWorktreeRunHistory, runHistoryFileSystem, runHistoryRoot } from '../../../src/adapters/filesystem/run-history-store.js';
@@ -350,7 +353,7 @@ test('agent execution observation correlates to its run, independently of coordi
   terminal.host.result = { ok: true, sessions: { owned: 'task-9', others: [], operations: [
     { name: 'other-window', started: true, runId: 'execute-codex-a1-other', execution: true },
   ] } };
-  assert.equal(view().operations[0].execution, 'unknown', 'another run of the same family cannot establish execution');
+  assert.equal(view().operations[0].execution, 'stopped', 'another run of the same family cannot establish execution');
   assert.equal(view().operations[0].state, 'running', 'an open capture alone is not execution proof');
   capture.observeExecution(process.pid, 'captured-process-start');
   let probedPid: number | null = null;
@@ -358,7 +361,7 @@ test('agent execution observation correlates to its run, independently of coordi
   assert.equal(observed(true).execution, 'live');
   assert.equal(probedPid, process.pid);
   assert.equal(observed(false).execution, 'stopped', 'dead or reused child pid does not inherit its live supervisor');
-  assert.equal(observed(null).execution, 'unknown', 'an inconclusive process probe is not absence');
+  assert.equal(observed(null).execution, 'stopped', 'an inconclusive process probe confirms no provider (the failure is reported as a scoped limitation)');
   const interrupted = (alive: boolean) => ok(service(repository, { isAlive: () => false, executionAlive: () => alive }).overview('task-9')).operations[0];
   assert.equal(interrupted(true).state, 'interrupted');
   assert.equal(interrupted(true).execution, 'live', 'an orphan capture cannot conceal its live execution (TASK-2750 F9)');
@@ -461,17 +464,17 @@ test('provider observation deduplicates owned invocation metadata and keeps part
   const identity = agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock });
   const duplicateStore = { ...store, fs: { ...store.fs, readBytes: () => { throw new Error('Execution must not read transcript bytes'); } }, locations: () => [...store.locations(identity), ...store.locations(identity)] };
   let observed = observeProviderExecution(duplicateStore, identity);
-  assert.equal(observed.complete, true);
+  assert.deepEqual(observed.limitations, []);
   assert.deepEqual(observed.invocations.map(run => run.runId).sort(), [first.runId, second.runId].sort());
   assert.equal(observed.invocations.find(run => run.runId === first.runId)?.operationId, 'owned-operation');
   alive = null;
   observed = observeProviderExecution(duplicateStore, identity);
-  assert.equal(observed.complete, false);
-  assert.equal(providerFamilyCount(observed, 'codex'), 1);
-  assert.equal(providerFamilyCount(observed, 'claude'), null);
+  assert.equal(observed.limitations.length, 1, 'the inconclusive probe is a scoped diagnostic on its own invocation');
+  assert.match(observed.limitations[0], new RegExp(second.runId));
+  assert.equal(observed.invocations.length, 1, 'the other confirmed provider keeps its count');
   alive = false;
   observed = observeProviderExecution(duplicateStore, identity);
-  assert.equal(observed.complete, true);
+  assert.deepEqual(observed.limitations, []);
   assert.equal(observed.invocations.length, 1, 'confirmed exit independent of coordinator');
   first.finish({ exitCode: 0, signal: null });
   assert.equal(observeProviderExecution(store, identity).invocations.length, 0);
@@ -488,11 +491,11 @@ test('interrupted capture, unreadable metadata and failed probes never establish
   capture.correlateOperation('current');
   const store = createRunHistoryStore({ repositoryRoot: root, repositoryKey: 'abc123', executionAlive: () => null });
   const identity = agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock });
-  assert.equal(observeProviderExecution(store, identity, 'current').complete, false);
+  assert.match(observeProviderExecution(store, identity, 'current').limitations.join(), /probe unavailable/, 'an inconclusive probe on the current owner is a scoped diagnostic, not a count');
   const unreadable = { ...store, fs: { ...store.fs, inspectDirs: () => ({ ok: false as const }) } };
-  assert.equal(providerFamilyCount(observeProviderExecution(unreadable, identity), 'codex'), null);
+  assert.deepEqual(observeProviderExecution(unreadable, identity).limitations, ['Run metadata directory unavailable'], 'unreadable history reports its own diagnostic');
   const failed = { ...store, executionAlive: () => { throw new Error('timeout'); } };
-  assert.equal(observeProviderExecution(failed, identity).complete, false);
+  assert.equal(observeProviderExecution(failed, identity).invocations.length, 0);
   // Supervisor loss alone does not invalidate a still-confirmed provider process.
   const live = { ...store, executionAlive: () => true };
   assert.equal(observeProviderExecution(live, identity).invocations.length, 1);
@@ -519,7 +522,7 @@ test('capture finalization without an exit result does not establish provider de
   const identity = agentRunIdentity({ repositoryId: 'abc123', missionId: 'task-9', role: 'execute', family: 'codex', attempt: 1, startedAtMs: clock });
   const store = createRunHistoryStore({ repositoryRoot: root, executionAlive: () => true });
   assert.equal(observeProviderExecution(store, identity).invocations.length, 1);
-  assert.equal(observeProviderExecution({ ...store, executionAlive: () => null }, identity).complete, false);
+  assert.equal(observeProviderExecution({ ...store, executionAlive: () => null }, identity).invocations.length, 0, 'an unavailable probe confirms nothing');
 });
 
 function retainedObservationFixture() {
@@ -554,12 +557,11 @@ test('historical interrupted and legacy captures do not poison a current provide
   }
   f.add('execute-codex-a1-zzzz', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 456, processIdentity: 'live' }, operationId: 'current' });
   const observation = observeProviderExecution(f.store, f.identity);
-  assert.equal(observation.complete, true);
-  assert.equal(providerFamilyCount(observation, 'codex'), 1);
-  assert.equal(providerFamilyCount(observation, 'claude'), 0);
+  assert.deepEqual(observation.limitations, []);
+  assert.deepEqual(observation.invocations.map(run => run.family), ['codex']);
   f.records.delete('execute-codex-a1-zzzz');
   const idle = observeProviderExecution(f.store, f.identity);
-  assert.equal(idle.complete, true, 'retained completed missions can report a complete zero');
+  assert.deepEqual(idle.limitations, [], 'retained completed missions report a plain zero');
   assert.equal(idle.invocations.length, 0);
 });
 
@@ -576,7 +578,7 @@ test('coordinator-heavy unordered retained history cannot hide the newest provid
   f.add('execute-codex-a1-zzzz', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 456, processIdentity: 'live' }, operationId: 'current' });
   const probes: number[] = [];
   const observed = observeProviderExecution({ ...f.store, executionAlive: execution => { probes.push(execution.pid); return true; } }, f.identity);
-  assert.equal(observed.complete, true);
+  assert.deepEqual(observed.limitations, []);
   assert.deepEqual(observed.invocations.map(run => run.runId), ['execute-codex-a1-zzzz']);
   assert.deepEqual(probes, [456], 'only current provider process evidence consumes probes');
 });
@@ -585,12 +587,12 @@ test('current-operation and live-supervisor uncertainty survive historical filte
   const f = retainedObservationFixture();
   const id = 'execute-codex-a1-zzzz';
   f.add(id, { state: 'running', exitCode: null, supervisorPid: 999, execution: undefined, operationId: 'open-operation' });
-  const unknown = observeProviderExecution(f.store, f.identity, 'open-operation');
-  assert.equal(unknown.complete, false, 'current owner with interrupted legacy capture remains unknown');
-  assert.equal(providerFamilyCount(unknown, 'codex'), null);
-  assert.equal(observeProviderExecution(f.store, f.identity, 'replacement').complete, true, 'superseded legacy capture cannot poison replacement');
+  const current = observeProviderExecution(f.store, f.identity, 'open-operation');
+  assert.deepEqual(current.limitations, [], 'an interrupted legacy capture with no recorded child is stopped, not a ghost provider');
+  assert.equal(current.invocations.length, 0);
+  assert.deepEqual(observeProviderExecution(f.store, f.identity, 'replacement').limitations, [], 'superseded legacy capture cannot poison replacement');
   f.add(id, { state: 'running', exitCode: null, supervisorPid: 123, execution: undefined });
-  assert.equal(observeProviderExecution(f.store, f.identity).complete, false, 'live legacy supervisor remains potentially current');
+  assert.equal(observeProviderExecution(f.store, f.identity).invocations.length, 0, 'a live supervisor without a recorded child is not a provider');
   f.add(id, { state: 'running', exitCode: null, supervisorPid: 999, execution: { pid: 456, processIdentity: 'orphan-live' } });
   assert.equal(observeProviderExecution(f.store, f.identity).invocations.length, 1, 'confirmed orphan provider survives lost capture supervisor');
 });
@@ -606,9 +608,9 @@ test('provider probe limit is finite and admits newest candidates across locatio
   assert.equal(probes, MAX_RUNS_PER_MISSION);
   assert.equal(result.invocations[0].runId, `execute-codex-a1-${(MAX_RUNS_PER_MISSION + 1).toString(36)}`);
   assert.equal(result.invocations.length, MAX_RUNS_PER_MISSION, 'locations deduplicate invocation identities before probing');
-  assert.equal(result.complete, false, 'a genuine excess of undecidable/live candidates reports a lower bound');
+  assert.ok(result.limitations.length > 0, 'a genuine excess of candidates reports scoped diagnostics');
   assert.ok(result.limitations.some(note => note.includes('probe budget reached')));
-  assert.equal(providerFamilyCount(result, 'codex'), MAX_RUNS_PER_MISSION);
+  assert.ok(result.invocations.every(run => run.family === 'codex'));
 });
 
 test('historical undecidable identities cannot exhaust the current operation probe (TASK-2769 F1 F2)', () => {
@@ -621,5 +623,74 @@ test('historical undecidable identities cannot exhaust the current operation pro
   const result = observeProviderExecution({ ...f.store, executionAlive: execution => { probes.push(execution.pid); return execution.pid === 456 ? true : null; } }, f.identity, 'current');
   assert.equal(probes[0], 456, 'an existing long-lived owner takes priority over newer historical crashes');
   assert.equal(result.invocations.length, 1);
-  assert.equal(result.complete, true, 'unprobeable historical identities stay outside current uncertainty');
+  assert.deepEqual(result.limitations, [], 'unprobeable historical identities stay outside current diagnostics');
+});
+
+test('px-0024 stop-before-spawn capture settles as stopped and cannot null unrelated provider counts (px-0027)', () => {
+  const f = retainedObservationFixture();
+  // Capture opened before launch authorization; authorization refused, no child spawned,
+  // finalized exited with null exitCode/signal and no execution, supervisor gone.
+  f.add('review-claude-a1-mvz43546', { state: 'exited', exitCode: null, signal: null, execution: null, supervisorPid: 999, operationId: 'op-latest', family: 'claude' as never });
+  const refused = observeProviderExecution(f.store, f.identity, 'op-latest');
+  assert.deepEqual(refused.limitations, [], 'a settled never-started capture is not a limitation even as the latest operation');
+  assert.equal(refused.invocations.length, 0);
+  assert.equal(refused.recordedOperationIds?.includes('op-latest'), true, 'retained history stays retrievable');
+
+  // Production board aggregation: another mission runs a healthy codex provider.
+  const healthy = { observedAt: refused.observedAt, limitations: [], invocations: [{ runId: 'execute-codex-a1-live', operationId: 'op-2', family: 'codex' as never }] };
+  const base = makeProjection({ active: [
+    makeCard({ id: missionId('px-0024') as never, execution: refused }),
+    makeCard({ id: missionId('px-0025') as never, execution: healthy }),
+  ] });
+  const board = projectExecutionMetrics({ ...base, metrics: { ...base.metrics,
+    agentAvailability: ['claude', 'codex', 'custom'].map(family => ({ family: agentFamily(family), available: true, blockedForMs: 0, reason: '' })) } });
+  const count = (family: string) => board.metrics.agentAvailability.find(agent => agent.family === family)?.runningSessions;
+  assert.equal(count('claude'), 0, 'zero observed claude is a real zero');
+  assert.equal(count('custom'), 0, 'zero observed custom is a real zero');
+  assert.equal(count('codex'), 1, 'healthy concurrent codex is counted');
+});
+
+test('one broken, refused, reused-pid or malformed invocation cannot change healthy concurrent providers (px-0027)', () => {
+  const f = retainedObservationFixture();
+  f.add('execute-codex-a1-live1', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 11, processIdentity: 'a' }, operationId: 'op-live' });
+  f.add('execute-claude-a1-live2', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 22, processIdentity: 'b' }, operationId: 'op-live', family: 'claude' as never });
+  f.add('review-claude-a1-refused', { state: 'exited', exitCode: null, signal: null, execution: null, supervisorPid: 999, operationId: 'op-latest', family: 'claude' as never });
+  f.add('review-custom-a1-failspawn', { state: 'exited', exitCode: 1, signal: null, execution: null, supervisorPid: 999, family: 'custom' as never });
+  f.add('execute-custom-a1-reused', { state: 'running', exitCode: null, supervisorPid: 999, execution: { pid: 33, processIdentity: 'old' }, family: 'custom' as never });
+  f.add('execute-claude-a1-throws', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 44, processIdentity: 'c' }, family: 'claude' as never, operationId: 'op-latest' });
+  f.records.set('execute-codex-a1-malformed', 'not a record' as never);
+  const probe = (pid: number): boolean | null => { if (pid === 33) { return false; } if (pid === 44) { throw new Error('probe timeout'); } return true; };
+  const observed = observeProviderExecution({ ...f.store, executionAlive: execution => probe(execution.pid) }, f.identity, 'op-latest');
+  assert.deepEqual(observed.invocations.map(run => run.family).sort(), ['claude', 'codex'], 'only confirmed live providers count');
+  assert.ok(observed.limitations.some(note => /execute-claude-a1-throws: provider process probe unavailable/.test(note)), 'the throwing probe is diagnosed on its own invocation');
+  assert.ok(observed.limitations.some(note => /execute-codex-a1-malformed: unreadable run metadata/.test(note)), 'malformed history is diagnosed on its own record');
+  assert.equal(observed.limitations.length, 2, 'refused, failed-spawn and reused-pid captures settle without diagnostics');
+  const board = projectExecutionMetrics(makeProjection({ active: [makeCard({ id: missionId('px-0027') as never, execution: observed })] }));
+  assert.equal(board.metrics.agentAvailability.find(agent => agent.family === 'custom')?.runningSessions ?? 0, 0);
+});
+
+test('an unprobeable recorded provider is not counted live but history keeps termination unconfirmed for stop (px-0027 F1)', () => {
+  const root = mkdtemp('px-probe-unavailable-');
+  const capture = open(root, { supervisorPid: 999999 }); capture.observeExecution(123, null);
+  const history = (alive: boolean | null) => {
+    const result = createMissionTerminalService({ repositoryId: 'abc123' as never, store: createRunHistoryStore({ repositoryRoot: root, repositoryKey: 'abc123', executionAlive: () => alive }),
+      host: { sessions() { return { ok: true, sessions: { owned: 'task-9', others: [], operations: [] } }; } } as unknown as MissionTerminalHostPort }).history('task-9');
+    assert.ok(result.ok);
+    return result.runs[0];
+  };
+  assert.equal(history(null).execution, 'stopped', 'not counted as a live provider');
+  assert.equal(history(null).executionProbeUnavailable, true, 'stop must not treat an unprobeable provider as terminated');
+  assert.ok(history(null).coverage.some(line => /could not be probed/.test(line)));
+  assert.equal(history(false).executionProbeUnavailable, undefined, 'a definitive negative probe proves termination');
+  assert.equal(history(true).execution, 'live');
+});
+
+test('a running Pi capture without a recorded provider process is stopped, not live (px-0027 F3)', () => {
+  const f = retainedObservationFixture();
+  f.add('execute-pi-a1-held', { state: 'running', exitCode: null, supervisorPid: 123, execution: null, family: 'pi' as never, operationId: 'op' });
+  const observed = observeProviderExecution(f.store, f.identity, 'op');
+  assert.equal(observed.invocations.length, 0, 'pending authorization or a never-entered launcher is not a provider');
+  assert.deepEqual(observed.limitations, []);
+  f.add('execute-pi-a1-held', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 5, processIdentity: 'worker' }, family: 'pi' as never, operationId: 'op' });
+  assert.equal(observeProviderExecution(f.store, f.identity, 'op').invocations.length, 1, 'the spawned Pi worker is counted from its recorded process');
 });

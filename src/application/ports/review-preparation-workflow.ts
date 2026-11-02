@@ -257,7 +257,8 @@ export interface ReviewPreparationAgentSelectionPort {
 }
 
 export interface ReviewPreparationProcessPort {
-  spawnSync(_command: string, _args: string[], _options: { cwd: string; encoding: 'utf8'; stdio: 'pipe' }): CommandResult;
+  /** Run a declared gate command; resolves when the command itself exits. */
+  run(_command: string, _args: string[], _options: { cwd: string }): Promise<CommandResult>;
 }
 
 /** Options the workflow opens a mission service bundle with. */

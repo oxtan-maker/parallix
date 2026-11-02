@@ -18,6 +18,7 @@ mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 const { createBaseWorktreeRepair } = await import('../../../src/application/integrate/base-worktree-repair.js');
 const { resolveWorktree } = await import('../../../src/adapters/git/worktree.js');
+const { detectRebaseState: detectRebaseStateAt } = await import('../../../src/adapters/git/git.js');
 const { resolveCanonicalRepositoryId } = await import('../../../src/adapters/git/repository-identity.js');
 
 // ---- task-2532 stale integration state repair (consolidated from test/task-2532-stale-integration-state-repro.test.ts, TASK-2622.09) ----
@@ -40,6 +41,11 @@ describe("stale integration state repair", () => {
   /** A git runner that mirrors the application seam: the caller supplies `-C <rootDir>` inside each call. */
   function gitRunner() {
     return (args: readonly string[]) => childProcess.spawnSync('git', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  }
+
+  /** Rebase-state owner for the repair seam, wired from the real git adapter (TASK-2828). */
+  function rebaseStateOwner() {
+    return (dir: string) => detectRebaseStateAt(dir);
   }
 
   /** Seed a throwaway Git repository on `main` with one commit and return its root. */
@@ -121,7 +127,7 @@ describe("stale integration state repair", () => {
       assert.ok(before.includes('my personal work in progress'), 'personal stash present before sweep');
       assert.ok(before.includes('integrate:task-001: temporary integration checkout stash'), 'marker stash present before sweep');
 
-      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner() });
+      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner(), detectRebaseState: rebaseStateOwner() });
 
       const after = stashList(root);
       assert.ok(!after.includes('integrate:task-001: temporary integration checkout stash'), 'marker stash dropped by sweep');
@@ -141,12 +147,11 @@ describe("stale integration state repair", () => {
       assert.ok(rebaseDirs(root).length > 0, 'rebase directory present before repair');
       assert.ok(unmergedFiles(root).length > 0, 'unmerged index entries present before repair');
 
-      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner() });
+      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner(), detectRebaseState: rebaseStateOwner() });
 
       assert.deepEqual(rebaseDirs(root), [], 'no rebase-* directories remain after repair');
       assert.deepEqual(unmergedFiles(root), [], 'unmerged index cleared after repair');
-      const showCurrent = childProcess.spawnSync('git', ['rebase', '--show-current'], { encoding: 'utf8', cwd: root });
-      assert.equal(showCurrent.stdout.trim(), '', 'no rebase in progress after repair');
+      assert.equal(detectRebaseStateAt(root).inProgress, false, 'no rebase in progress after repair');
       assert.equal(report.rebaseAborted, true);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -177,7 +182,7 @@ describe("stale integration state repair", () => {
       const before = stashList(root);
       assert.equal(before.split('\n').filter(Boolean).length, 3, 'three stashes before sweep');
 
-      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner() });
+      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner(), detectRebaseState: rebaseStateOwner() });
 
       const after = stashList(root);
       assert.equal(after.split('\n').filter(Boolean).length, 1, 'only the personal stash remains');
@@ -202,6 +207,7 @@ describe("stale integration state repair", () => {
       const report = await createBaseWorktreeRepair({}).repairBaseWorktree({
         baseWorktree: root,
         git: gitRunner(),
+        detectRebaseState: rebaseStateOwner(),
         dryRun: true,
       });
 
@@ -221,7 +227,7 @@ describe("stale integration state repair", () => {
       const beforeDirs = rebaseDirs(root);
       const beforeHead = headSha(root);
 
-      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner() });
+      const report = await createBaseWorktreeRepair({}).repairBaseWorktree({ baseWorktree: root, git: gitRunner(), detectRebaseState: rebaseStateOwner() });
 
       assert.equal(stashList(root), beforeStash, 'stash list unchanged');
       assert.deepEqual(rebaseDirs(root), beforeDirs, 'rebase-* directory set unchanged');

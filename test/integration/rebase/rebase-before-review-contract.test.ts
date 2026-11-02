@@ -287,7 +287,6 @@ describe("rebase hardening", () => {
           capturedArgs.value = args;
           return { signal: null, stdout: '', stderr: '',  status: 0 };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) return { signal: null, stderr: '',  status: 0, stdout: '' };
         return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       exitFn: () => {},
@@ -322,7 +321,6 @@ describe("rebase hardening", () => {
           capturedArgsList.push(args);
           return { signal: null, stdout: '', stderr: '',  status: 0 };
         }
-        if (args.includes('rebase') && args.includes('--show-current')) return { signal: null, stderr: '',  status: 0, stdout: '' };
         return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
       exitFn: () => {},
@@ -446,6 +444,7 @@ describe("rebase diagnostics", () => {
 
   test('rebase reports git output on failed continue attempt', async () => {
     let stderrLines = [];
+    let rebasing = false;
     const capturedStderr: string[] = [];
     const originalError = console.error;
     console.error = (...args) => { capturedStderr.push(args.join(' ')); };
@@ -465,16 +464,19 @@ describe("rebase diagnostics", () => {
       gitFn: (args, opts) => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
         if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
-        if (args.includes('rebase') && args.includes('main')) return { signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' };
+        if (args.includes('rebase') && args.includes('main')) { rebasing = true; return { signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' }; }
         if (gitSubcommandArgs(args)[0] === 'checkout') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (gitSubcommandArgs(args)[0] === 'add') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('--continue')) {
           return { signal: null,  status: 1, stdout: '', stderr: 'error: another hook failed' };
         }
         if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') return { signal: null, stderr: '',  status: 0, stdout: 'M  file.js' };
-        if (gitSubcommandArgs(args)[0] === 'rebase' && gitSubcommandArgs(args)[1] === '--show-current') return { signal: null, stderr: '',  status: 0, stdout: 'mission/task-1077' };
         return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
+      // The rebase-state owner answers "still rebasing" from metadata; the old
+      // `rebase --show-current` double is gone because git prefix-matches that to a
+      // full current-patch dump (TASK-2828).
+      detectRebaseStateFn: () => ({ inProgress: rebasing, rebaseHead: null, unmergedFiles: [] }),
       exitFn: () => {},
     });
 

@@ -1,3 +1,4 @@
+import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
@@ -92,6 +93,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
           ...observers,
           configuration,
+          integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
           classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
           ...reviewLoopBindings(mission.store, mission.lifecycle, reviewerSessionPort),

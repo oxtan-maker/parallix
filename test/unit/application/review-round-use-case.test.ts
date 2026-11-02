@@ -138,24 +138,26 @@ test('workflow rejection after launch stops provider polling and output retries 
   assert.match(fake.errors.join('\n'), /cause=REVIEWER_LAUNCH_FAILURE/);
 });
 
-test('workflow blocker during reviewer retry ends recovery without replacing the stop (px-0017)', async () => {
-  let launches = 0;
-  let polls = 0;
-  const { POLL_TIMEOUT } = await import('../../../src/application/ports/review-round.js');
-  const { fake, useCase } = fixture(null, true, {
-    state: new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude' }),
-    provider: { pollReview: async () => { polls++; return POLL_TIMEOUT; } },
-    agents: { launch: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; } },
-    stateport: { verdictBlock: async () => launches >= 2 ? {
-      cause: 'operator stop', diagnostic: 'operator stop; px review task-2637', nextAction: 'operator continuation',
-    } : null },
+for (const exited of [false, true]) {
+  test(`workflow blocker during reviewer ${exited ? 'exited-artifact' : 'timeout'} retry preserves the stop (px-0017, TASK-2827)`, async () => {
+    let launches = 0;
+    let polls = 0;
+    const { POLL_TIMEOUT } = await import('../../../src/application/ports/review-round.js');
+    const { fake, useCase } = fixture(null, true, {
+      state: new ReviewState(base.slug, { implementer: 'codex', reviewer: 'claude' }),
+      provider: { pollReview: async () => { polls++; return POLL_TIMEOUT; } },
+      agents: { launch: async () => { launches++; return { agent: 'claude', ...(exited || launches > 1 ? { result: { status: 0 } } : {}) }; } },
+      stateport: { verdictBlock: async () => launches >= 2 ? {
+        cause: 'operator stop', diagnostic: 'operator stop; px review task-2637', nextAction: 'operator continuation',
+      } : null },
+    });
+    await useCase.enter({ ...base, rawMaxAttempts: '1' });
+    assert.equal(launches, 2);
+    assert.equal(polls, exited ? 0 : 1);
+    assert.deepEqual(fake.stops, [], 'retained authority must not be replaced with retry exhaustion');
+    assert.match(fake.errors.join('\n'), /operator stop/);
   });
-  await useCase.enter({ ...base, rawMaxAttempts: '1' });
-  assert.equal(launches, 2);
-  assert.equal(polls, 1);
-  assert.deepEqual(fake.stops, [], 'retained authority must not be replaced with retry exhaustion');
-  assert.match(fake.errors.join('\n'), /operator stop/);
-});
+}
 
 
 for (const mode of ['start', 'continue'] as const) {

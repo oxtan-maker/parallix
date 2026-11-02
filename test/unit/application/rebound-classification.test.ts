@@ -61,3 +61,17 @@ test('kernel routes typed CPU versus infrastructure and logs fallback before rou
     assert.equal(logs.some(line => line.includes('legacy fallback')), !failureReason);
   }
 });
+
+test('runner-health gate producers preserve infrastructure precedence and diagnostics (TASK-2815)', () => {
+  const diagnostic = '[runner-health] infrastructure: operation=check-filesystem-capacity; resource=/run/user/1000; observedAt=2026-11-01T12:00:00Z; remediation=restore capacity; missing required file';
+  const result = { ok: false as const, area: 'unit', key: 'unit', command: './scripts/verify-local.sh all', exitCode: 75, stdout: '', stderr: diagnostic };
+  for (const reason of [gateFailureReason(result), integrationGateFailureReason(result)]) {
+    assert.deepEqual(reason.failureReason, { version: 1, code: 'infrastructure' });
+    assert.equal(reason.stderr, diagnostic);
+    assert.equal(classifyRecoveryReason(reason).failureClass, 'InfraBlocker');
+    assert.equal(classifyRecoveryReason(reason).dispatchAction, 'HumanOnly');
+    assert.equal(classifyRecoveryReason(reason).isRelaunchable, false);
+  }
+  assert.equal(classifyError(diagnostic).failureClass, 'InfraBlocker');
+  assert.equal(gateFailureReasonFromProcess({ status: 75, stderr: diagnostic })?.code, 'infrastructure');
+});

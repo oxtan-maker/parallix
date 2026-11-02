@@ -1,8 +1,8 @@
 ---
 id: TASK-2828
 title: Make Git operations safe for large changes
-status: backlog
-assignee: []
+status: done
+assignee: [custom]
 created_date: '2026-11-01 07:50'
 labels:
   - bug

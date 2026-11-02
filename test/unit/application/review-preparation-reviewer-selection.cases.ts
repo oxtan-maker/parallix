@@ -56,7 +56,7 @@ test("ineligible explicit reviewer is refused before review preparation effects 
     t.mock.method(ports.repositoryGates, 'runPhaseGates'), t.mock.method(ports.verification, 'runVerificationGate'),
     t.mock.method(ports.rebase, 'rebaseBeforeReviewRound'), t.mock.method(ports.forgejo, 'createPr'),
     t.mock.method(ports.git, 'run'), t.mock.method(ports.gatekeeper, 'runGatekeeper'),
-    t.mock.method(ports.nel, 'computeNELRecord'), t.mock.method(ports.process, 'spawnSync'),
+    t.mock.method(ports.nel, 'computeNELRecord'), t.mock.method(ports.process, 'run'),
   ];
   const services = await ports.missionServices!(ROOT, { missionDir: MISSION_DIR });
   const mutations = [t.mock.method(services.checkpoints, 'record'), t.mock.method(services.lifecycle, 'transition'), t.mock.method(services.nel, 'recordNel')];

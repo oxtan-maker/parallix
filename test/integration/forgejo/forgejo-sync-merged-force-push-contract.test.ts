@@ -183,7 +183,6 @@ describe("review ref force push", () => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
           if (args.includes('main')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: '', stderr: '' };
           return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
         if (args.includes('fetch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -217,7 +216,6 @@ describe("review ref force push", () => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
           if (args.includes('main')) return { signal: null,  status: 0, stdout: '', stderr: '' };
-          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: '', stderr: '' };
           return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
         if (args.includes('fetch')) return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -260,10 +258,6 @@ describe("review ref force push", () => {
             }
             // Recursive call: git rebase main reports "already in progress"
             return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
-          }
-          if (args.includes('--show-current')) {
-             // If we are in conflict resolution, rebase is in progress
-             return { signal: null,  status: 0, stdout: rebaseAttempts < 2 ? 'mission/task-1049' : '', stderr: '' };
           }
           if (args.includes('--continue')) {
              stagedSets.push([...staged]); staged = [];
@@ -318,10 +312,6 @@ describe("review ref force push", () => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
           if (args.includes('main')) return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
-          if (args.includes('--show-current')) {
-             // Rebase is still in progress even after agent "success"
-             return { signal: null,  status: 0, stdout: 'mission/task-1049', stderr: '' };
-          }
         }
         return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
@@ -339,8 +329,9 @@ describe("review ref force push", () => {
     assert.strictEqual(createPrCalled, false, 'Should not have pushed because rebase was still in progress');
   });
 
-  serialTest('rebase --push does NOT push if git rebase returns 0 but --show-current is non-empty', async (t) => {
+  serialTest('rebase --push does NOT push when the round exits 0 with a rebase still replaying a commit (TASK-2828)', async (t) => {
     let createPrCalled = false;
+    let rebased = false;
 
     const options = {
       inferSlugFn: (s) => s || 'task-1049',
@@ -349,12 +340,17 @@ describe("review ref force push", () => {
       findMissionAreaFn: () => 'workflow',
       gitFn: (args) => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
-        if (args.includes('rebase')) {
-          if (args.includes('main')) return { signal: null,  status: 0, stdout: 'Already up to date', stderr: '' };
-          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'mission/task-1049', stderr: '' };
+        if (args.includes('rebase') && args.includes('main')) {
+          rebased = true;
+          return { signal: null,  status: 0, stdout: 'Already up to date', stderr: '' };
         }
         return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
+      // The rebase-state owner answers this from fixed-size metadata. The old probe was
+      // `rebase --show-current`, which git prefix-matches to a full current-patch dump.
+      detectRebaseStateFn: () => (rebased
+        ? { inProgress: true, rebaseHead: 'a'.repeat(40), unmergedFiles: [] }
+        : { inProgress: false, rebaseHead: '', unmergedFiles: [] }),
       createPrFn: () => {
         createPrCalled = true;
         return { ok: true as const };
@@ -364,7 +360,7 @@ describe("review ref force push", () => {
     } satisfies NonNullable<Parameters<typeof rebase>[1]>;
 
     await rebase(['task-1049', '--push'], options);
-    assert.strictEqual(createPrCalled, false, 'Should not have pushed because rebase --show-current was non-empty');
+    assert.strictEqual(createPrCalled, false, 'Should not have pushed because a rebase was still replaying a commit');
   });
 
   serialTest('createPr fails cleanly (no --force fallback) when stale push persists after fetch+retry', (t) => {
@@ -411,7 +407,6 @@ describe("review ref force push", () => {
         findMissionAreaFn: () => 'workflow',
         gitFn: (args) => {
           if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
-          if (args.includes('--show-current')) return { signal: null,  status: 0, stdout: '', stderr: '' };
           return { signal: null,  status: 0, stdout: '', stderr: '' };
         },
         resolveTaskFileFn: (slug) => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),

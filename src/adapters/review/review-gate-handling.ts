@@ -13,7 +13,7 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { GateFailureReason, HookFailureReason } from '../../application/rebound-kernel.js';
 import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
-import { run } from '../git/git.js';
+import { isOutputLimitFailure, runToExit, type CommandRunner } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
 import { createActiveVerificationIdentity as createVerificationProofIdentity, readActiveVerificationProof as readReusableVerificationProof, writeActiveVerificationProof as writeReusableVerificationProof } from '../verification/active-verification-proof.js';
@@ -46,7 +46,7 @@ export async function runPreReviewGate(
     configuration?: ParallixConfiguration;
     resolveEffectiveAreaFn?: typeof resolveEffectiveArea;
     findMissionAreaFn?: typeof findMissionArea;
-    runFn?: typeof run;
+    runFn?: CommandRunner;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
   } = {}
@@ -114,14 +114,27 @@ async function executePreReviewGate(
   worktree: string,
   command: string,
   configuration: ParallixConfiguration | undefined,
-  runFn: typeof run,
+  runFn: CommandRunner,
 ) {
-  return usesAdmittedVerification(worktree) ? await runConfiguredVerification(area, worktree, configuration) : runFn('bash', ['-lc', command], {
-    progressLabel: `Pre-review verification (${area})`,
-    cwd: worktree,
-    stdio: 'pipe',
-    maxBuffer: 10 * 1024 * 1024, // 10MB buffer
-  });
+  return usesAdmittedVerification(worktree) ? await runConfiguredVerification(area, worktree, configuration) : runGateCaptured(area, worktree, command, runFn);
+}
+
+/**
+ * A captured gate whose output exceeds the child-process limit cannot be certified: the
+ * retained stream is incomplete. Report it as a failed gate carrying the reason rather than
+ * letting a truncated stream reach the `status === 0` pass branch.
+ */
+async function runGateCaptured(area: string, worktree: string, command: string, runFn: CommandRunner) {
+  try {
+    return await runFn('bash', ['-lc', command], {
+      progressLabel: `Pre-review verification (${area})`,
+      cwd: worktree,
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+    });
+  } catch (error) {
+    if (!isOutputLimitFailure(error)) { throw error; }
+    return { status: null, signal: null, stdout: '', stderr: error.message };
+  }
 }
 
 
@@ -162,7 +175,7 @@ function preReviewGateBindings(opts: NonNullable<Parameters<typeof runPreReviewG
   const {
     resolveEffectiveAreaFn = resolveEffectiveArea,
     findMissionAreaFn,
-    runFn: runFnOverride = run,
+    runFn: runFnOverride = runToExit,
     log = fmt.log.plain,
     error = fmt.log.plainError,
   } = opts;

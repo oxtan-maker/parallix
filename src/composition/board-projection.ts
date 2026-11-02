@@ -1,6 +1,6 @@
 import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
-import { unknownExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
+import { failedExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
 import { DEFAULT_CONFIGURATION } from '../application/ports/configuration.js';
 import type { AgentFamily } from '../domain/agents.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
@@ -186,7 +186,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       providerExecution: deps.providerExecution ?? { observe: (scope, currentOperationId) => {
         terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION, mission => topology?.resolveWorktree(mission) ?? null);
         const result = terminal.execution?.(scope.missionId, currentOperationId);
-        return result && 'invocations' in result ? result : unknownExecution();
+        return result && 'invocations' in result ? result : failedExecution();
       } },
       prepareReads: () => {
         topology = snapshotWorktreeTopology({

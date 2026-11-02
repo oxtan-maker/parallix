@@ -339,7 +339,7 @@ test('application history payloads survive JSON browser reads (TASK-2786)', asyn
   context.after(() => { globalThis.fetch = original; });
   const payload: import('../../../../src/application/ports/mission-terminal.js').MissionHistoryOverview = {
     missionId: MISSION, state: 'ended', probe: { kind: 'live', operation: 'execute', runId: null, execution: null },
-    operations: [{ ...operation('run'), captureKind: 'agent', operationId: null, execution: 'unknown', legacy: false, redacted: false, state: 'exited', terminalHost: 'tmux' }],
+    operations: [{ ...operation('run'), captureKind: 'agent', operationId: null, execution: 'stopped', legacy: false, redacted: false, state: 'exited', terminalHost: 'tmux' }],
     notices: [], unattributed: [],
   };
   for (const probe of [payload.probe, { kind: 'starting', operation: 'execute' }, { kind: 'absent' }] as const) {
@@ -408,7 +408,7 @@ test('terminal route JSON projects application history into browser validated re
   context.after(async () => { globalThis.fetch = original; await app.close(); });
   const model: import('../../../../src/application/ports/mission-terminal.js').MissionHistoryOverview = {
     missionId: MISSION, state: 'ended', probe: { kind: 'starting', operation: 'execute' },
-    operations: [{ ...operation('run'), captureKind: 'coordinator', family: null, attempt: null, operationId: null, execution: 'unknown', legacy: false, redacted: true, state: 'exited', terminalHost: 'pipe' }],
+    operations: [{ ...operation('run'), captureKind: 'coordinator', family: null, attempt: null, operationId: null, execution: 'stopped', legacy: false, redacted: true, state: 'exited', terminalHost: 'pipe' }],
     notices: ['bounded'], unattributed: ['legacy record'],
   };
   registerTerminalRoute(app, {

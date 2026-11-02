@@ -6,8 +6,10 @@ export type PiStats = {
   tokens?: Record<string, number | undefined>;
 };
 
+export type PiStopReason = 'stop' | 'length' | 'toolUse' | 'error' | 'aborted';
+
 export type PiMessage = {
-  role?: string; stopReason?: string; errorMessage?: string;
+  role?: string; stopReason?: PiStopReason; errorMessage?: string;
   content?: { type?: string; text?: string; thinking?: string }[];
 };
 

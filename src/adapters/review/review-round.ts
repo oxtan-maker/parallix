@@ -1,6 +1,3 @@
-import { settleRequestedChanges } from './review-request-changes-transition.js';
-import { verdictBlockForReview, type VerdictBlock } from '../../application/review-verdict-readiness.js';
-import { readReviewForDecision, type ReviewRoundObservation } from './review-round-read.js';
 /**
  * Round advancement for the autonomous review loop.
  *
@@ -19,6 +16,10 @@ import { readReviewForDecision, type ReviewRoundObservation } from './review-rou
  * domain type and no second state machine.
  */
 
+import { applyOperatorCorrection } from '../../domain/operator-review-correction.js';
+import { settleRequestedChanges } from './review-request-changes-transition.js';
+import { verdictBlockForReview, type VerdictBlock } from '../../application/review-verdict-readiness.js';
+import { readReviewForDecision, type ReviewRoundObservation } from './review-round-read.js';
 import { isStaleWrite, type MissionStore, type MissionVersion } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { missionId, type Mission } from '../../domain/mission.js';
@@ -32,6 +33,7 @@ import {
   reviewStatus,
   type FindingResolution,
   type ReviewApprovalSource,
+  type OperatorReviewSource,
   type ReviewDisposition,
   type ReviewFinding,
   type ReviewItemDisposition,
@@ -109,6 +111,7 @@ export async function recordRequestedChanges(
   slug: string,
   input: {
     findings: readonly ReviewFinding[];
+    source?: OperatorReviewSource;
     comment: string | null;
     revision?: string | null;
     decidedAt: string;
@@ -126,6 +129,11 @@ export async function recordRequestedChanges(
     const loaded = await readReviewForDecision(slug, store, input.expectedVersion, 'decide', input.observedRound);
     if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
+    if (input.source) {
+      const review = applyOperatorCorrection(mission.review, { ...input, source: input.source });
+      const version = review === mission.review ? loaded.version : await store.save({ ...mission, review }, loaded.version);
+      return await settleRequestedChanges(slug, { ...mission, review }, version, ports, input.source.author);
+    }
 
     if (!mission.review.intervention && currentReviewRound(mission.review).decision?.kind === 'changes-requested') {
       return await settleRequestedChanges(slug, mission, loaded.version, ports);

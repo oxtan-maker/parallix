@@ -14,7 +14,7 @@ import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
 import { checkoutTestTmpdir, linkSharedTsxCache } from './lib/test-tmpdir.js';
 import { assertValidTestLayout } from './lib/test-layout-validation.js';
 import { MEMORY_BOUNDARY_ENV, MEMORY_LIMIT_ENV, classifyWorkload, formatBreachReport, MEMORY_SCOPE_ENV, resolveMemoryBoundaryPolicy } from '../src/adapters/process/test-memory-policy.js';
-import { assertCgroupEnforcement, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
+import { assertRunnerHealth, RUNNER_HEALTH_EXIT_STATUS, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
 
 // A verifier may be launched from an operator checkout while it is validating
 // a mission worktree. Capture that selected root once and use it for every
@@ -47,6 +47,26 @@ const coverageEnabled = process.env.PARALLIX_TEST_COVERAGE === '1'
   || process.env.PARALLIX_TEST_COVERAGE === 'true';
 const plan = buildTestRunPlan({ executionRoot, requestedArgs: process.argv.slice(2), coverage: coverageEnabled });
 const { testNode, nodeArgs, runsIntegrationSuite, runsIntegrationCiSuite, unitTestHeadroomMs } = plan;
+
+const requestedArgs = process.argv.slice(2);
+const memoryPolicy = resolveMemoryBoundaryPolicy({
+  boundaryMode: process.env[MEMORY_BOUNDARY_ENV],
+  limitMiB: process.env[MEMORY_LIMIT_ENV],
+  workload: classifyWorkload({ requestedArgs, integration: runsIntegrationSuite, local: plan.runsIntegrationLocalSuite, coverage: coverageEnabled }),
+  hostedRunner: onGitHubActions(),
+});
+try {
+  if (!process.env.XDG_RUNTIME_DIR && !process.env.DBUS_SESSION_BUS_ADDRESS) {
+    const runtimeDir = defaultUserRuntimeDir();
+    if (runtimeDir) { process.env.XDG_RUNTIME_DIR = runtimeDir; }
+  }
+  assertRunnerHealth(memoryPolicy.mode === 'cgroup' ? memoryPolicy.limitMiB : null, {
+    runtimeDir: process.env.XDG_RUNTIME_DIR,
+  });
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(RUNNER_HEALTH_EXIT_STATUS);
+}
 
 const coverageDestination = runsIntegrationCiSuite
   ? path.join(executionRoot, 'coverage', '.lcov-integration-ci.info')
@@ -135,13 +155,6 @@ const childCpuModule = runsIntegrationSuite && !onGitHubActions() ? childCpuUsag
 // suite inside a memory-limited cgroup scope. This runner stays outside it, so
 // it survives a breach to report it. An unenforceable boundary fails here,
 // before any test allocates; only an explicit opt-out runs unbounded.
-const requestedArgs = process.argv.slice(2);
-const memoryPolicy = resolveMemoryBoundaryPolicy({
-  boundaryMode: process.env[MEMORY_BOUNDARY_ENV],
-  limitMiB: process.env[MEMORY_LIMIT_ENV],
-  workload: classifyWorkload({ requestedArgs, integration: runsIntegrationSuite, local: plan.runsIntegrationLocalSuite, coverage: coverageEnabled }),
-  hostedRunner: onGitHubActions(),
-});
 const suiteCommand = meter ?? testNode;
 const suiteArgs = meter ? ['--cpu-report', cpuReportPath, testNode, ...executedNodeArgs] : executedNodeArgs;
 let launch: { command: string; args: string[]; unit: string | null } = { command: suiteCommand, args: suiteArgs, unit: null };
@@ -150,17 +163,6 @@ let launch: { command: string; args: string[]; unit: string | null } = { command
 const enclosingScope = process.env[MEMORY_SCOPE_ENV];
 const insideEnclosingScope = memoryPolicy.mode === 'cgroup' && enclosingScope !== undefined && scopeCgroupDir(process.pid, enclosingScope) !== null;
 if (memoryPolicy.mode === 'cgroup' && !insideEnclosingScope) {
-  try {
-    if (!process.env.XDG_RUNTIME_DIR && !process.env.DBUS_SESSION_BUS_ADDRESS) {
-      const runtimeDir = defaultUserRuntimeDir();
-      if (runtimeDir) { process.env.XDG_RUNTIME_DIR = runtimeDir; }
-    }
-    assertCgroupEnforcement(memoryPolicy.limitMiB);
-  } catch (error) {
-    cleanupRunnerOwnedRoots();
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(1);
-  }
   launch = wrapInScope(memoryPolicy.limitMiB, suiteCommand, suiteArgs, undefined, true);
 } else if (memoryPolicy.mode === 'off') {
   console.error(`[test-memory-boundary] WARNING: no aggregate memory boundary (${memoryPolicy.reason}); a memory-growing test is not contained.`);

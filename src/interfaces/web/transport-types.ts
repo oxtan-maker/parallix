@@ -210,13 +210,8 @@ export interface WebAgentAvailability {
   readonly available: boolean;
   readonly blockedFor: WebDurationMs;
   readonly reason: string | null;
-  /**
-   * Optional-and-nullable, projected one-to-one: key omitted when the metric
-   * was built without a liveness probe, `null` when liveness could not be
-   * observed, `0` when the probe ran and nothing was running.
-   */
-  readonly runningSessions?: number | null;
-  readonly executionComplete?: boolean;
+  /** Confirmed provider invocations for the family; `0` means none were confirmed. Omitted before an execution reader ran. */
+  readonly runningSessions?: number;
 }
 
 export interface WebSourceFact {
@@ -259,8 +254,6 @@ export interface WebBoardSnapshot {
   readonly operationLog: readonly WebOperationLogEntry[];
   readonly agentAvailability: readonly WebAgentAvailability[];
   readonly metrics: WebBoardMetrics;
-  /** Optional-and-nullable, same three states as `runningSessions`. */
-  readonly unattributedRunningSessions?: number | null;
   /** One fact per `(source, status, value)` tuple; repeats are collapsed by the projection. */
   readonly sourceFacts: readonly WebSourceFact[];
 }

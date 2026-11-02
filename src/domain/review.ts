@@ -1,3 +1,6 @@
+import { operatorDecisionSource, type OperatorReviewSource, type ReviewApprovalSource, type ReviewDecisionRevocation, type ReviewDecisionSupersession } from './review-decision-source.js';
+export { operatorDecisionSource } from './review-decision-source.js';
+export type { OperatorReviewSource, ReviewApprovalSource, ReviewDecisionRevocation, ReviewDecisionSupersession, ReviewRevocationCause } from './review-decision-source.js';
 import { assertReviewPhaseTransition, type ReviewPhase } from './review-phase-policy.js';
 import type { AgentFamily, StepSelectionPolicy } from './agents.js';
 
@@ -60,50 +63,6 @@ export interface ReviewedRevision {
   readonly baseline?: ChangeRevision;
 }
 
-export type ReviewApprovalSource =
-  | { readonly kind: 'provider'; readonly provider: string }
-  | { readonly kind: 'local' };
-
-/**
- * Why an approval was withdrawn, as a typed fact rather than reason text.
- * `integration-gate-failure` names the red gate so the repaired mission can
- * show the human what failed last time (TASK-2620).
- */
-export type ReviewRevocationCause =
-  | { readonly kind: 'operator' }
-  | {
-    readonly kind: 'integration-gate-failure';
-    readonly gate: string | null;
-    readonly command?: string | null;
-    /** Tail of the failed gate's output, kept so the repair can be reviewed with it. */
-    readonly log?: string | null;
-  }
-  | { readonly kind: 'review-repair' }
-  | { readonly kind: 'rebase-repair' };
-
-/** An operator correction of an approval that must remain auditable. */
-export interface ReviewDecisionRevocation {
-  readonly revokedAt: string;
-  readonly revokedBy: string;
-  readonly reason: string;
-  /** Absent only on revocations recorded before causes were typed. */
-  readonly cause?: ReviewRevocationCause;
-}
-
-/**
- * A branch move recorded against an approval: the approved change is no longer
- * what the branch would land.  Unlike a revocation this is a mechanical fact,
- * not a judgement; the approval stays effective until an operator stands it
- * down, and nothing is owed a resolution.
- */
-export interface ReviewDecisionSupersession {
-  readonly supersededAt: string;
-  /** The branch revision whose change the approval no longer covers. */
-  readonly supersedingRevision: ChangeRevision;
-  /** The operation that moved the branch, for example `px rebase`. */
-  readonly recordedBy: string;
-}
-
 export type ReviewerDecision =
   | {
     readonly kind: 'approved';
@@ -120,6 +79,7 @@ export type ReviewerDecision =
   }
   | {
     readonly kind: 'changes-requested';
+    readonly source?: OperatorReviewSource;
     readonly classifier?: import('./classifier-review.js').ClassifierReviewSource;
     /** Exact judged head; null when unknown, never inferred from the start subject. */
     readonly revision?: ChangeRevision | null;
@@ -486,6 +446,7 @@ export type ReviewerCommand =
   }
   | {
     readonly type: 'request-changes';
+    readonly source?: OperatorReviewSource;
     /** Exact judged head; null when unknown, never inferred from the start subject. */
     readonly revision?: ChangeRevision | null;
     readonly decidedAt: string;
@@ -800,6 +761,7 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
       revision: typeof command.revision === 'string' ? changeRevision(command.revision) : null,
       comment: command.comment,
       findings: command.findings,
+      ...operatorDecisionSource(command.source),
     };
   const disposition: ReviewDisposition = command.type === 'approve'
     ? 'APPROVED'
@@ -816,7 +778,7 @@ export function applyReviewerCommand(review: Review, command: ReviewerCommand): 
 }
 
 /** Validate that every requested-change finding carries an id and summary and is not duplicated. */
-function validateRequestChanges(findings: readonly ReviewFinding[]): void {
+export function validateRequestChanges(findings: readonly ReviewFinding[]): void {
   const ids = new Set<string>();
   for (const finding of findings) {
     if (!finding.id.trim() || !finding.summary.trim()) {

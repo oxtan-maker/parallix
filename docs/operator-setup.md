@@ -292,7 +292,13 @@ operator: it revokes the approval with the provider author and the change
 request as the recorded operator and reason, then acts on the correction. The
 loop never launches an implementer under an effective approval. If the
 revocation fails, it stops with the `px revoke-review` guidance and keeps the
-change request pending for a retry.
+change request pending for a retry, including after restarting the command.
+The request is consumed only after its findings and the return to active have
+been recorded. A failed decision write leaves the same correction available.
+New corrections join unresolved reviewer findings; resolved rounds open a new
+round first. Older requests superseded by the latest review are retained as
+audit notes when that correction commits. Operator-only corrections do not
+count as reviewer send-backs in statistics.
 
 Revocation preserves the original decision, its reviewed revision, the named
 operator, and the stated reason in the review history. It returns the mission
@@ -353,7 +359,10 @@ automatic push. After an agent attempt, Parallix checks Git: the rebase must hav
 ended, no unmerged files may remain, and the checkout must be on the mission
 branch captured before launch.
 An unfinished rebase or wrong checkout automatically returns to the implementer
-through bounded recovery. Each fresh completion retry receives refreshed Mission
+through bounded recovery. Parallix reads that state from Git rebase metadata
+rather than the current patch, so a mission change larger than the command
+capture limit cannot break the completion check or the conflict classification
+that follows a pause. Each fresh completion retry receives refreshed Mission
 and Git context, including the current completion failure, and must finish on that
 captured branch. A retry reports when the index is clean. If recovery exhausts
 its budget, Parallix reports the remaining Git state and recovery instructions,
@@ -398,7 +407,10 @@ An integration-gate failure follows an automatic repair path. Before launching
 an implementer, Parallix moves the mission to active repair while retaining the
 original approval, bound to the revision it judged. Historical approval does not
 authorize landing: pending repair, failed or cancelled gates and uncommitted work
-block integration, including after interruption. Resume with `px integrate <slug>`.
+block integration, including after interruption. Resume verification with
+`px integrate <slug>`.
+After a successful repair, `px review <slug>` also resumes the pending patch
+assessment before considering the recorded approval.
 Restart rebases onto the current base before comparison and certifies outstanding
 repair checkpoints through their authorized verifier. Missing repair evidence or
 a contract blocker requires recovery before integration.
@@ -421,9 +433,13 @@ coverage, lifecycle or gate requirements. Unrelated base advancement during live
 repair does not change the mission patch comparison; subsequent integration still
 rebases and verifies its candidate.
 
-Substantive repairs retain the specialized weakening questions and shared general
-reviewer. All approvals still require the configured integration gates and provider
-protections. Retained and newly reviewed approvals stop in the integration lane;
+When that assessment finds a changed mission patch, continuation creates or resumes
+an undecided round for the repaired revision and launches the normal independent
+repository reviewer with the recorded Mission instructions. It does not replay the
+old approval or ask the reviewer to assess integration bookkeeping. An interruption
+before review preparation resumes that round on the next `px review <slug>`.
+Other repair review routes retain their configured classification policy. All
+approvals still require the configured integration gates and provider protections. Retained and newly reviewed approvals stop in the integration lane;
 a human reads the PR and runs `px integrate <slug>` to land. Status shows the
 retention assessment and validation citation alongside the original judgment.
 If no original approval round is recorded, retention stays blocked; run
@@ -451,6 +467,10 @@ approval, run `px integrate <slug>` to continue integration. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval. An interrupted
 repair resumes the implementer even with unfinished checkpoints. Checkpoint
 evidence is required before leaving active work for reviewer review preparation.
+Continuation advances once the repair agent and each check have exited; a
+background process they leave holding their output is read for at most half a
+second, never awaited beyond that, and never signalled. Admitted gates still keep their lease until their process group
+settles, and cancellation still terminates it.
 
 Direct operator `px review` also acknowledges
 a retained invalid-contract stop for the mission in the current worktree.

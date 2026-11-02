@@ -86,6 +86,17 @@ PARALLIX_REAL_GIT="${PARALLIX_TEST_REAL_GIT:-$(command -v git)}"
 export PARALLIX_REAL_GIT
 export PATH="${SCRIPT_DIR}:$PATH"
 
+# Admit expensive commands before builds, static analysis or test discovery.
+case "$subcommand" in
+  ""|docs) ;;
+  integrate)
+    if [[ "${INTEGRATE_DRY_RUN:-}" != "true" ]]; then
+      node "$SCRIPT_DIR/check-runner-health.ts" || exit $?
+    fi
+    ;;
+  *) node "$SCRIPT_DIR/check-runner-health.ts" || exit $? ;;
+esac
+
 gate_all() {
   # Release-metadata tests verify the published bundle payload, including every
   # SQLite migration. Build it here so this declared gate never validates a

@@ -129,7 +129,7 @@ function overviewOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalS
     const projected = summary(entry);
     const observed = observations.find(operation => operation.runId === entry.run.record.runId);
     if (entry.run.state === 'running' && observed?.started) {
-      return { ...projected, execution: observed.execution === true ? 'live' as const : observed.execution === false ? 'stopped' as const : 'unknown' as const };
+      return observed.execution === true ? { ...projected, execution: 'live' as const } : observed.execution === false ? { ...projected, execution: 'stopped' as const } : projected;
     }
     return projected;
   }), unattributed, notices };

@@ -30,6 +30,7 @@ export function projectStatusMissionData(recorded: RecordedMission, card: Missio
   const sources = { recorded, card, latest, brief, legacyTask, legacyMission, legacyReview };
   return {
     activity: card ? projectMissionActivity(card as MissionActivitySource) : null,
+    providerObservation: card?.execution ? { observedAt: card.execution.observedAt, limitations: card.execution.limitations } : null,
     ...authoringFields(sources),
     ...criteriaFields(sources),
     ...checkpointFields(sources),

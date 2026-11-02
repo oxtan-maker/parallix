@@ -1,8 +1,8 @@
 ---
 id: TASK-2815
 title: Check runner health before starting repository verification
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-24 05:09'
 labels: []
 dependencies: []

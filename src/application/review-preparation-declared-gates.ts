@@ -323,14 +323,14 @@ export class DeclaredGateRunner {
       return admittedGateResult(result, cleanCommands);
     }
 
-    return this.executeUnadmittedGateCommands(cleanCommands, rootDir, log);
+    return await this.executeUnadmittedGateCommands(cleanCommands, rootDir, log);
   }
 
-  private executeUnadmittedGateCommands(
+  private async executeUnadmittedGateCommands(
     cleanCommands: string[],
     rootDir: string,
     log: ReviewPreparationLog,
-  ): DeclaredGatesResult {
+  ): Promise<DeclaredGatesResult> {
     const { verification, process: processPort } = this.ports;
     // Execute each gate command
     for (const cmd of cleanCommands) {
@@ -341,11 +341,7 @@ export class DeclaredGateRunner {
         continue;
       }
       log(`  Gate: ${cmd}`);
-      const result = processPort.spawnSync('bash', ['-c', cmd], {
-        cwd: rootDir,
-        encoding: 'utf8',
-        stdio: 'pipe'
-      });
+      const result = await processPort.run('bash', ['-c', cmd], { cwd: rootDir });
 
       if (result.status !== 0) {
         const stdout = (result.stdout || '').trim();

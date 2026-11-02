@@ -1,9 +1,10 @@
+import { runnerHealthRecoveryCases } from './rebound-runner-health.cases.js';
+runnerHealthRecoveryCases();
 import { repairCheckpointCases } from './rebound-repair-checkpoint.cases.js';
 repairCheckpointCases();
 import { launchFailureCases } from './rebound-launch-failure.cases.js';
 launchFailureCases();
 import { transientRetryAllowed, reboundRequiresHuman, repairStrategy, launchRecoveryAction, repairBudgetAllows, reboundExhaustion } from '../../../src/domain/rebound-policy.js';
-// Historical regression provenance: TASK-2413, TASK-2369.13, TASK-2492.
 // Rebound kernel contract: the single repair loop (classification, per-occurrence budget, fix prompts,
 // root-failure dossier, output elision) shared by every automatic bounce.
 //

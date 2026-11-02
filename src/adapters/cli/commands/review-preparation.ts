@@ -185,7 +185,7 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
       selectAgent: (step, options) => selectAgent(step, { ...options, configuration }),
     },
     process: {
-      spawnSync: (command, args, options) => git.run(command, args, { ...options,
+      run: (command, args, options) => git.runToExit(command, args, { ...options,
         env: verificationEnvironment(configuration?.forwardedEnvironment ?? { ...process.env }),
       }),
     },

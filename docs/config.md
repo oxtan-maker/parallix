@@ -207,6 +207,12 @@ invoked command. Multiline payloads are escaped onto one line, and recognized
 credential-bearing text is redacted; direct Git arguments remain hidden.
 Redirected logs receive one static completion row per displayed command.
 
+When a captured command produces more output than its capture limit allows,
+Parallix rejects the incomplete output instead of treating it as a clean result.
+The check keeps its normal failed-gate handling and reports the failing
+operation together with the byte limit, so the operator can narrow the query or
+read it in bounded parts.
+
 ```json
 {
   "adapters": {
@@ -270,6 +276,9 @@ is a legacy local `YYYY-MM-DD HH` hour or an ISO timestamp with an offset; an
 active block with an unreadable expiry stays blocked. An explicit entry in the
 operator-local `agents.local.json` blocklist takes precedence over a runtime
 block, so `{ "blocked": false }` makes a runtime-blocked family selectable.
+The web board and agent picker show the active block reason and remaining time.
+Recognized Claude 5-hour limits use the reported reset rounded up to the next
+hour. A successful launcher presence check does not clear a usage block.
 
 `adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
 across local custom-agent processes that share `PARALLIX_HOME`; its default is
@@ -674,7 +683,10 @@ without approval return them to the implementer. Conflicts, no votes, incomplete
 or invalid results, provider failures and stale revision/version results retain
 the general reviewer. No partial panel can approve.
 
-An integration repair is judged by the weakening questions rather than that panel.
+A pending integration repair whose patch assessment finds a changed mission patch
+requires the normal repository reviewer. This also applies when `px review` resumes
+the assessment after an interruption. Other integration repair rounds use the
+weakening questions rather than that panel.
 A substantive repair can be classified with or without an admitted green gate
 re-run. A recorded result is admitted only when it names the failed gate, precedes
 the review round, and covers the candidate or an equivalent mission patch.
@@ -801,6 +813,11 @@ and Backlog labels.
 `src/composition/config.ts` resolves the supported host environment into frozen typed configuration at startup. Composition passes this configuration to adapters and use cases through arguments; they do not interpret individual environment variables. Numeric controls such as review polling and watchdog values are parsed there, and invalid values behave as unset. Child processes receive their launch environment separately. Pi runs its SDK and tools in an isolated child process so concurrent sessions do not change the orchestrator's environment.
 
 `PARALLIX_CLI_ENTRYPOINT` and `PARALLIX_TERMINAL_RETURN_DIR` are set for child processes, not read as configuration.
+
+When a reviewer exits without a recorded verdict or consumable artifacts, review
+starts bounded incomplete-artifact recovery immediately. It does not wait for the
+provider polling timeout. An output-token-limit stop is included in the diagnostic;
+if retries are exhausted, the output gives the recovery command.
 
 | Name | Type | Default | Accepted values | Effect |
 | --- | --- | --- | --- | --- |

@@ -72,7 +72,7 @@ for (const recovery of ['artifact', 'timeout'] as const) {
             cause: 'awaiting-implementation', diagnostic: 'Verdict already accepted', nextAction: 'resolve',
           } : null,
         },
-        agents: { launch: async launch => { launches++; return { agent: launch.agent, result: { status: 0 } }; } },
+        agents: { launch: async launch => { launches++; return { agent: launch.agent, result: recovery === 'timeout' && launches === 1 ? {} : { status: 0 } }; } },
         artifacts: { consumeReviewer: async () => {
           consumes++;
           assert.equal(launches, 1, 'accepted retry verdict needs no artifact polling');

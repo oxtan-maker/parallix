@@ -12,8 +12,8 @@
  *
  * The wire vocabulary distinguishes what the domain distinguishes:
  *   - an indefinite agent block is a tagged `indefinite` duration, never `null`
- *   - `runningSessions` keeps four states: omitted (no probe), `null`
- *     (liveness not observed), `0` (observed none), `n` (observed n)
+ *   - `runningSessions` is a confirmed count (`0` observed none, `n` observed n),
+ *     omitted only before an execution reader ran
  *   - mission work keeps live / unknown / stale / blocked / idle
  *   - an action is `enabled`, `ineligible` (lane/lifecycle), or
  *     `unavailable` (capability not integrated) — the server decides, the
@@ -44,8 +44,8 @@ export { validateWebBoardSnapshot, validateWebCommandResult, validateWebCommandR
  *
  * The wire vocabulary distinguishes what the domain distinguishes:
  *   - an indefinite agent block is a tagged `indefinite` duration, never `null`
- *   - `runningSessions` keeps four states: omitted (no probe), `null`
- *     (liveness not observed), `0` (observed none), `n` (observed n)
+ *   - `runningSessions` is a confirmed count (`0` observed none, `n` observed n),
+ *     omitted only before an execution reader ran
  *   - mission work keeps live / unknown / stale / blocked / idle
  *   - an action is `enabled`, `ineligible` (lane/lifecycle), or
  *     `unavailable` (capability not integrated) — the server decides, the

@@ -1,0 +1,11 @@
+@import url('../fresh-context-recovery/styles.css');
+pre { padding: 1rem; background: var(--wash); border-left: 3px solid var(--green); font: .8rem/1.6 ui-monospace, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+code { font: .85em ui-monospace, monospace; overflow-wrap: anywhere; }
+pre code { font: inherit; }
+.article-nav { display: flex; flex-wrap: wrap; gap: .5rem 1.2rem; padding: .9rem 0; border-block: 1px solid var(--rule); font: .8rem/1.5 var(--sans); }
+.scenario { border-left: 3px solid var(--rule); padding-left: 1rem; }
+.scenario h3 { font: 650 1.05rem/1.4 var(--sans); margin: 1.4rem 0 .6rem; }
+.source-note { font: .8rem/1.6 var(--sans); color: var(--muted); }
+.article-footer li { margin-bottom: .7rem; }
+.article-footer ol { padding-left: 1.3rem; }
+section[id] h2 { overflow-wrap: anywhere; }

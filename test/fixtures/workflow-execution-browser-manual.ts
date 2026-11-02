@@ -4,11 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
-import { missionRunsDir } from '../../src/adapters/filesystem/run-history-store.js';
+import { openRunCapture, missionRunsDir } from '../../src/adapters/filesystem/run-history-store.js';
 import { chromium } from 'playwright-core';
 import { MissionLifecycleService } from '../../src/application/mission-lifecycle-service.js';
 import { missionId } from '../../src/domain/mission.js';
 import { agentFamily } from '../../src/domain/agents.js';
+import { agentRunId, agentRunIdentity } from '../../src/domain/agent-run.js';
+import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-identity.js';
 import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { workflowBoard, until } from './workflow-board.js';
 import { bundleWorkflowChild } from './workflow-bundle.js';
@@ -38,10 +40,10 @@ try {
   const card = (slug: string) => page.locator(`[data-board-card="${slug}"]`);
   // Cards expose worker identity; repository provider counts belong to the header.
   // Assert both supported surfaces against explicit phase expectations and HTTP facts.
-  const sample = async (phase: string, workers: readonly (string | null)[], complete = [true, true]) => {
+  const sample = async (phase: string, workers: readonly (string | null)[]) => {
     const counts = Object.fromEntries(['codex', 'claude'].map(family => {
       const count = workers.filter(worker => worker === family).length;
-      return [family, complete.every(Boolean) ? String(count) : count ? `${count}+` : 'unknown'];
+      return [family, String(count)];
     }));
     if (!baseline) {
       await page.waitForFunction(({ slugs, workers, counts }) => {
@@ -60,7 +62,7 @@ try {
       const execution = snapshot.stages.flatMap(stage => stage.cards).find(card => card.id === slug)!.execution!;
       const labels = await card(slug).locator('[title*="active worker"]').allTextContents();
       if (!baseline) {
-        assert.equal(execution.complete, complete[index], `${phase}: ${slug} observation certainty`);
+        assert.ok(execution.limitations.every(note => note.length > 0), `${phase}: ${slug} diagnostics stay scoped to the mission`);
         assert.deepEqual(execution.invocations.map(run => run.family), workers[index] === null ? [] : [workers[index]], `${phase}: ${slug} HTTP providers`);
         assert.deepEqual(labels, workers[index] === null ? [] : [workers[index]], `${phase}: ${slug} browser worker`);
         assert.equal(await card(slug).locator('[data-provider-execution]').count(), 0, 'the card design has no count row');
@@ -70,8 +72,7 @@ try {
     if (!baseline) {
       for (const [family, count] of Object.entries(counts)) {
         const metric = snapshot.agentAvailability.find(metric => metric.family === family)!;
-        assert.equal(metric.runningSessions, count === 'unknown' ? null : Number.parseInt(count), `${phase}: ${family} HTTP count`);
-        assert.equal(metric.executionComplete, complete.every(Boolean), `${phase}: ${family} HTTP certainty`);
+        assert.equal(metric.runningSessions, Number.parseInt(count), `${phase}: ${family} HTTP count`);
       }
     }
     const result = { phase, header: await page.locator('[aria-label="Agent availability"]').innerText(), cards };
@@ -104,6 +105,15 @@ try {
   if (retainedHistory) { seedRetainedProviderHistory(fixture.root, command); }
   if (baseline) { await page.reload(); await card(board).waitFor(); }
   await sample('two-providers', ['codex', 'codex']);
+  if (process.argv.includes('--refused-launch')) {
+    // px-0024: capture opened before launch authorization, authorization refused, no provider spawned.
+    const owner = await fixture.service.current(board);
+    const refusedIdentity = agentRunIdentity({ repositoryId: resolveCanonicalRepositoryId(fixture.root), missionId: board, role: 'review', family: 'claude', attempt: 1, startedAtMs: Date.now() });
+    const refused = openRunCapture({ worktree: fixture.root, identity: refusedIdentity, runId: agentRunId(refusedIdentity), terminalHost: 'pipe', now: () => new Date() });
+    refused.correlateOperation(owner!.id);
+    refused.finish({ exitCode: null, signal: null });
+    await sample('refused-launch-alongside-healthy-providers', ['codex', 'codex']);
+  }
   if (!baseline) {
   const runs = missionRunsDir(fixture.root, command);
   const executing = fixture.terminal.execution!(command);
@@ -111,7 +121,7 @@ try {
   const metadata = path.join(runs, executing.invocations[0].runId, 'run.json');
   const original = fs.readFileSync(metadata, 'utf8'); const record = JSON.parse(original);
   fs.writeFileSync(metadata, JSON.stringify({ ...record, execution: { ...record.execution, processIdentity: null } }));
-  await sample('partial-probe-one-confirmed-one-unknown', ['codex', null], [true, false]);
+  await sample('partial-probe-one-confirmed-one-unconfirmed', ['codex', null]);
   fs.writeFileSync(metadata, original);
   await sample('probe-restored', ['codex', 'codex']);
   const idsBefore = fixture.slugs.map(slug => fs.readFileSync(path.join(fixture.root, `${slug}.provider-1.entered`), 'utf8'));

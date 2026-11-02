@@ -58,3 +58,9 @@ for (const entry of ['cli', 'board'] as const) {
     assert.equal(decisions.filter(kind => kind === 'approved').length, 1 + outcome.launches.filter(kind => kind === 'review').length, 'every approval beyond the seeded one has a reviewer launch');
   });
 }
+
+for (const inferred of [false, true]) {
+  it(`completed repair with settled children reaches its next lifecycle action (${inferred ? 'inferred' : 'explicit'} slug, TASK-2806)`, { timeout: 20000 }, async t => {
+    await retainedRepairCase('settled-descendant', inferred, t);
+  });
+}

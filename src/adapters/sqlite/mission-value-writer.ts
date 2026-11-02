@@ -164,12 +164,12 @@ export class SqliteMissionValueWriter {
            (mission_id, position, round_number, change_kind, provider,
             provider_change_id, provider_url, source_branch, target_branch,
             revision, review_baseline, reviewer, implementer, started_at, decision_kind,
-            decided_at, decided_revision, decision_comment, classifier_source, integration_repair_assessment, mechanical_source, approval_source_kind,
+            decided_at, decided_revision, decision_comment, operator_author, classifier_source, integration_repair_assessment, mechanical_source, approval_source_kind,
             approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
                   superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
             phase, disposition, reviewer_retry_count, implementer_retry_count,
             implementer_response_content, item_dispositions, blocked_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [missionId, roundPosition, ...reviewIdentityColumns(round), ...reviewDecisionColumns(round), ...reviewApprovalColumns(round), ...reviewWithdrawalColumns(round), ...reviewSupersessionColumns(round), ...reviewResponseColumns(round)],
     );
 
@@ -241,6 +241,7 @@ function reviewDecisionColumns(round: ReviewRound): SqlParameter[] {
     decision?.decidedAt ?? null,
     decision?.revision ?? null,
     decision?.comment ?? null,
+    operatorAuthor(decision),
     decision?.classifier ? JSON.stringify(decision.classifier) : null,
     round.integrationRepairAssessment ? JSON.stringify(round.integrationRepairAssessment) : null,
   ];
@@ -291,4 +292,8 @@ function reviewResponseColumns(round: ReviewRound): SqlParameter[] {
     round.itemDispositions ? JSON.stringify(round.itemDispositions) : null,
     round.blockedReason ?? null,
   ];
+}
+
+function operatorAuthor(decision: ReviewerDecision | null): string | null {
+  return decision?.kind === 'changes-requested' ? decision.source?.author ?? null : null;
 }

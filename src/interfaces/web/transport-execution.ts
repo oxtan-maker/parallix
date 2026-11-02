@@ -1,10 +1,9 @@
-import { isPlainObject, checkKeys, checkString, checkBoolean, checkStringArray, checkNullableString } from './transport-validation-primitives.js';
+import { isPlainObject, checkKeys, checkString, checkStringArray, checkNullableString } from './transport-validation-primitives.js';
 
 export function checkExecution(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['observedAt', 'complete', 'invocations', 'limitations', 'recordedOperationIds'], ['observedAt', 'complete', 'invocations', 'limitations'], path, problems);
+  checkKeys(object, ['observedAt', 'invocations', 'limitations', 'recordedOperationIds'], ['observedAt', 'invocations', 'limitations'], path, problems);
   checkString(object, 'observedAt', path, problems);
-  checkBoolean(object, 'complete', path, problems);
   checkStringArray(object, 'limitations', path, problems);
   if (object.recordedOperationIds !== undefined) { checkStringArray(object, 'recordedOperationIds', path, problems); }
   if (!Array.isArray(object.invocations)) { problems.push(`${path}.invocations must be an array`); return; }

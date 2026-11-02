@@ -82,15 +82,14 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
             disposition: requested ? 'REQUEST_CHANGES' as const : null,
             approval: isApproval(comment), reason: comment.body || '',
             reviewId: comment.kind === 'inline-comment' ? comment.reviewId || comment.id || String(index) : comment.id || String(index),
-            findings: requested ? [{ id: `human-${comment.id || index + 1}`, summary: comment.body || 'Operator requested changes' }] : [],
+            findings: requested ? [{ id: `human-${comment.kind}-${comment.id || index + 1}`, summary: comment.body || 'Operator requested changes' }] : [],
           };
         });
       const seenContent = new Set([...seen].filter((source): source is string => typeof source === 'string').map(feedbackContentIdentity));
       const unseen = feedback.filter(item => !seenContent.has(feedbackContentIdentity(item.source)));
-      // A current correction on an approved round is not handled yet (the
-      // loop stops for `px revoke-review`), so neither its audit note nor its
-      // source is recorded: both are durable and would hide it from a retry.
-      const deferred = (item: typeof feedback[number]) => state.phase === 'approved' && item.disposition === 'REQUEST_CHANGES' && item.state === 'current';
+      // Observation is not application. Keep current corrections unconsumed
+      // until the loop commits their decision, including after revocation.
+      const deferred = (item: typeof feedback[number]) => item.disposition === 'REQUEST_CHANGES' && item.state === 'current';
       const newFeedback = unseen.filter(item => !deferred(item));
       const consumedSources = new Set([...seen, ...newFeedback.map(item => item.source)]);
       state.metadata.humanFeedbackSources = [...consumedSources];
@@ -104,9 +103,25 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
       const currentRequest = [...unseen].reverse().find(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current');
       if (currentRequest) {
         const related = unseen.filter(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current' && item.reviewId === currentRequest.reviewId);
-        return { ...currentRequest, reason: related.map(item => item.reason).filter(Boolean).join('\n'), findings: related.flatMap(item => item.findings) };
+        return { ...currentRequest, reason: related.map(item => item.reason).filter(Boolean).join('\n'), findings: related.flatMap(item => item.findings),
+          records: unseen.filter(deferred).map(item => ({ source: item.source, author: item.author,
+            reason: item.reviewId === currentRequest.reviewId ? item.reason : `Superseded by ${currentRequest.source}: ${item.reason}` })) };
       }
       return dismissedApprovalObservation(normalized, configuredAgents);
+    },
+    async acknowledge(state, feedback) {
+      if (dependencies.readOnly) { return; }
+      const records = feedback.records ?? [feedback];
+      for (const record of records) {
+        const result = await recordHumanNote(slug, VALID_EVENT_TYPES.HUMAN_NOTE, {
+          content: record.reason, actor: record.author, round: state.round, phase: state.phase,
+          followUpReference: `${record.source}; state=${feedback.state}`,
+        }, { worktree, skipGit: true, missionStore, log, error });
+        if (!result.ok) { throw new Error(result.error || `Could not record human correction ${record.source}`); }
+      }
+      const consumedSources = new Set<unknown>(Array.isArray(state.metadata.humanFeedbackSources) ? state.metadata.humanFeedbackSources : []);
+      for (const record of records) { consumedSources.add(record.source); }
+      state.metadata.humanFeedbackSources = [...consumedSources];
     },
   };
 }

@@ -131,6 +131,13 @@ function logRebaseFiles(heading: string, rebaseInfo: { detached: boolean; unmerg
 }
 
 /** Every settled round, so a verdict survives a reviewer reroute. */
+function logProviderObservation(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  const observation = missionData.providerObservation;
+  if (observation && observation.limitations.length > 0) {
+    log(`Provider observation at ${observation.observedAt}: ${observation.limitations.join('; ')}`);
+  }
+}
+
 function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => void): void {
   // What failed at integration last time, read from the Mission record rather
   // than the board card, so it shows whenever the repair is recorded.
@@ -249,6 +256,7 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log(`Mission work: ${describeMissionWork(missionData.activity.work)}`);
     log(`Coordinator evidence: ${describeCoordinatorEvidence(missionData.activity.coordinator)}`);
   }
+  logProviderObservation(missionData, log);
   logBriefAndGates(missionData, log);
   if (missionData.version !== null && missionData.version !== undefined) {
     log(`Version: ${missionData.version} (diagnostic only; writes resolve it automatically, or pass --expected-version to pin it)`);

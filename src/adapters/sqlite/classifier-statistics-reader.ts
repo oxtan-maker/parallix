@@ -13,7 +13,7 @@ export class SqliteClassifierStatisticsReader implements ClassifierStatisticsRea
       decision_kind: string; classifier_source: string | null; mechanical_source: string | null; change_kind: string }>(
       `SELECT r.mission_id, r.round_number, r.decided_at, r.decision_kind, r.classifier_source, r.mechanical_source, r.change_kind
        FROM mission_review_rounds r JOIN missions m ON m.id = r.mission_id
-       WHERE m.repository_id = ? AND r.decision_kind IN ('approved', 'changes-requested')`, [repository]);
+       WHERE m.repository_id = ? AND r.operator_author IS NULL AND r.decision_kind IN ('approved', 'changes-requested')`, [repository]);
     const decisions: PrDecisionFact[] = [];
     let partial = false;
     for (const row of rows) {

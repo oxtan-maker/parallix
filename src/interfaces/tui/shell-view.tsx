@@ -28,7 +28,6 @@ export function BoardShellView({ state }: { state: BoardShellState }): React.Rea
       {/* ═══ AGENT STRIP ═══ */}
       <AgentStrip
         agentAvailability={projection.metrics.agentAvailability}
-        unattributedRunningSessions={projection.metrics.unattributedRunningSessions}
         missionActivity={projection.stages.flatMap((stage) => stage.cards).map(projectMissionActivity)}
       />
 

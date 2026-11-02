@@ -465,6 +465,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
       routing: { eligibleFamilies: () => ['codex', 'claude'] },
       reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
       provider: { pollReview: async () => 'APPROVED', pollDisposition: async () => 'CHANGES_MADE' },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
       missionStore: missionStore,
       lifecycle: lifecycle,
       stateport: {
@@ -537,7 +538,7 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
         writeReusableVerificationProof: () => ({ ok: true as const }),
       },
       process: {
-        spawnSync: () => { shellRuns++; return { status: 2, stdout: '', stderr: 'syntax error' }; },
+        run: async () => { shellRuns++; return { status: 2, stdout: '', stderr: 'syntax error' }; },
       },
     });
 

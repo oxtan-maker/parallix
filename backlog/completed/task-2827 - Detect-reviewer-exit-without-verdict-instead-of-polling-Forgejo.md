@@ -1,8 +1,8 @@
 ---
 id: TASK-2827
 title: Detect reviewer exit without verdict instead of polling Forgejo
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-31 16:45'
 labels:
   - bug

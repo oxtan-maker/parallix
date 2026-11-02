@@ -492,6 +492,20 @@ describe("review projection queries", { concurrency: false }, () => {
     assert.equal(database.calls.length, 8);
   });
 
+  test('one unreadable persisted review history stays on its mission and leaves the others readable (px-0027)', async () => {
+    const ids = [missionId('task-0027-bad'), missionId('task-0027-good')];
+    const base = countingDatabase();
+    const database = { async query<T>(sql: string, bound: readonly MissionId[]): Promise<T[]> {
+      const rows = await base.query<Record<string, unknown>>(sql, bound);
+      return rows.map(row => row.mission_id === ids[0] ? { ...row, integration_repair_assessment: '{"outcome":"bogus","failedGate":null}' } : row) as T[];
+    } };
+    const facts = await new SqliteReviewProjectionReader(database).loadReviews(ids);
+    assert.match(facts.get(ids[0])!.unreadable ?? '', /Review history unreadable: Invalid restoration assessment/);
+    assert.equal(facts.get(ids[0])!.review, null);
+    assert.equal(facts.get(ids[1])!.unreadable, undefined, 'the healthy mission is unaffected');
+    assert.equal(facts.get(ids[1])!.review?.rounds.length, 1);
+  });
+
   test('SQLite-backed board review projection never loads Mission aggregates', async () => {
     const database = countingDatabase();
     let aggregateLoads = 0;

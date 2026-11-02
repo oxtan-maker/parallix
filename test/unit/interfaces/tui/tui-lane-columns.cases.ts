@@ -173,6 +173,24 @@ describe('MissionCard renders projection facts', () => {
 
     assert.ok(!output.includes('▲'), `An unblocked card must not render the red flag. Got: ${output}`);
   });
+
+  it('renders a dated provider-observation failure on its own card (px-0027 F2)', async () => {
+    const failing = await renderMissionCard({
+      card: makeFullCard({ blockingReason: null, execution: { observedAt: '2026-11-02T10:00:00Z', limitations: ['probe unavailable'], invocations: [] } }),
+      width: 90,
+    });
+    assert.match(failing.replace(/\s+/g, ' '), /probe unavailable \(provider observation 2026-11-02T10:00:00Z\)/);
+    const narrow = await renderMissionCard({
+      card: makeFullCard({ blockingReason: null, execution: { observedAt: '2026-11-02T10:00:00.000Z', limitations: ['execute-codex-a1-mvz8e7jh: provider process probe unavailable'], invocations: [] } }),
+    });
+    const flat = narrow.replace(/\s+/g, ' ');
+    assert.ok(flat.includes('provider process probe unavailable') && flat.includes('2026-11-02T10:00:00.000Z'), `The full reason and date wrap at the default card width. Got: ${narrow}`);
+    const healthy = await renderMissionCard({
+      card: makeFullCard({ blockingReason: null, execution: { observedAt: '2026-11-02T10:00:00Z', limitations: [], invocations: [] } }),
+      width: 90,
+    });
+    assert.ok(!healthy.includes('provider observation'), `A healthy observation renders no diagnostic. Got: ${healthy}`);
+  });
 });
 
 describe('long titles truncate inside the card area', () => {

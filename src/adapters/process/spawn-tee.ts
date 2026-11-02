@@ -5,6 +5,7 @@ import type { SpawnOptions, ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import { createOutputWatchdog, type NoOutputWatchdog } from './output-watchdog.js';
 import { wrapWithBubblewrap } from './bubblewrap.js';
+import { settleOnExit } from '../config/child-exit.js';
 import { DECISION_CREDENTIAL_ENV } from '../../domain/decision-credentials.js';
 
 export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
@@ -302,7 +303,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       });
     });
 
-    child.on('close', (code: number | null, signal: string | null) => {
+    const settle = (code: number | null, signal: string | null) => {
       finish({
         status: supervisor.timedOut ? null : code,
         signal: supervisor.timedOut ? null : signal,
@@ -310,6 +311,9 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
         stderr: stderrTail.toString(),
         error: supervisor.timedOut ? Object.assign(new Error('No output before configured liveness deadline'), { code: 'NO_OUTPUT_TIMEOUT' }) : null,
       });
-    });
+    };
+    child.on('close', settle);
+    // A liveness timeout keeps its group escalation; only a normal exit settles early.
+    settleOnExit(child, settle, { terminating: () => supervisor.timedOut });
   });
 }

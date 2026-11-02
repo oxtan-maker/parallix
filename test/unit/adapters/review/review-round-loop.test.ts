@@ -310,11 +310,12 @@ it('observed approval retries one stale write and rechecks the round (TASK-2821 
 });
 
 it('polled changes and resolution advance through their owners to round two (TASK-2821 review P2)', async () => {
-  for (const scenario of ['CHANGES_MADE', 'PUSHBACK_ALL', 'interrupted-request'] as const) {
-    const disposition = scenario === 'interrupted-request' ? 'CHANGES_MADE' : scenario;
+  for (const scenario of ['CHANGES_MADE', 'PUSHBACK_ALL', 'interrupted-request', 'human-mid-loop', 'human-ready-resume'] as const) {
+    const disposition = scenario === 'PUSHBACK_ALL' ? scenario : 'CHANGES_MADE';
     const { store, lifecycle } = await reviewInProgress();
     let head = 'rev-1';
-    let reviews = scenario === 'interrupted-request' ? 1 : 0;
+    let reviews = ['interrupted-request', 'human-ready-resume'].includes(scenario) ? 1 : 0;
+    let fixes = 0;
     const decisionTime = '2026-08-16T14:00:00.000Z';
     const responseTime = '2026-08-16T15:00:00.000Z';
     if (scenario === 'interrupted-request') {
@@ -325,8 +326,16 @@ it('polled changes and resolution advance through their owners to round two (TAS
       assert.equal(store.mission().status, 'review');
       assert.equal(currentReviewRound(store.mission().review!).decision?.kind, 'changes-requested');
     }
+    if (scenario === 'human-ready-resume') {
+      await recordRequestedChanges(String(MISSION), { findings: parseReviewFindings('## F1: provider finding'),
+        comment: 'reviewer', revision: head, decidedAt: decisionTime }, { missionStore: store, lifecycleService: lifecycle });
+      await recordImplementerResolution(String(MISSION), { resultingRevision: 'rev-2', itemDispositions: [], evidence: 'Provider fix evidence',
+        respondedAt: responseTime }, { missionStore: store });
+      head = 'rev-2'; fixes = 1;
+    }
     const fake = fakeReviewLoopPorts({
       slug: String(MISSION), missionStore: store, lifecycle,
+      reviewPreparation: scenario === 'human-ready-resume' ? { reviewPreparation: prepareReady } : null,
       stateport: {
         read: () => readReviewState(String(MISSION), undefined, store),
         persist: async state => { assertReviewStatePersisted(await writeReviewState(String(MISSION), state, fake.ports.worktree, { missionStore: store }), { slug: String(MISSION), round: state.round }); },
@@ -342,12 +351,39 @@ it('polled changes and resolution advance through their owners to round two (TAS
       },
       agents: { launch: async request => {
         assert.equal(store.mission().status, request.role === 'implementer' ? 'active' : 'review');
-        if (request.role === 'implementer') { head = 'rev-2'; }
+        if (request.role === 'implementer') { head = `rev-${++fixes + 1}`; }
         return { agent: request.agent, result: { status: null } };
       } },
       preReview: { head: () => head },
     });
-    await runReviewLoop({ slug: String(MISSION), isContinue: true, maxAttempts: 2 }, fake.ports);
+    let acknowledged = false;
+    const human = scenario.startsWith('human-');
+    async function prepareReady(): Promise<{ ok: boolean }> {
+      const state = (await readReviewState(String(MISSION), '/fixture', store))!;
+      state.advanceRound();
+      assert.equal((await openReviewRound(String(MISSION), state, { worktree: fake.ports.worktree,
+        missionStore: store, lifecycleService: lifecycle, log: () => {}, error: message => { throw new Error(message); } })).ok, true);
+      return { ok: true };
+    }
+    if (human) {
+      fake.ports.humanFeedback.reconcile = async state => (state.round === 2 || scenario === 'human-ready-resume') && !acknowledged ? {
+        source: 'forgejo:review:7', author: 'operator', state: 'current', disposition: 'REQUEST_CHANGES',
+        approval: false, reason: 'mid-loop correction', findings: [{ id: 'human-review-7', summary: 'mid-loop correction' }],
+      } : null;
+      fake.ports.humanFeedback.acknowledge = async () => { acknowledged = true; };
+    }
+    await runReviewLoop({ slug: String(MISSION), isContinue: true, maxAttempts: human ? 3 : 2 }, fake.ports);
+    if (human) {
+      assert.equal(acknowledged, true, `${scenario}: ${[...fake.errors, ...fake.logs].join('\n')}`);
+      assert.equal(store.mission().status, 'integration', fake.errors.join('\n'));
+      assert.equal(store.mission().review!.rounds.length, 3);
+      const decision = store.mission().review!.rounds[1].decision;
+      assert.ok(decision?.kind === 'changes-requested');
+      assert.deepEqual(decision.findings.map(f => f.id), ['human-review-7']);
+      assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
+      assert.equal(store.events.filter(e => e.to === 'active').at(-1)?.agent, 'operator');
+      continue;
+    }
     assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
     const mission = store.mission();
     assert.equal(mission.status, 'integration');
@@ -407,4 +443,35 @@ it('provider approval never substitutes HEAD or the current time for missing evi
   const review = store.mission().review!;
   assert.equal(currentReviewRound(review).decision?.revision, null);
   assert.equal(assessApprovalCoverage(review, { landedRevision: changeRevision('unreviewed-B'), sameChange: false })?.kind, 'unverifiable');
+});
+
+it('persists operator findings alongside a pending reviewer decision before acknowledging (px-0020)', async () => {
+  const { store, lifecycle } = await reviewInProgress();
+  const recorder = createReviewObservationRecorder(String(MISSION), () => 'rev-2', true, { missionStore: store, lifecycleService: lifecycle });
+  const state = (await readReviewState(String(MISSION), '/fixture', store))!;
+  await recorder.recordRequestedChanges(state, { disposition: 'REQUEST_CHANGES', findings: parseReviewFindings('## F1: reviewer finding'),
+    comment: 'reviewer', revision: 'rev-1', decidedAt: '2026-08-16T14:00:00Z' });
+  await recorder.recordRequestedChanges(state, { disposition: 'REQUEST_CHANGES', source: { kind: 'operator', author: 'human' },
+    findings: [{ id: reviewFindingId('human-review-7'), summary: 'operator correction', location: null }],
+    comment: 'operator correction', revision: null, decidedAt: '2026-08-16T15:00:00Z' });
+  const decision = currentReviewRound(store.mission().review!).decision;
+  assert.equal(decision?.kind, 'changes-requested');
+  if (decision?.kind !== 'changes-requested') { assert.fail('Missing decision'); }
+  assert.deepEqual(decision.findings.map(f => f.id), ['F1', 'human-review-7']);
+  assert.equal(decision.decidedAt, '2026-08-16T14:00:00Z', 'original reviewer attribution is preserved');
+});
+
+it('does not acknowledge a correction over a resolved round without opening a new round (px-0020)', async () => {
+  const { store, lifecycle } = await reviewInProgress();
+  await recordRequestedChanges(String(MISSION), { findings: parseReviewFindings('## F1: reviewer finding'), comment: 'reviewer',
+    revision: 'rev-1', decidedAt: '2026-08-16T14:00:00Z' }, { missionStore: store, lifecycleService: lifecycle });
+  await recordImplementerResolution(String(MISSION), { resultingRevision: 'rev-2', itemDispositions: [], evidence: 'fixed F1',
+    respondedAt: '2026-08-16T15:00:00Z' }, { missionStore: store });
+  const before = store.mission();
+  const state = (await readReviewState(String(MISSION), '/fixture', store))!;
+  const recorder = createReviewObservationRecorder(String(MISSION), () => 'rev-2', true, { missionStore: store, lifecycleService: lifecycle });
+  await assert.rejects(recorder.recordRequestedChanges(state, { disposition: 'REQUEST_CHANGES', source: { kind: 'operator', author: 'human' },
+    findings: [{ id: reviewFindingId('human-review-7'), summary: 'operator correction', location: null }],
+    comment: 'operator correction', revision: null, decidedAt: '2026-08-16T16:00:00Z' }), /open the next review round/);
+  assert.deepEqual(store.mission(), before);
 });

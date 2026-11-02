@@ -443,7 +443,7 @@ test("legacy corrected criteria require explicit reconciliation, current proof a
   const commands: string[] = [];
   let gateExit = 1;
   const ports = makePorts(recorder, { ...contractServices(() => store.load()), process: {
-    spawnSync: (_cmd, args) => { commands.push(args.join(' ')); return { status: gateExit, stdout: '', stderr: 'original gate diagnostic' }; },
+    run: async (_cmd, args) => { commands.push(args.join(' ')); return { status: gateExit, stdout: '', stderr: 'original gate diagnostic' }; },
   } });
   const service = new MissionCheckpointService(store, { fileSystem: ports.fileSystem, rootFor: () => ROOT });
   const repair = new RepairCheckpointService(store);

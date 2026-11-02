@@ -13,6 +13,7 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { SessionMarkerPort } from '../../../../src/application/domain-ports.js';
 import type { AgentLauncherInput } from '../../../../src/adapters/agents/agent-process-types.js';
+import type { StartAgentOptions } from '../../../../src/adapters/agents/agent-launch-context.js';
 
 // Regression provenance: TASK-1036.
 
@@ -207,3 +208,48 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+for (const pinned of [false, true]) {
+  test(`observed Claude limit persists its reason before ${pinned ? 'pinned refusal' : 'eligible review fallback'} (px-0026)`, async () => {
+    const { detectLimitHit } = await import('../../../../src/application/services/agent-limit.js');
+    const { resolveBlockContext } = await import('../../../../src/adapters/agents/agent-block-selection.js');
+    const blocks = new Map<string, { until: string; reason?: string }>();
+    const launched: string[] = [];
+    const options: StartAgentOptions = {
+      configuration: resolveConfiguration(environment), prompt: 'Review', agent: 'claude', pinnedAgent: pinned,
+      isAgentBlockedFn: (family: string) => blocks.has(family),
+      assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null, log: () => {},
+      runtimeBlockContextFn: async (_step: string, tried: ReadonlySet<string>) => resolveBlockContext(['claude', 'vibe'], tried, new Set(blocks.keys())),
+      selectAgentFn: (_step, opts) => {
+        assert.ok(blocks.has('claude'), 'selection follows the checked write');
+        assert.ok(new Set(opts?.exclude).has('claude'), 'blocked family cannot be retried');
+        return 'vibe';
+      },
+      detectLimitHitFn: (input) => {
+        assert.ok(input, 'launch outcome supplies detector input');
+        return detectLimitHit({ ...input, now: new Date('2026-11-02T08:00:00Z') });
+      },
+      updateAgentBlockFn: (family: string, until: string, options?: { reason?: string }) => {
+        blocks.set(family, { until, reason: options?.reason }); return { reason: options?.reason };
+      },
+      launchAgentFn: (input: AgentLauncherInput) => {
+        const family = input.env!.FORGEJO_USER!;
+        launched.push(family);
+        return { invocation: { command: family, args: [] }, result: {
+          status: family === 'claude' ? 1 : 0,
+          stderr: family === 'claude' ? 'You’ve hit your 5-hour limit · resets 10:50am (Europe/Stockholm)' : '',
+        } };
+      },
+    };
+    if (pinned) {
+      await assert.rejects(startAgent('review', options), /Pinned agent.*usage limit hit/);
+      assert.deepEqual(launched, ['claude']);
+    } else {
+      assert.equal((await startAgent('review', options)).agent, 'vibe');
+      assert.deepEqual(launched, ['claude', 'vibe']);
+    }
+    assert.equal(blocks.size, 1);
+    assert.match(blocks.get('claude')!.reason!, /^parsed:.*5-hour limit/);
+    assert.match(blocks.get('claude')!.until, /^2026-11-02 \d{2}$/);
+  });
+}

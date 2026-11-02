@@ -1,8 +1,8 @@
 ---
 id: TASK-2812
 title: Clarify existing rebase conflict-resolution instructions
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-23 05:27'
 updated_date: '2026-10-23 19:56'
 labels: []

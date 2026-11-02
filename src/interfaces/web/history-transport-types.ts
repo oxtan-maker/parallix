@@ -14,7 +14,7 @@ export interface HistoryOperation {
   readonly runId: string;
   readonly captureKind: 'agent' | 'coordinator';
   readonly operationId: string | null;
-  readonly execution: 'live' | 'stopped' | 'unknown';
+  readonly execution: 'live' | 'stopped';
   readonly role: string;
   readonly family: string | null;
   readonly attempt: number | null;

@@ -872,16 +872,16 @@ test('mounted header and card execution transition together while workflow fans 
     agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' } });
   const board = makeProjection({ active: [card] });
   const availability = ['codex', 'claude'].map(family => ({ family: agentFamily(family), available: true, blockedForMs: 0 }));
-  const observation = (family: string | null, complete = true) => toWebBoardSnapshot(projectProviderExecution(
+  const observation = (family: string | null, diagnostic = false) => toWebBoardSnapshot(projectProviderExecution(
     { ...board, metrics: { ...board.metrics, agentAvailability: availability } }, {
-      observe: () => ({ observedAt: new Date().toISOString(), complete, limitations: complete ? [] : ['probe unavailable'],
+      observe: () => ({ observedAt: new Date().toISOString(), limitations: diagnostic ? ['probe unavailable'] : [],
         invocations: family ? [{ runId: `execute-${family}-a1-test`, operationId: 'held-workflow', family: agentFamily(family) }] : [] }),
     }));
   const page = await renderBoard({ board: observation(null) });
   try {
-    for (const [family, complete] of [[null, true], ['codex', true],
-      ['claude', false], [null, false], [null, true]] as const) {
-      await page.rerender(observation(family, complete));
+    for (const [family, diagnostic] of [[null, false], ['codex', false],
+      ['claude', true], [null, true], [null, false]] as const) {
+      await page.rerender(observation(family, diagnostic));
       const article = page.mount.querySelector('[data-board-card]')!;
       // px-0013: execution observations must never add a row above the established header.
       assert.equal(article.querySelector('[data-provider-execution]') !== null, false);
@@ -892,11 +892,11 @@ test('mounted header and card execution transition together while workflow fans 
       assert.equal(article.querySelectorAll('.fan.spin').length, 2);
       const header = page.mount.querySelector('[aria-label="Agent availability"]')!;
       if (family) {
-        assert.ok(header.textContent?.includes(`${family}1${complete ? '' : '+'}`));
+        assert.ok(header.textContent?.includes(`${family}1`));
         assert.equal(article.querySelector('[title*="active worker"]')?.textContent, family);
       } else {
         assert.equal(article.querySelector('[title*="active worker"]'), null);
-        assert.ok(header.textContent?.includes(complete ? 'codex0' : 'codexunknown'));
+        assert.ok(header.textContent?.includes('codex0') && !header.textContent.includes('unknown'));
       }
     }
     await page.rerender(toWebBoardSnapshot(board));

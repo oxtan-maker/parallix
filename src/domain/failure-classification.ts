@@ -125,6 +125,12 @@ export function classifyError(errorMsg: string, failureReason?: unknown): { fail
     return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
   }
 
+  // Admission failure precedes test/build execution. Preserve this producer
+  // marker even when the resource or remediation mentions another failure.
+  if (/^\[runner-health\] infrastructure:/m.test(errorMsg)) {
+    return { failureClass: FailureClass.InfraBlocker, dispatchAction: DispatchAction.HumanOnly };
+  }
+
   const incompleteEvidence = classifyIncompleteEvidence(errorMsg);
   if (incompleteEvidence) { return incompleteEvidence; }
 

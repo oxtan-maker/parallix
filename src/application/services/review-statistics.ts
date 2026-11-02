@@ -16,11 +16,12 @@ export function reviewStatistics(review: Review | null): ReviewStatistics {
   const hasOutcomes = events.some(e => e.eventType === 'reviewer_outcome');
   const eventCount = events.filter(e => e.eventType === 'reviewer_outcome' && e.verdict === 'request-changes').length;
   const decisionCount = rounds.filter(round =>
-    round.decision?.kind === 'changes-requested' && round.implementer === implementer,
+    round.decision?.kind === 'changes-requested' && !round.decision.source && round.implementer === implementer,
   ).length;
+  const hasOperatorCorrection = rounds.some(round => round.decision?.kind === 'changes-requested' && round.decision.source);
   return {
     implementer,
-    prFixRounds: eventCount > 0 ? eventCount : decisionCount > 0 ? decisionCount : hasOutcomes ? 0 : null,
+    prFixRounds: eventCount > 0 ? eventCount : decisionCount > 0 ? decisionCount : hasOutcomes || hasOperatorCorrection ? 0 : null,
     source: 'review-aggregate',
   };
 }

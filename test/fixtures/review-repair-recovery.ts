@@ -21,6 +21,7 @@ import { repositoryId } from '../../src/domain/repository.js';
 import { makeExecutePorts } from './execute-mission-ports.js';
 import { emptyBoardRepositories } from '../helpers/empty-board-repositories.js';
 import { captureRecoveryEvidence } from '../../src/application/recovery-evidence.js';
+import { mkdtemp } from '../helpers/temp-dir.js';
 
 // Keep acknowledgment and verified recovery as separate contracts. Each owns a
 // fresh Git/SQLite fixture; neither depends on a preceding test's mutations.
@@ -32,6 +33,20 @@ export function registerRetainedRepairCases(phases: readonly ('acknowledgment' |
       });
     }
   }
+}
+
+type RetainedRepairPhase = 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker' | 'settled-descendant';
+
+/** A passing check whose shell leaves a quiet background process holding its output pipes. */
+function settledDescendantCommand(t: TestContext): { command: string; descendants: () => number[] } {
+  const root = mkdtemp('repair-descendant-');
+  const pids = path.join(root, 'pids');
+  const descendants = () => fs.existsSync(pids) ? fs.readFileSync(pids, 'utf8').split('\n').filter(Boolean).map(Number) : [];
+  t.after(() => {
+    for (const pid of descendants()) { try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ } }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  return { command: `sleep 6 & echo $! >> ${pids}`, descendants };
 }
 
 
@@ -55,8 +70,7 @@ export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture,
 }
 
 /** Seed an interrupted retained repair on an active Mission whose round awaits review (the TASK-2789 shape). */
-export async function seedRetainedRepair(phase: 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker', t: TestContext, withoutReview = false) {
-  const command = phase === 'failed-check' ? 'false' : ':';
+export async function seedRetainedRepair(phase: RetainedRepairPhase, t: TestContext, withoutReview = false, command = phase === 'failed-check' ? 'false' : ':') {
   const fixture = await openRepairFixture({ slug: 'task-repair-recovery' });
   const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
   process.env.PARALLIX_NO_BUBBLEWRAP = '1';
@@ -98,8 +112,9 @@ export async function seedRetainedRepair(phase: 'acknowledgment' | 'recovery' | 
   return { fixture, store, repair, opened, blocker, command };
 }
 
-export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 'failed-check' | 'new-blocker', inferred: boolean, t: TestContext, withoutReview = false, entry: 'cli' | 'board' = 'cli'): Promise<void> {
-  const { fixture, store, repair, opened, blocker, command } = await seedRetainedRepair(phase, t, withoutReview);
+export async function retainedRepairCase(phase: RetainedRepairPhase, inferred: boolean, t: TestContext, withoutReview = false, entry: 'cli' | 'board' = 'cli'): Promise<void> {
+  const descendant = phase === 'settled-descendant' ? settledDescendantCommand(t) : null;
+  const { fixture, store, repair, opened, blocker, command } = await seedRetainedRepair(phase, t, withoutReview, descendant?.command);
   const before = await fixture.load();
   const prompts: string[] = [];
   const launches: string[] = [];
@@ -188,6 +203,10 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   const captured = captureRecoveryEvidence({ missionId: fixture.slug, cwd: fixture.worktree,
     command, capturedRevision: fixture.approvedRevision, signal: null, exitCode: 1, stdout: 'original interrupted check', stderr: 'original gate failure' });
   assert.equal(captured.ok, true);
+  if (descendant) {
+    await settledDescendantContinuation({ fixture, opened, before, launches, invoke, descendants: descendant.descendants, messages, t });
+    return;
+  }
   // A no-op agent cannot turn even a passing check into checkpoint proof.
   messages.length = 0;
   assert.equal(await enterReview(), 1, messages.join('\n'));
@@ -238,4 +257,50 @@ export async function retainedRepairCase(phase: 'acknowledgment' | 'recovery' | 
   assert.deepEqual(launches, ['act-on-review', 'repair', 'review']);
   assert.equal(reviewStatus((await fixture.load()).review!), 'approved');
   t.diagnostic("After valid evidence, inferred review passed review preparation and launched the independent reviewer; approval came only from its explicit verdict.");
+}
+
+/**
+ * TASK-2806: the repair agent and every verification child exit, but a quiet
+ * background process inherited the check's output. The inferred review coordinator
+ * must still reach its next durable lifecycle action without px stop, and must
+ * neither signal that process nor launch extra workers or synthesize approval.
+ */
+async function settledDescendantContinuation({ fixture, opened, before, launches, invoke, descendants, messages, t }: {
+  fixture: Awaited<ReturnType<typeof openRepairFixture>>; opened: { name: string }; before: Mission; launches: string[];
+  invoke: (_args: string[]) => Promise<number>; descendants: () => number[]; messages: string[]; t: TestContext;
+}): Promise<void> {
+  setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
+    invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
+    resultPromise: (async () => {
+      if (prompt.includes('REPAIR AUTHORITY')) {
+        launches.push('repair');
+        assert.equal(await invoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
+          '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Independent review']), 0);
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      assert.match(prompt, /^Mode: review\./m, 'only independent reviewer work is allowed after repaired handoff');
+      launches.push('review');
+      const mission = await fixture.load();
+      assert.equal(await invoke(['verdict', 'approve', '--slug', fixture.slug,
+        '--actor', mission.review!.rounds.at(-1)!.reviewer, '--comment', 'Fixture repair reviewed']), 0);
+      return { status: 0, stdout: '', stderr: '' };
+    })(),
+  }));
+  messages.length = 0;
+  const started = Date.now();
+  assert.equal(await invoke(['review', fixture.slug]), 0, messages.join('\n'));
+  const elapsedMs = Date.now() - started;
+  // Each check leaves a six-second descendant; waiting on its pipes would exceed this bound.
+  assert.ok(elapsedMs < 3500, `coordinator finished ${elapsedMs} ms after settled children`);
+  const after = await fixture.load();
+  assert.deepEqual(launches, ['repair', 'review'], 'one repair and one independent reviewer; no duplicate worker');
+  assert.equal(after.checkpoints.at(-1)?.repair?.verified, true);
+  assert.equal(reviewStatus(after.review!), 'approved', 'approval came only from the explicit reviewer verdict');
+  assert.equal(after.review?.intervention, null, 'no operator stop was requested');
+  assert.deepEqual(after.checkpoints.slice(0, before.checkpoints.length).map(cp => cp.name), before.checkpoints.map(cp => cp.name));
+  assert.deepEqual(after.review!.rounds.slice(0, before.review!.rounds.length - 1), before.review!.rounds.slice(0, -1), 'decided rounds are unchanged');
+  const pids = descendants();
+  assert.ok(pids.length >= 2, `retained verification and handoff both ran the exact check: ${pids.join(',')}`);
+  for (const pid of pids) { assert.doesNotThrow(() => process.kill(pid, 0), `descendant ${pid} was signalled`); }
+  t.diagnostic(`Coordinator returned in ${elapsedMs} ms with ${pids.length} quiet check descendants still alive; one repair, one reviewer, approval by verdict.`);
 }

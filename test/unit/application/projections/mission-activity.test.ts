@@ -18,6 +18,8 @@ import {
   type MissionActivity,
   type MissionActivitySource,
 } from '../../../../src/application/projections/mission-activity.js';
+import type { StatusMissionData } from '../../../../src/application/ports/cli-workflows.js';
+import { projectStatusMissionData } from '../../../../src/adapters/cli/commands/status-mission-data.js';
 import { renderStatus } from '../../../../src/interfaces/cli/status.js';
 import type { StatusResult } from '../../../../src/application/status-command-use-case.js';
 import type { AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
@@ -212,13 +214,12 @@ test('summarizeMissionActivity tallies work states and sums no coordinator evide
 async function renderStrip(
   agentAvailability: readonly AgentAvailabilityMetric[],
   missionActivity?: readonly MissionActivity[],
-  unattributedRunningSessions?: number | null,
 ): Promise<string> {
   const ink = await import('ink');
   const React = await import('react');
   const { AgentStrip } = await import('../../../../src/interfaces/tui/agent-strip.js');
   return plain(ink.renderToString(
-    React.createElement(AgentStrip, { agentAvailability, missionActivity, unattributedRunningSessions }),
+    React.createElement(AgentStrip, { agentAvailability, missionActivity }),
     { columns: 200 },
   ));
 }
@@ -226,14 +227,12 @@ async function renderStrip(
 const ONE_FAMILY: readonly AgentAvailabilityMetric[] = projectAgentAvailability(
   [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
   Date.parse('2026-08-22T10:00:00Z'),
-  [],
 );
 
-test('AgentStrip renders live authoritative work separately from coordinator evidence', async () => {
+test('AgentStrip renders live authoritative work without a running-agent count', async () => {
   const frame = await renderStrip(ONE_FAMILY, [projectMissionActivity(working('live'))]);
 
   assert.ok(frame.includes('work: 1 live'), `authoritative work must be named. Got: ${frame}`);
-  assert.ok(frame.includes('px cmd live'), `coordinator evidence must stay a px-command count. Got: ${frame}`);
   assert.ok(!/\d+ running/.test(frame), `no surface may render an exact running-agent count. Got: ${frame}`);
 });
 
@@ -246,27 +245,12 @@ test('AgentStrip renders recovery-only live coordinator evidence without claimin
   const rows = projectAgentAvailability(
     [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
     Date.parse('2026-08-22T10:00:00Z'),
-    [{ missionId: fixtureMissionId('task-2389'), family: agentFamily('claude') }],
   );
 
   const frame = await renderStrip(rows, [recoveryOnly]);
 
-  assert.ok(frame.includes('1 px cmd live'), `the live px process must be shown. Got: ${frame}`);
   assert.ok(frame.includes('work: 1 idle'), `a live coordinator is not authoritative work. Got: ${frame}`);
   assert.ok(!frame.includes('1 live '), `recovery evidence must not become live work. Got: ${frame}`);
-});
-
-test('AgentStrip renders unknown coordinator evidence as unknown rather than zero', async () => {
-  const rows = projectAgentAvailability(
-    [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
-    Date.parse('2026-08-22T10:00:00Z'),
-    null,
-  );
-
-  const frame = await renderStrip(rows, [projectMissionActivity({ currentWork: null, blockingReason: null })]);
-
-  assert.ok(frame.includes('px cmd unknown'), `unobserved liveness must read unknown. Got: ${frame}`);
-  assert.ok(!frame.includes('0 px cmd live'), `unknown must never render as zero. Got: ${frame}`);
 });
 
 test('AgentStrip renders stale, blocked and idle authoritative work in the work summary', async () => {
@@ -290,7 +274,7 @@ test('AgentStrip omits the work summary when no mission activity is supplied', a
 // ---------- px status rendering ----------
 
 /** Render `px status` output for one mission activity, returning its lines. */
-function renderStatusLines(activity: MissionActivity | null): string[] {
+function renderStatusLines(activity: MissionActivity | null, providerObservation: StatusMissionData['providerObservation'] = null): string[] {
   const lines: string[] = [];
   const result = ({
     branch: 'mission/task-2389',
@@ -301,6 +285,7 @@ function renderStatusLines(activity: MissionActivity | null): string[] {
       backlogStatus: 'active',
       reviewHistory: [],
       activity,
+      providerObservation,
     },
     prInfo: null,
     staleWorktrees: [],
@@ -475,4 +460,13 @@ test('settled ownership preserves a later independent recovery blocker (TASK-282
   assert.deepEqual(item.action, { kind: 'manual', display: `px lead ${card.id} --once` });
   assert.deepEqual(item.card.commands, card.commands, 'investigation grants no lifecycle capability');
   assert.deepEqual(projectMissionActivity(item.card).work, { kind: 'blocked', reason: 'Forgejo token expired' });
+});
+
+test('px status carries a failed provider observation, with reason and date, from the production projection (px-0027 F2)', () => {
+  const card = makeCard({ execution: { observedAt: '2026-11-02T10:00:00.000Z', invocations: [], limitations: ['execute-codex-a1-mvz8e7jh: provider process probe unavailable'] } });
+  const data = projectStatusMissionData(null, card, 'task-2389', '/nonexistent-root');
+  const lines = renderStatusLines(data.activity ?? null, data.providerObservation);
+  assert.ok(lines.includes('Provider observation at 2026-11-02T10:00:00.000Z: execute-codex-a1-mvz8e7jh: provider process probe unavailable'), lines.join('\n'));
+  const healthy = projectStatusMissionData(null, makeCard({ execution: { observedAt: '2026-11-02T10:00:00.000Z', invocations: [], limitations: [] } }), 'task-2389', '/nonexistent-root');
+  assert.ok(!renderStatusLines(healthy.activity ?? null, healthy.providerObservation).some(line => line.startsWith('Provider observation')));
 });

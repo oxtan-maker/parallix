@@ -1,3 +1,4 @@
+import { integrationRepairNeedsReview } from '../domain/integration-repair-policy.js';
 import { classifyReboundReason, type ReboundReason } from '../domain/rebound-policy.js';
 import { isReviewerPoolExhausted } from '../domain/reviewer-assignment-policy.js';
 import { classifyError } from '../domain/failure-classification.js';
@@ -318,7 +319,8 @@ function bindCommittedReviewPreparationRepair(review: import('../domain/review.j
   const current = currentReviewRound(review);
   const openedRound = priorReview !== null && current.number > currentReviewRound(priorReview).number;
   if (priorReview && reviewStatus(review) === 'awaiting-review' && (openedRound
-    || existing.kind === 'found' && (existing.mission.status === 'active' || existing.mission.reviewPreparationPending))) {
+    || existing.kind === 'found' && (existing.mission.status === 'active' || existing.mission.reviewPreparationPending
+      || integrationRepairNeedsReview(existing.mission)))) {
     review = {
       ...review, rounds: replaceCurrentRound(review, {
         ...current, subject: { ...current.subject, revision: changeRevision(reviewHeadSha) },

@@ -162,7 +162,7 @@ export function makePorts(recorder: Recorder, overrides: ReviewPreparationOverri
       selectAgent: () => 'codex',
     },
     process: {
-      spawnSync: (_cmd: string, args: string[]) => { recorder.spawned.push(args[1]); return { status: 0, stdout: '', stderr: '' }; },
+      run: async (_cmd: string, args: string[]) => { recorder.spawned.push(args[1]); return { status: 0, stdout: '', stderr: '' }; },
     },
     missionServices: async () => ({
       checkpoints: { record: async () => ({ durableEvidence: [],  status: 'completed' as const }) },

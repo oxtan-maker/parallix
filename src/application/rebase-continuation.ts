@@ -160,9 +160,21 @@ function failContinueBudget(ctx: RebaseContext, driver: ContinueDriver, branchNa
   ctx.port.exit(1);
 }
 
-/** The branch a rebase is currently stopped on, or '' when none is in progress. */
-function rebaseInProgressBranch(ctx: RebaseContext): string {
-  return ctx.gitFn(['-C', ctx.executionRoot, 'rebase', '--show-current']).stdout.trim();
+/**
+ * True while the execution worktree still holds rebase state (TASK-2828).
+ *
+ * Replaces `git rebase --show-current`, which git prefix-matches to
+ * `--show-current-patch`: that probe buffered the whole current commit patch and
+ * failed with ENOBUFS on a large change, and its stdout was never a branch name.
+ * The rebase-state owner answers the same question from fixed-size metadata.
+ */
+function rebaseStillInProgress(ctx: RebaseContext): boolean {
+  return ctx.port.detectRebaseState(ctx.executionRoot).inProgress;
+}
+
+/** Branch label for diagnostics; empty while HEAD is detached mid-rebase. */
+function rebaseDiagnosticBranch(ctx: RebaseContext): string {
+  return ctx.port.getCurrentBranch(ctx.executionRoot);
 }
 
 /**
@@ -186,7 +198,7 @@ export type ContinueOutcome = 'completed' | 'exited' | 'recursed' | 'unfinished'
 /** Spend one budgeted `--continue`, bouncing a hook failure once. */
 async function attemptContinue(ctx: RebaseContext, driver: ContinueDriver): Promise<{ result: GitCommandResult } | { outcome: 'exited' }> {
   if (continueBudgetExceeded(driver.attempts, driver.max)) {
-    failContinueBudget(ctx, driver, rebaseInProgressBranch(ctx));
+    failContinueBudget(ctx, driver, rebaseDiagnosticBranch(ctx));
     return { outcome: 'exited' };
   }
   const result = driver.run();
@@ -214,7 +226,7 @@ function classifyPreContinue(ctx: RebaseContext, result: GitCommandResult): Driv
     return { action };
   }
   const staged = Boolean(ctx.gitFn(['-C', ctx.executionRoot, 'status', '--porcelain']).stdout.trim());
-  action = preContinueAction(result.status, false, staged, staged ? true : Boolean(rebaseInProgressBranch(ctx)));
+  action = preContinueAction(result.status, false, staged, staged ? true : rebaseStillInProgress(ctx));
   if (action === 'completed') { return { action }; }
   if (staged) {
     fmt.log.info('More changes detected. Continuing rebase...');
@@ -232,11 +244,11 @@ function classifyPreContinue(ctx: RebaseContext, result: GitCommandResult): Driv
  */
 function classifyPostContinue(ctx: RebaseContext, driver: ContinueDriver, result: GitCommandResult, staged: boolean): DriveClassification {
   const conflicts = hasConflictMarkers(combineOutput(result));
-  const stillRebasing = result.status === 0 || conflicts ? '' : rebaseInProgressBranch(ctx);
-  const action = postContinueAction(result.status, conflicts, Boolean(stillRebasing), driver.attempts, driver.max, staged);
+  const stillRebasing = result.status === 0 || conflicts ? false : rebaseStillInProgress(ctx);
+  const action = postContinueAction(result.status, conflicts, stillRebasing, driver.attempts, driver.max, staged);
   if (action === 'completed') { return { action }; }
   if (action === 'budget-exhausted') {
-    failContinueBudget(ctx, driver, stillRebasing);
+    failContinueBudget(ctx, driver, stillRebasing ? rebaseDiagnosticBranch(ctx) : '');
     return { action: 'exited' };
   }
   if (action === 'staged-failure') {

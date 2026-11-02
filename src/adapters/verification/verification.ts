@@ -3,7 +3,7 @@ import { assertIndependentGateInvocation } from '../../application/ports/gate-ad
 import { verificationEnvironment } from '../config/verification-environment.js';
 import { verificationDigest as digest, readVerificationInputs } from './verification-proof-inputs.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
-import { git, run } from '../git/git.js';
+import { git, isOutputLimitFailure, run } from '../git/git.js';
 import type { SpawnSyncOptions } from 'node:child_process';
 import { loadAdapterConfig } from '../config/product-config.js';
 import { log } from '../../application/presentation/cli-format.js';
@@ -198,13 +198,21 @@ export function runVerificationGate(area: string | undefined, options: { rootDir
 
   const { stdio = 'inherit' } = options;
   const runFn: VerificationRunner = options.runFn ?? run;
-  const result = runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
-    progressLabel: `Repository verification (${effectiveArea})`,
-    env: verificationEnvironment(options.env ?? { ...process.env }),
-    cwd: rootDir,
-    stdio,
-    ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024 } : {}),
-  });
+  let result: VerificationGateResult;
+  try {
+    result = runFn('bash', ['-c', command.replaceAll('{{area}}', effectiveArea)], {
+      progressLabel: `Repository verification (${effectiveArea})`,
+      env: verificationEnvironment(options.env ?? { ...process.env }),
+      cwd: rootDir,
+      stdio,
+      ...(stdio === 'pipe' ? { encoding: 'utf8', maxBuffer: options.maxBuffer ?? 10 * 1024 * 1024 } : {}),
+    });
+  } catch (error) {
+    // A gate whose output cannot be captured cannot be certified as passed; report the
+    // failed check instead of letting a truncated stream look like a clean run.
+    if (!isOutputLimitFailure(error)) { throw error; }
+    result = { status: null, signal: null, stdout: '', stderr: error.message };
+  }
   return { ...result, failureReason: result.failureReason ?? gateFailureReasonFromProcess(result) };
 }
 

@@ -1,3 +1,5 @@
+import { integrationRepairNeedsReview } from '../../domain/integration-repair-policy.js';
+import { resumeIntegrationAssessment } from './integration-assessment.js';
 /**
  * The application-owned autonomous review loop.
  *
@@ -8,6 +10,7 @@
  * (`implementer-phase.ts`). Mechanisms are reached only through the typed ports
  * in `../ports/review-round.ts`.
  */
+import { recordHumanCorrection } from './human-correction.js';
 import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
@@ -212,6 +215,10 @@ async function runRound(context: LoopContext, attempt: number): Promise<'stop' |
     if (context.state.phase === 'approved') { return await handleApprovedRoundCorrection(context, humanFeedback); }
     round.blockingFindings = [...humanFeedback.findings];
     round.humanFeedback = `${humanFeedback.author} (${humanFeedback.source}): ${humanFeedback.reason}`;
+    if (!context.dryRun) {
+      const recorded = await recordHumanCorrection(context, round, humanFeedback);
+      if (recorded !== 'recorded') { return recorded; }
+    }
     // A resumed round may already be fixing; only a reviewing round enters it.
     if (context.state.phase !== 'fixing') { context.state.transitionTo('fixing'); }
     context.state.disposition = 'REQUEST_CHANGES';
@@ -243,6 +250,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
+  if (await resumeIntegrationAssessment(start, ports)) { return; }
   persisted = await ports.state.read();
   const prepared = await prepareStart(start, request.skipReviewPreparation ?? false, implementer, ports, out);
   if (!prepared) { return; }
@@ -339,7 +347,8 @@ async function continuesActiveReviewPreparation(start: Start, ports: ReviewLoopP
   let continueReviewPreparation = false;
   if (store && isContinue && !dryRun) {
     const loaded = await store.load(missionId(slug));
-    continueReviewPreparation = loaded.kind === 'found' && (loaded.mission.status === 'active' || loaded.mission.status === 'review' && loaded.mission.reviewPreparationPending === true)
+    continueReviewPreparation = loaded.kind === 'found' && (loaded.mission.status === 'active' || loaded.mission.status === 'review' && (loaded.mission.reviewPreparationPending === true
+      || integrationRepairNeedsReview(loaded.mission) && currentReviewRound(loaded.mission.review!).subject.revision !== ports.preReview.head()))
       && Boolean(loaded.mission.review && ['awaiting-review', 'ready-for-next-round'].includes(reviewStatus(loaded.mission.review)));
   }
   return continueReviewPreparation;

@@ -4,6 +4,7 @@ import { HTMLButtonElement as DomButton } from 'happy-dom';
 import { act } from 'react';
 import { renderBoard } from './web-board-harness.fixture.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import type { WebAgentAvailability } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
@@ -19,12 +20,13 @@ function familyBoard(kind = 'active:execute', enabled = true) {
   const board = snapshot();
   const card = board.stages.flatMap(stage => stage.cards)[0];
   const action = { ...card.actions[0], kind, state: enabled ? 'enabled' : 'unavailable' } as typeof card.actions[number];
-  return { ...board, stages: board.stages.map(stage => ({ ...stage, cards: stage.cards.map(card => ({ ...card, actions: [action] })) })),
-    agentAvailability: [
+  const agentAvailability: WebAgentAvailability[] = [
       { family: 'codex', available: true, blockedFor: { kind: 'finite' as const, ms: 0 }, reason: null },
       { family: 'custom', available: true, blockedFor: { kind: 'finite' as const, ms: 0 }, reason: null },
       { family: 'claude', available: false, blockedFor: { kind: 'indefinite' as const }, reason: 'usage blocked' },
-    ] };
+    ];
+  return { ...board, stages: board.stages.map(stage => ({ ...stage, cards: stage.cards.map(card => ({ ...card, actions: [action] })) })),
+    agentAvailability };
 }
 
 for (const kind of ['draft:create', 'active:execute', 'review:submit']) {
@@ -114,5 +116,29 @@ test('agent menu dismisses outside and cannot bypass unavailable or pending acti
     assert.equal(page.window.document.querySelector('[role="menu"]') === null, true);
     assert.equal(page.calls.length, 1);
     await act(async () => { release(new Response(JSON.stringify(commandResult()))); });
+  } finally { await page.close(); }
+});
+
+test('timed Claude block shows its reason and countdown on board and picker through expiry (px-0026)', async () => {
+  const board = familyBoard();
+  const reason = 'parsed: Claude 5-hour limit';
+  board.agentAvailability[2] = { family: 'claude', available: false, blockedFor: { kind: 'finite', ms: 90_000 }, reason };
+  const page = await renderBoard({ board });
+  try {
+    const button = page.mount.querySelector<DomButton>('button[data-action-kind="active:execute"]')!;
+    await act(async () => { button.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })); });
+    const claude = () => [...page.window.document.querySelectorAll<DomButton>('[role="menuitem"]')].find(item => item.textContent.includes('claude'))!;
+    assert.equal(claude().disabled, true);
+    assert.match(claude().textContent, /parsed: Claude 5-hour limit · 1m 30s/);
+    assert.ok(page.mount.querySelector(`[title="${reason}"]`));
+    assert.match(page.mount.textContent, /blocked · 1m 30s/);
+    await page.rerender({ ...board, agentAvailability: board.agentAvailability.map(metric => metric.family === 'claude'
+      ? { ...metric, available: true, blockedFor: { kind: 'finite', ms: 0 }, reason: null } : metric) });
+    assert.equal(claude().disabled, false);
+    assert.match(claude().textContent, /claude — available/);
+    assert.doesNotMatch(claude().textContent, /limit|1m 30s/);
+    assert.equal(page.mount.querySelector(`[title="${reason}"]`), null);
+    assert.doesNotMatch(page.mount.textContent, /blocked · 1m 30s/);
+    assert.equal(page.calls.length, 0);
   } finally { await page.close(); }
 });

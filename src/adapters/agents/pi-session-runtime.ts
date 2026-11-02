@@ -159,6 +159,7 @@ async function createSdkSessionOptions(
 interface PiRunState {
   assistantText: string;
   settleError: string | null;
+  stopReason?: string;
 }
 
 function sessionValue<T>(read: () => T | null | undefined, fallback: T): T {
@@ -190,6 +191,7 @@ function piResult(session: PiSession | null, state: PiRunState, error: unknown, 
     model: modelId || undefined, provider: 'pi', transientRetries: attempts,
     startedAt, endedAt: new Date().toISOString(),
     stats,
+    ...(state.stopReason ? { stopReason: state.stopReason } : {}),
   };
 }
 
@@ -252,6 +254,7 @@ function updatePiSettlement(event: PiStreamEvent, state: PiRunState) {
     if (event.type === 'message_start' && event.message?.role === 'assistant') { state.settleError = null; }
     if (event.type === 'agent_end' && !event.willRetry) {
       const last = event.messages?.findLast((message) => message.role === 'assistant') ?? event.messages?.at(-1);
+      state.stopReason = last?.stopReason === 'length' ? 'output-token-limit' : last?.stopReason;
       state.settleError = piMessageError(last);
     } else if (event.type === 'auto_retry_end') {
       state.settleError = event.success === false ? event.finalError || 'agent retries exhausted without a model response' : null;

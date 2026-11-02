@@ -140,17 +140,6 @@ export function describeCoordinatorEvidence(evidence: CoordinatorEvidence): stri
   return `live px command${family} — recovery evidence only`;
 }
 
-/**
- * The agent strip's per-family evidence text.
- *
- * The input counts live `px` processes attributed to a family, not agents, so
- * the text names `px cmd`. `null`/`undefined` means the process scan could not
- * run and must never be rendered as zero.
- */
-export function describeFamilyCoordinatorEvidence(liveCommands: number | null | undefined): string {
-  return typeof liveCommands === 'number' ? `${liveCommands} px cmd live` : 'px cmd unknown';
-}
-
 /** Counts of authoritative work states across the board. */
 export interface MissionActivityTotals {
   readonly live: number;
@@ -186,7 +175,7 @@ export function describeMissionActivityTotals(totals: MissionActivityTotals): st
   return segments.length === 0 ? null : `work: ${segments.join(' · ')}`;
 }
 
-/** Confirmed provider invocations; incomplete observations give lower bounds. */
-export function describeFamilyProviderExecution(count: number | null | undefined, complete: boolean): string {
-  return typeof count === 'number' ? `${count}${complete ? '' : '+'} providers executing` : 'provider execution unknown';
+/** Confirmed provider invocations; nothing is printed before an execution reader has run. */
+export function describeFamilyProviderExecution(count: number | undefined): string | null {
+  return typeof count === 'number' ? `${count} providers executing` : null;
 }

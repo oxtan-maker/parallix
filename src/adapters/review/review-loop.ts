@@ -1,3 +1,5 @@
+import { invalidateApprovedPrReview } from './integration-approval-invalidation.js';
+import { createIntegrationApprovalEvidence } from './integration-approval-evidence.js';
 import { createReviewObservationRecorder } from './review-observation-recording.js';
 import { providerReviewObservation, providerReviewChanges, providerResolution } from './review-provider-observations.js';
 import { reviewVerdictBlock } from '../../application/review-verdict-readiness.js';
@@ -23,7 +25,7 @@ import * as path from 'path';
 import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { renderReviewLoopEvent } from './review-loop-presentation.js';
-import { git, run } from '../git/git.js';
+import { git, run, runToExit } from '../git/git.js';
 import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
@@ -60,6 +62,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
   readonly pinnedReviewer?: string;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
@@ -134,6 +137,11 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
   });
   const push = (options: Record<string, unknown>) => pushReviewRef(branch, branch, worktree, { ...options, token: credentials() });
   return {
+    async dismissApproval(approvedRevision, reason) {
+      const result = await invalidateApprovedPrReview({ slug, branch, approval: { ok: true }, summary: reason,
+        approvedRevision, rootDir: worktree, configuration });
+      if (!result.ok) { throw new Error(result.errors.join('; ')); }
+    },
     async ensureReachable() {
       const url = configuration.forgejo.url || 'http://localhost:3300';
       log(fmt.status('INFO', `Checking review-provider availability at ${url}...`));
@@ -292,6 +300,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     branch,
     worktree,
     classification: bindings.classification,
+    integrationApprovalEvidence: createIntegrationApprovalEvidence(worktree, bindings.integrationValidation ?? (async () => null), bindings.configuration),
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
     retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore, bindings.configuration) : undefined,
@@ -364,7 +373,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
           ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
         },
       })),
-      runGate: async () => gateFacts(await runPreReviewGate(slug, worktree, { configuration: bindings.configuration, runFn: run, log, error })),
+      runGate: async () => gateFacts(await runPreReviewGate(slug, worktree, { configuration: bindings.configuration, runFn: runToExit, log, error })),
       reviewBaseline() {
         try {
           const primary = getPrimaryBranch(worktree, git);

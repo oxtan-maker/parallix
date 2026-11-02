@@ -109,6 +109,17 @@ import { GitMissionPatchComparison, releaseVersionOnly } from '../../../../../sr
 test('patch comparison fails closed on Git errors and only accepts release-version fields (TASK-2734)', async () => {
   const compare = new GitMissionPatchComparison('/fixture', async () => { throw new Error('git unavailable'); });
   await assert.rejects(compare.samePatch({ baseline: 'a'.repeat(40), revision: 'b'.repeat(40) }, { baseline: 'a'.repeat(40), revision: 'c'.repeat(40) }));
+  // TASK-2828.3: an output-limit failure must say which read overflowed, so a blocked approval
+  // retention records an actionable reason rather than an opaque child-process error.
+  const plain = new GitMissionPatchComparison('/fixture', async (_file, args) => { throw Object.assign(new Error('boom'), { code: 'EPERM', args }); });
+  await assert.rejects(plain.samePatch({ baseline: 'a'.repeat(40), revision: 'b'.repeat(40) }, { baseline: 'c'.repeat(40), revision: 'd'.repeat(40) }),
+    /git cat-file failed/);
+  const oversize = new GitMissionPatchComparison('/fixture', async (_file, args) => {
+    if ((args as string[]).includes('cat-file')) { return { stdout: '' }; }
+    throw Object.assign(new Error('buffer overflow'), { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' });
+  });
+  await assert.rejects(oversize.samePatch({ baseline: 'a'.repeat(40), revision: 'b'.repeat(40) }, { baseline: 'c'.repeat(40), revision: 'd'.repeat(40) }),
+    /git diff output exceeds the 4000000 byte read limit; the mission patch cannot be compared completely/);
   const json = (v: unknown) => JSON.stringify(v, null, 2) + '\n';
   const pkg = { name: 'fixture', version: '1.2.3', dependencies: { x: '1' } };
   assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4' }), 'package.json'), true);

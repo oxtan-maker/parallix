@@ -301,6 +301,10 @@ test('database-only replay preserves squashed work, relocation and completed tas
         launches++;
         assert.equal(options.agent, 'codex');
         assert.match(String(options.prompt), /Review shared conflicts semantically/);
+        assert.match(String(options.prompt), /Before resolving unexpectedly replayed inherited work, inspect the target branch, Git history and actual diffs/);
+        assert.match(String(options.prompt), /Preserve intended Mission changes and current base behavior/);
+        assert.match(String(options.prompt), /Do not restore obsolete code or task metadata merely to apply an old commit/);
+        assert.match(String(options.prompt), /Use ordinary Git rebase tools when the intended range is clear\. If unclear, explain the specific uncertainty with paths and evidence/);
         // Explicit semantic review: carry unique intent to the relocated file;
         // keep newer main state and completed work, removing only stale paths.
         for (let pauses = 0; pauses < 5; pauses++) {

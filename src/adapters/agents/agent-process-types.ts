@@ -4,6 +4,7 @@ import type { spawnAndTee } from '../process/spawn-tee.js';
 /** Process output plus metadata attached by the provider launchers. */
 export type AgentProcessResult = Partial<Awaited<ReturnType<typeof spawnAndTee>>> & {
   failureReason?: unknown;
+  stopReason?: string;
   sessionId?: string | null;
   telemetry?: StageTelemetry | null;
   model?: string | null;

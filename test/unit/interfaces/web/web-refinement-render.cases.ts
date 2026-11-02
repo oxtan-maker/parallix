@@ -15,7 +15,7 @@ const snapshotOf = (overrides: Partial<BoardProjection>) => toWebBoardSnapshot({
 const render = (snapshot: WebBoardSnapshot) => renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
 const browserSources = fs.readdirSync('web/src').filter(name => /\.(?:ts|tsx|css)$/.test(name)).map(name => ({ name, text: fs.readFileSync(`web/src/${name}`, 'utf8') }));
 const refinementExecution = (family: string | null, complete = true): MissionCard['execution'] => ({
-  observedAt: '2026-10-18T10:00:00Z', complete, limitations: complete ? [] : ['Provider execution could not be observed'],
+  observedAt: '2026-10-18T10:00:00Z', limitations: complete ? [] : ['Provider execution could not be observed'],
   invocations: family === null ? [] : [{ runId: `draft-${family}-a1-test`, operationId: 'op-draft', family: agentFamily(family) }],
 });
 const refinementCard = (overrides: Partial<MissionCard>): MissionCard => makeCard({

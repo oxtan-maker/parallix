@@ -112,3 +112,60 @@ test('serial non-TTY gate output arrives before the gate finishes', async () => 
   assert.equal(sawReadyWhileRunning, true);
   assert.match(output, /done/);
 });
+
+/** Read pids a gate's descendants wrote, and SIGKILL any survivors when the case ends. */
+function descendantPids(t: import('node:test').TestContext): { file: string; pids: () => number[] } {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-descendant-'));
+  const file = path.join(root, 'pids');
+  const pids = () => fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(Number) : [];
+  t.after(() => {
+    for (const pid of pids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ } }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  return { file, pids };
+}
+
+const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+test('a gate settles on its own exit while a quiet descendant keeps its pipes, without signalling it (TASK-2806)', async t => {
+  const descendant = descendantPids(t);
+  const started = Date.now();
+  const result = await runGateCommand(`sleep 3 & echo $! > ${descendant.file}; printf done`, [], { cwd: process.cwd(), env: process.env, stdio: 'pipe' });
+  assert.deepEqual({ status: result.status, signal: result.signal, stdout: result.stdout }, { status: 0, signal: null, stdout: 'done' });
+  assert.ok(Date.now() - started < 2000, 'the gate result does not wait for the descendant');
+  assert.equal(alive(descendant.pids()[0]), true, 'the descendant is left running');
+});
+
+test('a continuously writing descendant cannot hold a settled gate open (TASK-2806 F1)', { timeout: 5000 }, async t => {
+  // The writer ignores SIGPIPE, so its survival shows the runner sent it nothing.
+  const descendant = descendantPids(t);
+  const started = Date.now();
+  const result = await runGateCommand(`(trap '' PIPE; while :; do printf . 2>/dev/null; sleep 0.05; done) & echo $! > ${descendant.file}; printf done`, [], { cwd: process.cwd(), env: process.env, stdio: 'pipe' });
+  const elapsedMs = Date.now() - started;
+  assert.deepEqual({ status: result.status, signal: result.signal }, { status: 0, signal: null });
+  assert.match(result.stdout, /done/);
+  assert.ok(elapsedMs < 1500, `settled ${elapsedMs} ms after the gate exited`);
+  assert.equal(alive(descendant.pids()[0]), true, 'the writer is left running, not signalled');
+});
+
+test('a quiet live gate is awaited past the exit drain window (TASK-2806)', async () => {
+  const started = Date.now();
+  const result = await runGateCommand('sleep 0.8; printf finished', [], { cwd: process.cwd(), env: process.env, stdio: 'pipe' });
+  assert.deepEqual({ status: result.status, stdout: result.stdout }, { status: 0, stdout: 'finished' });
+  assert.ok(Date.now() - started >= 800, 'a running gate is never settled as idle');
+});
+
+// The grace outlasts the exit drain window, so an early exit settlement would be observable.
+test('cancellation still escalates to the gate group after the gate shell exits on TERM (TASK-2806)', async t => {
+  const descendant = descendantPids(t);
+  const controller = new globalThis.AbortController();
+  const result = await runGateCommand(`(trap '' TERM; echo $BASHPID > ${descendant.file}; while :; do sleep 0.05; done) & sleep 0.05; printf ready; wait`, [], {
+    cwd: process.cwd(), env: process.env, stdio: 'pipe', signal: controller.signal, terminationGraceMs: 1000,
+    onOutput: chunk => { if (chunk.includes('ready')) controller.abort(); },
+  });
+  assert.deepEqual({ status: result.status, signal: result.signal }, { status: null, signal: 'SIGKILL' });
+  assert.match(result.stderr, /cancelled after termination grace/);
+  const [pid] = descendant.pids();
+  for (let waited = 0; alive(pid) && waited < 1000; waited += 20) { await new Promise(resolve => setTimeout(resolve, 20)); }
+  assert.equal(alive(pid), false, 'cancellation, unlike a settled gate, terminates the group');
+});

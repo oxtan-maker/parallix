@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { retainGateOutput } from './gate-dashboard.js';
+import { settleOnExit } from './child-exit.js';
 
 export function runGateCommand(command: string, _args: string[], options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void, terminationGraceMs?: number }): Promise<{ status: number | null, stdout: string, stderr: string, signal: string | null }> {
   return new Promise(resolve => {
@@ -50,6 +51,8 @@ export function runGateCommand(command: string, _args: string[], options: { cwd:
     });
     child.once('error', cause => { stderr = retainGateOutput(stderr, String(cause)); finish(null); });
     child.once('close', finish);
+    // Cancellation keeps its termination grace and group escalation.
+    settleOnExit(child, finish, { terminating: () => Boolean(watchdog) });
     if (guarded && child.pid) {
       try {
         options.bindProcessGroup!(child.pid);

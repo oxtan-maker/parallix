@@ -3,7 +3,6 @@ import { AgentStrip } from '../../../../src/interfaces/tui/agent-strip.js';
 import { renderToString } from 'ink';
 import React from 'react';
 import { type AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
-import { countUnattributedSessions } from '../../../../src/application/projections/agent-status.js';
 import { projectAgentAvailability } from '../../../../src/application/projections/agent-status.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import assert from 'node:assert/strict';
@@ -33,10 +32,9 @@ const FORTY_FIVE_MINUTES_MS = 45 * 60 * 1000;
 
 function renderStrip(
   agentAvailability: readonly AgentAvailabilityMetric[],
-  unattributedRunningSessions?: number | null,
 ): string {
   return plain(renderToString(
-    React.createElement(AgentStrip, { agentAvailability, unattributedRunningSessions }),
+    React.createElement(AgentStrip, { agentAvailability }),
     { columns: 120 },
   ));
 }
@@ -61,7 +59,7 @@ test('AgentStrip renders a red dot and countdown for a family blocked until a fu
   assert.ok(frame.includes('codex'), `strip must name the available family. Got: ${frame}`);
   assert.ok(frame.includes('●'), `strip must render availability dots. Got: ${frame}`);
   assert.ok(frame.includes('45m'), `strip must render the formatCountdown value. Got: ${frame}`);
-  assert.ok(frame.includes('px cmd unknown'), `unobserved liveness must read as unknown. Got: ${frame}`);
+  assert.ok(!frame.includes('unknown') && !frame.includes('px cmd'), `an unobserved count prints nothing. Got: ${frame}`);
   assert.ok(!frame.includes('wip:'), `the strip must not stand in board cards for sessions. Got: ${frame}`);
 });
 
@@ -254,45 +252,10 @@ test('projectAgentAvailability prefers the block reason over the launcher reason
   assert.equal(row?.reason, 'usage limit', 'an active block is the more specific explanation');
 });
 
-test('AgentStrip reports observed live px commands per family without calling them agents', async () => {
-  const rows = projectAgentAvailability(
-    [
-      { family: agentFamily('codex'), launcherAvailable: true, block: { kind: 'none' } },
-      { family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } },
-    ],
-    NOW_MS,
-    [
-      { missionId: fixtureMissionId('task-2328'), family: agentFamily('claude') },
-      { missionId: fixtureMissionId('task-2340'), family: agentFamily('claude') },
-    ],
-  );
-
-  const frame = await renderStrip(rows);
-
-  assert.ok(frame.includes('claude 2 px cmd live'), `observed px processes must be counted. Got: ${frame}`);
-  assert.ok(frame.includes('codex 0 px cmd live'), `an observed idle family is zero. Got: ${frame}`);
-  assert.ok(!/\d+ running/.test(frame), `coordinator evidence must never read as a running-agent count. Got: ${frame}`);
-});
-
-test('AgentStrip says px command liveness is unknown when liveness was not observed', async () => {
-  const rows = projectAgentAvailability(
-    [{ family: agentFamily('codex'), launcherAvailable: true, block: { kind: 'none' } }],
-    NOW_MS,
-    null,
-  );
-
-  const frame = await renderStrip(rows);
-
-  assert.equal(rows[0]?.runningSessions, null, 'unobserved liveness must stay null');
-  assert.ok(frame.includes('px cmd unknown'), `unknown must not render as 0. Got: ${frame}`);
-  assert.ok(!frame.includes('0 px cmd live'), `unknown must never be shown as zero. Got: ${frame}`);
-});
-
 test('AgentStrip shows no trace of a block whose until has elapsed', async () => {
   const rows = projectAgentAvailability(
     [{ family: agentFamily('vibe'), launcherAvailable: true, block: { kind: 'until', untilMs: NOW_MS - 1, reason: 'exit 1' } }],
     NOW_MS,
-    [],
   );
 
   const frame = await renderStrip(rows);
@@ -303,32 +266,6 @@ test('AgentStrip shows no trace of a block whose until has elapsed', async () =>
   assert.ok(!frame.includes('exit 1'), `a lapsed block reason must not linger. Got: ${frame}`);
 });
 
-test('AgentStrip counts a session no family can claim instead of dropping it', async () => {
-  const rows = projectAgentAvailability(
-    [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
-    NOW_MS,
-    [{ missionId: fixtureMissionId('task-2328'), family: null }],
-  );
-
-  const frame = await renderStrip(rows, countUnattributedSessions([{ missionId: fixtureMissionId('task-2328'), family: null }]));
-
-  assert.ok(frame.includes('claude 0 px cmd live'), `no family may claim the process. Got: ${frame}`);
-  assert.ok(frame.includes('1 px cmd live · family unknown'), `the process must still be counted. Got: ${frame}`);
-});
-
-test('AgentStrip omits the unattributed entry when every session is attributed', async () => {
-  const sessions = [{ missionId: fixtureMissionId('task-2328'), family: agentFamily('claude') }];
-  const rows = projectAgentAvailability(
-    [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'none' } }],
-    NOW_MS,
-    sessions,
-  );
-
-  const frame = await renderStrip(rows, countUnattributedSessions(sessions));
-
-  assert.ok(frame.includes('claude 1 px cmd live'), `the attributed process belongs to its family. Got: ${frame}`);
-  assert.ok(!frame.includes('family unknown'), `nothing is unattributed here. Got: ${frame}`);
-});
 }
 
 // Regression group from test/agent-family-config-discovery.test.ts
@@ -423,13 +360,14 @@ test('shipped config/agents.json declares no top-level families key', () => {
 });
 }
 
-test('AgentStrip distinguishes provider counts and partial lower bounds from coordinator evidence (TASK-2769)', () => {
+test('AgentStrip prints confirmed provider counts including a real zero and nothing before a reader ran (TASK-2769, px-0027)', () => {
   const rows: AgentAvailabilityMetric[] = [
-    { family: agentFamily('codex'), available: true, blockedForMs: 0, runningSessions: 1, executionComplete: false },
-    { family: agentFamily('claude'), available: true, blockedForMs: 0, runningSessions: null, executionComplete: false },
+    { family: agentFamily('codex'), available: true, blockedForMs: 0, runningSessions: 1 },
+    { family: agentFamily('claude'), available: true, blockedForMs: 0, runningSessions: 0 },
+    { family: agentFamily('custom'), available: true, blockedForMs: 0 },
   ];
-  const frame = renderToString(React.createElement(AgentStrip, { agentAvailability: rows }), { columns: 160 });
-  assert.match(frame, /1\+ providers executing/);
-  assert.match(frame, /provider execution unknown/);
-  assert.doesNotMatch(frame, /px cmd live/);
+  const frame = renderToString(React.createElement(AgentStrip, { agentAvailability: rows }), { columns: 200 });
+  assert.match(frame, /codex 1 providers executing/);
+  assert.match(frame, /claude 0 providers executing/);
+  assert.doesNotMatch(frame, /custom \d|unknown|px cmd|\+/);
 });

@@ -213,3 +213,18 @@ test('a refused prepared launch settles its reservation without invoking a provi
   assert.equal(launches, 0);
   assert.equal(releases, 1);
 });
+
+test('a capture finalized before any spawn stays retrievable and reads stopped without a fabricated exit (px-0027)', async () => {
+  const { getRun } = await import('../../../../src/application/run-history.js');
+  const { runHistoryFileSystem } = await import('../../../../src/adapters/filesystem/run-history-store.js');
+  const { worktree, deps, input } = setup('pipe');
+  const session = openRunSession(input, deps)!;
+  session.finish({ status: null, signal: null, sessionId: null });
+  const finished = record(worktree, session.runId);
+  assert.equal(finished.state, 'exited');
+  assert.equal(finished.exitCode, null, 'no child ran, so no exit code is invented');
+  assert.equal(finished.signal, null);
+  assert.equal(finished.execution, null);
+  const lookup = getRun({ runsDir: missionRunsDir(worktree, 'task-7'), fs: runHistoryFileSystem, isAlive: () => false }, session.runId);
+  assert.equal(lookup.ok && lookup.run?.execution, 'stopped');
+});

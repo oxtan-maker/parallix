@@ -80,6 +80,7 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   // The launch is an await boundary: a concurrent controller may have advanced
   // the round, so re-read before any identity or telemetry write.
   if (await stopIfControllerSuperseded(context, 'reviewer-launch fallback')) { return 'stop'; }
+  round.reviewerLaunch = launch;
   await adoptLaunchedAgent(context, 'reviewer', identities.reviewer, launch);
   await ports.agents.recordStage('reviewer', context.state, identities, launch);
   return null;
@@ -89,10 +90,22 @@ function reviewerArtifactDiagnostic(context: LoopContext, artifacts: ReviewerArt
   return artifacts.diagnostic || `Reviewer ${context.identities.reviewer} produced incomplete or invalid review artifacts`;
 }
 
+function missingReviewerArtifacts(context: LoopContext, round: ReviewRound): string {
+  const stopReason = round.reviewerLaunch?.result?.stopReason;
+  const cause = stopReason === 'length' ? 'output-token-limit' : stopReason;
+  return `Incomplete reviewer artifact: reviewer ${context.identities.reviewer} exited without a recorded verdict or consumable review artifacts${cause ? ` (${cause})` : ''}`;
+}
+
+/** A completed process cannot produce a later verdict without a relaunch. */
+function incompleteReviewerDiagnostic(context: LoopContext, round: ReviewRound, artifacts: ReviewerArtifactFacts): string | null {
+  if (artifacts.consumed) { return artifacts.ok ? null : reviewerArtifactDiagnostic(context, artifacts); }
+  return typeof round.reviewerLaunch?.result?.status === 'number' ? missingReviewerArtifacts(context, round) : null;
+}
+
 /**
  * Consume the reviewer's output. Incomplete output is relaunched through one
  * rebound occurrence; an infrastructure failure or a spent budget escalates.
- * Falls back to the provider poll when nothing was consumed.
+ * An exited reviewer with no output enters the same bounded artifact recovery.
  */
 async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): Promise<{ step: RoundStep; reviewState?: unknown }> {
   const { ports, state, identities } = context;
@@ -102,25 +115,34 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
   if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
   let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state);
   let reviewState: unknown = null;
-  if (artifacts.consumed && !artifacts.ok) {
-    const diagnostic = reviewerArtifactDiagnostic(context, artifacts);
+  const diagnostic = incompleteReviewerDiagnostic(context, round, artifacts);
+  if (diagnostic) {
     if (isArtifactInfraDiagnostic(diagnostic)) {
       context.emit({ kind: 'reviewer-artifact-infra', diagnostic: diagnostic });
       await context.escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
       return { step: 'stop' };
     }
-    if (round.capReached()) { return { step: await round.stopForCap('reviewer artifact') }; }
+    context.emit({ kind: 'reviewer-artifact-incomplete', diagnostic });
+    if (round.capReached()) {
+      context.emit({ kind: 'reviewer-recovery-exhausted', maxAttempts: 0, slug: context.slug, diagnostic });
+      return { step: await round.stopForCap('reviewer artifact') };
+    }
     // `fixed` requires the re-consumed artifacts to be complete: a relaunch
     // alone is no evidence that the reviewer produced anything.
     const maxAttempts = round.occurrenceBudget(DEFAULT_REBOUND_ATTEMPTS);
+    const collaborators = reboundCollaborators(context, 'reviewer', () => round.promptFacts());
     const recovery = await rebound({ kind: 'artifact-incomplete', role: 'reviewer', diagnostic }, {
-      ...reboundCollaborators(context, 'reviewer', () => round.promptFacts()),
+      ...collaborators,
+      applyAgentFallback: async options => {
+        round.reviewerLaunch = options.launchResult;
+        return await collaborators.applyAgentFallback!(options);
+      },
       implementer: identities.reviewer, step: 'review', role: 'reviewer', exclude: [identities.implementer], maxAttempts,
       verify: async () => {
         const retry = await reviewerRecoveryOutput(context);
         if (retry.workflowBlock) { return { ok: false, workflowBlock: retry.workflowBlock }; }
         artifacts = retry.artifacts;
-        if (!artifacts.consumed) { return { ok: false, diagnostic: `Reviewer ${identities.reviewer} produced no review artifacts after the relaunch` }; }
+        if (!artifacts.consumed) { return { ok: false, diagnostic: missingReviewerArtifacts(context, round) }; }
         return artifacts.ok ? { ok: true } : { ok: false, diagnostic: reviewerArtifactDiagnostic(context, artifacts) };
       },
     });
@@ -156,8 +178,8 @@ async function stopForArtifactRecovery(context: LoopContext, round: ReviewRound,
       await context.escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
       return 'stop';
     }
+    context.emit({ kind: 'reviewer-recovery-exhausted', maxAttempts, slug: context.slug, diagnostic: recovery.diagnostic });
     if (round.capReached()) { return await round.stopForCap('reviewer artifact'); }
-    context.emit({ kind: 'reviewer-recovery-exhausted', maxAttempts: maxAttempts, slug: context.slug });
     await context.escalateToHumanReview('REVIEWER_ARTIFACT_RETRY_EXHAUSTED');
     return 'stop';
   }

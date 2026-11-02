@@ -128,10 +128,9 @@ test('snapshot DTO round-trips through JSON.stringify and JSON.parse without los
       ...emptyMetrics,
       agentAvailability: [
         availabilityMetric({ family: agentFamily('codex'), available: false, blockedForMs: Infinity, reason: 'usage limit' }),
-        availabilityMetric({ family: agentFamily('custom'), runningSessions: null }),
+        availabilityMetric({ family: agentFamily('custom'), runningSessions: 1 }),
         { family: agentFamily('claude'), available: true, blockedForMs: 0, reason: null },
       ],
-      unattributedRunningSessions: null,
     },
     sourceFacts: [
       { source: 'task-markdown', status: 'fresh', value: 'CP-2 committed' },
@@ -212,44 +211,25 @@ test('running sessions distinguish unobserved, observed-none, and a positive cou
       ...emptyMetrics,
       agentAvailability: [
         { family: agentFamily('a'), available: true, blockedForMs: 0 },
-        availabilityMetric({ family: agentFamily('b'), runningSessions: null }),
+        availabilityMetric({ family: agentFamily('b'), runningSessions: 1 }),
         availabilityMetric({ family: agentFamily('c'), runningSessions: 0 }),
         availabilityMetric({ family: agentFamily('d'), runningSessions: 2 }),
       ],
     },
   });
   const snapshot = toWebBoardSnapshot(projection);
-  const [absent, unknown, observedNone, observedTwo] = snapshot.agentAvailability;
+  const [absent, observedOne, observedNone, observedTwo] = snapshot.agentAvailability;
 
   assert.ok(!('runningSessions' in absent), 'absent probe result must omit the key');
-  assert.strictEqual(unknown.runningSessions, null, 'unobserved liveness must be wire null');
+  assert.strictEqual(observedOne.runningSessions, 1);
   assert.strictEqual(observedNone.runningSessions, 0, 'observed-none must be wire 0');
   assert.strictEqual(observedTwo.runningSessions, 2);
 
   const parsed = roundTrip(snapshot);
   assert.ok(!('runningSessions' in parsed.agentAvailability[0]));
-  assert.strictEqual(parsed.agentAvailability[1].runningSessions, null);
+  assert.strictEqual(parsed.agentAvailability[1].runningSessions, 1);
   assert.strictEqual(parsed.agentAvailability[2].runningSessions, 0);
   assert.strictEqual(parsed.agentAvailability[3].runningSessions, 2);
-});
-
-test('unattributed running sessions keep the same three-state encoding', () => {
-  const omitted = toWebBoardSnapshot(projectionWith({ metrics: emptyMetrics }));
-  assert.ok(!('unattributedRunningSessions' in omitted));
-
-  const unknown = toWebBoardSnapshot(projectionWith({
-    metrics: { ...emptyMetrics, unattributedRunningSessions: null },
-  }));
-  assert.strictEqual(unknown.unattributedRunningSessions, null);
-
-  const observed = toWebBoardSnapshot(projectionWith({
-    metrics: { ...emptyMetrics, unattributedRunningSessions: 3 },
-  }));
-  assert.strictEqual(observed.unattributedRunningSessions, 3);
-
-  const parsed = roundTrip(unknown);
-  assert.strictEqual(parsed.unattributedRunningSessions, null);
-  assert.ok(!('unattributedRunningSessions' in roundTrip(omitted)));
 });
 
 test('mission work activity preserves live, unconfirmed, stale, blocked, and idle liveness', () => {

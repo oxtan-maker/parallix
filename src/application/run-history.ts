@@ -46,7 +46,9 @@ export interface RunSummary {
   readonly record: RunRecord;
   /** The record's state, with a dead supervisor's `running` reported as `interrupted`. */
   readonly state: RunState;
-  readonly execution: 'live' | 'stopped' | 'unknown';
+  readonly execution: 'live' | 'stopped';
+  /** True when the recorded provider process could not be probed: not counted live, but termination is not proven either. */
+  readonly executionProbeUnavailable?: boolean;
   /** Plain coverage statements: sources, retained bytes and omissions. */
   readonly coverage: readonly string[];
 }
@@ -83,11 +85,19 @@ function coverageOf(record: RunRecord, state: RunState): string[] {
   return lines;
 }
 
-/** Reusable process evidence check after metadata ownership and candidate selection. */
-export function observeRunExecution(record: RunRecord, state: RunState, scope: Pick<RunHistoryScope, 'executionAlive'>): RunSummary['execution'] {
-  const confirmedExit = state === 'exited' && (typeof record.exitCode === 'number' || typeof record.signal === 'string');
-  const observed = !confirmedExit && record.execution ? scope.executionAlive?.(record.execution) : null;
-  return confirmedExit ? 'stopped' : observed === true ? 'live' : observed === false ? 'stopped' : 'unknown';
+/**
+ * Reusable process evidence check after metadata ownership and candidate selection.
+ * Only a confirmed provider process (or a running in-process session) is live; a capture that
+ * never recorded a child, finalized, or whose child is gone is stopped from its own facts.
+ * An unavailable probe leaves the invocation uncounted and is reported through `onInconclusive`.
+ */
+export function observeRunExecution(record: RunRecord, state: RunState, scope: Pick<RunHistoryScope, 'executionAlive'> & { readonly onInconclusive?: () => void }): RunSummary['execution'] {
+  if (!record.execution) { return 'stopped'; }
+  if (state === 'exited' && (typeof record.exitCode === 'number' || typeof record.signal === 'string')) { return 'stopped'; }
+  const observed = scope.executionAlive?.(record.execution);
+  if (observed === true) { return 'live'; }
+  if (observed !== false) { scope.onInconclusive?.(); }
+  return 'stopped';
 }
 
 function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
@@ -101,8 +111,10 @@ function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
   catch { return { ok: false, error: 'malformed', detail: `run record ${runId} has an invalid agent family` }; }
   if (scope.acceptRecord && !scope.acceptRecord(record)) { return { ok: false, error: 'malformed', detail: `run record ${runId} is not attributed to this scope` }; }
   const state = effectiveState(record, scope.isAlive);
-  const execution = observeRunExecution(record, state, scope);
-  return { ok: true, run: { record, state, execution, coverage: coverageOf(record, state) } };
+  let executionProbeUnavailable = false;
+  const execution = observeRunExecution(record, state, { executionAlive: scope.executionAlive, onInconclusive: () => { executionProbeUnavailable = true; } });
+  return { ok: true, run: { record, state, execution, ...(executionProbeUnavailable ? { executionProbeUnavailable } : {}),
+    coverage: [...coverageOf(record, state), ...(executionProbeUnavailable ? ['the recorded provider process could not be probed; its termination is unconfirmed'] : [])] } };
 }
 
 /** Every retained run of the Mission, newest first. */

@@ -22,7 +22,9 @@ test('repository active verifier real shell ' + scenario + ' contract (TASK-2715
     });
     fs.chmodSync(path.join(checkout, 'bin/npm'), 0o755);
     fs.symlinkSync(process.execPath, path.join(checkout, 'bin/node'));
-    fs.symlinkSync(path.join(repoRoot, 'scripts/verify-active-units.ts'), path.join(checkout, 'scripts/verify-active-units.ts'));
+    for (const script of ['verify-active-units.ts', 'check-runner-health.ts']) {
+      fs.symlinkSync(path.join(repoRoot, 'scripts', script), path.join(checkout, 'scripts', script));
+    }
     repo.git('add', '.'); repo.git('commit', '-m', 'verifier');
     fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(checkout, 'node_modules'));
     const home = path.join(checkout, '.git', 'home');
@@ -44,7 +46,8 @@ test('repository active verifier real shell ' + scenario + ' contract (TASK-2715
     }
     {
       const result = spawnSync('sh', ['scripts/verify-local.sh', 'all'], { cwd: checkout, encoding: 'utf8', timeout: 5000,
-        env: { ...process.env, PATH: `${path.join(checkout, 'bin')}:${process.env.PATH}`, PARALLIX_EXECUTION_ROOT: checkout, PARALLIX_HOME: path.join(checkout, '.git', 'home'),
+        // Exercise the hosted policy so this CI contract needs no user systemd manager.
+        env: { ...process.env, GITHUB_ACTIONS: 'true', PATH: `${path.join(checkout, 'bin')}:${process.env.PATH}`, PARALLIX_EXECUTION_ROOT: checkout, PARALLIX_HOME: path.join(checkout, '.git', 'home'),
           FAIL_BUILD: scenario === 'build-failure' ? '1' : '0', PARALLIX_TEST_COVERAGE: 'true', NODE_V8_COVERAGE: path.join(checkout, '.git', 'raw') } });
       if (scenario === 'build-failure') {
         assert.notEqual(result.status, 0, 'a build failure must not be masked by successful or cached units');

@@ -112,6 +112,11 @@ presses the action each item already advertises, and gives an item that survives
 it a fresh agent in that mission's worktree to diagnose and repair. Whatever is
 still stuck comes back with the evidence behind it.
 
+Idle review missions remain visible after workflow failures, failed gates or
+stale work when review is available. The queue retains the diagnostic and offers
+review recovery to both the board operator and `px lead`. The configured reviewer
+owns the decision, and existing approval requirements still apply.
+
 **Confidence:** Confirmed. The queue is the board's own, so a mission with a live
 agent is never touched; attempts are bounded per failure; an item counts as
 cleared only when the board stops asking about it. Integration items are left for

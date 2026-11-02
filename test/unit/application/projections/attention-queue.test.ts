@@ -334,6 +334,60 @@ describe("Attention queue ranking and sources —", () => {
       ?.commands.every(command => !command.enabled));
   });
 
+  test('retains failed idle review recovery when active is disabled (TASK-2814)', () => {
+    const projection = project([makeCard('task-review-failed', 'review', {
+      blockingReason: 'Workflow exited with status 1',
+      commands: [
+        { command: 'active', enabled: false, reason: 'review lane' },
+        { command: 'review', enabled: true, reason: null },
+      ],
+    })]);
+    assert.equal(projection.attentionQueue.length, 1);
+    assert.equal(projection.attentionQueue[0]?.action?.kind, 'review:submit');
+  });
+
+  const diagnostics = [
+    { blockingReason: 'Workflow exited with status 1', reason: { kind: 'blocking', detail: 'Workflow exited with status 1' }, sources: ['current-work', 'mission-store'] },
+    { gate: 'failed' as const, reason: { kind: 'gate-failed', detail: 'Gate failed' }, sources: ['gate'] },
+    { currentWork: { operationId: 'review-old', phase: 'review' as const, summary: 'stopped', agent: agentFamily('codex'), updatedAt: '2026-08-30T00:00:00Z', freshness: 'stale' as const }, reason: { kind: 'stale-work', detail: 'review work is no longer verifiable' }, sources: ['current-work'] },
+  ];
+
+  test('review diagnostics retain reasons, ordering and sources (TASK-2814)', () => {
+    const cards = diagnostics.map((diagnostic, index) => makeCard(`review-${index}`, 'review', diagnostic));
+    const queue = project([...cards].reverse()).attentionQueue;
+    assert.deepEqual(queue.map(item => item.missionId), cards.map(card => card.id));
+    assert.deepEqual(queue.map(item => item.rank), [1, 2, 3]);
+    queue.forEach((item, index) => {
+      assert.deepEqual(item.reason, diagnostics[index]!.reason);
+      assert.deepEqual(item.dependsOnSources, diagnostics[index]!.sources);
+      assert.deepEqual(item.action, { kind: 'review:submit', display: `px review ${item.missionId}` });
+    });
+  });
+
+  test('diagnostic recovery respects lane availability and live review work (TASK-2814)', () => {
+    for (const diagnostic of diagnostics) {
+      const active = project([makeCard('task-implementer', 'active', diagnostic)]).attentionQueue;
+      assert.equal(active[0]?.action?.kind, 'active:execute');
+      for (const commands of [
+        [{ command: 'active' as const, enabled: false, reason: 'ineligible' }],
+        [{ command: 'active' as const, enabled: true, reason: null }, { command: 'review' as const, enabled: false, reason: 'unavailable' }],
+      ]) {
+        assert.deepEqual(project([makeCard('task-unavailable', 'review', { ...diagnostic, commands })]).attentionQueue, []);
+      }
+      for (const freshness of ['live', 'unverified'] as const) {
+        const currentWork = { operationId: 'live-review', phase: 'review' as const, summary: 'review running', agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness };
+        assert.deepEqual(project([makeCard('live-review', 'review', { ...diagnostic, currentWork })]).attentionQueue, []);
+      }
+      const liveSessionCard: MissionCard = { ...makeCard('live-session', 'review', diagnostic), currentWork: null, liveSession: { missionId: missionId('live-session'), family: agentFamily('codex') } };
+      assert.deepEqual(project([liveSessionCard]).attentionQueue, []);
+    }
+    const operatorCard = { ...makeCard('review-operator-stop', 'review', {
+      blockingReason: 'Operator review authority decision required',
+    }), blockerRequiresOperator: true };
+    assert.deepEqual(project([operatorCard]).attentionQueue[0]?.action,
+      { kind: 'manual', display: 'px lead review-operator-stop --once' });
+  });
+
   test('task-2444: every queued reason carries source dependencies', () => {
     const queue = project([makeCard('task-2444-blocking', 'active', { blockingReason: 'decision required' })]).attentionQueue;
     assert.equal(queue.length, 1);

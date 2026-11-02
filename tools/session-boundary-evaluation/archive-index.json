@@ -1,0 +1,342 @@
+{
+  "mission": "px-0008",
+  "archiveRoot": "/mnt/data/code/parallix-research/px-0008",
+  "pathResolution": "Resolve each files key relative to archiveRoot. The archive is operator-retained local evidence, not bundled with Git; a clone without archive access cannot reproduce these studies.",
+  "historicalReferences": {
+    "repositoryPrefix": "tools/session-boundary-evaluation/",
+    "archivePrefix": "session-boundary-evaluation/",
+    "originalCommit": "1ebed1baf8dc6b7bb4aa163cdc1ff6f884fdf6a8",
+    "verification": "All 58 original committed artifacts exist in the archive; 57 are byte-identical. report.md has later navigation text; its retained version is hashed below. Historical assertions describe the pinned replay, not current production behavior.",
+    "originalReportSha256": "b47b0b33d3cdcc0affd7777d3b0623952b500c218707c3ff0aa18441146e27ab"
+  },
+  "rawReplayArchive": "session-boundary-evaluation/archive.json records the original raw output/session archive root and per-file hashes. Its root is separate from archiveRoot and must also be retained for full replay.",
+  "checkpointEvidence": {
+    "sc-1": [
+      "session-boundary-evaluation/report.md",
+      "session-boundary-evaluation/manifest.json"
+    ],
+    "sc-2": [
+      "session-boundary-evaluation/manifest.json",
+      "session-boundary-evaluation/results.json",
+      "session-boundary-evaluation/reconstruction.json"
+    ],
+    "sc-3": [
+      "session-boundary-evaluation/report.md",
+      "session-boundary-evaluation/results.json",
+      "session-boundary-evaluation/integrity.json",
+      "session-boundary-evaluation/C1-precheck.json",
+      "session-boundary-evaluation/C1-adjudication.json"
+    ],
+    "sc-4": [
+      "session-boundary-evaluation/report.md",
+      "session-boundary-evaluation/summary.json",
+      "session-boundary-evaluation/manual.json",
+      "session-boundary-evaluation/verification.json",
+      "strata-no-context-20/final-summary.json",
+      "rebase-context-34-extension/final-summary.json",
+      "review-repair-three-arm/final-results.json",
+      "review-repair-three-arm/20261022-completion-reconciliation.json",
+      "review-repair-three-arm/cost-accounting.json"
+    ]
+  },
+  "limitations": "This index restores evidence discoverability and integrity checks; it does not complete CP-4/CP-5/CP-6, verify the current repair, or authorize more experiments. Archived gate results belong to their historical revisions.",
+  "files": {
+    "context-management-results.md": {
+      "bytes": 12597,
+      "sha256": "24f4018989cea8b0b96205ad7263aae593d3c706e8074211d276d128a1c10dd4"
+    },
+    "rebase-context-34-extension/final-summary.json": {
+      "bytes": 6067,
+      "sha256": "cb176f6573e56790b68c3e39ac0bd2a39e4d025fe79c49212423ecc666b4f7da"
+    },
+    "rebase-context-34-extension/retention-manifest.json": {
+      "bytes": 25647,
+      "sha256": "3f942381a08af7cceec9c299ca3eee6fc3799c1733a5417fb51b20da1cf8564e"
+    },
+    "review-repair-three-arm/20261022-completion-reconciliation.json": {
+      "bytes": 575,
+      "sha256": "873fb0eaa5ab9c8e8f2c9ef227081e413461903e215acd7d3ea2e4b31d3e8f7c"
+    },
+    "review-repair-three-arm/cost-accounting.json": {
+      "bytes": 23889,
+      "sha256": "10e50895fcfa00afbb6a52608fd8c95cc419d4e4b8529f38e204ed0395642794"
+    },
+    "review-repair-three-arm/final-results.json": {
+      "bytes": 18107,
+      "sha256": "82e68098087eb8245e34c611562d465a0bc7e1763e95e3c62cf4c460a7db7189"
+    },
+    "session-boundary-evaluation/.gitignore": {
+      "bytes": 13,
+      "sha256": "32dae3052f331ee34d628ef535709b301259a45df7c7522c4d35dcf49873f00b"
+    },
+    "session-boundary-evaluation/C1-adjudication.json": {
+      "bytes": 24479,
+      "sha256": "989ebf99b3849d4bb5791051acec85a8b670a6e8e3515d17d867f1bfee36719d"
+    },
+    "session-boundary-evaluation/C1-precheck.json": {
+      "bytes": 13601,
+      "sha256": "df98df456cd794be5f12428550dcdb67a248728cc55a05147411ab3110e5f43e"
+    },
+    "session-boundary-evaluation/all-gate.log.gz": {
+      "bytes": 118666,
+      "sha256": "c8429f61aafc886fcd9283a8c36190c2e2cd5062785688c9fdc574ac64120697"
+    },
+    "session-boundary-evaluation/analyze.py": {
+      "bytes": 6162,
+      "sha256": "e515cf20348e3879864e5da1f922dad3289856acb360f9826d575c40f4cdca26"
+    },
+    "session-boundary-evaluation/archive.json": {
+      "bytes": 7103,
+      "sha256": "0822cdfe950e5c4c7b4071baa262f29f3de44452f6dbbea5518737f42f6598c1"
+    },
+    "session-boundary-evaluation/bootstrap-results.json": {
+      "bytes": 41498,
+      "sha256": "22dcc80d39f39743871721e893141ff0339832702eefe501be96dedafd89d034"
+    },
+    "session-boundary-evaluation/context-management/backlog.md": {
+      "bytes": 41893,
+      "sha256": "249245150401b8d69ac9e3bb437902227f7bde5ae1b74774ad91a0a06a983a73"
+    },
+    "session-boundary-evaluation/docs-gate.log.gz": {
+      "bytes": 113,
+      "sha256": "f7f4eeb927b7c0031344f5d039ea84bf67781b07920a95e69f4e4cfbf6a02dfb"
+    },
+    "session-boundary-evaluation/inputs/C1-capsule.json": {
+      "bytes": 2884,
+      "sha256": "9e7beab6198eb8625a0799c40a2f97264fa2f51c44aca75df8584dfb66e333a4"
+    },
+    "session-boundary-evaluation/inputs/C1-parent-vs-baseline.patch.gz": {
+      "bytes": 581717,
+      "sha256": "831533d700fa0d31a556f9954a6067cc39d3c599b4a5c25e82940d80cc729d4c"
+    },
+    "session-boundary-evaluation/inputs/C1-prefix.jsonl.gz": {
+      "bytes": 21333,
+      "sha256": "c548b270ec2cc72400de2dedba1c357f52ee64c3c7d0a4c4c3b7b3268afb4ddf"
+    },
+    "session-boundary-evaluation/inputs/C1-prompt.txt": {
+      "bytes": 813,
+      "sha256": "440038cb2351c191a334657f7e89263c634184e3dd950f3c3244c6b2c996e9ac"
+    },
+    "session-boundary-evaluation/inputs/C2-capsule.json": {
+      "bytes": 2884,
+      "sha256": "9e7beab6198eb8625a0799c40a2f97264fa2f51c44aca75df8584dfb66e333a4"
+    },
+    "session-boundary-evaluation/inputs/C2-frozen-suite.txt": {
+      "bytes": 27297,
+      "sha256": "f98d437ea4d4aae08919a02b504d86d5ba4dbad055768b9fbf8c84e8d21fa185"
+    },
+    "session-boundary-evaluation/inputs/C2-parent-vs-baseline.patch.gz": {
+      "bytes": 605008,
+      "sha256": "dd252e51df9907c761989a7cb832dd6aeced2423dd6df1a93db7af0c82086231"
+    },
+    "session-boundary-evaluation/inputs/C2-prefix.jsonl.gz": {
+      "bytes": 270828,
+      "sha256": "556bb96edb2ce7cd8d1a471b12da18eb95d1b5958191d76897ee67ec45659f33"
+    },
+    "session-boundary-evaluation/inputs/C2-prompt.txt": {
+      "bytes": 962,
+      "sha256": "ed7ca6d5399ef3784a2d71f2140d08d8d50d0606ba68a14f6158bfea8633727d"
+    },
+    "session-boundary-evaluation/inputs/C2-reference-src__application__revoke-review-decision-use-case.ts.txt": {
+      "bytes": 5555,
+      "sha256": "19645f6616605e58a43f1cb718581e131df23f537c8efb19754aee3f218b495a"
+    },
+    "session-boundary-evaluation/inputs/C3-capsule.json": {
+      "bytes": 5939,
+      "sha256": "abfa9501b898905fee50a8025d51b06da10510be32367c6e9c8fd3f8c822b6e3"
+    },
+    "session-boundary-evaluation/inputs/C3-frozen-suite.txt": {
+      "bytes": 8051,
+      "sha256": "6a2e644e0fd04d6d6942183b7000a98d658e5df6b3c1ab0e794baedc1f48afbc"
+    },
+    "session-boundary-evaluation/inputs/C3-parent-vs-baseline.patch.gz": {
+      "bytes": 560423,
+      "sha256": "337553c0670c3f4a61c889eaea2cf9ed9da56b0d8c26908ae8eb72f286662125"
+    },
+    "session-boundary-evaluation/inputs/C3-prefix.jsonl.gz": {
+      "bytes": 22757,
+      "sha256": "b1f1fd7b314d2bb10137d41fdfabea406881a32ec3c6f9e4b0f7bcd459cea330"
+    },
+    "session-boundary-evaluation/inputs/C3-prompt.txt": {
+      "bytes": 1010,
+      "sha256": "08ed1903c8a8beb9f0f43308725b02fa67abbf84da34929f0249829f99539738"
+    },
+    "session-boundary-evaluation/inputs/C3-reference-src__adapters__cli__commands__integrate.ts.txt": {
+      "bytes": 19375,
+      "sha256": "ab41e57dae6f887203b5580194167a1cd5364c44ee62c04106c290cf3eff820d"
+    },
+    "session-boundary-evaluation/inputs/C3-reference-src__adapters__review__review-loop.ts.txt": {
+      "bytes": 29558,
+      "sha256": "a55c6613e9a6ef7b856cbe466b8329d997d2d6ad1b3a5d9b23a693bda3d1b4d4"
+    },
+    "session-boundary-evaluation/inputs/models.json": {
+      "bytes": 495,
+      "sha256": "2d70aab78dac7eebd9494bfd13b115d5aedddf06ecc2c7dbb2f01c3d5a2aa237"
+    },
+    "session-boundary-evaluation/inputs/settings.json": {
+      "bytes": 141,
+      "sha256": "9e60f5d30768d4eed8ab35cf9a8d4f7452e1e5eda2eed64e7f6c4477aac53a2c"
+    },
+    "session-boundary-evaluation/integrity.json": {
+      "bytes": 471,
+      "sha256": "79a112c610bda58acc949713e8ff6355ade886d7d1197054e2cb853a2f56a019"
+    },
+    "session-boundary-evaluation/manifest.json": {
+      "bytes": 19995,
+      "sha256": "e0185c92e28d8b0820d1c61d943d4c9dbde9fc46e76050a6d311d3762186e1db"
+    },
+    "session-boundary-evaluation/manual.json": {
+      "bytes": 978738,
+      "sha256": "b341368d4bbecff9bb93a343380aaeefd86c497d181ce8ac8f45e772fdf2d52d"
+    },
+    "session-boundary-evaluation/manual.py": {
+      "bytes": 3317,
+      "sha256": "ba8258320159c251316f619e9444a8d2f1ffcf519051541256d15e975712fc05"
+    },
+    "session-boundary-evaluation/patches/C1-fresh-new-events.jsonl.gz": {
+      "bytes": 36258,
+      "sha256": "c49aafabf142ab8cfb4a282348f6b988e9420fcd80bad333f13ac4e43c3ba905"
+    },
+    "session-boundary-evaluation/patches/C1-fresh-output.txt.gz": {
+      "bytes": 922085,
+      "sha256": "e5df96b9a7d5b80abd8923a147ef03fa3a500b084220505c7c3cb6cbf9a666dc"
+    },
+    "session-boundary-evaluation/patches/C1-fresh.patch": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "session-boundary-evaluation/patches/C1-resumed-new-events.jsonl.gz": {
+      "bytes": 4824,
+      "sha256": "6df72e63d6cefb5ea13ffb02b87795a70945cccbd0ab3095ac295c53753362f6"
+    },
+    "session-boundary-evaluation/patches/C1-resumed-output.txt.gz": {
+      "bytes": 53486,
+      "sha256": "44a6ac2b16f63817cfa8089bad7e1335414a56605654e614492626d0412c3530"
+    },
+    "session-boundary-evaluation/patches/C1-resumed.patch": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "session-boundary-evaluation/patches/C2-fresh-new-events.jsonl.gz": {
+      "bytes": 27296,
+      "sha256": "6a23462b6c2f105ff17a4609f19d23145261d94110623832509824824f274138"
+    },
+    "session-boundary-evaluation/patches/C2-fresh-output.txt.gz": {
+      "bytes": 402803,
+      "sha256": "110079b036e8e1b1de1ac04e3a7224748069c2148c3eaf7bce2f477fb30d482c"
+    },
+    "session-boundary-evaluation/patches/C2-fresh.patch": {
+      "bytes": 2295,
+      "sha256": "099f3d58706b57e72bbc0b1894d3a433b5b3d4e638f35e3ecb80bd603e7b11e3"
+    },
+    "session-boundary-evaluation/patches/C2-resumed-new-events.jsonl.gz": {
+      "bytes": 722,
+      "sha256": "0afdaba60bddc8df8b91b5a25a2510473f6b2f72e9ac134d78a2d58fbf9bf3ad"
+    },
+    "session-boundary-evaluation/patches/C2-resumed-output.txt.gz": {
+      "bytes": 938,
+      "sha256": "c8af4fa8285a90205c5069fa0d85215bc106ae32945517d6fd2ddf0f34fe1987"
+    },
+    "session-boundary-evaluation/patches/C2-resumed.patch": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "session-boundary-evaluation/patches/C3-fresh-new-events.jsonl.gz": {
+      "bytes": 114720,
+      "sha256": "c5e190fa61b01455bfc3c8938f32932dc98e313c3226e3299e34d650af825c8c"
+    },
+    "session-boundary-evaluation/patches/C3-fresh-output.txt.gz": {
+      "bytes": 648931,
+      "sha256": "3697d14fd7949fb9815ba760e3f046bdee26cf6931671bd4f4805a36008758c9"
+    },
+    "session-boundary-evaluation/patches/C3-fresh.patch": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "session-boundary-evaluation/patches/C3-resumed-new-events.jsonl.gz": {
+      "bytes": 25416,
+      "sha256": "39d291aae0bbc255a0fbf647612ab4b6aad5a10f99c2b82df2769b6ff4b5ed3c"
+    },
+    "session-boundary-evaluation/patches/C3-resumed-output.txt.gz": {
+      "bytes": 348588,
+      "sha256": "8826ce7e158077eba8bf1fb60da51d8ebb9d949a0a319c221251071dc5c406c1"
+    },
+    "session-boundary-evaluation/patches/C3-resumed.patch": {
+      "bytes": 1914,
+      "sha256": "967d3fe6de83096a316215e1a83264826ab23ceb5015f5a491c298911b47057a"
+    },
+    "session-boundary-evaluation/reconstruction.json": {
+      "bytes": 390,
+      "sha256": "c8ac8e525b9d16aa2192d06a604606411f9fac7fb1c67cd82bee1f7b90a08587"
+    },
+    "session-boundary-evaluation/reference-environment.json": {
+      "bytes": 5426,
+      "sha256": "4d92d58e9abe547d4b8c7ac67da15216d3ebb88548ca385020a45ac3a14130d5"
+    },
+    "session-boundary-evaluation/replay.py": {
+      "bytes": 19567,
+      "sha256": "9e50888a93eda2b8bb495eceee014a3d1cccaf3dbe5a55fb8105adf2924226a5"
+    },
+    "session-boundary-evaluation/report.md": {
+      "bytes": 27404,
+      "sha256": "3a0578480e00b540dcda69544c20b2db93a49c58aab13a2825f86d9bae63886c"
+    },
+    "session-boundary-evaluation/results.json": {
+      "bytes": 93022,
+      "sha256": "0d94e93babcda6e88414affc4ad8f66a2112b4bebbc5dead480b37059e1ebf35"
+    },
+    "session-boundary-evaluation/seed.mjs": {
+      "bytes": 2177,
+      "sha256": "24ff3afa22f39b69da49bd01bcb9f269364ab9b1f23a5f043dfda675ed9b40e0"
+    },
+    "session-boundary-evaluation/static-analysis-gate.log.gz": {
+      "bytes": 361,
+      "sha256": "5e4c261acc2fb5e45d8825a4f489b1a2611a24928b1db5f784ca704aa289f53a"
+    },
+    "session-boundary-evaluation/summary.json": {
+      "bytes": 2807,
+      "sha256": "6d834db60857b3ad236a2d3e3ea9c47c77eaf53cdab4c6f215a23de6b4d7ff1e"
+    },
+    "session-boundary-evaluation/verification.json": {
+      "bytes": 885,
+      "sha256": "46e053e329a7197be0535bebb90671715e0b31f0b05fbf7a3fc77fb46cc125ae"
+    },
+    "strata-no-context-20/final-summary.json": {
+      "bytes": 2086,
+      "sha256": "709c7b018fb3cbf836bb339157c7321e09cb7522a1190820be3155bec295c824"
+    },
+    "strata-no-context-20/retention-manifest.json": {
+      "bytes": 86693,
+      "sha256": "6ba05f7d71f829f07ce6e5c6f6bebad3f14fc2a85f35918d4ed56d3d11f40f97"
+    }
+  },
+  "completionReconciliation": "tools/session-boundary-evaluation/completion-reconciliation.json supersedes the historical CP-4/CP-5/CP-6 pending status; original studies and archived gate claims remain historical.",
+  "laterArchiveRefresh": {
+    "date": "2026-11-01",
+    "reason": "Research continued after the original index. Refresh changed retained artifact pointers; preserve original indexed values here. No archive files modified.",
+    "changes": [
+      {
+        "path": "context-management-results.md",
+        "prior": {
+          "bytes": 6369,
+          "sha256": "8c6e98ce359898b0d1f8f6946058366237bfe1642972ad2903027d01f42f7298"
+        },
+        "current": {
+          "bytes": 12597,
+          "sha256": "24f4018989cea8b0b96205ad7263aae593d3c706e8074211d276d128a1c10dd4"
+        }
+      },
+      {
+        "path": "session-boundary-evaluation/context-management/backlog.md",
+        "prior": {
+          "bytes": 27351,
+          "sha256": "aa18d36d09c708a47352c5ac842578d52f2f1d3fee5200456e31524b87da346a"
+        },
+        "current": {
+          "bytes": 41893,
+          "sha256": "249245150401b8d69ac9e3bb437902227f7bde5ae1b74774ad91a0a06a983a73"
+        }
+      }
+    ]
+  }
+}

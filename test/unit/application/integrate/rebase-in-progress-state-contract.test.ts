@@ -37,6 +37,7 @@ test('integration shared conflicts use the fresh shared resolver and resolved ba
   const ports = stubIntegrateWorkflowPorts({
     missionPaths: { ...defaults.missionPaths, missionBranchName: () => 'mission/task-2503', conventionalWorktreePath: () => '/worktree' },
     rebase: { createRebaseWorkflowPort: options => { h.port.exit = options.exitFn!; return h.port; } },
+    git: { ...defaults.git, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }) },
   });
   const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
   try {
@@ -113,7 +114,7 @@ describe("integration rebase state", async () => {
       landing: landing,
       git: { git },
       }),
-      git: { ...defaults.git, git },
+      git: { ...defaults.git, git, detectRebaseState: (rootDir: string) => ({ inProgress: missionRebaseInProgress && rootDir === MISSION_WORKTREE, unmergedFiles: [] }) },
     };
     return ports;
   }
@@ -193,7 +194,7 @@ describe("integration rebase state", async () => {
         if (args.includes('rev-parse')) { stdout = args.at(-1) === 'main' ? 'new-base' : rebased ? 'rebased-B' : 'before-rebase'; }
         if (args.includes('merge-base') && !args.includes('--is-ancestor')) { stdout = rebased ? 'new-base' : 'old-base'; }
         return { status: 0, stdout, stderr: '' };
-      } },
+      }, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }) },
       gates: { approvalEvidence: () => evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: rebased ? 'rebased-B' : 'before-rebase' }),
         loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { assert.equal(rebased, true); return { ok: true }; } },
     });
@@ -202,6 +203,19 @@ describe("integration rebase state", async () => {
     assert.equal(comparisons, 1); assert.equal(store.mission().status, 'integration');
     assert.equal(store.mission().review!.rounds.length, 1);
     assert.equal(store.mission().review!.rounds[0].decision?.revision, 'approved-A');
+  });
+
+  test('integration rebase checks completion from rebase metadata, never a patch dump (TASK-2828.2)', async () => {
+    mock.method(console, 'log', () => true);
+    mock.method(console, 'error', () => true);
+    const ports = buildPorts({ missionRebaseInProgress: false });
+
+    await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git });
+
+    const probes = ports.git.git.mock.calls.map((call: { arguments: [string[]] }) => call.arguments[0].join(' '));
+    assert.ok(probes.length > 0, 'the integration rebase still probes git state');
+    assert.deepEqual(probes.filter((p) => p.includes('--show-current')), [],
+      'the completion check must not ask git for the current patch');
   });
 
   test('integration rebase completes cleanly when no rebase is active in the mission worktree (SC7)', async () => {
@@ -217,7 +231,7 @@ describe("integration rebase state", async () => {
 describe("px rebase in-progress", async () => {
   // TASK-2520 SC6 / AC7: `px rebase` must never report "Rebase completed cleanly"
   // while the mission worktree still has a rebase in progress. The shared rebase
-  // workflow treats a non-empty `rebase --show-current` after a status-0
+  // workflow treats a rebase-state snapshot still reporting inProgress after a status-0
   // rebase as incomplete and must skip the clean-completion result. Hermetic: the
   // rebase-workflow port is an injected double, so no worktree, real Forgejo, or
   // agent is touched.
@@ -233,20 +247,28 @@ describe("px rebase in-progress", async () => {
   const WORKTREE = '/tmp/task-2520-rebase-worktree';
 
   /**
-   * Build a minimal RebaseWorkflowPort. The rebase command succeeds (status 0) but
-   * `rebase --show-current` reports the worktree is still mid-rebase, which is the
+   * Build a minimal RebaseWorkflowPort. The rebase command succeeds (status 0) but the
+   * rebase-state owner reports the worktree is still mid-rebase, which is the
    * exact SC6 trap: a status-0 rebase that has not actually finished.
    */
-  function buildPort({ inProgress }: { inProgress: boolean }, exitCodes: { value: number[] }) {
+  function buildPort({ inProgress }: { inProgress: boolean }, exitCodes: { value: number[] }, gitCalls: string[][] = []) {
+    // The worktree is clean on entry — otherwise the workflow reports an existing rebase and
+    // bails before starting a round. It is still mid-rebase after a status-0 round when
+    // inProgress is set, which is the SC6 trap.
+    let rebaseRoundRan = false;
     const port = rebaseWorkflowFixture({
       git: (args: string[]) => {
-        if (args.includes('--show-current')) {
-          return { signal: null,  status: 0, stdout: inProgress ? SLUG : '', stderr: '' };
-        }
-        if (args.includes('rebase')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
+        gitCalls.push([...args]);
+        if (args.includes('rebase')) { rebaseRoundRan = true; }
         return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
-      detectRebaseState: () => ({ inProgress: false, rebaseHead: null, unmergedFiles: [] }),
+      detectRebaseState: () => ({
+        inProgress: rebaseRoundRan && inProgress,
+        // A paused round replays a commit, so REBASE_HEAD resolves; that is the metadata the
+        // removed `rebase --show-current` probe was reading the patch to identify.
+        rebaseHead: rebaseRoundRan && inProgress ? 'a'.repeat(40) : '',
+        unmergedFiles: [],
+      }),
       getCurrentBranch: () => BRANCH,
       cwd: () => WORKTREE,
       inferSlug: () => SLUG,
@@ -298,6 +320,24 @@ describe("px rebase in-progress", async () => {
     assert.match(joined, /still in progress/, 'a mid-rebase rebase must be reported as still in progress');
     assert.doesNotMatch(joined, /Rebase completed cleanly/, 'must not emit the clean-completion result while a rebase is active');
     assert.deepEqual(exitCodes, [0], 'exits 0 to hand the worktree back to the operator to continue the rebase');
+  });
+
+  test('px rebase resolves the completion check from rebase metadata, never a patch dump (TASK-2828.2)', async () => {
+    mock.method(console, 'log', () => true);
+    mock.method(console, 'error', () => true);
+    const gitCalls: string[][] = [];
+    const exitCodes: number[] = [];
+    const port = buildPort({ inProgress: false }, { value: exitCodes }, gitCalls);
+
+    await runRebaseWorkflow([SLUG], port);
+
+    assert.deepEqual(exitCodes, [0], 'the clean-completion path still runs');
+    assert.ok(gitCalls.length > 0, 'the workflow still talks to git');
+    assert.deepEqual(
+      gitCalls.filter((args) => args.includes('--show-current')).map((args) => args.join(' ')),
+      [],
+      'the completion check must not ask git for the current patch; `rebase --show-current` is git\'s prefix match for --show-current-patch',
+    );
   });
 
   test('px rebase reports clean completion only when no rebase is active (SC6)', async () => {

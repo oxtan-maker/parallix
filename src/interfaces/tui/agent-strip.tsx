@@ -2,7 +2,6 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import type { AgentAvailabilityMetric } from '../../application/projections/board.js';
 import {
-  describeFamilyCoordinatorEvidence,
   describeFamilyProviderExecution,
   describeMissionActivityTotals,
   summarizeMissionActivity,
@@ -14,18 +13,14 @@ import { formatCountdown } from '../../application/projections/agent-countdown.j
 // AgentStrip — horizontal strip of agent availability entries
 //
 // Follows the board design's agent family strip: one entry per known family,
-//   ● family-name  [countdown ·] N px cmd live  [reason]
+//   ● family-name  [countdown ·] N providers executing  [reason]
 // green dot when the family is usable, red dot when it is blocked or its
 // launcher is not usable on this workstation.
 //
-// The per-family number counts live `px` *processes* observed in the process
-// table (see `detectRunningMissionSessions`), not agents: a coordinator spends
-// whole phases in git, gates, and file writes with no agent at the keyboard.
-// The strip therefore says `N px cmd live`, never `N running`. When liveness
-// cannot be observed the entry says `px cmd unknown` — an unobserved count is
-// never rendered as zero. A process that cannot be attributed to a family is
-// shown in a trailing `N px cmd live · family unknown` entry rather than
-// assigned to a guess.
+// The per-family number is the count of confirmed provider invocations from
+// the provider execution reader: zero means none were confirmed, and nothing
+// is printed before a reader has run. Failed probes surface as diagnostics on
+// the mission that owns them, never as another family's count.
 //
 // Authoritative mission work — what the operations themselves published — is
 // summarised separately in a leading `work:` entry, because that is the only
@@ -51,14 +46,6 @@ function displayBlockReason(reason: string | null | undefined): string | null {
 export interface AgentStripProps {
   readonly agentAvailability: readonly AgentAvailabilityMetric[];
   /**
-   * Live `px` processes no source could attribute to a family. Shown as its
-   * own trailing entry so the strip's total matches what was observed: a
-   * `px review` process runs the reviewer and then the act-on-review
-   * implementer, and `px resolve-conflict` writes no session marker at all, so
-   * neither can be claimed by a family.
-   */
-  readonly unattributedRunningSessions?: number | null;
-  /**
    * Authoritative activity for every mission on the board, summarised into the
    * leading `work:` entry. Omitted when no board projection is available; an
    * empty array simply produces no entry.
@@ -69,10 +56,10 @@ export interface AgentStripProps {
 /**
  * AgentStrip — one entry per agent family from BoardMetrics.agentAvailability.
  *
- * Each entry: [dot] family-name [countdown ·] N px cmd live [reason]
+ * Each entry: [dot] family-name [countdown ·] N providers executing [reason]
  * Dot color: green=available, red=blocked or launcher unavailable.
  */
-export function AgentStrip({ agentAvailability, unattributedRunningSessions, missionActivity }: AgentStripProps): React.ReactElement {
+export function AgentStrip({ agentAvailability, missionActivity }: AgentStripProps): React.ReactElement {
   const workSummary = missionActivity === undefined
     ? null
     : describeMissionActivityTotals(summarizeMissionActivity(missionActivity));
@@ -96,21 +83,17 @@ export function AgentStrip({ agentAvailability, unattributedRunningSessions, mis
         const dotColor = agent.available ? 'green' : 'red';
         const countdown = !agent.available && agent.blockedForMs > 0 ? formatCountdown(agent.blockedForMs) : '';
         const reason = agent.available ? '' : displayBlockReason(agent.reason);
+        const executing = describeFamilyProviderExecution(agent.runningSessions);
         return (
           <Box key={agent.family} marginRight={3}>
             <Text color={dotColor}>{'●'}</Text>
             <Text color="gray">{` ${agent.family}`}</Text>
             {countdown && <Text dimColor color="yellow">{` ${countdown} ·`}</Text>}
-            <Text dimColor>{` ${agent.executionComplete === undefined ? describeFamilyCoordinatorEvidence(agent.runningSessions) : describeFamilyProviderExecution(agent.runningSessions, agent.executionComplete)}`}</Text>
+            {executing !== null && <Text dimColor>{` ${executing}`}</Text>}
             {reason && <Text dimColor color="red">{` ${reason}`}</Text>}
           </Box>
         );
       })}
-      {typeof unattributedRunningSessions === 'number' && unattributedRunningSessions > 0 && (
-        <Box>
-          <Text dimColor>{`${describeFamilyCoordinatorEvidence(unattributedRunningSessions)} · family unknown`}</Text>
-        </Box>
-      )}
     </Box>
   );
 }

@@ -83,9 +83,9 @@ test('task-2408: a raw persisted agent-block reason is not rendered on the agent
   const output = renderBoard();
 
   assert.ok(!output.includes('parsed:'), `the raw reason must not leak. Got:\n${output}`);
-  // The family still renders as unavailable with its liveness evidence.
+  // The family still renders as unavailable with its confirmed provider count.
   assert.match(output, /qwen/, `the unavailable family must still be named`);
-  assert.match(output, /px cmd live/, `the family's px cmd liveness evidence must remain`);
+  assert.match(output, /qwen 1 providers executing/, `the family's confirmed provider count must remain`);
   // The authoritative work summary stays in the agent strip.
   assert.match(output, /work: 1 live/, `the agent-strip work summary must remain`);
 });

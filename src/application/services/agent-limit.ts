@@ -9,6 +9,7 @@ const PATTERN_SETS = Object.freeze({
   claude: [
     /claude (?:ai )?usage limit reached/i,
     /\b5-hour limit (?:reached|exceeded)\b/i,
+    /you['’]ve hit your 5-hour limit\b/i,
     /you(?:'|')?ve hit your limit(?:\b|$)/i,
     /you(?:'|')?ve hit your (?:weekly|daily|monthly|usage) limit/i,
     /(?:usage|rate)\s*limit (?:has been )?(?:reached|exceeded)/i,
@@ -71,8 +72,9 @@ function clipContext(text: string, index: number, length: number) {
 
 function isQuotedLimitPhrase(text: string, index: number, length: number) {
   const opening = text[index - 1];
-  const closing = text[index + length];
-  return (opening === '"' || opening === '“') && (closing === '"' || closing === '”');
+  // A quoted provider diagnostic can include its reset suffix after the match.
+  const remainder = text.slice(index + length).split('\n', 1)[0];
+  return (opening === '"' || opening === '“') && /["”]/.test(remainder);
 }
 
 const ISO_PATTERN = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?/;

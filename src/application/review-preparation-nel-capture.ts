@@ -49,8 +49,8 @@ export class ReviewPreparationNelCapture {
     let nelRecord: ReturnType<typeof nel.computeNELRecord>;
     try {
       nelRecord = nel.computeNELRecord(`${primaryBranch}..HEAD`, { cwd: rootDir });
-    } catch (_) {
-      return { ok: false, error: 'NEL computation failed' };
+    } catch (error) {
+      return { ok: false, error: `NEL computation failed: ${error instanceof Error ? error.message : 'unknown error'}` };
     }
 
     const actualNel = nelRecord.nel;

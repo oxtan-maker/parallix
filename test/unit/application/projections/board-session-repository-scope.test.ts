@@ -93,26 +93,26 @@ test('SC4: a liveSession change repaints the board', () => {
   assert.notEqual(boardFingerprint(base), boardFingerprint(withSession), 'liveSession must move the fingerprint');
 });
 
-test('SC4: an unattributedRunningSessions change repaints the board', () => {
-  const withMetrics = (count: number | null): BoardProjection => {
+test('SC4: a confirmed provider count change repaints the board', () => {
+  const withMetrics = (count: number): BoardProjection => {
     const projection = makeProjection();
     (projection as { metrics: BoardProjection['metrics'] }).metrics = {
       ...projection.metrics,
-      unattributedRunningSessions: count,
+      agentAvailability: [{ family: agentFamily('codex'), available: true, blockedForMs: 0, runningSessions: count }],
     };
     return projection;
   };
 
   assert.notEqual(
-    boardFingerprint(withMetrics(null)),
+    boardFingerprint(withMetrics(0)),
     boardFingerprint(withMetrics(2)),
-    'unattributedRunningSessions must move the fingerprint',
+    'the provider count must move the fingerprint',
   );
 });
 
 test('provider identity and uncertainty repaint while observation timestamps alone do not (TASK-2769)', () => {
   const projection = (runId: string | null, complete: boolean, observedAt = '2026-10-16T10:00:00Z') => makeProjection({ active: [makeCard({
-    execution: { observedAt, complete, limitations: complete ? [] : ['probe failed'],
+    execution: { observedAt, limitations: complete ? [] : ['probe failed'],
       invocations: runId ? [{ runId, operationId: 'owned', family: agentFamily('codex') }] : [] },
   })] });
   assert.equal(boardFingerprint(projection('run-one', true)), boardFingerprint(projection('run-one', true, '2026-10-16T10:00:01Z')));

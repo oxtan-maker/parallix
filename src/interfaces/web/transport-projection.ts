@@ -187,7 +187,6 @@ function toAgentAvailability(metric: AgentAvailabilityMetric): WebAgentAvailabil
     available: metric.available,
     blockedFor: toWireDuration(metric.blockedForMs, `agentAvailability[${metric.family}]`),
     reason: metric.reason ?? null,
-    ...(metric.executionComplete !== undefined ? { executionComplete: metric.executionComplete } : {}),
     ...(metric.runningSessions !== undefined ? { runningSessions: metric.runningSessions } : {}),
   };
 }
@@ -258,9 +257,6 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
     agentAvailability: projection.metrics.agentAvailability.map(toAgentAvailability),
     metrics: toWebMetrics(projection.metrics),
     sourceFacts: projection.sourceFacts.map(toSourceFact),
-    ...(projection.metrics.unattributedRunningSessions !== undefined
-      ? { unattributedRunningSessions: projection.metrics.unattributedRunningSessions }
-      : {}),
   };
 }
 

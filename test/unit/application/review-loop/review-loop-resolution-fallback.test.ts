@@ -24,6 +24,7 @@ test('TASK-1048: review loop adopts an implementer launcher fallback for the pol
         return { agent: 'custom', result: {} };
       },
     },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }) },
     preReview: { head: () => null },
     output: { error: message => { throw new Error(message); }, exit: code => { throw new Error(`exit(${code})`); } },
   });

@@ -366,14 +366,6 @@ test('SC4: an attributed live-process count change publishes on the next schedul
   assert.equal(observed.notifications, 2, 'a live-process count change must repaint even when the countdown label is unchanged');
 });
 
-test('SC4: an unattributed live-process count change publishes on the next scheduled projection', async () => {
-  const observed = await twoTicks(
-    withBlockedAgent({ unattributedRunningSessions: null }, { available: true, blockedForMs: 0 }),
-    withBlockedAgent({ unattributedRunningSessions: 2 }, { available: true, blockedForMs: 0 }),
-  );
-  assert.equal(observed.notifications, 2, 'an unattributed live-process count change must repaint');
-});
-
 test('SC4: a card state change publishes on the next scheduled projection', async () => {
   const card = (status: 'active' | 'review') => makeCard({
     id: fixtureMissionId('task-2442') as MissionId,
