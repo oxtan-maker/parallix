@@ -173,3 +173,9 @@ test('no-fact question refuses either missing substitution (TASK-2754 F1)', asyn
     } finally { mutable.instructions = original; }
   }
 });
+
+test('large mandatory-only packets receive exact admission despite estimate overshoot (px-0022)', () => {
+  const request: DecisionRequest = { state: { obligation: 'x'.repeat(300_000) }, questions: {} };
+  const compressed: MeasureBudget = r => ({ ...generous(r), inputTokens: 1, contextTokens: 1, maxInputTokens: 10, maxContextTokens: 10 });
+  assert.equal(fitPacket(request, compressed, { diffKey: 'diff' }), request);
+});

@@ -672,15 +672,17 @@ test('every failed or invalid panel member vetoes partial approval (TASK-2716)',
 });
 
 test('later panel member budgets are checked before any provider call (TASK-2716)', async () => {
-  for (const patch of [{ inputTokens: 32001 }, { contextTokens: 30001 }, { requestBytes: 1000001 }, { inputTokens: NaN }]) {
-    const s = scenario();
-    const budget = s.classifier.decision.requestBudget;
-    s.classifier.decision.requestBudget = request => ({ ...budget(request),
-      ...(request.questions.resolution.instructions === PANEL_QUESTIONS.v1.instructions ? patch : {}) });
-    s.classifier.decision.decide = async () => { return assert.fail('budget failure must prevent all calls'); };
-    assert.equal(await tryClassifyReview(s.context, s.round), null);
-    assert.deepEqual(s.published, []);
-    assert.equal(s.attempts[0].reason, 'evidence-over-budget');
+  for (const question of Object.values(PANEL_QUESTIONS)) {
+    for (const patch of [{ inputTokens: 32001 }, { contextTokens: 30001 }, { requestBytes: 1000001 }, { inputTokens: NaN }]) {
+      const s = scenario();
+      const budget = s.classifier.decision.requestBudget;
+      s.classifier.decision.requestBudget = request => ({ ...budget(request),
+        ...(request.questions.resolution.instructions === question.instructions ? patch : {}) });
+      s.classifier.decision.decide = async () => { return assert.fail('budget failure must prevent all calls'); };
+      assert.equal(await tryClassifyReview(s.context, s.round), null);
+      assert.deepEqual(s.published, []);
+      assert.equal(s.attempts[0].reason, 'evidence-over-budget');
+    }
   }
 });
 
@@ -969,4 +971,19 @@ test('frozen production controls reproduce all four recorded packet hashes (TASK
     assert.equal(outcome.selected.route, 'reviewer');
     assert.equal(s.classifier.hash(JSON.stringify(control.state)), control.originalPacketHash, control.id);
   }
+});
+
+test('required omission metadata overflow falls back before any panel call (px-0022)', async () => {
+  const s = scenario();
+  const measure = s.classifier.decision.requestBudget;
+  s.classifier.evidence.source = async () => 'optional '.repeat(40000);
+  s.classifier.decision.requestBudget = request => {
+    const state = request.state as { finding?: string; candidateSourceExcerpts?: object; contextOmissions?: string[] };
+    return { ...measure(request), contextTokens: state.finding && (Object.keys(state.candidateSourceExcerpts ?? {}).length || state.contextOmissions?.length) ? 30001 : 1 };
+  };
+  s.classifier.decision.decide = async () => assert.fail('required metadata cannot be omitted for admission');
+  assert.equal(await tryClassifyReview(s.context, s.round), null);
+  assert.equal(s.attempts[0].reason, 'evidence-over-budget');
+  assert.equal(s.attempts[0].panel!.calls, 0);
+  assert.deepEqual(s.published, []);
 });

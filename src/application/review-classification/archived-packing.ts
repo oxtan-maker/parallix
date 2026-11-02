@@ -61,9 +61,9 @@ export async function buildArchivedEvidencePacket(input: ReviewFindingEvidence, 
   if (validation) { state.validation = validation; }
   const excerpts = state.candidateSourceExcerpts as Record<string, Excerpt[]>;
   const omissions = state.contextOmissions as string[];
-  fitPacket(packet.request, measure, { diffKey: 'diff', context: packet.paths.map(path => ({
+  fitPacket(packet.request, measure, { diffKey: 'diff', requestBytes: true, context: packet.paths.map(path => ({
     text: excerpts[path],
-    tokens: measure({ ...packet.request, state: { candidateSourceExcerpts: { [path]: excerpts[path] } } }).inputTokens,
+    get tokens() { return measure({ ...packet.request, state: { candidateSourceExcerpts: { [path]: excerpts[path] } } }).inputTokens; },
     omit: () => {
       state.coverage = 'Selected evidence supplied; omissions are listed in state. Do not assume missing evidence. Select insufficient_evidence when omitted evidence could decide the answer.';
       delete excerpts[path]; omissions.push(`${path}: complete candidate file omitted by token budget`);

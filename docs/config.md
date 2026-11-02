@@ -715,8 +715,11 @@ touching failure-cited paths are supplied as separate provenance, so a failure
 fixed by main remains visible. Missing baselines are explicitly labelled as a
 plain revision comparison that may include main changes.
 
-Complete selected candidate files provide context. Admission uses the decision
-provider's tokenizer accounting, with no fixed diff or packet byte ceiling.
+Complete selected candidate files provide context. Large packets use approximate
+sizing to batch optional omissions before exact admission; small fitting packets
+retain their context. Every admitted panel question satisfies the provider's exact
+token accounting and request-byte limit, including required evidence, omission
+metadata and question overhead.
 All packet builders use the same omission order: optional whole-file context
 first, then per-file diffs from largest to smallest token cost, then long commit
 lists shortened with kept and dropped counts. Each omitted diff is named with

@@ -419,3 +419,47 @@ test('source windows keep mixed line endings and long unterminated lines (TASK-2
   const source = 'x'.repeat(100000);
   assert.equal(sourceWindows(source, [1], [], []).excerpts[0].text, source);
 });
+
+test('oversized archived evidence batch reduction bounds full-state counts (px-0022)', async () => {
+  const { oversizedClassifierEvidence, countingEvidenceBudget } = await import('../../../helpers/oversized-classifier-evidence.js');
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const fixture = oversizedClassifierEvidence();
+  const counter = countingEvidenceBudget();
+  const packet = await buildArchivedEvidencePacket({ ...input, priorReviewComment: fixture.paths.join(' '), implementerResponse: 'Fixed F1' }, fixture.repository, counter.measure);
+  assert.equal(fixture.paths.length, 348);
+  assert.equal(fixture.diff.length, 1_275_250);
+  assert.ok(counter.counts.fullState <= 35, `full-state calls ${counter.counts.fullState}; parent 350, bound 35`);
+  assert.ok(counter.counts.largestFullState < 200_000, 'reduce before the first full-state exact count');
+  assert.ok(counter.measure(packet.request).contextTokens <= 30000);
+});
+
+test('small exact-fitting evidence survives estimate overshoot without source sizing (px-0022)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  let calls = 0;
+  const measure: MeasureBudget = request => { calls++; return { ...budgetOf(() => 1, 10)(request), maxRequestBytes: 1_000_000 }; };
+  const packet = await buildArchivedEvidencePacket(input, { ...repository, source: async () => 'compressible '.repeat(1000) }, measure);
+  assert.deepEqual(packet.paths, ['lib/x.java']);
+  assert.equal(calls, 1, 'exact admission precedes all optional sizing');
+  assert.deepEqual((packet.request.state as { contextOmissions: string[] }).contextOmissions, []);
+});
+
+test('large estimate undershoot exact-checks successive batches and retains mandatory provenance (px-0022)', async () => {
+  const { buildArchivedEvidencePacket } = await import('../../../../src/application/review-classification/archived-packing.js');
+  const paths = Array.from({ length: 20 }, (_, i) => `src/evidence-${i}.ts`);
+  const measure: MeasureBudget = request => ({ ...budgetOf(encodedBytes, 200_000)(request), maxRequestBytes: 1_000_000 });
+  const packet = await buildArchivedEvidencePacket({ ...input, priorReviewComment: paths.join(' '), missionRange: {
+    approved: { baseline: 'base-a', revision: input.priorRevision }, candidate: { baseline: 'base-b', revision: input.candidateRevision },
+  } }, { ...repository, tree: async () => paths, source: async () => 'x'.repeat(20_000),
+    missionInterdiff: async () => ({ diff: '+repair', paths }),
+    mainCommits: async () => [{ revision: 'main-fix', paths: [paths[0]], diff: '+main repair' }],
+  }, measure);
+  const state = packet.request.state as Record<string, unknown>;
+  assert.ok(measure(packet.request).inputTokens <= 200_000);
+  assert.ok(packet.paths.length > 0 && packet.paths.length < 20);
+  assert.equal((state.contextOmissions as string[]).length, 20 - packet.paths.length);
+  for (const path of paths) { assert.equal(packet.paths.includes(path), !omissionsOf(packet.request).includes(`${path}:`)); }
+  assert.deepEqual(state.findings, input.findings);
+  assert.match(JSON.stringify(state.mainCommits), /main-fix/);
+  assert.match(JSON.stringify(state.missionRange), /base-a/);
+  assert.equal(state.diff, '+repair');
+});

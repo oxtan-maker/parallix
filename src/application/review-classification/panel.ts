@@ -9,9 +9,18 @@ const CONTEXT_LIMIT = 30000;
 
 /** Packing must fit every frozen question before optional context is retained. */
 export function panelRequestBudget(request: DecisionRequest, port: Pick<DecisionPort, 'requestBudget'>): DecisionRequestBudget {
-  const budgets = Object.values(PANEL_QUESTIONS).map(question => port.requestBudget({
-    ...request, questions: { resolution: question },
-  }));
+  const budgets: DecisionRequestBudget[] = [];
+  for (const question of Object.values(PANEL_QUESTIONS)) {
+    const measured = port.requestBudget({ ...request, questions: { resolution: question } });
+    const b = { ...measured, maxInputTokens: Math.min(INPUT_LIMIT, measured.maxInputTokens),
+      maxContextTokens: Math.min(CONTEXT_LIMIT, measured.maxContextTokens) };
+    // One failing question is enough to reject a candidate. Successful candidates
+    // still count all three complete requests; arbitrary adapters promise no additive accounting.
+    if (![b.requestBytes, b.inputTokens, b.contextTokens, b.maxRequestBytes, b.maxInputTokens, b.maxContextTokens]
+      .every(n => Number.isFinite(n) && n >= 0) || !b.tokenizerModel
+      || b.requestBytes > b.maxRequestBytes || b.inputTokens > b.maxInputTokens || b.contextTokens > b.maxContextTokens) { return b; }
+    budgets.push(b);
+  }
   return {
     requestBytes: Math.max(...budgets.map(b => b.requestBytes)),
     inputTokens: Math.max(...budgets.map(b => b.inputTokens)),

@@ -285,14 +285,23 @@ test('frozen panel sends three separate configured requests and retains actual m
       return new Response(JSON.stringify({ model: 'typesafe/jev-1.14-20261014', usage: { input_tokens: 500, output_tokens: 1, cost: 0.001 },
         answers: { resolution: { type: 'choice', choice: 'addresses', probabilities: { addresses: 0.8, does_not_address: 0.1, insufficient_evidence: 0.1 }, confidence: 0.01 } } }));
     } });
-  const outcome = await runPanel({ finding: 'a.java:1 preserve output' }, port, { provider: 'vercel', model: DECISION_MODEL }, () => 'hash');
+  const state = { finding: 'a.java:1 preserve output', findings: [{ id: 'F1', summary: 'preserve output' }],
+    missionRange: { approved: { baseline: 'base-a', revision: 'a' }, candidate: { baseline: 'base-b', revision: 'b' } },
+    contextOmissions: ['lib/optional.ts: complete candidate file omitted by token budget'],
+    omittedDiffs: [{ path: 'lib/change.ts', added: 1, removed: 1 }], omittedDiffCount: 1, omittedTokens: 100,
+    omissionNotice: 'Omitted changes were not shown.' };
+  const outcome = await runPanel(state, port, { provider: 'vercel', model: DECISION_MODEL }, () => 'hash');
   assert.equal(outcome.selected.route, 'clear');
   assert.equal(bodies.length, 3);
   for (const [index, body] of bodies.entries()) {
     assert.equal(body.model, DECISION_MODEL);
     assert.equal(outcome.measurement.members[index].configuredModel, DECISION_MODEL);
     assert.deepEqual(body.questions, { resolution: Object.values(PANEL_QUESTIONS)[index] });
-    assert.deepEqual(body.state, bodies[0].state);
+    assert.deepEqual(body.state, state);
+    const exact = port.requestBudget({ state, questions: { resolution: Object.values(PANEL_QUESTIONS)[index] } });
+    assert.ok(exact.inputTokens <= Math.min(32000, exact.maxInputTokens));
+    assert.ok(exact.contextTokens <= Math.min(30000, exact.maxContextTokens));
+    assert.ok(exact.requestBytes <= exact.maxRequestBytes);
     assert.equal(outcome.measurement.members[index].model, 'typesafe/jev-1.14-20261014');
     assert.deepEqual(outcome.measurement.members[index].usage, { inputTokens: 500, outputTokens: 1, cost: 0.001 });
   }
