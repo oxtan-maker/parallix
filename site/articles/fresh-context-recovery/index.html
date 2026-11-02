@@ -3,9 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Whether a coding agent should keep, compact or reset its conversation depends on the next job. Paired replays at checkpoints, failed checks, rebases and acting on review findings.">
+  <meta name="description" content="Whether a coding agent should keep its context, compact it or start fresh depends on what sets the next job. Paired replays at checkpoints, failed checks, rebases and acting on review findings.">
   <meta name="color-scheme" content="light">
+  <meta name="author" content="Magnus Ekdahl">
   <title>When should an agent keep its context, compact it or start a fresh session? — Magnus Ekdahl</title>
+  <link rel="canonical" href="https://oxtan-maker.github.io/parallix/articles/fresh-context-recovery/">
+  <meta property="og:type" content="article">
+  <meta property="article:author" content="Magnus Ekdahl">
+  <meta property="article:published_time" content="2026-11-02">
+  <meta property="og:title" content="When should an agent keep its context, compact it or start a fresh session?">
+  <meta property="og:description" content="Start fresh when a failing check or a moved main branch sets the next job: 43–46% less time and 46–70% less cost than continuing. When the agent continues its own plan, compact; fresh took up to 73% longer.">
+  <meta property="og:url" content="https://oxtan-maker.github.io/parallix/articles/fresh-context-recovery/">
+  <meta property="og:image" content="https://oxtan-maker.github.io/parallix/articles/fresh-context-recovery/assets/social-card.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Start fresh after a failed check or a moved main branch (46–70% less cost); compact when the agent continues its own plan (fresh took up to 73% longer).">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="stylesheet" href="styles.css?v=20261101-4">
 </head>
 <body>
