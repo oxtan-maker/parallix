@@ -59,7 +59,7 @@ export interface MissionActivity {
 }
 
 /** The card fields this projection reads. Kept structural so tests need no full card. */
-export type MissionActivitySource = Pick<MissionCard, 'currentWork' | 'blockingReason' | 'liveSession'>;
+export type MissionActivitySource = Pick<MissionCard, 'currentWork' | 'blockingReason' | 'liveSession'> & Partial<Pick<MissionCard, 'closed'>>;
 
 /**
  * Project one mission card into the shared activity read model.
@@ -75,6 +75,7 @@ export function projectMissionActivity(card: MissionActivitySource): MissionActi
 }
 
 function projectWork(card: MissionActivitySource): MissionWorkActivity {
+  if (card.closed) { return { kind: 'idle' }; }
   if (card.blockingReason) { return { kind: 'blocked', reason: card.blockingReason }; }
   const work: LiveMissionWork | null = card.currentWork;
   if (work !== null) {

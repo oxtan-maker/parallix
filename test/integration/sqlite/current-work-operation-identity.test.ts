@@ -1,3 +1,12 @@
+import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
+import { SqliteWorkflowOperationStore } from '../../../src/adapters/sqlite/workflow-operation-store.js';
+import { workflowOperation, claimWorkflow, finishWorkflow } from '../../../src/domain/workflow-operation.js';
+import { projectMissionCard } from '../../../src/application/projections/mission-board.js';
+import { projectWorkflowBoard } from '../../../src/application/projections/workflow-board.js';
+import { buildBoardProjection } from '../../../src/application/projections/board.js';
+import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
+import { emptyMetrics } from '../../fixtures/board-projection.js';
 import { projectExecutionActivity, isWorkInProgress } from '../../../src/domain/execution-activity.js';
 import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
 import { repositoryId } from '../../../src/domain/repository.js';
@@ -246,5 +255,74 @@ test('overlapping publications on one SQLite connection retain both active sourc
     const snapshot = (await second.loadMissionCurrentWork(MISSION))[0];
     assert.deepEqual(snapshot.frames.map(frame => frame.sourceId), ['parent', 'later']);
     assert.equal(snapshot.frames.at(-1)?.event.agent, 'codex');
+  } finally { await subject.dispose(); }
+});
+
+
+test('persisted closed integration blockers disappear on repeatable board and web reads without history writes (px-0024)', async () => {
+  const subject = await fixture();
+  try {
+    const repo = repositoryId('parallix');
+    const missions = new SqliteMissionStore(subject.db);
+    const workflows = new SqliteWorkflowOperationStore(subject.db, repo);
+    for (const slug of ['px-0008', 'px-0020', 'task-open-failure']) {
+      const mission = fixtureMission(slug, { repositoryId: repo,
+        status: slug === 'task-open-failure' ? 'integration' : 'done',
+        closedAt: slug === 'task-open-failure' ? null : '2026-11-02T10:00:00Z' });
+      await missions.save(mission, null);
+      const operation = workflowOperation({ id: `owner:${slug}`, requestKey: slug,
+        repositoryId: repo, missionId: mission.id, command: 'integrate:merge', generation: 0,
+        phase: 'accepted', owner: null, providerStarted: false, agent: null, reviewer: null,
+        originalStatus: 'integration', previousAssignee: null, reason: null,
+        createdAt: '2026-11-02T10:00:00Z', updatedAt: '2026-11-02T10:00:00Z' });
+      const event = { missionId: mission.id, operationId: operation.id, phase: 'integrate' as const,
+        state: 'running' as const, summary: `px integrate ${slug}`, agent: null, processId: null,
+        blockedReason: null, occurredAt: operation.createdAt };
+      // Reproduce the pre-fix source nesting: blocked child, completed root.
+      await subject.readAdapter.publish(event, operation.id);
+      await subject.readAdapter.publish(event, `integration:${slug}`);
+      await subject.readAdapter.publish({ ...event, state: 'blocked',
+        blockedReason: slug === 'task-open-failure' ? 'genuine landing failure' : 'integration cannot continue autonomously' }, `integration:${slug}`);
+      await subject.readAdapter.publish({ ...event, state: 'ended' }, operation.id);
+      await workflows.insert(finishWorkflow(claimWorkflow(operation, { pid: 100, identity: 'fixture' }, operation.createdAt), 1, true, null, operation.updatedAt));
+    }
+    const durable = async () => ({
+      activity: await subject.db.query('SELECT * FROM execution_activity ORDER BY mission_id'),
+      audit: await subject.db.query('SELECT * FROM operational_history ORDER BY id'),
+      lifecycle: await subject.db.query('SELECT * FROM board_lane_events ORDER BY id'),
+      missions: await subject.db.query('SELECT * FROM missions ORDER BY id'),
+      workflows: await workflows.latestByMission(),
+    });
+    const before = await durable();
+    assert.ok(before.audit.length > 0);
+    for (let read = 0; read < 2; read++) {
+      const reloaded = new SqliteExecutionActivityStore(subject.db, repo);
+      const snapshots = await reloaded.loadCurrentWork();
+      assert.ok(snapshots.every(snapshot => snapshot.frames.at(-1)?.event.state === 'blocked'));
+      const facts = projectExecutionActivity(snapshots, { nowMs: NOW, ttlMs: 300000 });
+      const cards = [];
+      for (const snapshot of snapshots) {
+        const loaded = await missions.load(snapshot.missionId);
+        assert.equal(loaded.kind, 'found');
+        if (loaded.kind !== 'found') { throw new Error('fixture missing'); }
+        const work = facts.get(snapshot.missionId)!;
+        cards.push(projectMissionCard(loaded.mission, { ...work, activityOperationId: work.operationId,
+          reviewApproval: null, latestGate: 'passed', flags: [] }));
+      }
+      const board = projectWorkflowBoard(buildBoardProjection(repo, cards, [], [], emptyMetrics, []), await workflows.latestByMission());
+      const web = toWebBoardSnapshot(board);
+      assert.deepEqual(board.attentionQueue.map(item => item.missionId), ['task-open-failure']);
+      assert.deepEqual(web.attentionQueue.map(item => item.missionId), ['task-open-failure']);
+      for (const card of web.stages.flatMap(stage => stage.cards)) {
+        if (card.closed) {
+          assert.equal(card.activity.work.kind, 'idle');
+          assert.equal(card.blockingReason, null);
+          assert.ok(card.actions.every(action => action.state !== 'enabled'));
+        } else {
+          assert.equal(card.blockingReason, 'genuine landing failure');
+        }
+      }
+    }
+    assert.deepEqual(await durable(), before, 'reads preserve lifecycle, workflow, activity and audit rows');
   } finally { await subject.dispose(); }
 });

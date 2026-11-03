@@ -1,6 +1,6 @@
 import { projectExecutionMetrics } from './provider-execution.js';
 import { isOpenWorkflow, type WorkflowOperation } from '../../domain/workflow-operation.js';
-import type { MissionCard } from './mission-board.js';
+import { projectMissionClosure, type MissionCard } from './mission-board.js';
 import { buildBoardProjection, type BoardProjection } from './board.js';
 
 /** Ownership fences actions. Activity and observed liveness describe actual work. */
@@ -13,6 +13,7 @@ export function projectWorkflowBoard(board: BoardProjection, operations: readonl
 }
 
 export function projectWorkflowCard(card: MissionCard, owner: WorkflowOperation | null): MissionCard {
+  if (card.closed) { return projectMissionClosure(card); }
   if (!owner || owner.repositoryId !== card.repositoryId || owner.missionId !== card.id) { return card; }
   if (!isOpenWorkflow(owner)) { return settledCard(card, owner); }
 

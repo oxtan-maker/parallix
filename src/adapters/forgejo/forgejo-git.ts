@@ -390,7 +390,7 @@ function isMissingRemoteRef(result: { failureReason?: unknown }): boolean {
 function isStaleInfoPushRejection(result: { status: number | null; failureReason?: unknown; stderr?: string | null; stdout?: string | null }): boolean {
   if (result.status === 0) { return false; }
   return recognizedFailureReason(result.failureReason)?.code === 'git-behind'
-    || /\bstale info\b|\bstale ref\b|fetch first/i.test(pushOutput(result));
+    || /^\s*!\s*\[rejected\].*\((?:stale info|stale ref|fetch first)\)\s*$/im.test(pushOutput(result));
 }
 
 /** Ports the sync-merged flow drives. Every one is a seam a test can replace. */

@@ -67,10 +67,10 @@ const HEALTHCHECK_TIMEOUT_MS = Math.min(
 );
 // The active phase runs up to three sequential model sessions in one px
 // invocation (execute agent, a possible repair relaunch, and the autonomous
-// review loop), so it gets twice the single-session budget. Observed: a run
-// where the relaunch machinery was legitimately recovering an
-// incomplete-evidence checkpoint was killed at 600s mid-recovery.
-const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 2;
+// review loop), so its finite wall deadline must cover three single-session
+// budgets. Observed: a successful 10m18s execute followed by an 8m+ review was
+// killed at the old 20m deadline after the reviewer had persisted approval.
+const ACTIVE_TIMEOUT_MS = RUN_TIMEOUT_MS * 3;
 const MIN_TMP_FREE_BYTES = Number(process.env.PARALLIX_REAL_AGENT_MIN_TMP_BYTES || 512 * 1024 * 1024);
 // The fixture seeds this in its base checkout; the pre-draft hook writes a
 // separate copy into each mission worktree. Verification requires it in both.

@@ -1,3 +1,4 @@
+import { observeCommandExits } from './recording/command-exits.js';
 import { randomUUID } from 'node:crypto';
 import { assertWorkflowControl } from './ports/mission-write-authorization.js';
 import { missionId } from '../domain/mission.js';
@@ -31,13 +32,27 @@ export class IntegrateCommandUseCase {
     // The repair agent and the re-review run inside this operation; they
     // publish under it so the board keeps showing live work (TASK-2620).
     const nestedWork = nestedWorkPublisher(this._currentWork, publication);
+    const exits = observeCommandExits(options);
     let result: unknown;
     try {
-      result = await this._workflow.execute(args, { ...options, nestedWork });
+      result = await this._workflow.execute(args, { ...options, ...exits.options, nestedWork });
     } catch (error) {
+      if (exits.terminatedWith(error)) {
+        const failed = exits.failure();
+        if (failed === null) { await bestEffort(() => this._currentWork.ended(publication)); }
+        else { await bestEffort(() => this._currentWork.blocked(publication, `${publication.summary} exited with status ${failed}`)); }
+        throw error;
+      }
       // A stop reason appears only when automation genuinely cannot continue.
       const reason = error instanceof Error ? error.message : 'integration cannot continue autonomously';
       await bestEffort(() => this._currentWork.blocked(publication, reason));
+      throw error;
+    }
+    // Returning exit observers must not turn an unsuccessful workflow into success.
+    const failed = exits.failure();
+    if (failed !== null) {
+      const error = new Error(`${publication.summary} exited with status ${failed}`);
+      await bestEffort(() => this._currentWork.blocked(publication, error.message));
       throw error;
     }
     await bestEffort(() => this._currentWork.ended(publication));

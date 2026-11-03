@@ -1,3 +1,4 @@
+import { commandInvocation } from '../../../../src/composition/command-invocation.js';
 import { projectExecutionActivity } from '../../../../src/domain/execution-activity.js';
 import { projectActivityPublications, activityFixture, ActivityRecorderFixture } from '../../../fixtures/execution-activity.js';
 import { makeExecutePorts as completeExecuteFixture } from '../../../fixtures/execute-mission-ports.js';
@@ -368,6 +369,42 @@ test('px integrate brackets the run with integrate-phase current work', async ()
     ['integrate', 'ended'],
   ]);
 });
+
+test('returning integration exit observers preserve failure and its status (px-0024)', async () => {
+  const { repo, appended } = inMemoryOperationalHistory();
+  const codes: number[] = [];
+  await assert.rejects(new IntegrateCommandUseCase({ execute: async (_args, options) => {
+    (options!.exitFn as (code: number) => void)(23);
+  } }, new ActivityRecorderFixture(repo)).execute(['task-2370'], { exitFn: (code: number) => codes.push(code) }),
+  /exited with status 23/);
+  assert.deepEqual(codes, [23]);
+  assert.equal(published(appended).at(-1)?.state, 'blocked');
+  assert.equal(published(appended).at(-1)?.blockedReason, 'px integrate task-2370 exited with status 23');
+});
+
+for (const phase of ['review', 'integrate'] as const) {
+  for (const scenario of ['success', 'nonzero', 'cleanup'] as const) {
+    test(`${phase} observes ${scenario} termination through the shared exit observer (px-0024)`, async () => {
+      const { repo, appended } = inMemoryOperationalHistory();
+      const recorder = new ActivityRecorderFixture(repo);
+      const execute = async (_args: string[], options: Record<string, unknown> = {}) => {
+        try { (options.exitFn as (code: number) => never)(scenario === 'nonzero' ? 23 : 0); }
+        finally { if (scenario === 'cleanup') { throw new Error('cleanup after exit failed'); } }
+      };
+      const useCase = phase === 'integrate' ? new IntegrateCommandUseCase({ execute }, recorder)
+        : new ReviewCommandUseCase({ ...makeReviewWorkflow([]),
+          preflight: (args, options = {}) => ({ slug: 'task-2370', args, options }),
+          enter: context => execute(context.args, context.options) }, recorder);
+      const invoke = commandInvocation(exitFn => useCase.execute(['task-2370'], { exitFn }));
+      if (scenario === 'cleanup') { await assert.rejects(invoke, /cleanup after exit failed/); }
+      else { assert.equal(await invoke, scenario === 'nonzero' ? 23 : 0); }
+      const last = published(appended).at(-1)!;
+      assert.equal(last.state, scenario === 'success' ? 'ended' : 'blocked');
+      assert.equal(last.blockedReason, scenario === 'success' ? null : scenario === 'cleanup'
+        ? 'cleanup after exit failed' : `px ${phase} task-2370 exited with status 23`);
+    });
+  }
+}
 
 test('px integrate without a slug publishes for the adapter-inferred mission', async () => {
   const { repo, appended } = inMemoryOperationalHistory();

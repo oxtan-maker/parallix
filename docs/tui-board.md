@@ -54,6 +54,11 @@ keep the mission listed: a blocking reason and a failed gate. Process liveness
 only verifies that a recorded operation has not disappeared; unavailable
 verification is never treated as an idle mission.
 
+Closed missions have no live-work attention or lifecycle actions, even when an
+older activity record reports running or blocked work. Their retained activity
+and audit history remain available. A done mission awaiting closeout is still
+open, so closeout failures remain visible.
+
 A blocked run that can still be retried keeps its usual `px active` retry.
 A recorded contract stop, or a blocker with no eligible retry, stays visible
 with its blocking detail and a concrete `px lead <mission> --once` next step.

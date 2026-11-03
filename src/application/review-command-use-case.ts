@@ -1,3 +1,4 @@
+import { observeCommandExits } from './recording/command-exits.js';
 import { assertWorkflowControl } from './ports/mission-write-authorization.js';
 import { reviewOperation, reviewOperationPhase } from '../domain/review-command-policy.js';
 import { randomUUID } from 'node:crypto';
@@ -69,7 +70,7 @@ export class ReviewCommandUseCase {
     };
     if (nested) { await nested.running(phase, `${summary} (inside ${nested.parent.summary})`); }
     else { await bestEffort(() => this._currentWork.running(publication)); }
-    const exits = exitRecorder(context.options);
+    const exits = observeCommandExits(context.options);
     const options = {
       ...context.options,
       ...exits.options,
@@ -102,27 +103,6 @@ export class ReviewCommandUseCase {
     }
     await bestEffort(() => this._currentWork.ended(publication));
   }
-}
-
-/** Observe the exit codes an injected, non-terminating exit reports. */
-function exitRecorder(options: Record<string, unknown>) {
-  let code: number | null = null;
-  let termination: { error: unknown } | null = null;
-  const observed: Record<string, unknown> = {};
-  for (const key of ['exit', 'exitFn'] as const) {
-    const exit = options[key];
-    if (typeof exit !== 'function') { continue; }
-    observed[key] = (value?: number) => {
-      if (value) { code = value; }
-      try {
-        return (exit as (_code?: number) => unknown)(value);
-      } catch (error) {
-        termination = { error };
-        throw error;
-      }
-    };
-  }
-  return { options: observed, failure: () => code, terminatedWith: (error: unknown) => termination !== null && termination.error === error };
 }
 
 async function bestEffort(publish: () => Promise<void>): Promise<void> {

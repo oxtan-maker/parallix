@@ -264,6 +264,7 @@ export interface MetricsProvenance {
 
 /** Derive AttentionReason from a MissionCard's operational facts. */
 export function attentionReason(card: MissionCard): AttentionReason {
+  if (card.closed) { return { kind: 'none' }; }
   if (card.blockingReason) { return { kind: 'blocking', detail: card.blocker && card.nextActionText ? `${card.blockingReason}\n${card.nextActionText}` : card.blockingReason }; }
   if (card.gate === 'failed') { return { kind: 'gate-failed', detail: `Gate ${card.gate}` }; }
   // An agent is already taking this lane's turn — see `agentIsWorking`.
@@ -300,6 +301,7 @@ function attentionCommand(card: MissionCard): 'active' | 'integrate' | 'review' 
  * no surface can render `px review` beside a dispatch of `active:execute`.
  */
 export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction | null {
+  if (card.closed) { return null; }
   if (card.workflowOperation) { return null; }
   const humanOnlyBlocker = hasHumanOnlyAttentionBlocker(card, reason);
   // Diagnostics explain why attention is needed; the lane owns its recovery.

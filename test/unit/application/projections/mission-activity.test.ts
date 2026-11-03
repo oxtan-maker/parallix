@@ -1,3 +1,4 @@
+import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { projectActivityPublications } from '../../../fixtures/execution-activity.js';
 import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
@@ -470,3 +471,28 @@ test('px status carries a failed provider observation, with reason and date, fro
   const healthy = projectStatusMissionData(null, makeCard({ execution: { observedAt: '2026-11-02T10:00:00.000Z', invocations: [], limitations: [] } }), 'task-2389', '/nonexistent-root');
   assert.ok(!renderStatusLines(healthy.activity ?? null, healthy.providerObservation).some(line => line.startsWith('Provider observation')));
 });
+
+for (const phase of ['accepted', 'executing', 'stopping', 'completed', 'blocked', 'interrupted', 'stopped'] as const) {
+  test(`closed mission ignores retained ${phase} workflow ownership (px-0024)`, () => {
+    const card = makeCard({ lane: 'done', status: 'done', closed: true,
+      ...working('stale'), blockingReason: 'obsolete failure',
+      commands: [{ command: 'integrate', enabled: true, reason: null }] });
+    const owner = { ...workflowOperation({ id: 'closed-owner', missionId: card.id,
+      repositoryId: card.repositoryId, requestKey: 'closed-owner', command: 'integrate:merge',
+      generation: 0, phase: 'accepted', owner: null, providerStarted: false,
+      agent: null, reviewer: null, originalStatus: 'integration', previousAssignee: null,
+      createdAt: '2026-11-02T10:00:00Z', updatedAt: '2026-11-02T10:00:00Z', reason: null }),
+      phase, reason: 'obsolete failure' };
+    assert.equal(projectMissionActivity(card).work.kind, 'idle');
+    const board = projectWorkflowBoard(buildBoardProjection(card.repositoryId, [card], [], [], emptyMetrics, []), [owner]);
+    assert.deepEqual(board.attentionQueue, []);
+    const projected = board.stages.flatMap(stage => stage.cards)[0];
+    assert.equal(projected.workflowOperation, undefined);
+    assert.equal(projected.blockingReason, null);
+    assert.equal(projected.currentWork, null);
+    assert.ok(projected.commands.every(command => !command.enabled));
+    const web = toWebBoardSnapshot(board).stages.flatMap(stage => stage.cards)[0];
+    assert.equal(web.activity.work.kind, 'idle');
+    assert.ok(web.actions.every(action => action.state !== 'enabled'), 'retained owner must not enable Stop');
+  });
+}

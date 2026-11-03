@@ -265,7 +265,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     : null;
   const reviewedChange = reviewedSubject?.change ?? null;
   const currentRound = mission.review ? currentReviewRound(mission.review) : null;
-  return {
+  return projectMissionClosure({
     id: mission.id,
     repositoryId: mission.repositoryId,
     title: mission.title,
@@ -291,7 +291,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
       ? [...facts.flags, `approval no longer covers the branch (round ${facts.approvalCoverage.round})`]
       : facts.flags,
     commands: availableBoardCommands(mission, facts),
-  };
+  });
 }
 
 /**
@@ -310,6 +310,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
  * wins, including when it says the work is stale.
  */
 export function agentIsWorking(card: MissionCard): boolean {
+  if (card.closed) { return false; }
   if (card.currentWork) { return card.currentWork.freshness !== 'stale'; }
   if (card.workflowOperation) { return false; }
   return (card.liveSession ?? null) !== null;
@@ -369,5 +370,15 @@ function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSu
     approvalOwed: reviewApprovalOwed(mission.review),
     approvalCoverage: facts.approvalCoverage ?? null,
     reviewHistory: projectReviewHistory(mission.review),
+  };
+}
+
+/** Closure ends live obligations without rewriting retained activity or history. */
+export function projectMissionClosure(card: MissionCard): MissionCard {
+  if (!card.closed) { return card; }
+  return { ...card, currentWork: null, activityOperationId: undefined,
+    blockingReason: null, blocker: undefined, blockerRequiresOperator: false,
+    nextActionText: null, workflowOperation: undefined,
+    commands: card.commands.map(command => ({ ...command, enabled: false, reason: 'Mission is closed' })),
   };
 }

@@ -180,7 +180,7 @@ local backend can return its first response; set
 `PARALLIX_REAL_AGENT_HEALTHCHECK_TIMEOUT_MS` to tune that limit. The
 single-session timeout defaults to 600s and can be raised via
 `PARALLIX_REAL_AGENT_TIMEOUT_MS`; the health-probe limit is capped at that
-single-session budget, and the active phase gets twice that budget because one
+single-session budget, and the active phase gets three times that budget because one
 `px active` invocation covers up to three sequential model sessions (execute
 agent, a possible repair relaunch, and the autonomous review loop). Occasional local-model flakiness
 (slow tool calls, transient backend hiccups) is a known risk of this tier —

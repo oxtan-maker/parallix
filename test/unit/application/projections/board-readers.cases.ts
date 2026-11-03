@@ -1,3 +1,7 @@
+import { activitySnapshots } from '../../../fixtures/execution-activity.js';
+import { projectMissionActivity } from '../../../../src/application/projections/mission-activity.js';
+import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 import { makeCard as fixtureCard } from '../../../fixtures/board-projection.js';
 import { missionOutcome } from '../../../fixtures/mission-outcome.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
@@ -829,3 +833,53 @@ test('board and focused reads observe the gate with the owning workflow (TASK-27
   assert.equal((await builder.buildMissionCard(id1))?.gate, 'not-run');
   assert.equal((await builder.buildMissionCard(id2))?.gate, 'not-run');
 });
+
+
+for (const state of ['running', 'blocked', 'ended'] as const) {
+  test(`closed missions ignore ${state} activity and lifecycle attention on board and web (px-0024)`, async () => {
+    const now = '2026-11-02T12:00:00Z';
+    const closed = fixtureMission('px-0008', { repositoryId: repo, status: 'done', closedAt: now });
+    const unclosed = fixtureMission('task-closeout', { repositoryId: repo, status: 'done', closedAt: null });
+    const snapshots = activitySnapshots([closed, unclosed].map(mission => ({
+      missionId: mission.id, operationId: `owner:${mission.id}`, state, phase: 'integrate',
+      summary: 'integration', agent: null, processId: null,
+      blockedReason: state === 'blocked' ? 'integration cannot continue autonomously' : null,
+      occurredAt: '2026-11-01T10:00:00Z',
+    })));
+    const owners: WorkflowOperation[] = [closed, unclosed].map(mission => ({
+      id: `owner:${mission.id}`, missionId: mission.id, repositoryId: repo,
+      requestKey: mission.id, command: 'integrate:merge', generation: 1, phase: 'blocked',
+      owner: { pid: 100, identity: 'fixture' }, providerStarted: false, agent: null, reviewer: null,
+      originalStatus: 'integration', previousAssignee: null, reason: 'closeout failed',
+      createdAt: now, updatedAt: now,
+    }));
+    const before = JSON.stringify({ snapshots, owners, closed, unclosed });
+    const builder = new BoardProjectionBuilder(makeMissionAdapter([closed, unclosed]), makeReviewAdapter(),
+      makeGateAdapter('failed'), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(), {
+        now: () => Date.parse(now), currentWork: { loadCurrentWork: async () => snapshots,
+          loadMissionCurrentWork: async id => snapshots.filter(snapshot => snapshot.missionId === id) },
+        workflowOperations: { latestByMission: async () => owners, latest: async id => owners.find(owner => owner.missionId === id) ?? null },
+      });
+    for (let read = 0; read < 2; read++) {
+      const board = await builder.build();
+      const card = board.stages.flatMap(stage => stage.cards).find(card => card.id === closed.id)!;
+      assert.equal(card.blockingReason, null);
+      assert.equal(card.currentWork, null);
+      assert.equal(projectMissionActivity(card).work.kind, 'idle');
+      assert.ok(card.commands.every(command => !command.enabled));
+      assert.deepEqual(await builder.buildMissionCard(closed.id), card);
+      assert.ok(!board.attentionQueue.some(item => item.missionId === closed.id));
+      const closeout = await builder.buildMissionCard(unclosed.id);
+      assert.equal(closeout?.closed, false);
+      assert.ok(closeout?.blockingReason, 'unclosed done retains closeout failure');
+      assert.ok(board.attentionQueue.some(item => item.missionId === unclosed.id));
+      const web = toWebBoardSnapshot(board);
+      const wire = web.stages.flatMap(stage => stage.cards).find(card => card.id === closed.id)!;
+      assert.equal(wire.activity.work.kind, 'idle');
+      assert.equal(wire.blockingReason, null);
+      assert.ok(wire.actions.every(action => action.state !== 'enabled'));
+      assert.ok(!web.attentionQueue.some(item => item.missionId === closed.id));
+    }
+    assert.equal(JSON.stringify({ snapshots, owners, closed, unclosed }), before, 'readback preserves authority facts');
+  });
+}
