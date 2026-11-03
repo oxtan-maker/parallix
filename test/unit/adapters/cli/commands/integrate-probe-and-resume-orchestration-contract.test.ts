@@ -615,7 +615,9 @@ describe("resume landing closeout", () => {
       if (joined.includes('rev-parse') && joined.includes('main')) { return { signal: null, status: 0, stdout: 'basesha', stderr: '' }; }
       if (joined.includes('rev-parse')) { return { signal: null, status: 0, stdout: BRANCH, stderr: '' }; }
       if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('merge-base')) { return { signal: null, status: 0, stdout: 'basesha', stderr: '' }; }
+      // Squashing leaves main outside the mission branch's ancestry even
+      // though its payload has already landed. The guard must permit closeout.
+      if (joined.includes('merge-base')) { return { signal: null, status: 0, stdout: 'pre-squash-base', stderr: '' }; }
       // The resume closeout resolves the landed squash commit timestamp via `show`.
       if (joined.includes('show') && joined.includes('--format')) { return { signal: null,  status: 0, stdout: '2026-09-15T12:00:00+00:00', stderr: '' }; }
       if (joined.includes('branch')) { return { signal: null,  status: 0, stdout: 'main\n', stderr: '' }; }
@@ -671,6 +673,7 @@ describe("resume landing closeout", () => {
     try {
       await integrate([SLUG], { missionServicesFn: composition.createMissionApplicationServices });
 
+      assert.doesNotMatch(logs.join('\n'), /advanced while integration gates|base advanced before landing|base kept advancing/);
       // The integration rebase must be skipped: the squash is already on the base.
       assert.equal(rebaseStarted, false, 'px integrate must not rebase when the mission squash is already on the local base');
       // The landing closeout resumes against the existing squash commit.

@@ -292,6 +292,15 @@ class IntegrateWorkflow {
     context.missionHeadSha = headResolution.status === 0 ? String(headResolution.stdout || '').trim() : null;
   }
 
+  private landingNeedsRebase(slug: string, context: IntegrationContext): boolean {
+    // A squash does not preserve mission ancestry. An already-landed payload
+    // must reach the existing closeout path instead of retrying its landing.
+    if (this.dependencies.ports.checkout.findLandedSquashOnBaseBranch(context.baseWorktree, slug)) { return false; }
+    return this.dependencies.predictIntegrationRebase(slug, {
+      baseWorktree: context.baseWorktree, baseBranch: context.baseBranch, git: this.dependencies.ports.git.git,
+    }).needed;
+  }
+
   /** Explicit checkouts replace every working-directory read of the context builder. */
   private executionCheckouts(slug: string, execution: MissionExecutionContext | undefined) {
     if (!execution) { return {}; }
@@ -351,11 +360,7 @@ class IntegrateWorkflow {
     // Gates certify a particular landing candidate.  If the primary advanced
     // while they ran, rebase again and run the complete configured set against
     // that new candidate; never squash a comparison tree the gates did not see.
-    if (!dryRun && this.dependencies.predictIntegrationRebase(slug, {
-      baseWorktree: context.baseWorktree,
-      baseBranch: context.baseBranch,
-      git: this.dependencies.ports.git.git,
-    }).needed) {
+    if (!dryRun && this.landingNeedsRebase(slug, context)) {
       fmt.log.info(`${context.baseBranch} advanced while integration gates ran; rebasing and re-running gates on the updated landing candidate.`);
       await this.rebaseForIntegration(slug, context, false, missionServicesFn);
       verificationEvidence = await strategy.run('run-required-local-gates', () =>
@@ -384,7 +389,7 @@ class IntegrateWorkflow {
     const landingBase = { baseWorktree: String(context.baseWorktree), baseBranch: String(context.baseBranch) };
     for (let attempt = 0; attempt < 3; attempt++) {
       const landed = await withBaseMutation(this.dependencies.ports.process, landingBase.baseWorktree, landingBase.baseBranch, async () => {
-        if (this.dependencies.predictIntegrationRebase(slug, { baseWorktree: String(context.baseWorktree), baseBranch: String(context.baseBranch), git: this.dependencies.ports.git.git }).needed) { return false; }
+        if (this.landingNeedsRebase(slug, context)) { return false; }
         await strategy.run('publish', () => this.dependencies.publishMission({
           slug, context, missionServices, missionServicesFn,
           ...landingBase, seams, state, configuration: options.configuration,
