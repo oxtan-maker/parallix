@@ -149,7 +149,7 @@ test('Forgejo PR round sync: stale-info rejection triggers fetch-retry then succ
   mock.method(forgejo, 'pushReviewRef', (_source: string, _destination: string, _rootDir: string, opts: Record<string, unknown>) => {
     pushCalls.push(opts);
     return pushCalls.length === 1
-      ? { status: 1, stdout: '', stderr: ' ! [rejected]        main -> main (stale info)' }
+      ? { failureReason: { version: 1, code: 'git-behind', source: 'git' }, status: 1, stdout: '', stderr: ' ! [rejected]        main -> main (stale info)' }
       : { status: 0, stdout: '', stderr: '' };
   });
   mock.method(forgejo, 'fetchReviewBranch', (branch: string) => { fetchCalls.push(branch); return { status: 0, stdout: '', stderr: '' }; });
@@ -182,7 +182,7 @@ test('Forgejo PR round sync: a competing update between fetch and retry survives
       remoteTip = missionHead;
       return { status: 0, stdout: '', stderr: '' };
     }
-    return { status: 1, stdout: '', stderr: staleDetail };
+    return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, status: 1, stdout: '', stderr: staleDetail };
   });
   mock.method(forgejo, 'fetchReviewBranch', (branch: string) => {
     assert.equal(branch, `mission/${TEST_SLUG}`);

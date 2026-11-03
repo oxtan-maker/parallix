@@ -12,6 +12,7 @@ import type { ReboundLaunchOptions } from '../rebound-kernel.js';
  */
 
 export interface GitCommandResult {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
   status: number | null;
   stdout: string;
   stderr: string;
@@ -74,7 +75,7 @@ export type PreReviewRebaseFailure =
   | { kind: 'gate'; operation: PreReviewRebaseOperation; gate: PreReviewRebaseGateEvidence }
   | { kind: 'conflict'; operation: 'rebase'; sharedFiles: string[] }
   | { kind: 'unsafe-worktree'; operation: 'commit'; unsafeFiles: string[] }
-  | { kind: 'other'; operation: PreReviewRebaseOperation; output: string };
+  | { kind: 'other'; operation: PreReviewRebaseOperation; output: string; failureReason?: import('../../domain/failure-reason.js').FailureReason };
 
 /** Result returned by `rebaseBeforeReviewRound`. */
 export interface PreReviewRebaseResult {

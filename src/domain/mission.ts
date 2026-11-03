@@ -1,3 +1,4 @@
+import { failureReason as reason, type FailureReason } from './failure-reason.js';
 import type { AgentFamily } from './agents.js';
 import type { CheckpointData } from './checkpoint.js';
 import type { ExternalTaskRef } from './external-task.js';
@@ -169,7 +170,7 @@ export type Mission = OpenMission | ClosedMission;
 export class MissionRuleViolation extends Error {
   readonly disposition = 'human-only' as const;
 
-  constructor(message: string) {
+  constructor(message: string, readonly failureReason: FailureReason = reason('state-machine', 'lifecycle')) {
     super(message);
     this.name = 'MissionRuleViolation';
   }

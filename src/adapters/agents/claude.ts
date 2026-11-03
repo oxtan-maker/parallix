@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
@@ -112,15 +113,7 @@ function startClaudeAgent({ configuration = DEFAULT_CONFIGURATION, prompt, workt
   function isStaleSessionResult(result: AgentProcessResult) {
     // Adapter-owned parsing of Claude CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
-    const stderr = result.stderr || '';
-    const stdout = result.stdout || '';
-    // Real Claude missing-session diagnostics. Match narrowly so an ordinary
-    // exit-1 failure is not mistaken for a recoverable stale resume.
-    const signals = [
-      'Session not found',
-      'No conversation found with session ID:'
-    ];
-    return signals.some(s => stderr.includes(s) || stdout.includes(s));
+    return recognizedFailureReason(result.failureReason)?.code === 'provider-session-missing';
   }
 
   function processResult(result: AgentProcessResult) {

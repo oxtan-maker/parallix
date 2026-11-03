@@ -1,3 +1,5 @@
+import { preparationFailure } from './review-preparation-failure.js';
+import type { FailureReasonCode } from '../domain/failure-reason.js';
 import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
 /**
  * Recorded Mission contract inputs review preparation verifies: the recorded contract,
@@ -88,12 +90,12 @@ export class ReviewPreparationContractVerifier {
   }): ReviewPreparationResult | VerifiedCheckpointDocument {
     const ports = this.ports;
     const { rootDir, missionDirPath, error } = context;
-    const fail = (msg: string): ReviewPreparationResult => { error(msg); return { ok: false, error: msg }; };
+    const fail = (msg: string, code: FailureReasonCode = 'incomplete-evidence'): ReviewPreparationResult => { error(msg); return preparationFailure(msg, code); };
 
     const relativeMissionPath = path.relative(rootDir, path.join(missionDirPath, 'MISSION.md'));
     const dirtyFiles = ports.git.getWorktreeStatus(rootDir);
     if (dirtyFiles.some(line => line.endsWith(relativeMissionPath))) {
-      return fail(`${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before review preparation.`);
+      return fail(`${fmt.path('MISSION.md')} is modified but uncommitted at ${fmt.path(relativeMissionPath)}. Commit the mission contract before review preparation.`, 'git-dirty');
     }
 
     const checkpoints = ports.missionUtils.findCheckpoints(missionDirPath);
@@ -104,7 +106,7 @@ export class ReviewPreparationContractVerifier {
     const finalCheckpoint = checkpoints[checkpoints.length - 1];
     const relativeCheckpointPath = path.relative(rootDir, finalCheckpoint);
     if (dirtyFiles.some(line => line.endsWith(relativeCheckpointPath))) {
-      return fail(`The latest checkpoint document is modified but uncommitted at ${fmt.path(relativeCheckpointPath)}. Commit the implementation evidence before review preparation.`);
+      return fail(`The latest checkpoint document is modified but uncommitted at ${fmt.path(relativeCheckpointPath)}. Commit the implementation evidence before review preparation.`, 'git-dirty');
     }
 
     // Per review.md step 5, a missing or empty goal-check table means the
@@ -150,7 +152,7 @@ export class ReviewPreparationContractVerifier {
       if (!ports.fileSystem.existsSync(missionMdPath)) {
         const message = `MISSION.md not found at ${missionMdPath}. Import the historical contract before review preparation.`;
         error(message);
-        return { ok: false, error: message };
+        return preparationFailure(message, 'missing-artifacts');
       }
     }
     const readiness = evaluateMissionEvidence(contract, ports.fileSystem, rootDir);
@@ -160,7 +162,7 @@ export class ReviewPreparationContractVerifier {
     let evidenceRows: string[] = [];
     if (readiness.source !== 'historical') {
       const finding = readiness.findings[0];
-      if (finding) { error(finding.message); return { ok: false, error: finding.message, reason: finding.code }; }
+      if (finding) { error(finding.message); return { ...preparationFailure(finding.message, finding.code === 'human-only-contract-blocker' || finding.code === 'repair-contract-changed' ? 'state-machine' : finding.code === 'incomplete-criterion' ? 'incomplete-success-criteria' : 'incomplete-evidence', 'review-preparation', { finding: finding.code }), reason: finding.code }; }
       const combinedRows = recorded.reduce((total, checkpoint) => total + checkpoint.goalCheck.length, 0);
       log(fmt.status('PASS', `Recorded checkpoint evidence verified: ${recorded.length} recorded checkpoint(s), ${combinedRows} Goal Check row(s).`));
     } else {

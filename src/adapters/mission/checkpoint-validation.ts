@@ -1,3 +1,4 @@
+import { failureReason, failureReasonFromCause } from '../../domain/failure-reason.js';
 import * as path from 'node:path';
 import type { GitReader } from '../git/worktree.js';
 import { git } from '../git/git.js';
@@ -25,10 +26,10 @@ export async function validateCheckpointsBeforeReviewPreparation(
   worktree: string,
   options: CheckpointValidationOptions = {},
 ): Promise<CheckpointValidationVerdict> {
-  const fail = (message: string, extra: Partial<CheckpointValidationVerdict> = {}) => { options.error?.(message); return { ok: false, error: message, ...extra }; };
+  const fail = (message: string, extra: Partial<CheckpointValidationVerdict> = {}) => { options.error?.(message); return { ok: false, error: message, failureReason: failureReason('incomplete-evidence', 'review-preparation'), ...extra }; };
   const recorded = await (options.loadRecordedCheckpointsFn ?? (async (_slug: string) => null))(slug);
-  if (recorded) { return validateRecordedCheckpoints(recorded, options, fail); }
-  return validateCheckpointFiles(slug, worktree, options, fail);
+  if (recorded) { return { ...validateRecordedCheckpoints(recorded, options, fail), source: 'recorded' }; }
+  return { ...validateCheckpointFiles(slug, worktree, options, fail), source: 'historical' };
 }
 
 type CheckpointValidationOptions = { loadRecordedCheckpointsFn?: (_slug: string) => Promise<{ planned: string[]; recorded: string[]; humanOnlyContractBlocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker } | null>; log?: (_message: string) => void; error?: (_message: string) => void; findMissionDirFn?: typeof findMissionDir; findCheckpointsFn?: typeof findCheckpoints; readMissionFileFn?: typeof readMissionFile; runFn?: GitReader };
@@ -50,8 +51,8 @@ function validateCheckpointFiles(slug: string, worktree: string, options: Checkp
   if (!missionDir) { return fail(`Mission directory not found for slug: ${fmt.slug(slug)}. Cannot validate checkpoints.`); }
   let declared: { names: string[]; error?: string };
   try { declared = parseDeclaredCheckpointNames((options.readMissionFileFn ?? readMissionFile)(missionDir)); }
-  catch (error) { return fail(`Could not read ${fmt.path(path.join(missionDir, 'MISSION.md'))} to validate declared checkpoints: ${(error as Error).message}`); }
-  if (declared.error) { return fail(declared.error); }
+  catch (error) { return fail(`Could not read ${fmt.path(path.join(missionDir, 'MISSION.md'))} to validate declared checkpoints: ${(error as Error).message}`, { failureReason: failureReasonFromCause(error, 'filesystem') }); }
+  if (declared.error) { return fail(declared.error, { failureReason: failureReason('state-machine', 'review-preparation', { contract: 'checkpoint-declarations' }) }); }
   const checkpoints = (options.findCheckpointsFn ?? findCheckpoints)(missionDir);
   const names = new Set(checkpoints.map(checkpoint => /(?:CP-|CHECKPOINT_)(\d+)/i.exec(path.basename(checkpoint))?.[1]).filter(Boolean).map(number => `CP-${number}`));
   const missing = declared.names.filter(name => !names.has(name));
@@ -66,7 +67,7 @@ function validateCheckpointFiles(slug: string, worktree: string, options: Checkp
 function checkpointCommitFailure(slug: string, rootDir: string, checkpoints: string[], options: CheckpointValidationOptions, fail: CheckpointFailure): CheckpointValidationVerdict | null {
   const args = checkpoints.map(checkpoint => path.relative(rootDir, checkpoint) || checkpoint);
   const status = (options.runFn ?? git)(['status', '--porcelain', '--', ...args], { cwd: rootDir });
-  if (status.status !== 0) { return fail(`Could not verify checkpoint commit state for ${fmt.slug(slug)}: ${(status.stderr || status.stdout || '').trim() || 'git status failed'}`); }
+  if (status.status !== 0) { return fail(`Could not verify checkpoint commit state for ${fmt.slug(slug)}: ${(status.stderr || status.stdout || '').trim() || 'git status failed'}`, { failureReason: status.failureReason ?? failureReason('git-failed', 'git') }); }
   const dirty = String(status.stdout || '').split('\n').map((line: string) => line.trimEnd()).filter(Boolean).map((line: string) => line.slice(3).trim()).filter(Boolean);
   if (dirty.length) { return fail(`Checkpoint documents must be committed before review preparation. Uncommitted checkpoint files: ${dirty.map((file: string) => fmt.path(file)).join(', ')}. Commit the checkpoint update and re-run the review preparation.`); }
   return null;

@@ -627,3 +627,22 @@ test('prelaunch compensation restores the recorded assignee through the executio
     assert.deepEqual(f.events, ['refined:active', 'active:refined']);
   }
 });
+
+import { approvedReview } from '../../fixtures/mission-builders.js';
+import { decideMission } from '../../../src/domain/mission-workflow.js';
+import { currentReviewRound } from '../../../src/domain/review.js';
+
+test('pending integration repair admission preserves approval and skips agent selection and activation (TASK-2829)', async () => {
+  const f = fixture(false, undefined, { select: async () => assert.fail('retention requires no implementer selection') });
+  const review = approvedReview('task-one');
+  const approved = fixtureMission('task-one', { status: 'integration', review, assignee: currentReviewRound(review).implementer });
+  const pending = decideMission(approved, { type: 'rebound-to-active', agent: currentReviewRound(review).implementer,
+    cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test' }, occurredAt: '2026-11-02T10:00:00Z' });
+  f.missions.set('task-one', pending);
+  const result = await f.service.admit({ ...request(), missionStatusAtRequest: 'active' });
+  assert.equal(result.status, 'accepted');
+  if (result.status !== 'accepted') { assert.fail('safe retention continuation must be admitted'); }
+  assert.equal(result.operation.agent, null);
+  assert.deepEqual(f.events, []);
+  assert.deepEqual(f.missions.get('task-one'), pending);
+});

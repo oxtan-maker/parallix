@@ -9,7 +9,7 @@ import { tryClassifyReview } from '../review-classification/classify-review.js';
 import { integrationRepairReviewBrief, latestIntegrationRepair } from '../integration-repair-review.js';
 import { missionId } from '../../domain/mission.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
-import { isArtifactInfraDiagnostic, isPollTimeout, POLL_TIMEOUT, type ReviewerArtifactFacts } from '../ports/review-round.js';
+import { isArtifactInfraFailure, isPollTimeout, POLL_TIMEOUT, type ReviewerArtifactFacts } from '../ports/review-round.js';
 import { pinReviewBaseline } from './pin-baseline.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
@@ -117,7 +117,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
   let reviewState: unknown = null;
   const diagnostic = incompleteReviewerDiagnostic(context, round, artifacts);
   if (diagnostic) {
-    if (isArtifactInfraDiagnostic(diagnostic)) {
+    if (isArtifactInfraFailure(artifacts.failureReason)) {
       context.emit({ kind: 'reviewer-artifact-infra', diagnostic: diagnostic });
       await context.escalateToHumanReview('REVIEWER_ARTIFACT_INFRA_FAILURE');
       return { step: 'stop' };
@@ -131,7 +131,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
     // alone is no evidence that the reviewer produced anything.
     const maxAttempts = round.occurrenceBudget(DEFAULT_REBOUND_ATTEMPTS);
     const collaborators = reboundCollaborators(context, 'reviewer', () => round.promptFacts());
-    const recovery = await rebound({ kind: 'artifact-incomplete', role: 'reviewer', diagnostic }, {
+    const recovery = await rebound({ kind: 'artifact-incomplete', role: 'reviewer', diagnostic, failureReason: artifacts.failureReason }, {
       ...collaborators,
       applyAgentFallback: async options => {
         round.reviewerLaunch = options.launchResult;
@@ -143,7 +143,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
         if (retry.workflowBlock) { return { ok: false, workflowBlock: retry.workflowBlock }; }
         artifacts = retry.artifacts;
         if (!artifacts.consumed) { return { ok: false, diagnostic: missingReviewerArtifacts(context, round) }; }
-        return artifacts.ok ? { ok: true } : { ok: false, diagnostic: reviewerArtifactDiagnostic(context, artifacts) };
+        return artifacts.ok ? { ok: true } : { ok: false, diagnostic: reviewerArtifactDiagnostic(context, artifacts), reason: { kind: 'artifact-incomplete', role: 'reviewer', diagnostic: reviewerArtifactDiagnostic(context, artifacts), failureReason: artifacts.failureReason } };
       },
     });
     round.used += recovery.attempts;

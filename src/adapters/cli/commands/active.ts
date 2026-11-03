@@ -144,9 +144,7 @@ async function selectLaunchAndRecord(opts: LaunchOptions) {
       onLaunch: launch => recorder.record(launch),
       // The agent's own terminal stream is the progress record. Keep only
       // conditions an operator must act on; the normal launcher trace is debug detail.
-      log: (message: string) => {
-        if (/\[(WARN|FAIL)\]|No output yet|Still waiting/.test(message)) { log(message); }
-      }
+      log
     }));
 
   // `actual` is the family that actually ran (may differ from `preselected` after

@@ -144,6 +144,8 @@ export interface ExecuteTelemetryPort {
 
 /** Result of checking whether every planned checkpoint has durable evidence. */
 export interface CheckpointValidationVerdict {
+  readonly source?: 'recorded' | 'historical';
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly ok: boolean;
   readonly error?: string;
   readonly humanOnlyContractBlocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker;
@@ -179,6 +181,7 @@ export interface ReviewPreparationRunRequest {
 }
 
 export interface ReviewPreparationRunResult {
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly recoveryAttempted?: boolean;
   readonly recoveryFailure?: import('../../domain/rebound-policy.js').ReboundReason;
   readonly ok: boolean;
@@ -201,14 +204,11 @@ export interface ReviewPreparationExecutionPort {
     readonly worktree: string;
     readonly taskFile: string | null;
     readonly error: string;
+    readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
     readonly log: (_message: string) => void;
     readonly outputError: (_message: string) => void;
   }): Promise<{ readonly repaired: boolean; readonly blocker?: string }>;
-  classifyFailure(_error: string): {
-    readonly failureClass: string;
-    readonly dispatchAction: string;
-  } | null;
-  isRelaunchableFailure(_error: string): boolean;
+
 }
 
 /** Mechanism request for beginning autonomous review after a successful review preparation. */
@@ -259,6 +259,8 @@ export interface ExecuteOperatorOutputPort {
  * read-revision write and no adapter can choose a transition.
  */
 export interface ExecuteMissionPorts {
+  readonly integrationRepair?: { resume(_slug: string): Promise<'none' | 'retained' | 'changed' | 'blocked'> };
+
   readonly workspace: MissionWorkspacePort;
   readonly agentExecution: AgentExecutionPort;
   readonly missionTransitions: MissionTransitionStore;

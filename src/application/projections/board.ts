@@ -1,4 +1,3 @@
-import { hasExplicitHumanOnlyDiagnostic } from '../../domain/failure-classification.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { CohortComparison } from './cohorts.js';
 import type { RepositoryId } from '../../domain/repository.js';
@@ -283,8 +282,14 @@ export function attentionReason(card: MissionCard): AttentionReason {
 }
 
 function hasHumanOnlyAttentionBlocker(card: MissionCard, reason: AttentionReason): boolean {
-  return reason.kind === 'blocking' && Boolean(card.blockerRequiresOperator || card.blocker
-    || hasExplicitHumanOnlyDiagnostic(card.blockingReason ?? ''));
+  return reason.kind === 'blocking' && Boolean(card.blockerRequiresOperator || card.blocker);
+}
+
+function attentionCommand(card: MissionCard): 'active' | 'integrate' | 'review' {
+  if (card.pendingApprovalRetention) { return 'active'; }
+  if (card.lane === 'integration') { return 'integrate'; }
+  if (card.lane === 'review' && card.reviewPhase !== 'fixing') { return 'review'; }
+  return 'active';
 }
 
 /**
@@ -298,7 +303,7 @@ export function attentionAction(card: MissionCard, reason: AttentionReason): Att
   const humanOnlyBlocker = hasHumanOnlyAttentionBlocker(card, reason);
   // Diagnostics explain why attention is needed; the lane owns its recovery.
   if (card.lane === 'review' && card.reviewPhase !== 'fixing'
-    && !humanOnlyBlocker) {
+    && !card.pendingApprovalRetention && !humanOnlyBlocker) {
     return card.commands.some(action => action.command === 'review' && action.enabled)
       ? { kind: 'review:submit', display: `px review ${card.id}` }
       : null;
@@ -307,7 +312,7 @@ export function attentionAction(card: MissionCard, reason: AttentionReason): Att
     && !card.commands.some(action => action.command === 'active' && action.enabled))) {
     return { kind: 'manual', display: `px lead ${card.id} --once` };
   }
-  const command = card.lane === 'integration' ? 'integrate' : card.lane === 'review' && card.reviewPhase !== 'fixing' ? 'review' : 'active';
+  const command = attentionCommand(card);
   if (!card.commands.some(action => action.command === command && action.enabled)) { return null; }
   const kind = command === 'integrate' ? 'integrate:merge' : command === 'review' ? 'review:submit' : 'active:execute';
   return { kind, display: `px ${command} ${card.id}` };

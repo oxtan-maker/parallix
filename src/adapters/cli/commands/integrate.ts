@@ -100,7 +100,6 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
       resolveBaseWorktree: (slug, options) => missionUtils.resolveBaseWorktree(slug, { ...options, configuration }),
       resolveWorktree: (slug, options) => missionUtils.resolveWorktree(slug, options),
       findMissionDocInBranches: (slug, rootDir) => missionUtils.findMissionDocInBranches(slug, rootDir),
-      parseConflictFilesFromMergeOutput: output => missionUtils.parseConflictFilesFromMergeOutput(output),
       softResetTrailingBacklogNoise: (rootDir, gitRunner) => missionUtils.softResetTrailingBacklogNoise(rootDir, gitRunner),
     },
     verification: {

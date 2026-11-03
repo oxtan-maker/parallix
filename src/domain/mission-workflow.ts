@@ -1,3 +1,4 @@
+import { failureReason } from './failure-reason.js';
 import { preserveHistoricalRestoration } from './integration-repair-record.js';
 import { retentionEvidenceMatches } from './integration-approval-retention.js';
 import type { AgentFamily } from './agents.js';
@@ -121,7 +122,7 @@ function requireDraftedContract(mission: OpenMission, command: MissionCommand): 
   if (missing.length > 0) {
     throw new MissionRuleViolation(
       `Cannot ${command.type} ${mission.id}: its mission contract is incomplete. `
-      + `Missing ${missing.join('; ')}. Record what is missing, then read it back with \`px status ${mission.id}\`.`,
+      + `Missing ${missing.join('; ')}. Record what is missing, then read it back with \`px status ${mission.id}\`.`, failureReason('mission-contract-incomplete', 'lifecycle'),
     );
   }
 }
@@ -222,7 +223,7 @@ function validateSubmission(mission: OpenMission, command: SubmitForReviewComman
 
 function submitForReview(mission: Mission, command: SubmitForReviewCommand): Mission {
   requireStatus(mission, ['active', 'review'], command);
-  if (pendingIntegrationApproval(mission)) { throw new MissionRuleViolation('Integration repair must prove approval retention before lifecycle recovery'); }
+  if (pendingIntegrationApproval(mission)) { throw new MissionRuleViolation('Integration repair must prove approval retention before lifecycle recovery', failureReason('approval-retention-pending', 'lifecycle', { operation: 'lifecycle-recovery' })); }
   // Preparation enters review before the verified Review is stored. A retry
   // preserves the current round; a resolved conversation may advance it.
   if (mission.status === 'review' && mission.review) {

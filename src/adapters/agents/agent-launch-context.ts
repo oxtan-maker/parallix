@@ -102,7 +102,7 @@ export type StartAgentLoopDeps = {
   noOutputWatchdog: { initialDelayMs?: number; intervalMs?: number; maxNoOutputMs?: number } | boolean;
   unrefChild: boolean;
   allowUnsandboxedMutation: boolean;
-  refuseFallbackWhenPinned: (_detail: string) => void;
+  refuseFallbackWhenPinned: (_detail: string, _reason?: import('../../domain/failure-reason.js').FailureReason) => void;
   runtimeBlockContext: (_step: string, _tried: ReadonlySet<string>) => Promise<BlockContext>;
 };
 
@@ -141,7 +141,7 @@ export class PinnedAgentUnavailableError extends Error {
   code = 'PINNED_AGENT_UNAVAILABLE';
   agent: string;
   detail: string;
-  constructor(agent: string, detail: string) {
+  constructor(agent: string, detail: string, readonly failureReason?: import('../../domain/failure-reason.js').FailureReason) {
     super(`Pinned agent "${agent}" cannot run this step: ${detail}`);
     this.name = 'PinnedAgentUnavailableError';
     this.agent = agent;

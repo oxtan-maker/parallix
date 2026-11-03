@@ -130,7 +130,6 @@ describe("squash landing commit message", () => {
         findMissionDocInBranches: () => null,
         // The probe merge is clean in the fixture, so conflict parsing is never
         // reached; keep the seam stubbed like the other non-git collaborators.
-        parseConflictFilesFromMergeOutput: () => [],
         softResetTrailingBacklogNoise: () => false,
       },
       productConfig: { isForgejoReviewEnabled: () => false },
@@ -292,7 +291,7 @@ describe("squash hook bounce", () => {
 
   interface Scenario {
     /** commit --only results per attempt; each entry is { status, stderr }. */
-    commitResults: Array<{ status: number; stderr: string }>;
+    commitResults: Array<{ status: number; stderr: string; failureReason?: import('../../../src/domain/failure-reason.js').FailureReason }>;
     /** payload already at HEAD on the first probe (SC3 short-circuit). */
     alreadyAtHead?: boolean;
   }
@@ -341,7 +340,7 @@ describe("squash hook bounce", () => {
       if (args.includes('commit')) {
         const r = scenario.commitResults[Math.min(commitAttempt, scenario.commitResults.length - 1)];
         commitAttempt += 1;
-        return { signal: null,  status: r.status, stdout: '', stderr: r.stderr };
+        return { signal: null,  status: r.status, stdout: '', stderr: r.stderr, failureReason: r.failureReason };
       }
       if (args.includes('rev-parse')) { return ok(`${LANDED_SHA}\n`); }
       if (args.includes('merge-base')) { return ok(`${LANDED_SHA}\n`); }
@@ -383,7 +382,7 @@ describe("squash hook bounce", () => {
   test('SC2 S1: hook failure bounces through the kernel and lands when the re-run commit passes', async () => {
     const result = await runIntegrate({
       commitResults: [
-        { status: 1, stderr: 'pre-commit: lint errors found' },
+        { status: 1, stderr: 'pre-commit: lint errors found', failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } },
         { status: 0, stderr: '' },
       ],
     });
@@ -395,8 +394,8 @@ describe("squash hook bounce", () => {
   test('SC2 S2: two failed re-run commits exhaust the budget and throw IntegrationAbort', async () => {
     const result = await runIntegrate({
       commitResults: [
-        { status: 1, stderr: 'pre-commit: lint errors found' },
-        { status: 1, stderr: 'pre-commit: lint errors found' },
+        { status: 1, stderr: 'pre-commit: lint errors found', failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } },
+        { status: 1, stderr: 'pre-commit: lint errors found', failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } },
       ],
     });
     assert.equal(result.launches.length, 2, 'the kernel spends its per-occurrence budget of two');
@@ -410,7 +409,7 @@ describe("squash hook bounce", () => {
 
   // S3 — payload already at HEAD short-circuits before any bounce.
   test('SC2 S3: an already-landed payload short-circuits without bouncing', async () => {
-    const result = await runIntegrate({ alreadyAtHead: true, commitResults: [{ status: 1, stderr: 'pre-commit: x' }] });
+    const result = await runIntegrate({ alreadyAtHead: true, commitResults: [{ status: 1, stderr: 'pre-commit: x', failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } }] });
     assert.equal(result.launches.length, 0, 'no bounce when the payload is already at HEAD');
     assert.equal(result.exitCode, 0, 'integration lands without bouncing');
   });

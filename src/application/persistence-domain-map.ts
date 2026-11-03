@@ -51,7 +51,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A mission cannot close before integration reports `done`, cannot close twice, and cannot close without an actual closure time; each violation throws MissionRuleViolation.',
     fileLocation: 'src/domain/mission.ts',
-    line: 252,
+    line: 253,
     anchor: 'export function closeMission',
   },
   CheckpointData: {

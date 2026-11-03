@@ -1,3 +1,5 @@
+import { captureGateFailureEvidence } from '../../src/application/rebound-evidence.js';
+import { classifyRecoveryReason } from '../../src/application/rebound-classification.js';
 import type { FixPromptSlots } from '../../src/application/rebound-prompts.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -630,12 +632,12 @@ test('typed failure reason round-trips with process and completeness metadata wh
   try {
     const failure = captureFailedVerification({ ok: true, rootDir: '/isolated-mission', commit: 'revision-a', tree: 'tree-a' }, {
       status: null, signal: 'SIGTERM', stdout: 'complete stdout', stderr: 'complete stderr',
-      failureReason: { version: 1, code: 'process-terminated' },
+      failureReason: { version: 1, code: 'process-terminated', source: 'process', context: { signal: 'SIGTERM' } },
     }, 'npm test');
     const original = failure.recoveryEvidence!;
     assert.equal(failure.ok, false);
     assert.equal(failure.signal, 'SIGTERM');
-    assert.deepEqual(failure.failureReason, { version: 1, code: 'process-terminated' });
+    assert.deepEqual(failure.failureReason, { version: 1, code: 'process-terminated', source: 'process', context: { signal: 'SIGTERM' } });
     assert.deepEqual(original.failureReason, failure.failureReason);
     assert.equal(original.command, 'npm test');
     assert.equal(original.cwd, '/isolated-mission');
@@ -661,6 +663,20 @@ test('typed failure reason round-trips with process and completeness metadata wh
     const old = lookupRecoveryEvidence({ cwd: original.cwd, incidentId: original.incidentId, attempt: 1, fs: memory });
     assert.equal(old.ok, true);
     assert.equal(old.evidence?.failureReason, undefined);
+    const diagnostic = 'Integration repair must prove approval retention; Forgejo token expired is conflicting diagnostic text';
+    const reason = { version: 1, code: 'approval-retention-pending', source: 'lifecycle', context: { operation: 'submit-for-review' } } as const;
+    const captured = await captureGateFailureEvidence({ kind: 'review-preparation-verification', error: diagnostic, failureReason: reason }, '/isolated-mission', {
+      slug: 'task-retention', worktree: '/isolated-mission', implementer: 'codex', log: () => {}, error: () => {},
+      startAgent: async () => assert.fail('capture does not launch'), verify: () => assert.fail('capture does not verify'),
+    });
+    assert.ok(captured);
+    assert.equal(files.get(captured.stderrPath), diagnostic, 'original lifecycle cause is retained verbatim');
+    const reloaded = lookupRecoveryEvidence({ cwd: captured.cwd, missionId: 'task-retention', incidentId: captured.incidentId, fs: memory });
+    assert.deepEqual(reloaded.evidence?.failureReason, reason);
+    const classified = classifyRecoveryReason({ kind: 'review-preparation-verification', error: 'rewritten wording', failureReason: reloaded.evidence?.failureReason });
+    assert.equal(classified.failureClass, 'StateMachineViolation');
+    assert.equal(classified.dispatchAction, 'AutoRepair');
+    assert.equal(classified.isRelaunchable, false);
     // A typed code cannot turn truncated output into complete capture.
     files.set(metadata, JSON.stringify({ ...legacy, failureReason: { version: 1, code: 'gate-failed' }, captureComplete: false, truncatedFrom: 'stdout' }));
     assert.equal(lookupRecoveryEvidence({ cwd: original.cwd, incidentId: original.incidentId, attempt: 1, fs: memory }).evidence?.captureComplete, false);

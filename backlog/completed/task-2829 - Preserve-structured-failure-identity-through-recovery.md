@@ -1,8 +1,8 @@
 ---
 id: TASK-2829
 title: Preserve structured failure identity through recovery
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-02 12:30'
 labels:
   - bug

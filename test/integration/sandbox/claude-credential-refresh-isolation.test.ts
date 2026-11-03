@@ -16,6 +16,7 @@ import {
   claudeProjectMemoryDir,
 } from '../../../src/adapters/config/state-homes.js';
 import { buildBubblewrapArgs, resolveSandboxProfile } from '../../../src/adapters/process/bubblewrap.js';
+import { spawnAndTee } from '../../../src/adapters/process/spawn-tee.js';
 import {
   FIRST_REFRESH,
   readCredentials,
@@ -173,7 +174,7 @@ test('task-2598: an unrefreshable Claude credential reports the refresh diagnost
     const before = fs.readFileSync(claudeCredentialsPath(), 'utf8');
     const logs: string[] = [];
     const blocks: unknown[] = [];
-    let claudeResult: { value: { status: number | null; stderr: string } | null } = { value: null };
+    let claudeResult: { value: Awaited<ReturnType<typeof spawnAndTee>> | null } = { value: null };
     let calls = 0;
     const result = await startAgent('execute', {
       prompt: 'Execute.', worktree: fixture.worktree,
@@ -183,13 +184,20 @@ test('task-2598: an unrefreshable Claude credential reports the refresh diagnost
       launchAgentFn: () => ({
         invocation: { command: fixture.claude, args: [], options: {} },
         resultPromise: calls === 1
-          ? runSandboxedAsync(sandboxArgs(fixture, 'execute'), fixture.claude, claudeEnv(fixture)).then(run => { claudeResult.value = run; return run; })
+          // Exercise the production protocol normalizer instead of injecting
+          // an unclassified raw child result (TASK-2829).
+          ? spawnAndTee('bwrap', [...sandboxArgs(fixture, 'execute'), fixture.claude], {
+            env: claudeEnv(fixture), stdoutSink: { write() {} }, stderrSink: { write() {} },
+          }).then(run => { claudeResult.value = run; return run; })
           : Promise.resolve({ status: 0, stdout: '' }),
       }),
       log: (line: string) => logs.push(line),
     });
     assert.equal(result.agent, 'vibe');
     assert.ok(claudeResult.value, 'claude launched');
+    assert.equal(claudeResult.value.failureReason?.code, 'provider-auth');
+    assert.equal(claudeResult.value.failureReason?.source, 'provider');
+    assert.equal(claudeResult.value.failureReason?.context?.httpStatus, 401);
     assert.match(claudeResult.value!.stderr, /OAuth access token has expired/);
     assert.ok(logs.some(line => line.includes('claude') && line.includes('credentials need refreshing')));
     assert.equal(shouldPersistLaunchFailureBlock('claude', claudeResult.value!), false);

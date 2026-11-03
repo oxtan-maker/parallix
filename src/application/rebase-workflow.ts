@@ -1,3 +1,4 @@
+import { failureReason, recognizedFailureReason } from '../domain/failure-reason.js';
 import { rebaseImplementer, recordImplementerLaunch } from './rebase-identity.js';
 import { replacementImplementer } from '../domain/rebase-policy.js';
 /**
@@ -24,8 +25,8 @@ export { classifyHookFailure };
 import { autoResolveMissionConflicts, handleNonConflictRebaseFailure, type ContinueOutcome } from './rebase-continuation.js';
 import { buildCurrentRebasePrompt } from './rebase-prompt.js';
 export { buildRebasePrompt } from './rebase-prompt.js';
-import { parseConflictFilesFromGitStatus, parseConflictFilesFromRebaseOutput } from './rebase-conflict-files.js';
-export { parseConflictFilesFromGitStatus, parseConflictFilesFromRebaseOutput } from './rebase-conflict-files.js';
+import { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
+export { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
 import { combineOutput, continueSucceeded, hasConflictMarkers, type RebaseContext } from './rebase-context.js';
 import { recoverAgentRebaseCompletion } from './rebase-agent-completion.js';
 
@@ -110,7 +111,7 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
     'This is local-base ancestry, not origin/mission/* tracking divergence.',
     'Recovery: git rebase --abort',
   ].join('\n');
-  port.onFailure?.({ kind: 'other', operation: 'rebase', output });
+  port.onFailure?.({ kind: 'other', operation: 'rebase', output, failureReason: failureReason('git-behind', 'git', { operation: 'rebase-postcondition' }) });
   fmt.log.fail(output);
   port.exit(1);
   return false;
@@ -147,7 +148,6 @@ async function finishRebase(ctx: RebaseContext, message: string): Promise<void> 
  */
 function classifyRebaseConflicts(ctx: RebaseContext, rebaseOutput: string | null, knownMissionFiles: readonly string[] = []): MissionConflictClassification | null {
   const { port, gitFn, slug, area, branch, executionRoot } = ctx;
-  const output = rebaseOutput ?? '';
   const current = port.detectRebaseState(executionRoot);
   const currentFiles = current.unmergedFiles;
   const prefix = port.missionConflictPathPrefix(slug, executionRoot);
@@ -160,13 +160,13 @@ function classifyRebaseConflicts(ctx: RebaseContext, rebaseOutput: string | null
     : port.resolveConflictsForMission(slug, area, { worktreePathOverride: executionRoot });
 
   // When rebase is in progress in the worktree, dry merge may fail. Fall back to
-  // parsing the rebase output directly.
+  // reading the current index conflicts.
   if (conflictResult.ok === false && conflictResult.error === 'merge-failed') {
-    fmt.log.info('Dry merge failed (rebase in progress). Parsing rebase output directly...');
+    fmt.log.info('Dry merge failed (rebase in progress). Reading index conflicts...');
     // Prefer git status --porcelain (authoritative index entries) over localized
     // rebase text, which can contain advice prefixes that parse as false paths.
     const statusFiles = parseConflictFilesFromGitStatus(executionRoot, gitFn);
-    const conflictFiles = statusFiles.length > 0 ? statusFiles : parseConflictFilesFromRebaseOutput(output);
+    const conflictFiles = statusFiles;
     const missionDocPrefix = port.missionConflictPathPrefix(slug, executionRoot);
     const taskPattern = new RegExp(`backlog/(?:tasks|completed)/[^/]*${slug}`);
     const missionSpecificFiles = conflictFiles.filter((f: string) => f.startsWith(missionDocPrefix) || taskPattern.test(f));
@@ -192,7 +192,7 @@ function classifyRebaseConflicts(ctx: RebaseContext, rebaseOutput: string | null
   // through to shared-file handling with whatever git reports.
   const conflictFiles = conflictResult.conflictFiles.length > 0
     ? conflictResult.conflictFiles
-    : parseConflictFilesFromRebaseOutput(output);
+    : [];
   // Only treat unclassified conflict files as shared-file conflicts.
   if (conflictResult.sharedFiles.length === 0 && conflictFiles.length > 0) {
     const classified = new Set([...conflictResult.missionSpecificFiles]);
@@ -268,8 +268,8 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
   try {
     return await port.startAgent('conflict-resolution', { ...launchOptions, prompt: task, agent: implementer, pinnedAgent: true });
   } catch (err) {
-    const message = (err as { message?: string } | null)?.message || String(err);
-    if (!/usage\s+limit|blocked\s+until|usage\s+limit\s+hit/i.test(message)) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (launchFailureReason(err)?.code !== 'agent-quota') {
       fmt.log.fail(`Implementer ${fmt.agent(implementer)} cannot run conflict resolution: ${message}`);
       fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
       port.exit(1);
@@ -293,9 +293,7 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
         return null;
       }
     }
-    const resetMatch = /blocked[ \t]+until[ \t]+/i.exec(message);
-    const resetTail = resetMatch ? message.slice(resetMatch.index + resetMatch[0].length) : '';
-    const resetTime = /[\r\n]/.test(resetTail) ? null : resetTail.trim() || null;
+    const resetTime = launchFailureReason(err)?.context?.resetAt;
     fmt.log.fail(`Implementer ${fmt.agent(implementer)} hit an agent usage limit${resetTime ? ` (resets ${resetTime})` : ''}.`);
     fmt.log.info('No eligible replacement family is available under the current mission policy, so the rebase cannot continue automatically.');
     fmt.log.info(`Recovery: ${fmt.command('git rebase --abort')}`);
@@ -399,7 +397,7 @@ export async function runRebaseWorkflow(
     // `--continue`. Re-classify the current state; a fresh `git rebase` would
     // fail with "rebase in progress" (TASK-2668.02).
     fmt.log.warn('Rebase already paused on conflicts. Re-classifying...');
-    rebaseResult = { status: 1, stdout: '', stderr: existingRebase.unmergedFiles
+    rebaseResult = { failureReason: failureReason('git-conflict', 'git'), status: 1, stdout: '', stderr: existingRebase.unmergedFiles
       .map(file => `CONFLICT (content): Merge conflict in ${file}`).join('\n') };
   } else {
     fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
@@ -430,7 +428,7 @@ export async function runRebaseWorkflow(
 
   // Rebase paused on conflicts — classify and resolve.
   const rebaseOutput = combineOutput(rebaseResult);
-  if (!hasConflictMarkers(rebaseOutput)) {
+  if (!hasConflictMarkers(rebaseResult)) {
     if (await handleNonConflictRebaseFailure(ctx, rebaseResult, rebaseOutput)) {
       await finishRebase(ctx, 'Rebase completed after hook fix.');
     }
@@ -474,3 +472,7 @@ async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, sl
 }
 
 function blocksRebaseStart(opts: { resumeInPlace?: boolean } | undefined, state: ReturnType<RebaseWorkflowPort['detectRebaseState']>): boolean { return !opts?.resumeInPlace && state.inProgress; }
+
+function launchFailureReason(error: unknown) {
+  return recognizedFailureReason((error as { failureReason?: unknown } | null)?.failureReason);
+}

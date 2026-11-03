@@ -11,112 +11,8 @@ import { AgentPoolExhaustedError } from "../../domain/agents.js";
 import type { LaunchResultLike, AgentFailureDetails, AgentBlockWriter, AgentLog, StartAgentLoopState, StartAgentLoopDeps, LaunchVerdict } from './agent-launch-context.js';
 
 
-export const NON_BLOCKING_CREDENTIAL_ERROR_PATTERNS = Object.freeze([
-  /\bauth(?:entication)?\b/i,
-  /\bunauthorized\b/i,
-  /\bforbidden\b/i,
-  /\bapi\s+key\b/i,
-]);
-
-
-export const CREDENTIAL_REFRESH_ERROR_PATTERNS = Object.freeze([
-  ...NON_BLOCKING_CREDENTIAL_ERROR_PATTERNS,
-  /\b(?:access\s+)?(?:token|credential)s?\b.*\bexpired\b|\bexpired\b.*\b(?:access\s+)?(?:token|credential)s?\b/i,
-]);
-
-
-export const NON_BLOCKING_LAUNCH_ERROR_PATTERNS = Object.freeze([
-  // task-2380: Claude missing-session resume error (also recovered per-family
-  // in claude.ts). Deterministic, agent-specific — never poison the blocklist.
-  /no conversation found with session id:/i,
-  /\b(?:invalid|unknown|unsupported|unrecognized)\s+model\b/i,
-  /\bmodel\s+(?:identifier|id)\s+(?:is\s+)?invalid\b/i,
-  /\b(?:model\s+not\s+found|no\s+such\s+model)\b/i,
-  /\bunknown\s+option\b/i,
-  /\bunsupported\s+(flag|option)\b/i,
-  ...NON_BLOCKING_CREDENTIAL_ERROR_PATTERNS,
-  /\bread-only file system\b/i,
-  /\b(home|bootstrap)\s+(error|failed|cannot|denied|not\s+found)\b/i,
-  /\bpermission\s+denied\b/i,
-  // (a) websocket / connection failures — transient infrastructure issues
-  /failed to connect to websocket/i,
-  /\bconnection refused\b/i,
-  /\bECONNREFUSED\b/i,
-  /\bos error 1\b/i,
-  // (b) provider reachability errors — provider endpoints unreachable
-  /provider endpoints are unreachable/i,
-  /\breachability\b/i,
-  /\bendpoint unreachable\b/i,
-    // (c) generic os-error / transient runtime failures (non-quota)
-    /\bos error \d+\b/i,
-    // (d) timeout errors — transient waits exceeded
-    /\btimeout\b/i,
-    /\btimed\s+out\b/i,
-    /\bdeadline\s+exceeded\b/i,
-    /\brequest\s+timed\s+out\b/i,
-    // (e) sandbox / permission-denial errors that are not auth-related
-    /\bsandbox\s+violation\b/i,
-    /\bsandbox\s+denied\b/i,
-    /\btool\s+call\s+denied\b/i,
-    /\baction\s+denied\b/i,
-    /\bapproval\s+denied\b/i,
-    // (f) provider reachability / connectivity errors not already covered
-    /\bEPIPE\b/i,
-    /\bETIMEDOUT\b/i,
-    /\bENETUNREACH\b/i,
-    /\bENOTFOUND\b/i,
-    /\bEAI_AGAIN\b/i,
-    /\bsocket\s+hang\s+up\b/i,
-    /\bfetch\s+failed\b/i,
-    /\bservice\s+unavailable\b/i,
-    /\bgateway\s+timeout\b/i,
-    /\boverloaded\b/i,
-    /\btemporarily\s+unavailable\b/i,
-    /\bplease\s+try\s+again\b/i,
-    /\bretry\s+after\b/i,
-    // (g) prompt rejection errors
-    /\bprompt\s+rejected\b/i,
-    /\bprompt\s+blocked\b/i,
-    /\bcontent\s+policy\b/i,
-    /\bcontent\s+filter\b/i,
-    /\bsafety\s+filter\b/i,
-    // (h) invocation argument errors
-    /\binvalid\s+argument\b/i,
-    /\binvalid\s+option\b/i,
-    /\binvalid\s+parameter\b/i,
-    /\bmissing\s+required\b/i,
-    /\bargument\s+error\b/i,
-    // (i) resource exhaustion not rate-limit related
-    /\b(out of memory|OOM)\b/i,
-    /\bmemory\s+limit\b/i,
-    /\bcontext\s+window\s+exceeded\b/i,
-    /\btoken\s+limit\s+exceeded\b/i
-]);
-
-
-// Deterministic config/setup errors (invalid model IDs, auth failures,
-// unsupported CLI flags, home/bootstrap failures, missing-session resume) are
-// per-invocation and repeat on every retry, so they must never poison the
-// persistent blocklist. Custom agents are never blocked.
-//
-// Beyond those deterministic errors, a family-wide block is persisted ONLY when
-// the failure is positively classified as a genuine provider-wide availability
-// or quota condition. The decision routes through the same `detectLimitHit`
-// classifier the limit-hit branch uses (task-2536) so both block-persistence
-// sites agree on one bar: an ambiguous non-zero exit with no quota/429/
-// resource_exhausted signal (e.g. a bare `exit 1` / "generic crash") stays local
-// to the failing launch instead of becoming a three-hour family block while the
-// family is live. A process-kill signal is still caught by detectLimitHit's
-// short-block path and preserved.
 export function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike | null | undefined) {
   if (!result || agent === 'custom') {return false;}
-  const combined = [
-    result.stderr || '',
-    result.stdout || '',
-    (result.error as { message?: string } | null | undefined)?.message || '',
-    launchErrorCode(result.error) || ''
-  ].join('\n');
-  if (!recognizedFailureReason(result.failureReason) && NON_BLOCKING_LAUNCH_ERROR_PATTERNS.some(pattern => pattern.test(combined))) {return false;}
   const hit = detectLimitHit({
     agent,
     failureReason: result.failureReason,
@@ -134,9 +30,7 @@ export function shouldPersistLaunchFailureBlock(agent: string, result: LaunchRes
 
 
 export function needsCredentialRefresh(result: LaunchResultLike): boolean {
-  return CREDENTIAL_REFRESH_ERROR_PATTERNS.some(pattern => pattern.test([
-    result.stderr || '', result.stdout || '', (result.error as { message?: string } | null | undefined)?.message || '', launchErrorCode(result.error) || ''
-  ].join('\n')));
+  return recognizedFailureReason(result.failureReason)?.code === 'provider-auth';
 }
 
 
@@ -304,7 +198,7 @@ async function handleLimitHit(state: StartAgentLoopState, deps: StartAgentLoopDe
     if (typeof deps.onLimitHit === 'function') {
       deps.onLimitHit({ agent: chosen, until: limitHit.until, source: limitHit.source });
     }
-    deps.refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`);
+    deps.refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`, { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: limitHit.until } });
     // A pinned agent fails loudly above; everything else reselects next round.
     state.chosen = undefined;
     return { kind: 'continue' };

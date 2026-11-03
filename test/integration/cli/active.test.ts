@@ -63,8 +63,6 @@ const runReviewPreparationAndReview = async (slug: string, worktree: string, age
     reviewPreparation: {
       async run(request) { return reviewPreparation(slug, { forgejoUser: agent, worktree, force: request.force }); },
       async repairHygiene(request) { return repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); },
-      classifyFailure: classifyError,
-      isRelaunchableFailure: repairReviewPreparationModule.isRelaunchableError,
     },
     review: { async start(request) { await options.startReviewLoop?.(slug, { implementer: agent, worktree, skipReviewPreparation: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
     repairLaunch: {
@@ -667,7 +665,7 @@ test("runReviewPreparationAndReview does not hand off or start review when CP-2 
   let reviewPreparationCalls = 0;
   let reviewCalls = 0;
   const result = await runReviewPreparationAndReview('task-incomplete', '/tmp/project-task-incomplete', 'codex', {
-    validateCheckpointsBeforeReviewPreparationFn: () => ({
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
       ok: false as const,
       error: "Declared checkpoint documents are missing before review preparation: CP-2. Create and commit CP-2.md before review preparation.",
       nextCheckpoint: 'CP-2'
@@ -740,7 +738,7 @@ test("runReviewPreparationAndReview retries review preparation once after succes
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
     performReviewPreparation: async (slug, opts) => {
       reviewPreparationAttempts++;
-      if (reviewPreparationAttempts === 1) return { ok: false as const, error: 'dirty files' };
+      if (reviewPreparationAttempts === 1) return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'dirty files' };
       forceUsed = opts.force === true;
       return { ok: true as const };
     },
@@ -767,7 +765,7 @@ test("runReviewPreparationAndReview fails and does not retry if repair returns r
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: 'dirty files' };
+      return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'dirty files' };
     },
     repairReviewPreparationFn: async () => {
       repairAttempts++;
@@ -787,7 +785,7 @@ test("runReviewPreparationAndReview reports specific blocker when repair fails",
   const errors: string[] = [];
   const result = await runReviewPreparationAndReview('task-test', '/tmp/project-task-test', 'codex', {
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-    performReviewPreparation: async () => ({ ok: false as const, error: 'original error' }),
+    performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'original error' }),
     repairReviewPreparationFn: async () => ({ repaired: false, blocker: 'specific rebase blocker' }),
     startReviewLoop: () => {},
     log: () => {},
@@ -806,7 +804,7 @@ test("runReviewPreparationAndReview fails if retry also fails", async () => {
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: 'still dirty' };
+      return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'still dirty' };
     },
     repairReviewPreparationFn: async () => ({ repaired: true, blocker: undefined }),
     startReviewLoop: () => {},
@@ -1176,7 +1174,7 @@ test("validateCheckpointsBeforeReviewPreparation reads a typed-verb mission's re
   assert.equal(result.nextCheckpoint, 'CP-2');
   assert.ok(result.error);
   assert.match(result.error, /missing before review preparation: CP-2, CP-3/);
-  assert.equal(classifyError(result.error).failureClass, 'IncompleteEvidence', 'the gap must auto-send back like a missing CP document');
+  assert.equal(classifyError(result.error, result.failureReason).failureClass, 'IncompleteEvidence', 'the gap must auto-send back like a missing CP document');
 
   const complete = await validateCheckpointsBeforeReviewPreparation('task-db', '/tmp/project-task-db', {
     loadRecordedCheckpointsFn: async () => ({ planned: ['CP-1'], recorded: ['CP-1'] }),
@@ -1268,6 +1266,7 @@ test("validateCheckpointsBeforeReviewPreparation rejects a section with no parsa
   assert.equal(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /contains no checkpoint declarations/);
+  assert.equal(result.failureReason?.context?.contract, 'checkpoint-declarations');
 });
 
 test("validateCheckpointsBeforeReviewPreparation rejects malformed declarations missing a separator", async () => {
@@ -1281,6 +1280,7 @@ test("validateCheckpointsBeforeReviewPreparation rejects malformed declarations 
   assert.equal(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /Malformed checkpoint declaration/);
+  assert.equal(result.failureReason?.code, 'state-machine');
 });
 
 test("validateCheckpointsBeforeReviewPreparation accepts compatible declaration and filename variants before its documentation sub-block", async () => {
@@ -1365,7 +1365,7 @@ test('the launch port declines when the agent launcher is unavailable', async ()
   let launches = 0;
   const result = await runReviewPreparationAndReview('task-1124', '/tmp/worktree', 'unavailable-agent', {
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-    performReviewPreparation: async () => ({
+    performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
       ok: false as const,
       error: "The final checkpoint at CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.",
     }),
@@ -1385,7 +1385,7 @@ test('the launch port calls startAgent with the mission step, slug, role, and wo
   let optsArg: { value: Parameters<NonNullable<ReviewPreparationFixtureOptions['startAgentFn']>>[1] | null } = { value: null };
   await runReviewPreparationAndReview('task-1124', '/tmp/worktree', 'codex', {
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-    performReviewPreparation: async () => ({
+    performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
       ok: false as const,
       error: "The final checkpoint at CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.",
     }),
@@ -1420,7 +1420,7 @@ test('the checkpoint bounce prompt names the next checkpoint and forbids an earl
     validateCheckpointsBeforeReviewPreparationFn: () => {
       validations++;
       return validations === 1
-        ? {
+        ? { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
           ok: false,
           error: "Declared checkpoint documents are missing before review preparation: CP-2, CP-3. Create and commit CP-2.md in /tmp/worktree before review preparation.",
           nextCheckpoint: 'CP-2',
@@ -1448,6 +1448,7 @@ test("runReviewPreparationAndReview gives malformed checkpoint declarations corr
   const result = await runReviewPreparationAndReview('task-malformed', '/tmp/worktree', 'codex', {
     validateCheckpointsBeforeReviewPreparationFn: () => ({
       ok: false as const,
+      failureReason: { version: 1, code: 'state-machine', source: 'review-preparation', context: { contract: 'checkpoint-declarations' } },
       error: 'MISSION.md must contain a ## Checkpoints section with declarations such as "- CP 1: <name>".'
     }),
     performReviewPreparation: async () => { throw new Error('must not hand off'); },
@@ -1664,7 +1665,7 @@ test("runReviewPreparationAndReview: relaunch success triggers post-relaunch rev
       reviewPreparationAttempts++;
       // First call fails with relaunchable error; second call (post-fix) would succeed
       if (reviewPreparationAttempts === 1) {
-        return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
+        return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
       }
       return { ok: true as const };
     },
@@ -1698,7 +1699,7 @@ test("runReviewPreparationAndReview: relaunch success must trigger post-relaunch
     performReviewPreparation: async (slug, opts) => {
       reviewPreparationAttempts++;
       if (reviewPreparationAttempts === 1) {
-        return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
+        return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
       }
       return { ok: true as const };
     },
@@ -1732,7 +1733,7 @@ test("runReviewPreparationAndReview: relaunch success with post-relaunch review 
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
       // IncompleteEvidence error — classifies as AutoSendBack, triggers relaunch path
-      return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
+      return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
     },
     repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
@@ -1757,7 +1758,7 @@ test("runReviewPreparationAndReview: relaunch failure must not trigger post-rela
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
+      return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: "The final checkpoint at docs/missions/2026/task-1324/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
     },
     repairReviewPreparationFn: async () => ({ repaired: false, blocker: undefined }),
     startAgentFn: async () => {
@@ -1791,7 +1792,7 @@ test("runReviewPreparationAndReview relaunches on verification gate failure with
     performReviewPreparation: async (slug, opts) => {
       reviewPreparationAttempts++;
       if (reviewPreparationAttempts === 1) {
-        return {
+        return { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
           ok: false as const,
           error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
           gateOutput: {
@@ -1832,7 +1833,7 @@ test("runReviewPreparationAndReview relaunches on declared gate failure with cap
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
       if (reviewPreparationAttempts === 1) {
-        return {
+        return { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
           ok: false as const,
           error: "Declared gate \"bash -c exit 1\" failed for task-1387-sc3-declared: err output. Blocking review preparation — task remains in active.",
           gateOutput: {
@@ -1871,7 +1872,7 @@ test("runReviewPreparationAndReview limits gate-failure relaunches to 2 attempts
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
       // Handoff keeps failing with gate failure
-      return {
+      return { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
         ok: false as const,
         error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
         gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }
@@ -1903,7 +1904,7 @@ test("runReviewPreparationAndReview stops relaunching when agent relaunch itself
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return {
+      return { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
         ok: false as const,
         error: 'Final verification gate failed. Fix errors before submitting or use --no-gate if appropriate.',
         gateOutput: { stdout: 'gate error', stderr: 'gate stderr' }

@@ -114,8 +114,8 @@ test('task-2413: a materially changed failure is reclassified from its own evide
   assert.equal(classifiedA.isRelaunchable, true);
 
   // Attempt B: the same gate now fails because the Forgejo provider is down. The
-  // structured reason is still a gate-failure, but the diagnostic names an
-  // infrastructure blocker, so it must be reclassified as InfraBlocker
+  // gate envelope now carries a producer infrastructure identity,
+  // so it must be reclassified as InfraBlocker
   // (human-only) rather than continuing under the prior GateFailure policy.
   const infraReason: ReboundReason = {
     kind: 'gate-failure',
@@ -123,12 +123,14 @@ test('task-2413: a materially changed failure is reclassified from its own evide
     command: 'npm test',
     exitCode: 1,
     stdout: '',
-    stderr: 'forgejo connection refused',
+    stderr: 'forgejo connection refused', failureReason: { version: 1, code: 'infrastructure', source: 'forgejo' },
   };
   const classifiedB = classifyReboundReason(infraReason);
   assert.notEqual(classifiedA.failureClass, classifiedB.failureClass, 'B is freshly classified');
   assert.equal(classifiedB.failureClass, 'InfraBlocker');
   assert.equal(classifiedB.isRelaunchable, false);
+  assert.deepEqual(classifyReboundReason({ ...infraReason, stderr: 'unrelated translated diagnostic' }), classifiedB, 'fresh infrastructure facts survive diagnostic rewrites (TASK-2829)');
+  assert.deepEqual(classifyReboundReason({ ...gateReason, stderr: 'forgejo connection refused' }), classifiedA, 'infrastructure wording cannot override gate evidence (TASK-2829)');
 });
 
 test('task-2413: a deterministic gate failure is not masked as a transient/no-output pass', () => {
@@ -144,10 +146,12 @@ test('task-2413: a deterministic gate failure is not masked as a transient/no-ou
   });
 });
 
-test('task-2413: only adapter-declared verifier markers receive a transient rerun', () => {
-  assert.equal(isTransientVerificationFailure({ stdout: '[unit-test-budget:exceeded] test/a.test.ts' }), true);
-  assert.equal(isTransientVerificationFailure({ stderr: '[unit-test-budget] SUITE BUDGET EXCEEDED: 10ms > 5ms' }), true);
+test('task-2413: only adapter-declared CPU evidence receives a transient rerun', () => {
+  assert.equal(isTransientVerificationFailure({ failureReason: { version: 1, code: 'cpu-budget-exceeded', source: 'verification' }, stdout: '[unit-test-budget:exceeded] test/a.test.ts' }), true);
+  assert.equal(isTransientVerificationFailure({ failureReason: { version: 1, code: 'cpu-budget-exceeded', source: 'verification' }, stderr: '[unit-test-budget] SUITE BUDGET EXCEEDED: 10ms > 5ms' }), true);
   assert.equal(isTransientVerificationFailure({ stdout: 'deterministic resource contention assertion failed' }), false);
+  assert.equal(isTransientVerificationFailure({ stdout: '[unit-test-budget:exceeded] test/a.test.ts' }), false, 'a quoted marker is diagnostic only (TASK-2829)');
+  assert.equal(isTransientVerificationFailure({ failureReason: { version: 1, code: 'cpu-budget-exceeded', source: 'verification' }, stderr: 'translated diagnostic' }), true);
 });
 
 test('task-2413: a slow unit-test gate retries before it can be mistaken for a Git hook failure', async () => {
@@ -216,7 +220,7 @@ test('task-2413: fresh structured evidence reclassifies recovery instead of reta
     startAgent: async () => { launches++; return { result: { status: 0 } }; },
     verify: () => ({ ok: false as const, reason: {
       kind: 'gate-failure', area: 'all', command: 'npm test', exitCode: 1,
-      stdout: '', stderr: 'forgejo connection refused',
+      stdout: '', stderr: 'forgejo connection refused', failureReason: { version: 1, code: 'infrastructure', source: 'forgejo' },
     } }),
     log: () => {}, error: () => {},
   });

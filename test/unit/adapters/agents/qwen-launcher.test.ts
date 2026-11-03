@@ -186,9 +186,9 @@ test('isSpuriousQwenExit: returns false for exit 1 with no telemetry', () => {
 
 test('qwen quota exhaustion: an exit-0 provider rejection is normalized to a failed launch', () => {
   const transcript = 'Quota exhausted: Your token-plan 1-week quota has been exhausted.\nPlease retry after the reset time. (cause: insufficient_quota: 429)';
-  const result = processResult({ status: 0, signal: null, error: null, stdout: transcript, stderr: '' }, '/tmp/qwen-quota-test', new Date().toISOString());
+  const result = processResult({ failureReason: { version: 1, code: 'agent-quota' }, status: 0, signal: null, error: null, stdout: transcript, stderr: '' }, '/tmp/qwen-quota-test', new Date().toISOString());
 
-  assert.equal(isQwenQuotaExhausted({ status: 0, signal: null, error: null, stdout: transcript, stderr: '' }), true);
+  assert.equal(isQwenQuotaExhausted({ failureReason: { version: 1, code: 'agent-quota' }, status: 0, signal: null, error: null, stdout: transcript, stderr: '' }), true);
   assert.equal(result.status, 1, 'the Qwen-specific provider rejection must reach limit detection');
   assert.equal(isSpuriousQwenExit({ ...result, telemetry: { totalTokens: 1 } }), false, 'quota rejection is never a completed turn');
 });
@@ -272,9 +272,9 @@ test('qwen telemetry: processResult leaves telemetry unset when no artifacts exi
 });
 
 test('qwen resume: stale session id is detected so the launch falls back to a fresh session', () => {
-  assert.equal(isStaleQwenSessionResult({ status: 1, stderr: 'Error: Session not found: abc-123', stdout: '' }), true);
-  assert.equal(isStaleQwenSessionResult({ status: 1, stdout: 'invalid session id', stderr: '' }), true);
-  assert.equal(isStaleQwenSessionResult({ status: 0, stderr: 'Session not found', stdout: '' }), false,
+  assert.equal(isStaleQwenSessionResult({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, stderr: 'Error: Session not found: abc-123', stdout: '' }), true);
+  assert.equal(isStaleQwenSessionResult({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, stdout: 'invalid session id', stderr: '' }), true);
+  assert.equal(isStaleQwenSessionResult({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 0, stderr: 'Session not found', stdout: '' }), false,
     'a successful run is never treated as stale');
   assert.equal(isStaleQwenSessionResult({ status: 1, stderr: 'rate limit exceeded', stdout: '' }), false,
     'unrelated failures do not trigger a relaunch');
@@ -304,7 +304,7 @@ test('oversized Qwen stdin survives every session policy and stale fallback (TAS
     assert.equal(options.input, prompt);
     assert.ok(!JSON.stringify({ args, env: options.env }).includes(prompt));
     calls.push(args);
-    return { status: args.includes('-r') ? 1 : 0, stdout: '', stderr: args.includes('-r') ? 'Session not found' : '' };
+    return { failureReason: args.includes('-r') ? { version: 1, code: 'provider-session-missing' } : undefined, status: args.includes('-r') ? 1 : 0, stdout: '', stderr: args.includes('-r') ? 'Session not found' : '' };
   });
   try {
     for (const sessionId of [null, 'old-session']) {

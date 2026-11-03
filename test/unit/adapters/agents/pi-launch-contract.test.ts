@@ -179,7 +179,7 @@ describe("Pi progress streaming", () => {
     const f = fixture();
     let attempts = 0;
     pi.__setCreateAgentSessionForTest(async () => ({ session: { ...f.session,
-      prompt: async () => { if (++attempts === 1) { throw new Error('Connection refused'); } f.emit(delta('text_delta', 'Recovered')); },
+      prompt: async () => { if (++attempts === 1) { throw Object.assign(new Error('Connection refused'), { code: 'ECONNREFUSED' }); } f.emit(delta('text_delta', 'Recovered')); },
     } }));
     const result = await pi.startPiAgent(f.options).resultPromise;
     assert.equal(result.status, 0);

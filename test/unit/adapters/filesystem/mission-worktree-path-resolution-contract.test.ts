@@ -10,7 +10,7 @@ import path from 'node:path';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 import { mkdtemp as registeredMkdtemp, mkdtemp } from '../../../helpers/temp-dir.js';
-import { parseConflictFilesFromMergeOutput, getConflictFiles, findLastNonNoiseCommit, squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise, findMissionDocInBranches, isMissionArtifact } from '../../../../src/adapters/filesystem/mission-utils.js';
+import { getConflictFiles, findLastNonNoiseCommit, squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise, findMissionDocInBranches, isMissionArtifact } from '../../../../src/adapters/filesystem/mission-utils.js';
 import { checkBacklogIntegrity, pruneStaleBacklogDuplicates, resolveTaskFile } from '../../../../src/adapters/backlog/backlog.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
@@ -101,24 +101,12 @@ describe("task-file and slug-suffix resolution", () => {
 // ---- merge-noise classification of backlog paths (consolidated from test/mission-utils-merge-noise.test.ts, TASK-2622.09) ----
 describe("merge-noise classification of backlog paths", () => {
   const _require = createRequire(import.meta.url);
-  test('parseConflictFilesFromMergeOutput parses content and modify/delete conflicts and deduplicates paths', () => {
-    const output = [
-      'CONFLICT (content): Merge conflict in workflow/lib/file.js',
-      'CONFLICT (modify/delete): docs/missions/2026/task-132/CP-1.md deleted in HEAD.',
-      'CONFLICT (content): Merge conflict in workflow/lib/file.js',
-    ].join('\n');
-
-    assert.deepEqual(parseConflictFilesFromMergeOutput(output), [
-      'workflow/lib/file.js',
-      'docs/missions/2026/task-132/CP-1.md'
-    ]);
-  });
-
   test('getConflictFiles returns conflict paths, empty arrays for clean merges, and throws on non-conflict failures', () => {
     const calls: string[][] = [];
     const conflicts = getConflictFiles('/tmp/worktree', 'main', {
       gitRunner: args => {
         calls.push(args);
+        if (args.includes('--diff-filter=U')) return { status: 0, stdout: 'workflow/lib/file.js\0workflow/lib/file.js\0', stderr: '' };
         if (args.includes('--abort')) return { status: 0, stdout: '', stderr: '' };
         return {
           status: 1,
@@ -142,7 +130,7 @@ describe("merge-noise classification of backlog paths", () => {
           return { status: 2, stdout: '', stderr: 'fatal: index.lock' };
         }
       }),
-      /no CONFLICT lines/
+      /without confirmed unmerged index paths/
     );
   });
 

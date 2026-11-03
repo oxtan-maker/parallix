@@ -48,6 +48,7 @@ beforeEach(context => {
       fs.appendFileSync(path.join(destination, `cases-${process.pid}.jsonl`), JSON.stringify(record) + '\n');
     }
     if (exclusiveUs > limitMs * 1000) {
+      console.error(JSON.stringify({ type: 'parallix.failure', failureReason: { version: 1, code: 'cpu-budget-exceeded', source: 'verification' } }));
       throw new Error(`[integration-test-cpu:exceeded] ${name}: ${(exclusiveUs / 1e6).toFixed(3)} CPU seconds > ${(limitMs / 1000).toFixed(3)}`);
     }
   }));

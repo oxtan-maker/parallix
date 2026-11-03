@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from './integration-repair-policy.js';
 import { isClosedMission, type Mission } from './mission.js';
 import { reviewStatus, currentReviewRound, sameReviewedRevision, type ReviewedRevision } from './review.js';
 import type { WorkflowCommand } from './workflow-operation.js';
@@ -10,13 +11,13 @@ export function workflowEligible(command: WorkflowCommand, mission: Mission, rev
   switch (command) {
     case 'draft:create': return mission.status === 'backlog';
     case 'active:execute': return executionEligible(mission);
-    case 'review:submit': return ['active', 'review'].includes(mission.status) || mission.status === 'integration' && reviewMode === 'enter';
+    case 'review:submit': return !pendingIntegrationApproval(mission) && ( ['active', 'review'].includes(mission.status) || mission.status === 'integration' && reviewMode === 'enter');
     case 'integrate:merge': return integrationEligible(mission, approval);
   }
 }
 
 function executionEligible(mission: Mission): boolean {
-  return ['refined', 'active'].includes(mission.status)
+  return Boolean(pendingIntegrationApproval(mission)) || ['refined', 'active'].includes(mission.status)
     || mission.status === 'review' && mission.review?.rounds.at(-1)?.phase === 'fixing';
 }
 

@@ -125,7 +125,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'workflow-admission-owner', family: 'launch',
     fileLocation: 'src/application/workflow-operation-service.ts',
-    line: 93, anchor: 'async admit(request: BoardCommandRequest)',
+    line: 94, anchor: 'async admit(request: BoardCommandRequest)',
     reads: ['WorkflowOperation', 'Mission'],
     requirement: 'One durable command identity spans admission, exclusive fenced ownership, recovery, phases and outcomes; provider launches remain attributed evidence beneath it.',
     perLaunchIdentity: 'none', perWorkflowIdentity: 'durable-command',
@@ -196,7 +196,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'retry-launch-failure-reselect',
     family: 'retry',
     fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
-    line: 340,
+    line: 234,
     anchor: 'retrying with next eligible agent',
     reads: ['AgentBlock'],
     requirement:
@@ -222,7 +222,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-limit-hit-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
-    line: 299,
+    line: 193,
     anchor: 'deps.updateAgentBlockFn(chosen, limitHit.until',
     reads: ['AgentBlock'],
     requirement:
@@ -233,7 +233,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'failover-transient-failure-block',
     family: 'failover',
     fileLocation: 'src/adapters/agents/agent-launch-outcome.ts',
-    line: 197,
+    line: 91,
     anchor: 'await updateAgentBlockFn(agent, blockUntil',
     reads: ['AgentBlock'],
     requirement:
@@ -318,7 +318,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'review-checkpoint-evidence',
     family: 'review',
     fileLocation: 'src/application/review-preparation-contract.ts',
-    line: 141,
+    line: 143,
     anchor: 'verifyCheckpointEvidence(',
     reads: ['CheckpointData', 'Mission'],
     requirement:
@@ -333,7 +333,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 257,
+    line: 259,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:

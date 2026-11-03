@@ -260,12 +260,7 @@ export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBef
     ? { area: failure.gate.area, exitCode: failure.gate.exitCode, command: failure.gate.command, operation: failure.operation, reason: gateFailureReason({ ok: false, area: failure.gate.area, command: failure.gate.command, failureReason: failure.gate.failureReason, signal: failure.gate.signal, exitCode: failure.gate.exitCode, stdout: failure.gate.stdout, stderr: failure.gate.stderr, error: failure.gate.error }) }
     : undefined;
   // Typed hook evidence (TASK-2377.02) is preferred; hookOutput is the fallback.
-  const hook = result.hookFailure
-    ? hookFailureReason(
-      failure?.kind === 'hook' ? failure.hook.output : (result.hookOutput || ''),
-      failure?.kind === 'hook' && failure.operation !== 'commit' ? `git ${failure.operation} (pre-review rebase, ${failure.hook.hook})` : 'git commit (pre-review safety commit)',
-    )
-    : undefined;
+  const hook = preReviewHookFacts(result);
   return {
     ok: false, gate, hook,
     diagnostic: rebaseDiagnostic(result),
@@ -273,11 +268,22 @@ export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBef
   };
 }
 
+function preReviewHookFacts(result: Awaited<ReturnType<typeof rebaseBeforeReviewRound>>) {
+  const failure = result.failure;
+  return result.hookFailure
+    ? hookFailureReason(
+      failure?.kind === 'hook' ? failure.hook.output : (result.hookOutput || ''),
+      failure?.kind === 'hook' && failure.operation !== 'commit' ? `git ${failure.operation} (pre-review rebase, ${failure.hook.hook})` : 'git commit (pre-review safety commit)',
+      failure?.kind === 'hook' ? failure.hook.hook : 'pre-commit',
+    )
+    : undefined;
+}
+
 function unclassifiedRebaseReason(result: Awaited<ReturnType<typeof rebaseBeforeReviewRound>>): ReboundReason {
   const failure = result.failure;
   if (failure?.kind === 'conflict') { return { kind: 'rebase-conflict', files: failure.sharedFiles, diagnostic: rebaseDiagnostic(result) }; }
-  if (failure?.kind === 'hook') { return hookFailureReason(failure.hook.output, `git ${failure.operation}`); }
-  return { kind: "review-preparation-verification", error: rebaseDiagnostic(result) || 'Pre-review rebase command failed' };
+  if (failure?.kind === 'hook') { return hookFailureReason(failure.hook.output, `git ${failure.operation}`, failure.hook.hook); }
+  return { kind: "review-preparation-verification", error: rebaseDiagnostic(result) || 'Pre-review rebase command failed', failureReason: failure?.kind === 'other' ? failure.failureReason : undefined };
 }
 
 function gateFacts(result: Awaited<ReturnType<typeof runPreReviewGate>>): PreReviewGateFacts {

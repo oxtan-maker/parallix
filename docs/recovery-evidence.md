@@ -23,7 +23,7 @@ mission worktree:
 
 - the command, its working directory, and the captured revision
 - the exit code and signal
-- a versioned failure reason when the gate writer can identify one
+- a versioned failure reason, with its source and structured context when available
 - incident and attempt identity, so the original failure and its retries group
   into one series without overwriting each other
 - attributable stdout and stderr with byte counts and a capture-completeness
@@ -38,19 +38,26 @@ interrupted write is read as interrupted rather than as a complete record.
 
 ## Classification and compatibility
 
-Recognized versioned failure reasons take precedence over diagnostic keywords.
-A typed CPU-budget failure stays repairable even if its output contains an
-infrastructure keyword; a typed infrastructure failure still requires human
-intervention. Passing test titles do not establish a blocker. A process signal
-alone does not establish provider quota: an unaccompanied SIGTERM leaves the
-agent available, while identified quota evidence can justify a family block.
+Recovery dispatches on versioned producer facts and discriminated outcomes.
+Diagnostic wording is retained as evidence; rewriting it or mentioning another
+failure cannot change the selected recovery. Process status, signals, OS error
+codes and provider error events supply external facts. A process signal alone
+does not establish provider quota: an unaccompanied SIGTERM leaves the agent
+available, while explicit quota evidence can justify a family block.
 
 Records without a reason, with an unknown code, or with an unsupported reason
-version remain readable. Classification explicitly logs a legacy fallback and
-uses the existing diagnostic rules. That fallback cannot turn a failed or
-signalled process into success or change the record's capture-completeness flag.
-Inspect the original output and process metadata when diagnosing a fallback;
-a code is a routing fact, not proof that a repair passed.
+version remain readable. Unsupported failures fail closed with the original
+evidence; this is a conservative stop, not a contract for recognizing expected
+failures from prose. The fallback does not diagnose credentials or connectivity,
+certify a passing check, or change capture completeness. Inspect the original
+cause and machine facts before deciding how to resume.
+
+An integration repair with an effective approval resumes certification and
+approval-retention assessment before review preparation. Execute and integrate
+use the same owners; board and lead offer the safe execute continuation while
+that assessment is pending. Equivalent repairs retain the independent judgment
+and stop in the integration lane for human landing. Changed patches follow the
+existing approval-revocation and review path; unproven evidence stops explicitly.
 
 Checkpoint snapshots also carry the recorded review round and repaired-gate
 metadata when present. Older rows without these fields remain valid.

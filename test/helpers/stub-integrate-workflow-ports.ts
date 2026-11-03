@@ -67,7 +67,6 @@ export function stubIntegrateWorkflowPorts(overrides: Overrides = {}): Integrate
       resolveBaseWorktree: () => { throw new Error('Unexpected integrate boundary: missionPaths.resolveBaseWorktree'); },
       resolveWorktree: () => { throw new Error('Unexpected integrate boundary: missionPaths.resolveWorktree'); },
       findMissionDocInBranches: () => { throw new Error('Unexpected integrate boundary: missionPaths.findMissionDocInBranches'); },
-      parseConflictFilesFromMergeOutput: () => { throw new Error('Unexpected integrate boundary: missionPaths.parseConflictFilesFromMergeOutput'); },
       softResetTrailingBacklogNoise: () => { throw new Error('Unexpected integrate boundary: missionPaths.softResetTrailingBacklogNoise'); },
       ...overrides.missionPaths,
     },

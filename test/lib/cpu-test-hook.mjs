@@ -45,6 +45,7 @@ function finish(context) {
   if (parent) { parent.childUs += inclusiveUs; }
   const limitUs = headroomUs > 0 ? headroomUs : budgetUs;
   if (exclusiveUs > limitUs) {
+    console.error(JSON.stringify({ type: 'parallix.failure', failureReason: { version: 1, code: 'cpu-budget-exceeded', source: 'verification' } }));
     throw new Error(`[unit-test-cpu:${headroomUs > 0 ? 'headroom' : 'exceeded'}] ${sample.name}: ${(exclusiveUs / 1e6).toFixed(3)} CPU seconds > ${(limitUs / 1e6).toFixed(3)}`);
   }
 }

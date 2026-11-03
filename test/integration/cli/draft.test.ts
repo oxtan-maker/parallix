@@ -136,7 +136,7 @@ test('draft setup accepts valid labels and tolerates missing labels before launc
 
   const missingResult = validateMissionType('task-test', '/tmp/worktree', {
     resolveMissionClassificationFn: () => {
-      throw new Error(`Missing or invalid ${typeKey} for task-test`);
+      return { classification: null, error: `Missing or invalid ${typeKey} for task-test` };
     },
   });
   assert.equal(missingResult.ok, true);
@@ -201,7 +201,7 @@ test('post-draft mission type validation is label-only', () => {
 
   const missingResult = verifyMissionType('task-test', '/tmp/worktree', {
     resolveMissionClassificationFn: () => {
-      throw new Error(`Missing or invalid ${typeKey} for task-test`);
+      return { classification: null, error: `Missing or invalid ${typeKey} for task-test` };
     },
   });
   assert.equal(missingResult.ok, false);

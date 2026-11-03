@@ -266,7 +266,7 @@ test('startClaudeAgent retries without --resume when spawn returns "Session not 
   const mockSpawn: NonNullable<Parameters<typeof claude.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
     spawnCount++;
     if (spawnCount === 1) {
-      return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
+      return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
     }
     return Promise.resolve({ status: 0, signal: null, stdout: 'claude --resume sess_fresh\n', stderr: '', error: null });
   };
@@ -301,7 +301,7 @@ test('startClaudeAgent retries without --resume when spawn reports No conversati
   const mockSpawn: NonNullable<Parameters<typeof claude.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
     spawnCount++;
     if (spawnCount === 1) {
-      return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'No conversation found with session ID: 51a78e8c-e8bf-450f-bcdf-efe8381a670a', error: null });
+      return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'No conversation found with session ID: 51a78e8c-e8bf-450f-bcdf-efe8381a670a', error: null });
     }
     return Promise.resolve({ status: 0, signal: null, stdout: 'claude --resume sess_fresh\n', stderr: '', error: null });
   };
@@ -330,7 +330,7 @@ test('startClaudeAgent recognizes No conversation found on stdout too', async ()
   const mockSpawn: NonNullable<Parameters<typeof claude.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
     spawnCount++;
     if (spawnCount === 1) {
-      return Promise.resolve({ status: 1, signal: null, stdout: 'No conversation found with session ID: abc-123', stderr: '', error: null });
+      return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: 'No conversation found with session ID: abc-123', stderr: '', error: null });
     }
     return Promise.resolve({ status: 0, signal: null, stdout: 'claude --resume sess_fresh\n', stderr: '', error: null });
   };
@@ -354,7 +354,7 @@ test('startClaudeAgent does NOT retry when resume is false', async () => {
   let spawnCount = 0;
   const mockSpawn: NonNullable<Parameters<typeof claude.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
     spawnCount++;
-    return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
+    return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
   };
 
   claude.__setSpawnAndTeeForTest(mockSpawn);
@@ -431,7 +431,7 @@ test('oversized stdin survives every Claude session policy and stale fallback (T
     assert.equal(options.input, prompt);
     assert.ok(!JSON.stringify({ args, env: options.env }).includes(prompt));
     calls.push(args);
-    return { status: calls.length % 2 ? 1 : 0, stdout: '', stderr: calls.length % 2 ? 'Session not found' : '' };
+    return { failureReason: calls.length % 2 ? { version: 1, code: 'provider-session-missing' } : undefined, status: calls.length % 2 ? 1 : 0, stdout: '', stderr: calls.length % 2 ? 'Session not found' : '' };
   });
   try {
     for (const sessionId of [null, 'old-session']) {

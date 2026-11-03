@@ -114,7 +114,7 @@ for (const status of [0, 7, null]) {
       const { run } = await import(`../../../../src/adapters/git/git.js?progress=${status}`);
       const invoke = () => run('bash', args, { stdio: 'inherit', cwd: '/isolated', progressLabel: 'Hook' });
       if (failure) { assert.throws(invoke, error => error === failure); }
-      else { assert.deepEqual(invoke(), evidence); }
+      else { const actual = invoke(); assert.deepEqual(actual, { ...evidence, failureReason: status === 0 ? undefined : { version: 1, code: 'process-failed', source: 'process', context: { exitCode: status } } }); }
       assert.equal(calls, 1);
       assert.equal(output.length, 1);
       assert.match(output[0], status === 0 ? /^\[✓\]/ : /^\[✗\]/);

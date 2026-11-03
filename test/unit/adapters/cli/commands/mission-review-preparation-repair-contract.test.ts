@@ -10,7 +10,6 @@ import type { GitOptions } from "../../../../../src/adapters/git/git.js";
 
 import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { hasExplicitHumanOnlyDiagnostic } from '../../../../../src/domain/failure-classification.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 
@@ -32,7 +31,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -53,7 +52,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: (msg) => logs.push(msg)
     });
@@ -71,7 +70,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             'R  missions/task-1037/CP-1-renamed.md\0missions/task-1037/CP-1.md'
@@ -90,7 +89,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: () => {}
     });
@@ -107,7 +106,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -126,7 +125,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: (msg) => logs.push(msg)
     });
@@ -143,7 +142,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -161,7 +160,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: (msg) => logs.push(msg)
     });
@@ -179,7 +178,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md'
@@ -198,7 +197,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       error: (msg) => errors.push(msg),
       log: () => {}
@@ -217,7 +216,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             'UU missions/task-1037/MISSION.md'
@@ -227,7 +226,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: (msg) => logs.push(msg),
       error: (msg) => logs.push(msg)
@@ -256,7 +255,7 @@ describe("Repair review preparation", () => {
       opts.exitFn(0);
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', { failureReason: { version: 1, code: 'git-behind', source: 'review-preparation' },
       gitFn,
       rebaseFn,
       log: (msg) => logs.push(msg)
@@ -282,7 +281,7 @@ describe("Repair review preparation", () => {
       opts.exitFn(1);
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', { failureReason: { version: 1, code: 'git-behind', source: 'review-preparation' },
       gitFn,
       rebaseFn,
       log: (msg) => logs.push(msg),
@@ -298,7 +297,7 @@ describe("Repair review preparation", () => {
     const adds: string[] = [];
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M backlog/completed/task-1037 - some task.md'
@@ -313,7 +312,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: () => {}
     });
@@ -337,7 +336,7 @@ describe("Repair review preparation", () => {
       opts.exitFn(1); // Rebase fails
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'Updates were rejected', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'Updates were rejected', { failureReason: { version: 1, code: 'git-behind', source: 'review-preparation' },
       gitFn,
       rebaseFn,
       log: () => {},
@@ -349,7 +348,7 @@ describe("Repair review preparation", () => {
   });
 
   test("repairReviewPreparation returns repaired:false for generic git push failed (auth/transport)", async () => {
-    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed with status 128: fatal: Authentication failed', {
+    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed with status 128: fatal: Authentication failed', { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
       log: () => {}
     });
 
@@ -361,7 +360,7 @@ describe("Repair review preparation", () => {
   test('isRelaunchableError returns true for goal-check table missing evidence rows error', () => {
     const { isRelaunchableError } = repairReviewPreparation;
     const errorMsg = "The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.";
-    assert.equal(isRelaunchableError(errorMsg), true);
+    assert.equal(isRelaunchableError(errorMsg, { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }), true);
   });
 
   test('isRelaunchableError returns false for non-relaunchable errors', () => {
@@ -374,18 +373,18 @@ describe("Repair review preparation", () => {
     // @ts-expect-error Intentional non-string error-classification input.
     assert.equal(isRelaunchableError(123), false);
     assert.equal(isRelaunchableError(''), false);
-    assert.equal(isRelaunchableError('Some other error'), false);
-    assert.equal(isRelaunchableError('MISSION.md is modified but uncommitted'), false);
-    assert.equal(isRelaunchableError('git push failed'), false);
+    assert.equal(isRelaunchableError('Some other error', { version: 1, code: 'infrastructure', source: 'review-preparation' }), false);
+    assert.equal(isRelaunchableError('MISSION.md is modified but uncommitted', { version: 1, code: 'git-dirty', source: 'review-preparation' }), false);
+    assert.equal(isRelaunchableError('git push failed', { version: 1, code: 'infrastructure', source: 'review-preparation' }), false);
   });
 
   test('isRelaunchableError returns false for partial match', () => {
     const { isRelaunchableError } = repairReviewPreparation;
 
     // Missing the second part of the required message
-    assert.equal(isRelaunchableError('has a "## Goal Check" section but no evidence rows'), false);
+    assert.equal(isRelaunchableError('has a "## Goal Check" section but no evidence rows', { version: 1, code: 'infrastructure', source: 'review-preparation' }), false);
     // Missing the first part
-    assert.equal(isRelaunchableError("A goal-check table with real evidence is required before review preparation"), false);
+    assert.equal(isRelaunchableError("A goal-check table with real evidence is required before review preparation", { version: 1, code: 'infrastructure', source: 'review-preparation' }), false);
   });
 
   // ── CP-1 tests: FailureClass, DispatchAction, getDispatchAction (SC2) ─────────
@@ -445,65 +444,65 @@ describe("Repair review preparation", () => {
   // ── CP-2 tests: classifyError for all 8 failure classes (SC1) ────────────────
 
   test('classifyError classifies dirty-artifact error as GitBlockers with reason dirty', () => {
-    const result = classifyError('MISSION.md is modified but uncommitted');
+    const result = classifyError('MISSION.md is modified but uncommitted', { version: 1, code: 'git-dirty', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.GitBlockers);
     assert.equal(result.dispatchAction, DispatchAction.AutoRepair);
     assert.equal(result.reason, 'dirty');
   });
 
   test('classifyError classifies commit-mission-contract error as GitBlockers with reason dirty', () => {
-    const result = classifyError("Commit the mission contract before review preparation");
+    const result = classifyError("Commit the mission contract before review preparation", { version: 1, code: 'git-dirty', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.GitBlockers);
     assert.equal(result.dispatchAction, DispatchAction.AutoRepair);
     assert.equal(result.reason, 'dirty');
   });
 
   test('classifyError classifies behind-branch error as GitBlockers with reason behind', () => {
-    const result = classifyError('git push failed: Updates were rejected');
+    const result = classifyError('git push failed: Updates were rejected', { version: 1, code: 'git-behind', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.GitBlockers);
     assert.equal(result.dispatchAction, DispatchAction.AutoRepair);
     assert.equal(result.reason, 'behind');
   });
 
   test('classifyError classifies non-fast-forward error as GitBlockers with reason behind', () => {
-    const result = classifyError('error: failed to push some refs to origin\nhint: Updates were rejected because the remote contains work that does not exist locally.\nhint: This may also indicate remote master is behind your local branch.');
+    const result = classifyError('error: failed to push some refs to origin\nhint: Updates were rejected because the remote contains work that does not exist locally.\nhint: This may also indicate remote master is behind your local branch.', { version: 1, code: 'git-behind', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.GitBlockers);
     assert.equal(result.dispatchAction, DispatchAction.AutoRepair);
     assert.equal(result.reason, 'behind');
   });
 
   test('classifyError classifies goal-check missing-evidence as IncompleteEvidence', () => {
-    const result = classifyError("The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.");
+    const result = classifyError("The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.", { version: 1, code: 'incomplete-evidence', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.IncompleteEvidence);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
 
   test('classifyError classifies verification-gate-failed as GateFailure', () => {
-    const result = classifyError('verification gate failed: exit code 1');
+    const result = classifyError('verification gate failed: exit code 1', { version: 1, code: 'gate-failed', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.GateFailure);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
 
   test('classifyError classifies declared-gate-failed as GateFailure', () => {
-    const result = classifyError('Declared gate "lint" failed with exit code 2');
+    const result = classifyError('Declared gate "lint" failed with exit code 2', { version: 1, code: 'gate-failed', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.GateFailure);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
 
   test('classifyError classifies unverifiable-claims error as UnverifiableClaims', () => {
-    const result = classifyError('Tests passed but cannot verify: proof not found');
+    const result = classifyError('Tests passed but cannot verify: proof not found', { version: 1, code: 'unverifiable-claims', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.UnverifiableClaims);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
 
   test('classifyError classifies malformed-gate error as MalformedGates', () => {
-    const result = classifyError('Malformed gate config: syntax error in gate command');
+    const result = classifyError('Malformed gate config: syntax error in gate command', { version: 1, code: 'malformed-gates', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.MalformedGates);
     assert.equal(result.dispatchAction, DispatchAction.AutoRepair);
   });
 
   test('classifyError classifies missing-artifacts error as MissingArtifacts', () => {
-    const result = classifyError('Missing mandatory artifact: MISSION.md not found');
+    const result = classifyError('Missing mandatory artifact: MISSION.md not found', { version: 1, code: 'missing-artifacts', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.MissingArtifacts);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
@@ -511,31 +510,31 @@ describe("Repair review preparation", () => {
   test('classifyError recognizes auto-remediation failure as MissingArtifacts', () => {
     // Exact message shape emitted by performReviewPreparation when checkpoint auto-remediation
     // fails (task-2215): must bounce back to the implementer, not strand on a human.
-    const result = classifyError('No checkpoint documents found in /home/magnus/code/parallix-task-2213/missions/task-2213 even after auto-remediation. Implementation evidence is mandatory for review.');
+    const result = classifyError('No checkpoint documents found in /home/magnus/code/parallix-task-2213/missions/task-2213 even after auto-remediation. Implementation evidence is mandatory for review.', { version: 1, code: 'missing-artifacts', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.MissingArtifacts);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
 
   test('classifyError classifies infra-blocker error as InfraBlocker', () => {
-    const result = classifyError('Authentication failed for Forgejo: token expired');
+    const result = classifyError('Authentication failed for Forgejo: token expired', { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.InfraBlocker);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
 
   test('classifyError classifies state-machine-violation error as StateMachineViolation', () => {
-    const result = classifyError('State violation: invalid transition from active to review');
+    const result = classifyError('State violation: invalid transition from active to review', { version: 1, code: 'state-machine', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.StateMachineViolation);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
 
   test('classifyError keeps a missing conflict implementer out of infrastructure failures', () => {
-    const result = classifyError('No recorded implementer for task-2497; cannot launch conflict resolution.');
+    const result = classifyError('No recorded implementer for task-2497; cannot launch conflict resolution.', { version: 1, code: 'state-machine', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.StateMachineViolation);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
 
   test('classifyError returns InfraBlocker(HumanOnly) for unknown error', () => {
-    const result = classifyError('Some completely unknown error that does not match any pattern');
+    const result = classifyError('Some completely unknown error that does not match any pattern', { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.InfraBlocker);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
@@ -543,30 +542,30 @@ describe("Repair review preparation", () => {
   // ── task-2233: reviewer-non-submission classification ─────────────────────
 
   test('classifyError classifies reviewer-non-submission (formal outcome) as InfraBlocker', () => {
-    const result = classifyError('Reviewer custom did not submit a formal review outcome for mission/task-9001.');
+    const result = classifyError('Reviewer custom did not submit a formal review outcome for mission/task-9001.', { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.InfraBlocker);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
 
   test('classifyError classifies reviewer-non-submission (usable outcome) as InfraBlocker', () => {
-    const result = classifyError('Reviewer claude did not submit a usable formal review outcome after 2 recovery retries.');
+    const result = classifyError('Reviewer claude did not submit a usable formal review outcome after 2 recovery retries.', { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.InfraBlocker);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
 
   test("classifyError classifies reviewer-non-submission (local review preparation) as InfraBlocker", () => {
-    const result = classifyError("Reviewer custom did not leave a complete local review review preparation for mission/task-9001.");
+    const result = classifyError("Reviewer custom did not leave a complete local review review preparation for mission/task-9001.", { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.InfraBlocker);
     assert.equal(result.dispatchAction, DispatchAction.HumanOnly);
   });
 
   test('classifyError does not false-positive on partial matches', () => {
     // "tests passed" alone should NOT match UnverifiableClaims (needs verification failure)
-    const r1 = classifyError('All tests passed');
+    const r1 = classifyError('All tests passed', { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.notEqual(r1.failureClass, FailureClass.UnverifiableClaims);
 
     // "gate failed" alone should NOT match GateFailure if it's about malformed gates
-    const r2 = classifyError('gate syntax error: invalid config');
+    const r2 = classifyError('gate syntax error: invalid config', { version: 1, code: 'malformed-gates', source: 'review-preparation' });
     assert.notEqual(r2.failureClass, FailureClass.GateFailure);
   });
 
@@ -575,7 +574,7 @@ describe("Repair review preparation", () => {
   test('isRelaunchableError backward compat: goal-check missing evidence → true', () => {
     const { isRelaunchableError } = repairReviewPreparation;
     const msg = "The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.";
-    assert.equal(isRelaunchableError(msg), true);
+    assert.equal(isRelaunchableError(msg, { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }), true);
   });
 
   test('isRelaunchableError backward compat: null → false', () => {
@@ -597,27 +596,27 @@ describe("Repair review preparation", () => {
 
   test('isRelaunchableError backward compat: unknown message → false', () => {
     const { isRelaunchableError } = repairReviewPreparation;
-    assert.equal(isRelaunchableError('Some other error'), false);
+    assert.equal(isRelaunchableError('Some other error', { version: 1, code: 'infrastructure', source: 'review-preparation' }), false);
   });
 
   test('isRelaunchableError backward compat: dirty error → false', () => {
     const { isRelaunchableError } = repairReviewPreparation;
-    assert.equal(isRelaunchableError('MISSION.md is modified but uncommitted'), false);
+    assert.equal(isRelaunchableError('MISSION.md is modified but uncommitted', { version: 1, code: 'git-dirty', source: 'review-preparation' }), false);
   });
 
   test('isRelaunchableError backward compat: behind error → false', () => {
     const { isRelaunchableError } = repairReviewPreparation;
-    assert.equal(isRelaunchableError('git push failed: Updates were rejected'), false);
+    assert.equal(isRelaunchableError('git push failed: Updates were rejected', { version: 1, code: 'git-behind', source: 'review-preparation' }), false);
   });
 
   test('isRelaunchableError backward compat: verification-gate-failed → true', () => {
     const { isRelaunchableError } = repairReviewPreparation;
-    assert.equal(isRelaunchableError('verification gate failed: exit code 1'), true);
+    assert.equal(isRelaunchableError('verification gate failed: exit code 1', { version: 1, code: 'gate-failed', source: 'review-preparation' }), true);
   });
 
   test('isRelaunchableError backward compat: declared-gate-failed → true', () => {
     const { isRelaunchableError } = repairReviewPreparation;
-    assert.equal(isRelaunchableError('Declared gate "lint" failed with exit code 2'), true);
+    assert.equal(isRelaunchableError('Declared gate "lint" failed with exit code 2', { version: 1, code: 'gate-failed', source: 'review-preparation' }), true);
   });
 
   test("repairReviewPreparation uses classifyError internally for dirty errors", async () => {
@@ -627,7 +626,7 @@ describe("Repair review preparation", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M missions/task-1037/MISSION.md',
@@ -646,7 +645,7 @@ describe("Repair review preparation", () => {
       return { signal: null, stdout: '', stderr: '',  status: 0 };
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       log: (msg) => logs.push(msg)
     });
@@ -671,7 +670,7 @@ describe("Repair review preparation", () => {
       opts.exitFn(0);
     };
 
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'git push failed: Updates were rejected', { failureReason: { version: 1, code: 'git-behind', source: 'review-preparation' },
       gitFn,
       rebaseFn,
       log: (msg) => logs.push(msg)
@@ -683,7 +682,7 @@ describe("Repair review preparation", () => {
   });
 
   test("repairReviewPreparation returns false for non-GitBlocker errors", async () => {
-    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'verification gate failed: exit code 1', {
+    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'verification gate failed: exit code 1', { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
       log: () => {}
     });
 
@@ -694,39 +693,37 @@ describe("Repair review preparation", () => {
 
   test("repairReviewPreparation returns InfraBlocker-specific blocker message for infrastructure errors", async () => {
     const logs: string[] = [];
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'connection timed out', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'connection timed out', { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
       log: (msg) => logs.push(msg)
     });
 
     assert.equal(repaired, false, "repairReviewPreparation should return repaired:false for InfraBlocker");
     assert.ok(blocker, "repairReviewPreparation should return a non-null blocker for InfraBlocker errors");
-    assert.ok(blocker.includes('infrastructure'), 'InfraBlocker blocker should mention infrastructure');
-    assert.ok(blocker.toLowerCase().includes('forgejo'), 'InfraBlocker blocker should mention Forgejo');
-    assert.ok(blocker.toLowerCase().includes('relaunch'), 'InfraBlocker blocker should state relaunch will not help');
+    assert.equal(blocker, 'connection timed out', 'Original producer diagnostic survives hygiene');
     assert.ok(logs.some(l => l === blocker), 'InfraBlocker blocker should be logged');
   });
 
   test("repairReviewPreparation returns InfraBlocker-specific blocker for token expired errors", async () => {
     const logs: string[] = [];
-    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', {
+    const { repaired, blocker } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'Authentication failed for Forgejo: token expired', { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
       log: (msg) => logs.push(msg)
     });
 
     assert.equal(repaired, false);
     assert.ok(blocker, "repairReviewPreparation should return a non-null blocker for token expired");
-    assert.ok(blocker.includes('infrastructure'), 'InfraBlocker blocker should mention infrastructure');
+    assert.equal(blocker, 'Authentication failed for Forgejo: token expired', 'Original producer diagnostic survives hygiene');
   });
 
   // ── Finding 1 fix: isBehind derived from classifyError(reason) ────────────────
 
   test('classifyError returns reason field for GitBlockers (dirty and behind)', () => {
-    const dirty = classifyError('MISSION.md is modified but uncommitted');
+    const dirty = classifyError('MISSION.md is modified but uncommitted', { version: 1, code: 'git-dirty', source: 'review-preparation' });
     assert.equal(dirty.reason, 'dirty');
 
-    const behind = classifyError('git push failed: Updates were rejected');
+    const behind = classifyError('git push failed: Updates were rejected', { version: 1, code: 'git-behind', source: 'review-preparation' });
     assert.equal(behind.reason, 'behind');
 
-    const nonGitBlocker = classifyError('verification gate failed');
+    const nonGitBlocker = classifyError('verification gate failed', { version: 1, code: 'gate-failed', source: 'review-preparation' });
     assert.equal(nonGitBlocker.reason, undefined);
   });
 
@@ -746,7 +743,7 @@ describe("Repair review preparation", () => {
 
     const rebaseFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["rebaseFn"]> = async () => { rebaseCalled = true; };
 
-    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', {
+    const { repaired } = await repairReviewPreparation.default('task-1037', '/tmp/worktree', 'MISSION.md is modified but uncommitted', { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
       gitFn,
       rebaseFn,
       log: () => {}
@@ -766,7 +763,7 @@ describe("Repair review preparation auto-commit", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M missions/task-2202/MISSION.md',
@@ -793,7 +790,7 @@ describe("Repair review preparation auto-commit", () => {
       'task-2202',
       '/tmp/worktree',
       'MISSION.md is modified but uncommitted',
-      {
+      { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' },
         gitFn,
         log: (msg) => logs.push(msg)
       }
@@ -814,7 +811,7 @@ describe("Repair review preparation auto-commit", () => {
 
     const gitFn: NonNullable<NonNullable<Parameters<typeof repairReviewPreparation.default>[3]>["gitFn"]> = (args) => {
       if (args.includes('status')) {
-        return { signal: null, stderr: '', 
+        return { signal: null, stderr: '',
           status: 0,
           stdout: [
             ' M src/adapters/cli/commands/repair-review-preparation.ts',
@@ -840,7 +837,7 @@ describe("Repair review preparation auto-commit", () => {
       'task-2480',
       '/tmp/worktree',
       'MISSION.md is modified but uncommitted',
-      { gitFn }
+      { failureReason: { version: 1, code: 'git-dirty', source: 'review-preparation' }, gitFn }
     );
 
     assert.equal(repaired, true, `expected git-blocker repair to commit all dirty files; blocker was: ${blocker}`);
@@ -857,7 +854,7 @@ describe('Rebase failure classification', () => {
   const { classifyError, FailureClass, DispatchAction } = repairReviewPreparation;
   test('task-2366 repro: classifyError maps rebase failure to GateFailure/AutoSendBack', () => {
     const result = classifyError(
-      "Rebase failed before review preparation. Ensure the mission branch can be rebased onto the latest primary branch.",
+      "Rebase failed before review preparation. Ensure the mission branch can be rebased onto the latest primary branch.", { version: 1, code: 'gate-failed', source: 'review-preparation' }
     );
     assert.equal(result.failureClass, FailureClass.GateFailure,
       'rebase failure must be classified as a relaunchable gate failure, not an infrastructure blocker');
@@ -904,7 +901,7 @@ test("default execute runtime preserves configuration through review preparation
   const gitCalls: { args: string[]; options: GitOptions | undefined; }[] = [];
   const gitFn: NonNullable<NonNullable<Parameters<typeof runtime.repairReviewPreparation>[3]>["gitFn"]> = (args, options) => { gitCalls.push({ args, options }); return { signal: null, stderr: '',  status: 0, stdout: '' }; };
   let rebases = 0;
-  const result = await runtime.repairReviewPreparation('task-2744', '/fixture', 'git push failed: Updates were rejected', {
+  const result = await runtime.repairReviewPreparation('task-2744', '/fixture', 'git push failed: Updates were rejected', { failureReason: { version: 1, code: 'git-behind', source: 'review-preparation' },
     gitFn, log: () => {}, error: () => {},
     rebaseFn: async (args, options) => {
       assert.deepEqual(args, ['task-2744']);
@@ -958,7 +955,7 @@ test("successful gate repair commits tracked and untracked edits before review p
 for (const operation of ['status', 'commit', 'throw'] as const) {
   test(`automatic Git repair stops before rebase on ${operation} failure (px-0014)`, async () => {
     const calls: string[][] = [];
-    const result = await repairReviewPreparation.default('px-0014', '/selected', 'git push failed: Updates were rejected', {
+    const result = await repairReviewPreparation.default('px-0014', '/selected', 'git push failed: Updates were rejected', { failureReason: { version: 1, code: 'git-behind', source: 'review-preparation' },
       gitFn: args => {
         calls.push(args);
         assert.equal(args[1], '/selected');
@@ -974,27 +971,12 @@ for (const operation of ['status', 'commit', 'throw'] as const) {
     if (operation !== 'commit') assert.equal(calls.length, 1);
   });
 }
-test('direct and explicit state recognition agree without widening unknown fallback (TASK-2780)', () => {
-  for (const diagnostic of ['Task state invalid for review', 'No recorded implementer for task-2780; cannot launch conflict resolution.']) {
-    assert.deepEqual(repairReviewPreparation.classifyError(diagnostic), {
+test('structured state recognition ignores diagnostic text and unknown failures stay closed (TASK-2780, TASK-2829)', () => {
+  for (const diagnostic of ['Task state invalid for review', 'Forgejo quota exceeded', 'arbitrary wording']) {
+    assert.deepEqual(repairReviewPreparation.classifyError(diagnostic, { version: 1, code: 'state-machine' }), {
       failureClass: 'StateMachineViolation', dispatchAction: 'HumanOnly',
     });
-    assert.equal(hasExplicitHumanOnlyDiagnostic(diagnostic), true);
+    assert.equal(repairReviewPreparation.classifyError(diagnostic, { version: 1, code: 'agent-quota' }).failureClass, 'AgentCapacity');
+    assert.equal(repairReviewPreparation.classifyError(diagnostic).dispatchAction, 'HumanOnly');
   }
-  assert.deepEqual(repairReviewPreparation.classifyError('unrecognized diagnostic'), {
-    failureClass: 'InfraBlocker', dispatchAction: 'HumanOnly',
-  });
-  assert.equal(hasExplicitHumanOnlyDiagnostic('unrecognized diagnostic'), false);
-});
-test('explicit evidence ignores passing titles and retains capacity precedence (TASK-2780)', () => {
-  for (const prefix of ['✔ ', '  ✓ ', 'ok 14 - ']) {
-    assert.equal(hasExplicitHumanOnlyDiagnostic(prefix + 'Task state invalid'), false);
-    assert.equal(hasExplicitHumanOnlyDiagnostic(prefix + 'forgejo forbidden'), false);
-  }
-  assert.equal(hasExplicitHumanOnlyDiagnostic('not ok 14 - Task state invalid'), true);
-  assert.equal(hasExplicitHumanOnlyDiagnostic('✖ forgejo authentication failed'), true);
-  assert.equal(hasExplicitHumanOnlyDiagnostic('quota exhausted'), false);
-  assert.equal(repairReviewPreparation.classifyError('quota exhausted').failureClass, 'AgentCapacity');
-  assert.equal(hasExplicitHumanOnlyDiagnostic('forgejo quota exhausted'), true);
-  assert.equal(repairReviewPreparation.classifyError('forgejo quota exhausted').failureClass, 'InfraBlocker');
 });

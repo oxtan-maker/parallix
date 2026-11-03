@@ -223,7 +223,7 @@ test("direct review preparation retries a slow-test verifier result before it di
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder, {
     recoverGateFailure: true,
     runVerificationGateFn: () => ++gateRuns === 1
-      ? { status: 1, stdout: '[unit-test-budget:exceeded] test/example.test.ts was slow', stderr: '' }
+      ? { status: 1, failureReason: { version: 1, code: 'cpu-budget-exceeded' }, stdout: '[unit-test-budget:exceeded] test/example.test.ts was slow', stderr: '' }
       : { status: 0, stdout: '', stderr: '' },
   }));
 
@@ -523,6 +523,7 @@ test("review preparation preserves a publication verifier failure as structured 
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.deepEqual(result.gateFailure, gateFailure);
+  assert.deepEqual([result.failureReason?.code, result.recoveryFailure?.kind], ['gate-failed', 'gate-failure'], 'publication retains gate identity');
 });
 
 // --- TASK-2476: operator-facing handoff story ---
@@ -619,7 +620,7 @@ test('a Mission drafted through the typed verbs never falls back to checkpoint d
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /no recorded checkpoint evidence.*px checkpoint record/);
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack', 'missing evidence is the implementer\'s to record');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'AutoSendBack', 'missing evidence is the implementer\'s to record');
   assert.deepEqual(recorder.transitions, []);
 });
 
@@ -639,7 +640,7 @@ test("a Mission drafted through the typed verbs with no recorded gate fails revi
   assert.match(result.error ?? '', /no recorded verification gate.*px gate add/);
   // Not sent back: execution may not change the contract, so a lost gate is a
   // human's call rather than the implementer's.
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'HumanOnly');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'HumanOnly');
   assert.deepEqual(recorder.transitions, []);
 });
 
@@ -663,7 +664,7 @@ test('a typed-verb Mission requires completion and one verifiable row per distin
     .performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(missing.ok, false);
   assert.match(missing.error ?? '', /2 completed criteria require 2 Goal Check row/);
-  assert.equal(classifyError(missing.error ?? '').dispatchAction, 'AutoSendBack', 'the gap is sent back to the implementer');
+  assert.equal(classifyError(missing.error ?? '', missing.failureReason).dispatchAction, 'AutoSendBack', 'the gap is sent back to the implementer');
 
   // A row covers the completed criterion whose identity its `criterion` field
   // equals; distinct coverage across recorded checkpoints is what handoff checks.
@@ -692,7 +693,7 @@ test('a typed-verb Mission whose recorded evidence cites nothing verifiable is s
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /cites no verifiable reference/);
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack', 'weak evidence is repaired by the implementer, as for a CP-N.md table');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'AutoSendBack', 'weak evidence is repaired by the implementer, as for a CP-N.md table');
   assert.deepEqual(recorder.transitions, []);
 });
 
@@ -773,7 +774,7 @@ test("review preparation rejects basename-only recorded evidence with the record
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /CP-5 is not verifiable; re-record it with `px checkpoint record`/);
   assert.match(result.error ?? '', /`web-board-interaction\.cases\.ts` does not exist relative to the repository root/);
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'AutoSendBack');
   assert.deepEqual(recorder.transitions, []);
 });
 
@@ -806,7 +807,7 @@ test("review preparation rejects an invalid retained row in an earlier checkpoin
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /CP-1 is not verifiable; re-record it with `px checkpoint record`/);
   assert.match(result.error ?? '', /`review-preparation-use-case\.test\.ts` does not exist relative to the repository root/);
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'AutoSendBack');
   assert.deepEqual(recorder.transitions, []);
 });
 
@@ -837,7 +838,7 @@ test("review preparation rejects a repair that leaves a completed criterion with
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /criterion have no row: mission review preparation/);
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'AutoSendBack');
   assert.deepEqual(recorder.transitions, []);
 });
 
@@ -959,7 +960,7 @@ test("review preparation commits mission changes through its port before fresh p
       return { repaired: true, blocker: null };
     } },
     verification: {
-      readReusableVerificationProof: () => { assert.equal(committed, true); return { ok: false, error: 'HEAD changed; dirty-tree proof is stale' }; },
+      readReusableVerificationProof: () => { assert.equal(committed, true); return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'HEAD changed; dirty-tree proof is stale' }; },
       createVerificationProofIdentity: () => { assert.equal(committed, true); return { ok: true, identity: 'committed-head' }; },
       writeReusableVerificationProof: (_command, _root, options) => { assert.equal(verified, true); if (options) assert.equal(options.expectedIdentity, 'committed-head'); return { ok: true }; },
     },

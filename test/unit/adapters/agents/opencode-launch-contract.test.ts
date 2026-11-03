@@ -253,7 +253,7 @@ describe("OpenCode launcher ,", () => {
       spawnCount++;
       if (spawnCount === 1) {
         // First call: stale session error
-        return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
+        return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
       }
       // Second call: fresh session succeeds
       return Promise.resolve({ status: 0, signal: null, stdout: 'done opencode -s ses_fresh123\n', stderr: '', sessionId: 'ses_fresh123', error: null });
@@ -293,7 +293,7 @@ describe("OpenCode launcher ,", () => {
     let spawnCount = 0;
     const mockSpawn: NonNullable<Parameters<typeof opencode.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
-      return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
+      return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
     };
     const mockExport = () => Promise.resolve(null);
 
@@ -349,7 +349,7 @@ describe("OpenCode launcher ,", () => {
       spawnCount++;
       if (spawnCount === 1) {
         assert.ok(args.includes('--format'), 'first invocation must include --format json');
-        return Promise.resolve({
+        return Promise.resolve({ failureReason: { version: 1, code: 'provider-config', source: 'provider' },
           status: 1, signal: null, stdout: '',
           stderr: 'opencode: error: unrecognized option: --format',
           error: null,
@@ -569,7 +569,7 @@ describe('OpenCode provider-failure retry', () => {
       'the model is overloaded',
       'service is temporarily unavailable',
     ]) {
-      assert.equal(opencode.isTransientOpencodeFailure({ stderr }), true, `expected transient: ${stderr}`);
+      assert.equal(opencode.isTransientOpencodeFailure({ stderr, failureReason: { version: 1, code: 'provider-unavailable' } }), true, `expected transient: ${stderr}`);
     }
   });
 
@@ -581,7 +581,7 @@ describe('OpenCode provider-failure retry', () => {
   });
 
   test('isTransientOpencodeFailure inspects stdout as well as stderr', () => {
-    assert.equal(opencode.isTransientOpencodeFailure({ stdout: 'request failed: ETIMEDOUT', stderr: '' }), true);
+    assert.equal(opencode.isTransientOpencodeFailure({ stdout: 'request failed: ETIMEDOUT', stderr: '', failureReason: { version: 1, code: 'provider-unavailable' } }), true);
   });
 
   test('isHardOpencodeFailure matches model-not-found / auth signatures', () => {
@@ -593,7 +593,7 @@ describe('OpenCode provider-failure retry', () => {
       '401 Unauthorized',
       'authentication failed',
     ]) {
-      assert.equal(opencode.isHardOpencodeFailure({ stderr }), true, `expected hard: ${stderr}`);
+      assert.equal(opencode.isHardOpencodeFailure({ stderr, failureReason: { version: 1, code: 'provider-auth' } }), true, `expected hard: ${stderr}`);
     }
   });
 
@@ -612,26 +612,26 @@ describe('OpenCode provider-failure retry', () => {
   // ---------- plain 429 throttling (F1) ----------
 
   test('isTransientOpencodeFailure does NOT match plain 429 (classified as limit-hit)', () => {
-    assert.equal(opencode.isTransientOpencodeFailure({ status: 1, stderr: '429 Too Many Requests' }), false);
-    assert.equal(opencode.isTransientOpencodeFailure({ status: 1, stderr: 'HTTP 429' }), false);
-    assert.equal(opencode.isTransientOpencodeFailure({ status: 1, stderr: '429 Throttled' }), false);
+    assert.equal(opencode.isTransientOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: '429 Too Many Requests' }), false);
+    assert.equal(opencode.isTransientOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: 'HTTP 429' }), false);
+    assert.equal(opencode.isTransientOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: '429 Throttled' }), false);
   });
 
   test('shouldRetryOpencodeFailure does NOT retry plain 429 (classified as limit-hit)', () => {
     assert.equal(
-      opencode.shouldRetryOpencodeFailure({ status: 1, stderr: '429 Too Many Requests' }),
+      opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: '429 Too Many Requests' }),
       false,
       'plain 429 is a limit-hit, not a transient error',
     );
     assert.equal(
-      opencode.shouldRetryOpencodeFailure({ status: 1, stderr: 'request failed: 429 Too Many Requests' }),
+      opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: 'request failed: 429 Too Many Requests' }),
       false,
       '429 embedded in longer message is still a limit-hit',
     );
   });
 
   test('detectLimitHit classifies plain 429 as a limit-hit for custom', () => {
-    const result = detectLimitHit({ agent: 'custom', status: 1, stderr: '429 Too Many Requests' });
+    const result = detectLimitHit({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, agent: 'custom', status: 1, stderr: '429 Too Many Requests' });
     assert.ok(result, 'plain 429 should be detected as a limit-hit');
     assert.equal(result.source, 'fallback', 'no reset-time info in plain 429, uses fallback block');
   });
@@ -640,7 +640,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
+      return { failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
@@ -655,7 +655,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
+      return { failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
@@ -677,7 +677,7 @@ describe('OpenCode provider-failure retry', () => {
       'the model is overloaded, please try again',
     ]) {
       assert.equal(
-        opencode.shouldRetryOpencodeFailure({ status: 1, stdout: '', stderr }),
+        opencode.shouldRetryOpencodeFailure({ status: 1, stdout: '', stderr, failureReason: { version: 1, code: 'provider-unavailable' } }),
         true,
         `expected transient: ${stderr}`,
       );
@@ -685,24 +685,24 @@ describe('OpenCode provider-failure retry', () => {
   });
 
   test('shouldRetryOpencodeFailure does NOT retry a clean exit', () => {
-    assert.equal(opencode.shouldRetryOpencodeFailure({ status: 0, stdout: 'fetch failed mentioned in logs', stderr: '' }), false);
+    assert.equal(opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'provider-unavailable', source: 'provider' }, status: 0, stdout: 'fetch failed mentioned in logs', stderr: '' }), false);
   });
 
   test('shouldRetryOpencodeFailure does NOT retry hard errors (model-not-found / ENOENT / EACCES)', () => {
-    assert.equal(opencode.shouldRetryOpencodeFailure({ status: 1, stderr: 'Error: model not found' }), false);
+    assert.equal(opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'provider-auth', source: 'provider' }, status: 1, stderr: 'Error: model not found' }), false);
     assert.equal(opencode.shouldRetryOpencodeFailure({ status: null, error: { code: 'ENOENT' } }), false);
     assert.equal(opencode.shouldRetryOpencodeFailure({ status: null, error: { code: 'EACCES' } }), false);
   });
 
   test('shouldRetryOpencodeFailure does NOT retry a recognized limit-hit', () => {
     // custom limit pattern: "insufficient_quota" — owned by detectLimitHit, not the retry path.
-    assert.equal(opencode.shouldRetryOpencodeFailure({ status: 1, stderr: 'insufficient_quota: usage limit reached' }), false);
+    assert.equal(opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: 'insufficient_quota: usage limit reached' }), false);
     // plain 429 is also a limit-hit for custom, not a transient error
-    assert.equal(opencode.shouldRetryOpencodeFailure({ status: 1, stderr: '429 Too Many Requests' }), false);
+    assert.equal(opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stderr: '429 Too Many Requests' }), false);
   });
 
   test('shouldRetryOpencodeFailure does NOT retry a killing signal', () => {
-    assert.equal(opencode.shouldRetryOpencodeFailure({ status: null, signal: 'SIGINT', stderr: 'fetch failed' }), false);
+    assert.equal(opencode.shouldRetryOpencodeFailure({ failureReason: { version: 1, code: 'provider-unavailable', source: 'provider' }, status: null, signal: 'SIGINT', stderr: 'fetch failed' }), false);
   });
 
   // ---------- bounded in-family retry (criterion 4) ----------
@@ -711,7 +711,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      if (calls === 1) return { status: 1, stdout: '', stderr: 'Error: fetch failed' };
+      if (calls === 1) return { failureReason: { version: 1, code: 'provider-unavailable', source: 'provider' }, status: 1, stdout: '', stderr: 'Error: fetch failed' };
       return { status: 0, stdout: 'opencode -s ses_ok\n', stderr: '' };
     });
     opencode.__setExportCaptureForTest(async () => null);
@@ -728,7 +728,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      return { status: 1, stdout: '', stderr: 'Error: ECONNRESET' };
+      return { failureReason: { version: 1, code: 'provider-unavailable', source: 'provider' }, status: 1, stdout: '', stderr: 'Error: ECONNRESET' };
     });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
@@ -743,7 +743,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      return { status: 1, stdout: '', stderr: 'Error: model not found: qwen3-coder' };
+      return { failureReason: { version: 1, code: 'provider-auth', source: 'provider' }, status: 1, stdout: '', stderr: 'Error: model not found: qwen3-coder' };
     });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
@@ -784,7 +784,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
+      return { failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
@@ -799,7 +799,7 @@ describe('OpenCode provider-failure retry', () => {
     let calls = 0;
     opencode.__setSpawnAndTeeForTest(async () => {
       calls += 1;
-      return { status: 1, stdout: '', stderr: '429 Too Many Requests' };
+      return { failureReason: { version: 1, code: 'agent-quota', source: 'provider' }, status: 1, stdout: '', stderr: '429 Too Many Requests' };
     });
 
     const { resultPromise } = opencode.startOpencodeAgent({ configuration: resolveConfiguration(environment), prompt: 'p', worktree: '/tmp' });
@@ -864,6 +864,7 @@ test('oversized OpenCode stdin survives transient, format and stale-session retr
   const calls: string[][] = [];
   // Each branch receives the complete provider input, including any advisory.
   const failures = ['Session not found', 'unrecognized option: --format', 'fetch failed', ''];
+  const reasons = ['provider-session-missing', 'provider-config', 'provider-unavailable', undefined];
   opencodeModule.__setJsonFormatSupportForTest(true);
   opencodeModule.__setExportCaptureForTest(async () => null);
   opencodeModule.__setSpawnAndTeeForTest(async (command, args, options) => {
@@ -872,7 +873,7 @@ test('oversized OpenCode stdin survives transient, format and stale-session retr
     assert.ok(!JSON.stringify({ args, env: options.env }).includes(prompt));
     calls.push(args);
     const stderr = failures.shift();
-    return { status: stderr ? 1 : 0, stdout: '', stderr };
+    return { failureReason: stderr ? { version: 1, code: reasons.shift() ?? 'unexpected' } : undefined, status: stderr ? 1 : 0, stdout: '', stderr };
   });
   try {
     const result = await opencodeModule.startOpencodeAgent({ prompt, worktree: '/tmp', resume: true,

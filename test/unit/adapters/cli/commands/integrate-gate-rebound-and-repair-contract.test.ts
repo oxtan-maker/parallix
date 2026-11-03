@@ -217,7 +217,7 @@ describe("rebound active mission context", () => {
     let commits = 0;
     const { squashAndLand } = createSquashLanding(stubIntegrateWorkflowPorts({
       git: { git: (args: string[]) => {
-        if (args.includes('commit')) { commits += 1; return commits === 1 ? { status: 1, stdout: '', stderr: 'pre-commit: failed' } : { status: 0, stdout: '', stderr: '' }; }
+        if (args.includes('commit')) { commits += 1; return commits === 1 ? { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, status: 1, stdout: '', stderr: 'pre-commit: failed' } : { status: 0, stdout: '', stderr: '' }; }
         if (args.includes('diff')) { return { signal: null,  status: 0, stdout: args.includes('--cached') ? 'fixture.ts\0' : '', stderr: '' }; }
         if (args.includes('ls-files')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
         return { signal: null,  status: 0, stdout: 'commit\n', stderr: '' };
@@ -345,7 +345,7 @@ describe("relaunchable repair", () => {
 
   test('SC 1: isRelaunchableError returns true for goal-check missing evidence rows', () => {
     const errorMsg = "The final checkpoint at docs/missions/2026/task-1121/CP-3.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation.";
-    assert.equal(isRelaunchableError(errorMsg), true);
+    assert.equal(isRelaunchableError(errorMsg, { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }), true);
   });
 
   test("SC 3: ExecuteReviewPreparationService bounces through the kernel when repair fails and error is relaunchable", () => {
@@ -356,7 +356,7 @@ describe("relaunchable repair", () => {
     assert.ok(serviceSource.includes('rebound('), 'Should bounce through the rebound kernel');
     // Matched on the classifier call rather than one spelling of its argument, so
     // extracting the repair helpers does not silently drop the guard.
-    assert.match(serviceSource, /isRelaunchableFailure\(error\)/, 'Should check relaunchability before bouncing');
+    assert.match(serviceSource, /classifyFailure\(holder.result.failureReason\)/, 'Should check relaunchability before bouncing');
   });
 
   test('SC 4: reviewer fallback uses the review eligibility selector', () => {
@@ -460,7 +460,7 @@ describe("review preparation and push-gate regressions", () => {
           async transition() {
             refineCalls += 1;
             return refineCalls === 1
-              ? { status: 'failed', error: { kind: 'validation', message: INCOMPLETE }, durableEvidence: [] }
+              ? { status: 'failed', error: { kind: 'validation', message: INCOMPLETE, failureReason: { version: 1, code: 'mission-contract-incomplete', source: 'lifecycle' } }, durableEvidence: [] }
               : { status: 'completed', durableEvidence: [] };
           },
         },

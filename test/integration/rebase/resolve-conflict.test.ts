@@ -19,57 +19,11 @@ const { mock } = test;
 // Mock getPrimaryBranch BEFORE requiring dependent modules to ensure they use the mock.
 mock.method(missionUtils, 'getPrimaryBranch', () => 'main');
 
-const { parseConflictFilesFromMergeOutput, getConflictFiles, getPrimaryBranch } = missionUtils;
+const { getConflictFiles, getPrimaryBranch } = missionUtils;
 
 const PRIMARY = getPrimaryBranch();
 const TEST_WORKTREE = '/tmp/visualBoard-task-108';
 const MISSING_WORKTREE = '/tmp/visualBoard-task-nonexistent-zzz';
-
-// ---------------------------------------------------------------------------
-// parseConflictFilesFromMergeOutput
-// ---------------------------------------------------------------------------
-
-test('parseConflictFilesFromMergeOutput parses content conflicts', () => {
-  const output = [
-    'Auto-merging workflow/lib/commands/integrate.js',
-    'CONFLICT (content): Merge conflict in workflow/lib/commands/integrate.js',
-    'Auto-merging docs/missions/2026/task-108/CP-1.md',
-    'CONFLICT (content): Merge conflict in docs/missions/2026/task-108/CP-1.md',
-    'Automatic merge failed; fix conflicts and then commit the result.'
-  ].join('\n');
-
-  const files = parseConflictFilesFromMergeOutput(output);
-  assert.deepEqual(files, [
-    'workflow/lib/commands/integrate.js',
-    'docs/missions/2026/task-108/CP-1.md'
-  ]);
-});
-
-test('parseConflictFilesFromMergeOutput parses modify/delete conflicts', () => {
-  const output = [
-    'CONFLICT (modify/delete): backlog/tasks/task-108 - Fix.md deleted in HEAD. Version mission/task-108 of backlog/tasks/task-108 - Fix.md left in tree.',
-    'Automatic merge failed; fix conflicts and then commit the result.'
-  ].join('\n');
-
-  const files = parseConflictFilesFromMergeOutput(output);
-  assert.equal(files.length, 1);
-  assert.match(files[0], /task-108/);
-});
-
-test('parseConflictFilesFromMergeOutput returns empty array when no conflicts', () => {
-  const output = 'Already up to date.\n';
-  assert.deepEqual(parseConflictFilesFromMergeOutput(output), []);
-});
-
-test('parseConflictFilesFromMergeOutput deduplicates repeated conflict lines', () => {
-  const output = [
-    'CONFLICT (content): Merge conflict in workflow/lib/commands/integrate.js',
-    'CONFLICT (content): Merge conflict in workflow/lib/commands/integrate.js'
-  ].join('\n');
-
-  const files = parseConflictFilesFromMergeOutput(output);
-  assert.deepEqual(files, ['workflow/lib/commands/integrate.js']);
-});
 
 // ---------------------------------------------------------------------------
 // getConflictFiles
@@ -104,16 +58,17 @@ test('getConflictFiles returns conflict files and always aborts', () => {
       if (args.includes('--no-commit')) {
         return { status: 1, stdout: conflictOutput, stderr: '' };
       }
+      if (args.includes('--diff-filter=U')) return { status: 0, stdout: 'workflow/lib/commands/integrate.js\0backlog/tasks/task-108 - Fix.md\0docs/missions/2026/task-108/CP-1.md\0workflow/lib/commands/integrate.js\0', stderr: '' };
       return { status: 0, stdout: '', stderr: '' };
     }
   });
 
-  assert.deepEqual(files, ['workflow/lib/commands/integrate.js']);
-  assert.equal(gitCalls.length, 2);
-  assert.deepEqual(gitCalls[1], ['-C', '/tmp/worktree', 'merge', '--abort']);
+  assert.deepEqual(files, ['workflow/lib/commands/integrate.js', 'backlog/tasks/task-108 - Fix.md', 'docs/missions/2026/task-108/CP-1.md']);
+  assert.equal(gitCalls.length, 3);
+  assert.deepEqual(gitCalls[2], ['-C', '/tmp/worktree', 'merge', '--abort']);
 });
 
-test('getConflictFiles throws for non-conflict merge failure (no CONFLICT lines)', () => {
+test('getConflictFiles throws for non-conflict merge failure (no unmerged index paths)', () => {
   assert.throws(() => {
     getConflictFiles('/tmp/worktree', PRIMARY, {
       gitRunner(args) {
@@ -123,7 +78,7 @@ test('getConflictFiles throws for non-conflict merge failure (no CONFLICT lines)
         return { status: 0, stdout: '', stderr: '' };
       }
     });
-  }, /git merge exited 128 with no CONFLICT lines/);
+  }, /git merge exited 128 without confirmed unmerged index paths/);
 });
 
 // ---------------------------------------------------------------------------

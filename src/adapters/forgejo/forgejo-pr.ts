@@ -4,11 +4,11 @@ import { getPrimaryBranch, resolveMissionBaseBranch } from '../filesystem/missio
 import { getTaskImplementer, findTaskFile } from '../backlog/backlog.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, readToken, resolveAuthorizedApproverUser, resolveForgejoAuth, resolveForgejoHome, resolveForgejoSettings, resolveForgejoUser } from './forgejo-auth.js';
-import { forgejoApi, forgejoApiAsync, codexSandboxHint } from './forgejo-api.js';
+import { forgejoApi, forgejoApiAsync } from './forgejo-api.js';
 import type { ForgejoApiCall, ForgejoAsyncApiCall, ForgejoApiError, ForgejoApiResult, ForgejoIssueComment, ForgejoLogFn, ForgejoPrLookupFailure, ForgejoPullRequest, ForgejoReview, ForgejoReviewComment } from './forgejo-types.js';
 import { git } from '../git/git.js';
 import type { ReviewRefFetch } from './forgejo-git.js';
-import { syncPrimaryBaseline, ensureRemoteBaseBranch, fetchReviewBranch, buildCreatePrPushArgs, cLocaleEnv, deleteReviewRef, isStaleInfoPushRejection } from './forgejo-git.js';
+import { syncPrimaryBaseline, ensureRemoteBaseBranch, fetchReviewBranch, buildCreatePrPushArgs, cLocaleEnv, deleteReviewRef, isStaleInfoPushRejection, annotateLeaseFailure } from './forgejo-git.js';
 
 type GitFetchFn = ReviewRefFetch;
 
@@ -77,7 +77,7 @@ const noopLog = () => {};
  * @returns {string}
  */
 function formatPrLookupFailure(branch: string, apiErr: ForgejoApiError): string {
-  const sandboxNote = apiErr.status === 7 ? ` (${codexSandboxHint()})` : '';
+  const sandboxNote = apiErr.error ? `: ${apiErr.error}` : '';
   if (apiErr.statusCode === 401 || apiErr.statusCode === 403) {
     return `failed to resolve PR for ${branch}: Forgejo authentication failed (${apiErr.statusCode})${sandboxNote}`;
   }
@@ -175,7 +175,12 @@ type CreatePrResult = { ok: boolean, url?: string | null, error?: string | null,
 function runPrPush(branch: string, remoteUrl: string, rootDir: string, options: ForgejoOptions) {
   const argsResult = buildCreatePrPushArgs(branch, remoteUrl, rootDir, options) as { ok: boolean, pushArgs?: string[], error?: string };
   if (!argsResult.ok) { return { failure: { ok: false, error: argsResult.error } as CreatePrResult }; }
-  const result = git(argsResult.pushArgs || [], { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
+  const pushArgs = argsResult.pushArgs || [];
+  let result = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'], env: cLocaleEnv() });
+  const lease = pushArgs.find(arg => arg.startsWith('--force-with-lease='));
+  if (result.status !== 0 && lease) {
+    result = annotateLeaseFailure(result, branch, lease.slice('--force-with-lease='.length), rootDir, remoteUrl);
+  }
   if (result.stdout) { process.stdout.write(result.stdout); }
   if (result.stderr) { process.stderr.write(result.stderr); }
   return { result };
@@ -205,7 +210,7 @@ function pushBranchForPr(branch: string, remoteUrl: string, rootDir: string, con
 }
 
 function prLookupFailure(apiErr: { error?: string | null; status?: number | null }): CreatePrResult {
-  return { ok: false, error: `failed to check existing PR: ${(apiErr.error || 'API error')}${apiErr.status === 7 ? ` (${codexSandboxHint()})` : ''}` };
+  return { ok: false, error: `failed to check existing PR: ${(apiErr.error || 'API error')}${apiErr.error ? `: ${apiErr.error}` : ''}` };
 }
 
 /**
@@ -741,7 +746,7 @@ function getLatestReviewDecision(branch: string, options: ForgejoOptions = {}): 
       ok: false,
       error: 'api-failed',
       reviewState: null,
-      raw: `failed to resolve PR for ${branch}${apiErr.status === 7 ? ` (${codexSandboxHint()})` : ''}`
+      raw: `failed to resolve PR for ${branch}${apiErr.error ? `: ${apiErr.error}` : ''}`
     };
   }
   if (!prAccess) {
@@ -886,7 +891,7 @@ function postComment(branch: string, token: string, body: string, options: Forge
   const prNumber = resolvePrNumber(branch, token, { apiCall, slug, forgejoUser, rootDir: options.rootDir, configuration: options.configuration });
   if (isApiErrorResult(prNumber)) {
     const apiErr = prNumber._apiError;
-    return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
+    return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${apiErr.error ? `: ${apiErr.error}` : ''}` };
   }
   if (!prNumber) {return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'pr-not-found' };}
   return apiCall('POST', `/issues/${prNumber}/comments`, token, { body }, { ...({}), configuration: options.configuration });
@@ -930,7 +935,7 @@ function postReview(branch: string, token: string, outcome: string, summary: str
   const prNumber = resolvePrNumber(branch, token, { apiCall: scopedApi, slug, forgejoUser, rootDir, configuration: options.configuration });
   if (isApiErrorResult(prNumber)) {
     const apiErr = prNumber._apiError;
-    return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}` };
+    return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'api-failed', raw: `failed to resolve PR for ${branch}${apiErr.error ? `: ${apiErr.error}` : ''}` };
   }
   if (!prNumber) {return { ok: false, data: null, status: null, statusCode: null, stderr: null, error: 'pr-not-found' };}
 
@@ -1108,7 +1113,7 @@ async function closePrImpl(branch: string, token: string): Promise<{ ok: boolean
 
   if (prNumber && typeof prNumber === 'object' && isApiErrorResult(prNumber)) {
     const apiErr = prNumber._apiError;
-    fmt.log.warn(`API error resolving PR for ${fmt.branch(branch)}: status=${(apiErr as {status?: number}).status || 0}${((apiErr as {status?: number}).status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}`);
+    fmt.log.warn(`API error resolving PR for ${fmt.branch(branch)}: status=${(apiErr as {status?: number}).status || 0}${apiErr.error ? `: ${apiErr.error}` : ''}`);
     return { ok: true };
   }
 

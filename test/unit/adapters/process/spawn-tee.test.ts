@@ -623,3 +623,15 @@ test('spawnAndTee keeps stdin inherited without input and hands input to the ter
   assert.equal(launches.length, 1);
   assert.ok(Buffer.isBuffer(launches[0].input) && launches[0].input.toString('utf8') === 'hosted prompt');
 });
+
+
+test('failure normalization preserves protocol identity despite rewritten diagnostics (TASK-2829)', async () => {
+  const { normalizeProviderFailure, normalizeProcessFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  for (const message of ['quota exceeded', 'Forgejo authentication failed', 'arbitrary wording']) {
+    assert.equal(normalizeProviderFailure({ status: 1, stdout: JSON.stringify({ type: 'error', error: { status: 429, message } }) })?.code, 'agent-quota');
+    assert.equal(normalizeProviderFailure({ status: 1, stdout: JSON.stringify({ type: 'error', error: { status: 401, message } }) })?.code, 'provider-auth');
+    assert.equal(normalizeProviderFailure({ status: 1, stderr: message })?.code, 'process-failed');
+    assert.equal(normalizeProcessFailure({ status: null, error: Object.assign(new Error(message), { code: 'ENOSPC' }) })?.code, 'resource-exhausted');
+  }
+  assert.equal(normalizeProviderFailure({ status: 0, stdout: JSON.stringify({ type: 'assistant', content: 'quota exceeded' }) }), undefined);
+});

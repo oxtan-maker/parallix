@@ -330,6 +330,7 @@ child.on('close', (code, signal) => {
       const label = runsIntegrationSuite ? 'integration-test-cpu' : 'unit-test-cpu';
       console.error(`[${label}] suite budget=${actualBudget}ms CPU, used=${Math.round(cpuMs)}ms CPU, elapsed=${Math.round(suiteElapsedMs)}ms`);
       if (cpuMs > actualBudget) {
+        console.error(JSON.stringify({ type: 'parallix.failure', failureReason: { version: 1, code: 'cpu-budget-exceeded', source: 'verification' } }));
         console.error(`[${label}] SUITE CPU BUDGET EXCEEDED: ${Math.round(cpuMs)}ms > ${actualBudget}ms`);
         suiteExceeded = true;
       }

@@ -17,8 +17,8 @@ function writeConfig(dir: string, config: unknown) {
 }
 
 test('isTransientVerificationFailure flags unit-test-budget exhaustion', () => {
-  assert.equal(v.isTransientVerificationFailure({ stdout: '[unit-test-budget:exceeded] boom', stderr: '' }), true);
-  assert.equal(v.isTransientVerificationFailure({ stdout: '', stderr: '[unit-test-budget] SUITE BUDGET EXCEEDED:' }), true);
+  assert.equal(v.isTransientVerificationFailure({ failureReason: { version: 1, code: 'cpu-budget-exceeded' }, stdout: '[unit-test-budget:exceeded] boom', stderr: '' }), true);
+  assert.equal(v.isTransientVerificationFailure({ failureReason: { version: 1, code: 'cpu-budget-exceeded' }, stdout: '', stderr: '[unit-test-budget] SUITE BUDGET EXCEEDED:' }), true);
 });
 
 test('isTransientVerificationFailure treats other output as non-transient', () => {

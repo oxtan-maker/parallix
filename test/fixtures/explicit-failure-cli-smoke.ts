@@ -21,6 +21,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'explicit-failure-cli-'));
 try {
   for (const [name, diagnostic, expectedClass, repairs] of [
     ['state', 'Task state invalid for review', 'StateMachineViolation', 0],
+    ['conflicting-state', 'Forgejo authentication failed; network error: lifecycle transition rejected', 'StateMachineViolation', 0],
     ['implementer', 'No recorded implementer; cannot launch conflict resolution.', 'StateMachineViolation', 0],
     ['repairable', 'AssertionError: expected 3 to equal 4', 'GateFailure', 1],
   ] as const) {
@@ -40,6 +41,7 @@ try {
           const reason = gateFailureReason({
             ok: false, area: 'all', command, exitCode: result.status,
             stdout: result.stdout, stderr: result.stderr,
+            failureReason: { version: 1, code: name === 'repairable' ? 'gate-failed' : 'state-machine', source: name === 'repairable' ? 'verification' : 'lifecycle', context: { operation: 'submit-for-review' } },
           });
           classification = classifyReboundReason(reason);
           return { ok: false, command, area: 'all', exitCode: result.status, diagnostic: result.stdout, reason };

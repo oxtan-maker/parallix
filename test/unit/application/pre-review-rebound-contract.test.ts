@@ -23,31 +23,31 @@ import { rebound, DEFAULT_REBOUND_ATTEMPTS } from '../../../src/application/rebo
 
 describe('classifyHookFailure (rebase.ts) — SC1/SC7', () => {
   it('detects pre-commit hook failure', () => {
-    const result = classifyHookFailure('pre-commit: hook failed');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'pre-commit');
   });
 
   it('detects pre-push hook failure', () => {
-    const result = classifyHookFailure('pre-push: rejected');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-push' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'pre-push');
   });
 
   it('detects post-commit hook failure', () => {
-    const result = classifyHookFailure('post-commit hook exited with error');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'post-commit' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'post-commit');
   });
 
   it('detects generic hook keyword', () => {
-    const result = classifyHookFailure('The git hook failed with exit code 1');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'hook' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'hook');
   });
 
   it('returns false for non-hook output', () => {
-    const result = classifyHookFailure('CONFLICT (content): Merge conflict in file.ts');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-conflict', source: 'git' } });
     assert.ok(!result.isHookFailure);
     assert.equal(result.hookType, null);
   });
@@ -59,20 +59,19 @@ describe('classifyHookFailure (rebase.ts) — SC1/SC7', () => {
   });
 
   it('returns false for undefined output', () => {
-    // @ts-expect-error Intentional absent process output must classify as no hook failure.
     const result = classifyHookFailure(undefined);
     assert.ok(!result.isHookFailure);
     assert.equal(result.hookType, null);
   });
 
   it('pre-commit takes priority over generic hook', () => {
-    const result = classifyHookFailure('pre-commit hook failed');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'pre-commit');
   });
 
   it('handles case-insensitive matching', () => {
-    const result = classifyHookFailure('PRE-COMMIT: Hook Failed');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'pre-commit');
   });
@@ -80,19 +79,19 @@ describe('classifyHookFailure (rebase.ts) — SC1/SC7', () => {
 
 describe('classifyHookFailure (integrate.ts) — SC2/SC8', () => {
   it('detects pre-commit hook failure', () => {
-    const result = classifyHookFailureIntegrate('pre-commit: lint errors found');
+    const result = classifyHookFailureIntegrate({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'pre-commit');
   });
 
   it('detects pre-push hook failure', () => {
-    const result = classifyHookFailureIntegrate('pre-push: branch not up to date');
+    const result = classifyHookFailureIntegrate({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-push' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'pre-push');
   });
 
   it('detects generic hook keyword', () => {
-    const result = classifyHookFailureIntegrate('hook failed with exit code 1');
+    const result = classifyHookFailureIntegrate({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'hook' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'hook');
   });
@@ -111,7 +110,7 @@ describe('Non-hook rebase errors do not trigger bounce — SC9', () => {
   });
 
   it('merge conflict output is not classified as hook failure', () => {
-    const result = classifyHookFailure('CONFLICT (content): Merge conflict in file.ts');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-conflict', source: 'git' } });
     assert.ok(!result.isHookFailure);
   });
 
@@ -121,7 +120,7 @@ describe('Non-hook rebase errors do not trigger bounce — SC9', () => {
   });
 
   it('state machine error is not classified as hook failure', () => {
-    const result = classifyHookFailure('Error: transition not allowed from review to active');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'state-machine', source: 'lifecycle' } });
     assert.ok(!result.isHookFailure);
   });
 });
@@ -134,19 +133,19 @@ describe('Generic hook match narrowed — F7', () => {
   });
 
   it('hook with failure phrasing triggers', () => {
-    const result = classifyHookFailure('The git hook failed with exit code 1');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'hook' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'hook');
   });
 
   it('hook with error phrasing triggers', () => {
-    const result = classifyHookFailure('hook error: process exited');
+    const result = classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'hook' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'hook');
   });
 
   it('hook with failure phrasing triggers in integrate', () => {
-    const result = classifyHookFailureIntegrate('custom hook failure: lint check');
+    const result = classifyHookFailureIntegrate({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'hook' } } });
     assert.ok(result.isHookFailure);
     assert.equal(result.hookType, 'hook');
   });
@@ -170,7 +169,7 @@ describe('Pre-review lifecycle hook rebounce', () => {
 
   it('uses the hook-specific prompt and persists no retry counter for a pre-review hook failure', async () => {
     const { fake, context } = repair();
-    const result = await repairPreReviewFailure(context, hookFailureReason('pre-commit hook failed: lint error', 'pre-review safety commit'), 2);
+    const result = await repairPreReviewFailure(context, hookFailureReason('pre-commit hook failed: lint error', 'pre-review safety commit', 'pre-commit'), 2);
     assert.equal(result.bounced, true);
     assert.equal(result.outcome, 'fixed');
     assert.deepEqual(fake.writes, [], 'the kernel keeps its budget in memory');
@@ -181,7 +180,7 @@ describe('Pre-review lifecycle hook rebounce', () => {
 
   it('keeps a declared gate failure a gate failure even when its output mentions a hook', async () => {
     const { fake, context } = repair();
-    const result = await repairPreReviewFailure(context, gateFailureReason({
+    const result = await repairPreReviewFailure(context, gateFailureReason({ failureReason: { version: 1, code: 'gate-failed', source: 'verification' },
       ok: false,
       area: 'docs',
       command: './scripts/verify-local.sh docs',
@@ -198,12 +197,12 @@ describe('Pre-review lifecycle hook rebounce', () => {
 
 describe("Shared hook-failure-workflow module —", () => {
   it('exports classifyHookFailure identical to rebase and integrate copies', () => {
-    assert.equal(classifyHookFailureShared('pre-commit: error').hookType, 'pre-commit');
-    assert.equal(classifyHookFailureShared('hook failed').hookType, 'hook');
-    assert.equal(classifyHookFailureShared('CONFLICT').isHookFailure, false);
+    assert.equal(classifyHookFailureShared({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } }).hookType, 'pre-commit');
+    assert.equal(classifyHookFailureShared({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'hook' } } }).hookType, 'hook');
+    assert.equal(classifyHookFailureShared({ failureReason: { version: 1, code: 'git-conflict', source: 'git' } }).isHookFailure, false);
     // Verify same function via re-export chain
-    assert.equal(classifyHookFailureShared('pre-commit: x').hookType, classifyHookFailure('pre-commit: x').hookType);
-    assert.equal(classifyHookFailureShared('pre-commit: x').hookType, classifyHookFailureIntegrate('pre-commit: x').hookType);
+    assert.equal(classifyHookFailureShared({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } }).hookType, classifyHookFailure({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } }).hookType);
+    assert.equal(classifyHookFailureShared({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } }).hookType, classifyHookFailureIntegrate({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } }).hookType);
   });
 
   it('integrate wrapper delegates to shared module (same classification)', () => {
@@ -252,7 +251,7 @@ describe("Hook bounce on the rebound kernel —", () => {
       worktree: '/worktree',
       implementer: 'claude',
       startAgent: async () => { launches++; return { agent: 'claude', result: { status: 0 } }; },
-      verify: () => ({ ok: false as const, diagnostic: 'pre-commit: still failing' }),
+      verify: () => ({  failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, ok: false as const, diagnostic: 'pre-commit: still failing' }),
       log: () => {},
       error: () => {},
     });
@@ -339,7 +338,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
     let rebaseRuns = 0;
     let reviewerLaunches = 0;
 
-    const gateFailure = gateFailureReason({
+    const gateFailure = gateFailureReason({ failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
       ok: false, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1,
       stdout: 'failing static analysis diagnostic', stderr: '', error: 'verification gate failed with exit code 1',
     });
@@ -403,12 +402,12 @@ for (const kind of ['gate', 'hook'] as const) {
         head: () => repaired ? 'committed-fix' : 'before-fix',
         rebase: async () => {
           order.push('rebase');
-          if (kind === 'hook' && first) { first = false; return { ok: false, diagnostic: 'pre-commit hook failed: original failing assertion', hook: hookFailureReason('pre-commit hook failed: original failing assertion', 'rebase') }; }
+          if (kind === 'hook' && first) { first = false; return {  failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, ok: false, diagnostic: 'pre-commit hook failed: original failing assertion', hook: hookFailureReason('pre-commit hook failed: original failing assertion', 'rebase', 'pre-commit') }; }
           return { ok: true };
         },
         runGate: async () => {
           order.push('gate');
-          if (kind === 'gate' && first) { first = false; return { ok: false, reason, area: 'all', exitCode: 1, command: reason.command, diagnostic: 'original failing assertion' }; }
+          if (kind === 'gate' && first) { first = false; return {  ok: false, reason, area: 'all', exitCode: 1, command: reason.command, diagnostic: 'original failing assertion' }; }
           return { ok: true, command: 'npm run verify-fixture' };
         },
       },

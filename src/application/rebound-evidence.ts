@@ -39,7 +39,7 @@ export async function captureGateFailureEvidence(
   worktree: string,
   context: ReboundContext,
 ): Promise<RecoveryEvidenceRef | undefined> {
-  if (reason.kind !== 'gate-failure') { return undefined; }
+  if (reason.kind !== 'gate-failure' && reason.kind !== 'review-preparation-verification') { return undefined; }
   const capturedRevision = context.readHead ? (await context.readHead()) : context.head ?? null;
   // Obtain and pass the operator-configured credential redactor so the retained
   // streams are scrubbed before write when one is configured, and `redacted`
@@ -47,13 +47,9 @@ export async function captureGateFailureEvidence(
   const redactor = resolveConfiguredCredentialRedactor();
   const result = captureRecoveryEvidence({
     failureReason: reason.failureReason,
-    command: reason.command,
+    ...failureCaptureFields(reason),
     cwd: worktree,
     capturedRevision,
-    exitCode: reason.exitCode,
-    signal: reason.signal ?? null,
-    stdout: reason.stdout ?? '',
-    stderr: reason.stderr ?? '',
     diagnostic: reason.error ?? reboundDiagnostic(reason),
     missionId: context.slug,
     ...(redactor ? { redactor } : {}),
@@ -142,4 +138,11 @@ export async function captureOriginalFailureEvidence(state: { reason: ReboundRea
       state.capturedEvidence = undefined;
     }
   }
+}
+
+function failureCaptureFields(reason: Extract<ReboundReason, { kind: 'gate-failure' | 'review-preparation-verification' }>) {
+  if (reason.kind === 'gate-failure') {
+    return { command: reason.command, exitCode: reason.exitCode, signal: reason.signal ?? null, stdout: reason.stdout ?? '', stderr: reason.stderr ?? '' };
+  }
+  return { command: 'px review --submit', exitCode: null, signal: null, stdout: reason.gateOutput ?? '', stderr: reason.error };
 }

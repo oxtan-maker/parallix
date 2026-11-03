@@ -81,7 +81,7 @@ export class SqliteDatabaseAdapter {
       await Promise.race([
         predecessor,
         new Promise<never>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('SQLITE_BUSY: immediate writer queue timed out')), this.busyTimeoutMs);
+          timer = setTimeout(() => reject(Object.assign(new Error('SQLITE_BUSY: immediate writer queue timed out'), { errcode: 5 })), this.busyTimeoutMs);
         }),
       ]);
     } catch (error) {

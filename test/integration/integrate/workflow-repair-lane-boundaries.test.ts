@@ -314,7 +314,7 @@ test('composed rebase conflict repair commits active before its agent and review
       gitFn: (args: string[]) => {
         if (args.includes('rebase') && args.includes('main')) {
           rebaseStarted = true;
-          return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/shared.ts' };
+          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/shared.ts' };
         }
         if (args.includes('status') && args.includes('--porcelain')) {
           return { signal: null,  status: 0, stdout: 'UU src/shared.ts\n', stderr: '' };

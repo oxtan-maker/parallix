@@ -201,18 +201,14 @@ export function draftScaffold(environment: DraftWorkflowEnvironment, ctx: DraftW
   // the premature missing-classification status; any other errorFn output
   // (e.g. an invalid-classification throw, which returns ok:false) still
   // surfaces before the scaffold safeExits.
-  const suppressDraftStartClassificationFail = (message: string) => {
-    if (/Missing or invalid classification|Mission .* is absent from the px database/i.test(message)) {
-      return;
-    }
-    errorFn(message);
-  };
+  const classificationMessages: string[] = [];
   const validateDraftClassificationFn = merged.validateDraftClassificationFn || validateDraftClassification;
   const classificationCheck = validateDraftClassificationFn(ctx.slug, ctx.targetWorktree, {
     configuration: merged.configuration,
-    errorFn: suppressDraftStartClassificationFail
+    errorFn: message => classificationMessages.push(message)
   });
   if (!classificationCheck.ok) {
+    classificationMessages.forEach(errorFn);
     safeExit(1);
     return exitedContext({ ...ctx, missionFile });
   }

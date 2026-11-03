@@ -975,11 +975,12 @@ test('detectLimitHit returns null when status is undefined (legacy caller)', () 
   assert.equal(result, null, 'detectLimitHit must return null when status is undefined');
 });
 
-test('detectLimitHit still fires when status is 1 (explicit failure)', () => {
-  // When status is explicitly 1 (failure), limit-hit detection should still work.
+test('detectLimitHit fires for structured quota with status 1 (explicit failure)', () => {
+  // A failed invocation plus provider quota identity establishes a limit hit.
   const result = detectLimitHit({
     agent: 'codex',
     stdout: 'you\'ve hit your weekly limit',
+    failureReason: { version: 1, code: 'agent-quota', source: 'provider' },
     stderr: '',
     status: 1,
     signal: undefined,

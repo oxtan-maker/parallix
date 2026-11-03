@@ -56,7 +56,7 @@ export class SqliteWorkflowOperationStore implements WorkflowOperationStore {
     for (let attempt = 0; ; attempt++) {
       try { await this._db.beginImmediateTransaction(); return; }
       catch (error) {
-        if (attempt >= 200 || !/SQLITE_BUSY|database is locked/.test(String(error))) { throw error; }
+        if (attempt >= 200 || (Number((error as { errcode?: number }).errcode) & 0xff) !== 5) { throw error; }
         // Yield instead of blocking the HTTP loop in SQLite's busy handler.
         await new Promise(resolve => setTimeout(resolve, 10));
       }

@@ -12,10 +12,6 @@ import path from 'path';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 const buildCompactReviewPromptModule = mockModule<typeof import('../../../src/adapters/review/review-prompts.js')>('../../../src/adapters/review/review-prompts.js', import.meta.url);
 const __mm1 = mockModule<typeof import('../../../src/adapters/review/review-artifacts.js')>('../../../src/adapters/review/review-artifacts.js', import.meta.url);
-// TASK-2647: isArtifactInfraDiagnostic lives in the application review-round
-// port after the review-loop migration, so the artifacts mock no longer
-// exposes it. Mock the port module and read it from there.
-const __mm2 = mockModule<typeof import('../../../src/application/ports/review-round.js')>('../../../src/application/ports/review-round.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { buildCompactReviewPrompt } = buildCompactReviewPromptModule;
@@ -32,7 +28,7 @@ const {
   consumeImplementerArtifacts,
   resolveArtifactDir,
 } = __mm1;
-const { isArtifactInfraDiagnostic } = __mm2;
+import { classifyRecoveryReason } from '../../../src/application/rebound-classification.js';
 
 // ============================================================================
 // buildMetadataFooter tests
@@ -520,12 +516,13 @@ test('consumeReviewerArtifacts treats malformed request-changes findings as repa
     error: () => {},
   });
 
+  const identity = result.failureReason;
   assert.deepEqual(result, {
     consumed: true,
     ok: false,
     diagnostic: 'Reviewer artifacts invalid: request-changes findings must use a "## F1: summary" heading',
   });
-  assert.equal(isArtifactInfraDiagnostic(result.diagnostic), false);
+  assert.equal(classifyRecoveryReason({ kind: 'artifact-incomplete', role: 'reviewer', diagnostic: result.diagnostic ?? '', failureReason: identity }).failureClass, 'IncompleteEvidence');
 });
 
 // task-1264 / TASK-2322.12: artifacts are read from the configured artifact

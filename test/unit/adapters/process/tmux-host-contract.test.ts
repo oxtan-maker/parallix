@@ -393,7 +393,7 @@ test('the mission host port reads owned sessions, encodes dotted ids and types e
   reply = { error: Object.assign(new Error('spawnSync tmux ENOENT'), { code: 'ENOENT' }), status: null };
   assert.equal((host.sessions(dotted) as { reason: string }).reason, 'host-missing', 'missing tmux is not reported as absence');
   reply = { stderr: 'no server running on /tmp/x' };
-  assert.deepEqual(host.sessions(dotted), { ok: true, sessions: null }, 'a stale socket without a server is absence');
+  assert.equal(host.sessions(dotted).ok, false, 'a tmux diagnostic alone cannot prove a stale socket is absent');
   reply = { stderr: 'unexpected' };
   assert.equal((host.sessions(dotted) as { reason: string }).reason, 'failed');
   assert.ok(calls.every(args => ['list-sessions', 'list-windows', 'capture-pane'].includes(args[2])), 'the reader never mutates the server');
@@ -516,8 +516,8 @@ test('session and window probes distinguish confirmed absence from unavailable f
   fs.mkdirSync(path.dirname(socket), { recursive: true });
   fs.writeFileSync(socket, '');
   const cases = [
-    { reply: { status: 1, stderr: 'no server running on /tmp/x\n' }, reason: null },
-    { reply: { status: 1, stderr: 'error connecting to /tmp/x (No such file or directory)\n' }, reason: null },
+    { reply: { status: 1, stderr: 'no server running on /tmp/x\n' }, reason: 'failed' },
+    { reply: { status: 1, stderr: 'error connecting to /tmp/x (No such file or directory)\n' }, reason: 'failed' },
     { reply: { status: 1, stderr: 'unexpected failure' }, reason: 'failed' },
     { reply: { status: null, error: Object.assign(new Error('missing'), { code: 'ENOENT' }) }, reason: 'host-missing' },
     { reply: { status: null, error: Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }) }, reason: 'timeout' },

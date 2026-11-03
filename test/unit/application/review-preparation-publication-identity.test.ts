@@ -15,7 +15,7 @@ test('missing implementer credentials use Parallix publication fallback without 
     backlog: { transitionTask: (_slug, _status, options) => { implementers.push(options.implementer); return true; } },
     forgejo: { readToken: user => user === 'human' ? 'owner-token' : null,
       createPr: (_branch, user, token) => { publications.push(`${user}:${token}`); return { ok: true }; } },
-    setupReview: { bootstrapReviewSurface: async () => ({ ok: false, error: 'fixture bootstrap denied' }) },
+    setupReview: { bootstrapReviewSurface: async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'fixture bootstrap denied' }) },
   });
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, true, result.error ?? '');
@@ -27,7 +27,7 @@ test("review preparation stops when neither implementer nor Parallix credentials
   const ports = makePorts(recorder, {
     productConfig: { isForgejoReviewEnabled: () => true },
     forgejo: { readToken: () => null, createPr: () => assert.fail('no unauthenticated publication') },
-    setupReview: { bootstrapReviewSurface: async () => ({ ok: false, error: 'fixture bootstrap denied' }) },
+    setupReview: { bootstrapReviewSurface: async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'fixture bootstrap denied' }) },
   });
   const result = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
   assert.equal(result.ok, false);
@@ -102,11 +102,11 @@ test('first review enters review before expensive verification without fabricati
 test('actionable first-review failure reuses planned checkpoint work; infrastructure adds none (TASK-2822)', async () => {
   const services = recordedServices();
   await beginReviewPreparation(SLUG, services);
-  await recordReviewPreparationFailure(SLUG, 'Forgejo network error: token unavailable', services);
+  await recordReviewPreparationFailure(SLUG, 'Forgejo network error: token unavailable', services, { kind: 'review-preparation-verification', error: 'Forgejo network error: token unavailable', failureReason: { version: 1, code: 'infrastructure' } });
   assert.equal(services.store.mission().status, 'review');
   assert.equal(services.store.mission().checkpoints.length, 1);
   const failure = 'Planned checkpoint evidence is missing before review preparation: CP-2. Record fresh evidence with px checkpoint record';
-  await recordReviewPreparationFailure(SLUG, failure, services);
+  await recordReviewPreparationFailure(SLUG, failure, services, { kind: 'review-preparation-verification', error: failure, failureReason: { version: 1, code: 'incomplete-evidence' } });
   assert.equal(services.store.mission().status, 'active');
   assert.equal(services.store.mission().review, null);
   const repair = services.store.mission().checkpoints.at(-1)!;
@@ -115,7 +115,7 @@ test('actionable first-review failure reuses planned checkpoint work; infrastruc
   assert.deepEqual(repair.goalCheck, []);
   assert.equal(repair.repair, undefined, 'planned evidence work is not a fake failed gate');
   await beginReviewPreparation(SLUG, services);
-  await recordReviewPreparationFailure(SLUG, failure, services);
+  await recordReviewPreparationFailure(SLUG, failure, services, { kind: 'review-preparation-verification', error: failure, failureReason: { version: 1, code: 'incomplete-evidence' } });
   assert.equal(services.store.mission().checkpoints.length, 2);
 });
 
@@ -177,7 +177,8 @@ test(`committed repair binds its replacement round${interrupted ? ' after interr
   if (interrupted) {
     const interruptedPorts = makePorts(recorder, { missionServices: async () => services,
       verification: { runVerificationGate: () => { throw new Error('preparation interrupted'); } } });
-    await assert.rejects(new ReviewPreparationCommandUseCase(interruptedPorts).performReviewPreparation(SLUG, runOptions(recorder)), /preparation interrupted/);
+    const stopped = await new ReviewPreparationCommandUseCase(interruptedPorts).performReviewPreparation(SLUG, runOptions(recorder));
+    assert.equal(stopped.ok, false); assert.match(stopped.error ?? '', /preparation interrupted/);
     assert.equal(services.store.mission().status, 'review');
     assert.equal(currentReviewRound(services.store.mission().review!).subject.revision, 'approved-head');
     const resumed = await services.lifecycle.transition({ operationId: 'resume-repair-stage', missionId: services.store.mission().id,
@@ -255,7 +256,8 @@ for (const interrupted of [false, true]) {
     if (interrupted) {
       const ports = makePorts(recorder, { missionServices: async () => services,
         verification: { runVerificationGate: () => { throw new Error('first preparation interrupted'); } } });
-      await assert.rejects(new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder)), /first preparation interrupted/);
+      const stopped = await new ReviewPreparationCommandUseCase(ports).performReviewPreparation(SLUG, runOptions(recorder));
+      assert.equal(stopped.ok, false); assert.match(stopped.error ?? '', /first preparation interrupted/);
     }
     const preparation = new ReviewPreparationCommandUseCase(makePorts(recorder, { missionServices: async () => services }));
     const result = await preparation.performReviewPreparation(SLUG, runOptions(recorder));

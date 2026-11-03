@@ -2694,7 +2694,7 @@ test('auth launch failure names the family and asks the operator to refresh cred
       selectAgentFn: () => calls++ === 0 ? 'claude' : 'vibe',
       detectLimitHitFn: () => null,
       launchAgentFn: () => ({ invocation: { command: 'test', args: [], options: {} }, resultPromise: Promise.resolve(
-        calls === 1 ? { status: 1, stderr: 'API Error: 401 OAuth access token has expired' } : { status: 0, stdout: '' }
+        calls === 1 ? { status: 1, failureReason: { version: 1, code: 'provider-auth', source: 'provider', context: { httpStatus: 401 } }, stderr: 'API Error: 401 OAuth access token has expired' } : { status: 0, stdout: '' }
       ) }),
       log: (line: string) => logs.push(line),
     });

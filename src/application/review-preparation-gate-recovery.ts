@@ -1,6 +1,7 @@
+import { preparationFailure, preparationRecoveryReason } from './review-preparation-failure.js';
 import { missionId } from '../domain/mission.js';
 import { AGENT_COMMAND_COMPLETION_CONTRACT } from './agent-completion-contract.js';
-import { classifyError } from '../domain/failure-classification.js';
+import { classifyFailure } from '../domain/failure-classification.js';
 import { recordImplementerLaunch } from './rebase-identity.js';
 import type { ReviewPreparationMissionServices } from './ports/review-preparation-workflow.js';
 import { gateFailureReasonFromProcess } from '../domain/failure-classification.js';
@@ -46,14 +47,14 @@ export class ReviewPreparationGateRecovery {
     verify: () => Promise<ReviewPreparationResult>; log: ReviewPreparationLog; error: ReviewPreparationLog; attempts: number;
   }): Promise<ReviewPreparationResult> {
     if (failure.ok || failure.recoveryAttempted || failure.gatekeeperPushedBack || !failure.error
-      || classifyError(failure.error).dispatchAction !== 'AutoSendBack') { return failure; }
+      || classifyFailure(failure.failureReason).dispatchAction !== 'AutoSendBack') { return failure; }
     const loaded = await context.services.store.load(missionId(slug));
     if (loaded.kind !== 'found' || !loaded.mission.assignee) { return failure; }
     // Existing gate debt must resume through its retained evidence/incident owner.
     // A first-review --submit cannot open a second generic repair and new budget.
     if (pendingRetainedRepair(loaded.mission, context.root)) { return failure; }
     let result = failure;
-    const outcome = await rebound({ kind: 'review-preparation-verification', error: failure.error }, {
+    const outcome = await rebound(preparationRecoveryReason(failure), {
       slug, worktree: context.root, implementer: loaded.mission.assignee, maxAttempts: context.attempts,
       startAgent: context.startAgent,
       applyAgentFallback: async ({ launchResult, original }) => {
@@ -61,7 +62,7 @@ export class ReviewPreparationGateRecovery {
         await recordImplementerLaunch(slug, actual, context.services.store, context.services.lifecycle);
         return actual;
       },
-      verify: async () => { result = await context.verify(); return { ok: result.ok, diagnostic: result.error ?? '' }; },
+      verify: async () => { result = await context.verify(); return { ok: result.ok, diagnostic: result.error ?? '', reason: result.ok ? undefined : preparationRecoveryReason(result) }; },
       log: context.log, error: context.error,
     });
     return outcome.outcome === 'fixed' ? result : { ...result, recoveryAttempted: true, error: outcome.dossier || outcome.diagnostic || failure.error };
@@ -105,7 +106,7 @@ export class ReviewPreparationGateRecovery {
               area, command: verificationCommand, cwd: rootDir,
               exitCode: verifyResult.status, stdout, stderr, signal: verifyResult.signal,
               failureReason: gateFailureReasonFromProcess(verifyResult),
-              ...(ports.verification.isTransientVerificationFailure({ stdout, stderr }) ? { transient: true } : {}),
+              ...(ports.verification.isTransientVerificationFailure(verifyResult) ? { transient: true } : {}),
             },
           };
           // `px review` used to print this result and exit, unlike the active
@@ -181,7 +182,7 @@ export class ReviewPreparationGateRecovery {
       // contract lost it. Running nothing would pass review preparation unverified.
       const msg = `${fmt.slug(slug)} has no recorded verification gate. Declare one with \`px gate add\` before review preparation.`;
       error(msg);
-      return { ok: false, error: msg };
+      return preparationFailure(msg, 'state-machine', 'verification');
     }
     log(fmt.status('INFO', `Running mission-declared gates for ${fmt.slug(slug)}.`));
     const gatesResult = await gates.runDeclaredGates(missionDir, rootDir, { log: internalLog, error, recordedGates });
@@ -239,7 +240,7 @@ function gateRepairResult(outcome: Awaited<ReturnType<typeof rebound>>, retried:
 function retriedReason(retried: ReviewPreparationResult): ReboundReason {
   if (retried.recoveryFailure) { return retried.recoveryFailure; }
   if (retried.gateFailure) { return { kind: 'gate-failure', ...retried.gateFailure }; }
-  return { kind: "review-preparation-verification", error: retried.error || "ReviewPreparation failed after gate repair" };
+  return preparationRecoveryReason(retried);
 }
 
 function proofReuseMessage(proof: ProofResult): string {
@@ -287,7 +288,7 @@ export function reviewPreparationRebaseFailure(rebaseResult: Awaited<ReturnType<
           failureReason: gate.failureReason ?? gateFailureReasonFromProcess({ status: gate.exitCode, signal: gate.signal, stdout: gate.stdout, stderr: gate.stderr }),
           signal: gate.signal, area: gate.area, command: gate.command, cwd: rootDir, exitCode: gate.exitCode,
           stdout: gate.stdout, stderr: gate.stderr,
-          ...(ports.verification.isTransientVerificationFailure({ stdout: gate.stdout, stderr: gate.stderr }) ? { transient: true } : {}),
+          ...(ports.verification.isTransientVerificationFailure(gate) ? { transient: true } : {}),
         },
       };
     } else {
@@ -296,9 +297,13 @@ export function reviewPreparationRebaseFailure(rebaseResult: Awaited<ReturnType<
       const failure = rebaseResult.failure;
       return { ok: false, error: msg, recoveryFailure: failure?.kind === 'hook'
         ? { kind: 'hook-failure', hook: failure.hook.hook, operation: `git ${failure.operation}`, output: failure.hook.output }
-        : { kind: "review-preparation-verification", error: failure?.kind === 'other' ? `${msg}\n${failure.output}` : msg } };
+        : { kind: "review-preparation-verification", error: failure?.kind === 'other' ? `${msg}\n${failure.output}` : msg, failureReason: rebaseFailureIdentity(failure) } };
     }
   }
 
   return null;
+}
+
+function rebaseFailureIdentity(failure: Awaited<ReturnType<ReviewPreparationWorkflowPorts['rebase']['rebaseBeforeReviewRound']>>['failure']) {
+  return failure?.kind === 'other' ? failure.failureReason ?? { version: 1, code: 'git-failed', source: 'git' } : { version: 1, code: 'git-failed', source: 'git' };
 }

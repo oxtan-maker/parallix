@@ -42,6 +42,7 @@ import type { MissionNelService } from "../mission-nel-service.js";
 export type ReviewPreparationLog = (_message: string) => void;
 
 export interface CommandResult {
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   signal?: string | null;
   readonly status: number | null;
   readonly stdout?: string;
@@ -109,6 +110,7 @@ export interface ReviewPreparationPrOptions {
 }
 
 export interface ReviewPreparationPrResult {
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly ok: boolean;
   readonly error?: string | null;
   readonly prNumber?: number;
@@ -201,7 +203,7 @@ export interface ReviewPreparationVerificationPort {
   readReusableVerificationProof(_command: string, _rootDir: string): ProofResult;
   writeReusableVerificationProof(_command: string, _rootDir: string, _options?: { expectedIdentity?: string }): ProofResult;
   runVerificationGate(_area: string, _options: ReviewPreparationVerificationGateOptions): CommandResult | Promise<CommandResult>;
-  isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown }): boolean;
+  isTransientVerificationFailure(_output: { stdout?: unknown; stderr?: unknown; failureReason?: unknown }): boolean;
 }
 
 export interface ReviewPreparationRepositoryGatesPort {
@@ -361,6 +363,7 @@ export interface PerformReviewPreparationOptions {
 }
 
 export interface ReviewPreparationResult {
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly recoveryFailure?: import('../../domain/rebound-policy.js').ReboundReason;
   readonly ok: boolean;
   readonly error?: string;

@@ -32,7 +32,7 @@ describe("stale push rejection detection", () => {
     mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0], options: Parameters<(typeof git)["git"]>[1]) => {
       assert.ok(options != null);
       assert.deepEqual(options.stdio, ['ignore', 'pipe', 'pipe'], 'Implementation should now use pipes');
-      return { signal: null, 
+      return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null,
         status: 1,
         stdout: '',
         stderr: 'error: failed to push some refs to ... stale info'
@@ -58,7 +58,7 @@ describe("stale push rejection detection", () => {
     ];
 
     for (const { stderr, stdout, expected } of cases) {
-      const result = { status: 1, stderr, stdout };
+      const result = { status: 1, stderr, stdout, failureReason: expected ? { version: 1, code: 'git-behind' } : undefined };
       assert.strictEqual(isStaleInfoPushRejection(result), expected, `Failed for stderr: ${stderr}`);
     }
   });
@@ -100,7 +100,7 @@ describe("syncMerged retry on stale info", () => {
 
         // First call for branch sync: return stale info
         if (pushCalls.length === 2) {
-          return { signal: null, 
+          return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null,
             status: 1,
             stderr: 'error: failed to push some refs to ... stale info',
             stdout: ''
@@ -171,7 +171,7 @@ describe("syncMerged retry on stale info", () => {
 
         // Always return stale info for force-with-lease
         if (opts.forceWithLease) {
-          return { signal: null, 
+          return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null,
             status: 1,
             stderr: 'error: failed to push some refs to ... stale info',
             stdout: ''

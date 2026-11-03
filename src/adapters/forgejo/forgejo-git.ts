@@ -1,9 +1,10 @@
+import { failureReason, recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import type { GitOptions, GitResult } from '../git/git.js';
 import { git } from '../git/git.js';
 import { getPrimaryBranch } from '../filesystem/mission-utils.js';
 import { resolveForgejoAuth, resolveForgejoUser } from './forgejo-auth.js';
-import { forgejoApi, codexSandboxHint } from './forgejo-api.js';
+import { forgejoApi } from './forgejo-api.js';
 import type { ForgejoApiCall, ForgejoLogFn, ForgejoPrLookupFailure, ForgejoPullRequest } from './forgejo-types.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { authenticatedReviewUrl, getPrNumber, isApiErrorResult } from './forgejo-pr.js';
@@ -59,7 +60,7 @@ function syncPrimaryBaseline(user: string, token: string, rootDir: string = proc
     ok: result.status === 0,
     status: result.status,
     stderr: result.stderr,
-    error: result.status === 0 ? null : `${result.stderr || 'git push failed'}${result.error ? ` (${codexSandboxHint()})` : ''}`
+    error: result.status === 0 ? null : `${result.stderr || 'git push failed'}${result.error ? ` (${result.error.message})` : ''}`
   };
 }
 
@@ -97,7 +98,7 @@ function ensureRemoteBaseBranch(baseBranch: string, user: string, token: string,
     ok: result.status === 0,
     status: result.status,
     stderr: result.stderr,
-    error: result.status === 0 ? null : `${result.stderr || 'git push failed'}${result.error ? ` (${codexSandboxHint()})` : ''}`
+    error: result.status === 0 ? null : `${result.stderr || 'git push failed'}${result.error ? ` (${result.error.message})` : ''}`
   };
 }
 
@@ -116,9 +117,7 @@ function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: strin
     user,
     token
   } = options || {};
-  const remote = token
-    ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
-    : 'review';
+  const remote = reviewPushRemote(user, token, rootDir, options?.configuration);
   const pushArgs = /** @type {string[]} */ (['-C', rootDir, 'push', remote]);
   if (forceWithLease) {
     // A pinned lease (--force-with-lease=<ref>) rejects a remote SHA that changed
@@ -130,9 +129,27 @@ function pushReviewRef(sourceRef: string, destinationRef: string, rootDir: strin
     pushArgs.push('--force');
   }
   pushArgs.push(`${sourceRef}:${destinationRef}`);
-  const result = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  let result = git(pushArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.status !== 0 && forceWithLease) {
+    result = annotateLeaseFailure(result, destinationRef, forceWithLeaseRef, rootDir, remote);
+  }
   if (result.stdout) {process.stdout.write(result.stdout);}
   if (result.stderr) {process.stderr.write(result.stderr);}
+  return result;
+}
+
+function reviewPushRemote(user: string | undefined, token: string | null | undefined, rootDir: string, configuration: ParallixConfiguration | undefined): string {
+  return token
+    ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, configuration), token, rootDir, configuration)
+    : 'review';
+}
+
+export function annotateLeaseFailure(result: ReturnType<typeof git>, destinationRef: string, forceWithLeaseRef: string | undefined, rootDir: string, remote: string) {
+    const remoteRef = destinationRef.startsWith('refs/') ? destinationRef : `refs/heads/${destinationRef}`;
+    const expected = forceWithLeaseRef?.split(':')[1] ?? git(['-C', rootDir, 'rev-parse', '--verify', `refs/remotes/review/${remoteRef.slice('refs/heads/'.length)}`]).stdout.trim();
+    const observed = git(['-C', rootDir, 'ls-remote', '--exit-code', '--refs', remote, remoteRef]);
+    const actual = observed.stdout.trim().split('\t')[0];
+    if (expected && observed.status === 0 && actual && actual !== expected) { result = { ...result, failureReason: failureReason('git-behind', 'git', { expectedRevision: expected, observedRevision: actual }) }; }
   return result;
 }
 
@@ -147,14 +164,12 @@ function fetchReviewBranch(branch: string, rootDir: string = process.cwd(), opti
   const source = token
     ? authenticatedReviewUrl(user || resolveForgejoUser(undefined, options?.configuration), token, rootDir, options?.configuration)
     : 'review';
-  return git(['-C', rootDir, 'fetch', source, `+refs/heads/${branch}:refs/remotes/review/${branch}`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    // Force a stable C locale so git emits its diagnostics in English. Without
-    // this, a non-English operator locale (e.g. Swedish "kunde inte hitta
-    // fjärr-referensen") makes isMissingRemoteRef miss the "could not find
-    // remote ref" condition and a routine first push aborts with a fatal error.
-    env: cLocaleEnv()
-  });
+  const result = git(['-C', rootDir, 'fetch', source, `+refs/heads/${branch}:refs/remotes/review/${branch}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  if (result.status !== 0) {
+    const ref = git(['-C', rootDir, 'ls-remote', '--exit-code', '--heads', source, `refs/heads/${branch}`]);
+    if (ref.status === 2) { return { ...result, failureReason: failureReason('git-remote-missing', 'git', { branch }) }; }
+  }
+  return result;
 }
 
 /** @param {string} branch @param {string} rootDir @returns {{ok: boolean, ref?: string, sha?: string, error?: string}} */
@@ -368,23 +383,13 @@ function pushOutput(result: { stderr?: string | null, stdout?: string | null }):
     .trim();
 }
 
-// Detects the git fetch failure that means the remote branch simply does not
-// exist yet (first push of a new branch), e.g.
-// "fatal: could not find remote ref refs/heads/<branch>". This must be
-// distinguished from real fetch failures (auth/network), which also exit
-// non-zero but do not carry this message and should still abort.
-/** @param {{stderr?: string, stdout?: string}} result @returns {boolean} */
-function isMissingRemoteRef(result: { stderr?: string, stdout?: string }): boolean {
-  const output = pushOutput(result).toLowerCase();
-  return output.includes('could not find remote ref')
-    || output.includes("couldn't find remote ref");
+/** Ref absence and lease mismatch are adapter facts, independent of locale. */
+function isMissingRemoteRef(result: { failureReason?: unknown }): boolean {
+  return recognizedFailureReason(result.failureReason)?.code === 'git-remote-missing';
 }
-
-/** @param {{status?: number, stderr?: string, stdout?: string}} result @returns {boolean} */
-function isStaleInfoPushRejection(result: { status: number | null, stderr?: string | null, stdout?: string | null }): boolean {
-  return result && result.status !== 0 && /\bstale info\b|\bstale ref\b|fetch first/i.test(pushOutput(result));
+function isStaleInfoPushRejection(result: { status: number | null; failureReason?: unknown }): boolean {
+  return result.status !== 0 && recognizedFailureReason(result.failureReason)?.code === 'git-behind';
 }
-
 
 /** Ports the sync-merged flow drives. Every one is a seam a test can replace. */
 type SyncMergedPorts = {
@@ -454,7 +459,7 @@ function resolveSyncMergedPr(
     return {
       ok: false,
       error: 'api-failed',
-      raw: `failed to resolve PR for ${branch}${(apiErr.status || 0) === 7 ? ` (${codexSandboxHint()})` : ''}`
+      raw: `failed to resolve PR for ${branch}${apiErr.error ? `: ${apiErr.error}` : ''}`
     };
   }
   if (!prNumber) { return { ok: false, error: 'pr-not-found' }; }

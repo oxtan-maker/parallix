@@ -26,49 +26,19 @@ function gitSubcommandArgs(args: string[]): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// parseConflictFilesFromRebaseOutput
+// Unmerged index contract
 // ---------------------------------------------------------------------------
 
-test('parseConflictFilesFromRebaseOutput parses content conflicts', () => {
-  const output = [
-    'Auto-merging workflow/lib/commands/rebase.js',
-    'CONFLICT (content): Merge conflict in workflow/lib/commands/rebase.js',
-    'CONFLICT (content): Merge conflict in docs/missions/2026/task-1018/CP-1.md',
-    'Automatic merge failed; fix conflicts and then commit the result.',
-  ].join('\n');
-
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, [
-    'workflow/lib/commands/rebase.js',
-    'docs/missions/2026/task-1018/CP-1.md',
-  ]);
-});
-
-test('parseConflictFilesFromRebaseOutput parses localized KONFLIKT conflicts', () => {
-  const output = [
-    'KONFLIKT (innehåll): Sammanslagningskonflikt i backlog/tasks/task-1018.md',
-    'Automatic merge failed; fix conflicts and then commit the result.',
-  ].join('\n');
-
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput returns empty array when no conflicts', () => {
-  const output = 'Already up to date.\n';
-  assert.deepEqual(rebase.parseConflictFilesFromRebaseOutput(output), []);
-});
-
-test('parseConflictFilesFromRebaseOutput deduplicates repeated conflict lines', () => {
-  const output = [
-    'CONFLICT (content): Merge conflict in workflow/lib/commands/rebase.js',
-    'CONFLICT (content): Merge conflict in workflow/lib/commands/rebase.js',
-  ].join('\n');
-
-  assert.deepEqual(
-    rebase.parseConflictFilesFromRebaseOutput(output),
-    ['workflow/lib/commands/rebase.js']
-  );
+test('unmerged status paths are independent of localized conflict diagnostics (TASK-2829)', () => {
+  const paths = ['workflow/lib/commands/rebase.js', 'docs/missions/2026/task-1018/CP-1.md',
+    'backlog/tasks/task-1018.md', 'backlog/tasks/task 1018 extra.md',
+    'the backlog/tasks/task 1018 extra.md',
+    'backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md'];
+  for (const diagnostic of ['CONFLICT: wrong-path', 'KONFLIKT: wrong-path', 'tips: resolve CONFLICT']) {
+    const stdout = [...paths.map((file, index) => `${index % 2 ? 'DU' : 'UU'} ${file}`), `UU ${paths[0]}`].join('\n');
+    assert.deepEqual(rebase.parseConflictFilesFromGitStatus('/tmp/worktree', () => ({ status: 0, stdout, stderr: diagnostic })), paths);
+    assert.deepEqual(rebase.parseConflictFilesFromGitStatus('/tmp/worktree', () => ({ status: 0, stdout: '', stderr: diagnostic })), []);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -315,7 +285,7 @@ test('rebase detects localized KONFLIKT in rebase output', async () => {
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { signal: null,  status: 1, stdout: '', stderr: 'KONFLIKT (innehåll): Sammanslagningskonflikt i backlog/tasks/task-1018.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'KONFLIKT (innehåll): Sammanslagningskonflikt i backlog/tasks/task-1018.md\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     },
@@ -371,83 +341,6 @@ test('parseConflictFilesFromGitStatus strips quotes from filenames', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseConflictFilesFromRebaseOutput — filenames with spaces
-// ---------------------------------------------------------------------------
-
-test('parseConflictFilesFromRebaseOutput preserves filenames with spaces in generic fallback', () => {
-  const output = 'CONFLICT (content): backlog/tasks/task 1018 extra.md: some description\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task 1018 extra.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput preserves full filename after article words', () => {
-  const output = 'CONFLICT: the backlog/tasks/task 1018 extra.md: conflict markers\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['the backlog/tasks/task 1018 extra.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput strips English modify/delete description', () => {
-  const output = 'CONFLICT (content): Merge conflict in backlog/tasks/task 1018 extra.md: deleted by main, modified by HEAD\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task 1018 extra.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput strips Swedish modify/delete description', () => {
-  const output = 'CONFLICT (innehåll): Sammanslagningskonflikt i backlog/tasks/task 1018 extra.md: deleted/raderad av main, modified/ändrad av HEAD\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task 1018 extra.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput strips Swedish raderad/ändrad description', () => {
-  const output = 'CONFLICT (innehåll): Sammanslagningskonflikt i docs/missions/2026/task-1018/CP-1.md: raderad av main, ändrad av HEAD\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['docs/missions/2026/task-1018/CP-1.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera) modify/delete', () => {
-  const output = 'KONFLIKT (ändra/radera): backlog/tasks/task 1018 extra.md raderad i fa9599e6 (blaj) och ändrad i HEAD.\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task 1018 extra.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera) without trailing period', () => {
-  const output = 'KONFLIKT (ändra/radera): backlog/tasks/task 1018 extra.md raderad i fa9599e6 och ändrad i HEAD\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task 1018 extra.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput takes the segment before the second colon with modify/delete strip', () => {
-  const output = 'CONFLICT (modify/delete): backlog/tasks/task-1018.md: deleted by main, modified by HEAD\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput takes everything after the first colon when there is no second colon', () => {
-  const output = 'CONFLICT (content): backlog/tasks/task-1018.md\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput skips advice/hint labels in the generic fallback', () => {
-  const output = ['tips: resolve the CONFLICT in x', 'note: the CONFLICT is here', 'backlog/tasks/task-1018.md: fix CONFLICT'].join('\n');
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task-1018.md']);
-});
-
-
-test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera) with long filename', () => {
-  const output = 'KONFLIKT (ändra/radera): backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md raderad i fa9599e6 (blaj) och ändrad i HEAD.\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md']);
-});
-
-test('parseConflictFilesFromRebaseOutput handles Swedish KONFLIKT (ändra/radera) with trailing Versionen HEAD sentence', () => {
-  const output = 'KONFLIKT (ändra/radera): backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md raderad i fa9599e6 (blaj) och ändrad i HEAD. Versionen HEAD av backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md lämnad i trädet.\n';
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
-  assert.deepEqual(files, ['backlog/tasks/task-1015 - message-is-in-wrong-place-an-ugly-on-ios-client.md']);
-});
-
-// ---------------------------------------------------------------------------
 // CP-3 (task-1057): Flow-level regression — sharedFiles and prompt must omit tips
 // ---------------------------------------------------------------------------
 
@@ -489,7 +382,7 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
         paused = true;
-        return { signal: null,  status: 1, stdout: '', stderr: SWEDISH_REBASE_OUTPUT };
+        return { signal: null,  status: 1, stdout: '', stderr: SWEDISH_REBASE_OUTPUT, failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       // git status --porcelain (direct or via -C <worktreePath>)
       const statusIdx = args.indexOf('status');
@@ -511,7 +404,7 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   assert.equal(exitCode.value, 0);
 });
 
-test('parseConflictFilesFromRebaseOutput task-1057: does not treat tips advice as conflict path', () => {
+test('unmerged status task-1057: does not treat tips advice as conflict path', () => {
   // Captured Swedish rebase output: real conflict in workflow/docs/agents.md,
   // followed by tips: advice lines that themselves mention KONFLIKT.
   const output = [
@@ -520,18 +413,18 @@ test('parseConflictFilesFromRebaseOutput task-1057: does not treat tips advice a
     "tips: 'git rm' för att ta bort filen (KONFLIKT löses då automatiskt)",
   ].join('\n');
 
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
+  const files = rebase.parseConflictFilesFromGitStatus('/tmp/worktree', () => ({ status: 0, stdout: 'UU workflow/docs/agents.md\n', stderr: output }));
   assert.ok(!files.includes('tips'), `files must not include 'tips' but got: ${JSON.stringify(files)}`);
   assert.deepEqual(files, ['workflow/docs/agents.md']);
 });
 
-test('parseConflictFilesFromRebaseOutput task-1057: does not treat hint advice as conflict path', () => {
+test('unmerged status task-1057: does not treat hint advice as conflict path', () => {
   const output = [
     'CONFLICT (content): Merge conflict in workflow/docs/agents.md',
     'hint: After resolving the CONFLICT, run git rebase --continue',
   ].join('\n');
 
-  const files = rebase.parseConflictFilesFromRebaseOutput(output);
+  const files = rebase.parseConflictFilesFromGitStatus('/tmp/worktree', () => ({ status: 0, stdout: 'UU workflow/docs/agents.md\n', stderr: output }));
   assert.ok(!files.includes('hint'), `files must not include 'hint' but got: ${JSON.stringify(files)}`);
   assert.deepEqual(files, ['workflow/docs/agents.md']);
 });
@@ -566,7 +459,7 @@ test('rebase detects staged-no-conflict continuation after failed git rebase --c
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
         return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -629,7 +522,7 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       if (args.includes('rebase') && args.includes('--continue')) {
         continueCalls += 1;
@@ -687,7 +580,7 @@ test('rebase caps failed continue retries when rebase remains active', async () 
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
         return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -746,7 +639,7 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
       if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
       if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null,  status: 0, stdout: '', stderr: '' };
       if (args.includes('rebase') && args.includes('main')) {
-        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in docs/missions/2026/task-1035/MISSION.md\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       if (gitSubcommandArgs(args)[0] === 'checkout' && gitSubcommandArgs(args)[2] === 'docs/missions/2026/task-1035/MISSION.md') {
         return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -758,7 +651,7 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
         if (continueCalls > 1) {
           return { signal: null,  status: 0, stdout: '', stderr: '' };
         }
-        return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook declined' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook declined', failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } } };
       }
       if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') {
         // No unresolved conflicts
@@ -885,7 +778,7 @@ test('rebase mission-specific resolution verifies ancestry before reporting succ
       }
       const tail = gitSubcommandArgs(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in missions/task-2323/MISSION.md\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in missions/task-2323/MISSION.md\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') {
         return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -930,7 +823,7 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
       }
       const tail = gitSubcommandArgs(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
+        return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
       }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') {
         return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -976,7 +869,7 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
         const tail = gitSubcommandArgs(args);
         if (tail[0] === 'rev-parse') return { signal: null,  status: 0, stdout: 'cafe4242\n', stderr: '' };
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n' };
+          return { signal: null,  status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in src/adapters/git/git.ts\n', failureReason: { version: 1, code: 'git-conflict', source: 'git' } };
         }
         if (tail[0] === 'rebase' && tail[1] === '--show-current') {
           return { signal: null,  status: 0, stdout: '', stderr: '' };

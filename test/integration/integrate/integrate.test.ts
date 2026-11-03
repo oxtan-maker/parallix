@@ -2417,12 +2417,22 @@ test('findExistingSquashCommit returns null when no squash commit exists for the
 
 test('isNoMergeToAbortResult only ignores the known no-merge case', () => {
   assert.equal(
-    isNoMergeToAbortResult({ stdout: '', stderr: 'fatal: There is no merge to abort (MERGE_HEAD missing).' }),
+    isNoMergeToAbortResult({ failureReason: { version: 1, code: 'git-no-merge', source: 'git' }, stdout: '', stderr: 'fatal: There is no merge to abort (MERGE_HEAD missing).' }),
     true
   );
   assert.equal(
     isNoMergeToAbortResult({ stdout: '', stderr: 'fatal: some other git error' }),
     false
+  );
+  assert.equal(
+    isNoMergeToAbortResult({ stdout: '', stderr: 'fatal: There is no merge to abort (MERGE_HEAD missing).' }),
+    false,
+    'diagnostic wording alone cannot establish the no-merge state (TASK-2829)'
+  );
+  assert.equal(
+    isNoMergeToAbortResult({ failureReason: { version: 1, code: 'git-no-merge', source: 'git' }, stdout: '', stderr: 'unrelated translated diagnostic' }),
+    true,
+    'the adapter state survives diagnostic rewrites (TASK-2829)'
   );
 });
 

@@ -1,193 +1,6 @@
-import { recognizedFailureReason, legacyFailureReason } from '../../domain/failure-reason.js';
-import * as fmt from '../presentation/cli-format.js';
-'use strict';
-
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 const DEFAULT_FALLBACK_HOURS = 1;
 const SIGINT_SHORT_BLOCK_MINUTES = 15;
-
-const PATTERN_SETS = Object.freeze({
-  claude: [
-    /claude (?:ai )?usage limit reached/i,
-    /\b5-hour limit (?:reached|exceeded)\b/i,
-    /you['’]ve hit your 5-hour limit\b/i,
-    /you(?:'|')?ve hit your limit(?:\b|$)/i,
-    /you(?:'|')?ve hit your (?:weekly|daily|monthly|usage) limit/i,
-    /(?:usage|rate)\s*limit (?:has been )?(?:reached|exceeded)/i,
-    /you['’]?ve hit your session limit/i,
-    /\b429\b[^\n]*?\b(?:rate|usage|quota)\b/i
-  ],
-  codex: [
-    /you(?:'|’)?ve hit your (?:weekly|daily|monthly|usage) limit/i,
-    /\brate[_ ]?limit(?:_| )?(?:exceeded|reached)\b/i,
-    /\bweekly (?:codex )?usage limit\b/i,
-    /\b429\b[^\n]*?\b(?:rate|quota|usage)\b/i,
-    /resource_exhausted/i
-  ],
-
-  custom: [
-    /\b(?:rate|usage|quota)\s*limit\s*(?:reached|exceeded)\b/i,
-    /\b429\b[^\n]*?\b(?:rate|quota|usage)\b/i,
-    /\b429\b/i,
-    /\binsufficient[_ ]quota\b/i
-  ],
-  mistral: [
-    /\bmistral (?:ai )?usage limit reached/i,
-    /\bmistral (?:ai )?quota exceeded/i,
-    /\bmistral (?:ai )?rate limit(?: reached| exceeded)/i,
-    /you(?:'|')?ve hit your (?:mistral|vibe) (?:weekly|daily|monthly|usage) limit/i,
-    /\b429\b[^\n]*?\b(?:rate|quota|usage)\b/i,
-    /\brate limits exceeded\b/i,
-    /\bvibe\b[^\n]*?\b(?:quota exceeded|rate limits? exceeded)\b/i,
-    /\bmistral\b[^\n]*?\b(?:quota exceeded|rate limit exceeded)\b/i,
-    /\bresource[_ ]has[_ ]been[_ ]exhausted\b/i,
-    /\bresource_exhausted\b/i
-  ],
-  qwen: [
-    /\b403\b[^\n]*?\baccess to model denied\b/i,
-    /(?:\b429\b[^\n]*?\bAllocated quota exceeded\b|\bQuota exhausted:[\s\S]{0,500}\bcause:\s*insufficient_quota:\s*429\b)/i,
-    /\b429\b[^\n]*?\bRequests rate limit exceeded\b/i
-  ]
-});
-
-function getPatternsForAgent(agent: string) {
-  return PATTERN_SETS[(agent === 'vibe' ? 'mistral' : agent) as keyof typeof PATTERN_SETS] || [];
-}
-
-function findLimitHitMatch(agent: string, text: string) {
-  const patterns = getPatternsForAgent(agent);
-  for (const pattern of patterns) {
-    const match = pattern.exec(text);
-    if (match) {
-      return { pattern, index: match.index, length: match[0].length };
-    }
-  }
-  return null;
-}
-
-function clipContext(text: string, index: number, length: number) {
-  const before = Math.max(0, index - 200);
-  const after = Math.min(text.length, index + length + 200);
-  return text.slice(before, after);
-}
-
-function isQuotedLimitPhrase(text: string, index: number, length: number) {
-  const opening = text[index - 1];
-  // A quoted provider diagnostic can include its reset suffix after the match.
-  const remainder = text.slice(index + length).split('\n', 1)[0];
-  return (opening === '"' || opening === '“') && /["”]/.test(remainder);
-}
-
-const ISO_PATTERN = /(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})?/;
-const MONTH_DAY_UTC_PATTERN = /\b(\d{2})-(\d{2})\s+([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?\s*UTC\b/i;
-const TWELVE_HOUR_PATTERN = /\b(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)\b/;
-const TWENTY_FOUR_HOUR_PATTERN = /\b([01]?\d|2[0-3]):([0-5]\d)\b/;
-const RELATIVE_PATTERN = /\bin\s+(\d+)\s+(hour|hours|minute|minutes|second|seconds)\b/i;
-const RETRY_AFTER_PATTERN = /retry[- ]?after[:\s]+(\d+)\s*(seconds?|s|minutes?|m)?/i;
-const RETRY_AT_DATE_PATTERN = /(?:retry|reset|try again|reset(?:s)? at)[^\n]{0,40}?(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/i;
-
-function parseIsoOffset(value: string | undefined) {
-  if (!value) {return null;}
-  if (value === 'Z') {return 0;}
-  const m = /([+-])(\d{2}):?(\d{2})/.exec(value);
-  if (!m) {return null;}
-  const sign = m[1] === '-' ? -1 : 1;
-  return sign * (Number(m[2]) * 60 + Number(m[3]));
-}
-
-function parseIso(text: string) {
-  const m = ISO_PATTERN.exec(text);
-  if (!m) {return null;}
-  const [, year, month, day, hour, minute, second, offset] = m;
-  const offsetMinutes = parseIsoOffset(offset);
-  if (offsetMinutes === null) {
-    return new Date(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second || 0), 0);
-  }
-  const utcMs = Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second || 0), 0);
-  return new Date(utcMs - offsetMinutes * 60 * 1000);
-}
-
-function parseMonthDayUtc(text: string, now: Date) {
-  const m = MONTH_DAY_UTC_PATTERN.exec(text);
-  if (!m) {return null;}
-  const [, month, day, hour, minute, second] = m;
-  const candidate = new Date(Date.UTC(now.getUTCFullYear(), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second || 0)));
-  if (candidate.getUTCMonth() !== Number(month) - 1 || candidate.getUTCDate() !== Number(day)) {return null;}
-  if (candidate.getTime() <= now.getTime()) {
-    candidate.setUTCFullYear(candidate.getUTCFullYear() + 1);
-  }
-  return candidate;
-}
-
-function parseTwelveHour(text: string, now: Date) {
-  const m = TWELVE_HOUR_PATTERN.exec(text);
-  if (!m) {return null;}
-  let hour = Number(m[1]);
-  const minute = Number(m[2] || 0);
-  const meridiem = m[3].toLowerCase();
-  if (hour < 1 || hour > 12) {return null;}
-  if (meridiem === 'pm' && hour !== 12) {hour += 12;}
-  if (meridiem === 'am' && hour === 12) {hour = 0;}
-  return projectClockTime(now, hour, minute);
-}
-
-function parseTwentyFourHour(text: string, now: Date) {
-  const m = TWENTY_FOUR_HOUR_PATTERN.exec(text);
-  if (!m) {return null;}
-  const hour = Number(m[1]);
-  const minute = Number(m[2]);
-  return projectClockTime(now, hour, minute);
-}
-
-function parseRelative(text: string, now: Date) {
-  const m = RELATIVE_PATTERN.exec(text);
-  if (!m) {return null;}
-  const amount = Number(m[1]);
-  const unit = m[2].toLowerCase();
-  let ms;
-  if (unit.startsWith('hour')) {ms = amount * 60 * 60 * 1000;}
-  else if (unit.startsWith('minute')) {ms = amount * 60 * 1000;}
-  else {ms = amount * 1000;}
-  return new Date(now.getTime() + ms);
-}
-
-function parseRetryAfter(text: string, now: Date) {
-  const m = RETRY_AFTER_PATTERN.exec(text);
-  if (!m) {return null;}
-  const amount = Number(m[1]);
-  const unit = (m[2] || 's').toLowerCase();
-  let ms;
-  if (unit.startsWith('m') && unit !== 's') {ms = amount * 60 * 1000;}
-  else {ms = amount * 1000;}
-  return new Date(now.getTime() + ms);
-}
-
-function parseRetryAtDate(text: string) {
-  const m = RETRY_AT_DATE_PATTERN.exec(text);
-  if (!m) {return null;}
-  return parseIso(m[1]);
-}
-
-function projectClockTime(now: Date, hour: number, minute: number) {
-  const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, minute, 0, 0);
-  if (candidate.getTime() <= now.getTime()) {
-    candidate.setDate(candidate.getDate() + 1);
-  }
-  return candidate;
-}
-
-function parseResetTime(text: string, now: Date = new Date()) {
-  if (!text) {return null;}
-  return (
-    parseRetryAtDate(text) ||
-    parseIso(text) ||
-    parseMonthDayUtc(text, now) ||
-    parseTwelveHour(text, now) ||
-    parseTwentyFourHour(text, now) ||
-    parseRelative(text, now) ||
-    parseRetryAfter(text, now)
-  );
-}
-
 function formatBlockUntil(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -215,135 +28,35 @@ export type DetectedLimitHit =
   | { reroute?: false; until: string; source?: string; reason: string; kind?: never };
 
 interface DetectLimitHitOptions {
-  failureReason?: unknown;
-  log?: (_message: string) => void;
-  agent: string;
-  stdout?: string;
-  stderr?: string;
-  status?: number | null;
-  signal?: string | null;
-  error?: unknown;
-  now?: Date;
+  failureReason?: unknown; log?: (_message: string) => void;
+  agent: string; stdout?: string; stderr?: string; status?: number | null;
+  signal?: string | null; error?: unknown; now?: Date;
 }
 
-function matchedLimitHit(agent: string, combined: string, match: NonNullable<ReturnType<typeof findLimitHitMatch>>, now: Date) {
-  // A failed launcher can contain an agent's review of a transcript. Reject a
-  // complete quoted match so that review prose cannot persist a family block;
-  // bare provider messages remain positive limit-hit evidence.
-  if (isQuotedLimitPhrase(combined, match.index, match.length)) {return null;}
-  const matchedText = combined.slice(match.index, match.index + match.length);
-  if (agent === 'qwen' && /\b403\b[^\n]*?\baccess to model denied\b/i.test(matchedText)) {
-    // A model-level 403 means this invocation cannot use its selected model.
-    // It is neither provider-wide quota nor a reason to poison all Qwen
-    // launches: reroute the current work and tell the operator what to fix.
-    return { reroute: true as const, kind: 'entitlement', reason: 'model entitlement denied (scoped, no family block)' };
-  }
-  if (agent === 'qwen' && /Requests rate limit exceeded/i.test(matchedText)) {
-    return { reroute: true as const, reason: 'rate limit (transient, no block)' };
-  }
-  const parsed = parseResetTime(clipContext(combined, match.index, match.length), now);
-  if (parsed && !Number.isNaN(parsed.getTime()) && parsed.getTime() > now.getTime()) {
-    return { target: parsed, source: 'parsed', reason: `parsed: ${match.pattern.source}` };
-  }
-  const monthEnd = agent === 'vibe' || agent === 'mistral';
-  return {
-    target: monthEnd ? endOfCurrentUtcMonth(now) : new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000),
-    source: monthEnd ? 'month-end' : 'fallback',
-    reason: monthEnd ? `month-end: ${match.pattern.source}` : 'fallback: usage limit reached',
-  };
-}
-
-function failedLauncher({ error, signal, status }: DetectLimitHitOptions) {
-  return (
-    error !== null && error !== undefined ||
-    signal !== null && signal !== undefined ||
-    (typeof status === 'number' && status !== 0));
-}
-
-/** A recognized non-capacity code is positive no-block evidence; undefined requests legacy parsing. */
-function typedCapacityDecision(failureReason: unknown, now: Date): DetectedLimitHit | null | undefined {
+/** Capacity is a producer fact. Opaque transcripts never establish a family block. */
+export function detectLimitHit({ agent, status, signal, error, now = new Date(), failureReason }: DetectLimitHitOptions = {} as DetectLimitHitOptions): DetectedLimitHit | null {
+  if (!agent || processDidNotFail(status, signal, error)) { return null; }
   const typed = recognizedFailureReason(failureReason);
-  if (!typed) { return undefined; }
-  if (typed.code !== 'agent-quota') { return null; }
-  return { until: formatBlockUntil(ceilToNextHour(new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000))), source: 'fallback', reason: 'typed: agent-quota' };
-}
-
-function detectLimitHit({
-  agent,
-  stdout = '',
-  stderr = '',
-  status,
-  signal,
-  error,
-  now = new Date(), failureReason, log = fmt.log.plain
-}: DetectLimitHitOptions = {} as DetectLimitHitOptions): DetectedLimitHit | null {
-  if (!agent) {return null;}
-  // Gate detection on a failed launcher invocation. A successful child (exit 0,
-  // no signal, no spawn error) means any limit-hit phrases in the transcript
-  // are quoted text — typically when the agent itself reviewed code, tests, or
-  // logs containing those strings. Treating that as a real limit hit would
-  // wrongly block a healthy agent in agents.local.json.
-  // `status === undefined` means the caller did not pass exit metadata; return
-  // null to avoid false-positive limit-hit blocks from legacy callers.
-  const launcherFailed = failedLauncher({ agent, error, signal, status });
-  if (!launcherFailed) {return null;}
-  const typed = typedCapacityDecision(failureReason, now);
-  if (typed !== undefined) { return typed; }
-  log(`Agent capacity classification: legacy fallback (${legacyFailureReason(failureReason)})`);
-  return legacyLimitHit(agent, stdout, stderr, signal, now);
-}
-
-function legacyLimitHit(agent: string, stdout: string, stderr: string, signal: string | null | undefined, now: Date): DetectedLimitHit | null {
-
-
-  const combined = `${stdout || ''}\n${stderr || ''}`;
-  const match = findLimitHitMatch(agent, combined);
-
-  let target;
-  let source;
-  let reason;
-
-  if (match) {
-    const detected = matchedLimitHit(agent, combined, match, now);
-    if (!detected) {return null;}
-    if (detected.reroute === true) { return detected; }
-    ({ target, source, reason } = detected);
-  } else if (signal !== null && signal !== undefined && signal !== 'SIGTERM') {
-    // Agent was killed by a signal (e.g. SIGINT/Ctrl-C) but no limit-hit
-    // pattern matched. Apply a short-term block so the next invocation
-    // selects a different agent instead of re-picking the same one. SIGTERM
-    // is excluded (TASK-2729): an unexpected termination is a per-invocation
-    // failure, so the session falls back and the agent stays selectable.
-    target = new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60 * 1000);
-    source = 'sigint';
-    reason = `sigint: process terminated by ${signal}`;
-  } else {
-    return null;
+  if (typed?.code === 'provider-entitlement') { return { reroute: true, kind: 'entitlement', reason: 'typed: provider-entitlement' }; }
+  if (typed?.code === 'provider-rate-limit') { return { reroute: true, reason: 'typed: provider-rate-limit' }; }
+  if (typed?.code === 'agent-quota') { return quotaLimit(agent, now, typed); }
+  if ((!typed || typed.code === 'process-terminated') && signal && signal !== 'SIGTERM') {
+    return { until: formatBlockUntil(ceilToNextHour(new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60000))), source: 'sigint', reason: `signal: ${signal}` };
   }
+  return null;
+}
+export { formatBlockUntil, ceilToNextHour, endOfCurrentUtcMonth, DEFAULT_FALLBACK_HOURS, SIGINT_SHORT_BLOCK_MINUTES };
 
-  const ceiled = ceilToNextHour(target);
-  return { until: formatBlockUntil(ceiled), source, reason };
+function quotaLimit(agent: string, now: Date, typed: NonNullable<ReturnType<typeof recognizedFailureReason>>): DetectedLimitHit {
+    const resetAt = typed.context?.resetAt;
+    const retryAfter = typed.context?.retryAfterSeconds;
+    const explicit = typeof resetAt === 'string' ? new Date(resetAt) : typeof retryAfter === 'number' && retryAfter > 0 ? new Date(now.getTime() + retryAfter * 1000) : null;
+    const parsed = explicit && Number.isFinite(explicit.getTime()) && explicit > now ? explicit : null;
+    const monthEnd = agent === 'mistral' || agent === 'vibe';
+    const target = parsed ?? (monthEnd ? endOfCurrentUtcMonth(now) : new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 3600000));
+    return { until: formatBlockUntil(ceilToNextHour(target)), source: parsed ? 'structured' : monthEnd ? 'month-end' : 'fallback', reason: 'typed: agent-quota' };
 }
 
-export {
-  detectLimitHit,
-  parseResetTime,
-  formatBlockUntil,
-  ceilToNextHour,
-  endOfCurrentUtcMonth,
-  findLimitHitMatch,
-  clipContext,
-  parseIsoOffset,
-  parseIso,
-  parseMonthDayUtc,
-  parseTwelveHour,
-  parseTwentyFourHour,
-  parseRelative,
-  parseRetryAfter,
-  parseRetryAtDate,
-  projectClockTime,
-  getPatternsForAgent,
-  PATTERN_SETS,
-  DEFAULT_FALLBACK_HOURS,
-  SIGINT_SHORT_BLOCK_MINUTES
-};
+function processDidNotFail(status: number | null | undefined, signal: string | null | undefined, error: unknown): boolean {
+  return (status === 0 || status === undefined) && !signal && !error;
+}

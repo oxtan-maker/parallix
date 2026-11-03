@@ -99,7 +99,7 @@ describe("review presentation", { concurrency: false }, () => {
   });
 
   test('incomplete reviewer-artifact infrastructure failure survives at default verbosity', async () => {
-    const fake = providerNone(async () => ({ consumed: true, ok: false as const, diagnostic: 'persist failed (outcome): sqlite busy' }));
+    const fake = providerNone(async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, consumed: true, ok: false as const, diagnostic: 'persist failed (outcome): sqlite busy' }));
     await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
     assert.ok(fake.errors.some((m) => m.includes('Reviewer artifact infrastructure failure')), 'infra failure message surfaces at default verbosity');
     assert.deepEqual(fake.stops, ['REVIEWER_ARTIFACT_INFRA_FAILURE'], 'an infrastructure failure escalates to a human instead of relaunching');

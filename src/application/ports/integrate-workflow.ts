@@ -33,6 +33,7 @@ import type { ReboundContext } from '../rebound-kernel.js';
 import type { RebaseWorkflowPort } from './rebase-workflow.js';
 
 export interface IntegrateCommandResult {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly status: number | null;
   readonly stdout: string;
   readonly stderr: string;
@@ -113,7 +114,6 @@ export interface IntegrateMissionPathsPort {
   resolveBaseWorktree(_slug: string, _options: { rootDir: string }): string;
   resolveWorktree(_slug: string, _options: { cwd: string }): string | null;
   findMissionDocInBranches(_slug: string, _rootDir: string): Array<{ branch: string; path: string }> | null;
-  parseConflictFilesFromMergeOutput(_output: string): string[];
   softResetTrailingBacklogNoise(_rootDir: string, _git: IntegrateGitRunner): boolean;
 }
 
@@ -231,7 +231,7 @@ export interface IntegrateLandingPort {
   /** The error that ends a run with exit code 1 after its diagnostics were printed. */
   createAbort(): Error;
   isAbort(_error: unknown): boolean;
-  classifyHookFailure(_output: string): { isHookFailure: boolean; hookType: string | null };
+  classifyHookFailure(_result: { failureReason?: unknown }): { isHookFailure: boolean; hookType: string | null };
   reportSyncMergedFailure(_syncResult: { statusCode?: number | null; error?: string; raw?: string }): void;
   resolveForgejoUserForIntegration(_taskAssignee: string | null): { forgejoUser: string | null; warning: string | null };
   isNoMergeToAbortResult(_result: IntegrateCommandResult): boolean;

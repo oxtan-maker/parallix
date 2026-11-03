@@ -337,7 +337,7 @@ export class DeclaredGateRunner {
       const reusableProof = verification.readReusableVerificationProof(cmd, rootDir);
       if (reusableProof.ok) {
         if (reusableProof.diagnostic) { log(reusableProof.diagnostic); }
-        log(`  Gate reused proof ${reusableProof.identity}: ${cmd}`);
+        log(`  Gate already verified: ${cmd}`);
         continue;
       }
       log(`  Gate: ${cmd}`);
@@ -360,7 +360,7 @@ export class DeclaredGateRunner {
       }
       const proofResult = verification.writeReusableVerificationProof(cmd, rootDir);
       if (proofResult.ok) {
-        log(`  Gate executed; stored proof ${proofResult.identity}: ${cmd}`);
+        log(`  Gate passed: ${cmd}`);
       } else {
         log(`  Gate executed; proof unavailable (${proofResult.error}): ${cmd}`);
       }

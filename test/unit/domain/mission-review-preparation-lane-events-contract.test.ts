@@ -48,8 +48,6 @@ function reviewPreparationService(slug: string, worktree: string, agent: string,
     reviewPreparation: {
       async run(request) { return perform(slug, { forgejoUser: agent, worktree, force: request.force }); },
       async repairHygiene(request) { return repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); },
-      classifyFailure: classifyError,
-      isRelaunchableFailure: isRelaunchableError,
     },
     review: { async start(request) { await review(slug, { implementer: agent, worktree, skipReviewPreparation: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
     repairLaunch: { available: options.workflowLauncherStatusFn ?? (() => ({ supported: true })), readHead() { return null; }, async launch(request) { return launch('active', { prompt: request.prompt, worktree, agent, slug, role: 'implementer', sessionPolicy: request.sessionPolicy }); } },
@@ -95,7 +93,7 @@ describe("ReviewPreparation bounce", () => {
     const result = await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => {
         validations++;
-        return validations === 1 ? { ok: false, error: CHECKPOINT_GAP } : { ok: true };
+        return validations === 1 ? { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false, error: CHECKPOINT_GAP } : { ok: true };
       },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       performReviewPreparation: async () => { reviewPreparationCalls++; return { ok: true as const }; },
@@ -116,7 +114,7 @@ describe("ReviewPreparation bounce", () => {
     let reviewPreparationCalls = 0;
     const errors: string[] = [];
     const result = await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeReviewPreparationFn: () => { validations++; return { ok: false as const, error: CHECKPOINT_GAP }; },
+      validateCheckpointsBeforeReviewPreparationFn: () => { validations++; return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: CHECKPOINT_GAP }; },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       performReviewPreparation: async () => { reviewPreparationCalls++; return { ok: true as const }; },
       startReviewLoop: async () => {},
@@ -141,7 +139,7 @@ describe("ReviewPreparation bounce", () => {
     // A dirty-worktree checkpoint is GitBlockers — not IncompleteEvidence, and no
     // nextCheckpoint — so the guard declines to call the kernel.
     const result = await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
-      validateCheckpointsBeforeReviewPreparationFn: () => ({
+      validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
         ok: false as const,
         error: "Checkpoint documents are uncommitted in the worktree; commit them before review preparation.",
       }),
@@ -169,7 +167,7 @@ describe("ReviewPreparation bounce", () => {
       performReviewPreparation: async () => {
         reviewPreparationCalls++;
         return reviewPreparationCalls === 1
-          ? { ok: false, error: GATE_FAILURE, gateOutput: { stdout: 'gate stdout', stderr: 'gate stderr' } }
+          ? { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' }, ok: false, error: GATE_FAILURE, gateOutput: { stdout: 'gate stdout', stderr: 'gate stderr' } }
           : { ok: true, gatekeeperPushedBack: true };
       },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
@@ -191,7 +189,7 @@ describe("ReviewPreparation bounce", () => {
     const result = await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
       performReviewPreparation: async () => ++reviewPreparations === 1
-        ? { ok: false, error: "Success criteria 1 are incomplete before review preparation." }
+        ? { failureReason: { version: 1, code: 'incomplete-success-criteria', source: 'review-preparation' }, ok: false, error: "Success criteria 1 are incomplete before review preparation." }
         : { ok: true },
       startAgentFn: async (_step: string, opts: { prompt?: unknown }) => {
         launches++;
@@ -213,7 +211,7 @@ describe("ReviewPreparation bounce", () => {
     let promptSeen = '';
     await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-      performReviewPreparation: async () => ({
+      performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
         ok: false as const, error: GATE_FAILURE, gateOutput: { stdout: 'gate stdout', stderr: 'gate stderr' },
       }),
       startAgentFn: async (_step: string, opts: { prompt?: unknown }) => {
@@ -241,7 +239,7 @@ describe("ReviewPreparation bounce", () => {
     const errors: string[] = [];
     const result = await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-      performReviewPreparation: async () => { reviewPreparationCalls++; return { ok: false as const, error: GATE_FAILURE }; },
+      performReviewPreparation: async () => { reviewPreparationCalls++; return { failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' }, ok: false as const, error: GATE_FAILURE }; },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       startReviewLoop: async () => { reviewLoopStarted = true; },
       log: () => {},
@@ -263,7 +261,7 @@ describe("ReviewPreparation bounce", () => {
     let repairCalls = 0;
     await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-      performReviewPreparation: async () => ({
+      performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
         ok: false as const,
         error: 'ENOSPC: no space left on device while writing the review artifact.',
       }),
@@ -288,7 +286,7 @@ describe("ReviewPreparation bounce", () => {
       performReviewPreparation: async () => {
         reviewPreparationCalls++;
         return reviewPreparationCalls === 1
-          ? { ok: false, error: "The worktree has uncommitted changes; commit them before review preparation." }
+          ? { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: "The worktree has uncommitted changes; commit them before review preparation." }
           : { ok: true };
       },
       repairReviewPreparationFn: async () => { repairCalls++; return { repaired: true }; },
@@ -310,7 +308,7 @@ describe("ReviewPreparation bounce", () => {
     let prompt = '';
     await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-      performReviewPreparation: async () => ({
+      performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' },
         ok: false as const,
         error: GATE_FAILURE,
         gateFailure: { kind: 'gate-failure', area: 'unit', command: 'npm test', exitCode: 1, stdout: 'stdout', stderr: 'stderr' },
@@ -332,7 +330,7 @@ describe("ReviewPreparation bounce", () => {
       let launches = 0;
       await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
         validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
-        performReviewPreparation: async () => ({ ok: false as const, error: GATE_FAILURE }),
+        performReviewPreparation: async () => ({ failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' }, ok: false as const, error: GATE_FAILURE }),
         startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
         startReviewLoop: async () => {},
         log: () => {},
@@ -359,14 +357,14 @@ describe("ReviewPreparation bounce", () => {
     + "Create and commit CP-2.md, CP-3.md in /tmp/worktree-task-2377.05/missions/task-2377.05 before review preparation.";
 
   test('a declared checkpoint gap classifies as IncompleteEvidence, not InfraBlocker', () => {
-    const classified = classifyError(DECLARED_GAP);
+    const classified = classifyError(DECLARED_GAP, { version: 1, code: 'incomplete-evidence', source: 'review-preparation' });
     assert.equal(classified.failureClass, FailureClass.IncompleteEvidence);
     assert.equal(classified.dispatchAction, DispatchAction.AutoSendBack);
   });
 
   test('a single-checkpoint gap classifies as IncompleteEvidence too', () => {
     const classified = classifyError(
-      "Declared checkpoint documents are missing before review preparation: CP-2. Create and commit CP-2.md before review preparation.",
+      "Declared checkpoint documents are missing before review preparation: CP-2. Create and commit CP-2.md before review preparation.", { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }
     );
     assert.equal(classified.dispatchAction, DispatchAction.AutoSendBack);
   });
@@ -389,7 +387,7 @@ describe("ReviewPreparation bounce", () => {
     const result = await runReviewPreparationScenario(SLUG, WORKTREE, 'codex', {
       validateCheckpointsBeforeReviewPreparationFn: () => {
         validations++;
-        return validations === 1 ? { ok: false, error: DECLARED_GAP, nextCheckpoint: 'CP-2' } : { ok: true };
+        return validations === 1 ? { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false, source: 'recorded', error: DECLARED_GAP, nextCheckpoint: 'CP-2' } : { ok: true };
       },
       startAgentFn: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
       performReviewPreparation: async () => { reviewPreparationCalls++; return { ok: true as const }; },

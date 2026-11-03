@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { invalidContractRecoveryCommands } from '../checkpoint-recovery-commands.js';
 import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';
@@ -138,6 +139,7 @@ export interface MissionCard {
    */
   readonly reviewRound: number | null;
   readonly reviewPhase: ReviewPhase | null;
+  readonly pendingApprovalRetention?: boolean;
   readonly reviewDisposition: ReviewDisposition | null;
   /** An approved local self-review still needs a formal provider approval. */
   readonly approvalOwed?: boolean;
@@ -244,7 +246,7 @@ export function availableBoardCommands(
 ): CommandAvailability[] {
   const eligible = (command: import('../../domain/workflow-operation.js').WorkflowCommand) => workflowEligible(command, mission, 'status', false, facts.reviewApproval?.subject ?? null);
   const resumesFindings = mission.status === 'review' && mission.review?.rounds.at(-1)?.phase === 'fixing';
-  const activeLabel = resumesFindings ? 'findings ↩' : facts.latestGate === 'failed' ? 'resume ▸' : mission.status === 'active' ? 'restart ▸' : 'power ▸';
+  const activeLabel = pendingIntegrationApproval(mission) ? 'certify repair ▸' : resumesFindings ? 'findings ↩' : facts.latestGate === 'failed' ? 'resume ▸' : mission.status === 'active' ? 'restart ▸' : 'power ▸';
   return [
     availability('active', eligible('active:execute') && (!facts.currentWork || facts.currentWork.freshness === 'stale'), mission.status === 'backlog' ? 'Mission must be refined before it can be activated' : 'Execution requires refined or active work, or review findings', 'active', activeLabel),
     availability('review', eligible('review:submit'), 'Review requires an active mission or an existing review', 'review', 'review ▸'),
@@ -362,6 +364,7 @@ function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSu
       && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject),
     reviewRound: currentRound?.number ?? null,
     reviewPhase: currentRound?.phase ?? null,
+    pendingApprovalRetention: Boolean(pendingIntegrationApproval(mission)),
     reviewDisposition: currentRound?.disposition ?? null,
     approvalOwed: reviewApprovalOwed(mission.review),
     approvalCoverage: facts.approvalCoverage ?? null,

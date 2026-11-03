@@ -8,7 +8,7 @@ import {
   consumeReviewerArtifacts,
   consumeImplementerArtifacts,
 } from '../../../../src/adapters/review/review-artifacts.js';
-import { isArtifactInfraDiagnostic } from '../../../../src/application/ports/review-round.js';
+import { isArtifactInfraFailure } from '../../../../src/application/ports/review-round.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound, ReboundContext } from '../../../../src/application/rebound-kernel.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
@@ -129,7 +129,7 @@ test('consumeReviewerArtifacts returns diagnostic when persist fails', async () 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ path: null, ok: false as const, error: 'DB connection failed' }),
+    createEventFn: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, path: null, ok: false as const, error: 'DB connection failed' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -217,7 +217,7 @@ test('consumeImplementerArtifacts returns diagnostic when persist fails', async 
     tmpDir,
     worktree: tmpDir,
     readReviewStateFn: () => null,
-    createEventFn: () => ({ path: null, ok: false as const, error: 'DB write failed' }),
+    createEventFn: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, path: null, ok: false as const, error: 'DB write failed' }),
     forgejoEnabled: false,
     log: () => {},
     error: () => {}
@@ -281,7 +281,7 @@ test('artifact recovery relaunches with the fresh diagnostic when the re-consume
       return { agent: 'codex', result: { status: 0 } };
     },
     verify: (attempt: number) => attempt === 1
-      ? { ok: false, diagnostic: 'Reviewer artifacts incomplete: missing verdict' }
+      ? {  ok: false, diagnostic: 'Reviewer artifacts incomplete: missing verdict' }
       : { ok: true },
   }));
 
@@ -297,7 +297,7 @@ test('artifact recovery strands with the last diagnostic when the occurrence bud
   let launches = 0;
   const result = await dispatchArtifactFailure('reviewer', 'Reviewer artifacts incomplete: missing findings', dispatcherOptions({
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => ({ ok: false as const, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
+    verify: () => ({  ok: false as const, diagnostic: 'Reviewer artifacts incomplete: still missing verdict' }),
   }));
 
   assert.equal(result.outcome, 'exhausted');
@@ -311,7 +311,7 @@ test('artifact recovery gives every occurrence a fresh budget (no persisted carr
     let launches = 0;
     const outcome = await dispatchArtifactFailure('implementer', 'Implementer artifacts incomplete: missing disposition', dispatcherOptions({
       startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      verify: () => ({ ok: false as const, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
+      verify: () => ({  ok: false as const, diagnostic: 'Implementer artifacts incomplete: missing disposition' }),
     }));
     return { outcome, launches };
   };
@@ -373,37 +373,37 @@ test('artifact recovery persists no retry state anywhere', async () => {
 });
 
 // ============================================================================
-// isArtifactInfraDiagnostic — infra vs artifact failure classification
+// isArtifactInfraFailure — infra vs artifact failure classification
 // ============================================================================
 
-test('isArtifactInfraDiagnostic identifies post-failure diagnostics as infra', () => {
-  assert.ok(isArtifactInfraDiagnostic('Reviewer comment post failed: 502 Bad Gateway'));
-  assert.ok(isArtifactInfraDiagnostic('Reviewer review post failed: connection refused'));
-  assert.ok(isArtifactInfraDiagnostic('Implementer resolution post failed: API error'));
-  assert.ok(isArtifactInfraDiagnostic('Implementer disposition post failed: network error'));
+test('isArtifactInfraFailure identifies post-failure diagnostics as infra', () => {
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
 });
 
-test('isArtifactInfraDiagnostic identifies persist-failure diagnostics as infra', () => {
-  assert.ok(isArtifactInfraDiagnostic('Reviewer artifact persist failed (findings): DB connection failed'));
-  assert.ok(isArtifactInfraDiagnostic('Reviewer artifact persist failed (outcome): DB write failed'));
-  assert.ok(isArtifactInfraDiagnostic('Implementer artifact persist failed (round-summary): disk full'));
-  assert.ok(isArtifactInfraDiagnostic('Implementer artifact persist failed (disposition): timeout'));
+test('isArtifactInfraFailure identifies persist-failure diagnostics as infra', () => {
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
+  assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }));
 });
 
-test('isArtifactInfraDiagnostic returns false for artifact production failures', () => {
-  assert.equal(isArtifactInfraDiagnostic('Reviewer artifacts incomplete: missing findings'), false);
-  assert.equal(isArtifactInfraDiagnostic('Reviewer artifacts incomplete: missing verdict'), false);
-  assert.equal(isArtifactInfraDiagnostic('Implementer artifacts incomplete: missing disposition'), false);
-  assert.equal(isArtifactInfraDiagnostic('Implementer artifacts incomplete: missing round-resolution'), false);
+test('isArtifactInfraFailure returns false for artifact production failures', () => {
+  assert.equal(isArtifactInfraFailure('Reviewer artifacts incomplete: missing findings'), false);
+  assert.equal(isArtifactInfraFailure('Reviewer artifacts incomplete: missing verdict'), false);
+  assert.equal(isArtifactInfraFailure('Implementer artifacts incomplete: missing disposition'), false);
+  assert.equal(isArtifactInfraFailure('Implementer artifacts incomplete: missing round-resolution'), false);
 });
 
-test('isArtifactInfraDiagnostic handles null/undefined/empty', () => {
-  assert.equal(isArtifactInfraDiagnostic(null), false);
-  assert.equal(isArtifactInfraDiagnostic(undefined), false);
-  assert.equal(isArtifactInfraDiagnostic(''), false);
+test('isArtifactInfraFailure handles null/undefined/empty', () => {
+  assert.equal(isArtifactInfraFailure(null), false);
+  assert.equal(isArtifactInfraFailure(undefined), false);
+  assert.equal(isArtifactInfraFailure(''), false);
 });
 
-test('isArtifactInfraDiagnostic gates infra failures from artifact recovery', () => {
+test('isArtifactInfraFailure gates infra failures from artifact recovery', () => {
   // Infra diagnostics are caught before artifact recovery starts so
   // they neither consume the occurrence budget nor relaunch an agent.
   const infraDiagnostics = [
@@ -416,7 +416,7 @@ test('isArtifactInfraDiagnostic gates infra failures from artifact recovery', ()
   ];
 
   for (const diag of infraDiagnostics) {
-    assert.ok(isArtifactInfraDiagnostic(diag), `should classify as infra: ${diag}`);
+    assert.ok(isArtifactInfraFailure({ version: 1, code: 'infrastructure' }), `should classify as infra: ${diag}`);
   }
 
   const artifactDiagnostics = [
@@ -427,7 +427,7 @@ test('isArtifactInfraDiagnostic gates infra failures from artifact recovery', ()
   ];
 
   for (const diag of artifactDiagnostics) {
-    assert.equal(isArtifactInfraDiagnostic(diag), false, `should NOT classify as infra: ${diag}`);
+    assert.equal(isArtifactInfraFailure({ version: 1, code: 'incomplete-evidence' }), false, `should NOT classify as infra: ${diag}`);
   }
 });
 

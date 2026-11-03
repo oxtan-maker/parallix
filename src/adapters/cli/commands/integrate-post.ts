@@ -109,9 +109,8 @@ export function resolveForgejoUserForIntegration(taskAssignee: string | null) {
 }
 
 /** @param{{stdout: string, stderr: string, status: number}} result */
-export function isNoMergeToAbortResult(result: Pick<ReturnType<typeof git>, 'stdout' | 'stderr'>) {
-  const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
-  return /MERGE_HEAD missing|There is no merge to abort/i.test(output);
+export function isNoMergeToAbortResult(result: { failureReason?: unknown; stdout?: string; stderr?: string }) {
+  return (result.failureReason as { code?: string } | undefined)?.code === 'git-no-merge';
 }
 
 /**

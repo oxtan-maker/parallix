@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
@@ -158,10 +159,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
   function isStaleSessionResult(result: AgentProcessResult) {
     // Adapter-owned parsing of Codex CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
-    const stderr = result.stderr || '';
-    const stdout = result.stdout || '';
-    // codex-cli 0.162 reports an unknown session as "no rollout found for thread id".
-    return [stderr, stdout].some(text => text.includes('Session not found') || text.includes('no rollout found for thread id'));
+    return recognizedFailureReason(result.failureReason)?.code === 'provider-session-missing';
   }
 
   function processResult(result: AgentProcessResult) {

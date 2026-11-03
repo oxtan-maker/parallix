@@ -1,3 +1,5 @@
+import { preparationFailure, preparationGateFailure, preparationRecoveryReason } from './review-preparation-failure.js';
+import { failureReasonFromCause, recognizedFailureReason } from '../domain/failure-reason.js';
 import { missionId } from '../domain/mission.js';
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
 
@@ -63,19 +65,33 @@ export class ReviewPreparationExecutor {
     const refusal = validateReviewPreparationRequest(slug, options, bindings, this.ports);
     if (refusal) { return refusal; }
     const root = bindings.worktree || this.ports.missionUtils.resolveWorktree(slug, { cwd: process.cwd() }) || process.cwd();
-    if (!bindings.missionServicesFn) { return { ok: false, error: "mission services are not configured. Review preparation fails closed." }; }
+    if (!bindings.missionServicesFn) { return preparationFailure('mission services are not configured. Review preparation fails closed.', 'state-machine', 'lifecycle'); }
     let services: Awaited<ReturnType<NonNullable<ReviewPreparationBindings['missionServicesFn']>>>;
     try {
       services = await bindings.missionServicesFn(root, { missionDir: root });
       await beginReviewPreparation(slug, services);
     } catch (cause) {
-      return { ok: false, error: `Mission state transition failed: ${cause instanceof Error ? cause.message : String(cause)}. Review preparation fails closed.` };
+      const error = `Mission state transition failed: ${cause instanceof Error ? cause.message : String(cause)}. Review preparation fails closed.`;
+      const reason = failureReasonFromCause(cause, 'lifecycle');
+      return { ok: false, error, failureReason: reason, recoveryFailure: { kind: 'review-preparation-verification', error, failureReason: reason } };
     }
-    const result = await this.prepareReview(slug, options);
-    if (!result.ok && result.error) { await recordReviewPreparationFailure(slug, result.error, services, result.recoveryFailure ?? (result.gateFailure ? { kind: 'gate-failure', ...result.gateFailure } : undefined)); }
+    const result = await this.prepareReviewSafely(slug, options);
+    if (!result.ok && result.error) { await recordReviewPreparationFailure(slug, result.error, services, preparationRecoveryReason(result)); }
     return bindings.recoverGateFailure ? this.gateRecovery.repairPreparationFailure(slug, result, { root, services, startAgent: bindings.startAgentFn,
       verify: () => this.performReviewPreparation(slug, { ...options, recoverGateFailure: false }), log: bindings.log, error: bindings.error,
       attempts: reviewPreparationRetryBudget(bindings).retriesLeft }) : result;
+  }
+
+  private async prepareReviewSafely(slug: string, options: PerformReviewPreparationOptions): Promise<ReviewPreparationResult> {
+    let prepared: ReviewPreparationResult;
+    try { prepared = await this.prepareReview(slug, options); }
+    catch (cause) {
+      const reason = failureReasonFromCause(cause, 'review-preparation');
+      const error = cause instanceof Error ? cause.message : String(cause);
+      prepared = { ok: false, error, failureReason: reason, recoveryFailure: { kind: 'review-preparation-verification', error, failureReason: reason } };
+    }
+    return !prepared.ok && !prepared.recoveryFailure && !prepared.gateFailure
+      ? { ...preparationFailure(prepared.error ?? 'Review preparation failed', recognizedFailureReason(prepared.failureReason)?.code ?? 'unexpected'), ...prepared } : prepared;
   }
 
   private async prepareReview(slug: string, options: PerformReviewPreparationOptions): Promise<ReviewPreparationResult> {
@@ -83,9 +99,7 @@ export class ReviewPreparationExecutor {
     const opts = options;
     const bindings = reviewPreparationBindings(ports, opts, this.nel);
     const { skipGate, worktree, forceWithLease, log, error, rebaseFn, runVerificationGateFn, startAgentFn, runGatekeeperFn, occurredAt, recoverGateFailure, captureNel } = bindings;
-    const internalLog = (message: string) => {
-      if (/\[(WARN|FAIL)\]|failed|failure|conflict|missing|blocked|fallback|degraded/i.test(message)) { log(message); }
-    };
+    const internalLog = log;
 
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
     // persists across relaunch attempts. Hard limit of 3 total review preparation invocations.
@@ -124,7 +138,7 @@ export class ReviewPreparationExecutor {
     if (nelResult.ok === false && nelResult.persistenceFailed) {
       const msg = `NEL persistence failed; review preparation stopped before review state advanced: ${nelResult.error}`;
       error(msg);
-      return { ok: false, error: msg };
+      return preparationFailure(msg, 'state-machine');
     } else if (nelResult.ok === false) {
       log(fmt.status('WARN', `NEL capture skipped: ${nelResult.error}`));
     }
@@ -200,9 +214,9 @@ export class ReviewPreparationExecutor {
     // A repair can launch a replacement implementer. Publication must use the
     // identity committed by that launch, not the pre-repair credential choice.
     const current = await loadRecordedContract(missionServicesFn, rootDir, missionDirPath, slug);
-    if (!current.ok) { return { ok: false, error: current.error }; }
+    if (!current.ok) { return preparationFailure(current.error, 'state-machine', 'lifecycle'); }
     const drift = implementerIdentityFailure(slug, current);
-    if (drift) { error(drift); return { ok: false, error: drift }; }
+    if (drift) { error(drift); return preparationFailure(drift, 'state-machine', 'lifecycle'); }
     return { forgejoUser: current.implementer! };
   }
 
@@ -228,7 +242,7 @@ export class ReviewPreparationExecutor {
       if (!isDbAdhocIdentity(slug)) {
         const msg = `Could not transition task ${fmt.slug(slug)} to review.`;
         error(msg);
-        return { ok: false, error: msg };
+        return preparationFailure(msg, 'state-machine');
       }
       log(fmt.status('WARN', `No Backlog mirror to transition for DB-owned adhoc identity ${fmt.slug(slug)}; DB-authoritative lifecycle already recorded the review transition.`));
     }
@@ -257,7 +271,7 @@ export class ReviewPreparationExecutor {
     if (!('contract' in prepared)) { return prepared; }
     const { blocker } = this.ports.git.commitMissionChanges(prepared.verification.rootDir, slug, bindings.log, bindings.error);
     if (blocker) {
-      return { ok: false, error: blocker };
+      return preparationFailure(blocker, 'git-failed', 'git');
     }
     return prepared;
   }
@@ -271,17 +285,17 @@ export class ReviewPreparationExecutor {
     if (!missionServicesFn) {
       const msg = `Could not read Mission ${slug} from the operator database: mission services are not configured. Review preparation fails closed.`;
       error(msg);
-      return { ok: false, error: msg };
+      return preparationFailure(msg, 'state-machine');
     }
     const contract = await loadRecordedContract(missionServicesFn, contractRoot, contractDir, slug);
     if (contract.ok === false) {
       error(contract.error);
-      return { ok: false, error: contract.error };
+      return preparationFailure(contract.error, 'state-machine', 'lifecycle');
     }
     const verification = this.verifyReviewPreparation(slug, { worktree: contractRoot, recordedContract: contract.draftedInDb });
     if (verification.ok === false) {
       error(verification.error);
-      return { ok: false, error: verification.error };
+      return preparationFailure(verification.error, 'state-machine');
     }
 
     const { missionDir } = verification;
@@ -320,7 +334,7 @@ export class ReviewPreparationExecutor {
     if (identityDrift || !forgejoUser) {
       const msg = identityDrift ?? '';
       error(msg);
-      return { ok: false, error: msg };
+      return preparationFailure(msg, 'state-machine');
     }
 
     return { contract, verification, evidence, forgejoUser, forgejoEnabled, isForgejoReviewEnabledFn, missionServicesFn };
@@ -337,7 +351,7 @@ export class ReviewPreparationExecutor {
     const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
     const missionDir = missionUtils.findMissionDir(slug, rootDir);
     if (!missionDir && !options.recordedContract) {
-      return { ok: false, error: `Mission directory not found for slug: ${slug}` };
+      return preparationFailure(`Mission directory not found for slug: ${slug}`, 'missing-artifacts');
     }
 
     const area = this.ports.verification.resolveEffectiveArea(undefined, rootDir, missionDir);
@@ -345,7 +359,7 @@ export class ReviewPreparationExecutor {
     const current = git.getCurrentBranch(rootDir);
 
     if (current !== branch) {
-      return { ok: false, error: `Not on mission branch. Current: ${current}, Expected: ${branch}` };
+      return preparationFailure(`Not on mission branch. Current: ${current}, Expected: ${branch}`, 'state-machine', 'git');
     }
 
     return { ok: true, missionDir: missionDir || rootDir, area, branch, rootDir };
@@ -433,7 +447,9 @@ async function runPreReviewPreparationGates(slug: string, rootDir: string, bindi
     if (!preHandoffResult.ok && !preHandoffResult.skipped) {
       const msg = `Pre-review preparation gate "${preHandoffResult.failedGate?.key}" failed for ${fmt.slug(slug)}: ${preHandoffResult.error}`;
       error(msg);
-      return { ok: false, error: msg, reason: 'gate-failed' };
+      return preHandoffResult.failedGate
+        ? preparationGateFailure(msg, { area: 'handoff', cwd: rootDir, ...preHandoffResult.failedGate })
+        : preparationFailure(msg, 'gate-failed', 'verification');
     }
   }
 
@@ -445,7 +461,7 @@ function reviewPreparationTaskFailure(slug: string, taskResolution: ReturnType<R
   if (!taskResolution.ok && !dbAdhocIdentity) {
     const msg = `Backlog task file for ${fmt.slug(slug)} not found or ambiguous: ${taskResolution.reason}.`;
     error(msg);
-    return { ok: false, error: msg };
+    return preparationFailure(msg, 'state-machine');
   }
   if (dbAdhocIdentity && !taskResolution.ok) {
     log(fmt.status('WARN', `No Backlog mirror for DB-owned adhoc identity ${fmt.slug(slug)}; identity and lifecycle are DB-authoritative.`));

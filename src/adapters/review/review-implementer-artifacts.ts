@@ -1,3 +1,4 @@
+import { failureReason, type FailureReason } from '../../domain/failure-reason.js';
 import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { postComment } from './review-adapter.js';
 /**
@@ -83,7 +84,7 @@ function resolveImplementerArtifactSet(slug: string, options: { tmpDir: string; 
 
 /** Persist the reviewer findings and outcome events to the repo store. */
 
-type ImplementerArtifactFailure = { consumed: true; ok: false; diagnostic: string };
+type ImplementerArtifactFailure = { consumed: true; ok: false; failureReason?: FailureReason; diagnostic: string };
 
 /** Name which of the two required implementer artifacts is missing, and why that is fatal. */
 function reportIncompleteImplementerArtifacts(context: {
@@ -144,7 +145,7 @@ async function closeImplementerRound(slug: string, context: {
   } catch (revisionError) {
     const revErr = (revisionError as Error).message;
     error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${revErr}`));
-    return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${revErr}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${revErr}` };
   }
   const recorded = await recordImplementerResolutionFn(slug, {
     itemDispositions,
@@ -155,7 +156,7 @@ async function closeImplementerRound(slug: string, context: {
   }, { missionStore: options.missionStore });
   if (recorded.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${recorded.diagnostic}`));
-    return { consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${recorded.diagnostic}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${recorded.diagnostic}` };
   }
   if (recorded.outcome === 'unchanged') {
     log(fmt.status('INFO', `Implementer resolution for ${slug} already recorded (${recorded.reason}).`));
@@ -176,7 +177,7 @@ async function mirrorImplementerArtifacts(slug: string, context: {
   for (const [body, label] of [[resolution, 'resolution'], [`Autonomous review disposition: ${disposition}`, 'disposition']] as const) {
     const result = await postWorkflowComment(slug, body, postOptions);
     if (!result.ok) {
-      return { consumed: true, ok: false, diagnostic: `Implementer ${label} post failed: ${(result as { error?: string }).error}` };
+      return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: `Implementer ${label} post failed: ${(result as { error?: string }).error}` };
     }
   }
   return null;
@@ -196,7 +197,7 @@ async function persistImplementerEvents(params: {
   worktree: string;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
-}): Promise<{ ok: true } | { ok: false; diagnostic: string }> {
+}): Promise<{ ok: true } | { ok: false; failureReason?: FailureReason; diagnostic: string }> {
   const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason, createEventFn, worktree, log, error } = params;
   const summaryEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY, {
     content: resolution, round, phase, actor: implementer,
@@ -207,7 +208,7 @@ async function persistImplementerEvents(params: {
   if (!summaryEventResult.ok) {
     const summaryErr = (summaryEventResult as { error?: string }).error;
     error(fmt.status('FAIL', `Failed to persist implementer round summary to repo store: ${summaryErr}`));
-    return { ok: false, diagnostic: `Implementer artifact persist failed (round-summary): ${summaryErr}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), ok: false, diagnostic: `Implementer artifact persist failed (round-summary): ${summaryErr}` };
   }
 
   const dispositionEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
@@ -217,7 +218,7 @@ async function persistImplementerEvents(params: {
   if (!dispositionEventResult.ok) {
     const dispErr = (dispositionEventResult as { error?: string }).error;
     error(fmt.status('FAIL', `Failed to persist implementer disposition to repo store: ${dispErr}`));
-    return { ok: false, diagnostic: `Implementer artifact persist failed (disposition): ${dispErr}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), ok: false, diagnostic: `Implementer artifact persist failed (disposition): ${dispErr}` };
   }
 
   log(fmt.status('INFO', `Persisted implementer artifacts to repo store: ${(summaryEventResult as { path?: string }).path}, ${(dispositionEventResult as { path?: string }).path}`));
@@ -246,7 +247,7 @@ export async function consumeImplementerArtifacts(
   slug: string,
   implementer: string,
   options: ImplementerArtifactOptions = {}
-): Promise<{ consumed: boolean; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
+): Promise<{ consumed: boolean; failureReason?: FailureReason; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
   const { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, disposition, hasAny } = prepareImplementerArtifacts(slug, options);
 
   if (!hasAny) {
@@ -285,7 +286,7 @@ export async function consumeImplementerArtifacts(
     slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
     createEventFn: options.createEventFn || createEvent, worktree, log, error,
   });
-  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
+  if (!persisted.ok) { return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
 
   await consumeImplementerHumanNotes(slug, implementer, providerEnabled, worktree, options, log, error);
 

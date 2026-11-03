@@ -123,7 +123,7 @@ test('rebase use case auto-resolves mission-specific conflicts with --theirs', a
       gitCalls.push(args);
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+        return { signal: null,  failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
       }
       return OK;
     },
@@ -150,7 +150,7 @@ test('rebase use case launches an agent for shared-file conflicts', async () => 
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
         paused = true;
-        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        return { signal: null,  failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
     },
@@ -178,7 +178,7 @@ function sharedConflictHarness(shared: string, overrides: Partial<RebaseWorkflow
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        return { signal: null,  failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
     },
@@ -219,7 +219,7 @@ test('rebase use case keeps the implementer recorded before rebase rewrites task
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
         rebased = true;
-        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        return { signal: null,  failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
       }
       return OK;
     },
@@ -286,7 +286,7 @@ test('rebase use case bounces a hook failure through the kernel and completes wh
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
@@ -316,11 +316,11 @@ test('rebase use case strands a hook failure after two failed rebase --continue 
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed: original diagnostic' };
+        return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed: original diagnostic' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
-        return { signal: null,  status: 1, stdout: '', stderr: laterDiagnostic };
+        return { signal: null,  failureReason: { version: 1, code: 'git-hook-failed', source: 'git' }, status: 1, stdout: '', stderr: laterDiagnostic };
       }
       return OK;
     },
@@ -354,7 +354,7 @@ test('rebase use case bounces a hook failure with no recorded implementer via a 
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
@@ -386,7 +386,7 @@ test('rebase use case strands a hook failure when no implementer is recorded and
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+        return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
       }
       return OK;
     },
@@ -410,12 +410,12 @@ test('rebase use case bounces a hook failure raised by rebase --continue and res
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+        return { signal: null,  failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
       }
       if (tail[0] === 'rebase' && tail[1] === '--continue') {
         continues += 1;
         return continues === 1
-          ? { status: 1, stdout: '', stderr: 'error: pre-commit hook failed' }
+          ? { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, status: 1, stdout: '', stderr: 'error: pre-commit hook failed' }
           : OK;
       }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') { return OK; }
@@ -445,11 +445,11 @@ test('rebase use case starts a second hook occurrence with a full budget of two'
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
+          return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed' };
         }
         if (tail[0] === 'rebase' && tail[1] === '--continue') {
           continues += 1;
-          return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook failed again' };
+          return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook failed again' };
         }
         return OK;
       },

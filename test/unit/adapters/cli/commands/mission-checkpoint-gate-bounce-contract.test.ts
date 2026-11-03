@@ -52,8 +52,6 @@ const runReviewPreparationAndReview = async (slug: string, worktree: string, age
     reviewPreparation: {
       async run(request) { return reviewPreparation(slug, { forgejoUser: agent, worktree, force: request.force }); },
       async repairHygiene(request) { const result = await repair(slug, worktree, request.error, { taskFile: request.taskFile, log: request.log, error: request.outputError }); return { ...result, blocker: result.blocker ?? undefined }; },
-      classifyFailure: classifyError,
-      isRelaunchableFailure: isRelaunchableError,
     },
     review: { async start(request) { await options.startReviewLoop?.(slug, { slug, implementer: agent, worktree, skipReviewPreparation: true, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop }); } },
     repairLaunch: {
@@ -77,13 +75,13 @@ test("missing checkpoint: runReviewPreparationAndReview classifies as repairable
   let performReviewPreparationCallCount = 0;
 
   const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeReviewPreparationFn: () => ({
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
       ok: false as const,
       error: `No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.`
     }),
     performReviewPreparation: async () => {
       performReviewPreparationCallCount++;
-      return { ok: false as const, error: 'still missing' };
+      return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'still missing' };
     },
     startAgentFn: async (_step, opts) => {
       relaunchCalled = true;
@@ -108,7 +106,7 @@ test('missing checkpoint: classifyError recognizes missing-checkpoint message as
   const { classifyError, FailureClass } = repairReviewPreparation;
   const errorMsg = "No checkpoint documents found in /tmp/worktree/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation. Create at least CP-1 documenting your implementation, including a Goal Check table with real evidence such as a backticked command, test name, ADR reference, or test file path.";
 
-  const result = classifyError(errorMsg);
+  const result = classifyError(errorMsg, { version: 1, code: 'incomplete-evidence', source: 'review-preparation' });
 
   assert.ok(
     result.failureClass === FailureClass.IncompleteEvidence || result.failureClass === FailureClass.MissingArtifacts,
@@ -124,7 +122,7 @@ test('checkpoint missing Goal Check: classifyError recognizes as IncompleteEvide
   const { classifyError, FailureClass } = repairReviewPreparation;
   const errorMsg = "The final checkpoint at missions/task-2261/CP-1.md is missing a \"## Goal Check\" section. Review requires a goal-check table with real evidence before review preparation.";
 
-  const result = classifyError(errorMsg);
+  const result = classifyError(errorMsg, { version: 1, code: 'incomplete-evidence', source: 'review-preparation' });
 
   assert.equal(result.failureClass, FailureClass.IncompleteEvidence,
     'Missing Goal Check section should be classified as IncompleteEvidence');
@@ -146,7 +144,7 @@ test("valid repaired checkpoint: runReviewPreparationAndReview unblocks review p
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
       if (reviewPreparationAttempts === 1) {
-        return { ok: false as const, error: "The final checkpoint at missions/task-2261/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
+        return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: "The final checkpoint at missions/task-2261/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
       }
       return { ok: true as const };
     },
@@ -177,7 +175,7 @@ test("exhaustion: runReviewPreparationAndReview stops after bounded relaunch att
     validateCheckpointsBeforeReviewPreparationFn: () => ({ ok: true as const }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: "The final checkpoint at missions/task-2261/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
+      return { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false as const, error: "The final checkpoint at missions/task-2261/CP-1.md has a \"## Goal Check\" section but no evidence rows. A goal-check table with real evidence is required before review preparation." };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -214,7 +212,7 @@ test("missing checkpoint: valid CP after relaunch unblocks review preparation an
       // Real filesystem check: look for CP-*.md files with Goal Check content
       const cpFiles = fs.readdirSync(missionDir).filter(f => /^CP-\d+\.md$/.test(f));
       if (cpFiles.length === 0) {
-        return { ok: false as const, error: 'No checkpoint documents found in ' + missionDir + ". The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation." };
+        return { failureReason: { version: 1 as const, code: 'incomplete-evidence' as const }, ok: false as const, error: 'No checkpoint documents found in ' + missionDir + ". The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation." };
       }
       // Validate Goal Check table is present in the latest checkpoint
       const latestCp = cpFiles.sort().pop();
@@ -289,13 +287,13 @@ test('missing checkpoint: still absent after relaunch returns false with manual 
   const errors: string[] = [];
 
   const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeReviewPreparationFn: () => ({
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
       ok: false as const,
       error: "No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation."
     }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: 'still missing' };
+      return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'still missing' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -324,13 +322,13 @@ test('missing checkpoint: relaunch failure returns false with manual instruction
   const errors: string[] = [];
 
   const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeReviewPreparationFn: () => ({
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
       ok: false as const,
       error: "No checkpoint documents found in /tmp/worktree-task-2261/missions/task-2261. The execute agent must create checkpoint documents (CP-N.md) with a Goal Check table before review preparation."
     }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: 'still missing' };
+      return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'still missing' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -362,13 +360,13 @@ test('dirty checkpoint: GitBlockers classification does NOT enter the Incomplete
   const errors: string[] = [];
 
   const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
-    validateCheckpointsBeforeReviewPreparationFn: () => ({
+    validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
       ok: false as const,
       error: "Checkpoint documents must be committed before review preparation. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the review preparation."
     }),
     performReviewPreparation: async () => {
       reviewPreparationAttempts++;
-      return { ok: false as const, error: 'still dirty' };
+      return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'still dirty' };
     },
     startAgentFn: async () => {
       relaunchCount++;
@@ -392,7 +390,7 @@ test('dirty checkpoint: classifyError does NOT classify uncommitted checkpoint a
   const { classifyError, FailureClass } = repairReviewPreparation;
   const errorMsg = "Checkpoint documents must be committed before review preparation. Uncommitted checkpoint files: CP-1.md. Commit the checkpoint update and re-run the review preparation.";
 
-  const result = classifyError(errorMsg);
+  const result = classifyError(errorMsg, { version: 1, code: 'infrastructure', source: 'review-preparation' });
 
   assert.notEqual(result.failureClass, FailureClass.IncompleteEvidence,
     'Dirty checkpoint should NOT be classified as IncompleteEvidence (got ' + result.failureClass + ')');
@@ -416,7 +414,7 @@ describe("Missing checkpoint error classification —", () => {
     'even after auto-remediation. Implementation evidence is mandatory for review.';
 
   test('task-2215 repro: classifyError classifies auto-remediation checkpoint failure as MissingArtifacts/AutoSendBack', () => {
-    const result = classifyError(autoRemediationError);
+    const result = classifyError(autoRemediationError, { version: 1, code: 'missing-artifacts', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.MissingArtifacts,
       'auto-remediation failure must be MissingArtifacts per ADR 0048, not InfraBlocker');
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack,
@@ -424,7 +422,7 @@ describe("Missing checkpoint error classification —", () => {
   });
 
   test('missing checkpoint evidence is sent back without generating placeholders', () => {
-    const result = classifyError("No checkpoint documents found in missions/task-2521.06. Import historical evidence or record it with px checkpoint record; review preparation never generates evidence.");
+    const result = classifyError("No checkpoint documents found in missions/task-2521.06. Import historical evidence or record it with px checkpoint record; review preparation never generates evidence.", { version: 1, code: 'missing-artifacts', source: 'review-preparation' });
     assert.equal(result.failureClass, FailureClass.MissingArtifacts);
     assert.equal(result.dispatchAction, DispatchAction.AutoSendBack);
   });
@@ -453,10 +451,10 @@ describe("Typed checkpoint recovery advice —", () => {
     const prompts: string[] = [];
 
     const result = await runReviewPreparationAndReview(slug, worktree, 'codex', {
-      validateCheckpointsBeforeReviewPreparationFn: () => ({
+      validateCheckpointsBeforeReviewPreparationFn: () => ({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
         ok: false as const,
         error: typedCheckpointFailure,
-        nextCheckpoint: 'CP-2',
+        source: 'recorded', nextCheckpoint: 'CP-2',
       }),
       startAgentFn: async (_stage: string, options: { prompt: string }) => {
         prompts.push(options.prompt);

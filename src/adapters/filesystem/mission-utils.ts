@@ -54,7 +54,6 @@ export const updateGraphifyKnowledgeGraph = graphify.updateGraphifyKnowledgeGrap
 export const resolveGraphPath = graphify.resolveGraphPath;
 export const queryGraph = graphify.queryGraph;
 
-export const parseConflictFilesFromMergeOutput = mergeNoise.parseConflictFilesFromMergeOutput;
 export const getConflictFiles = mergeNoise.getConflictFiles;
 export const findLastNonNoiseCommit = mergeNoise.findLastNonNoiseCommit;
 export const squashTrailingBacklogNoiseIntoPreviousMission = mergeNoise.squashTrailingBacklogNoiseIntoPreviousMission;

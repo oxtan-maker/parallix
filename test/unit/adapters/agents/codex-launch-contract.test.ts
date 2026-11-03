@@ -209,7 +209,7 @@ describe("Codex launcher basics ,", () => {
     const mockSpawn: NonNullable<Parameters<typeof codex.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
       if (spawnCount === 1) {
-        return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
+        return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Error: Session not found', error: null });
       }
       return Promise.resolve({ status: 0, signal: null, stdout: 'codex resume sess_fresh\n', stderr: '', error: null });
     };
@@ -252,7 +252,7 @@ describe("Codex launcher basics ,", () => {
     codex.__setSpawnAndTeeForTest((cmd, args, opts) => {
       spawns.push({ args, input: opts?.input, configuration: opts?.configuration, capture: opts?.capture });
       return Promise.resolve(spawns.length === 1
-        ? { status: 1, signal: null, stdout: '', stderr: 'Error: thread/resume: thread/resume failed: no rollout found for thread id abc (code -32600)', error: null }
+        ? { failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Error: thread/resume: thread/resume failed: no rollout found for thread id abc (code -32600)', error: null }
         : { status: 0, signal: null, stdout: 'codex resume 1234abcd\n', stderr: '', error: null });
     });
     codex.__setSessionPortForTest(mockSessionPort);
@@ -278,7 +278,7 @@ describe("Codex launcher basics ,", () => {
     let spawnCount = 0;
     const mockSpawn: NonNullable<Parameters<typeof codex.__setSpawnAndTeeForTest>[0]> = (_cmd, args, _opts) => {
       spawnCount++;
-      return Promise.resolve({ status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
+      return Promise.resolve({ failureReason: { version: 1, code: 'provider-session-missing', source: 'provider' }, status: 1, signal: null, stdout: '', stderr: 'Session not found', error: null });
     };
 
     codex.__setSpawnAndTeeForTest(mockSpawn);

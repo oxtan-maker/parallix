@@ -1,3 +1,4 @@
+import { preparationFailure } from './review-preparation-failure.js';
 /**
  * Gatekeeper pushback handling: classify the gatekeeper outcome and run
  * the bounded agent relaunch that repairs missing artifacts.
@@ -110,7 +111,7 @@ export class GatekeeperRemediation {
       // Budget already spent by an outer attempt — strand without launching.
       const spent = `Gatekeeper pushback persisted after ${currentAttempt - 1} relaunch attempts (${currentAttempt - 1}/2 budget). Manual intervention required to create: ${missingItems.join(', ')}.`;
       error(spent);
-      return { ok: false, gatekeeperPushedBack: true, error: spent };
+      return { ...preparationFailure(spent, 'missing-artifacts'), gatekeeperPushedBack: true };
     }
     let repairedResult: ReviewPreparationResult | null = null;
     const outcome = await rebound(
@@ -174,7 +175,7 @@ export class GatekeeperRemediation {
     // once instead of nesting copies of itself on every bounded retry.
     const msg = `Manual intervention required. ${currentAttempt === 1 ? outcome.dossier || outcome.diagnostic : outcome.diagnostic}`;
     error(msg);
-    return { ok: false, gatekeeperPushedBack: true, error: msg };
+    return { ...preparationFailure(msg, 'missing-artifacts'), gatekeeperPushedBack: true };
   }
 
 }

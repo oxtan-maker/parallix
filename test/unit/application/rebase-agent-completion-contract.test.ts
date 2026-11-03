@@ -26,7 +26,7 @@ describe('rebase agent completion', () => {
       git: args => {
         if (subcommand(args).join(' ') === 'rebase local-feature') {
           active = true; files = ['src/first.ts'];
-          return { status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in stale-output.ts' };
+          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: 'CONFLICT (content): Merge conflict in stale-output.ts' };
         }
         return OK;
       },
@@ -90,11 +90,11 @@ describe('rebase agent completion', () => {
       detectRebaseState: () => ({ inProgress: active, unmergedFiles: [...files] }),
       resolveConflictsForMission: () => {
         active = true; files = [owned, 'shared.ts'];
-        return { ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
+        return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
       },
       git: args => subcommand(args).join(' ') === 'status --porcelain'
         ? { ...OK, stdout: files.map(file => `UU ${file}`).join('\n') }
-        : subcommand(args).join(' ') === 'rebase main' ? { ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
+        : subcommand(args).join(' ') === 'rebase main' ? { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
       startAgent: async (_step, options) => {
         prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);
         files = prompts.length === 2 ? [owned, 'shared.ts'] : [];

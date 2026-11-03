@@ -112,7 +112,7 @@ test("review preparation rejects unchanged proof when ordinary F-id findings req
   assert.equal(result.ok, false);
   assert.match(result.error ?? '', /no fresh fix evidence recorded in this review round for \(any\)/);
   assert.match(result.error ?? '', /px checkpoint record --name CP-2/);
-  assert.equal(classifyError(result.error ?? '').dispatchAction, 'AutoSendBack');
+  assert.equal(classifyError(result.error ?? '', result.failureReason).dispatchAction, 'AutoSendBack');
   assert.deepEqual(recorder.transitions, []);
 });
 

@@ -1,3 +1,5 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
+import { providerEvents } from '../process/failure-normalization.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
@@ -115,13 +117,7 @@ function checkJsonFormatSupport(configuration: ParallixConfiguration) {
       timeout: 3000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const stderr = (result.stderr && result.stderr.toString()) || '';
-    const combined = stderr;
-    // Flag rejected → fallback to legacy invocation.
-    if (/unrecognized|unknown option|no such option|invalid option/i.test(combined)) {
-      _jsonFormatSupported = false;
-      return false;
-    }
+    if (result.status !== 0 || result.error || result.signal) { _jsonFormatSupported = false; return false; }
     _jsonFormatSupported = true;
     return true;
   } catch (_) {
@@ -165,55 +161,13 @@ function buildOpencodeInvocation({ configuration = DEFAULT_CONFIGURATION, prompt
   };
 }
 
-// Transient custom/vLLM backend failures that opencode surfaces as a non-zero
-// exit. These are recoverable: the same prompt frequently succeeds on a second
-// attempt, so the launcher retries once in-family before agents.js reroutes to a
-// different agent family. Limit-hit phrases are intentionally NOT listed here —
-// detectLimitHit() in agents.js owns that accounting (lib/agents/limit-hit.js).
-// Hard errors (model-not-found, auth, ENOENT/EACCES) are never retried.
-const TRANSIENT_OPENCODE_PATTERNS = [
-  /\bECONNRESET\b/i,
-  /\bECONNREFUSED\b/i,
-  /\bETIMEDOUT\b/i,
-  /\bENETUNREACH\b/i,
-  /\bENOTFOUND\b/i,
-  /\bEAI_AGAIN\b/i,
-  /\bEPIPE\b/i,
-  /socket hang ?up/i,
-  /\bfetch failed\b/i,
-  /network (?:error|timeout)/i,
-  /connection (?:error|reset|closed|refused|timed? ?out)/i,
-  /\b(?:502|503|504|529)\b/,
-  /\bbad gateway\b/i,
-  /\bservice (?:is )?unavailable\b/i,
-  /\bgateway time-?out\b/i,
-  /\b(?:server |api |model )?overloaded\b/i,
-  /\btemporarily unavailable\b/i,
-  /\bplease (?:try|retry) again\b/i,
-  /\bretry[- ]after\b/i,
-];
-
-// Hard, non-retryable failures: retrying cannot help and only wastes time/quota.
-const HARD_OPENCODE_PATTERNS = [
-  /\bmodel not found\b/i,
-  /\bno such model\b/i,
-  /\bunknown model\b/i,
-  /\binvalid (?:api )?key\b/i,
-  /\b401\b[^\n]*\bunauthorized\b/i,
-  /\bauthentication (?:failed|error)\b/i,
-];
-
 function processErrorCode(error: unknown) { return (error as { code?: unknown } | null)?.code; }
-
-function failureText(result: AgentProcessResult) {
-  return `${(result && result.stdout) || ''}\n${(result && result.stderr) || ''}`;
-}
 
 function isHardOpencodeFailure(result: AgentProcessResult) {
   if (!result) {return false;}
   if (result.error && (processErrorCode(result.error) === 'ENOENT' || processErrorCode(result.error) === 'EACCES')) {return true;}
-  const text = failureText(result);
-  return HARD_OPENCODE_PATTERNS.some((re) => re.test(text));
+  const code = recognizedFailureReason(result.failureReason)?.code;
+  return code === 'provider-auth' || code === 'provider-config' || code === 'provider-entitlement';
 }
 
 // Opencode v2.0.0 JSON-mode sometimes exits with code 1 during post-run
@@ -223,16 +177,13 @@ function isHardOpencodeFailure(result: AgentProcessResult) {
 // completed successfully. See opencode issues #31446 and #33653.
 function isSpuriousOpencodeExit(result: AgentProcessResult) {
   if (!result || result.status !== 1) {return false;}
-  const text = failureText(result);
-  const hasStop = /"reason"\s*:\s*"stop"/.test(text);
-  const hasError = /"type"\s*:\s*"error"/.test(text);
-  return hasStop && !hasError;
+  const events = [...providerEvents(result.stdout), ...providerEvents(result.stderr)];
+  return events.some(event => event.reason === 'stop' || (event.part as { reason?: unknown } | undefined)?.reason === 'stop') && !events.some(event => event.type === 'error');
 }
 
 function isTransientOpencodeFailure(result: AgentProcessResult) {
   if (!result) {return false;}
-  const text = failureText(result);
-  return TRANSIENT_OPENCODE_PATTERNS.some((re) => re.test(text));
+  return recognizedFailureReason(result.failureReason)?.code === 'provider-unavailable';
 }
 
 // Decide whether a failed opencode run should be retried once in-family.
@@ -246,6 +197,7 @@ function shouldRetryOpencodeFailure(result: AgentProcessResult) {
   if (!(typeof result.status === 'number' && result.status !== 0)) {return false;}
   if (detectLimitHit({
     agent: 'custom',
+    failureReason: result.failureReason,
     stdout: result.stdout,
     stderr: result.stderr,
     status: result.status,
@@ -277,9 +229,7 @@ function startOpencodeAgent({ configuration = DEFAULT_CONFIGURATION,
   function isStaleSessionResult(result: AgentProcessResult) {
     // Adapter-owned parsing of OpenCode CLI diagnostics; never exposed as a workflow signal.
     if (!result) {return false;}
-    const stderr = result.stderr || '';
-    const stdout = result.stdout || '';
-    return stderr.includes('Session not found') || stdout.includes('Session not found');
+    return recognizedFailureReason(result.failureReason)?.code === 'provider-session-missing';
   }
 
   function runInvocation(invocation: ReturnType<typeof buildOpencodeInvocation>) {
@@ -304,8 +254,7 @@ function startOpencodeAgent({ configuration = DEFAULT_CONFIGURATION,
   // agent won't fail outright).
   function isJsonFlagError(result: AgentProcessResult) {
     if (!result) {return false;}
-    const text = failureText(result);
-    return (/\bunrecognized option\b|\bunknown option\b|\bno such option\b|\binvalid option\b|\bunrecognized flag\b|\bunknown flag\b/i).test(text);
+    return recognizedFailureReason(result.failureReason)?.code === 'provider-config';
   }
 
   async function processResult(result: AgentProcessResult) {

@@ -1,3 +1,4 @@
+import { git as runGit } from '../../../src/adapters/git/git.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 // TASK-2709: the composed review loop hands its resolved configuration to the pre-review
@@ -295,7 +296,7 @@ test('database-only replay preserves squashed work, relocation and completed tas
     await rebase(['task-replay'], {
       resolveWorktreeFn: () => repo, gitFn: args => {
         assert.equal(args.includes('merge-tree'), false, 'paused path never predicts a merge');
-        return git(...args.slice(args[0] === '-C' ? 2 : 0));
+        return runGit(args, { cwd: repo, env: { ...process.env, GIT_EDITOR: 'true' } });
       }, missionServicesFn: async () => ({ store }), exitFn: code => { exits.push(code); },
       startAgentFn: async (_step, options) => {
         launches++;

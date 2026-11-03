@@ -28,8 +28,6 @@ function failure(result: ReturnType<SpawnSync>): Failure | 'no-server' {
   if (code === 'ENOENT') { return { ok: false, reason: 'host-missing', detail: 'tmux is not installed or not on PATH; the terminal state is unknown' }; }
   if (code === 'ETIMEDOUT' || result.signal === 'SIGTERM') { return { ok: false, reason: 'timeout', detail: `tmux did not answer within ${PROBE_TIMEOUT_MS} ms` }; }
   const stderr = String(result.stderr ?? '');
-  // A socket file without a server is definitive absence, not a failure.
-  if (!result.error && result.status === 1 && /^(?:no server running on [^\n]+|error connecting to [^\n]+ \(No such file or directory\))\n?$/.test(stderr)) { return 'no-server'; }
   return { ok: false, reason: 'failed', detail: `tmux failed (${result.error ? result.error.message : `exit ${result.status}`}): ${stderr.trim()}` };
 }
 

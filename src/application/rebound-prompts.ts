@@ -1,8 +1,9 @@
+import { recognizedFailureReason } from '../domain/failure-reason.js';
 import type { ReboundReason, ReboundClassification } from '../domain/rebound-policy.js';
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
 import { renderRepairPrompt } from './ports/repair-prompts.js';
 import { elideBounceOutput } from './output-elision.js';
-import { isIncompleteSuccessCriteriaFailure, buildSuccessCriteriaRecoveryAdvice } from './typed-mission-recovery-advice.js';
+import { buildSuccessCriteriaRecoveryAdvice } from './typed-mission-recovery-advice.js';
 export interface FixPromptSlots {
   /** Failure banner (`PRE-REVIEW GATE FAILURE`, …). */
   label: string;
@@ -136,7 +137,7 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
       return {
         area: 'review-preparation',
         facts: [["ReviewPreparation error", reason.error]],
-        remedy: isIncompleteSuccessCriteriaFailure(reason.error)
+        remedy: recognizedFailureReason(reason.failureReason)?.code === 'incomplete-success-criteria'
           ? buildSuccessCriteriaRecoveryAdvice(slug)
           : renderRepairPrompt('review-preparation'),
       };

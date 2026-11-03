@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from '../domain/integration-repair-policy.js';
 import { workflowEligible } from '../domain/workflow-command-policy.js';
 import type { ExecutionActivity } from '../domain/execution-activity.js';
 import { reviewOperation } from '../domain/review-command-policy.js';
@@ -160,7 +161,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (refusal) { return refusal; }
     }
     const draft = loaded.kind === 'missing' && request.kind === 'draft:create' ? await this._draftInput?.(request.missionId) ?? null : null;
-    const agent = request.kind === 'active:execute' ? await this.resolveActiveAgent(request, loaded) : null;
+    const agent = request.kind === 'active:execute' && !(loaded.kind === 'found' && pendingIntegrationApproval(loaded.mission)) ? await this.resolveActiveAgent(request, loaded) : null;
     return { agent, draft };
   }
 
@@ -207,11 +208,11 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
           reviewer: request.reviewer ?? null, originalStatus: loaded.mission.status,
           previousAssignee: loaded.mission.assignee, owner: null, createdAt: now, updatedAt: now, reason: null,
         }), operatorInvocation: request.operatorInvocation, invocation: request.invocation, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent };
-        if (command === 'active:execute' && agent) {
+        if (command === 'active:execute' && agent && !pendingIntegrationApproval(loaded.mission)) {
           const activation = await new ExecutionStartService(this._missions).start(loaded.mission.id, agent, operation.id, loaded.version);
           operation = { ...operation, activationVersion: activation.version };
         }
-        if (command === 'review:submit') {
+        if (command === 'review:submit' && !pendingIntegrationApproval(loaded.mission)) {
           await beginReviewPreparation(loaded.mission.id, { store: this._missions, lifecycle: new MissionLifecycleService(this._missions) });
         }
         await this._operations.insert(operation);

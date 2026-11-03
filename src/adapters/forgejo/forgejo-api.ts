@@ -1,3 +1,4 @@
+import { failureReason } from '../../domain/failure-reason.js';
 import * as http from 'node:http';
 import * as https from 'node:https';
 import { spawnSync } from 'node:child_process';
@@ -8,10 +9,6 @@ import type { ForgejoApiOptions, ForgejoApiResult } from './forgejo-types.js';
 export type { ForgejoApiCall, ForgejoApiOptions, ForgejoApiResult, ForgejoAsyncApiCall } from './forgejo-types.js';
 
 const HTTP_REQUEST_TIMEOUT = 5000;
-
-function codexSandboxHint(): string {
-  return 'Codex runtime cannot reach local Forgejo from Node subprocesses. Use the repo-local Codex config/profile that allows the workflow network path.';
-}
 
 /**
  * Synchronous Forgejo API call via Curl.
@@ -49,11 +46,12 @@ function forgejoApi<T = unknown>(
   if (result.status !== 0 || !result.stdout) {
     return {
       ok: false,
+      failureReason: failureReason('infrastructure', 'forgejo', { operation: method, exitCode: result.status }),
       data: null,
       status: result.status,
       statusCode: null,
       stderr: result.stderr,
-      error: result.status === 7 ? codexSandboxHint() : null
+      error: transportDiagnostic(result)
     };
   }
 
@@ -75,6 +73,7 @@ function forgejoApi<T = unknown>(
 
   return {
     ok: statusCode >= 200 && statusCode < 300,
+    ...(statusCode >= 200 && statusCode < 300 ? {} : { failureReason: failureReason('infrastructure', 'forgejo', { operation: method, httpStatus: statusCode }) }),
     data,
     status: result.status,
     statusCode,
@@ -108,7 +107,7 @@ async function forgejoApiAsync<T = unknown>(
     const finish = (result: ForgejoApiResult<T>) => {
       if (settled) { return; }
       settled = true;
-      resolve(result);
+      resolve(result.ok ? result : { ...result, failureReason: result.failureReason ?? failureReason('infrastructure', 'forgejo', { operation: method, httpStatus: result.statusCode }) });
     };
 
     const req = transport.request(url, {
@@ -152,7 +151,7 @@ async function forgejoApiAsync<T = unknown>(
         status: null,
         statusCode: null,
         stderr: error.message || null,
-        error: ['ECONNREFUSED', 'ENOTFOUND', 'EHOSTUNREACH'].includes(error.code || '') ? codexSandboxHint() : null
+        error: error.message
       });
     });
 
@@ -176,4 +175,8 @@ async function forgejoApiAsync<T = unknown>(
 }
 
 export { forgejoApi, forgejoApiAsync };
-export { HTTP_REQUEST_TIMEOUT, codexSandboxHint };
+export { HTTP_REQUEST_TIMEOUT };
+
+function transportDiagnostic(result: ReturnType<typeof spawnSync>): string | null {
+  return result.error?.message ?? (result.stderr ? String(result.stderr) : null);
+}

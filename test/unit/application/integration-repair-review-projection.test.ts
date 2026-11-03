@@ -575,3 +575,72 @@ test('retention certification cannot reuse exact repair coverage from another wo
   assert.equal(await retainIntegrationApproval({ ...s.input, worktree: '/fixture' }), 'blocked');
   assert.equal(s.store.mission().status, 'active');
 });
+
+test('pending retention rejection crosses the lifecycle port with structured identity (TASK-2829)', async () => {
+  const s = retentionScenario();
+  const result = await s.services.lifecycle.transition({
+    operationId: 'pending-retention', missionId: s.active.id, capabilities: new Set(['mission:transition']),
+    actor: String(REVIEWER), occurredAt: '2026-09-20T12:00:00Z',
+    command: { type: 'submit-for-review', gatesPassed: true, review: s.active.review!, reviewerEligibility: ELIGIBILITY },
+  });
+  assert.notEqual(result.status, 'completed');
+  if (result.status === 'completed') { assert.fail('pending retention cannot submit'); }
+  assert.equal(result.error?.failureReason?.code, 'approval-retention-pending');
+  assert.equal(result.error?.failureReason?.source, 'lifecycle');
+  assert.equal(result.error?.failureReason?.context?.operation, 'lifecycle-recovery');
+  assert.match(result.error!.message, /Integration repair must prove approval retention/);
+  assert.deepEqual(s.store.mission(), s.active, 'the failed transition changes no approval or lane');
+});
+
+import { certifyPendingIntegrationRepair } from '../../../src/application/integrate/repair-resumption.js';
+import { ExecuteMissionService } from '../../../src/application/execute-mission-service.js';
+import { ExecuteReviewPreparationService } from '../../../src/application/execute-review-preparation-service.js';
+import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
+import { projectMissionCard } from '../../../src/application/projections/mission-board.js';
+import { attentionAction, attentionReason } from '../../../src/application/projections/board.js';
+
+for (const status of ['active', 'review'] as const) {
+  test(`execute resumes ${status} retained repair certification before any agent or review entry (TASK-2814, TASK-2829)`, async () => {
+    const s = retentionScenario();
+    await s.store.save({ ...s.active, status, closedAt: null });
+    const marker = (await s.evidence.validation('task-2620'))!;
+    s.evidence.validation = async () => null;
+    let verifications = 0;
+    const ports = stubIntegrateWorkflowPorts({
+      process: { cwd: () => '/fixture' },
+      missionPaths: { resolveWorktree: () => '/fixture', resolveMissionBaseBranch: () => 'main', resolveBaseWorktree: () => '/fixture', missionBranchName: () => 'mission/task-2620' },
+      git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
+      gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
+        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { verifications++; return { ok: true }; } },
+    });
+    const services = { ...s.services, operationalHistory: { loadLatestByTypeForMission: async () => null,
+      recordIntegrationValidation: async () => { s.evidence.validation = async () => marker; } } };
+    const unexpected = async () => assert.fail('pending retained approval must not launch, select, prepare review or land');
+    const { ports: execution } = makeExecutePorts({ missionTransitions: s.store,
+      agentExecution: { select: unexpected, prepare: unexpected, launch: unexpected },
+      reviewPreparationExecution: { run: unexpected, repairHygiene: unexpected }, autonomousReview: { start: unexpected },
+      integrationRepair: { resume: async slug => { const result = await certifyPendingIntegrationRepair(slug, services, ports); return result?.outcome === 'retained' ? 'retained' : 'blocked'; } },
+    });
+    const before = s.store.mission();
+    const card = projectMissionCard(before, { latestGate: 'unconfigured', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
+    assert.equal(card.pendingApprovalRetention, true);
+    assert.equal(attentionAction(card, attentionReason(card))?.kind, 'active:execute', 'board and lead admit safe certification');
+    assert.equal(card.commands.find(command => command.command === 'review')?.enabled, false);
+    const result = await new ExecuteMissionService(execution).execute({ operationId: 'retained-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+    assert.equal(result.status, 'completed', JSON.stringify(result));
+    assert.equal(verifications, 1);
+    assert.equal(s.store.mission().status, 'integration');
+    assert.deepEqual(currentReviewRound(s.store.mission().review!).decision, currentReviewRound(before.review!).decision);
+    assert.equal(s.store.mission().review!.rounds.length, 1);
+  });
+}
+
+test('post-execute continuation settles retained approval before begin-review-preparation (TASK-2829)', async () => {
+  const unexpected = async () => assert.fail('retention continuation precedes every review preparation effect');
+  const { ports } = makeExecutePorts();
+  const result = await new ExecuteReviewPreparationService({ checkpoints: { validateBeforeReviewPreparation: unexpected },
+    reviewPreparation: { run: unexpected, repairHygiene: unexpected }, review: { start: unexpected }, repairLaunch: ports.repairLaunch, output: ports.output,
+  }).run({ slug: 'task-2620', worktree: '/fixture', agent: 'codex', taskFile: null,
+    continueIntegrationRepair: async () => true, beginReviewPreparation: unexpected });
+  assert.equal(result, true);
+});

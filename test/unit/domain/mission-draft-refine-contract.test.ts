@@ -86,7 +86,7 @@ test('a contract the agent never completes fails after the bounded budget, namin
   let repairs = 0;
   const refusal = 'Cannot refine task-x: its mission contract is incomplete. Missing at least one verification gate (`px gate add`).';
   await quietly(async () => draftAdapter(record).finalTransition(draftContext(
-    async () => ({ status: 'failed', durableEvidence: [], error: { kind: 'validation', message: refusal } }),
+    async () => ({ status: 'failed', durableEvidence: [], error: { kind: 'validation', message: refusal, failureReason: { version: 1, code: 'mission-contract-incomplete', source: 'lifecycle' } } }),
     async () => { repairs += 1; return true; },
   )));
 

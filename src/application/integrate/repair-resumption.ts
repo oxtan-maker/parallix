@@ -14,7 +14,7 @@ import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { abortWith } from './support.js';
 
 interface RepairExecution {
-  slug: string; services: IntegrationMissionServices; ports: IntegrateWorkflowPorts; seams: IntegrateSeams;
+  slug: string; services: IntegrationMissionServices; ports: IntegrateWorkflowPorts;
   verification: Pick<GateStepRequest, 'realAgent' | 'realAgentModel'>;
   pending: ReviewRound; worktree: string; evidence: IntegrationApprovalEvidencePort; revision: string; baseline: string;
 }
@@ -22,23 +22,31 @@ interface RepairExecution {
 /** Restart verifies the same durable incident; it cannot use generic approval recovery. */
 export async function resumePendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
   ports: IntegrateWorkflowPorts, seams: IntegrateSeams, verification: RepairExecution['verification']): Promise<void> {
+  const result = await certifyPendingIntegrationRepair(slug, services, ports, verification);
+  if (!result) { return; }
+  return finishResumedRepair(result.execution, result.outcome, result.gatesPassed, seams);
+}
+
+/** Shared continuation only certifies and assesses; it has no landing or review launch path. */
+export async function certifyPendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
+  ports: IntegrateWorkflowPorts, verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }) {
   const loaded = await services.store.load(missionId(slug));
-  if (loaded.kind !== 'found') { return; }
+  if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
   const pending = pendingIntegrationApproval(loaded.mission);
-  if (!pending) { return; }
+  if (!pending) { return null; }
   const failure = repairCheckpointFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria);
   if (failure) { throw new Error(failure); }
   const worktree = ports.missionPaths.resolveWorktree(slug, { cwd: ports.process.cwd() });
   if (!worktree) { throw abortWith(ports.landing, 'Integration repair checkout is unavailable.'); }
-  const execution = await resolveRepairExecution(slug, services, ports, seams, pending, verification, worktree);
+  const execution = await resolveRepairExecution(slug, services, ports, pending, verification, worktree);
   const gatesPassed = await ensureRepairVerification(execution);
   const outcome = await retainIntegrationApproval({ slug, services, evidence: execution.evidence,
     candidate: { revision: execution.revision, baseline: execution.baseline }, worktree, head: () => committedRepairHead(execution) });
-  return finishResumedRepair(execution, outcome, gatesPassed);
+  return { execution, outcome, gatesPassed };
 }
 
 async function resolveRepairExecution(slug: string, services: IntegrationMissionServices, ports: IntegrateWorkflowPorts,
-  seams: IntegrateSeams, pending: ReviewRound, verification: RepairExecution['verification'], worktree: string): Promise<RepairExecution> {
+  pending: ReviewRound, verification: RepairExecution['verification'], worktree: string): Promise<RepairExecution> {
   const evidence = ports.gates.approvalEvidence?.(worktree);
   if (!evidence) { throw abortWith(ports.landing, 'Integration repair evidence is unavailable. Aborting before merge.'); }
   const original = ports.gates.captureFinalIntegrationTree(worktree);
@@ -56,7 +64,7 @@ async function resolveRepairExecution(slug: string, services: IntegrationMission
     || ports.git.git(['-C', worktree, 'merge-base', '--is-ancestor', baseline, tree.commit]).status !== 0) {
     throw abortWith(ports.landing, 'Integration repair baseline is not established; resume rebase before integration.');
   }
-  return { slug, services, ports, seams, verification, pending, worktree, evidence, revision: tree.commit, baseline };
+  return { slug, services, ports, verification, pending, worktree, evidence, revision: tree.commit, baseline };
 }
 
 function committedRepairHead({ ports, worktree }: RepairExecution): string | null {
@@ -86,8 +94,8 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
   return passed;
 }
 
-async function finishResumedRepair(execution: RepairExecution, outcome: RetentionOutcome, gatesPassed: boolean): Promise<void> {
-  const { slug, ports, seams, worktree, pending } = execution;
+async function finishResumedRepair(execution: RepairExecution, outcome: RetentionOutcome, gatesPassed: boolean, seams: IntegrateSeams): Promise<void> {
+  const { slug, ports, worktree, pending } = execution;
   if (outcome === 'retained') {
     await seams.transitionTaskFn(slug, 'ready-for-integration');
     throw new IntegrationStopsForHuman(`Original approval retained for ${slug}; review the PR and run px integrate ${slug} to land.`);

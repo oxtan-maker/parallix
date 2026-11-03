@@ -19,7 +19,7 @@ import { RebaseCommandUseCase } from '../../../src/application/rebase-command-us
 import type { GitCommandResult, RebaseWorkflowPort } from '../../../src/application/ports/rebase-workflow.js';
 import { predictIntegrationRebase } from '../../../src/adapters/cli/commands/integrate.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
-import { classifyError, hasExplicitHumanOnlyDiagnostic, FailureClass, DispatchAction } from '../../../src/application/failure-classification.js';
+import { classifyError, FailureClass, DispatchAction } from '../../../src/application/failure-classification.js';
 // ---- task-2294.01 pinned conflict agent (consolidated from test/task-2294.01-repro.test.ts, TASK-2622.09) ----
 describe("pinned conflict agent", () => {
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
@@ -149,11 +149,11 @@ describe("pinned conflict agent", () => {
       detectRebaseState: () => ({ inProgress: files.length > 0, unmergedFiles: [...files] }),
       resolveConflictsForMission: () => {
         files = [...owned, 'shared.ts'];
-        return { ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
+        return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
       },
       git: args => subcommand(args).join(' ') === 'status --porcelain'
         ? { ...OK, stdout: files.map(file => `UU ${file}`).join('\n') }
-        : subcommand(args).join(' ') === 'rebase main' ? { ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
+        : subcommand(args).join(' ') === 'rebase main' ? { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
       startAgent: async (_step, options) => {
         prompts.push(String(options.prompt)); files = [];
         return { agent: 'codex', result: { status: 0 } };
@@ -175,16 +175,16 @@ describe("pinned conflict agent", () => {
         detectRebaseState: () => ({ inProgress: files.length > 0, unmergedFiles: [...files] }),
         resolveConflictsForMission: () => {
           files = [...owned, 'shared.ts'];
-          return { ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
+          return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'merge-failed', conflictFiles: [], missionSpecificFiles: [], sharedFiles: [] };
         },
         git: args => subcommand(args).join(' ') === 'status --porcelain'
           ? { ...OK, stdout: files.map(file => `UU ${file}`).join('\n') }
-          : subcommand(args).join(' ') === 'rebase main' ? { ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
+          : subcommand(args).join(' ') === 'rebase main' ? { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, ...OK, status: 1, stderr: 'CONFLICT (content): Merge conflict in shared.ts' } : OK,
         startAgent: async (_step, options) => {
           prompts.push(String(options.prompt)); agents.push(options.agent);
           if (prompts.length === 1) {
             if (refresh) { files = [owned[1], 'current.ts']; }
-            throw new Error('usage limit hit');
+            throw Object.assign(new Error('usage limit hit'), { failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-09-12 13:00' } } });
           }
           files = [];
           return { agent: String(options.agent), result: { status: 0 } };
@@ -207,7 +207,7 @@ describe("pinned conflict agent", () => {
       const h = sharedConflictHarness({ missionServices: async () => {
         if (++reads === failureAt) { throw new Error('Mission task read failed: usage limit field unreadable'); }
         return { store };
-      }, startAgent: async () => { launches++; throw new Error('usage limit hit; blocked until tomorrow'); } });
+      }, startAgent: async () => { launches++; throw Object.assign(new Error('usage limit hit; blocked until tomorrow'), { failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-09-12 13:00' } } }); } });
       await run(h);
       assert.equal(launches, failureAt - 2);
       assert.deepEqual(h.exitCodes, [1]);
@@ -227,7 +227,7 @@ describe("pinned conflict agent", () => {
         startAgent: async (_step, options) => {
           assert.equal(options.sessionPolicy, 'fresh-ephemeral');
           prompts.push(String(options.prompt));
-          if (prompts.length === 1) { files = refresh ? ['current.ts'] : []; throw new Error('usage limit hit'); }
+          if (prompts.length === 1) { files = refresh ? ['current.ts'] : []; throw Object.assign(new Error('usage limit hit'), { failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-09-12 13:00' } } }); }
           files = [];
           return { agent: 'pool-selected', result: { status: 0 } };
         } });
@@ -265,7 +265,7 @@ describe("pinned conflict agent", () => {
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
         }
         return OK;
       },
@@ -426,7 +426,7 @@ describe("recorded implementer dispatch", () => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
           replayed = true;
-          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
+          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
         }
         return OK;
       },
@@ -443,7 +443,7 @@ describe("recorded implementer dispatch", () => {
   test('unavailable local mission metadata is reported as a local workflow condition, not an infrastructure blocker', async () => {
     const h = sharedConflictHarness({
       readReviewState: async () => null,
-      resolveTaskFile: () => ({ ok: false as const, error: 'not-found' }),
+      resolveTaskFile: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'not-found' }),
       getTaskImplementer: () => null,
     });
     await run(h);
@@ -551,9 +551,9 @@ describe("usage-blocked implementer", () => {
       launches.push({ step, options });
       const pinned = String(options.agent ?? '');
       if (options.pinnedAgent && pinned && pinned !== opts.replacement) {
-        throw new Error(
+        throw Object.assign(new Error(
           `Pinned agent "${pinned}" cannot run this step: usage limit hit; blocked until 2026-09-12 13:00`,
-        );
+        ), { failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-09-12 13:00' } } });
       }
       const replacement = opts.onReplacement?.(options);
       return { agent: replacement?.agent ?? String(options.agent ?? 'pool-selected'), result: { status: 0 } };
@@ -565,7 +565,7 @@ describe("usage-blocked implementer", () => {
       git: (args: string[]) => {
         const tail = subcommand(args);
         if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
         }
         return OK;
       },
@@ -720,17 +720,15 @@ describe("usage-blocked implementer", () => {
   });
   test('TASK-2494 repro: usage-block diagnostic classifies as a non-InfraBlocker, non-HumanOnly class', () => {
     const diagnostic = "you've hit your weekly usage limit (resets 2026-09-12 13:00)";
-    const { failureClass, dispatchAction } = classifyError(diagnostic);
+    const { failureClass, dispatchAction } = classifyError(diagnostic, { version: 1, code: 'agent-quota', source: 'review-preparation' });
     assert.notEqual(failureClass, FailureClass.InfraBlocker);
     assert.notEqual(dispatchAction, DispatchAction.HumanOnly);
-    assert.equal(hasExplicitHumanOnlyDiagnostic(diagnostic), false);
   });
   test('TASK-2494 repro: classifier must not widen the HumanOnly catch-all to generic limit / infra markers', () => {
     const infra = 'Forgejo token expired; network error pushing the review branch';
-    const { failureClass, dispatchAction } = classifyError(infra);
+    const { failureClass, dispatchAction } = classifyError(infra, { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(failureClass, FailureClass.InfraBlocker);
     assert.equal(dispatchAction, DispatchAction.HumanOnly);
-    assert.equal(hasExplicitHumanOnlyDiagnostic(infra), true);
   });
   test('TASK-2494 repro: infra marker beats agent-capacity quota marker (F1)', () => {
     // The quota marker must NOT steal a genuine Forgejo/network diagnostic. These
@@ -740,19 +738,17 @@ describe("usage-blocked implementer", () => {
       'network error: quota exhausted pushing the review branch',
     ];
     for (const message of cases) {
-      const { failureClass, dispatchAction } = classifyError(message);
+      const { failureClass, dispatchAction } = classifyError(message, { version: 1, code: 'infrastructure' });
       assert.equal(failureClass, FailureClass.InfraBlocker, `${message} stays InfraBlocker`);
       assert.equal(dispatchAction, DispatchAction.HumanOnly, `${message} stays HumanOnly`);
-      assert.equal(hasExplicitHumanOnlyDiagnostic(message), true, `${message} is explicit human-only`);
     }
   });
   test('TASK-2494 repro: a pure agent usage limit still classifies as AgentCapacity', () => {
     // Sanity: the usage-block rule still fires when no infra marker is present.
     const usage = "you've hit your weekly usage limit (resets 2026-09-12 13:00)";
-    const { failureClass, dispatchAction } = classifyError(usage);
+    const { failureClass, dispatchAction } = classifyError(usage, { version: 1, code: 'agent-quota', source: 'review-preparation' });
     assert.equal(failureClass, FailureClass.AgentCapacity);
     assert.equal(dispatchAction, DispatchAction.AutoRepair);
-    assert.equal(hasExplicitHumanOnlyDiagnostic(usage), false);
   });
   test('TASK-2494 repro: agent-branded rate limits classify as AgentCapacity (F1 round 4)', () => {
     // Agent-branded / provider rate limits follow agent-limit.ts and are
@@ -765,20 +761,18 @@ describe("usage-blocked implementer", () => {
       '429 Requests rate limit exceeded',
     ];
     for (const message of agents) {
-      const { failureClass, dispatchAction } = classifyError(message);
+      const { failureClass, dispatchAction } = classifyError(message, { version: 1, code: 'agent-quota' });
       assert.equal(failureClass, FailureClass.AgentCapacity, `${message} is AgentCapacity`);
       assert.equal(dispatchAction, DispatchAction.AutoRepair, `${message} is AutoRepair`);
-      assert.equal(hasExplicitHumanOnlyDiagnostic(message), false, `${message} is not human-only`);
     }
   });
   test('TASK-2494 repro: infra-branded rate limit still classifies as InfraBlocker', () => {
     // An infra-branded rate limit (carrying a network/infrastructure marker)
     // stays InfraBlocker even though it mentions a rate limit.
     const infra = 'network error: rate limit exceeded while pushing the review branch';
-    const { failureClass, dispatchAction } = classifyError(infra);
+    const { failureClass, dispatchAction } = classifyError(infra, { version: 1, code: 'infrastructure', source: 'review-preparation' });
     assert.equal(failureClass, FailureClass.InfraBlocker);
     assert.equal(dispatchAction, DispatchAction.HumanOnly);
-    assert.equal(hasExplicitHumanOnlyDiagnostic(infra), true);
   });
 });
 // ---- successive normal conflict stops (TASK-2668.02 / TASK-2672 follow-up) ----
@@ -808,7 +802,7 @@ describe("rebase through successive conflict stops", () => {
           assert.equal(state.rebaseCall, 1, 'never restart a paused rebase');
           state.inProgress = true;
           state.unmerged = [HANDOFF];
-          return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` };
+          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` };
         }
         if (tail[0] === 'rebase' && tail[1] === '--continue') {
           state.continueSets.push([...state.staged]);
@@ -817,7 +811,7 @@ describe("rebase through successive conflict stops", () => {
           state.staged = [];
           if (state.continueCall === 1) {
             state.unmerged = [PKG, PKGLCK];
-            return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${PKG}\nCONFLICT (content): Merge conflict in ${PKGLCK}\n` };
+            return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${PKG}\nCONFLICT (content): Merge conflict in ${PKGLCK}\n` };
           }
           state.inProgress = false;
           return OK;
@@ -883,8 +877,8 @@ describe("rebase through successive conflict stops", () => {
     let staged = false;
     h.port.git = (args: string[]) => {
       const tail = subcommand(args);
-      if (tail[0] === 'rebase' && tail[1] === 'main') { h.state.inProgress = true; return { status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` }; }
-      if (tail[0] === 'rebase' && tail[1] === '--continue') { continueCalls += 1; return { status: 1, stdout: '', stderr: 'pre-commit hook failed' }; }
+      if (tail[0] === 'rebase' && tail[1] === 'main') { h.state.inProgress = true; return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${HANDOFF}\n` }; }
+      if (tail[0] === 'rebase' && tail[1] === '--continue') { continueCalls += 1; return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, status: 1, stdout: '', stderr: 'pre-commit hook failed' }; }
       if (tail[0] === 'rebase' && tail[1] === '--show-current') { return { status: 0, stdout: 'mission/task-2672', stderr: '' }; }
       if (tail[0] === 'checkout' || tail[0] === 'add') { staged = true; return OK; }
       if (tail[0] === 'status' && tail[1] === '--porcelain') { return { status: 0, stdout: '', stderr: '' }; }

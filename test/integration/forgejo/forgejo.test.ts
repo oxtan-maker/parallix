@@ -468,7 +468,7 @@ test('createPr uses a plain push when the branch is absent from the review remot
     if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
     // First push: the mission branch does not exist on the review remote yet.
     if (args.includes('fetch') && args.some(a => typeof a === 'string' && a.includes(`+refs/heads/${branch}:`))) {
-      return { signal: null,  status: 128, stdout: '', stderr: `fatal: could not find remote ref refs/heads/${branch}` };
+      return { signal: null,  failureReason: { version: 1, code: 'git-remote-missing', source: 'git' }, status: 128, stdout: '', stderr: `fatal: could not find remote ref refs/heads/${branch}` };
     }
     // No tracking ref resolvable (neither review nor origin).
     if (args.includes('rev-parse') && args.some(a => typeof a === 'string' && a.includes(`refs/remotes/review/${branch}`))) {
@@ -847,7 +847,7 @@ test('getPrStatus reports missing PRs without throwing', () => {
   assert.match(pr.raw, /no PR found/i);
 });
 
-test('getPrStatus surfaces sandbox guidance when PR detail API is unavailable', () => {
+test('getPrStatus retains a failed PR lookup without inventing sandbox attribution', () => {
   const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (method === 'GET' && apiPath.includes('/pulls?state=all')) {
       return { ok: true as const, data: [{ number: 42, head: { ref: 'mission/task-104' } }] };
@@ -865,7 +865,8 @@ test('getPrStatus surfaces sandbox guidance when PR detail API is unavailable', 
 
   assert.equal(pr.exists, false);
   assert.equal(pr.error, 'api-failed');
-  assert.match(pr.raw, /Codex runtime cannot reach local Forgejo/i);
+  assert.match(pr.raw, /failed to resolve PR/);
+  assert.doesNotMatch(pr.raw, /Codex runtime/i);
 });
 
 test('getPrStatus surfaces Forgejo authentication failures clearly', () => {
@@ -1089,7 +1090,7 @@ test('syncMerged recovers from stale-info branch push rejection by fetching and 
         if (branchPushAttempts > 1) {
           return { stdout: '', stderr: '', signal: null,  status: 0 };
         }
-        return { stdout: '', signal: null,
+        return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, stdout: '', signal: null,
           status: 1,
           stderr: '! [rejected] abc123 -> mission/task-1062 (stale info)'
         };
@@ -1152,7 +1153,7 @@ test('syncMerged falls back to force push when stale-info persists after fetch r
     gitPush(sourceRef, destinationRef, rootDir, options) {
       calls.push({ type: 'push' as const, sourceRef, destinationRef, options });
       if (destinationRef === 'refs/heads/mission/task-1062' && options && options.forceWithLease) {
-        return { stdout: '', signal: null,
+        return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, stdout: '', signal: null,
           status: 1,
           stderr: '! [rejected] abc123 -> mission/task-1062 (stale info)'
         };
@@ -1902,7 +1903,7 @@ test('getPrNumber API failure returns structured error with _apiError and _notFo
   assert.equal(result._notFound, true);
 });
 
-test('getPrStatus surfaces sandbox hint when API returns status 7', () => {
+test('getPrStatus retains the transport diagnostic when API returns status 7', () => {
   const apiCall = mock.fn(forgejoApiFixture((method, apiPath) => {
     if (apiPath.includes('/pulls?state=')) {
       return { ok: false as const, data: null, status: 7, error: 'connection refused' };
@@ -1917,7 +1918,8 @@ test('getPrStatus surfaces sandbox hint when API returns status 7', () => {
 
   assert.equal(pr.exists, false);
   assert.equal(pr.error, 'api-failed');
-  assert.match(pr.raw, /Codex runtime cannot reach local Forgejo/i);
+  assert.match(pr.raw, /connection refused/);
+  assert.doesNotMatch(pr.raw, /Codex runtime/i);
 });
 
 test('getPrNumber propagates API error from first token to fallback token lookup', () => {
@@ -1994,7 +1996,8 @@ test('getLatestReviewDecision returns api-failed when getPrNumber returns _apiEr
   assert.ok(result.raw != null);
   assert.match(result.raw, /failed to resolve PR/);
   assert.ok(result.raw != null);
-  assert.match(result.raw, /Codex runtime cannot reach local Forgejo/i);
+  assert.match(result.raw, /connection refused/);
+  assert.doesNotMatch(result.raw, /Codex runtime/i);
 });
 
 test('postComment returns api-failed when getPrNumber returns _apiError', () => {
@@ -2042,7 +2045,7 @@ test('getComments returns null when getPrNumber returns _apiError', async () => 
   assert.equal(result, null);
 });
 
-test('createPr retries push after stale-info rejection when forceWithLease is true', (t) => {
+test('createPr normalizes changed remote lease facts before retrying (TASK-2829)', (t) => {
   const branch = 'mission/task-1089';
   const user = 'gemini';
   const token = 'fake-token';
@@ -2055,6 +2058,10 @@ test('createPr retries push after stale-info rejection when forceWithLease is tr
 
   mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
     if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+    if (args.includes('ls-remote')) {
+      assert.ok(args.includes(`refs/heads/${branch}`));
+      return { signal: null, status: 0, stdout: `newsha\trefs/heads/${branch}\n`, stderr: '' };
+    }
     if (args.includes('fetch')) {
       fetchCalled = true;
       return { signal: null, stderr: '',  status: 0, stdout: '' };
@@ -2069,7 +2076,7 @@ test('createPr retries push after stale-info rejection when forceWithLease is tr
       assert.ok(lease);
       leaseArgs.push(lease);
       if (pushAttempts === 1) {
-        return { signal: null, stdout: '',  status: 1, stderr: `! [rejected] ${branch} (stale info)` };
+        return { signal: null, stdout: '', status: 1, stderr: 'opaque translated rejection' };
       }
       return { signal: null, stderr: '',  status: 0, stdout: '' };
     }
@@ -2109,12 +2116,15 @@ test('createPr does not retry push on non-stale push failure', (t) => {
 
   mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
     if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
+    if (args.includes('ls-remote')) {
+      return { signal: null, status: 0, stdout: `abc123\trefs/heads/${branch}\n`, stderr: '' };
+    }
     if (args.includes('rev-parse') && args.includes(`refs/remotes/review/${branch}^{commit}`)) {
       return { signal: null,  status: 0, stdout: 'abc123\n', stderr: '' };
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      return { signal: null, stdout: '',  status: 1, stderr: 'remote: Permission denied' };
+      return { signal: null, stdout: '',  status: 1, stderr: 'remote: Permission denied; quoted stale info' };
     }
     return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
@@ -2142,7 +2152,7 @@ test('createPr fails cleanly on second consecutive stale rejection', (t) => {
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      return { signal: null, stdout: '',  status: 1, stderr: `! [rejected] ${branch} (stale info)` };
+      return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null, stdout: '', status: 1, stderr: `! [rejected] ${branch} (stale info)` };
     }
     return { signal: null, stderr: '',  status: 0, stdout: '' };
   });
@@ -2257,7 +2267,7 @@ test('createPr fails without retrying push when stale-info refresh fetch fails',
     }
     if (args.includes('push') && args[args.length - 1] === branch) {
       pushAttempts++;
-      return { signal: null, stdout: '',  status: 1, stderr: `! [rejected] ${branch} (stale info)` };
+      return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null, stdout: '', status: 1, stderr: `! [rejected] ${branch} (stale info)` };
     }
     return { signal: null,  status: 0, stdout: '', stderr: '' };
   });
@@ -2330,24 +2340,23 @@ test('fetchReviewBranch uses force-update refspec to handle rebased branches', (
   );
 });
 
-// Regression: git diagnostics are localized to the operator's locale. A
-// non-English locale (e.g. Swedish "kunde inte hitta fjärr-referensen") made
-// isMissingRemoteRef miss the "could not find remote ref" condition, so a
-// routine first push of a new mission branch aborted. fetchReviewBranch must
-// force a stable C locale so detection stays language-independent (task-1317).
-test('fetchReviewBranch forces a C locale so git diagnostics are English', (t) => {
-  let capturedOptions: { value: import("../../../src/adapters/git/git.js").GitOptions | undefined | null } = { value: null };
-  mock.method(git, 'git', (_args: Parameters<(typeof git)["git"]>[0], options: Parameters<(typeof git)["git"]>[1]) => {
-    capturedOptions.value = options;
-    return { signal: null,  status: 0, stdout: '', stderr: '' };
+// TASK-1317/TASK-2829: first-push detection uses the remote query exit code,
+// so translated diagnostics cannot change whether the branch is absent.
+test('fetchReviewBranch identifies a missing remote ref independently of locale', () => {
+  const calls: string[][] = [];
+  mock.method(git, 'git', (args: string[]) => {
+    calls.push(args);
+    return args.includes('ls-remote')
+      ? { signal: null, status: 2, stdout: '', stderr: '' }
+      : { signal: null, status: 128, stdout: '', stderr: 'kunde inte hitta fjärr-referensen' };
   });
-
-  fetchReviewBranch('mission/task-1317', '/tmp/fake-root', { configuration: resolveConfiguration(process.env) });
-
-  assert.ok(capturedOptions.value, 'git should have been called with options');
-  assert.ok(capturedOptions.value.env, 'fetch should pass an env override');
-  assert.strictEqual(capturedOptions.value.env.LC_ALL, 'C', 'LC_ALL must be forced to C');
-  assert.strictEqual(capturedOptions.value.env.LANG, 'C', 'LANG must be forced to C');
+  const result = fetchReviewBranch('mission/task-1317', '/tmp/fake-root', { configuration: resolveConfiguration(process.env) });
+  assert.equal(result.status, 128);
+  assert.equal(result.stderr, 'kunde inte hitta fjärr-referensen');
+  assert.equal(result.failureReason?.code, 'git-remote-missing');
+  assert.equal(calls.length, 2);
+  assert.ok(calls[1].includes('--exit-code'));
+  assert.ok(calls[1].includes('refs/heads/mission/task-1317'));
 });
 
 test('fetchReviewBranch uses authenticated review url when a token is available', () => {

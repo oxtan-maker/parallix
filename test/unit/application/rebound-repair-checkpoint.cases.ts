@@ -188,7 +188,7 @@ export function repairCheckpointCases(): void {
       let launches = 0;
       const result = await rebound(reason, context({
         startAgent: async () => { launches++; return { result: { status: 0 } }; },
-        verify: () => ({ ok: false as const, reason: { ...reason, stdout: '', stderr: 'forgejo connection refused', invalidContract } }),
+        verify: () => ({ ok: false as const, reason: { ...reason, failureReason: { version: 1, code: 'infrastructure' }, stdout: '', stderr: 'forgejo connection refused', invalidContract } }),
       }));
       assert.equal(launches, 1);
       assert.equal(result.outcome, invalidContract ? 'human-only' : 'exhausted');

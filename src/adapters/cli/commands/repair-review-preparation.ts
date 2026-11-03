@@ -4,7 +4,7 @@ import type { ParallixConfiguration } from '../../../application/ports/configura
 import { git, getCurrentBranch } from '../../git/git.js';
 import rebase from './rebase.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
-import { FailureClass, DispatchAction, classifyError, getDispatchAction } from '../../../application/failure-classification.js';
+import { FailureClass, DispatchAction, classifyError, classifyFailure, getDispatchAction } from '../../../application/failure-classification.js';
 
 // ── ADR 0048 classification (single table, owned by the application layer) ───
 // The eight failure classes, the three dispatch actions, and `classifyError`
@@ -24,11 +24,11 @@ export {
  * @param errorMsg - The error message to check
  * @returns True if the error is relaunchable (IncompleteEvidence or GateFailure)
  */
-function isRelaunchableError(errorMsg: string): boolean {
+function isRelaunchableError(errorMsg: string, failureReason?: unknown): boolean {
   if (!errorMsg || typeof errorMsg !== 'string') {
     return false;
   }
-  const { failureClass } = classifyError(errorMsg);
+  const { failureClass } = classifyFailure(failureReason);
   // IncompleteEvidence and GateFailure are the only classes that were relaunchable under the old logic
   return failureClass === FailureClass.IncompleteEvidence
     || failureClass === FailureClass.GateFailure;
@@ -44,7 +44,7 @@ function isRelaunchableError(errorMsg: string): boolean {
  * @param {object} [options]
  * @returns {Promise<{repaired: boolean, blocker: string|null}>} Result and optional blocker reason
   */
-async function repairReviewPreparation(slug: string, worktree: string, errorMsg: string, options: { configuration?: ParallixConfiguration, gitFn?: GitReader, rebaseFn?: typeof import('./rebase.js').rebase, log?: (message: string) => void, error?: (message: string) => void } = {}) {
+async function repairReviewPreparation(slug: string, worktree: string, errorMsg: string, options: { failureReason?: import('../../../domain/failure-reason.js').FailureReason, configuration?: ParallixConfiguration, gitFn?: GitReader, rebaseFn?: typeof import('./rebase.js').rebase, log?: (message: string) => void, error?: (message: string) => void } = {}) {
   /** @type {{gitFn?: GitReader, rebaseFn?: typeof import('./rebase.js').rebase, log?: (message: string) => void, error?: (message: string) => void}} */
   const opts = options;
   const {
@@ -59,14 +59,14 @@ async function repairReviewPreparation(slug: string, worktree: string, errorMsg:
   let blocker: string | null = null;
 
   // 0. Check if error is repairable via classifyError
-  const classification = classifyError(errorMsg);
+  const classification = classifyFailure(options.failureReason);
   const isGitBlocker = classification.failureClass === FailureClass.GitBlockers;
   // Derive isBehind from classification result (avoids duplicating classifyError's behind-branch patterns)
   const isBehind = classification.reason === 'behind';
 
   if (!isGitBlocker) {
     if (classification.failureClass === FailureClass.InfraBlocker) {
-      blocker = `Infrastructure blocker detected: the review preparation error is infrastructure-related (likely Forgejo credentials, connectivity, or rate limits). No agent relaunch will resolve this — the operator must check the Forgejo instance, verify credentials/token validity, and confirm network connectivity before retrying.`;
+      blocker = errorMsg;
       log(blocker);
       return { repaired: false, blocker };
     }

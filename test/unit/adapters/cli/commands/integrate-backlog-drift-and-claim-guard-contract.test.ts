@@ -143,7 +143,7 @@ describe("backlog drift retry", () => {
 
   // Simulate the Step 2 probe-merge flow from integrate.ts.
   // Reproduces the exact control flow: merge, abort, classify, reset/fetch/pull/retry.
-  function simulateStep2Probe(gitRunner: ReturnType<typeof createGitRunner>, conflictOutput: string) {
+  function simulateStep2Probe(gitRunner: ReturnType<typeof createGitRunner>, conflictFiles: string[]) {
     const { calls, run } = gitRunner;
 
     // Initial probe merge (integrate.ts:747-748)
@@ -151,7 +151,6 @@ describe("backlog drift retry", () => {
     const abortResult = run(['-C', '/tmp/base', 'merge', '--abort']);
 
     // Classify conflicts (integrate.ts:761-764)
-    const conflictFiles = missionUtils.parseConflictFilesFromMergeOutput(conflictOutput);
     const isBacklogOnly = areAllBacklogOnlyConflicts(conflictFiles) && conflictFiles.length > 0;
     const abortFailed = abortResult.status !== 0;
 
@@ -208,7 +207,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in backlog/tasks/task-100 - feature.md\n'
+      ['backlog/tasks/task-100 - feature.md']
     );
 
     assert.equal(result.ok, true, 'simulation completed');
@@ -232,7 +231,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in src/adapters/cli/commands/review-preparation.ts\n'
+      ['src/adapters/cli/commands/review-preparation.ts']
     );
 
     assert.equal(result.ok, true, 'simulation completed');
@@ -255,7 +254,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in backlog/tasks/task-2242 - backlog.md-changes-fast.md\n'
+      ['backlog/tasks/task-2242 - backlog.md-changes-fast.md']
     );
 
     assert.equal(result.ok, true, 'simulation completed');
@@ -278,7 +277,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in backlog/tasks/task-100.md\n'
+      ['backlog/tasks/task-100.md']
     );
 
     assert.equal(result.ok, false, 'simulation aborted');
@@ -301,7 +300,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in backlog/tasks/task-100.md\n'
+      ['backlog/tasks/task-100.md']
     );
 
     assert.equal(result.ok, false, 'simulation aborted');
@@ -331,7 +330,7 @@ describe("backlog drift retry", () => {
 
     const result = simulateStep2Probe(
       gitRunner,
-      'CONFLICT (content): Merge conflict in backlog/tasks/task-100.md\n'
+      ['backlog/tasks/task-100.md']
     );
 
     assert.equal(result.ok, true, 'simulation completed');
@@ -342,7 +341,7 @@ describe("backlog drift retry", () => {
 
   // Happy path: no conflicts
   test('happy path: probe merge succeeds on first try with no conflicts', () => {
-    const conflictFiles = missionUtils.parseConflictFilesFromMergeOutput('');
+    const conflictFiles: string[] = [];
     assert.equal(conflictFiles.length, 0, 'no conflict files');
     assert.equal(areAllBacklogOnlyConflicts(conflictFiles), true, 'empty list classified as backlog-only');
   });
@@ -446,6 +445,7 @@ describe("backlog drift retry", () => {
 
     const mergeNoCommitCalls = [];
     const gitMockFn = (args: string|string[]) => {
+      if (args.includes('--diff-filter=U')) return { status: 0, stdout: 'src/adapters/cli/commands/review-preparation.ts\0', stderr: '' };
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCalls.push(args);
         return { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/adapters/cli/commands/review-preparation.ts\n', stderr: '' };
@@ -475,6 +475,7 @@ describe("backlog drift retry", () => {
 
     let mergeNoCommitCount = 0;
     const gitMockFn = (args: string|string[]) => {
+      if (args.includes('--diff-filter=U')) return { status: 0, stdout: 'backlog/tasks/task-2242 - backlog.md-changes-fast.md\0', stderr: '' };
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCount++;
         return { status: 1, stdout: 'CONFLICT (content): Merge conflict in backlog/tasks/task-2242 - backlog.md-changes-fast.md\n', stderr: '' };
@@ -509,6 +510,7 @@ describe("backlog drift retry", () => {
     let mergeNoCommitCount = 0;
     let mergeAbortCount = 0;
     const gitMockFn = (args: string|string[]) => {
+      if (args.includes('--diff-filter=U')) return { status: 0, stdout: 'backlog/tasks/task-100.md\0', stderr: '' };
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCount++;
         return { status: 1, stdout: 'CONFLICT (content): Merge conflict in backlog/tasks/task-100.md\n', stderr: '' };
@@ -552,6 +554,7 @@ describe("backlog drift retry", () => {
     let mergeNoCommitCount = 0;
     let mergeAbortCount = 0;
     const gitMockFn = (args: string|string[]) => {
+      if (args.includes('--diff-filter=U')) return { status: 0, stdout: 'backlog/tasks/task-100.md\0', stderr: '' };
       if (args.includes('merge') && args.includes('--no-commit')) {
         mergeNoCommitCount++;
         // Both initial and retry conflict

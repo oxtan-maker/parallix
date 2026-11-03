@@ -1,3 +1,4 @@
+import { failureReasonFromCause } from '../../domain/failure-reason.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import { wrapWithBubblewrap } from "../process/bubblewrap.js";
@@ -66,7 +67,7 @@ export function startPiWorker(request: PiWorkerRequest, invocation: { command: s
       process.removeListener('exit', parentExit);
       process.removeListener('SIGTERM', parentSignal); process.removeListener('SIGINT', parentSignal);
       const failure = timedOut ? Object.assign(new Error('No output before configured liveness deadline'), { code: 'NO_OUTPUT_TIMEOUT' }) : error;
-      resolve(result ?? { status: 1, stdout: '', stderr: failure?.message ?? 'Pi worker exited before returning a result',
+      resolve(result ?? { failureReason: failureReasonFromCause(failure, 'provider'), status: 1, stdout: '', stderr: failure?.message ?? 'Pi worker exited before returning a result',
         error: failure, signal, sessionId: null, telemetry: null, model: undefined, provider: 'pi', transientRetries: 0,
         startedAt, endedAt: new Date().toISOString() });
       if (cancelSignal) { process.kill(process.pid, cancelSignal); }

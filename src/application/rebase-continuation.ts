@@ -106,7 +106,7 @@ export async function handleNonConflictRebaseFailure(ctx: RebaseContext, rebaseR
     return false;
   }
 
-  const classification = classifyHookFailure(rebaseOutput);
+  const classification = classifyHookFailure(rebaseResult);
   if (classification.isHookFailure && (typeof port.missionServices === 'function' || Boolean(port.onHookFailure))) {
     const bounce = await reboundHookFailure(ctx, rebaseOutput, classification, () => continueRebaseCommand(ctx));
     if (bounce.outcome === 'fixed') {
@@ -144,7 +144,7 @@ function reportContinueFailure(result: GitCommandResult): void {
     fmt.log.fail(output);
     fmt.log.fail('------------------');
   }
-  if (output.toLowerCase().includes('pre-commit') || output.toLowerCase().includes('hook')) {
+  if (classifyHookFailure(result).isHookFailure) {
     fmt.log.fail('Hint: A git hook failed. Fix the issues reported above.');
   }
   fmt.log.fail(`Check rebase state: ${fmt.command('git status')}`);
@@ -184,7 +184,7 @@ function rebaseDiagnosticBranch(ctx: RebaseContext): string {
 async function recoverHookFailureFromContinue(ctx: RebaseContext, driver: ContinueDriver, result: GitCommandResult): Promise<{ result: GitCommandResult; stranded: boolean }> {
   if (result.status === 0) { return { result, stranded: false }; }
   const output = combineOutput(result);
-  const classification = classifyHookFailure(output);
+  const classification = classifyHookFailure(result);
   if (!rebaseHookRecoveryEligible(result.status, classification.isHookFailure, typeof ctx.port.missionServices === 'function' || Boolean(ctx.port.onHookFailure))) { return { result, stranded: false }; }
   // Direct callers without composed mission services retain the legacy
   // hint-and-exit path; the production CLI always supplies this seam.
@@ -219,7 +219,7 @@ type DriveClassification =
  */
 function classifyPreContinue(ctx: RebaseContext, result: GitCommandResult): DriveClassification {
   // Preserve observation order: terminal results never query staged/rebase state.
-  let action = preContinueAction(result.status, hasConflictMarkers(combineOutput(result)), false, true);
+  let action = preContinueAction(result.status, hasConflictMarkers(result), false, true);
   if (action === 'completed') { return { action }; }
   if (action === 'recursed') {
     fmt.log.info('More conflicts found. Re-running classification...');
@@ -243,7 +243,7 @@ function classifyPreContinue(ctx: RebaseContext, result: GitCommandResult): Driv
  * an empty pick is not, so only the latter walks on to the next commit.
  */
 function classifyPostContinue(ctx: RebaseContext, driver: ContinueDriver, result: GitCommandResult, staged: boolean): DriveClassification {
-  const conflicts = hasConflictMarkers(combineOutput(result));
+  const conflicts = hasConflictMarkers(result);
   const stillRebasing = result.status === 0 || conflicts ? false : rebaseStillInProgress(ctx);
   const action = postContinueAction(result.status, conflicts, stillRebasing, driver.attempts, driver.max, staged);
   if (action === 'completed') { return { action }; }

@@ -258,15 +258,11 @@ class ReviewPreparationExecutionAdapter implements ReviewPreparationExecutionPor
       ? { ...reviewPreparation, gateFailure: { kind: 'gate-failure', ...gateFailure } }
       : reviewPreparation;
   }
-  async repairHygiene(request: { slug: string; worktree: string; taskFile: string | null; error: string; log: (_message: string) => void; outputError: (_message: string) => void }) {
-    const result = await this._runtime.repairReviewPreparation(request.slug, request.worktree, request.error, { log: request.log, error: request.outputError });
+  async repairHygiene(request: { slug: string; worktree: string; taskFile: string | null; error: string; failureReason?: import('../../domain/failure-reason.js').FailureReason; log: (_message: string) => void; outputError: (_message: string) => void }) {
+    const result = await this._runtime.repairReviewPreparation(request.slug, request.worktree, request.error, { log: request.log, error: request.outputError, failureReason: request.failureReason });
     return result.blocker ? { repaired: result.repaired, blocker: result.blocker } : { repaired: result.repaired };
   }
-  classifyFailure(error: string) {
-    const classified = repairReviewPreparation.classifyError(error);
-    return classified ? { failureClass: classified.failureClass, dispatchAction: classified.dispatchAction } : null;
-  }
-  isRelaunchableFailure(error: string) { return repairReviewPreparation.isRelaunchableError(error); }
+
 }
 
 class AutonomousReviewAdapter implements AutonomousReviewPort {

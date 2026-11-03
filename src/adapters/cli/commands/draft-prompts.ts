@@ -69,9 +69,6 @@ function validateDraftClassification(slug: string, worktree: string, {
     }
     return { ok: true, classification };
   } catch (error) {
-    if ((error instanceof Error ? error.message : String(error)).includes('Missing or invalid classification')) {
-      return { ok: true, classification: null };
-    }
     errorFn(fmt.status('FAIL', (error instanceof Error ? error.message : String(error))));
     return { ok: false, reason: 'invalid-classification' };
   }
@@ -90,9 +87,6 @@ function normalizeDraftClassification(slug: string, worktree: string, {
     }
     return { ok: true, classification };
   } catch (error) {
-    if ((error instanceof Error ? error.message : String(error)).includes('Missing or invalid classification')) {
-      return { ok: false, reason: 'missing-classification' };
-    }
     errorFn(fmt.status('FAIL', (error instanceof Error ? error.message : String(error))));
     return { ok: false, reason: 'invalid-classification' };
   }

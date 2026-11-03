@@ -146,7 +146,7 @@ export interface RepairEvidence { strategy: RepairStrategy; agent: string; conte
 function refreshedReason(previous: ReboundReason, result: VerifyResult): ReboundReason {
   if (result.reason) { return result.reason; }
   if (previous.kind === 'gate-failure') {
-    return { ...previous, failureReason: undefined, signal: undefined, stdout: result.diagnostic || previous.stdout, stderr: '', error: undefined };
+    return { ...previous, stdout: result.diagnostic || previous.stdout, stderr: '', error: undefined };
   }
   if (previous.kind === "review-preparation-verification") {
     return { ...previous, gateOutput: result.diagnostic || previous.gateOutput };

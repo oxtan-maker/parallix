@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
 import { assertIndependentGateInvocation } from '../../application/ports/gate-admission.js';
 import { verificationEnvironment } from '../config/verification-environment.js';
@@ -43,9 +44,8 @@ export interface VerificationAdapterConfig {
 }
 
 /** Adapter-owned machine markers for unchanged-tree verifier contention. */
-export function isTransientVerificationFailure(output: { stdout?: unknown; stderr?: unknown }): boolean {
-  const diagnostic = `${String(output.stdout ?? '')}\n${String(output.stderr ?? '')}`;
-  return /\[unit-test-(?:budget|cpu):exceeded\]|\[unit-test-(?:budget|cpu)\]\s+SUITE (?:CPU )?BUDGET EXCEEDED:/i.test(diagnostic);
+export function isTransientVerificationFailure(output: { stdout?: unknown; stderr?: unknown; failureReason?: unknown }): boolean {
+  return recognizedFailureReason(output.failureReason)?.code === 'cpu-budget-exceeded';
 }
 
 export interface VerificationProof {

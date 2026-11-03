@@ -41,7 +41,7 @@ const gateReason: ReboundReason = {
   stderr: '',
   error: 'verification gate failed with exit code 1',
 };
-const hookReason: ReboundReason = {
+const hookReason: ReboundReason = { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } },
   kind: 'hook-failure',
   hook: 'pre-commit',
   operation: 'pre-review safety commit',
@@ -119,7 +119,7 @@ test('task-2377.03: an agent-timeout reason classifies as incomplete evidence an
 });
 test('task-2413: an agent-timeout carrying explicit infrastructure evidence does not burn repair attempts', async () => {
   let launches = 0;
-  const outcome = await rebound({
+  const outcome = await rebound({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
     kind: 'agent-timeout', role: 'reviewer', diagnostic: 'forgejo connection refused',
   }, contextFor({ startAgent: async () => { launches++; return { result: { status: 0 } }; } }));
   assert.equal(outcome.outcome, 'human-only');
@@ -127,7 +127,7 @@ test('task-2413: an agent-timeout carrying explicit infrastructure evidence does
   assert.equal(launches, 0);
 });
 test("task-2377.03: a review-preparation-verification reason classifies from its own ADR 0048 error text", () => {
-  const classification = classifyReboundReason({
+  const classification = classifyReboundReason({ failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' },
     kind: "review-preparation-verification",
     error: 'checkpoint is missing a "## Goal Check" section',
   });
@@ -138,7 +138,7 @@ test('task-2377.03: the human-only rule inside the classifier keeps an infrastru
   const classification = classifyReboundReason({
     ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
     stdout: '',
-    stderr: 'forgejo authentication failed: token expired',
+    failureReason: { version: 1, code: 'infrastructure' }, stderr: 'forgejo authentication failed: token expired',
     error: undefined,
   });
   assert.equal(classification.failureClass, 'InfraBlocker');
@@ -149,7 +149,7 @@ test('task-2377.03: the human-only rule keeps a state-machine gate diagnostic hu
   const classification = classifyReboundReason({
     ...(gateReason as { kind: 'gate-failure' } & typeof gateReason),
     stdout: '',
-    stderr: 'transition not allowed for this task',
+    failureReason: { version: 1, code: 'state-machine' }, stderr: 'transition not allowed for this task',
     error: undefined,
   });
   assert.equal(classification.failureClass, 'StateMachineViolation');
@@ -195,7 +195,7 @@ test('TASK-2663: passing TAP and spec titles naming unauthorized access in stder
   assert.equal(classification.isRelaunchable, true);
 });
 test('TASK-2663: genuine infrastructure evidence beside passing output still dispatches HumanOnly', () => {
-  const classification = classifyReboundReason({
+  const classification = classifyReboundReason({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' },
     kind: 'gate-failure',
     area: 'integration-local',
     command: './scripts/verify-local.sh integration-local',
@@ -327,7 +327,7 @@ test('task-2377.03: a failing verify consumes one attempt and relaunches with th
       return { agent: 'codex', result: { status: 0 } };
     },
     verify: () => verifyDiagnostics.length
-      ? { ok: false, diagnostic: verifyDiagnostics.shift()! }
+      ? {  ok: false, diagnostic: verifyDiagnostics.shift()! }
       : { ok: true },
   }));
 
@@ -344,7 +344,7 @@ test('task-2377.03: two failed verifies exhaust the default budget with the last
   let verifyRuns = 0;
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => { verifyRuns++; return { ok: false as const, diagnostic: `still failing after attempt ${verifyRuns}` }; },
+    verify: () => { verifyRuns++; return {  ok: false as const, diagnostic: `still failing after attempt ${verifyRuns}` }; },
   }));
 
   assert.equal(outcome.outcome, 'exhausted');
@@ -399,7 +399,7 @@ test('task-2377.03: a throwing launch is a failed attempt, not a fix', async () 
 test('task-2377.03: the budget is per occurrence — a second invocation after an exhausted one starts fresh', async () => {
   // This budget-only contract does not exercise durable evidence capture; keep
   // its retries in-memory so filesystem work belongs to that owning contract.
-  const failing = contextFor({ worktree: '', verify: () => ({ ok: false as const, diagnostic: 'still failing' }) });
+  const failing = contextFor({ worktree: '', verify: () => ({  ok: false as const, diagnostic: 'still failing' }) });
   const first = await rebound(gateReason, failing);
   assert.equal(first.outcome, 'exhausted');
 
@@ -407,7 +407,7 @@ test('task-2377.03: the budget is per occurrence — a second invocation after a
   const second = await rebound(gateReason, contextFor({
     worktree: '',
     startAgent: async () => { secondLaunches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => (secondLaunches < 2 ? { ok: false, diagnostic: 'still failing' } : { ok: true }),
+    verify: () => (secondLaunches < 2 ? {  ok: false, diagnostic: 'still failing' } : { ok: true }),
   }));
   assert.equal(second.outcome, 'fixed');
   assert.equal(second.attempts, 2, 'the next occurrence of the same failure class gets a full budget of 2');
@@ -419,7 +419,7 @@ test('task-2377.03: the budget is configurable per occurrence and never read fro
     worktree: '',
     maxAttempts: 1,
     startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => ({ ok: false as const, diagnostic: 'still failing' }),
+    verify: () => ({  ok: false as const, diagnostic: 'still failing' }),
   }));
   assert.equal(outcome.outcome, 'exhausted');
   assert.equal(launches, 1);
@@ -436,7 +436,7 @@ test('task-2377.03: the kernel writes nothing to a state store while spending a 
   // the context object. The kernel's context has no state-store slot, so a run
   // that spends the whole budget must leave every write method untouched.
   const outcome = await rebound(gateReason, {
-    ...contextFor({ verify: () => ({ ok: false as const, diagnostic: 'still failing' }) }),
+    ...contextFor({ verify: () => ({  ok: false as const, diagnostic: 'still failing' }) }),
     ...failOnWriteStore,
   });
   assert.equal(outcome.outcome, 'exhausted');
@@ -474,7 +474,7 @@ test('task-2525.05: a transient gate rerun preserves the original diagnostic in 
     maxAttempts: 1,
     verify: () => {
       verifyCalls += 1;
-      return { ok: false as const, diagnostic: 'REFRESHED_GATE_OUTPUT' };
+      return {  ok: false as const, diagnostic: 'REFRESHED_GATE_OUTPUT' };
     },
     startAgent: async (_step, options) => {
       assert.ok(typeof options.prompt === 'function');
@@ -507,7 +507,7 @@ test('task-2588: fresh diagnostic failure then independent fresh success keeps b
 
 test('task-2588: fresh failure escalates after two independent attempts with no false pass', async () => {
   let launches = 0; const logs: string[] = [];
-  const outcome = await rebound(gateReason, contextFor({ verify: () => ({ ok: false as const, diagnostic: 'STILL_RED' }), startAgent: async () => ({ result: { status: 0, }, agent: (++launches, 'codex') }), log: message => logs.push(message) }));
+  const outcome = await rebound(gateReason, contextFor({ verify: () => ({  ok: false as const, diagnostic: 'STILL_RED' }), startAgent: async () => ({ result: { status: 0, }, agent: (++launches, 'codex') }), log: message => logs.push(message) }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2); assert.match(outcome.dossier || '', /fresh-diagnostic/); assert.ok(!/PASS|APPROVED/.test(outcome.dossier || ''));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=advance')));
   assert.ok(logs.some(line => line.includes('RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=escalate')));
@@ -539,7 +539,7 @@ test('task-2588: changed code with the same failure still exhausts the bounded b
   const outcome = await rebound(gateReason, contextFor({
     readHead: () => head,
     startAgent: async () => { head = `after-${++launches}`; return { agent: 'codex', result: { status: 0 } }; },
-    verify: () => ({ ok: false as const, diagnostic: gateReason.stdout }),
+    verify: () => ({  ok: false as const, diagnostic: gateReason.stdout }),
   }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2);
   assert.deepEqual(outcome.attemptsDetail?.map(detail => [detail.headBefore, detail.headAfter]), [['before', 'after-1'], ['after-1', 'after-2']]);
@@ -549,7 +549,7 @@ test('task-2588: a changed failure after attempt one remains bounded at two laun
   let launches = 0; let verifies = 0;
   const outcome = await rebound(gateReason, contextFor({
     startAgent: async () => ({ agent: 'codex', result: { status: 0 }, ...(launches++, {}) }),
-    verify: () => ({ ok: false as const, diagnostic: ++verifies === 1 ? 'SECOND_FAILURE' : 'THIRD_FAILURE' }),
+    verify: () => ({  ok: false as const, diagnostic: ++verifies === 1 ? 'SECOND_FAILURE' : 'THIRD_FAILURE' }),
   }));
   assert.equal(outcome.outcome, 'exhausted'); assert.equal(launches, 2);
   assert.equal(outcome.attemptsDetail?.[0].fingerprintAfter, outcome.attemptsDetail?.[1].fingerprintBefore);
@@ -622,7 +622,7 @@ describe("Recovery dossier —", () => {
       worktree,
       implementer: 'codex',
       startAgent: async () => ({ agent: 'codex', result: { status: 0 } }),
-      verify: () => ({ ok: false as const, diagnostic: 'still failing after attempt N' }),
+      verify: () => ({  ok: false as const, diagnostic: 'still failing after attempt N' }),
       log: () => {},
       error: () => {},
       ...overrides,
@@ -656,13 +656,13 @@ describe("Recovery dossier —", () => {
 
   test('task-2413: the exhaustion dossier carries the final diagnostic, not the first', async (t) => {
     const diagnostics = [
-      { ok: false, diagnostic: 'first-run deterministic failure' },
-      { ok: false, diagnostic: 'final-run still failing' },
+      {  ok: false, diagnostic: 'first-run deterministic failure' },
+      {  ok: false, diagnostic: 'final-run still failing' },
     ];
     let launches = 0;
     const outcome = await rebound(gateReason, exhaustingContext(t, {
       startAgent: async () => { launches++; return { agent: 'codex', result: { status: 0 } }; },
-      verify: () => (diagnostics.length ? diagnostics.shift()! : { ok: false, diagnostic: 'unknown' }),
+      verify: () => (diagnostics.length ? diagnostics.shift()! : {  ok: false, diagnostic: 'unknown' }),
     }));
 
     // Budget spent -> exhausted. The retained diagnostic is the LAST observed one,
@@ -872,7 +872,7 @@ describe("Integration gate rebound —", () => {
       captureFinalTreeFn: (() => ({ ok: true as const, rootDir: harness.root, commit: 'c', tree: 't' })),
       runPhaseGatesFn: (async (_p: string, o) => (rerunOk
         ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null }
-        : { ok: false, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: failedGate(), error: 'still red' })),
+        : { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: failedGate(), error: 'still red' })),
       log: (m: string) => harness.messages.push(m),
       error: (m: string) => harness.messages.push(m),
       gateRunLog: (m: string) => harness.messages.push(m),
@@ -925,7 +925,7 @@ describe("Integration gate rebound —", () => {
   test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {
     const h = harness();
     const route = await routeIntegrationGateFailure(routeArgs({
-      captureFinalTreeFn: (() => ({ ok: false as const, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })),
+      captureFinalTreeFn: (() => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false as const, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })),
     }, h));
     assert.equal(route.route, 'exhausted');
     assert.match(h.messages.join('\n'), /not committed|dirty tree/);
@@ -980,8 +980,8 @@ test('first agent-fixable repair uses independent diagnostic context (TASK-2700)
 
 for (const diagnostic of ['Task state invalid for review', 'No recorded implementer for task-2780; cannot launch conflict resolution.']) {
   for (const reason of [
-      { ...gateReason, stdout: diagnostic, stderr: '', error: undefined },
-      { ...hookReason, output: diagnostic },
+      { ...gateReason, failureReason: { version: 1, code: 'state-machine' }, stdout: diagnostic, stderr: '', error: undefined },
+      { ...hookReason, failureReason: { version: 1, code: 'state-machine' }, output: diagnostic },
   ] as ReboundReason[]) {
     test(`explicit state blockers never launch ${reason.kind} repairs: ${diagnostic} (TASK-2780)`, async () => {
       let launches = 0;

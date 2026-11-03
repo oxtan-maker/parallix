@@ -13,7 +13,6 @@ import { RebaseCommandUseCase } from '../../../application/rebase-command-use-ca
 import {
   classifyHookFailure,
   parseConflictFilesFromGitStatus,
-  parseConflictFilesFromRebaseOutput,
 } from '../../../application/rebase-workflow.js';
 import {
   buildRebasePrompt,
@@ -25,12 +24,11 @@ async function rebase(args: string[], options: RebaseCommandOptions = {}): Promi
   return new RebaseCommandUseCase(createRebaseWorkflowPort(options)).execute(args);
 }
 
-const rebaseWithHelpers = Object.assign(rebase, { buildRebasePrompt, parseConflictFilesFromRebaseOutput, parseConflictFilesFromGitStatus, classifyHookFailure });
+const rebaseWithHelpers = Object.assign(rebase, { buildRebasePrompt, parseConflictFilesFromGitStatus, classifyHookFailure });
 export default rebaseWithHelpers;
 export {
   rebase,
   buildRebasePrompt,
-  parseConflictFilesFromRebaseOutput,
   parseConflictFilesFromGitStatus,
   classifyHookFailure,
 };

@@ -4,9 +4,9 @@ import * as fmt from './presentation/cli-format.js';
 
 /** Logging belongs to the application boundary; the domain classifier stays pure. */
 export function classifyRecoveryReason(reason: ReboundReason, log: (_message: string) => void = fmt.log.plain) {
-  if (reason.kind === 'gate-failure') {
+  if (reason.kind === 'gate-failure' || reason.kind === 'review-preparation-verification') {
     const fallback = legacyFailureReason(reason.failureReason);
-    if (fallback) { log(`Failure classification: legacy fallback (${fallback}); command=${reason.command}`); }
+    if (fallback) { log(`Failure classification: fail-closed fallback (${fallback}); kind=${reason.kind}`); }
   }
   return classify(reason);
 }

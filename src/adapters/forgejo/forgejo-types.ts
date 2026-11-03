@@ -64,6 +64,7 @@ export type ForgejoReviewComment = ForgejoIssueComment & {
 
 /** Result envelope shared by the synchronous (curl) and asynchronous transports. */
 export type ForgejoApiResult<T = unknown> = {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
   ok: boolean;
   data: T | null;
   status: number | null;

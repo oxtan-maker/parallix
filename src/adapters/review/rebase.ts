@@ -223,12 +223,13 @@ function preReviewRebaseOutcome(slug: string, observed: PreReviewRebaseObservati
   error(fmt.status('FAIL', `Rebase failed before launching reviewer for ${fmt.branch(`mission/${slug}`)}.`));
   return {
     ok: false, sharedFileConflicts: false, hookFailure: false,
-    failure: { kind: 'other', operation: 'rebase', output: observed.failureOutput ?? `rebase workflow exited with status ${finalExitCode}` },
+    failure: { kind: 'other', operation: 'rebase', failureReason: observed.failureReason, output: observed.failureOutput ?? `rebase workflow exited with status ${finalExitCode}` },
   };
 }
 
 interface PreReviewRebaseObservations {
   failureOutput: string | null;
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
   exitCode: number | null; hookEvidence: PreReviewRebaseHookEvidence | null; hookBounceRequests: number;
   pushFailureOutput: string | null; publicationAttempted: boolean; pushGate: PreReviewRebaseGateEvidence | null;
   credentialFailure: string | null; conflictClassification: MissionConflictClassification | null;
@@ -238,7 +239,7 @@ function observePreReviewRebase(port: RebaseWorkflowPort, observed: PreReviewReb
   // factory, so they hold for any port implementation the caller supplies.
   const innerOnFailure = port.onFailure;
   port.onFailure = failure => {
-    observed.failureOutput = failure.output;
+    observed.failureOutput = failure.output; observed.failureReason = failure.failureReason;
     innerOnFailure?.(failure);
   };
   port.cwd = () => worktree;

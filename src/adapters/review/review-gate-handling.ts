@@ -1,3 +1,4 @@
+import { failureReasonFromCause } from '../../domain/failure-reason.js';
 import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
 import { usesAdmittedVerification } from '../config/product-config.js';
 import { runConfiguredVerification } from '../verification/configured-verification.js';
@@ -12,7 +13,6 @@ import { runConfiguredVerification } from '../verification/configured-verificati
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { GateFailureReason, HookFailureReason } from '../../application/rebound-kernel.js';
-import { classifyHookFailure } from '../../application/hook-failure-workflow.js';
 import { isOutputLimitFailure, runToExit, type CommandRunner } from '../git/git.js';
 import { findMissionDir, findMissionArea } from '../filesystem/mission-utils.js';
 import { formatVerificationCommand, isTransientVerificationFailure, resolveEffectiveArea } from '../verification/verification.js';
@@ -133,7 +133,7 @@ async function runGateCaptured(area: string, worktree: string, command: string, 
     });
   } catch (error) {
     if (!isOutputLimitFailure(error)) { throw error; }
-    return { status: null, signal: null, stdout: '', stderr: error.message };
+    return { status: null, signal: null, stdout: '', stderr: error.message, failureReason: failureReasonFromCause(error, 'process') };
   }
 }
 
@@ -162,10 +162,10 @@ export function gateFailureReason(gateResult: PreReviewGateResult): GateFailureR
  * on this branch's base, so the pre-review rebase still returns text output;
  * the kernel's own classification never re-derives the failure kind from it.
  */
-export function hookFailureReason(hookOutput: string, operation: string): HookFailureReason {
+export function hookFailureReason(hookOutput: string, operation: string, hook: string | null = null): HookFailureReason {
   return {
     kind: 'hook-failure',
-    hook: classifyHookFailure(hookOutput).hookType,
+    hook,
     operation,
     output: hookOutput,
   };

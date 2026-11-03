@@ -20,5 +20,5 @@ export interface RebaseContext {
 export const combineOutput = (result: GitCommandResult) =>
   [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
 export const continueSucceeded = (result: GitCommandResult) =>
-  result.status === 0 || /up to date|Already up to date/i.test((result.stdout || '') + (result.stderr || ''));
-export const hasConflictMarkers = (output: string) => /CONFLICT|KONFLIKT/i.test(output);
+  result.status === 0;
+export const hasConflictMarkers = (result: GitCommandResult) => result.failureReason?.code === 'git-conflict';

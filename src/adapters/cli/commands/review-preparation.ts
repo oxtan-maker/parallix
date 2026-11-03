@@ -1,3 +1,4 @@
+import { StructuredFailure, failureReasonFromCause } from '../../../domain/failure-reason.js';
 import { resolveVerificationResource, usesAdmittedVerification } from '../../config/product-config.js';
 import { assertIndependentGateInvocation } from '../../../application/ports/gate-admission.js';
 import { runConfiguredVerification } from '../../verification/configured-verification.js';
@@ -44,13 +45,19 @@ import {
 import type { CaptureNelOptions, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions, ReviewPreparationMissionServicesPort } from "../../../application/ports/review-preparation-workflow.js";
 import { recordImplementerLaunch } from '../../../application/rebase-identity.js';
 
+function filesystemOperation<T>(operation: () => T): T {
+  try { return operation(); } catch (cause) {
+    throw new StructuredFailure(cause instanceof Error ? cause.message : String(cause), failureReasonFromCause(cause, 'filesystem'), cause);
+  }
+}
+
 function createReviewPreparationFileSystemPorts(): ReviewPreparationWorkflowPorts['fileSystem'] {
   return {
     existsSync: (target) => fs.existsSync(target),
-    readText: (target) => fs.readFileSync(target, 'utf8'),
+    readText: (target) => filesystemOperation(() => fs.readFileSync(target, 'utf8')),
     writeText: (target, content) => fs.writeFileSync(target, content, 'utf8'),
-    listNames: (target) => fs.readdirSync(target),
-    listEntries: (target) => fs.readdirSync(target, { withFileTypes: true }),
+    listNames: (target) => filesystemOperation(() => fs.readdirSync(target)),
+    listEntries: (target) => filesystemOperation(() => fs.readdirSync(target, { withFileTypes: true })),
   };
 }
 

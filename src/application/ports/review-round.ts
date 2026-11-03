@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { OperatorReviewSource, ReviewDisposition, ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
 /**
  * Mechanism ports for the application-owned autonomous review loop.
@@ -290,6 +291,7 @@ export interface ReviewAgentPort {
  * ------------------------------------------------------------------ */
 
 export interface ReviewerArtifactFacts {
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly consumed: boolean;
   readonly ok?: boolean;
   readonly diagnostic?: string | null;
@@ -298,6 +300,7 @@ export interface ReviewerArtifactFacts {
 }
 
 export interface ImplementerArtifactFacts {
+  readonly failureReason?: import('../../domain/failure-reason.js').FailureReason;
   readonly consumed: boolean;
   readonly ok?: boolean;
   readonly diagnostic?: string | null;
@@ -311,13 +314,9 @@ export interface ReviewArtifactPort {
   consumeImplementer(_implementer: string, _state?: ReviewLoopState): Promise<ImplementerArtifactFacts>;
 }
 
-/**
- * Artifact consumers mark downstream provider/storage failures with "post
- * failed" or "persist failed": an infrastructure blocker no relaunch can fix.
- */
-export function isArtifactInfraDiagnostic(diagnostic: string | undefined | null): boolean {
-  if (!diagnostic) { return false; }
-  return diagnostic.includes('post failed') || diagnostic.includes('persist failed');
+/** A downstream publication/storage rejection is an explicit producer fact. */
+export function isArtifactInfraFailure(reason: unknown): boolean {
+  return recognizedFailureReason(reason)?.code === 'infrastructure';
 }
 
 /* ------------------------------------------------------------------ *

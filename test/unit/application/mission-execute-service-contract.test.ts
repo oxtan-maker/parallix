@@ -55,7 +55,6 @@ function strictPorts(overrides: Parameters<typeof makeExecutePorts>[0] = {}) {
     reviewPreparationExecution: {
       async run(request: { agent: string }) { calls.push(`review-preparation:${request.agent}`); return { ok: true as const }; },
       async repairHygiene() { return { repaired: false }; },
-      classifyFailure() { return null; },
     },
     autonomousReview: { async start() {} },
     repairLaunch: {
@@ -115,8 +114,8 @@ test("execute mission use case activates before launch, then records telemetry a
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
-    'load', 'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
-    'launch:codex', 'load', 'safety', 'telemetry:codex', 'load', 'load', 'synchronize', 'checkpoints', "review-preparation:codex",
+    'load', 'load', 'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
+    'launch:codex', 'load', 'safety', 'telemetry:codex', 'load', 'load', 'load', 'synchronize', 'checkpoints', "review-preparation:codex",
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(work.filter((entry) => entry.phase === 'review'), [
@@ -133,8 +132,6 @@ test("execute mission use case sequences typed checkpoint, review preparation, a
     reviewPreparationExecution: {
       async run() { calls.push("typed-review preparation"); return { ok: true as const }; },
       async repairHygiene() { throw new Error('unexpected hygiene repair'); },
-      classifyFailure() { return null; },
-      isRelaunchableFailure() { return false; },
     },
     autonomousReview: {
       async start() { calls.push('review'); },
@@ -162,11 +159,9 @@ test("execute mission use case hands the explicit reviewer to review and to ever
     reviewPreparationExecution: {
       async run(reviewPreparation: { reviewer?: string; force?: boolean }) {
         reviewPreparations.push({ reviewer: reviewPreparation.reviewer, force: reviewPreparation.force });
-        return reviewPreparations.length === 1 ? { ok: false, error: 'dirty worktree' } : { ok: true };
+        return reviewPreparations.length === 1 ? { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'dirty worktree' } : { ok: true };
       },
       async repairHygiene() { return { repaired: true }; },
-      classifyFailure() { return null; },
-      isRelaunchableFailure() { return false; },
     },
     autonomousReview: { async start(review: { implementer: string; reviewer?: string }) { reviews.push(review); } },
   });
@@ -221,8 +216,6 @@ test("execute mission use case reports a refused review preparation as an execut
     reviewPreparationExecution: {
       async run() { return { ok: false as const }; },
       async repairHygiene() { return { repaired: false }; },
-      classifyFailure() { return null; },
-      isRelaunchableFailure() { return false; },
     },
   });
   const outcome = await new ExecuteMissionService(ports).execute(request());
@@ -347,7 +340,7 @@ for (const callback of [true, false]) {
     let actual = 'codex';
     const service = new ExecuteReviewPreparationService({
       checkpoints: { validateBeforeReviewPreparation: async () => ++checks === 1
-        ? { ok: false, error: "Planned checkpoint evidence is missing before review preparation: CP-2.", nextCheckpoint: 'CP-2' }
+        ? { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false, error: "Planned checkpoint evidence is missing before review preparation: CP-2.", nextCheckpoint: 'CP-2' }
         : { ok: actual === 'custom', error: 'actual repair identity was not recorded' } },
       repairLaunch: { ...ports.repairLaunch, launch: async request => {
         if (callback) { await request.onAgentChanged?.('custom'); assert.equal(actual, 'custom'); }
@@ -393,7 +386,7 @@ test("review preparation typed contract blocker stops hygiene and evidence repai
   const { ports } = strictPorts();
   let repairs = 0;
   const service = new ExecuteReviewPreparationService({ checkpoints: ports.checkpointValidation,
-    reviewPreparation: { ...ports.reviewPreparationExecution, run: async () => ({ ok: false, reason: 'human-only-contract-blocker', error: 'Invalid locked contract requires human review' }),
+    reviewPreparation: { ...ports.reviewPreparationExecution, run: async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, reason: 'human-only-contract-blocker', error: 'Invalid locked contract requires human review' }),
       repairHygiene: async () => { repairs++; return { repaired: true }; } },
     review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { repairs++; return undefined; } }, output: ports.output });
   assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null }), false);
@@ -407,9 +400,9 @@ test("a contract blocker discovered during review preparation retry stops furthe
   const stops: string[] = [];
   const service = new ExecuteReviewPreparationService({ checkpoints: ports.checkpointValidation,
     reviewPreparation: { ...ports.reviewPreparationExecution, run: async () => ++reviewPreparations === 1
-      ? { ok: false, error: 'Missing evidence; run `px checkpoint record`' }
-      : { ok: false, reason: 'human-only-contract-blocker', error: 'Recorded contract requires operator decision' },
-      classifyFailure: () => ({ failureClass: 'IncompleteEvidence', dispatchAction: 'AutoSendBack' }) },
+      ? { failureReason: { version: 1, code: 'incomplete-evidence', source: 'review-preparation' }, ok: false, error: 'Missing evidence; run `px checkpoint record`' }
+      : { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, reason: 'human-only-contract-blocker', error: 'Recorded contract requires operator decision' },
+       },
     review: ports.autonomousReview, repairLaunch: { ...ports.repairLaunch, launch: async () => { launches++; return { result: { status: 0 } } as never; } }, output: ports.output });
   assert.equal(await service.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex', taskFile: null, onAutonomousStop: async reason => { stops.push(reason); } }), false);
   assert.deepEqual(stops, ['Recorded contract requires operator decision']);
@@ -426,12 +419,12 @@ test("execute review preparation preserves gate-to-conflict cause and actual ear
     reviewPreparation: { ...ports.reviewPreparationExecution,
       run: async () => {
         calls++;
-        if (calls === 1) { return { ok: false, error: 'gate failed', gateFailure: {
+        if (calls === 1) { return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'gate failed', gateFailure: {
           kind: 'gate-failure', area: 'unit', command: 'npm test', exitCode: 1, stdout: 'original assertion', stderr: '' } }; }
-        if (calls === 2) { return { ok: false, error: 'shared conflict', recoveryFailure: {
+        if (calls === 2) { return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, error: 'shared conflict', recoveryFailure: {
           kind: 'rebase-conflict', files: ['shared.ts'], diagnostic: 'shared conflict after repaired gate' } }; }
-        return { ok: false, recoveryFailure: { kind: "review-preparation-verification", error: 'connection refused' }, error: 'connection refused' };
-      }, classifyFailure: () => ({ failureClass: 'GateFailure', dispatchAction: 'AutoSendBack' }),
+        return { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, ok: false, recoveryFailure: { failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, kind: "review-preparation-verification", error: 'connection refused' }, error: 'connection refused' };
+      },
       repairHygiene: async () => assert.fail('structured conflicts use semantic resolver') },
     review: ports.autonomousReview,
     repairLaunch: { ...ports.repairLaunch, launch: async request => {

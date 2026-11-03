@@ -1,3 +1,5 @@
+import { pendingIntegrationApproval } from '../domain/integration-repair-policy.js';
+import { failureReason, failureReasonFromCause } from '../domain/failure-reason.js';
 import { beginReviewPreparation, recordReviewPreparationFailure } from "./review-submission-service.js";
 import { ExecutionStartService } from './execution-start-service.js';
 import { assertWorkflowControl, authorizedExecutionStart, reportWorkflowProviderStarted } from './ports/mission-write-authorization.js';
@@ -93,6 +95,8 @@ export class ExecuteMissionService {
     let agentStarted = false;
     try {
       await this.prepareOperatorResume(request);
+      const resumed = await this.resumeIntegrationRepair(request);
+      if (resumed) { return resumed; }
       const selectedAgent = await this.resolveAgent(request);
       if (!selectedAgent) { throw new Error('Could not select an execute agent.'); }
       activation = await this.synchronizeLifecycle(request.slug, selectedAgent, request.operationId);
@@ -123,11 +127,16 @@ export class ExecuteMissionService {
         slug: request.slug,
         worktree: prepared.worktree,
         agent: launch.agent,
+        continueIntegrationRepair: async () => {
+          const resumed = await this.resumeIntegrationRepair(request);
+          if (resumed && resumed.status !== 'completed') { preparationFailure = resumed.error?.message ?? 'Integration repair retention stopped'; await reviewPublisher.onAutonomousStop(preparationFailure); }
+          return resumed ? resumed.status === 'completed' : null;
+        },
         beginReviewPreparation: async () => { await beginReviewPreparation(request.slug, { store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions) }); },
         prepareImplementationRepair: (diagnostic: string, reason?: import('../domain/rebound-policy.js').ReboundReason) => recordReviewPreparationFailure(request.slug, diagnostic, {
           store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions),
           checkpoints: new MissionCheckpointService(this._ports.missionTransitions),
-        }, reason),
+        }, reason ?? { kind: 'review-preparation-verification', error: diagnostic, failureReason: failureReason('unexpected', 'review-preparation') }),
         reviewer: request.reviewer,
         taskFile: prepared.taskResolution.ok ? prepared.taskResolution.taskFile ?? null : null,
         onImplementerLaunched: async (agent: string) => {
@@ -154,6 +163,20 @@ export class ExecuteMissionService {
     } catch (error) {
       return this.failedExecution(request, error, activation, activationAgent, agentStarted);
     }
+  }
+
+  private async resumeIntegrationRepair(request: ExecuteMissionRequest): Promise<ApplicationOutcome<ExecuteMissionResult> | null> {
+    const loaded = await this._ports.missionTransitions.load(missionId(request.slug));
+    if (loaded.kind !== 'found' || !pendingIntegrationApproval(loaded.mission)) { return null; }
+    if (!this._ports.integrationRepair) { return failure('unavailable', 'Integration repair certification is unavailable; resume with px integrate before review submission.', [], failureReason('approval-retention-pending', 'lifecycle')); }
+    const outcome = await this._ports.integrationRepair.resume(request.slug);
+    if (outcome === 'retained') {
+      this._ports.output.log(`Original approval retained for ${request.slug}; human px integrate ${request.slug} is required to land.`);
+      return { status: 'completed', value: { agent: loaded.mission.assignee ?? 'workflow' }, durableEvidence: [{ id: `${request.slug}:approval-retention`, source: 'mission-store', detail: 'Existing integration repair certification and approval retention completed; no agent launched' }] };
+    }
+    return failure('validation', outcome === 'changed'
+      ? `Integration repair changed the approved patch; resume px review ${request.slug}.`
+      : `Integration repair retention remains unproven; resume certification with px integrate ${request.slug}.`, [], failureReason('approval-retention-pending', 'lifecycle', { outcome }));
   }
 
   private async resolveAgent(request: ExecuteMissionRequest): Promise<string | null | undefined> {
@@ -208,7 +231,7 @@ export class ExecuteMissionService {
     // it still could not finish, the run is not "running slowly" — the board
     // must stop showing it as working and say why an operator is needed.
     await this.blockWork(request, message);
-    return error instanceof WorkspaceRefusal ? rejected('validation', message) : failure('execution', message);
+    return error instanceof WorkspaceRefusal ? rejected('validation', message) : failure('execution', message, [], failureReasonFromCause(error, 'review-preparation'));
   }
 
   /**

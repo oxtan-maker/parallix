@@ -81,14 +81,13 @@ export function makeExecutePorts(overrides: ExecuteOverrides = {}) {
         return { ok: true as const };
       },
       async repairHygiene() { return { repaired: false }; },
-      classifyFailure() { return null; },
-      isRelaunchableFailure() { return false; },
     },
     autonomousReview: { async start() {} },
     repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } },
     output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
   };
   const ports: ExecuteMissionPorts = {
+    ...(overrides.integrationRepair?.resume ? { integrationRepair: { resume: overrides.integrationRepair.resume } } : {}),
     workspace: mergeFixturePort(base.workspace, overrides.workspace),
     agentExecution: mergeFixturePort(base.agentExecution, overrides.agentExecution),
     missionTransitions: mergeFixturePort(base.missionTransitions, overrides.missionTransitions),

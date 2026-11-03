@@ -44,12 +44,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       );
       return true;
     } catch (error: unknown) {
-      // SQLite exposes uniqueness only through its driver diagnostic. This is
-      // adapter-owned parsing; callers receive the boolean port result.
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes('UNIQUE constraint failed')) {
-        return false;
-      }
+      if ((error as { errcode?: number })?.errcode === 2067) { return false; }
       throw error;
     }
   }

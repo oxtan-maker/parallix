@@ -254,10 +254,10 @@ describe("review ref force push", () => {
               firstRebaseStarted = true;
               unmergedFiles = ['missions/task-1049/file.md'];
               // First call starts rebase and hits conflict
-              return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in missions/task-1049/file.md', stderr: '' };
+              return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in missions/task-1049/file.md', stderr: '' };
             }
             // Recursive call: git rebase main reports "already in progress"
-            return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
+            return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
           }
           if (args.includes('--continue')) {
              stagedSets.push([...staged]); staged = [];
@@ -266,7 +266,7 @@ describe("review ref force push", () => {
              if (rebaseAttempts === 1) {
                unmergedFiles = ['missions/task-1049/some-file.js'];
                // First continue: report another conflict to trigger recursion
-               return { signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in missions/task-1049/some-file.js', stderr: '' };
+               return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: 'CONFLICT (content): Merge conflict in missions/task-1049/some-file.js', stderr: '' };
              }
              // Second continue: success
              return { signal: null,  status: 0, stdout: '', stderr: '' };
@@ -311,7 +311,7 @@ describe("review ref force push", () => {
       gitFn: (args) => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
         if (args.includes('rebase')) {
-          if (args.includes('main')) return { signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
+          if (args.includes('main')) return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: 'CONFLICT', stderr: '' };
         }
         return { signal: null,  status: 0, stdout: '', stderr: '' };
       },
@@ -379,7 +379,7 @@ describe("review ref force push", () => {
       if (args.includes('push') && args.includes(branch)) {
         pushCallCount++;
         if (args.includes('--force') && !args.includes('--force-with-lease')) sawForcePush = true;
-        return { signal: null,  status: 1, stdout: '', stderr: 'error: failed to push some refs stale info' };
+        return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: 'error: failed to push some refs stale info' };
       }
       if (args.includes('fetch')) return { signal: null, stderr: '',  status: 0, stdout: '' };
       return { signal: null, stderr: '',  status: 0, stdout: '' };
@@ -454,7 +454,7 @@ describe("syncMerged hardening", () => {
         }
         if (pushCalls.length === 2) {
           // Second push: mission branch (FAIL - stale)
-          return { signal: null, 
+          return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null,
             status: 1,
             stdout: '',
             stderr: 'error: failed to push some refs to ... stale info'
@@ -462,7 +462,7 @@ describe("syncMerged hardening", () => {
         }
         if (pushCalls.length === 3) {
           // Third push: mission branch retry after fetch (FAIL - still stale)
-          return { signal: null, 
+          return { failureReason: { version: 1, code: 'git-behind', source: 'git' }, signal: null,
             status: 1,
             stdout: '',
             stderr: 'error: failed to push some refs to ... fetch first'

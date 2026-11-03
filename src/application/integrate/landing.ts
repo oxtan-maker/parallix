@@ -130,6 +130,8 @@ class MissionLanding {
       return false;
     }
     const dryMerge = this.dependencies.git(['-C', baseWorktree, 'merge', '--no-commit', '--no-ff', branch]);
+    const unmerged = dryMerge.status === 0 ? null : this.dependencies.git(['-C', baseWorktree, 'diff', '--name-only', '--diff-filter=U', '-z']);
+    const conflictFiles = unmerged?.status === 0 ? [...new Set(unmerged.stdout.split('\0').filter(Boolean))] : [];
     const abortResult = this.dependencies.git(['-C', baseWorktree, 'merge', '--abort']);
     // When the probe was clean, a failed abort may leave the base in a dirty merge state.
     let abortFailed = abortResult.status !== 0 && !this.dependencies.landing.isNoMergeToAbortResult(abortResult);
@@ -142,8 +144,6 @@ class MissionLanding {
 
     // Classify conflicts BEFORE deciding on abort failure, so backlog-only
     // classification can rescue an unabortable merge.
-    const conflictOutput = [dryMerge.stdout, dryMerge.stderr].filter(Boolean).join('\n');
-    const conflictFiles = this.dependencies.missionPaths.parseConflictFilesFromMergeOutput(conflictOutput);
     if (this.dependencies.checkout.areAllBacklogOnlyConflicts(conflictFiles) && conflictFiles.length > 0) {
       fmt.log.info('Backlog-only conflicts detected — refreshing base branch and retrying probe merge...');
       const retry = this.retryProbeAfterBaseRefresh(run, branch, abortFailed);

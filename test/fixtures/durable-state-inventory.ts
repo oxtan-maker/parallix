@@ -1378,13 +1378,6 @@ export interface MissionDocumentCallSiteEntry {
  */
 export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[] = [
   {
-    id: "mission-doc-call-execute-review preparation",
-    fileLocation: 'src/application/execute-review-preparation-service.ts',
-    purpose: 'describe legacy checkpoint evidence repair paths without persisting Mission state',
-    pathPatterns: ['missions/', 'MISSION.md'],
-    classification: 'mission-document-evidence',
-  },
-  {
     id: "mission-doc-call-review preparation",
     fileLocation: 'src/application/review-preparation-executor.ts',
     purpose: "resolve the mission document path for review preparation orchestration; delegate contract and checkpoint validation to ReviewPreparationContractVerifier",

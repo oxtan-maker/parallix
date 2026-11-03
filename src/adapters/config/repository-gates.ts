@@ -1,3 +1,4 @@
+import { failureReasonFromCause } from '../../domain/failure-reason.js';
 import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
 import { normalizeGates, validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 export { validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
@@ -362,7 +363,7 @@ class PhaseGateExecution {
         }
         return { key: gate.key, command: gate.command, exitCode, signal: result.signal ?? null, failureReason: gateFailureReasonFromProcess(result), stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
       })
-      .catch(cause => ({ failureReason: gateFailureReasonFromProcess({ status: null, stderr: String(cause) }), key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
+      .catch(cause => ({ failureReason: failureReasonFromCause(cause, 'process'), key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
     return run;
   }
 

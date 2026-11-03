@@ -314,7 +314,7 @@ describe("rebase hardening", () => {
       gitFn: (args, opts) => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
         if (args[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
-        if (args.includes('rebase') && args.includes('main')) return { signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' };
+        if (args.includes('rebase') && args.includes('main')) return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' };
         if (args[0] === 'checkout') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args[0] === 'add') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('--continue')) {
@@ -424,7 +424,7 @@ describe("rebase diagnostics", () => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
         if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('main')) {
-          return { signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed\nAborting rebase' };
+          return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: pre-commit hook failed\nAborting rebase' };
         }
         return { signal: null, stderr: '',  status: 0, stdout: '' };
       },
@@ -464,11 +464,11 @@ describe("rebase diagnostics", () => {
       gitFn: (args, opts) => {
         if (args.includes('branch') && args.includes('--list')) return { signal: null, stderr: '',  status: 0, stdout: 'main\n' };
         if (gitSubcommandArgs(args)[0] === 'fetch') return { signal: null, stdout: '', stderr: '',  status: 0 };
-        if (args.includes('rebase') && args.includes('main')) { rebasing = true; return { signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' }; }
+        if (args.includes('rebase') && args.includes('main')) { rebasing = true; return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null, stdout: '',  status: 1, stderr: 'CONFLICT' }; }
         if (gitSubcommandArgs(args)[0] === 'checkout') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (gitSubcommandArgs(args)[0] === 'add') return { signal: null, stdout: '', stderr: '',  status: 0 };
         if (args.includes('rebase') && args.includes('--continue')) {
-          return { signal: null,  status: 1, stdout: '', stderr: 'error: another hook failed' };
+          return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'error: another hook failed' };
         }
         if (gitSubcommandArgs(args)[0] === 'status' && gitSubcommandArgs(args)[1] === '--porcelain') return { signal: null, stderr: '',  status: 0, stdout: 'M  file.js' };
         return { signal: null, stderr: '',  status: 0, stdout: '' };

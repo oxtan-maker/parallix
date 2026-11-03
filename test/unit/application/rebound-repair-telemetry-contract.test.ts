@@ -53,7 +53,7 @@ test('TASK-2653: a first-attempt pass records one fresh rescue row with agent, p
 test('TASK-2653: fresh advance then fresh rescue share one occurrence with fresh strategy and context on both attempts', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
-  const results = [{ ok: false, diagnostic: 'still failing' }, { ok: true }];
+  const results = [{  ok: false, diagnostic: 'still failing' }, { ok: true }];
   await rebound(gateReason, contextFor(() => results.shift()!));
   const [first, second] = rows.map((row) => JSON.parse(row.eventData));
   assert.equal(rows.length, 2);
@@ -66,7 +66,7 @@ test('TASK-2653: fresh advance then fresh rescue share one occurrence with fresh
 test('TASK-2653: an exhausted budget records escalate on the last attempt, one row per attempt', async () => {
   const rows: OperationalHistoryEntry[] = [];
   bind(async (entry) => { rows.push(entry); });
-  const outcome = await rebound(gateReason, contextFor(() => ({ ok: false as const, diagnostic: 'nope' })));
+  const outcome = await rebound(gateReason, contextFor(() => ({  ok: false as const, diagnostic: 'nope' })));
   assert.equal(outcome.outcome, 'exhausted');
   assert.deepEqual(rows.map((row) => JSON.parse(row.eventData).outcome), ['advance', 'escalate']);
 });
@@ -101,7 +101,7 @@ test('owned workflow records final recovery accounting without inferring exhaust
   try {
     for (const [expected, verify, reason] of [
       ['fixed', () => ({ ok: true }), gateReason],
-      ['exhausted', () => ({ ok: false, diagnostic: 'still failing' }), gateReason],
+      ['exhausted', () => ({  ok: false, diagnostic: 'still failing' }), gateReason],
       ['human-only', () => ({ ok: false }), { ...gateReason, invalidContract: { command: 'verify', diagnostic: 'invalid contract', authorityReason: 'locked gate', proposedCorrection: 'operator decision' } }],
     ] as const) {
       const result = await rebound(reason, contextFor(verify));

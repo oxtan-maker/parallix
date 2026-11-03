@@ -120,7 +120,7 @@ test('a pre-review gate whose output exceeds the capture limit fails closed inst
     assert.equal(result.ok, false, 'a gate stream that cannot be captured is never a pass');
     assert.equal(result.exitCode, null, 'no exit code is claimed for an uncapturable stream');
     assert.match(result.stderr, /bash produced more output than its 10485760 byte capture limit allows/);
-    assert.equal(result.failureReason?.code, 'gate-failed');
+    assert.equal(result.failureReason?.code, 'resource-exhausted');
   } finally {
     if (priorHome === undefined) delete process.env.PARALLIX_HOME;
     else process.env.PARALLIX_HOME = priorHome;

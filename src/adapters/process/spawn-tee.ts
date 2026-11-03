@@ -1,3 +1,4 @@
+import { normalizeProviderFailure } from './failure-normalization.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import childProcess from 'node:child_process';
@@ -13,6 +14,7 @@ export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
 type ChunkType = Buffer | string;
 
 interface SpawnTeeResult {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
   status: number | null;
   signal: string | null;
   stdout: string;
@@ -287,7 +289,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       supervisor.clear();
       payload.startedAt = new Date(startTime).toISOString();
       payload.endedAt = new Date().toISOString();
-      resolve(payload as SpawnTeeResult);
+      resolve({ ...payload, failureReason: normalizeProviderFailure(payload as SpawnTeeResult) } as SpawnTeeResult);
     };
 
     child.stdout?.on('data', (chunk: Buffer) => forwardOutput(chunk, 'stdout', stdoutTail, stdoutSink, supervisor, capture));

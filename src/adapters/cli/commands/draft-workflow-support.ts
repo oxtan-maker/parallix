@@ -163,7 +163,7 @@ export async function recordDraftRefinement(ctx: DraftWorkflowContext): Promise<
     });
     if (result.status === 'completed') { return { ok: true }; }
     const message = result.error?.message || 'unknown error';
-    return { ok: false, contractIncomplete: result.error?.kind === 'validation' && /mission contract is incomplete/.test(message), message };
+    return { ok: false, contractIncomplete: result.error?.failureReason?.code === 'mission-contract-incomplete', message };
   } catch (error) {
     return { ok: false, contractIncomplete: false, message: (error instanceof Error ? error.message : String(error)) };
   }

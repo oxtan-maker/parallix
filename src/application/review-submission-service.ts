@@ -1,7 +1,7 @@
+import { failureReason, StructuredFailure } from '../domain/failure-reason.js';
 import { integrationRepairNeedsReview } from '../domain/integration-repair-policy.js';
 import { classifyReboundReason, type ReboundReason } from '../domain/rebound-policy.js';
 import { isReviewerPoolExhausted } from '../domain/reviewer-assignment-policy.js';
-import { classifyError } from '../domain/failure-classification.js';
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
 import type { ReviewPreparationMissionServices } from "./ports/review-preparation-workflow.js";
 /**
@@ -130,7 +130,7 @@ export class ReviewSubmissionService {
     if (!reviewHeadSha) {
       const msg = `Cannot capture the HEAD commit for ${slug}; repair the Git checkout and retry review preparation before starting review.`;
       error(msg);
-      return { ok: false, error: msg };
+      return { ok: false, error: msg, failureReason: failureReason('state-machine', 'lifecycle') };
     }
     // A mission that already carries a Review is handing back a later round of
     // the same change, not starting a new review. Restarting it would submit
@@ -147,7 +147,7 @@ export class ReviewSubmissionService {
     if (reviewForReviewPreparation && reviewStatus(reviewForReviewPreparation) === 'awaiting-implementation') {
       const msg = `Review findings for ${slug} are awaiting an implementer resolution; record the actual finding dispositions before starting the next round.`;
       error(msg);
-      return { ok: false, error: msg };
+      return { ok: false, error: msg, failureReason: failureReason('state-machine', 'lifecycle') };
     }
     let review = reviewSubmissionRound(reviewForReviewPreparation, { reviewer, implementer, reviewerEligibility }, context, targetBranch, reviewHeadSha);
     // Repair invalidation has already opened an undecided round. Bind it to
@@ -174,7 +174,8 @@ export class ReviewSubmissionService {
     if (transitionResult.status !== 'completed') {
       const msg = `Mission state transition failed: ${transitionResult.error?.message || 'unknown'}.`;
       error(msg);
-      return { ok: false, error: msg };
+      const reason = transitionResult.error?.failureReason ?? failureReason('state-machine', 'lifecycle', { operation: 'submit-for-review' });
+      return { ok: false, error: msg, failureReason: reason, recoveryFailure: { kind: 'review-preparation-verification', error: msg, failureReason: reason } };
     }
     return null;
   }
@@ -191,12 +192,12 @@ export async function beginReviewPreparation(slug: string, services: Pick<Review
     actor: loaded.mission.assignee ?? 'review', occurredAt: new Date().toISOString(),
     idempotencyKey: `review-preparation:${slug}:${loaded.version}`,
   });
-  if (result.status !== 'completed') { throw new Error(result.error?.message ?? 'Cannot enter review preparation'); }
+  if (result.status !== 'completed') { throw new StructuredFailure(result.error?.message ?? 'Cannot enter review preparation', result.error?.failureReason ?? failureReason('state-machine', 'lifecycle', { operation: 'begin-review-preparation' })); }
 }
 
 /** Reuse the planned checkpoint owner for concrete implementation/evidence repairs. */
-export async function recordReviewPreparationFailure(slug: string, diagnostic: string, services: Pick<ReviewPreparationMissionServices, 'store' | 'lifecycle' | 'checkpoints'>, reason?: ReboundReason): Promise<void> {
-  const action = reason ? classifyReboundReason(reason).dispatchAction : classifyError(diagnostic).dispatchAction;
+export async function recordReviewPreparationFailure(slug: string, diagnostic: string, services: Pick<ReviewPreparationMissionServices, 'store' | 'lifecycle' | 'checkpoints'>, reason: ReboundReason): Promise<void> {
+  const action = classifyReboundReason(reason).dispatchAction;
   if (action !== 'AutoSendBack') { return; }
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found' || !loaded.mission.assignee) { return; }
@@ -257,7 +258,7 @@ async function recordLegacyReviewPreparationCheckpoint(slug: string, checkpoint:
     if (checkpointOutcome.status !== 'completed') {
       const msg = `Recording checkpoint ${checkpointName} failed: ${checkpointOutcome.error?.message || 'unknown'}.`;
       error(msg);
-      return { ok: false, error: msg };
+      return { ok: false, error: msg, failureReason: failureReason('state-machine', 'lifecycle') };
     }
   }
 

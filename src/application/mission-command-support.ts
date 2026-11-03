@@ -99,7 +99,7 @@ export function writeFailure<T>(
     return failure('conflict', describe(error, 'stale mission write refused'), durableEvidence);
   }
   if (error instanceof MissionRuleViolation) {
-    return failure('validation', error.message, durableEvidence);
+    return failure('validation', error.message, durableEvidence, error.failureReason);
   }
   return failure('execution', describe(error, 'mission write failed'), durableEvidence);
 }
@@ -107,10 +107,10 @@ export function writeFailure<T>(
 /** Domain rule violations are validation failures, not infrastructure faults. */
 export function decisionFailure<T>(error: unknown): ApplicationOutcome<T> {
   if (error instanceof MissionRuleViolation) {
-    return failure('validation', error.message);
+    return failure('validation', error.message, [], error instanceof MissionRuleViolation ? error.failureReason : undefined);
   }
   if (error instanceof Error) {
-    return failure('validation', error.message);
+    return failure('validation', error.message, [], error instanceof MissionRuleViolation ? error.failureReason : undefined);
   }
   return failure('execution', 'mission decision failed');
 }

@@ -1,3 +1,4 @@
+import { failureReasonFromCause, recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { PiSdk, PiSessionFactory, PiSessionOptions, PiModelRegistry, PiModelRegistryConstructor, PiStats, PiSession, PiStreamEvent, PiMessage } from './pi-sdk-types.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
@@ -43,33 +44,9 @@ function __setSdkForTest(sdk: PiSdk | null) { _sdk = sdk || null; }
 // Legacy test hook retained for backward compatibility (pi.ts no longer uses file-based sessions).
 function __setSessionsForTest(_mod: unknown) { /* no-op: pi.ts uses SessionMarkerPort */ }
 
-// Transient failures that Pi may surface - similar to opencode patterns
-const TRANSIENT_PI_PATTERNS = [
-  /\bECONNRESET\b/i,
-  /\bECONNREFUSED\b/i,
-  /\bETIMEDOUT\b/i,
-  /\bENETUNREACH\b/i,
-  /\bENOTFOUND\b/i,
-  /\bEAI_AGAIN\b/i,
-  /\bEPIPE\b/i,
-  /socket hang ?up/i,
-  /fetch failed/i,
-  /network (?:error|timeout)/i,
-  /connection (?:error|reset|closed|refused|timed? ?out)/i,
-  /\b(?:502|503|504|529)\b/,
-  /\bbad gateway\b/i,
-  /\bservice (?:is )?unavailable\b/i,
-  /\bgateway time-?out\b/i,
-  /\b(?:server |api |model )?overloaded\b/i,
-  /\btemporarily unavailable\b/i,
-  /\bplease (?:try|retry) again\b/i,
-  /\bretry[- ]after\b/i,
-];
-
-function isTransientPiFailure(error: { stdout?: string; stderr?: string } | null) {
-  if (!error) { return false; }
-  const text = `${error.stdout || ''}\n${error.stderr || ''}`;
-  return TRANSIENT_PI_PATTERNS.some((re) => re.test(text));
+function isTransientPiFailure(error: { failureReason?: unknown; stdout?: string; stderr?: string } | null) {
+  const reason = recognizedFailureReason(error?.failureReason);
+  return reason?.code === 'provider-unavailable' || reason?.code === 'infrastructure' && reason.source === 'provider';
 }
 
 /** Extract telemetry from SDK session stats. */
@@ -184,6 +161,7 @@ function piResult(session: PiSession | null, state: PiRunState, error: unknown, 
   const stats = invocationStats(sessionValue(() => session?.getSessionStats?.(), {}), baseline);
   const modelId = session?.model?.id;
   return {
+    failureReason: piFailureReason(error),
     status: error ? (error as { exitCode?: number }).exitCode || 1 : 0,
     stdout: error ? state.assistantText : sessionValue(() => session?.getLastAssistantText?.(), '') || state.assistantText,
     stderr: error ? (error as { message?: string }).message || String(error) : '', error: error || null, signal: null,
@@ -308,3 +286,5 @@ export async function runPiSdk(request: {
 
 export function hasInjectedPiSdk(): boolean { return Boolean(_sdk || _createAgentSession); }
 export { isTransientPiFailure, __setCreateAgentSessionForTest, __setSdkForTest, __setSessionPortForTest, __setSessionsForTest };
+
+function piFailureReason(error: unknown) { return error ? failureReasonFromCause(error, 'provider') : undefined; }

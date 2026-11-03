@@ -378,7 +378,7 @@ describe("pre review gate", { concurrency: false }, () => {
   test('pre-review repair does not bounce for InfraBlocker (HumanOnly)', async () => {
     const { fake, context } = repairFixture();
 
-    const result = await repairPreReviewFailure(context, gateFailure({ command: 'node parallix verify docs', stdout: '', stderr: 'connection refused to forgejo server' }), 2);
+    const result = await repairPreReviewFailure(context, gateFailure({ failureReason: { version: 1, code: 'infrastructure' }, command: 'node parallix verify docs', stdout: '', stderr: 'connection refused to forgejo server' }), 2);
 
     assert.equal(result.bounced, false);
     assert.equal(result.outcome, 'human-only');
@@ -390,7 +390,7 @@ describe("pre review gate", { concurrency: false }, () => {
   test('pre-review repair does not bounce for StateMachineViolation (HumanOnly)', async () => {
     const { fake, context } = repairFixture();
 
-    const result = await repairPreReviewFailure(context, gateFailure({ command: 'node parallix verify docs', stdout: '', stderr: 'transition not allowed for this task' }), 2);
+    const result = await repairPreReviewFailure(context, gateFailure({ failureReason: { version: 1, code: 'state-machine' }, command: 'node parallix verify docs', stdout: '', stderr: 'transition not allowed for this task' }), 2);
 
     assert.equal(result.bounced, false);
     assert.equal(fake.launches.length, 0);
@@ -458,7 +458,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
       save: async () => { throw new Error('Unexpected fixture save'); },
     };
     const lifecycle = { transition: async (request: Parameters<MissionLifecycleService['transition']>[0]) => { lifecycleCommands.push(request); return { durableEvidence: [],  status: 'completed' as const }; } };
-    const gateFailure = { area: 'static-analysis', exitCode: 1, diagnostic: 'gate diagnostic', reason: gateFailureReason({ ok: false, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1, stdout: 'gate diagnostic', stderr: '', error: 'gate failed' }) };
+    const gateFailure = { area: 'static-analysis', exitCode: 1, diagnostic: 'gate diagnostic', reason: gateFailureReason({ failureReason: { version: 1, code: 'gate-failed', source: 'verification' }, ok: false, area: 'static-analysis', command: './scripts/verify-local.sh static-analysis', exitCode: 1, stdout: 'gate diagnostic', stderr: '', error: 'gate failed' }) };
     const fake = fakeReviewLoopPorts({
       slug,
       worktree,
@@ -478,7 +478,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
           rebaseRuns++;
           // A gate-only failure typed by the in-process pre-review rebase.
           return rebaseRuns === 1
-            ? { ok: false, gate: { area: 'static-analysis', exitCode: 1, command: './scripts/verify-local.sh static-analysis', operation: 'pre-push', reason: gateFailure.reason }, diagnostic: '' }
+            ? {  ok: false, gate: { area: 'static-analysis', exitCode: 1, command: './scripts/verify-local.sh static-analysis', operation: 'pre-push', reason: gateFailure.reason }, diagnostic: '' }
             : { ok: true };
         },
         runGate: async () => (++gateRuns === 1 ? { ok: false, ...gateFailure } : { ok: true }),

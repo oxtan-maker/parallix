@@ -1,9 +1,5 @@
 import { uncoveredCompletedCriteria as completedUncoveredCriteria } from './checkpoint.js';
 
-export function isIncompleteSuccessCriteriaFailure(errorMsg: string): boolean {
-  return /Success criteria [\d, ]+ are incomplete before review preparation\./i.test(errorMsg);
-}
-
 /**
  * Recorded contract evidence prerequisites, independent of its persistence.
  *

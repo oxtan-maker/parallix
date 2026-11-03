@@ -1,3 +1,4 @@
+import { failureReason, normalizeProcessFailure } from '../../domain/failure-reason.js';
 import { spawn, spawnSync } from 'node:child_process';
 import type { SpawnOptions, SpawnSyncOptions } from 'node:child_process';
 import * as fsMod from 'node:fs';
@@ -17,6 +18,7 @@ export interface GitOptions {
 }
 
 export interface GitResult {
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
   status: number | null;
   signal: string | null;
   stdout: string;
@@ -87,7 +89,21 @@ export function git(args: string[], options: GitOptions = {}): GitResult {
   if (result.error && result.status === null) {
     throw result.error;
   }
-  return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error };
+  const reason = gitFailureIdentity(result, args, options, operation);
+  return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error, failureReason: reason };
+}
+
+function gitFailureIdentity(result: ReturnType<typeof spawnSync>, args: string[], options: GitOptions, operation: string | undefined) {
+  let reason = result.status === 0 && !result.signal ? undefined : failureReason('git-failed', 'git', { operation: subcommandLabel('git', args), exitCode: result.status });
+  if (result.status !== 0 && (operation === 'rebase' || operation === 'merge')) {
+    const state = spawnSync('git', [...(options.cwd ? [] : args.slice(0, args.indexOf(operation))), 'ls-files', '-u'], { encoding: 'utf8', cwd: options.cwd });
+    if (state.status === 0 && String(state.stdout ?? '').trim()) { reason = failureReason('git-conflict', 'git', { operation }); }
+    else if (operation === 'merge' && args.includes('--abort')) {
+      const head = spawnSync('git', [...(options.cwd ? [] : args.slice(0, args.indexOf(operation))), 'rev-parse', '-q', '--verify', 'MERGE_HEAD'], { encoding: 'utf8', cwd: options.cwd });
+      if (head.status === 1) { reason = failureReason('git-no-merge', 'git'); }
+    }
+  }
+  return reason;
 }
 
 export function run(command: string, args: string[], options: GitOptions = {}): GitResult {
@@ -111,7 +127,7 @@ export function run(command: string, args: string[], options: GitOptions = {}): 
   if (result.error && result.status === null) {
     throw result.error;
   }
-  return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error };
+  return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error, failureReason: normalizeProcessFailure({ status: result.status, signal: result.signal, error: result.error }) };
 }
 
 /** Node's spawnSync default, so a caller that never set maxBuffer keeps its bound. */

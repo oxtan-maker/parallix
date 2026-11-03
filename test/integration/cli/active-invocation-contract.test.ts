@@ -139,7 +139,7 @@ describe("active invocation overlap", () => {
       },
       telemetry: { recordLaunchTelemetry: async () => {} },
       checkpointValidation: { validateBeforeReviewPreparation: async () => ({ ok: true as const }) },
-      reviewPreparationExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      reviewPreparationExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }),   },
       autonomousReview: { start: async () => {} },
       repairLaunch: { launch: async () => { throw new Error('Unexpected repair launch'); }, available: () => ({ supported: false }), readHead: () => null },
       output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },
@@ -342,7 +342,7 @@ describe("active persisted Mission", () => {
       },
       telemetry: { async recordLaunchTelemetry() {} },
       checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } },
-      reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+      reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; },  },
       autonomousReview: { async start() {} },
       repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } },
       output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
@@ -428,7 +428,7 @@ describe("active persisted Mission", () => {
         async load() { return { kind: 'found' as const, version: fixtureVersion(1), mission }; },
         async save() { throw new Error('must not save'); }, async saveWithTransition() { throw new Error('must not save'); },
       },
-      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } }, reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
+      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } }, reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; },  }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     }).execute({
       operationId: 'active:task-2580', slug: 'task-2580', agent: 'codex', capabilities: new Set(['active:execute']),
     });
@@ -460,7 +460,7 @@ describe("active persisted Mission", () => {
         async load() { return { kind: 'found' as const, mission, version }; },
         async save(next: Mission) { mission = next; version = fixtureVersion(version + 1); return version; }, async saveWithTransition(next: Mission) { mission = next; version = fixtureVersion(version + 1); return version; },
       },
-      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } }, reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
+      telemetry: { async recordLaunchTelemetry() {} }, checkpointValidation: { async validateBeforeReviewPreparation() { return { ok: true as const }; } }, reviewPreparationExecution: { async run() { return { ok: true as const }; }, async repairHygiene() { return { repaired: false }; },  }, autonomousReview: { async start() {} }, repairLaunch: { async launch() { throw new Error('Unexpected repair launch'); }, available() { return { supported: false }; }, readHead() { return null; } }, output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
     }).execute({
       operationId: 'active:task-2580', slug: 'task-2580', agent: 'codex', capabilities: new Set(['active:execute']),
     });
@@ -586,7 +586,7 @@ describe('active operator resume', () => {
             : { ok: true };
         },
       },
-      reviewPreparationExecution: { async run() { reviewPreparation.push('declared gates'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; }, classifyFailure() { return null; }, isRelaunchableFailure() { return false; } },
+      reviewPreparationExecution: { async run() { reviewPreparation.push('declared gates'); return { ok: true }; }, async repairHygiene() { return { repaired: false }; },  },
       autonomousReview: { async start() { reviewPreparation.push('independent review'); } },
       repairLaunch: { async launch() {}, available() { return { supported: false }; }, readHead() { return null; } },
       output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },

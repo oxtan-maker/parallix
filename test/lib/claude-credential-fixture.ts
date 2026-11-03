@@ -56,7 +56,10 @@ const dir = path.join(process.env.HOME, '.claude');
 const file = path.join(dir, '.credentials.json');
 const lock = path.join(dir, '.oauth_refresh.lock');
 const server = process.env.FAKE_OAUTH_SERVER_DIR;
-const fail = (message) => { process.stderr.write(message + '\\n'); process.exit(1); };
+const fail = (message, error) => {
+  if (error) { process.stdout.write(JSON.stringify({ type: 'error', error }) + '\\n'); }
+  process.stderr.write(message + '\\n'); process.exit(1);
+};
 const read = () => JSON.parse(fs.readFileSync(file, 'utf8'));
 if (process.env.CLAUDE_CODE_OAUTH_TOKEN) { process.stdout.write('setup-token\\n'); process.exit(0); }
 const initial = read().claudeAiOauth;
@@ -82,7 +85,7 @@ if (!state.revoked && state.valid === current.claudeAiOauth.refreshToken) {
 fs.writeFileSync(statePath, JSON.stringify(state));
 fs.rmdirSync(serverLock);
 sleep(Number(process.env.FAKE_OAUTH_LATENCY_MS || 0));
-if (!rotated) { release(); fail('API Error: 401 OAuth access token has expired. Re-authenticate to continue.'); }
+if (!rotated) { release(); fail('API Error: 401 OAuth access token has expired. Re-authenticate to continue.', { type: 'authentication_error', status: 401 }); }
 const next = JSON.stringify({ ...current, claudeAiOauth: { ...current.claudeAiOauth, accessToken: 'at-' + rotated, refreshToken: rotated, expiresAt: Date.now() + 8 * 3600000 } });
 const tmp = file + '.tmp.' + crypto.randomBytes(4).toString('hex');
 let saved = false;

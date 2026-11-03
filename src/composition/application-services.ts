@@ -1,3 +1,5 @@
+import { certifyPendingIntegrationRepair } from '../application/integrate/repair-resumption.js';
+import { createIntegratePorts } from '../adapters/cli/commands/integrate.js';
 import { SqliteExecutionActivityStore } from '../adapters/sqlite/execution-activity-store.js';
 import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
 import { resolveProcessConfiguration } from './config.js';
@@ -285,12 +287,16 @@ export async function createProductionApplicationServices(
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),
   } : defaultExecuteRuntime;
-  const executePorts = createExecuteMissionPorts(rootDir, {
+  const mechanisms = createExecuteMissionPorts(rootDir, {
     configuration: options.configuration,
     missionTransitionStore: mission?.store ?? unavailableMissionTransitionStore(),
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
   }, executeRuntime);
+  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? { integrationRepair: { async resume(slug: string) {
+    const result = await certifyPendingIntegrationRepair(slug, mission, createIntegratePorts(options.configuration));
+    return !result || result.outcome === 'not-pending' ? 'none' : result.outcome;
+  } } } : {}) };
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second execution activity projection.
   const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);

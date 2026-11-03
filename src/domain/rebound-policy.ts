@@ -11,7 +11,7 @@ export function assertInvalidContractBlocker(value: InvalidContractBlocker): voi
     if (typeof value?.[key] !== 'string' || !value[key].trim()) { throw new Error(`Invalid-contract blocker requires ${key}`); }
   }
 }
-import { classifyError, hasExplicitHumanOnlyDiagnostic, DispatchAction, FailureClass, type DispatchActionType, type FailureClassType } from './failure-classification.js';
+import { classifyFailure, DispatchAction, FailureClass, type DispatchActionType, type FailureClassType } from './failure-classification.js';
 /** A declared verification gate ran and exited non-zero. */
 export interface GateFailureReason {
   kind: 'gate-failure';
@@ -47,6 +47,7 @@ export interface GateFailureReason {
 
 /** A Git hook rejected a workflow-owned Git operation. */
 export interface HookFailureReason {
+  failureReason?: unknown;
   kind: 'hook-failure';
   /** Hook identity derived from Git state (`pre-commit`, `pre-push`, …). */
   hook: string | null;
@@ -57,6 +58,7 @@ export interface HookFailureReason {
 
 /** An agent finished without leaving the artifacts its role must produce. */
 export interface ArtifactIncompleteReason {
+  failureReason?: unknown;
   kind: 'artifact-incomplete';
   role: string;
   diagnostic: string;
@@ -64,6 +66,7 @@ export interface ArtifactIncompleteReason {
 
 /** An agent did not respond within its stage timeout. */
 export interface AgentTimeoutReason {
+  failureReason?: unknown;
   kind: 'agent-timeout';
   role: string;
   diagnostic?: string;
@@ -73,6 +76,7 @@ export interface AgentTimeoutReason {
 
 /** A review preparation verification check rejected the mission. */
 export interface ReviewPreparationVerificationReason {
+  failureReason?: unknown;
   kind: "review-preparation-verification";
   error: string;
   gateOutput?: string;
@@ -139,80 +143,23 @@ function reasonLabel(reason: ReboundReason): string {
   }
 }
 
-/**
- * Classify a structured reason through the single ADR 0048 table.
- *
- * Structured facts decide the class; the diagnostic text only decides whether a
- * recognized human-only blocker (ADR 0048 classes 7 and 8) is present:
- *
- * - `gate-failure`: a declared gate that ran and exited non-zero is a
- *   GateFailure (class 6) — never remapped to a Git blocker.
- * - `hook-failure`: a Git hook rejecting a workflow Git operation is a
- *   mechanical Git blocker (class 5, AutoRepair).
- * - `artifact-incomplete`: incomplete evidence (class 4).
- * - `agent-timeout`: no agent output to act on — infrastructure (class 7).
- * - `review-preparation-verification`: classified from its own error text, which is the
- *   review preparation path's existing evidence.
- *
- * An explicit infrastructure or state-machine diagnostic wins over the
- * structured default for the two incident-path kinds, because its remedy is
- * outside the implementer's working tree.
- */
+/** Structured reasons determine recovery admission; unsupported facts fail closed. */
 export function classifyReboundReason(reason: ReboundReason): ReboundClassification {
-  const diagnostic = reboundDiagnostic(reason);
   const label = reasonLabel(reason);
-  const classified = (failureClass: FailureClassType, dispatchAction: DispatchActionType): ReboundClassification => ({
-    failureClass,
-    dispatchAction,
-    isRelaunchable: dispatchAction !== DispatchAction.HumanOnly,
-    label,
-  });
-
-  if (reason.kind === 'rebase-conflict') {
-    return classified(FailureClass.GitBlockers, DispatchAction.AutoRepair);
-  }
-
-  if (reason.kind === 'gate-failure' && reason.invalidContract) {
+  const classified = (failureClass: FailureClassType, dispatchAction: DispatchActionType, isRelaunchable = dispatchAction !== DispatchAction.HumanOnly): ReboundClassification => ({ failureClass, dispatchAction, isRelaunchable, label });
+  if (reason.kind === 'gate-failure' && reason.invalidContract || reason.kind === 'declared-gate-validation') {
     return classified(FailureClass.MalformedGates, DispatchAction.HumanOnly);
   }
-
-  if (reason.kind === 'gate-failure' && recognizedFailureReason(reason.failureReason)) {
-    const { failureClass, dispatchAction } = classifyError(diagnostic, reason.failureReason);
-    return classified(failureClass, dispatchAction);
+  if ('failureReason' in reason && reason.failureReason !== undefined) {
+    const result = classifyFailure(reason.failureReason);
+    return classified(result.failureClass, result.dispatchAction, recognizedFailureReason(reason.failureReason)?.code === 'approval-retention-pending' ? false : result.dispatchAction !== DispatchAction.HumanOnly);
   }
-
-  if (reason.kind === 'gate-failure' || reason.kind === 'hook-failure') {
-    if (hasExplicitHumanOnlyDiagnostic(diagnostic)) {
-      const { failureClass, dispatchAction } = classifyError(diagnostic);
-      return classified(failureClass, dispatchAction);
-    }
-    return reason.kind === 'hook-failure'
-      ? classified(FailureClass.GitBlockers, DispatchAction.AutoRepair)
-      : classified(FailureClass.GateFailure, DispatchAction.AutoSendBack);
+  switch (reason.kind) {
+    case 'rebase-conflict': case 'hook-failure': return classified(FailureClass.GitBlockers, DispatchAction.AutoRepair);
+    case 'gate-failure': return classified(FailureClass.GateFailure, DispatchAction.AutoSendBack);
+    case 'artifact-incomplete': case 'agent-timeout': return classified(FailureClass.IncompleteEvidence, DispatchAction.AutoSendBack);
+    default: return classified(FailureClass.InfraBlocker, DispatchAction.HumanOnly);
   }
-
-  if (reason.kind === 'artifact-incomplete') {
-    if (hasExplicitHumanOnlyDiagnostic(diagnostic)) {
-      const { failureClass, dispatchAction } = classifyError(diagnostic);
-      return classified(failureClass, dispatchAction);
-    }
-    return classified(FailureClass.IncompleteEvidence, DispatchAction.AutoSendBack);
-  }
-
-  if (reason.kind === 'agent-timeout') {
-    if (hasExplicitHumanOnlyDiagnostic(diagnostic)) {
-      const { failureClass, dispatchAction } = classifyError(diagnostic);
-      return classified(failureClass, dispatchAction);
-    }
-    return classified(FailureClass.IncompleteEvidence, DispatchAction.AutoSendBack);
-  }
-
-  if (reason.kind === 'declared-gate-validation') {
-    return classified(FailureClass.MalformedGates, DispatchAction.HumanOnly);
-  }
-
-  const { failureClass, dispatchAction } = classifyError(diagnostic);
-  return classified(failureClass, dispatchAction);
 }
 
 /** Known verifier outcomes which are safe to retry once on an unchanged tree. */

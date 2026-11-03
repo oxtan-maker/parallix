@@ -53,7 +53,7 @@ const repairableGate: ReboundReason = {
   stderr: '',
 };
 
-const repairableHook: ReboundReason = {
+const repairableHook: ReboundReason = { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } },
   kind: 'hook-failure',
   hook: 'pre-commit',
   operation: 'pre-review safety commit',
@@ -106,7 +106,7 @@ test('task-2575: an external model-healthcheck failure prompt says to report the
 });
 
 test('task-2575: a hook failure without a named operation still states the failed check and repair authority', async () => {
-  const prompt = await promptFor({ kind: 'hook-failure', hook: 'pre-push', output: 'pre-push: npm run lint exited 1' });
+  const prompt = await promptFor({ failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-push' } }, kind: 'hook-failure', hook: 'pre-push', output: 'pre-push: npm run lint exited 1' });
   assertRepairCapable(prompt, /Failed check: pre-push hook on a workflow Git operation/, /npm run lint exited 1/);
 });
 
@@ -209,7 +209,7 @@ test('current capture identity wins over newer unrelated history and retains com
   });
   assert.equal(old.ok, true);
   const prompts: string[] = [];
-  await rebound({ kind: "review-preparation-verification", error: "Rebase failed before review preparation. CURRENT_DIAGNOSTIC" }, {
+  await rebound({ failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' }, kind: "review-preparation-verification", error: "Rebase failed before review preparation. CURRENT_DIAGNOSTIC" }, {
     slug: SLUG, worktree, implementer: 'codex', maxAttempts: 1,
     retainedFailure: { ...current.ref, captureComplete: false, truncatedFrom: 'stdout' },
     startAgent: async (_step, options) => {
@@ -233,7 +233,7 @@ test('current capture identity wins over newer unrelated history and retains com
 });
 
 for (const history of [false, true]) {
-  test(`non-gate repair discloses missing current capture with history=${history} (TASK-2796)`, async t => {
+  test(`non-gate repair retains current capture with history=${history} (TASK-2796)`, async t => {
     const worktree = mkdtemp('missing-current-capture-');
     t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
     if (history) {
@@ -242,7 +242,7 @@ for (const history of [false, true]) {
         stdout: 'unrelated old failure', stderr: '' });
     }
     const prompts: string[] = [];
-    await rebound({ kind: "review-preparation-verification", error: "Rebase failed before review preparation. CURRENT_ANCESTRY" }, {
+    await rebound({ failureReason: { version: 1, code: 'gate-failed', source: 'review-preparation' }, kind: "review-preparation-verification", error: "Rebase failed before review preparation. CURRENT_ANCESTRY" }, {
       slug: SLUG, worktree, implementer: 'codex', maxAttempts: 1,
       startAgent: async (_step, options) => {
         prompts.push(typeof options.prompt === 'function' ? options.prompt('codex') : options.prompt);
@@ -252,9 +252,10 @@ for (const history of [false, true]) {
     });
     assert.equal(prompts.length, 1);
     assert.match(prompts[0], /CURRENT_ANCESTRY/);
-    assert.match(prompts[0], /No retained evidence for this failure/);
-    assert.doesNotMatch(prompts[0], /Retained evidence for this failure|act on these|capture complete: yes/);
+    assert.match(prompts[0], /Retained evidence for this failure/);
+    assert.match(prompts[0], /command: px review --submit/);
+    assert.match(prompts[0], /capture complete: yes/);
     if (history) { assert.match(prompts[0], /Historical related context/); }
-    else { assert.match(prompts[0], /no retained evidence for this mission/); }
+
   });
 }

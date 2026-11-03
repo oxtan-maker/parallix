@@ -201,7 +201,7 @@ class SquashLanding {
     // `git commit --only` invocation, so `fixed` means the hook passes on
     // re-run — never merely that an agent ran. The kernel owns the
     // per-occurrence budget (2 attempts) in memory; nothing is persisted.
-    const hookClassification = this.dependencies.landing.classifyHookFailure(output);
+    const hookClassification = this.dependencies.landing.classifyHookFailure(commitResult);
     if (!hookClassification.isHookFailure) {
       fmt.log.info(strandHint);
       fmt.log.info(`For this mission, the relevant verification command is ${this.dependencies.verification.formatVerificationCommand(context.area, baseWorktree)}`);

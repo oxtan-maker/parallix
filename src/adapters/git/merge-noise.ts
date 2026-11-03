@@ -5,64 +5,17 @@ import { resolveTaskStorage } from '../config/product-config.js';
 import * as gitModule from './git.js';
 import { missionPathForSlug, missionDirForSlug, getMissionYear } from '../filesystem/mission-paths.js';
 
-/**
- * Parse files with merge conflicts from the output of `git merge --no-commit --no-ff`.
- *
- * Git emits lines of the form:
- *   CONFLICT (content): Merge conflict in path/to/file
- *   CONFLICT (modify/delete): path/to/file deleted in HEAD.
- *   CONFLICT (add/add): Merge conflict in path/to/file
- *
- * Returns an array of relative file paths (deduped).
- */
-/** @param {string} output */
-export function parseConflictFilesFromMergeOutput(output: string): string[] {
-  const seen = new Set<string>();
-  const files: string[] = [];
-  for (const line of output.split('\n')) {
-    if (!line.startsWith('CONFLICT')) {continue;}
-    const inMatch = line.match(/Merge conflict in (.+)$/);
-    if (inMatch) {
-      const f = inMatch[1].trim();
-      if (f && !seen.has(f)) { seen.add(f); files.push(f); }
-      continue;
-    }
-    const colonIdx = line.indexOf(':');
-    if (colonIdx !== -1) {
-      const rest = line.slice(colonIdx + 1).trim();
-      const f = rest.split(/\s+/)[0];
-      if (f && !seen.has(f)) { seen.add(f); files.push(f); }
-    }
-  }
-  return files;
-}
-
-/**
- * Identify files that would have merge conflicts when merging `branch` into `rootDir`.
- *
- * Performs a dry `git merge --no-commit --no-ff` in `rootDir`, collects conflict
- * file paths from the output, aborts the in-progress merge, and returns the list.
- *
- * @param {string} rootDir - Absolute path to the git worktree to test in.
- * @param {string} branch  - Branch (or ref) to attempt merging.
- * @param {{ gitRunner?: GitReader }} [options]
- * @returns {string[]} Relative paths of conflicting files (empty if no conflicts).
- */
-/** @param {string} rootDir @param {string} branch @param {{gitRunner?: GitReader}} [options] */
+/** Probe a merge and collect machine-delimited unmerged index paths before abort. */
 export function getConflictFiles(rootDir: string, branch: string, options: { gitRunner?: GitReader } = {}): string[] {
   const runner = options.gitRunner || gitModule.git;
 
   const merge = runner(['-C', rootDir, 'merge', '--no-commit', '--no-ff', branch]);
+  const index = merge.status === 0 ? null : runner(['-C', rootDir, 'diff', '--name-only', '--diff-filter=U', '-z']);
   runner(['-C', rootDir, 'merge', '--abort']);
-
-  if (merge.status === 0) {return [];}
-
-  const output = [merge.stdout, merge.stderr].filter(Boolean).join('\n');
-  const conflictFiles = parseConflictFilesFromMergeOutput(output);
-
+  if (merge.status === 0) { return []; }
+  const conflictFiles = index?.status === 0 ? [...new Set(index.stdout.split('\0').filter(Boolean))] : [];
   if (conflictFiles.length === 0) {
-    const summary = output.slice(0, 500) || '(no output)';
-    throw new Error(`git merge exited ${merge.status} with no CONFLICT lines — raw output:\n${summary}`);
+    throw new Error(`git merge exited ${merge.status} without confirmed unmerged index paths: ${merge.stderr || merge.stdout}`);
   }
 
   return conflictFiles;

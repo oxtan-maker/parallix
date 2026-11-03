@@ -6,6 +6,6 @@ import * as fmt from './presentation/cli-format.js';
 
 export function classifyError(message: string, failureReason?: unknown, log: (_message: string) => void = fmt.log.plain) {
   const fallback = legacyFailureReason(failureReason);
-  if (fallback) { log(`Failure classification: legacy fallback (${fallback})`); }
+  if (fallback) { log(`Failure classification: fail-closed fallback (${fallback})`); }
   return classify(message, failureReason);
 }

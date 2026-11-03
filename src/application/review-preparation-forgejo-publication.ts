@@ -1,3 +1,4 @@
+import { preparationFailure, preparationGateFailure } from './review-preparation-failure.js';
 /**
  * Forgejo publication for review preparation: resolve implementer credentials and push the
  * Backlog transition under a lease.
@@ -54,7 +55,8 @@ export class ReviewPreparationForgejoPublisher {
       if (!prResult.ok) {
         const msg = `Forgejo PR creation/update failed: ${prResult.error}`;
         error(msg);
-        return { ok: false, error: msg, ...(prResult.gateFailure ? { gateFailure: prResult.gateFailure } : {}) };
+        return prResult.gateFailure ? preparationGateFailure(msg, prResult.gateFailure)
+          : { ...preparationFailure(msg, 'infrastructure', 'forgejo'), ...(prResult.failureReason ? { failureReason: prResult.failureReason, recoveryFailure: { kind: 'review-preparation-verification' as const, error: msg, failureReason: prResult.failureReason } } : {}) };
       }
       if (prResult.prNumber) {
         submittedPr = { id: String(prResult.prNumber), url: prResult.url ?? null };
@@ -117,7 +119,7 @@ Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { r
     }
     const msg = `No Forgejo token found for implementer "${forgejoUser}" after bootstrap (${bootstrapFailureReason || 'token unavailable'}). Publication for ${slug} stopped; configure that implementer's credentials with px setup-review. Parallix publication credentials are also unavailable.`;
     error(msg);
-    return { ok: false, error: msg };
+    return preparationFailure(msg, 'infrastructure', 'forgejo');
   }
 
   /**
@@ -150,13 +152,13 @@ Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { r
       const fetchError = (fetchResult.stderr || fetchResult.stdout || '').trim();
       const msg = `Failed to refresh Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
       error(`${msg}${fetchError ? ` ${fetchError}` : ''}`);
-      return { ok: false, error: msg };
+      return preparationFailure(msg, 'infrastructure', 'forgejo');
     }
     const tracking = this.ports.forgejo.resolveTrackingBranchSha(branch || '', rootDir);
     if (!tracking.ok) {
       const msg = `Failed to resolve Backlog transition lease for ${fmt.slug(slug)} before Forgejo push.`;
       error(msg);
-      return { ok: false, error: `${msg} ${tracking.error || ''}`.trim() };
+      return preparationFailure(`${msg} ${tracking.error || ''}`.trim(), 'git-failed', 'git');
     }
     return `--force-with-lease=refs/heads/${branch}:${String(tracking.sha || '')}`;
   }
@@ -164,7 +166,7 @@ Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { r
   private handleBacklogPushResult(slug: string, result: CommandResult, context: Pick<BacklogPushContext, 'rootDir' | 'branch' | 'force' | 'error' | 'gatekeeperPushedBack'> & { remoteUrl: string }): ReviewPreparationResult | null {
     if (result.status === 0) { return null; }
     const pushError = [result.stderr, result.stdout].filter(Boolean).join('\n');
-    if (context.force && /non-fast-forward|stale info|fetch first/i.test(pushError)) {
+    if (context.force && result.failureReason?.code === 'git-behind') {
       const forced = this.ports.git.git(['-C', context.rootDir, 'push', '--force', String(context.remoteUrl || ''), context.branch || '']);
       if (forced.status === 0) {
         fmt.log.info(`Backlog transition for ${fmt.slug(slug)} required plain force after stale lease.`);
@@ -179,7 +181,7 @@ Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { r
   private backlogPushFailure(slug: string, detail: string, error: (_: string) => void): ReviewPreparationResult {
     const msg = `Failed to push Backlog transition for ${fmt.slug(slug)} to Forgejo.`;
     error(msg);
-    return { ok: false, error: detail ? `${msg} ${detail}` : msg };
+    return preparationFailure(detail ? `${msg} ${detail}` : msg, 'git-failed', 'git');
   }
 
 }

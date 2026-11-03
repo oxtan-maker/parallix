@@ -195,7 +195,7 @@ describe("Command dispatch convergence", () => {
         recordLaunchTelemetry: async () => {},
       },
       checkpointValidation: { validateBeforeReviewPreparation: async () => ({ ok: true as const }) },
-      reviewPreparationExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }), classifyFailure: () => null, isRelaunchableFailure: () => false },
+      reviewPreparationExecution: { run: async () => ({ ok: true as const }), repairHygiene: async () => ({ repaired: false }),   },
       autonomousReview: { start: async () => {} },
       repairLaunch: { launch: async () => undefined, available: () => ({ supported: false }), readHead: () => null },
       output: { log: () => {}, error: () => {}, command: (value: string) => value, formatSlug: (value: string) => value, formatAgent: (value: string) => value },

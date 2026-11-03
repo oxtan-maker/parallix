@@ -31,7 +31,7 @@ test('integration shared conflicts use the fresh shared resolver and resolved ba
     brief: { goal: 'Integration intent', why: 'Keep current base behavior', scope: 'shared source', outOfScope: [] },
     successCriteria: ['Preserve the feature'] }));
   const h = sharedConflictHarness({ missionServices: async () => ({ store }), findMissionDir: () => null,
-    git: args => ({ status: args.at(-1) === 'local-base' && args.includes('rebase') ? 1 : 0,
+    git: args => ({ failureReason: args.at(-1) === 'local-base' && args.includes('rebase') ? { version: 1, code: 'git-conflict' } : undefined, status: args.at(-1) === 'local-base' && args.includes('rebase') ? 1 : 0,
       stdout: '', stderr: args.at(-1) === 'local-base' && args.includes('rebase') ? 'CONFLICT (content): Merge conflict in shared.ts' : '' }) });
   const defaults = stubIntegrateWorkflowPorts();
   const ports = stubIntegrateWorkflowPorts({
@@ -91,7 +91,6 @@ describe("integration rebase state", async () => {
     const missionPaths = {
       missionBranchName: (_slug: string) => `mission/${SLUG}`,
       conventionalWorktreePath: (_slug: string) => MISSION_WORKTREE,
-      parseConflictFilesFromMergeOutput: () => [],
     };
     const git = mock.fn((args: string[]) => {
       const joined = args.join(' ');

@@ -25,7 +25,7 @@ export function sharedConflictHarness(overrides: Partial<RebaseWorkflowPort> = {
     git: (args: string[]) => {
       const tail = subcommand(args);
       if (tail[0] === 'rebase' && tail[1] === 'main') {
-        return { signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
+        return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${SHARED_FILE}\n` };
       }
       return OK;
     },

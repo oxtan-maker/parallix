@@ -7,7 +7,7 @@ import { recordProviderResolution } from './provider-observations.js';
 import { currentReviewRound } from '../../domain/review.js';
 import { missionId } from '../../domain/mission.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
-import { isArtifactInfraDiagnostic, isPollTimeout, type ImplementerArtifactFacts } from '../ports/review-round.js';
+import { isArtifactInfraFailure, isPollTimeout, type ImplementerArtifactFacts } from '../ports/review-round.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, type LoopContext, type ReviewRound } from './round.js';
 
 const CONTINUE_DISPOSITIONS = new Set(['BLOCKED', 'PARKED']);
@@ -152,7 +152,7 @@ async function consumeImplementerOutput(context: LoopContext, round: ReviewRound
     return null;
   }
   const diagnostic = implementerDiagnostic(context, artifacts, 'produced incomplete or invalid artifacts');
-  if (isArtifactInfraDiagnostic(diagnostic)) {
+  if (isArtifactInfraFailure(artifacts.failureReason)) {
     context.emit({ kind: 'implementer-artifact-infra', diagnostic: diagnostic });
     await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
     return 'stop';
@@ -160,7 +160,7 @@ async function consumeImplementerOutput(context: LoopContext, round: ReviewRound
   if (round.capReached()) { return await round.stopForCap('implementer artifact'); }
   let stored: string | null = null;
   const maxAttempts = round.occurrenceBudget(DEFAULT_REBOUND_ATTEMPTS);
-  const recovery = await rebound({ kind: 'artifact-incomplete', role: 'implementer', diagnostic }, {
+  const recovery = await rebound({ kind: 'artifact-incomplete', role: 'implementer', diagnostic, failureReason: artifacts.failureReason }, {
     ...reboundCollaborators(context, 'implementer', () => round.promptFacts(reviewState)),
     implementer: identities.implementer, maxAttempts,
     verify: async () => {
@@ -173,7 +173,7 @@ async function consumeImplementerOutput(context: LoopContext, round: ReviewRound
         }
         return { ok: false, diagnostic: `Implementer ${identities.implementer} produced no round artifacts after the relaunch` };
       }
-      return artifacts.ok ? { ok: true } : { ok: false, diagnostic: artifacts.diagnostic || `Implementer ${identities.implementer} still produced incomplete artifacts after the relaunch` };
+      return artifacts.ok ? { ok: true } : { ok: false, diagnostic: artifacts.diagnostic || `Implementer ${identities.implementer} still produced incomplete artifacts after the relaunch`, reason: { kind: 'artifact-incomplete', role: 'implementer', diagnostic: artifacts.diagnostic ?? '', failureReason: artifacts.failureReason } };
     },
   });
   round.used += recovery.attempts ?? 0;
@@ -188,7 +188,7 @@ async function consumeImplementerOutput(context: LoopContext, round: ReviewRound
 
 async function failedImplementerRecovery(context: LoopContext, round: ReviewRound, recovery: Awaited<ReturnType<typeof rebound>>, maxAttempts: number): Promise<'stop' | null> {
   const { slug } = context;
-  if (recovery.outcome === 'human-only' || isArtifactInfraDiagnostic(recovery.diagnostic)) {
+  if (recovery.outcome === 'human-only') {
     context.emit({ kind: 'implementer-recovery-human', slug: slug });
     await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
     return 'stop';
@@ -223,7 +223,7 @@ async function pollDisposition(context: LoopContext, round: ReviewRound, reviewS
     verify: async () => {
       const retry = await ports.artifacts.consumeImplementer(identities.implementer);
       const retryArtifactDiagnostic = retry.diagnostic || `Implementer disposition still missing for ${ports.branch}`;
-      const diagnostic = isArtifactInfraDiagnostic(retryArtifactDiagnostic) ? `Recovery infrastructure failure: ${retryArtifactDiagnostic}` : retryArtifactDiagnostic;
+      const diagnostic = retryArtifactDiagnostic;
       disposition.value = retry.consumed && retry.ok ? retry.disposition : null;
       disposition.providerObserved = false;
       if (!disposition.value && ports.provider) {
@@ -232,13 +232,13 @@ async function pollDisposition(context: LoopContext, round: ReviewRound, reviewS
       }
       return disposition.value && !isPollTimeout(disposition.value)
         ? { ok: true }
-        : { ok: false, diagnostic, reason: { kind: 'artifact-incomplete', role: 'implementer', diagnostic } };
+        : { ok: false, diagnostic, reason: { kind: 'artifact-incomplete', role: 'implementer', diagnostic, failureReason: retry.failureReason } };
     },
   });
   round.used += recovery.attempts;
   identities.implementer = recovery.implementer || identities.implementer;
   if (recovery.outcome === 'fixed') { return null; }
-  if (isArtifactInfraDiagnostic(recovery.diagnostic)) {
+  if (recovery.outcome === 'human-only') {
     context.emit({ kind: 'implementer-timeout-infra', diagnostic: recovery.diagnostic });
     await context.escalateToHumanReview('IMPLEMENTER_ARTIFACT_INFRA_FAILURE');
     return 'stop';

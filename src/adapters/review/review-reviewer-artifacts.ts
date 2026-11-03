@@ -1,3 +1,4 @@
+import { failureReason, type FailureReason } from '../../domain/failure-reason.js';
 import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { postComment, postReview, getPrAuthor } from './review-adapter.js';
 /**
@@ -111,7 +112,7 @@ async function persistReviewerEvents(params: {
   log: (_msg: string) => void;
   error: (_msg: string) => void;
   verbose: boolean;
-}): Promise<{ ok: true } | { ok: false; diagnostic: string }> {
+}): Promise<{ ok: true } | { ok: false; failureReason?: FailureReason; diagnostic: string }> {
   const { slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict, createEventFn, worktree, log, error, verbose } = params;
   const findingsEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
     content: reviewFindings, round, phase, actor: reviewer
@@ -120,7 +121,7 @@ async function persistReviewerEvents(params: {
   if (!findingsEventResult.ok) {
     const findingsErr = (findingsEventResult as { error?: string }).error;
     error(fmt.status('FAIL', `Failed to persist reviewer findings to repo store: ${findingsErr}`));
-    return { ok: false, diagnostic: `Reviewer artifact persist failed (findings): ${findingsErr}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), ok: false, diagnostic: `Reviewer artifact persist failed (findings): ${findingsErr}` };
   }
 
   const outcomeEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
@@ -130,7 +131,7 @@ async function persistReviewerEvents(params: {
   if (!outcomeEventResult.ok) {
     const outcomeErr = (outcomeEventResult as { error?: string }).error;
     error(fmt.status('FAIL', `Failed to persist reviewer outcome to repo store: ${outcomeErr}`));
-    return { ok: false, diagnostic: `Reviewer artifact persist failed (outcome): ${outcomeErr}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), ok: false, diagnostic: `Reviewer artifact persist failed (outcome): ${outcomeErr}` };
   }
 
   if (verbose) {
@@ -245,7 +246,7 @@ function prepareReviewerArtifacts(slug: string, options: ReviewerArtifactOptions
 }
 
 type AdmittedReviewerArtifacts =
-  | { ok: false; failure: { consumed: boolean; ok?: boolean; diagnostic?: string | null; reviewState?: string | null } }
+  | { ok: false; failure: { consumed: boolean; failureReason?: FailureReason; ok?: boolean; diagnostic?: string | null; reviewState?: string | null } }
   | { ok: true; reviewFindings: string; reviewOutcome: string; reviewVerdict: string; typedFindings: readonly ReviewFinding[]; options: ReviewerArtifactOptions };
 
 /** Completeness, parsing, staleness and revision-pin checks that precede any decision. */
@@ -283,7 +284,7 @@ export async function consumeReviewerArtifacts(
   slug: string,
   reviewer: string,
   options: ReviewerArtifactOptions = {}
-): Promise<{ consumed: boolean; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; reviewFindings?: { id: string; summary: string }[] }> {
+): Promise<{ consumed: boolean; failureReason?: FailureReason; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; reviewFindings?: { id: string; summary: string }[] }> {
   const { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, verdict } = prepareReviewerArtifacts(slug, options);
 
   if ([artifacts.findings, artifacts.outcomeMessage, artifacts.verdictRaw].every(value => value === null)) {
@@ -318,7 +319,7 @@ export async function consumeReviewerArtifacts(
       slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
       createEventFn: options.createEventFn || createEvent, worktree, log, error, verbose: Boolean(options.verbose),
     });
-    return persisted.ok ? null : { consumed: true as const, ok: false as const, diagnostic: persisted.diagnostic };
+    return persisted.ok ? null : { consumed: true as const, ok: false as const, failureReason: persisted.failureReason, diagnostic: persisted.diagnostic };
   };
   // Legacy exports have no aggregate decision; persist their audit before mirroring.
   if (!options.missionStore) { const failed = await persistEvents(); if (failed) { return failed; } }
@@ -330,7 +331,7 @@ export async function consumeReviewerArtifacts(
     return (leadingStage && await approvalLegalDiagnostic(slug, { missionStore: options.missionStore })) || await mirror();
   };
   const leading = await mirrorStage(true);
-  if (leading) { return { consumed: true, ok: false, diagnostic: leading }; }
+  if (leading) { return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: leading }; }
   const decisionFailure = await recordReviewerArtifactDecision(slug, reviewVerdict, typedFindings, reviewOutcome, options, log, error);
   if (decisionFailure) { return decisionFailure; }
 
@@ -338,7 +339,7 @@ export async function consumeReviewerArtifacts(
   if (options.missionStore) { const failed = await persistEvents(); if (failed) { return failed; } }
 
   const trailing = await mirrorStage(false);
-  if (trailing) { return { consumed: true, ok: false, diagnostic: trailing }; }
+  if (trailing) { return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: trailing }; }
   if (!providerEnabled && options.verbose) {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
   }
@@ -371,7 +372,7 @@ function reportIncompleteReviewerArtifacts(context: {
   slug: string; findings: string | null; outcomeMessage: string | null; verdict: string | null;
   findingsPath: string; outcomePath: string; verdictPath: string;
   providerEnabled: boolean; error: (_msg: string) => void;
-}): { consumed: true; ok: false; diagnostic: string } | null {
+}): { consumed: true; ok: false; failureReason?: FailureReason; diagnostic: string } | null {
   const { slug, findings, outcomeMessage, verdict, findingsPath, outcomePath, verdictPath, providerEnabled, error } = context;
   const localRepair = providerEnabled
     ? ''
@@ -406,7 +407,7 @@ async function recordReviewerChangeRequest(slug: string, findings: readonly Revi
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
-    return { consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
   }
   if (decision.outcome === 'unchanged') {
     log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));
@@ -425,7 +426,7 @@ async function recordReviewerApproval(slug: string, outcomeMessage: string, opti
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the approve decision for ${slug}: ${decision.diagnostic}`));
-    return { consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
+    return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
   }
   if (decision.outcome === 'unchanged') {
     log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));

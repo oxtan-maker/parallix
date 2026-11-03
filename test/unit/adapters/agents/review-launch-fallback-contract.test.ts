@@ -121,7 +121,7 @@ test('startAgent review fallback selects configured vibe when claude hits limit 
         worktree: tmpRoot,
         agent: 'claude',
         exclude: ['codex'], // implementer excluded for family separation
-        
+
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
@@ -187,7 +187,7 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
         worktree: tmpRoot,
         agent: 'custom',
         exclude: ['claude'], // reviewer excluded for family separation
-        
+
         detectLimitHitFn,
         updateAgentBlockFn,
         selectAgentFn,
@@ -236,6 +236,7 @@ for (const pinned of [false, true]) {
         const family = input.env!.FORGEJO_USER!;
         launched.push(family);
         return { invocation: { command: family, args: [] }, result: {
+          failureReason: family === 'claude' ? { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-11-02T10:50:00+01:00' } } : undefined,
           status: family === 'claude' ? 1 : 0,
           stderr: family === 'claude' ? 'You’ve hit your 5-hour limit · resets 10:50am (Europe/Stockholm)' : '',
         } };
@@ -249,7 +250,7 @@ for (const pinned of [false, true]) {
       assert.deepEqual(launched, ['claude', 'vibe']);
     }
     assert.equal(blocks.size, 1);
-    assert.match(blocks.get('claude')!.reason!, /^parsed:.*5-hour limit/);
+    assert.match(blocks.get('claude')!.reason!, /^typed: agent-quota/);
     assert.match(blocks.get('claude')!.until, /^2026-11-02 \d{2}$/);
   });
 }

@@ -197,9 +197,9 @@ describe("02 pre-review rebase in-process", () => {
     assert.equal(prompts.length, 1);
     const prompt = prompts[0];
     assert.match(prompt, /local base branch is not an ancestor/);
-    assert.match(prompt, /No retained evidence for this failure/);
+    assert.match(prompt, /Retained evidence for this failure/);
     assert.match(prompt, /Historical related context/);
-    assert.doesNotMatch(prompt, /act on these|Retained evidence for this failure/);
+    assert.doesNotMatch(prompt, /act on these/);
   });
 
   test('non-conflict rebase failure preserves current Git output (TASK-2796)', async () => {
@@ -244,7 +244,7 @@ describe("02 pre-review rebase in-process", () => {
     const hookOutput = 'error: failed to push some refs\npre-commit hook rejected the commit: lint error';
     const port = stubPort({
       git: (args: string[]) => (args.includes('rebase') && !args.includes('--show-current')
-        ? { status: 1, stdout: '', stderr: hookOutput }
+        ? { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, status: 1, stdout: '', stderr: hookOutput }
         : OK),
     });
     const previousLogger = setLogger({ log: () => {} });
@@ -275,7 +275,7 @@ describe("02 pre-review rebase in-process", () => {
       git: (args: string[]) => {
         if (args.includes('--continue')) { continueCalls.push(args); }
         return args.includes('rebase') && !args.includes('--show-current')
-          ? { status: 1, stdout: '', stderr: hookOutput }
+          ? { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, status: 1, stdout: '', stderr: hookOutput }
           : OK;
       },
     });
@@ -299,7 +299,7 @@ describe("02 pre-review rebase in-process", () => {
     const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(stubPort(), {
       gitFn: (args: string[]) => {
         if (args.includes('status')) { return { signal: null,  status: 0, stdout: ` M missions/${SLUG}/MISSION.md\0`, stderr: '' }; }
-        if (args.includes('commit')) { return { signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook failed: lint error' }; }
+        if (args.includes('commit')) { return { failureReason: { version: 1, code: 'git-hook-failed', source: 'git', context: { hook: 'pre-commit' } }, signal: null,  status: 1, stdout: '', stderr: 'pre-commit hook failed: lint error' }; }
         return OK;
       },
     }));
@@ -368,7 +368,7 @@ describe("02 pre-review rebase in-process", () => {
       if (args.includes('--show-current')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
       if (args.includes('rebase') && args.includes('--continue')) { return OK; }
       if (args.includes('rebase')) {
-        return { signal: null,  status: 1, stdout: 'Merge conflict in src/shared/common.ts', stderr: '' };
+        return { failureReason: { version: 1, code: 'git-conflict', source: 'git' as const }, signal: null, status: 1, stdout: 'Merge conflict in src/shared/common.ts', stderr: '' };
       }
       if (args.includes('merge-base')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
       return OK;

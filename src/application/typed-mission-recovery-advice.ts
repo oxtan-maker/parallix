@@ -3,14 +3,6 @@
  * the Mission aggregate. Legacy mission documents remain import inputs, not
  * artifacts a typed-mission recovery is allowed to manufacture.
  */
-export function isTypedCheckpointEvidenceFailure(errorMsg: string): boolean {
-  return /Planned checkpoint evidence is missing before review preparation:/i.test(errorMsg);
-}
-
-export function namedCheckpointFromTypedFailure(errorMsg: string): string | null {
-  return /Planned checkpoint evidence is missing before review preparation:\s*(CP-\d+)/i.exec(errorMsg)?.[1] ?? null;
-}
-
 /**
  * A concrete `px checkpoint record` command for the repair advice. Built from a
  * single-quoted inner string so the backticked verification command survives
@@ -41,7 +33,7 @@ export function buildTypedMissionRecoveryAdvice(slug: string, checkpoint: string
   ].join(' ');
 }
 
-export { isIncompleteSuccessCriteriaFailure } from "../domain/mission-review-preparation-policy.js";
+
 
 export function buildSuccessCriteriaRecoveryAdvice(slug: string): string {
   return [

@@ -1,3 +1,4 @@
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
@@ -202,8 +203,7 @@ function buildQwenInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, wo
 // exit from every other agent retains the shared quoted-transcript safeguard.
 function isQwenQuotaExhausted(result: AgentProcessResult) {
   if (!result || result.status !== 0 || result.signal || result.error) { return false; }
-  const text = `${result.stdout || ''}\n${result.stderr || ''}`;
-  return /Quota exhausted:[\s\S]{0,500}\bcause:\s*insufficient_quota:\s*429\b/i.test(text);
+  return recognizedFailureReason(result.failureReason)?.code === 'agent-quota';
 }
 
 /**
@@ -238,8 +238,7 @@ function processResult(result: AgentProcessResult, rootDir: string, invocationSt
 function isStaleQwenSessionResult(result: AgentProcessResult) {
   // Adapter-owned parsing of Qwen CLI diagnostics; never exposed as a workflow signal.
   if (!result || result.status === 0) { return false; }
-  const text = `${result.stderr || ''}${result.stdout || ''}`;
-  return /session not found|no session|invalid session/i.test(text);
+  return recognizedFailureReason(result.failureReason)?.code === 'provider-session-missing';
 }
 
 let _spawnAndTee: AgentProcessSpawn = spawnAndTee;

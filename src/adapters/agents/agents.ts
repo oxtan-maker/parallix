@@ -77,9 +77,9 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
   // Single explicit-fail branch for pinned work (TASK-2294.01). Every reroute
   // point below calls it before clearing `chosen`, so a pinned agent never
   // reaches `selectAgent` and the caller sees why the owner could not run.
-  const refuseFallbackWhenPinned = (detail: string) => {
+  const refuseFallbackWhenPinned = (detail: string, reason?: import('../../domain/failure-reason.js').FailureReason) => {
     if (pinnedAgent && agentOverride) {
-      throw new PinnedAgentUnavailableError(agentOverride, detail);
+      throw new PinnedAgentUnavailableError(agentOverride, detail, reason);
     }
   };
 

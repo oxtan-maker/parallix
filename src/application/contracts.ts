@@ -5,6 +5,7 @@ export type ErrorKind = 'validation' | 'capability' | 'conflict' | 'unavailable'
 export interface ApplicationError {
   readonly kind: ErrorKind;
   readonly message: string;
+  readonly failureReason?: import('../domain/failure-reason.js').FailureReason;
 }
 
 export interface DurableEvidence {
@@ -63,8 +64,8 @@ export function completed<T>(
   return { status: 'completed', value, durableEvidence };
 }
 
-export function failure<T>(kind: ErrorKind, message: string, durableEvidence: readonly DurableEvidence[] = []): ApplicationOutcome<T> {
-  return { status: kind === 'cancelled' ? 'cancelled' : 'failed', error: { kind, message }, durableEvidence };
+export function failure<T>(kind: ErrorKind, message: string, durableEvidence: readonly DurableEvidence[] = [], failureReason?: import('../domain/failure-reason.js').FailureReason): ApplicationOutcome<T> {
+  return { status: kind === 'cancelled' ? 'cancelled' : 'failed', error: { kind, message, ...(failureReason ? { failureReason } : {}) }, durableEvidence };
 }
 
 export function rejected<T>(kind: 'validation' | 'capability', message: string): ApplicationOutcome<T> {

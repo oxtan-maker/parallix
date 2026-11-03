@@ -28,7 +28,7 @@ const { mock } = test;
 await installModuleMocks();
 
 // Use the mock handles (not direct imports) so re-linked modules see mocked deps.
-const { forgejoApi, forgejoApiAsync, HTTP_REQUEST_TIMEOUT, codexSandboxHint } = forgejoApiModule;
+const { forgejoApi, forgejoApiAsync, HTTP_REQUEST_TIMEOUT } = forgejoApiModule;
 
 // --- Helpers ---
 
@@ -89,7 +89,7 @@ test('forgejoApi returns ok with parsed JSON on 200', () => {
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.statusCode, 200);
     assert.deepStrictEqual(result.data, { id: 1, title: 'test' });
-    assert.strictEqual(result.error, null);
+    assert.strictEqual(result.error, result.stderr || null);
   } finally {
     mockSpawnSync.mock.restore();
   }
@@ -133,7 +133,7 @@ test('forgejoApi returns ok=false on 404', () => {
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.statusCode, 404);
     assert.deepStrictEqual(result.data, { message: 'Not Found' });
-    assert.strictEqual(result.error, null);
+    assert.strictEqual(result.error, result.stderr || null);
   } finally {
     mockSpawnSync.mock.restore();
   }
@@ -170,7 +170,7 @@ test('forgejoApi handles malformed JSON response gracefully', () => {
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.statusCode, 200);
     assert.strictEqual(result.data, null);
-    assert.strictEqual(result.error, null);
+    assert.strictEqual(result.error, result.stderr || null);
   } finally {
     mockSpawnSync.mock.restore();
   }
@@ -191,7 +191,8 @@ test('forgejoApi returns error on curl spawn failure (status 7 = sandbox)', () =
     assert.strictEqual(result.statusCode, null);
     assert.strictEqual(result.data, null);
     assert.ok(typeof result.error === 'string');
-    assert.match(result.error, /Codex runtime cannot reach local Forgejo/);
+    assert.equal(result.error, result.stderr);
+    assert.equal(result.failureReason?.code, 'infrastructure');
   } finally {
     mockSpawnSync.mock.restore();
   }
@@ -210,7 +211,8 @@ test('forgejoApi returns error on curl spawn failure (generic status)', () => {
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.status, 28);
     assert.strictEqual(result.statusCode, null);
-    assert.strictEqual(result.error, null);
+    assert.strictEqual(result.error, 'curl: (28) Operation timed out');
+    assert.strictEqual(result.failureReason?.context?.exitCode, 28);
     assert.strictEqual(result.stderr, 'curl: (28) Operation timed out');
   } finally {
     mockSpawnSync.mock.restore();
@@ -352,7 +354,8 @@ test('forgejoApiAsync returns error on ECONNREFUSED with sandbox hint', async ()
     assert.strictEqual(result.statusCode, null);
     assert.strictEqual(result.status, null);
     assert.ok(typeof result.error === 'string');
-    assert.match(result.error, /Codex runtime cannot reach local Forgejo/);
+    assert.equal(result.error, result.stderr);
+    assert.equal(result.failureReason?.code, 'infrastructure');
   } finally {
     mockRequest.mock.restore();
   }
@@ -369,7 +372,8 @@ test('forgejoApiAsync returns error on ENOTFOUND', async () => {
     const result = await forgejoApiAsync('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/tmp' });
     assert.strictEqual(result.ok, false);
     assert.ok(typeof result.error === 'string');
-    assert.match(result.error, /Codex runtime cannot reach local Forgejo/);
+    assert.equal(result.error, result.stderr);
+    assert.equal(result.failureReason?.code, 'infrastructure');
   } finally {
     mockRequest.mock.restore();
   }
@@ -385,7 +389,7 @@ test('forgejoApiAsync returns error on generic request failure without sandbox h
   try {
     const result = await forgejoApiAsync('GET', '/pulls/1', 'token-123', undefined, { rootDir: '/tmp' });
     assert.strictEqual(result.ok, false);
-    assert.strictEqual(result.error, null);
+    assert.strictEqual(result.error, 'write EPIPE');
     assert.strictEqual(result.stderr, 'write EPIPE');
   } finally {
     mockRequest.mock.restore();
@@ -539,12 +543,6 @@ test('forgejoApiAsync omits Content-Length when no body', async () => {
 });
 
 // --- Utility tests ---
-
-test('codexSandboxHint returns expected message', () => {
-  const hint = codexSandboxHint();
-  assert.ok(hint.includes('Codex runtime'), 'hint should mention Codex runtime');
-  assert.ok(hint.includes('local Forgejo'), 'hint should mention local Forgejo');
-});
 
 test('HTTP_REQUEST_TIMEOUT is 5000', () => {
   assert.strictEqual(HTTP_REQUEST_TIMEOUT, 5000);

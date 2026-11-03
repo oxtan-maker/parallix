@@ -101,7 +101,7 @@ export function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts
  * findLastNonNoiseCommit. An empty list is treated as backlog-only
  * (no conflicts to classify).
  *
- * @param {string[]} conflictFiles - Relative file paths from parseConflictFilesFromMergeOutput
+ * @param {string[]} conflictFiles - Relative paths from the unmerged Git index
  * @returns {boolean} true if every file starts with 'backlog/'
  */
 export function areAllBacklogOnlyConflicts(conflictFiles: string[]): boolean {
