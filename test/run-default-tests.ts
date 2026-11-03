@@ -3,8 +3,10 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildTestRunPlan, withCoverageReporters } from './lib/test-run-plan.js';
-import { addTrustedTempRoot, createTempRootRegistry, defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
-import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
+import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots, registerRunnerOwner } from '../src/adapters/verification/temp-root-registry.js';
+import { diskBackedTempBase } from '../src/adapters/process/bulk-storage.js';
+import { probeProcessLiveness, processStartIdentity } from '../src/adapters/process/process-liveness.js';
+import { cleanupRunnerTempRoots, legacyCoverageBases, reportUnresolvedTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
 import { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { resolveFileTimingProfile, printFileTimingSummary } from './lib/file-timing-profile.js';
 import { PROFILE_ENV } from './lib/file-timing-reporter.js';
@@ -95,11 +97,40 @@ if (fastUnit && fileTimingProfile) {
 const executedNodeArgs = fastUnit
   ? ['--import', 'tsx', path.join(testRoot, 'run-fast-unit-tests.ts')]
   : suiteNodeArgs;
-// Persist runner-owned scratch too: worker manifests cannot reclaim it if
-// this supervisor itself is killed before its close handlers run.
-addTrustedTempRoot(path.join(executionRoot, 'tmp'));
-const runnerRoots = createTempRootRegistry();
-process.once('exit', runnerRoots.cleanup);
+// Node writes raw V8 payloads below TMPDIR. Give each covered invocation an
+// owned scratch root outside the checkout: fixtures must not inherit its Git
+// history, package metadata or configuration through ancestor discovery.
+// The payload is bulk data, so the scratch lives on a disk-backed temporary
+// base (TMPDIR, or /var/tmp when TMPDIR is tmpfs) and never fills a
+// memory-backed /tmp (TASK-2816). The finalized LCOV still goes to
+// coverageDestination.
+let coverageBase: string | null = null;
+if (coverageEnabled) {
+  try {
+    coverageBase = checkoutTestTmpdir(executionRoot,
+      diskBackedTempBase(process.env.XDG_RUNTIME_DIR, [path.join(executionRoot, 'tmp'),
+        ...(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR ? [process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR] : [])]));
+  }
+  catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+// Per-worker manifest directory for SIGKILL orphan cleanup.
+// The runner creates a PID-scoped directory and passes its path to the child
+// process via PARALLIX_TEST_MANIFEST_DIR. Each worker (including the main child
+// process) writes its own <worker-PID>.json file inside the directory, so
+// concurrent workers do not overwrite each other's root lists (task-2326 round 5).
+// After the suite completes, the runner reads all files and unions the roots.
+// The runner records its own scratch roots there too, with its start identity,
+// so the next runner's recovery reclaims them after a SIGKILL (TASK-2816).
+const tempManifestDir = ensureManifestDir(coverageBase ? path.join(coverageBase, 'manifests') : defaultManifestDir());
+if (coverageBase) { reportUnresolvedTempRoots(recoverRecordedTempRoots({ ownerLiveness: probeProcessLiveness })); }
+const testManifestDir = path.join(tempManifestDir, `test-run-${process.pid}`);
+reportUnresolvedTempRoots(recoverRecordedTempRoots({ manifestDir: tempManifestDir, ownerLiveness: probeProcessLiveness, legacyCoverageBases: legacyCoverageBases() }));
+fs.mkdirSync(testManifestDir, { recursive: true, mode: 0o700 });
+const runnerRoots = registerRunnerOwner(testManifestDir, { pid: process.pid, startId: processStartIdentity(process.pid) });
 // The covered fast unit tier writes its group LCOV fragments and bootstrap
 // homes under a scratch root this runner owns, so the root is removed even
 // when the watchdog kills the child. The unit and integration-ci gates may run
@@ -113,36 +144,19 @@ if (fastUnit && coverageEnabled) {
   fastUnitScratchDir = runnerRoots.register(fs.mkdtempSync(path.join(executionRoot, 'tmp', 'fast-unit-scratch-')));
 }
 
-// Node writes raw V8 payloads below TMPDIR. Give each covered invocation an
-// owned scratch root outside the checkout: fixtures must not inherit its Git
-// history, package metadata or configuration through ancestor discovery.
-// The finalized LCOV still goes to coverageDestination; cleanup removes this
-// invocation's payload on every runner exit path.
 let coverageScratchDir: string | null = null;
-if (coverageEnabled) {
-  const stableTmpdir = checkoutTestTmpdir(executionRoot);
-  coverageScratchDir = runnerRoots.register(fs.mkdtempSync(path.join(stableTmpdir, 'coverage-scratch-')));
+if (coverageBase) {
+  coverageScratchDir = runnerRoots.register(fs.mkdtempSync(path.join(coverageBase, 'coverage-scratch-')));
   // The per-invocation scratch would otherwise cold-start tsx's transpile cache
   // for every covered run, so each tsx-loaded child re-transformed the module
   // graph. Keep that cache in the checkout's stable tmp root.
-  linkSharedTsxCache(coverageScratchDir, stableTmpdir);
+  linkSharedTsxCache(coverageScratchDir, checkoutTestTmpdir(executionRoot));
 }
 
 // Unit tests import production modules directly from `src/` and replace
 // dependencies through the ESM-native seam in `test/lib/module-mock.ts`
 // (node:test module mocking). There is no transpiled compatibility tree.
 
-
-// Per-worker manifest directory for SIGKILL orphan cleanup.
-// The runner creates a PID-scoped directory and passes its path to the child
-// process via PARALLIX_TEST_MANIFEST_DIR. Each worker (including the main child
-// process) writes its own <worker-PID>.json file inside the directory, so
-// concurrent workers do not overwrite each other's root lists (task-2326 round 5).
-// After the suite completes, the runner reads all files and unions the roots.
-const tempManifestDir = ensureManifestDir(defaultManifestDir());
-const testManifestDir = path.join(tempManifestDir, `test-run-${process.pid}`);
-recoverRecordedTempRoots({ manifestDir: tempManifestDir });
-fs.mkdirSync(testManifestDir, { recursive: true });
 const cpuReportPath = path.join(testManifestDir, 'suite-cpu.json');
 const meter = !onGitHubActions() ? cpuSupervisor(executionRoot) : null;
 const childCpuModule = runsIntegrationSuite && !onGitHubActions() ? childCpuUsageModule(executionRoot, testNode) : null;
@@ -172,6 +186,7 @@ if (memoryPolicy.mode === 'cgroup' && !insideEnclosingScope) {
 } else if (memoryPolicy.mode === 'off') {
   console.error(`[test-memory-boundary] WARNING: no aggregate memory boundary (${memoryPolicy.reason}); a memory-growing test is not contained.`);
 }
+runnerRoots.prepareChild();
 const child = spawn(launch.command, launch.args, {
   stdio: ['inherit', 'pipe', 'pipe'],
   cwd: executionRoot,
@@ -185,6 +200,7 @@ const child = spawn(launch.command, launch.args, {
     ...(childCpuModule ? { PARALLIX_CHILD_CPU_USAGE_MODULE: childCpuModule } : {}),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
+    PARALLIX_TEST_FIXTURE_TMPDIR: checkoutTestTmpdir(executionRoot),
     // Coverage scratch already lives below the checkout's temporary root.
     // Use it directly to keep tsx IPC paths within Unix socket limits.
     TMPDIR: coverageScratchDir ?? checkoutTestTmpdir(executionRoot),
@@ -202,6 +218,7 @@ const child = spawn(launch.command, launch.args, {
   },
   detached: process.platform !== 'win32'
 });
+if (child.pid !== undefined) { runnerRoots.recordChild({ pid: child.pid, startId: processStartIdentity(child.pid) }); }
 let outputBytes = 0;
 child.stdout.on('data', (chunk: Buffer) => {
   outputBytes += chunk.length;
@@ -257,7 +274,6 @@ process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 function cleanupRunnerOwnedRoots() {
   if (launch.unit !== null) { forgetScope(launch.unit); }
   cleanupRunnerTempRoots(testManifestDir);
-  runnerRoots.cleanup();
 }
 
 // Measure elapsed time for the suite-level budget check.

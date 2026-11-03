@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { parallixTerminalTranscriptHome } from '../config/state-homes.js';
+import { DISK_TEMP_FALLBACK, selectDiskBackedDirectory } from './bulk-storage.js';
 
 /**
  * Private state root for tmux terminal hosting (TASK-2643).
@@ -13,6 +15,7 @@ import { createHash } from 'node:crypto';
  * so a confined agent can neither reach another run's tmux server nor read the
  * launch environment written for its own pane. The root is preferably under
  * `$XDG_RUNTIME_DIR`, which is per-user and short enough for socket paths.
+ * Bulk transcripts never live here (TASK-2816): see `terminalTranscriptRoot`.
  */
 export function terminalStateRoot(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
   const [preferred, fallback] = terminalStateRootCandidates(configuration);
@@ -61,9 +64,42 @@ export function ensurePrivateDir(dir: string): void {
   if ((stat.mode & 0o077) !== 0) { fs.chmodSync(dir, 0o700); }
 }
 
-/** Every existing state root to mask inside the sandbox; empty when none was created. */
-export function existingTerminalStateRoots(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
-  return [...new Set([...terminalStateRootCandidates(configuration), terminalSocketFallbackRoot(configuration)])].filter(root => {
+/** Disk-backed private transcript roots, most preferred first (TASK-2816). */
+function terminalTranscriptRootCandidates(configuration: ParallixConfiguration): string[] {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : 'user';
+  const home = parallixTerminalTranscriptHome(configuration);
+  return [...(configuration.terminal.transcriptDir ? [path.resolve(configuration.terminal.transcriptDir)] : []), home,
+    ...(process.platform === 'win32' ? [] : [path.join(DISK_TEMP_FALLBACK, `parallix-terminal-transcripts-${uid}`)])];
+}
+
+/**
+ * Owner-only root for the private, unredacted terminal transcripts (TASK-2816).
+ * Transcripts are bulk data, so they go to the Parallix state home, or the
+ * disk-backed system temporary directory when that home is memory-backed,
+ * never to the runtime directory or tmpfs that holds the sockets. Throws an
+ * actionable error when no disk-backed candidate exists.
+ */
+export function terminalTranscriptRoot(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return selectDiskBackedDirectory({
+    purpose: 'Mission terminal transcripts',
+    candidates: configuration.terminal.transcriptDir ? [configuration.terminal.transcriptDir] : terminalTranscriptRootCandidates(configuration),
+    remedy: 'Point PARALLIX_TERMINAL_TRANSCRIPT_DIR or PARALLIX_HOME at a disk-backed directory, or set adapters.terminal.host to "pipe".',
+    runtimeDir: configuration.terminal.runtimeDir,
+  });
+}
+
+function existingDirectories(roots: readonly string[]): string[] {
+  return [...new Set(roots)].filter(root => {
     try { return fs.statSync(root).isDirectory(); } catch { return false; }
   });
+}
+
+/** Existing socket and launch-transport roots, including the compact socket fallback. */
+export function existingTerminalSocketRoots(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
+  return existingDirectories([...terminalStateRootCandidates(configuration), terminalSocketFallbackRoot(configuration)]);
+}
+
+/** Every existing state and transcript root to mask inside the sandbox; empty when none was created. */
+export function existingTerminalStateRoots(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string[] {
+  return existingDirectories([...existingTerminalSocketRoots(configuration), ...terminalTranscriptRootCandidates(configuration)]);
 }

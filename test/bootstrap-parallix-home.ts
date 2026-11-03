@@ -1,3 +1,4 @@
+import { createTestTranscriptRoot, restoreFixtureTmpdir } from './lib/test-tmpdir.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -17,7 +18,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // so it protects the database this process would otherwise have resolved.
 startDefaultDbGuard('unit-test');
 
+restoreFixtureTmpdir();
 const tempRoots: string[] = [];
+process.env.PARALLIX_TERMINAL_TRANSCRIPT_DIR = createTestTranscriptRoot(root => tempRoots.push(root));
+// Nested stand-in checkouts may live on tmpfs with /var/tmp read-only. Give
+// their bootstrap a private disk-backed candidate owned by this test tree.
+process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR = process.env.PARALLIX_TERMINAL_TRANSCRIPT_DIR;
 const testHomeTempRoot = process.env.PARALLIX_TEST_HOME_TMPDIR || os.tmpdir();
 
 function makeTempDir(prefix: string) {

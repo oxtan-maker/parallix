@@ -64,6 +64,7 @@ export interface TerminalConfiguration {
   readonly operationCapture: OptionalString;
   readonly tmux: OptionalString;
   readonly stateDir: OptionalString;
+  readonly transcriptDir?: OptionalString;
   readonly runtimeDir: OptionalString;
   readonly xdgDataHome: OptionalString;
 }

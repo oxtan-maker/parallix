@@ -77,7 +77,7 @@ px attach task-1234
 Use `Ctrl-b d` to detach; it does not stop work. `--read-only` opens a watching
 client. When work finishes, its operation window closes and one console shell remains
 for inspection and later commands, showing the last 50 lines of command output
-and its exit code. Commands started from that console also retain their output.
+and its exit code. Hosted mission commands started from that console also retain their output.
 Mission commands resolve their worktree from the Mission identity even when the
 console or shell startup files leave the shell in the base checkout. Execute,
 review and recovery retries retain the mission branch preflight; the console
@@ -111,18 +111,19 @@ unavailable; retained history stays readable and observation never retires it.
 
 ## Mission history on the board
 
-Selecting a mission card in `px web` opens its retained history, newest
-operation first, with new output appended while an operation runs. Earlier
+Selecting a mission card in `px web` immediately shows its current terminal
+above the retained history. The terminal refreshes every second while the view
+is open, including when browsing older operations. Retained history opens at
+the newest operation, with new output appended while an operation runs. Earlier
 history loads page by page; search covers every retained operation (literal
 text); the operation and stream selectors switch between records; copy copies
 what is shown. Scrolling back keeps the selected operation and position when
 new runs arrive; resume following to return to the newest operation. Failed
 initial history reads retry during polling. Incomplete or malformed history
 responses are reported as read errors; already loaded history stays visible
-until a valid refresh recovers. The live
-pane is an optional extra view and never replaces the history. It refreshes
-once a second while open, skips refresh ticks while a read is pending, and
-keeps its displayed output if a refresh fails. Closing it cancels the read.
+until a valid refresh recovers. Terminal refreshes skip ticks while a read is
+pending and keep the displayed output if a refresh fails. Closing the mission
+view cancels its reads.
 The view states whether an operation is starting, live, ended, ran without a terminal (pipe),
 has no history, or whether the terminal could not be inspected; a failed or
 timed-out inspection keeps the history on screen and is not reported as "no
@@ -220,11 +221,50 @@ This is best effort when the recorded process identity is stale or a child
 has escaped its supervisor: removing a tmux window alone does not prove that
 all detached descendants have exited.
 
-The private terminal transcript (unredacted, in the owner-only terminal state
-directory) only feeds the console's display of a finished command; it is never
-offered through `px history`, `px attach` or the web host. An absent live
-terminal or unavailable observation is reported as such rather than being
-inferred from scrollback.
+The web mission view reads the current terminal screen independently of retained
+transcripts. Rotating or expiring transcript segments does not interrupt that
+display. Private transcript segments supply the console's replay after a command
+finishes; durable history keeps its existing access and redaction rules.
+
+### Where transcripts are stored and how much is kept
+
+Transcripts are bulk data, so they never live beside the tmux sockets in the
+runtime directory. They go to their own owner-only directory under the operator
+state home (`PARALLIX_HOME`), or the explicit disk-backed
+`PARALLIX_TERMINAL_TRANSCRIPT_DIR`; when the state home sits on a memory-backed filesystem
+the transcript root moves to `/var/tmp/parallix-terminal-transcripts-<uid>`, and
+when no candidate is disk-backed and writable the launch reports why instead of
+writing there, and hosting falls back to the pipe. Sockets, launch scripts and
+fifos keep their short private runtime paths, including the compact socket path
+used when a configured state path is too long for a Unix socket.
+
+The kept volume is finite. One writer holds four 1 MiB segments and drops its
+oldest as it starts a new one, so continuous output never grows a single capture
+file without bound. Launches and live writers also apply per-mission and
+aggregate budgets — 16 MiB per mission and 256 MiB across all missions — and
+expire segments untouched for seven days. Writers enforce these budgets before each
+segment, at completion and every second while an operation pipe is open, even
+when that operation is idle. The retained interactive console has no transcript
+writer: its current screen remains available to attach and web viewing. Each segment reserves at least its full 1 MiB capacity (or its
+allocated blocks when larger), plus 16 KiB for file and directory metadata. A writer removes its oldest segment
+before creating another; rotation makes no temporary transcript copy. If another
+writer evicts an open segment, its inode can retain at most 1 MiB until the
+evicted writer closes it at its next check, within one second. This transient
+space is additional to the retained-file budgets, per evicted live writer. The
+newest operation segments are kept; live terminal output continues while capture
+rotates. If a storage write fails, capture drops that segment and retries at
+the next segment boundary. A worker startup failure drains the capture pipe so
+durable workflow output can continue.
+
+When requested output is no longer retained, the console says which case it is
+instead of showing a silent gap: earlier output of that operation was rotated
+out, so the retained tail follows, or the transcript of that operation is no
+longer retained. Retention of the private transcript never touches the durable,
+redacted history records above, and those keep their own bounds.
+
+Transcripts written beside the socket by earlier releases are reclaimed at the
+same launch or live-writer check: removed when their socket is gone, truncated
+when an older server is still appending to them.
 
 Terminal separation is not a security sandbox. On Linux, the existing
 Bubblewrap confinement boundary remains responsible for agent filesystem

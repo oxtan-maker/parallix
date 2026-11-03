@@ -440,16 +440,28 @@ probe('unit-test CPU guard: suite budget enforcement fails when exceeded', async
 });
 
 // Integration CPU limits include waited command trees, unlike process.cpuUsage().
-async function runIntegrationCpuFixture(source: string, extraEnv: Record<string, string> = {}) {
+async function runIntegrationCpuFixture(source: string, extraEnv: Record<string, string> = {}, cpuSamples?: readonly number[]) {
   const directory = mkdtemp('integration-cpu-proof-');
   // These probes contain only JavaScript. Loading tsx adds background loader
   // CPU during the timed wait and can make an idle probe exceed its budget
   // (TASK-2677); exercise the real CPU hook without that unrelated work.
   const file = path.join(directory, 'probe.test.mjs');
   fs.writeFileSync(file, `import test from 'node:test';\nimport { spawnSync } from 'node:child_process';\n${source}\n`);
+  const sampleModule = path.join(directory, 'cpu-samples.cjs');
+  if (cpuSamples) {
+    // Isolate nesting arithmetic from Node's background CPU and scheduling.
+    // The adjacent burn/wait/teardown probes still use real OS counters.
+    fs.writeFileSync(sampleModule, `const samples = ${JSON.stringify(cpuSamples)};
+process.cpuUsage = () => {
+  if (!samples.length) throw new Error('unexpected CPU sample');
+  return { user: samples.shift(), system: 0 };
+};
+exports.waitedChildCpuUs = () => 0;
+`);
+  }
   const env: NodeJS.ProcessEnv = {
     ...process.env, NODE_NO_WARNINGS: '1',
-    PARALLIX_CHILD_CPU_USAGE_MODULE: childCpuUsageModule(ROOT, process.execPath),
+    PARALLIX_CHILD_CPU_USAGE_MODULE: cpuSamples ? sampleModule : childCpuUsageModule(ROOT, process.execPath),
     PARALLIX_EXECUTION_ROOT: ROOT, ...extraEnv,
   };
   delete env.NODE_TEST_CONTEXT;
@@ -491,11 +503,20 @@ probe('integration hook CPU guard counts teardown CPU (TASK-2622.20)', async () 
 });
 
 probe('integration hook CPU guard charges nested cases without double counting (TASK-2622.20)', async () => {
-  const burn = burnCpuSource(40_000);
-  const nested = await runIntegrationCpuFixture(`test('outer', async t => { ${burn} await t.test('inner', async () => { ${burn} }); });`, {
-    PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '75',
-  });
+  const source = "test('outer', async t => { await t.test('inner', async () => {}); });";
+  const budget = { PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS: '75' };
+  // Samples: outer start, inner start, inner end, outer end. Each case
+  // owns 40 ms; charging the inner twice would reject the 80 ms parent.
+  const nested = await runIntegrationCpuFixture(source, budget, [0, 40_000, 80_000, 80_000]);
   assert.equal(nested.status, 0, `${nested.stdout}\n${nested.stderr}`);
+  const inner = await runIntegrationCpuFixture(source, budget, [0, 0, 80_000, 80_000]);
+  assert.notEqual(inner.status, 0, `${inner.stdout}\n${inner.stderr}`);
+  assert.match(inner.stdout, /\[integration-test-cpu:exceeded\] outer > inner/);
+  assert.doesNotMatch(inner.stdout, /\[integration-test-cpu:exceeded\] outer:/);
+  const outer = await runIntegrationCpuFixture(source, budget, [0, 80_000, 80_000, 80_000]);
+  assert.notEqual(outer.status, 0, `${outer.stdout}\n${outer.stderr}`);
+  assert.match(outer.stdout, /\[integration-test-cpu:exceeded\] outer:/);
+  assert.doesNotMatch(outer.stdout, /\[integration-test-cpu:exceeded\] outer > inner/);
 });
 
 probe('integration suite CPU budget rejects a passing hook suite (TASK-2622.20)', async () => {

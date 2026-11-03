@@ -45,13 +45,16 @@ function conflictRepo(root: string, extraConfig: Record<string, unknown> = {}) {
   git('checkout', 'mission/task-lcfg-iso');
 
   // Fake implementer: resolves the conflict and continues the rebase in its `--cd` directory.
-  const launches = path.join(root, 'launches.log');
+  // The implementer may write only inside its worktree. /tmp used to hide
+  // this dependency because the sandbox supplies a writable temporary mount;
+  // disk-backed coverage scratch must retain the same confinement boundary.
+  const launches = path.join(repo, '.git', 'launches.log');
   fs.writeFileSync(path.join(binDir, 'codex'), [
     '#!/bin/sh',
     'while [ $# -gt 0 ] && [ "$1" != "--cd" ]; do shift; done',
     '[ $# -gt 0 ] || exit 0',
     `echo launched >> '${launches}'`,
-    `printf '%s' "$TASK_2744_ENV" > '${path.join(root, 'child-environment')}'`,
+    `printf '%s' "$TASK_2744_ENV" > '${path.join(repo, '.git', 'child-environment')}'`,
     'cd "$2" || exit 1',
     'printf "resolved\\n" > shared.txt',
     'git add shared.txt',
@@ -81,7 +84,7 @@ describe("pre-review rebase launcher configuration", () => {
       const result = await createReviewPreparationPorts(configuration).rebase.rebaseBeforeReviewRound('task-lcfg-iso', options);
       assert.equal(fs.existsSync(launches), true, `Codex was not detected/launched: ${logs.join(' | ')}`);
       assert.equal(result.ok, true, JSON.stringify(result));
-      assert.equal(fs.readFileSync(path.join(root, 'child-environment'), 'utf8'), 'composed');
+      assert.equal(fs.readFileSync(path.join(repo, '.git', 'child-environment'), 'utf8'), 'composed');
       assert.equal(git('status', '--porcelain', '--untracked-files=no').stdout.trim(), '');
       assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false);
       assert.equal(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8'), 'resolved\n');

@@ -24,7 +24,16 @@ export function processStartIdentity(pid: number): string | null {
 }
 
 export function probeProcessLiveness(pid: number, identity: string | null): boolean | null {
-  try { process.kill(pid, 0); } catch { return false; }
+  try { process.kill(pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' ? false : null; }
+  if (process.platform === 'linux') {
+    try {
+      const stat = readProcessStat.sync(pid);
+      const state = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[0];
+      // An unreaped process has exited and cannot still write scratch data.
+      if (state === 'Z' || state === 'X') { return false; }
+    } catch { /* Unreadable state cannot establish that the process exited. */ }
+  }
   if (identity === null) {
     return null;
   }

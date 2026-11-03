@@ -1,12 +1,12 @@
 import { readProcessStat, runNativeStartIdentity } from '../../../../src/adapters/process/process-liveness.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
-const environment: NodeJS.ProcessEnv = { ...process.env };
+const environment: NodeJS.ProcessEnv = { ...process.env, PARALLIX_TERMINAL_TRANSCRIPT_DIR: undefined };
 import fs from 'node:fs';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import test from 'node:test';
+import test, { afterEach, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
 import { agentRunIdentity as logicalRunIdentity } from '../../../../src/domain/agent-run.js';
@@ -22,12 +22,22 @@ import {
   tmuxMissionName,
   type TmuxLaunch,
 } from '../../../../src/adapters/process/tmux-host.js';
-import { ensurePrivateDir, terminalStateRoot } from '../../../../src/adapters/process/terminal-state-root.js';
+import { ensurePrivateDir, terminalSocketFallbackRoot, terminalStateRoot, terminalTranscriptRoot } from '../../../../src/adapters/process/terminal-state-root.js';
+import { BulkStorageUnavailableError, DISK_TEMP_FALLBACK, bulkStorageProbe, isMemoryBacked } from '../../../../src/adapters/process/bulk-storage.js';
+import { TERMINAL_TRANSCRIPT_LIMITS, TRANSCRIPT_FILE_OVERHEAD_BYTES, TRANSCRIPT_RETENTION_INTERVAL_MS, captureTerminalTranscript, enforceTranscriptRetention, transcriptWriterScript } from '../../../../src/adapters/process/terminal-transcript.js';
 import { createTmuxMissionTerminalHost } from '../../../../src/adapters/process/tmux-mission-terminal.js';
 import { missionTerminalIdentity } from '../../../../src/adapters/process/mission-terminal-identity.js';
 import { observeTmuxLaunchExecution, readTmuxLaunchExecution } from '../../../../src/adapters/process/tmux-launch-execution.js';
 
 // Doubles cover terminal policy and launch construction without a real tmux server.
+// The fixture state home stands on a disk-backed filesystem whatever backs the
+// host's temporary directory; storage selection has its own cases below.
+const EXT4 = 0xef53;
+beforeEach(() => {
+  mock.method(bulkStorageProbe, 'statfs', () => ({ type: EXT4 }));
+  mock.method(bulkStorageProbe, 'writable', () => true);
+});
+afterEach(() => { mock.restoreAll(); });
 
 test('tmux launch identity comes from immutable startup evidence (TASK-2764)', () => {
   const root = mkdtemp('px-tmux-identity-');
@@ -421,12 +431,13 @@ test('a presented launch draws the readable view on the pane and relays raw byte
   const files = (launch: TmuxLaunch) => { const scratch = path.dirname(launch.args[0]); return { host: fs.readFileSync(launch.args[0], 'utf8'), pane: fs.readFileSync(path.join(scratch, 'pane.sh'), 'utf8') }; };
   const [before, after] = [files(plain), files(presented)];
   assert.doesNotMatch(before.pane, /presenter/, 'unpresented launches keep the verbatim pane');
-  assert.match(before.host, /tee -a/);
+  assert.match(before.host, /\| tee '[^']*\/transcript' &/, 'an unpresented pane is relayed and teed into the bounded transcript writer');
   assert.match(after.pane, /tee .*raw.* < .*agent\.out.* \| 'px' '--claude-stream-presenter' &/);
   assert.match(after.pane, /wait "\$presenter"/, 'the pane drains the presenter before reporting the exit status');
   assert.match(after.pane, /status=\$\?\nwait/, 'the command status is captured before waiting');
   assert.match(after.host, /cat '[^']*\/raw' &/, 'the host relays the raw stream to the supervisor');
-  assert.doesNotMatch(after.host, /tee -a/, 'the transcript receives only the rendered pane');
+  assert.doesNotMatch(after.host, /\| tee /, 'the transcript receives only the rendered pane');
+  assert.match(after.host, /transcript-writer\.sh' '[^']*' '[^']+' < '[^']*\/out' &/, 'the rendered pane goes straight to the bounded writer');
   plain.cleanup();
   presented.cleanup();
 });
@@ -538,4 +549,212 @@ test('session and window probes distinguish confirmed absence from unavailable f
   const host = createTmuxMissionTerminalHost({ configuration, repositoryKey: 'abc123', spawnSyncFn: (() => { throw new Error('unexpected probe'); }) as never });
   t.mock.method(fs, 'statSync', () => { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }); });
   assert.equal(host.sessions(scope).ok, false, 'an inaccessible socket is not a missing socket');
+});
+
+test('terminal transcripts go to disk-backed private storage apart from the socket and launch transport (TASK-2816)', () => {
+  const base = mkdtemp('px-tmux-store-');
+  const configuration = resolveConfiguration({ ...environment, PARALLIX_TERMINAL_STATE_DIR: path.join(base, 'state'), PARALLIX_HOME: path.join(base, 'home') });
+  const { fn } = fakeSpawnSync('');
+  const launch = prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'sh', args: [], cwd: '/work', env: {} }, { configuration, spawnSyncFn: fn });
+  const host = fs.readFileSync(launch.args[0], 'utf8');
+  const transcripts = path.join(base, 'home', 'terminal-transcripts');
+  const missionDir = path.join(transcripts, 'abc123', 'task-1');
+  assert.equal(terminalTranscriptRoot(configuration), transcripts);
+  const socketRoots = [terminalStateRoot(configuration), terminalSocketFallbackRoot(configuration)];
+  assert.ok(socketRoots.some(root => launch.socketPath.startsWith(`${root}${path.sep}`)), 'the socket stays in a private runtime root, compacted when needed');
+  assert.equal(host.includes('.sock.log'), false, 'no transcript is written beside the socket');
+  assert.ok(host.includes(`${shellQuote(missionDir)} ${shellQuote(launch.windowName)} < `), 'the operation writer targets the mission transcript directory');
+  for (const dir of [transcripts, missionDir]) { assert.equal(fs.statSync(dir).mode & 0o777, 0o700); }
+  for (const script of ['transcript-writer.sh', 'transcript-replay.sh']) {
+    assert.equal(fs.statSync(path.join(path.dirname(launch.socketPath), 'task-1', script)).mode & 0o777, 0o700, `${script} is private launch transport`);
+  }
+  assert.match(host, /pipe-pane -t '=task-1:console'\n/, 'console logging from earlier releases is disabled');
+  assert.doesNotMatch(host, /@px_transcript|console-\$\(date/, 'no unused console capture or branch-only version marker');
+  assert.match(host, /send-keys -t '=task-1:console' -l 'sh .*transcript-replay\.sh.*'"\$result"/, 'the console replays the operation from its retained transcript');
+  launch.cleanup();
+  assert.equal(fs.existsSync(missionDir), true, 'cleanup removes launch transport, not the retained transcript');
+});
+
+test('memory-backed transcript homes fall back to disk-backed temporary storage or fail actionably (TASK-2816)', { skip: process.platform !== 'linux' && 'statfs filesystem types are Linux-specific' }, t => {
+  const base = mkdtemp('px-tmux-tmpfs-');
+  t.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const runtime = path.join(base, 'run');
+  const fallback = path.join(DISK_TEMP_FALLBACK, `parallix-terminal-transcripts-${process.getuid!()}`);
+  let fallbackExists = false;
+  const existsSync = fs.existsSync;
+  t.mock.method(fs, 'existsSync', (dir: fs.PathLike) => dir === fallback ? fallbackExists : existsSync(dir));
+  let diskTemp = true;
+  let writableTemp = true;
+  // The simulated tmpfs home may itself be below /var/tmp in a covered run.
+  // Probe /var/tmp before creation, and the fallback itself on subsequent runs.
+  const isFallback = (dir: string) => dir === DISK_TEMP_FALLBACK || dir === fallback;
+  t.mock.method(bulkStorageProbe, 'statfs', (dir: string) => ({ type: diskTemp && isFallback(dir) ? EXT4 : 0x01021994 }));
+  t.mock.method(bulkStorageProbe, 'writable', (dir: string) => writableTemp || !isFallback(dir));
+  const configuration = resolveConfiguration({ ...environment, PARALLIX_HOME: path.join(base, 'home'), XDG_RUNTIME_DIR: runtime, PARALLIX_TERMINAL_STATE_DIR: path.join(base, 'state') });
+  const { fn } = fakeSpawnSync('');
+  for (const existing of [false, true]) {
+    fallbackExists = existing;
+    diskTemp = true;
+    assert.equal(terminalTranscriptRoot(configuration), fallback, `fallback exists: ${existing}`);
+    writableTemp = false;
+    assert.throws(() => terminalTranscriptRoot(configuration), /not writable/, 'a read-only disk-backed candidate is not chosen');
+    writableTemp = true;
+    diskTemp = false;
+    assert.throws(() => terminalTranscriptRoot(configuration), /Mission terminal transcripts need disk-backed storage.*PARALLIX_HOME.*adapters\.terminal\.host/);
+    assert.throws(() => prepareTmuxLaunch({ identity: identity(), spawnIndex: 0, command: 'sh', args: [], cwd: '/work', env: {} }, { configuration, spawnSyncFn: fn }), BulkStorageUnavailableError);
+  }
+  diskTemp = true;
+  assert.equal(isMemoryBacked(path.join(runtime, 'parallix-terminal'), runtime), true, 'the runtime directory never holds bulk data, whatever statfs reports');
+});
+
+test('a transcript writer rotates continuous output within its segment budget and replay reports rotation and expiry (TASK-2816)', async context => {
+  const base = mkdtemp('px-transcript-stream-');
+  context.after(() => fs.rmSync(base, { recursive: true, force: true }));
+  const dir = path.join(base, 'abc123', 'task-1');
+  const stream = new PassThrough();
+  const limits = { ...TERMINAL_TRANSCRIPT_LIMITS, segmentBytes: 64, segmentsPerWriter: 3 };
+  const capture = captureTerminalTranscript({ stream, root: base, dir, name: 'operation', limits });
+  stream.end(Buffer.from('a'.repeat(64) + 'b'.repeat(64) + 'c'.repeat(64) + 'd'.repeat(64) + 'end'));
+  await capture;
+  const files = fs.readdirSync(dir).sort();
+  assert.deepEqual(files, ['operation.000000000002', 'operation.000000000003', 'operation.000000000004']);
+  assert.equal(files.map(name => fs.readFileSync(path.join(dir, name), 'utf8')).join(''), 'c'.repeat(64) + 'd'.repeat(64) + 'end');
+  for (const name of files) { assert.equal(fs.statSync(path.join(dir, name)).mode & 0o777, 0o600); }
+  assert.match(transcriptWriterScript('/private/px'), /'\/private\/px' --terminal-transcript-writer.*\|\| cat >\/dev\/null/);
+
+});
+
+test('live writers reserve whole segments and enforce aggregate retention while idle (TASK-2816)', async context => {
+  context.mock.timers.enable({ apis: ['setInterval'] });
+  const root = mkdtemp('px-transcript-live-');
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'abc123', 'task-1');
+  const stream = new PassThrough();
+  const limits = { ...TERMINAL_TRANSCRIPT_LIMITS, segmentBytes: 64, missionBytes: 32800, aggregateBytes: 32800 };
+  const capture = captureTerminalTranscript({ stream, root, dir, name: 'active', limits });
+  context.after(async () => { stream.destroy(); await capture; });
+  stream.write('partial');
+  await new Promise<void>(resolve => setImmediate(resolve));
+  const old = path.join(root, 'abc123', 'task-old', 'old.000000000000');
+  fs.mkdirSync(path.dirname(old), { recursive: true });
+  fs.writeFileSync(old, 'old');
+  fs.utimesSync(old, Date.now() / 1000 - 60, Date.now() / 1000 - 60);
+  context.mock.timers.tick(TRANSCRIPT_RETENTION_INTERVAL_MS);
+  assert.equal(fs.existsSync(old), false, 'idle pipe enforces the root budget at one second');
+  assert.equal(fs.existsSync(path.join(dir, 'active.000000000000')), true);
+  stream.end(' end');
+  await capture;
+  assert.equal(fs.readFileSync(path.join(dir, 'active.000000000000'), 'utf8'), 'partial end');
+});
+
+test('an evicted live segment is closed and later output continues in order (TASK-2816)', async context => {
+  context.mock.timers.enable({ apis: ['setInterval'] });
+  const root = mkdtemp('px-transcript-evicted-');
+  const dir = path.join(root, 'abc123', 'task-1');
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const stream = new PassThrough();
+  const capture = captureTerminalTranscript({ stream, root, dir, name: 'active', limits: { ...TERMINAL_TRANSCRIPT_LIMITS, segmentBytes: 8 } });
+  context.after(async () => { stream.destroy(); await capture; });
+  stream.write('1234');
+  await new Promise<void>(resolve => setImmediate(resolve));
+  fs.rmSync(path.join(dir, 'active.000000000000'));
+  context.mock.timers.tick(TRANSCRIPT_RETENTION_INTERVAL_MS);
+  stream.end('5678retained');
+  await capture;
+  assert.deepEqual(fs.readdirSync(dir), ['active.000000000001']);
+  assert.equal(fs.readFileSync(path.join(dir, 'active.000000000001'), 'utf8'), 'retained');
+});
+
+test('capture drains failed storage without breaking output and rejects unrelated destinations (TASK-2816)', async context => {
+  const root = mkdtemp('px-transcript-failure-');
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const dir = path.join(root, 'abc123', 'task-1');
+  fs.mkdirSync(path.dirname(dir));
+  fs.writeFileSync(dir, 'unrelated');
+  const stream = new PassThrough();
+  const capture = captureTerminalTranscript({ stream, root, dir, name: 'active' });
+  stream.end(Buffer.alloc(65536));
+  await capture;
+  assert.equal(fs.readFileSync(dir, 'utf8'), 'unrelated');
+  await assert.rejects(captureTerminalTranscript({ stream: new PassThrough(), root, dir: path.dirname(root), name: 'active' }), /Invalid private terminal/);
+});
+
+test('launch retention keeps per-mission, aggregate and age limits and reclaims earlier release socket logs (TASK-2816)', () => {
+  const base = mkdtemp('px-transcript-retention-');
+  const [root, legacy] = [path.join(base, 'transcripts'), path.join(base, 'state', 'abc123')];
+  const nowMs = Date.now();
+  const segment = (mission: string, name: string, ageSeconds: number) => {
+    const file = path.join(root, 'abc123', mission, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, Buffer.alloc(4096));
+    fs.utimesSync(file, (nowMs - ageSeconds * 1000) / 1000, (nowMs - ageSeconds * 1000) / 1000);
+    return file;
+  };
+  const accounted = (file: string) => { const stat = fs.statSync(file); return Math.max(stat.size, stat.blocks * 512) + TRANSCRIPT_FILE_OVERHEAD_BYTES; };
+  const unit = accounted(segment('probe', 'probe.000000000000', 0));
+  fs.rmSync(path.join(root, 'abc123', 'probe'), { recursive: true });
+  const limits = { ...TERMINAL_TRANSCRIPT_LIMITS, segmentBytes: 4096, missionBytes: 3 * unit, aggregateBytes: 4 * unit, retentionMs: 60_000 };
+  const a = [10, 9, 8, 7, 6, 5].map((age, index) => segment('task-a', `op.${String(index).padStart(12, '0')}`, age));
+  const b = [20, 19].map((age, index) => segment('task-b', `op.${String(index).padStart(12, '0')}`, age));
+  const expired = segment('task-c', 'operation-old.000000000000', 120);
+  const empty = path.join(root, 'abc123', 'empty-launch');
+  fs.mkdirSync(empty, { recursive: true });
+  const foreign = path.join(root, 'abc123', 'task-a', 'notes.txt');
+  fs.writeFileSync(foreign, 'not a segment');
+  fs.symlinkSync(foreign, path.join(root, 'abc123', 'task-a', 'link.000000000009'));
+  fs.mkdirSync(legacy, { recursive: true });
+  for (const name of ['task-1.sock', 'task-1.sock.log', 'task-2.sock.log', 'other.log']) { fs.writeFileSync(path.join(legacy, name), 'legacy transcript'); }
+  const report = enforceTranscriptRetention({ root, legacyRoots: [path.dirname(legacy)], nowMs, limits });
+  assert.deepEqual([...a, ...b, expired].map(file => fs.existsSync(file)), [false, false, false, true, true, true, false, true, false],
+    'each mission keeps its newest segments, the aggregate drops the oldest remaining and expired segments go');
+  assert.equal(fs.existsSync(path.dirname(expired)), false, 'an emptied mission directory is removed');
+  assert.equal(fs.existsSync(empty), false, 'launches producing no bytes do not accumulate directories');
+  assert.ok(fs.existsSync(foreign) && fs.lstatSync(path.join(root, 'abc123', 'task-a', 'link.000000000009')).isSymbolicLink(), 'foreign files and links survive');
+  assert.deepEqual({ removed: report.removedSegments, legacyRemoved: report.legacyRemoved, legacyTruncated: report.legacyTruncated }, { removed: 5, legacyRemoved: 1, legacyTruncated: 1 });
+  assert.equal(fs.statSync(path.join(legacy, 'task-1.sock.log')).size, 0, 'a live earlier-release log is truncated in place');
+  assert.deepEqual(fs.readdirSync(legacy).sort(), ['other.log', 'task-1.sock', 'task-1.sock.log']);
+  assert.equal(enforceTranscriptRetention({ root, legacyRoots: [path.dirname(legacy)], nowMs, limits }).removedSegments, 0, 'repeated enforcement is idempotent');
+  for (let mission = 0; mission < 6; mission++) {
+    [3, 2, 1].forEach((age, index) => segment(`done-${mission}`, `op.${String(index).padStart(12, '0')}`, age));
+    enforceTranscriptRetention({ root, legacyRoots: [], nowMs, limits });
+    const kept = fs.readdirSync(path.join(root, 'abc123'), { recursive: true }).map(String).filter(name => /\.\d{12}$/.test(name) && !name.includes('link'));
+    assert.ok(kept.reduce((sum, name) => sum + accounted(path.join(root, 'abc123', name)), 0) <= limits.aggregateBytes, `completed mission ${mission} keeps the aggregate bound`);
+  }
+});
+
+test('a raced directory and a failed segment recover without permanently disabling capture (TASK-2816)', async context => {
+  const root = mkdtemp('transcript-retry-');
+  const dir = path.join(root, 'abc123', 'task-1');
+  context.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const open = fs.openSync;
+  let raced = false;
+  context.mock.method(fs, 'openSync', ((file: fs.PathLike, flags: string, mode: number) => {
+    if (!raced && flags === 'wx') {
+      raced = true; fs.rmdirSync(dir);
+      throw Object.assign(new Error('retention raced'), { code: 'ENOENT' });
+    }
+    return open(file, flags, mode);
+  }) as typeof fs.openSync);
+  const write = fs.writeSync;
+  let failed = false;
+  context.mock.method(fs, 'writeSync', ((...args: Parameters<typeof fs.writeSync>) => {
+    if (!failed) { failed = true; throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); }
+    return Reflect.apply(write, fs, args);
+  }) as typeof fs.writeSync);
+  const stream = new PassThrough();
+  const capture = captureTerminalTranscript({ stream, root, dir, name: 'operation', limits: { ...TERMINAL_TRANSCRIPT_LIMITS, segmentBytes: 8 } });
+  stream.end('dropped!retained'); await capture;
+  assert.equal(raced, true);
+  assert.equal(fs.readFileSync(path.join(dir, 'operation.000000000001'), 'utf8'), 'retained', 'the next segment retries after storage recovers');
+});
+
+test('an explicit transcript root is isolated even with a tmpfs home and refuses unsafe storage (TASK-2816)', t => {
+  const base = mkdtemp('explicit-transcript-');
+  const home = path.join(base, 'home');
+  const bulk = path.join(base, 'bulk'); fs.mkdirSync(bulk);
+  const configuration = resolveConfiguration({ ...environment, PARALLIX_HOME: home, PARALLIX_TERMINAL_TRANSCRIPT_DIR: bulk });
+  t.mock.method(bulkStorageProbe, 'statfs', (dir: string) => ({ type: dir === bulk ? EXT4 : 0x01021994 }));
+  assert.equal(terminalTranscriptRoot(configuration), bulk, 'no shared host fallback is selected');
+  t.mock.method(bulkStorageProbe, 'writable', () => false);
+  assert.throws(() => terminalTranscriptRoot(configuration), /disk-backed storage.*PARALLIX_TERMINAL_TRANSCRIPT_DIR/);
 });

@@ -85,6 +85,32 @@ attempts. Restore capacity or the user manager as directed, then rerun the
 original verification command: recovery requires a fresh healthy preflight and
 successful verification. Parallix does not remove runtime data automatically.
 
+## Temporary storage after an interrupted run
+
+The native coverage runner starts with a disk-backed `TMPDIR`, or `/var/tmp`
+when the configured temporary directory is memory-backed. If neither is
+writable on disk, startup fails with guidance to set `TMPDIR`. Once Node has
+allocated its raw coverage directory, the test bootstrap restores the ordinary
+fixture `TMPDIR`. Covered and uncovered fixtures therefore use the same
+filesystem; only raw coverage and explicitly isolated transcript storage need
+disk space.
+
+Scratch ownership is recorded before use, both in the runner manifest and
+beside its data. Covered manifests share the scratch filesystem. The data's
+owner record includes the PID, process start identity and, on Linux, boot
+identity; it also protects the runner's surviving suite process. Normal cleanup
+removes these roots. At the next test-runner startup, recovery checks the exact
+runner scratch layout and reclaims confirmed abandoned roots, including after
+SIGKILL, reboot or loss of a volatile manifest. Live or uncertain owners keep
+their data. Repeated recovery is safe.
+
+Legacy roots without trusted ownership records are kept and reported; an age
+or directory name alone never proves abandonment. Recovery does not require
+reading every same-user process environment. Shared caches, durable evidence
+and unrelated directories survive; there is no blanket temporary-directory
+sweep. Test bootstraps register their own private disk-backed transcript roots
+for cleanup instead of writing into the operator's shared fallback.
+
 ## What is not contained
 
 The boundary belongs to the runner. Invoking Node's test runner directly

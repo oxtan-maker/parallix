@@ -211,11 +211,10 @@ test('verification admission precedes build and test scratch setup with infrastr
   assert.ok(verifier.indexOf('check-runner-health.ts') < verifier.indexOf('gate_all()'));
   assert.match(verifier, /check-runner-health\.ts" \|\| exit \$\?/);
   const admission = runner.indexOf('assertRunnerHealth(');
-  assert.ok(admission >= 0, 'runner health admission must exist');
-  for (const scratch of ['fastUnitScratchDir', 'coverageScratchDir']) {
-    const allocation = runner.search(new RegExp(`${scratch} = runnerRoots\\.register\\(fs\\.mkdtempSync\\(`));
-    assert.ok(allocation >= 0, `${scratch} allocation must remain registered for recovery`);
-    assert.ok(admission < allocation, `health admission must precede ${scratch} allocation`);
+  assert.ok(admission >= 0, 'the runner must perform health admission');
+  for (const setup of ['coverageBase = checkoutTestTmpdir(', 'const tempManifestDir = ensureManifestDir(', 'fastUnitScratchDir = runnerRoots.register(', 'coverageScratchDir = runnerRoots.register(']) {
+    const position = runner.indexOf(setup);
+    assert.ok(position > admission, `${setup} must exist and follow health admission`);
   }
   assert.ok(runner.indexOf('assertRunnerHealth(') < runner.indexOf('cpuSupervisor(executionRoot)'));
   assert.match(runner, /process\.exit\(RUNNER_HEALTH_EXIT_STATUS\)/);

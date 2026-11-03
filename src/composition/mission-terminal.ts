@@ -79,6 +79,8 @@ export async function hostMissionCommand(command: string, args: string[], target
     env: { ...configuration.forwardedEnvironment, PARALLIX_MISSION_TERMINAL: slug, PARALLIX_MISSION_SOCKET: socketPath, PARALLIX_OPERATION_CAPTURE: runId, PARALLIX_TERMINAL_RETURN_DIR: resolveCanonicalRepositoryRoot(worktree) },
   }, { configuration }); } catch (error) {
     if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw error; }
+    // An unsafe transcript destination is actionable even when pipe hosting takes over.
+    log(`Mission terminal unavailable; running through the pipe host: ${(error as Error).message}`);
     return null;
   }
   log(`Mission terminal: px attach ${slug} (detach with Ctrl-b d).`);

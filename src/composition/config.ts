@@ -61,10 +61,11 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
     }),
     terminal: Object.freeze({
       hostEnvironment: Object.freeze(Object.fromEntries([
-        'PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME',
+        'PATH', 'HOME', 'TERM', 'SHELL', 'LANG', 'USER', 'LOGNAME', 'PARALLIX_HOME', 'PARALLIX_TERMINAL_TRANSCRIPT_DIR', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME', 'XDG_DATA_HOME',
       ].map(name => [name, e(name)]))),
       missionTerminal: e('PARALLIX_MISSION_TERMINAL'), missionSocket: e('PARALLIX_MISSION_SOCKET'), operationCapture: e('PARALLIX_OPERATION_CAPTURE'),
       tmux: e('TMUX'),
+      transcriptDir: e('PARALLIX_TERMINAL_TRANSCRIPT_DIR') ? path.resolve(e('PARALLIX_TERMINAL_TRANSCRIPT_DIR')!) : undefined,
       stateDir: e('PARALLIX_TERMINAL_STATE_DIR') ? path.resolve(e('PARALLIX_TERMINAL_STATE_DIR')!) : undefined,
       runtimeDir: e('XDG_RUNTIME_DIR'), xdgDataHome: e('XDG_DATA_HOME'),
     }),

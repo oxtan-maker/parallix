@@ -218,8 +218,6 @@ npm run test:codeql       # CodeQL SAST scan (javascript-typescript security/cod
 LCOV reports omit TypeScript modules that compile to no runtime code. Modules
 with runtime declarations or imports remain subject to coverage requirements.
 
-The test suite is the verification gate this repo declares in `workflow.config.json`. Run it before integrating any change. Coverage runs (`PARALLIX_TEST_COVERAGE=1`, used by GitHub CI and the local pre-integration gates) use Node's built-in coverage with `--test-coverage-include-all` and need Node 26.7 or newer; the runner picks one from `PATH` or nvm, or from `PARALLIX_TEST_NODE` (ADR 0062).
-
 Four Node floors are distinct here: the shipped runtime floor is `>=22.23.1` (`package.json` `engines.node`, also the bundle target); the ordinary development and unit-test floor is Node `24.15.0` or newer, which the unit-test module mock helper needs; the coverage-tooling floor is Node `26.7` or newer for `--test-coverage-include-all`; and GitHub CI selects Node `26` for the coverage run and Node `24` for the release path. The local verifier accepts any Node `20` or newer so `node --test` runs, but coverage still needs the `26.7` floor. Contributions follow the same mission lifecycle the tool itself runs: branch, worktree, checkpoints, a second review, and a passing gate before integration. To exercise the packaged artifact the way a user receives it: `npm pack && npm install -g ./magnusekdahl-parallix-*.tgz`.
 
 If you are developing Parallix itself from a checkout, install dependencies with

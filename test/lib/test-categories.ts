@@ -37,6 +37,7 @@ export type TestCategory = 'unit' | 'integration-ci' | 'integration-local' | 'ag
  * private local services, and any binary outside the clean runner image.
  */
 export const INTEGRATION_CI_TESTS: readonly string[] = [
+  'integration/process/terminal-transcript.test.ts',
   'integration/cli/first-run-configuration.test.ts',
   // Real SQLite/Git approval timing; no extra workstation dependency.
   'integration/lifecycle/lifecycle-approval-timing-contract.test.ts',

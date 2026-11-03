@@ -1205,6 +1205,18 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    // TASK-2816: bounded private terminal transcript segments on disk-backed
+    // storage, their retention and reclamation of earlier releases' socket
+    // logs. They only feed the console's display of a finished command.
+    id: 'large-artifacts-terminal-transcript-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/process/terminal-transcript.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
     id: 'large-artifacts-tmux-terminal-state-root-write',
     concept: 'LargeArtifacts',
     pathType: 'default',
@@ -1545,10 +1557,10 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
   },
   {
     id: 'coverage-manifest',
-    pathPattern: '<tmp>/parallix-temp-root-manifests/<pid>.json',
+    pathPattern: '<tmp>/parallix-temp-root-manifests/{<pid>.json,test-run-<pid>/{owner,runner,<worker-pid>}.json}',
     writer: 'src/adapters/verification/temp-root-registry.ts',
     classification: 'cache-scratch-data',
-    persistencePolicy: 'PID-scoped scratch manifest for SIGKILL orphan recovery; documented direct-write exception.',
+    persistencePolicy: 'PID-scoped scratch manifests, runner start identity and registered roots for SIGKILL orphan recovery; documented direct-write exception. These files grant conservative temporary-data cleanup authority, never durable workflow authority.',
   },
   {
     id: 'forgejo-token',

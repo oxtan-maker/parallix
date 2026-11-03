@@ -62,7 +62,9 @@ test('interrupted gate descendant fixture kills its writer before removing its P
     if (writer) { try { process.kill(writer, 'SIGKILL'); } catch { /* stopped */ } }
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: root };
+  // bootstrap restores TMPDIR from this variable after native coverage starts.
+  // Override both so the nested fixture remains inside the root observed here.
+  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: root, PARALLIX_TEST_FIXTURE_TMPDIR: root };
   delete env.NODE_TEST_CONTEXT;
   child = spawn(process.execPath, ['--import', 'tsx', '--import', './test/bootstrap-parallix-home.ts',
     '--test-name-pattern=continuously writing descendant', 'test/integration/verification/repository-gates.integration.test.ts'],

@@ -97,7 +97,10 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   let browser;
-  try { browser = await chromium.launch({ args: ['--disable-extensions'], executablePath: process.env.PARALLIX_CHROMIUM ?? '/usr/bin/chromium', headless: true, timeout: 5000 }); }
+  // A loaded integration host can spend more than five seconds starting the
+  // process before Playwright receives its debugging pipe. Keep a finite hang
+  // bound without consuming most of the owning case's assertion window.
+  try { browser = await chromium.launch({ args: ['--disable-extensions'], executablePath: process.env.PARALLIX_CHROMIUM ?? '/usr/bin/chromium', headless: true, timeout: 10_000 }); }
   catch (error) { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); throw error; }
   let closePromise: Promise<void> | undefined;
   const close = () => closePromise ??= (async () => {

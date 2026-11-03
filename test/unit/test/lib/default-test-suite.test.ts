@@ -586,11 +586,15 @@ test('shared-process assignments follow the suite path, never its directory or b
 // a workstation-speed wall deadline in an integration case would also fail on GitHub.
 test('CI integration cases carry no workstation-speed wall deadline (TASK-2813)', () => {
   const offenders: string[] = [];
+  const deadline = (line: string) => /\b(?:timeout:|timeoutMs =|Date\.now\(\) \+|BUDGET_MS =) (\d[\d_]*)\s*[;,}]|\buntil\([^\n]*,\s*(\d[\d_]*)\)|\bsetTimeout\(\(\) => (?:finish|reject)\(.*, (\d[\d_]*)\)\)|\bwaitFor\([^\n]*,\s*['"`][^'"`]+['"`],\s*(\d[\d_]*)\)|\},\s*['"`][^'"`]+['"`],\s*(\d[\d_]*)\);/.exec(line);
+  assert.equal(deadline("  }, 'fixture ready', 1000);")?.[5], '1000',
+    'multiline waitFor-style deadlines remain covered by the hosted-CI policy');
   // The TUI command-flow cases module is imported by a CI suite and carries its deadlines.
   for (const suite of [...INTEGRATION_CI_TESTS, 'integration/presentation/tui-command-flow.cases.ts']) {
     fs.readFileSync(path.join(REPO_ROOT, 'test', suite), 'utf8').split('\n').forEach((line, index) => {
-      const bound = /\b(?:timeout:|timeoutMs =|Date\.now\(\) \+|BUDGET_MS =) (\d[\d_]*)\s*[;,}]|\buntil\([^\n]*,\s*(\d[\d_]*)\)|\bsetTimeout\(\(\) => (?:finish|reject)\(.*, (\d[\d_]*)\)\)/.exec(line);
-      if (bound && Number((bound[1] ?? bound[2] ?? bound[3]).replaceAll('_', '')) < 5000) offenders.push(`${suite}:${index + 1}`);
+      const bound = deadline(line);
+      const milliseconds = bound?.slice(1).find(Boolean);
+      if (milliseconds && Number(milliseconds.replaceAll('_', '')) < 5000) offenders.push(`${suite}:${index + 1}`);
     });
   }
   assert.deepEqual(offenders, []);

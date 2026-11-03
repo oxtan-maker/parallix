@@ -73,6 +73,7 @@ async function render(route: Route, context: import('node:test').TestContext, el
   await settle();
   return {
     window, mount, reads, settle, cadences,
+    async reopen() { await act(async () => { root.render(null); }); await this.mission(MISSION); },
     async mission(id: string) { await act(async () => { root.render(React.createElement(MissionHistory, { missionId: id, onClose: () => { closed += 1; } })); }); await settle(); },
     closed: () => closed,
     async click(target: string | RegExp) { await act(async () => { (typeof target === 'string' ? mount.querySelector<DomHtmlElement>(target) : this.button(target))!.click(); }); await settle(); },
@@ -200,18 +201,21 @@ test('follow output pauses while scrolled back and resumes on request (TASK-2749
   assert.equal(pre.scrollTop, 1400);
 });
 
-test('search jumps to a hit, copy copies the shown history, and the live pane is optional (TASK-2749)', async context => {
+test('search and copy preserve history while the current terminal stays visible (TASK-2749, TASK-2816)', async context => {
   const copied: string[] = [];
+  let liveOutput = 'LIVE-PANE-TEXT';
   context.after(() => { delete (globalThis.navigator as { clipboard?: unknown }).clipboard; });
   Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { copied.push(text); } } });
   const view = await render(url => {
     if (url.pathname.endsWith('/search')) { return { ok: true, hits: [{ ref: 'run:review-claude-a1-y:stdout@5000+4', runId: 'review-claude-a1-y', stream: 'stdout', offset: 5000, preview: 'E401 failed' }], totalHits: 1, searchedRuns: [], scanLimited: false, coverage: [], errors: [] }; }
-    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: null, output: 'LIVE-PANE-TEXT' }; }
+    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: null, output: liveOutput }; }
     if (url.pathname.endsWith('/history')) {
       return url.searchParams.get('run') === 'review-claude-a1-y' ? page(4000, 7048, 'context E401 failed\n', { runId: 'review-claude-a1-y', hasEarlier: true, atEnd: false }) : page(0, 6, 'tail\n');
     }
     return overview('ended', [operation('execute-codex-a1-x'), operation('review-claude-a1-y', 'exited', 'review')]);
   }, context);
+  assert.equal(view.text('Live pane'), 'LIVE-PANE-TEXT', 'opening a mission immediately shows the current terminal (TASK-2816)');
+  assert.equal(view.mount.querySelector('input[type="checkbox"]'), null, 'current terminal display requires no opt-in');
   (view.mount.querySelector('[aria-label="Search retained history"]') as unknown as { value: string }).value = 'E401';
   await act(async () => { view.mount.querySelector('form')!.dispatchEvent(new view.window.Event('submit', { bubbles: true, cancelable: true })); });
   await view.settle();
@@ -223,21 +227,29 @@ test('search jumps to a hit, copy copies the shown history, and the live pane is
   assert.equal(view.text(), 'context E401 failed\n');
   await view.click(/^copy$/);
   assert.deepEqual(copied, ['context E401 failed\n']);
-  await view.click('input[type="checkbox"]');
-  assert.equal(view.mount.querySelector('[aria-label="Live pane"]')?.textContent, 'LIVE-PANE-TEXT');
+  const livePane = view.mount.querySelector<DomHtmlElement>('[aria-label="Live pane"]')!;
+  Object.defineProperty(livePane, 'scrollHeight', { get: () => 1000 });
+  liveOutput = 'CURRENT-TERMINAL-AFTER-SEARCH';
+  await view.poll();
+  assert.equal(view.text('Live pane'), liveOutput, 'the terminal keeps updating while older history is selected');
+  assert.equal(livePane.scrollTop, 1000, 'the current terminal output stays in view');
   assert.equal(view.text(), 'context E401 failed\n', 'the live pane never replaces the history');
 });
 
 test('polling skips pending reads and closing cancels them (TASK-2661, TASK-2749)', async context => {
   let pending: AbortSignal | undefined;
-  const view = await render((_url, init) => new Promise((_resolve, reject) => {
-    pending = init!.signal!;
-    pending.addEventListener('abort', () => reject(new Error('closed')), { once: true });
-  }), context);
-  const before = view.reads.length;
+  const view = await render((url, init) => url.pathname.endsWith('/live')
+    ? { kind: 'live', operation: null, output: 'CURRENT-WITHOUT-HISTORY' }
+    : new Promise((_resolve, reject) => {
+      pending = init!.signal!;
+      pending.addEventListener('abort', () => reject(new Error('closed')), { once: true });
+    }), context);
+  const historyReads = () => view.reads.filter(read => !read.path.endsWith('/live')).length;
+  const before = historyReads();
   await view.poll();
   await view.poll();
-  assert.equal(view.reads.length, before, 'a slow overview read must not accumulate requests');
+  assert.equal(historyReads(), before, 'a slow overview read must not accumulate requests');
+  assert.equal(view.text('Live pane'), 'CURRENT-WITHOUT-HISTORY', 'pending history cannot block the current terminal (TASK-2816)');
   assert.match(view.dialog(), /Loading mission history/);
   await act(async () => { view.button(/^close$/)!.click(); });
   assert.equal(view.closed(), 1);
@@ -254,8 +266,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
     const complete = async (index: number, body: unknown) => { pending[index]!.resolve(body); await view.settle(); };
     const live = (output: string) => ({ kind: 'live', operation: null, output });
     context.after(() => { for (const request of pending) { request.resolve(live('cleanup')); } });
-    await view.click('input[type="checkbox"]');
-    assert.equal(pending.length, 1, 'opening starts immediately');
+    assert.equal(pending.length, 1, 'opening the mission starts live reads immediately (TASK-2816)');
     await view.poll();
     await view.poll();
     assert.equal(pending.length, 1, 'multiple ticks must not overlap a pending live read');
@@ -273,7 +284,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
     await complete(3, { kind: 'not-live', probe: { kind: 'unavailable', reason: 'timeout', detail: 'timeout' } });
     assert.equal(view.text('Live pane'), 'No live pane (unavailable: timeout).');
     await view.poll();
-    if (stop === 'close') { await view.click('input[type="checkbox"]'); await view.click('input[type="checkbox"]'); }
+    if (stop === 'close') { await view.reopen(); }
     else if (stop === 'mission change') { await view.mission('task-2781-other'); }
     else { await view.close(); }
     assert.equal(pending[4]!.signal.aborted, true);

@@ -14,6 +14,7 @@
 //
 // The default-database guard arms BEFORE the override so it protects the
 // database this process would otherwise have resolved.
+import { createTestTranscriptRoot, restoreFixtureTmpdir } from './lib/test-tmpdir.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +24,9 @@ import './lib/bootstrap-recovery-evidence-fs.js';
 
 startDefaultDbGuard('e2e-test');
 
+restoreFixtureTmpdir();
+const transcriptRoot = createTestTranscriptRoot(() => {});
+process.env.PARALLIX_TERMINAL_TRANSCRIPT_DIR = transcriptRoot;
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-home-'));
 process.env.PARALLIX_HOME = tempRoot;
 // Synthetic CLI runs share only disposable admission state, never the enclosing gate.
@@ -40,7 +44,7 @@ const manifestDir = process.env.PARALLIX_TEST_MANIFEST_DIR;
 function flushManifest() {
   if (!manifestDir) { return; }
   try {
-    fs.writeFileSync(path.join(manifestDir, `${process.pid}.json`), JSON.stringify([tempRoot]));
+    fs.writeFileSync(path.join(manifestDir, `${process.pid}.json`), JSON.stringify([tempRoot, transcriptRoot]));
   } catch (_) {
     // best-effort manifest write
   }
@@ -53,6 +57,7 @@ function cleanupTempDirs() {
   cleanupRan = true;
   try {
     fs.rmSync(tempRoot, { recursive: true, force: true });
+    fs.rmSync(transcriptRoot, { recursive: true, force: true });
   } catch (_) {
     // best-effort cleanup only
   }

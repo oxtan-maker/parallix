@@ -11,7 +11,11 @@ bindVerificationObservation(resolveProcessConfiguration());
 // Load only the composition needed by this process role. Independent workers
 // must not initialize the interactive CLI and its presentation dependencies.
 
-if (process.argv[2] === '--workflow-recover') {
+if (process.argv[2] === '--terminal-transcript-writer') {
+  const { runTerminalTranscriptWriter } = await import('../composition/terminal-transcript-worker.js');
+  runTerminalTranscriptWriter(process.argv[3], process.argv[4], process.argv[5], process.argv[6])
+    .catch(error => { console.error(error); process.exitCode = 1; });
+} else if (process.argv[2] === '--workflow-recover') {
   const { runWorkflowRecovery } = await import('../composition/workflow-recovery.js');
   runWorkflowRecovery(process.argv[3], resolveProcessConfiguration())
     .then(() => process.exit(0), error => { console.error(error); process.exit(1); });

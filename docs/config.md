@@ -321,6 +321,16 @@ For missions without a live tmux session, the view shows the latest retained
 agent-run output when available, labeled as recorded output with its run dates.
 Agents started outside Parallix are not captured by this view.
 
+Terminal state splits by what it holds: sockets, launch scripts and fifos stay
+in the private runtime state directory, while the private transcript of a
+mission's output is bulk data and stays on disk-backed storage under
+`PARALLIX_HOME`, with a bounded kept volume. When neither the state home nor the
+disk-backed system temporary directory can hold it, the launch reports the
+remedy instead of writing to memory-backed storage. See
+[agent terminal sessions and run history](agent-run-history.md) for the storage
+selection, the limits and what the console reports when output is no longer
+retained.
+
 Explicit host and unavailable-tool overrides remain available through
 `px config` and the workflow configuration schema. `whenUnavailable: "fail"`
 applies only to `host: "tmux"`; automatic hosting always falls back if a terminal
@@ -867,6 +877,7 @@ if retries are exhausted, the output gives the recovery command.
 | `PARALLIX_NO_TUI` | flag | unset | `1` | Disables the interactive board. |
 | `PARALLIX_TERMINAL_RETURN_DIR` | path | unset | directory | Repository root to return to from a mission terminal. |
 | `PARALLIX_TERMINAL_STATE_DIR` | path | derived | directory | Terminal state root override. |
+| `PARALLIX_TERMINAL_TRANSCRIPT_DIR` | path | derived | disk-backed directory | Private bulk transcript root override; unsafe destinations fail with guidance. |
 | `PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS` | flag | unset | `1` | Test-only: permits `--no-integration-gates`. |
 | `PARALLIX_TEST_NO_FORGEJO` | flag | unset | `1` | Test-only: Forgejo reported unavailable. |
 | `PATH` | path list | OS | standard | Executable lookup. |

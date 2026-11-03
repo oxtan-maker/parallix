@@ -14,6 +14,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { selectDiskBackedDirectory, DISK_TEMP_FALLBACK } from '../../src/adapters/process/bulk-storage.js';
 
 export function checkoutTestTmpdir(executionRoot: string, base: string = os.tmpdir()): string {
   const id = crypto.createHash('sha256').update(path.resolve(executionRoot)).digest('hex').slice(0, 12);
@@ -28,6 +29,13 @@ export function checkoutTestTmpdir(executionRoot: string, base: string = os.tmpd
     : parts.slice(0, managedRoot).join(path.sep) || path.parse(resolvedBase).root;
   const dir = path.join(root, `px-tmp-${id}`);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // The base may be a shared sticky directory such as /var/tmp (TASK-2816):
+  // never adopt a planted link or another user's directory.
+  const stat = fs.lstatSync(dir);
+  const uid = process.getuid?.();
+  if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid)) {
+    throw new Error(`Unsafe checkout temporary directory ${dir}: expected a directory owned by uid ${uid}`);
+  }
   return dir;
 }
 
@@ -56,4 +64,25 @@ export function linkSharedTsxCache(scratchDir: string, stableTmpdir: string): vo
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') { throw error; }
   }
+}
+
+/** Fixture-owned bulk storage, never the operator's shared transcript fallback. */
+export function createTestTranscriptRoot(register: (_root: string) => void): string {
+  const base = selectDiskBackedDirectory({
+    purpose: 'Isolated test transcripts',
+    candidates: [os.tmpdir(), path.join(process.env.PARALLIX_EXECUTION_ROOT || process.cwd(), 'tmp'),
+      ...(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR ? [process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR] : []), DISK_TEMP_FALLBACK],
+    remedy: 'Provide a writable disk-backed checkout temporary directory.',
+    runtimeDir: process.env.XDG_RUNTIME_DIR,
+  });
+  fs.mkdirSync(base, { recursive: true, mode: 0o700 });
+  const root = fs.mkdtempSync(path.join(base, 'parallix-test-transcripts-'));
+  fs.chmodSync(root, 0o700);
+  register(root);
+  return root;
+}
+
+/** Native coverage is already allocated when Node loads the test bootstrap. */
+export function restoreFixtureTmpdir(): void {
+  if (process.env.PARALLIX_TEST_FIXTURE_TMPDIR) { process.env.TMPDIR = process.env.PARALLIX_TEST_FIXTURE_TMPDIR; }
 }

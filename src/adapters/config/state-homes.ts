@@ -23,6 +23,11 @@ export function parallixStateHome(configuration: ParallixConfiguration = DEFAULT
   return resolveParallixHome({ ensureDir: true, configuration });
 }
 
+/** Private terminal transcripts in the operator state home (TASK-2816); the path is not created. */
+export function parallixTerminalTranscriptHome(configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
+  return path.join(resolveParallixHome({ configuration }), 'terminal-transcripts');
+}
+
 export function qwenHomeRoot(worktree: string): string {
   return path.join(worktree, '.workflow', 'qwen-home');
 }

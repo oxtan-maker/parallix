@@ -74,7 +74,7 @@ import { createIntegrationGateStep } from '../../../src/application/integrate/ga
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
-import { resolvePxEntryLoader } from '../../lib/px-entry.js';
+import { resolvePxEntryLoader, pxNodeArgs } from '../../lib/px-entry.js';
 import { run } from '../../../src/composition/create-cli.js';
 // CLI cold-loading is shared immutable setup; case budgets cover the workflow
 // and its real pinned children, including their source-loader startup.
@@ -430,7 +430,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
     agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
     owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
   const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
-  pinChildCli(entry, { nodeArgs: ['--v8-pool-size=1', ...(loader ? ['--import', loader,
+  pinChildCli(entry, { nodeArgs: [...pxNodeArgs({ entry, loader }, []).slice(0, -1), ...(loader ? [
     '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts')] : [])],
   stateHome, env: environment, configuration: resolveConfiguration(environment) });
   // This executor is the workflow owner, not an inherited agent CLI. Keep

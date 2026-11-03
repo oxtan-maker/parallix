@@ -63,3 +63,11 @@ test('composes explicit shared admission separately from disposable operator sto
   assert.equal(config.agents.customAdmissionHome, '/shared/leases');
   assert.equal(config.agents.customAdmissionRepository, '/canonical/repo');
 });
+
+
+test('resolves a private transcript destination independently of runtime transport (TASK-2816)', () => {
+  const config = resolveConfiguration({ PARALLIX_TERMINAL_TRANSCRIPT_DIR: '/bulk/private', PARALLIX_TERMINAL_STATE_DIR: '/run/private' });
+  assert.equal(config.terminal.transcriptDir, '/bulk/private');
+  assert.equal(config.terminal.hostEnvironment.PARALLIX_TERMINAL_TRANSCRIPT_DIR, '/bulk/private', 'commands from the retained console preserve the isolated destination');
+  assert.equal(config.terminal.stateDir, '/run/private');
+});

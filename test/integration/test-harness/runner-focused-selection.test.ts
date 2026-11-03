@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { caseRoot } from '../../fixtures/case-root.js';
 import { cleanupFixtureProcesses, registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
+import { mkdtempAt } from '../../helpers/temp-dir.js';
 import { recoverRecordedTempRoots } from '../../../src/adapters/verification/temp-root-registry.js';
 
 const TEST_ROOT = path.join(import.meta.dirname, '..', '..');
@@ -34,7 +35,7 @@ function standInCheckout(): { root: string; dispose: () => void } {
   return checkout;
 }
 
-function runRunner(root: string, args: string[]) {
+function runRunner(root: string, args: string[], coverage = false) {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     PARALLIX_EXECUTION_ROOT: root,
@@ -45,7 +46,7 @@ function runRunner(root: string, args: string[]) {
   };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_V8_COVERAGE;
-  delete env.PARALLIX_TEST_COVERAGE;
+  if (coverage) { env.PARALLIX_TEST_COVERAGE = '1'; } else { delete env.PARALLIX_TEST_COVERAGE; }
   delete env.PARALLIX_FAST_UNIT;
   return spawnSync(process.execPath, ['--import', 'tsx', path.join(TEST_ROOT, 'run-default-tests.ts'), ...args], {
     cwd: root, env, encoding: 'utf8', timeout: 60_000,
@@ -55,21 +56,33 @@ function runRunner(root: string, args: string[]) {
 test('the runner executes only the focused nested suite and reports it green', (t) => {
   const checkout = standInCheckout();
   t.after(() => checkout.dispose());
-  const result = runRunner(checkout.root, ['test/unit/domain/missions/deep/passing.test.ts']);
+  fs.appendFileSync(path.join(checkout.root, 'test/unit/domain/missions/deep/passing.test.ts'), `
+import fs from 'node:fs'; import os from 'node:os';
+test('runner preserves fixture TMPDIR and disk-backed transcript isolation (TASK-2816)', () => {
+  assert.equal(os.tmpdir(), process.env.PARALLIX_TEST_FIXTURE_TMPDIR);
+  const raw = process.env.NODE_V8_COVERAGE;
+  if (process.env.PARALLIX_TEST_COVERAGE === '1') {
+    assert.ok(raw && raw !== os.tmpdir() && !os.tmpdir().startsWith(raw + '/'));
+    assert.notEqual(fs.statfsSync(raw).type, 0x01021994);
+  }
+  assert.notEqual(fs.statfsSync(process.env.PARALLIX_TERMINAL_TRANSCRIPT_DIR).type, 0x01021994);
+});
+`);
+  const result = runRunner(checkout.root, ['test/unit/domain/missions/deep/passing.test.ts'], process.env.PARALLIX_TEST_COVERAGE === '1');
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /✔ nested passing fixture/);
   assert.doesNotMatch(result.stdout, /nested failing fixture/);
-  assert.match(result.stdout, /ℹ tests 1\n/);
+  assert.match(result.stdout, /ℹ tests 2\n/);
 });
 
 test('a hard-killed covered runner leaves recoverable scratch instead of untracked payloads', { timeout: 30_000 }, async t => {
   const checkout = standInCheckout();
-  const temporary = caseRoot('runner-coverage-recovery-');
+  const temporary = mkdtempAt(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR!, 'runner-coverage-recovery-');
   let child: ReturnType<typeof spawn> | undefined;
   registerFixtureCleanup(t, () => {
     child?.kill('SIGKILL');
     cleanupFixtureProcesses(checkout.root);
-    checkout.dispose(); temporary.dispose();
+    checkout.dispose(); fs.rmSync(temporary, { recursive: true, force: true });
   });
   const marker = path.join(checkout.root, 'scratch.json');
   // Execution is a stand-in boundary, as is the checkout. This checks the
@@ -85,7 +98,7 @@ test('a hard-killed covered runner leaves recoverable scratch instead of untrack
       setTimeout(() => {}, 1500);
     }`, { mode: 0o755 });
   const env: NodeJS.ProcessEnv = { ...process.env, GITHUB_ACTIONS: 'true', PARALLIX_EXECUTION_ROOT: checkout.root,
-    PARALLIX_TEST_COVERAGE: '1', PARALLIX_TEST_NODE: executor, TMPDIR: temporary.root, PARALLIX_TEST_MEMORY_BOUNDARY: 'off' };
+    PARALLIX_TEST_COVERAGE: '1', PARALLIX_TEST_NODE: executor, TMPDIR: temporary, PARALLIX_TEST_MEMORY_BOUNDARY: 'off' };
   delete env.NODE_TEST_CONTEXT;
   delete env.NODE_V8_COVERAGE;
   delete env.PARALLIX_FAST_UNIT;
@@ -104,7 +117,7 @@ test('a hard-killed covered runner leaves recoverable scratch instead of untrack
   cleanupFixtureProcesses(checkout.root);
   await closed;
   assert.ok(fs.existsSync(scratch), 'SIGKILL bypasses ordinary runner cleanup');
-  recoverRecordedTempRoots({ manifestDir: path.join(temporary.root, 'parallix-temp-root-manifests') });
+  recoverRecordedTempRoots({ legacyCoverageBases: [temporary] });
   assert.equal(fs.existsSync(scratch), false, 'next-run recovery reclaims runner-owned coverage scratch');
 });
 

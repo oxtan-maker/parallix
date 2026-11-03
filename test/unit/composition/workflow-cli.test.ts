@@ -70,6 +70,36 @@ test('CLI streams only its coordinator bytes incrementally and renders phase cha
   assert.deepEqual(after, [0, 0, 20, 20]);
 });
 
+test('CLI replay reports retention gaps and expiry in order, including after a restart (TASK-2816)', async () => {
+  // Bytes 0-100 of the stored stream were dropped by the retention cap.
+  let stage: 'retained' | 'unreadable' | 'expired' = 'retained';
+  const terminal = { history: () => ({ ok: true, runs: stage === 'expired' ? [] : [{ record: { operationId: 'owned', runId: 'worker', captureKind: 'coordinator' } }] }),
+    page: (_mission: string, request: { stream: string; after: number }) => {
+      if (stage === 'unreadable') { return { ok: false, error: 'missing', detail: 'gone' }; }
+      if (request.stream === 'stderr') { return { ok: true, text: '', from: 0, to: 0, atEnd: true, running: true }; }
+      return request.after < 100 ? { ok: true, text: 'retained tail\n', from: 100, to: 114, atEnd: true, running: true }
+        : { ok: true, text: '', from: 114, to: 114, atEnd: true, running: true };
+    } } as unknown as MissionTerminalCapability;
+  const operation = { id: 'owned', missionId: 'task-test', phase: 'executing' } as WorkflowOperation;
+  const output: string[] = [];
+  const observe = workflowCliObserver(terminal, undefined, text => output.push(text), true);
+  await observe(operation); await observe(operation);
+  assert.deepEqual(output, ['\n[worker:stdout: bytes 0-100 were not retained]\n', 'retained tail\n'], 'the loss is reported once, before the retained bytes');
+  const restarted: string[] = [];
+  await workflowCliObserver(terminal, undefined, text => restarted.push(text), true)(operation);
+  assert.deepEqual(restarted, output, 'a restarted observer reports the same loss in the same order');
+  stage = 'unreadable';
+  await observe(operation); await observe(operation);
+  stage = 'expired';
+  await observe(operation); await observe(operation);
+  assert.deepEqual(output.slice(2), [
+    '\n[worker:stdout: output from byte 114 is no longer retained (missing)]\n',
+    '\n[worker:stderr: output from byte 0 is no longer retained (missing)]\n',
+    "\n[worker:stdout: the operation's retained output has expired]\n",
+    "\n[worker:stderr: the operation's retained output has expired]\n",
+  ]);
+});
+
 test('CLI observation excludes its own capture to prevent output feedback and unsettled completion (TASK-2750)', async () => {
   let captured = '';
   const pages: string[] = [];

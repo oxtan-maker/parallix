@@ -538,18 +538,26 @@ describe("Bubblewrap guard", () => {
   test('buildBubblewrapArgs masks the tmux terminal state so an agent cannot reach any run session (TASK-2643)', () => {
     const worktree = makeWorktree();
     const stateRoot = path.join(makeWorktree(), 'terminal-state');
-    const previous = environment.PARALLIX_TERMINAL_STATE_DIR;
-    environment.PARALLIX_TERMINAL_STATE_DIR = stateRoot;
+    // TASK-2816: the disk-backed transcript root under the writable Parallix
+    // home is masked like the socket root, after the home's writable bind.
+    const home = path.join(path.dirname(stateRoot), 'parallix-home');
+    const transcripts = path.join(home, 'terminal-transcripts');
+    const explicit = path.join(path.dirname(stateRoot), 'private-bulk');
+    const configuration = () => resolveConfiguration({ ...environment, PARALLIX_TERMINAL_STATE_DIR: stateRoot, PARALLIX_HOME: home, PARALLIX_TERMINAL_TRANSCRIPT_DIR: explicit });
+    const masks = (args: string[]) => args.flatMap((arg, index) => arg === '--tmpfs' ? [args[index + 1]] : []);
     try {
-      const before = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)), worktree);
-      assert.equal(before.includes('--tmpfs'), false, 'nothing to mask before any tmux launch');
+      const before = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, 'claude', configuration()), worktree);
+      assert.deepEqual(masks(before).filter(root => [stateRoot, transcripts].includes(root)), [], 'nothing to mask before any tmux launch');
       fs.mkdirSync(stateRoot, { recursive: true });
-      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, undefined, resolveConfiguration(environment)), worktree);
-      const at = args.indexOf('--tmpfs');
-      assert.equal(args[at + 1], stateRoot);
-      assert.ok(at > args.lastIndexOf('--bind'), 'the mask is mounted after every writable bind');
+      fs.mkdirSync(transcripts, { recursive: true });
+      fs.mkdirSync(explicit, { recursive: true });
+      const args = buildBubblewrapArgs(resolveSandboxProfile('active', worktree, undefined, 'claude', configuration()), worktree);
+      const writable = args.flatMap((arg, index) => arg === '--bind' ? [args[index + 1]] : []);
+      assert.ok(writable.some(dir => home === dir || home.startsWith(`${dir}${path.sep}`)), 'the Parallix home stays writable for the agent');
+      assert.deepEqual(masks(args).filter(root => [stateRoot, transcripts].includes(root)), [stateRoot, transcripts]);
+      assert.ok(masks(args).includes(explicit), 'the explicit disk-backed transcript destination is masked too');
+      assert.ok(Math.min(args.lastIndexOf(stateRoot), args.lastIndexOf(transcripts), args.lastIndexOf(explicit)) > args.lastIndexOf('--bind'), 'the masks are mounted after every writable bind');
     } finally {
-      if (previous === undefined) { delete environment.PARALLIX_TERMINAL_STATE_DIR; } else { environment.PARALLIX_TERMINAL_STATE_DIR = previous; }
       fs.rmSync(worktree, { recursive: true, force: true });
       fs.rmSync(path.dirname(stateRoot), { recursive: true, force: true });
     }

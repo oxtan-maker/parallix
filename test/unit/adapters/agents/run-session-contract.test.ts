@@ -8,6 +8,7 @@ import { mkdtemp } from '../../../helpers/temp-dir.js';
 import { openRunSession, TerminalHostUnavailableError } from '../../../../src/adapters/agents/run-session.js';
 import { missionRunsDir } from '../../../../src/adapters/filesystem/run-history-store.js';
 import { claudeProjectDir } from '../../../../src/adapters/config/state-homes.js';
+import { bulkStorageProbe } from '../../../../src/adapters/process/bulk-storage.js';
 
 // Doubles for the tmux probe, config and repository key; no real tmux or git.
 
@@ -76,7 +77,11 @@ test('an in-process family is never tmux-hosted and its rendered output is captu
   assert.ok(session.teeOptions.stdoutSink, 'pi renders through a sink, so the sink is captured');
 });
 
-test('available tmux hosts the launch and records the attach target (TASK-2643)', () => {
+test('available tmux hosts the launch and records the attach target (TASK-2643)', t => {
+  // The fixture state home holds the transcript whatever backs the host's
+  // temporary directory (TASK-2816 places transcripts on disk-backed storage).
+  t.mock.method(bulkStorageProbe, 'statfs', () => ({ type: 0xef53 }));
+  t.mock.method(bulkStorageProbe, 'writable', () => true);
   const { worktree, logs, deps, input } = setup('tmux', 'fallback', true);
   const session = openRunSession(input, deps)!;
   assert.ok(session.teeOptions.terminalHost);

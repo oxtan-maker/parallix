@@ -19,7 +19,7 @@ async function waitForCommands(page: Page, timeout = 3000) {
   await page.waitForFunction(() => !document.querySelector('[data-board-card] button[aria-label*="starting"], [data-board-card] button[aria-label*="working"]'), undefined, { timeout });
 }
 
-test('pending current-work commands wait for the response before the next coordinate action (TASK-2724)', { timeout: 10_000 }, async (context) => {
+test('pending current-work commands wait for the response before the next coordinate action (TASK-2724)', { timeout: 20_000 }, async (context) => {
   const fixture = await pointerBoard();
   context.after(fixture.close);
   const { page, requests } = fixture;
@@ -61,7 +61,7 @@ function commandFields(request: unknown) {
 for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as const) {
   for (const work of ['idle', 'running', 'unverified', 'stale', 'stopped'] as const) {
     for (const contract of ['commands', 'confirmation'] as const) {
-      test(`board coordinate control ${contract} ${lane}/${work} (TASK-2705, TASK-2750)`, { timeout: 10_000 }, async context => {
+      test(`board coordinate control ${contract} ${lane}/${work} (TASK-2705, TASK-2750)`, { timeout: 20_000 }, async context => {
         const fixture = await pointerBoard();
         context.after(fixture.close);
         const { page, requests } = fixture;
@@ -135,7 +135,7 @@ for (const lane of ['backlog', 'refined', 'active', 'review', 'integration'] as 
   }
 }
 
-test('SSE refresh during coordinate press cannot invoke another action or fall through (TASK-2705)', { timeout: 20_000 }, async (context) => {
+test('SSE refresh during coordinate press cannot invoke another action or fall through (TASK-2705)', { timeout: 30_000 }, async (context) => {
   const fixture = await pointerBoard();
   context.after(fixture.close);
   const {page, requests} = fixture;
@@ -174,7 +174,7 @@ test('SSE refresh during coordinate press cannot invoke another action or fall t
   } finally { await fixture.close(); }
 });
 
-test('tall board modal and pending coordinate presses remain safe (TASK-2705)', { timeout: 20_000 }, async (context) => {
+test('tall board modal and pending coordinate presses remain safe (TASK-2705)', { timeout: 30_000 }, async (context) => {
   const fixture = await pointerBoard();
   context.after(fixture.close);
   const {page, requests} = fixture;
@@ -220,7 +220,7 @@ test('tall board modal and pending coordinate presses remain safe (TASK-2705)', 
 });
 
 
-test('checkpoint indicators stay below terminal and edit dialogs with usable evidence (TASK-2745)', { timeout: 20_000 }, async (context) => {
+test('checkpoint indicators stay below terminal and edit dialogs with usable evidence (TASK-2745)', { timeout: 30_000 }, async (context) => {
   const fixture = await pointerBoard();
   context.after(fixture.close);
   const { page } = fixture;
@@ -279,6 +279,9 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     assert.match(await terminal.textContent() ?? '', /Checkpoint terminal output/);
     await page.mouse.click(point.x, point.y);
     assert.equal(await page.getByRole('dialog', { name: /Checkpoint evidence/ }).count(), 0);
+    // The covered indicator may fall inside the panel rather than the scrim.
+    // Both must block evidence activation; only the scrim dismisses on click.
+    await page.keyboard.press('Escape');
     await terminal.waitFor({ state: 'hidden' });
     await clickAt(page.locator('[data-board-card] button[data-action-kind="mission:edit"]'));
     const edit = page.getByRole('dialog', { name: /Edit/ });

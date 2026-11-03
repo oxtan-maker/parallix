@@ -9,6 +9,7 @@ import { isRunHistoryId } from '../../application/run-history-types.js';
 import { agentRunId } from '../../domain/agent-run.js';
 import { missionTerminalIdentity } from './mission-terminal-identity.js';
 import { ensurePrivateDir, terminalSocketFallbackRoot, terminalStateRoot } from './terminal-state-root.js';
+import { prepareMissionTranscript, type MissionTranscript } from './terminal-transcript.js';
 
 /** Mission-keyed persistent terminals; operation windows retain run attribution. */
 
@@ -57,16 +58,6 @@ export function missionSocketPath(input: { readonly repositoryKey: string; reado
   // root in the digest so independent configured state roots cannot collide.
   const digest = createHash('sha256').update(`${root}\0${identity.repositoryKey}\0${name}`).digest('hex').slice(0, 32);
   return path.join(terminalSocketFallbackRoot(configuration), `${digest}.sock`);
-}
-
-/**
- * Private, unredacted operation transcript in the owner-only terminal state
- * root: the source of the console's display-only replay. It is never exposed
- * through history, attach or the web host; retained, redacted history is the
- * run-history store (TASK-2749).
- */
-export function missionTerminalCapturePath(identity: { readonly repositoryKey: string; readonly missionId: string }, configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): string {
-  return `${missionSocketPath(identity, configuration)}.log`;
 }
 
 /** Single-quote one value for POSIX `sh`. */
@@ -177,7 +168,7 @@ function consolePxScript(command: string | undefined, mission: string): string {
     `PARALLIX_CONSOLE_PX=1 exec /bin/bash -ic 'unset PARALLIX_CONSOLE_PX; exec "$@"' bash ${quoted} "$@"`, ''].join('\n');
 }
 
-function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, capturePath: string, terminalStateDir: string, configuration: ParallixConfiguration, presented: boolean, runId: string): string {
+function hostScript(socketPath: string, sessionName: string, windowName: string, scratch: string, cwd: string, supervisorPid: number, consoleBin: string, transcript: MissionTranscript, terminalStateDir: string, configuration: ParallixConfiguration, presented: boolean, runId: string): string {
   // The tmux server, and every window it later launches, must not inherit operation credentials.
   // The retained console is the operator's own interactive shell and reads their rc files like any terminal.
   const cleanEnv = Object.entries(configuration.terminal.hostEnvironment).filter(([, value]) => value !== undefined && value !== '')
@@ -187,7 +178,11 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
   const fifo = shellQuote(path.join(scratch, 'out'));
   const raw = shellQuote(path.join(scratch, 'raw'));
   const status = shellQuote(path.join(scratch, 'status'));
-  const capture = shellQuote(capturePath);
+  // The private, unredacted transcript only feeds the console's display of a
+  // finished command; it is never history, attach or web output (TASK-2749).
+  // Bounded segment writers keep it on disk-backed storage (TASK-2816).
+  const transcriptFifo = shellQuote(path.join(scratch, 'transcript'));
+  const writer = (name: string) => `sh ${shellQuote(transcript.writer)} ${shellQuote(transcript.dir)} ${name}`;
   const name = shellQuote(sessionName);
   const consoleTarget = shellQuote(`=${sessionName}:console`);
   const target = shellQuote(`=${sessionName}:${windowName}`);
@@ -202,6 +197,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     '  [ -z "$completion" ] || kill "$completion" 2>/dev/null',
     '  [ -z "$relay" ] || kill "$relay" 2>/dev/null',
     '  [ -z "$rawrelay" ] || kill "$rawrelay" 2>/dev/null',
+    '  [ -z "$writer" ] || kill "$writer" 2>/dev/null',
     '}',
 
     "trap 'cleanup INT; exit 130' INT",
@@ -212,21 +208,23 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     // turns that write into EPIPE so the HUP cleanup above still stops the
     // command; a caught signal resets to default in the children it execs.
     "trap ':' PIPE",
-    `rm -f ${fifo} ${status}`,
+    `rm -f ${fifo} ${transcriptFifo} ${status}`,
     `mkfifo ${fifo} || exit 70`,
+    ...(presented ? [] : [`mkfifo ${transcriptFifo} || exit 70`]),
     // Presented launches relay the raw stream to the supervisor separately from the pane's readable view.
     ...(presented ? [`mkfifo ${raw} || exit 70`, `cat ${raw} &`, 'rawrelay=$!'] : []),
     // -A would attach when the session exists and require a caller TTY.
     // Concurrent creators may lose new-session; recheck the exact session.
     `${t} has-session -t ${shellQuote(`=${sessionName}`)} 2>/dev/null || ${t} -f /dev/null new-session -d -s ${name} -n console -x 200 -y 50 -c ${shellQuote(cwd)} ${shellQuote(`PARALLIX_TERMINAL_STATE_DIR=${shellQuote(terminalStateDir)} PATH=${consoleBin}:$PATH exec "\${SHELL:-/bin/sh}" -i`)} 2>/dev/null || ${t} has-session -t ${shellQuote(`=${sessionName}`)} || exit 70`,
-    // The private transcript keeps the operator console too (TASK-2670); it is
-    // never history: retained, redacted history is the run-history store.
-    `${t} pipe-pane -t ${consoleTarget} -o ${shellQuote(`cat >> ${capture}`)} || exit 70`,
+    // Console output has no replay consumer. Disable earlier-release log pipes;
+    // only operation windows capture bounded transcripts.
+    `${t} pipe-pane -t ${consoleTarget}`,
     // Publish ownership in the same tmux queue as creation: another client
     // must never observe an operation window as an idle, closable console.
     `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} \\; set-option -w -t ${target} @px_run_id ${shellQuote(runId)} \\; set-option -w -t ${target} @px_host_pid "$$" \\; set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null || exit 70`,
     `${t} pipe-pane -t ${target} -o ${shellQuote(`cat > ${fifo}`)} || { cleanup; exit 70; }`,
-    presented ? `cat ${fifo} >> ${capture} &` : `cat ${fifo} | tee -a ${capture} &`,
+    ...(presented ? [`${writer(shellQuote(windowName))} < ${fifo} &`]
+      : [`${writer(shellQuote(windowName))} < ${transcriptFifo} &`, 'writer=$!', `cat ${fifo} | tee ${transcriptFifo} &`]),
     'relay=$!',
     `${t} select-window -t ${target}`,
     `${t} wait-for -S ${shellQuote(`${windowName}-go`)}`,
@@ -235,14 +233,14 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     'wait "$completion"',
     `${t} pipe-pane -t ${target}`,
     'wait "$relay"',
+    '[ -z "$writer" ] || wait "$writer"',
     ...(presented ? ['wait "$rawrelay"'] : []),
     `if [ -s ${status} ]; then`,
     `  result=$(cat ${status})`,
-    `  printf '\n[mission terminal command exit code: %s]\n' "$result" >> ${capture}`,
     // Show the completed command in the surviving operator shell before the
     // operation window disappears. The replay reaches only the console and its
     // private transcript; retained history never receives it (TASK-2749).
-    `  ${t} send-keys -t ${consoleTarget} -l ${shellQuote(`tail -n 50 ${capture}`)}`,
+    `  ${t} send-keys -t ${consoleTarget} -l ${shellQuote(`sh ${shellQuote(transcript.replay)} ${shellQuote(transcript.dir)} ${shellQuote(windowName)} `)}"$result"`,
     `  ${t} send-keys -t ${consoleTarget} Enter`,
     `  ${t} select-window -t ${consoleTarget}`,
     `  ${t} wait-for -S ${shellQuote(`${windowName}-done`)}`,
@@ -278,6 +276,7 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   ensurePrivateDir(scratch);
   const consoleBin = path.join(path.dirname(socketPath), sessionName, 'console-bin');
   ensurePrivateDir(consoleBin);
+  const transcript = prepareMissionTranscript({ configuration, repositoryKey: missionTerminalIdentity(input.identity).repositoryKey, sessionName, sessionDir: path.dirname(consoleBin), nowMs: Date.now() });
   const commandPath = configuration.agents.searchPath.split(path.delimiter).map(dir => path.join(dir, 'px')).find(candidate => {
     try { return fs.statSync(candidate).isFile(); } catch { return false; }
   });
@@ -286,7 +285,7 @@ export function prepareTmuxLaunch(input: TmuxLaunchInput, options: { configurati
   if (input.input) { fs.writeFileSync(path.join(scratch, 'stdin'), input.input, { mode: 0o600 }); }
   fs.writeFileSync(path.join(scratch, 'command.sh'), commandScript(socketPath, scratch, input.command, input.args, Boolean(input.input)), { mode: 0o700 });
   fs.writeFileSync(path.join(scratch, 'pane.sh'), paneScript(socketPath, windowName, scratch, input.presenter), { mode: 0o700 });
-  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, missionTerminalCapturePath(input.identity, configuration), terminalStateRoot(configuration), configuration, Boolean(input.presenter), runId), { mode: 0o700 });
+  fs.writeFileSync(path.join(scratch, 'host.sh'), hostScript(socketPath, sessionName, windowName, scratch, input.cwd, input.supervisorPid ?? process.pid, consoleBin, transcript, terminalStateRoot(configuration), configuration, Boolean(input.presenter), runId), { mode: 0o700 });
   const spawnSyncFn = options.spawnSyncFn ?? childProcess.spawnSync;
   let started = false;
   return {

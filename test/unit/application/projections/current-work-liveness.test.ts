@@ -217,3 +217,11 @@ describe("Unverifiable process liveness — SC5", () => {
     assert.strictEqual(result, false, 'dead pid returns false');
   });
 });
+
+test('terminated process identities cannot retain scratch while permission failures stay uncertain (TASK-2816)', t => {
+  t.mock.method(process, 'kill', () => true);
+  t.mock.method(readProcessStat, 'sync', () => '123 (exited child) Z ' + Array(19).fill('0').join(' '));
+  if (process.platform === 'linux') { assert.equal(probeProcessLiveness(123, 'recorded'), false, 'a zombie cannot still write to its scratch'); }
+  t.mock.method(process, 'kill', () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+  assert.equal(probeProcessLiveness(123, 'recorded'), null, 'permission denial is not proof of death');
+});

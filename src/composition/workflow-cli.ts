@@ -95,6 +95,27 @@ export function workflowCliObserver(terminal: Pick<import('../application/ports/
   activity?: import('../application/ports/execution-activity.js').ExecutionActivityReadPort) {
   const offsets = new Map<string, number>();
   const replay = workflowReplay(write, interactive);
+  const lost = new Set<string>();
+  // Retention may drop or expire retained bytes; replay says so instead of
+  // skipping silently (TASK-2816). A fresh observer after a restart starts at 0.
+  const reportLoss = (key: string, text: string) => {
+    const notice = `\n[${key}: ${text}]\n`;
+    if (!lost.has(notice)) { lost.add(notice); write(notice); }
+  };
+  /** Replay one stream from its last offset; `true` once it has ended. */
+  const replayStream = (missionId: string, runId: string, stream: 'stdout' | 'stderr'): boolean => {
+    const key = `${runId}:${stream}`;
+    const after = offsets.get(key) ?? 0;
+    const page = terminal.page(missionId, { runId, stream, presentation: 'terminal', after });
+    if (!page.ok) {
+      if (offsets.has(key)) { reportLoss(key, `output from byte ${after} is no longer retained (${page.error})`); }
+      return true;
+    }
+    if (page.from > after) { reportLoss(key, `bytes ${after}-${page.from} were not retained`); }
+    replay(key, page);
+    offsets.set(key, page.to);
+    return page.atEnd && !page.running;
+  };
   let last = '';
   let sequence = 0;
   return async (operation: import('../domain/workflow-operation.js').WorkflowOperation): Promise<boolean> => {
@@ -111,14 +132,12 @@ export function workflowCliObserver(terminal: Pick<import('../application/ports/
     // capture feeds bytes back into itself and waits on its running record.
     const coordinators = history.runs.filter(({ record }) => record.operationId === operation.id
       && record.captureKind === 'coordinator' && record.supervisorPid !== process.pid);
+    for (const key of offsets.keys()) {
+      if (!coordinators.some(({ record }) => key.startsWith(`${record.runId}:`))) { reportLoss(key, 'the operation\'s retained output has expired'); }
+    }
     for (const run of [...coordinators].reverse()) {
       for (const stream of ['stdout', 'stderr'] as const) {
-        const key = `${run.record.runId}:${stream}`;
-        const page = terminal.page(operation.missionId, { runId: run.record.runId, stream, presentation: 'terminal', after: offsets.get(key) ?? 0 });
-        if (!page.ok) { continue; }
-        finished = finished && page.atEnd && !page.running;
-        replay(key, page);
-        offsets.set(key, page.to);
+        finished = replayStream(operation.missionId, run.record.runId, stream) && finished;
       }
     }
     return finished;

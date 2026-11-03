@@ -23,7 +23,7 @@ export const MISSION_TERMINAL_HANDLE_OWNERS: readonly string[] = [
 const TMUX_ADAPTER = 'src/adapters/process/';
 const TMUX_MODULE = /from\s+['"][^'"]*\/(?:tmux-host|tmux-mission-terminal)\.js['"]/;
 const TMUX_SPAWN = /\bspawn(?:Sync)?(?:Fn)?\s*\(\s*['"]tmux['"]|\bexecFile(?:Sync)?\s*\(\s*['"]tmux['"]/;
-const NATIVE_CALL = /\b(?:missionSocketPath|tmuxSessionName|tmuxMissionName|missionTerminalCapturePath|tmuxAttachArgs)\s*\(/;
+const NATIVE_CALL = /\b(?:missionSocketPath|tmuxSessionName|tmuxMissionName|tmuxAttachArgs)\s*\(/;
 
 function productionFiles(root: string): string[] {
   const files: string[] = [];

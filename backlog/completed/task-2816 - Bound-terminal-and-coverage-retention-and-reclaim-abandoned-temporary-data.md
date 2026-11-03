@@ -1,8 +1,8 @@
 ---
 id: TASK-2816
 title: Bound terminal and coverage retention and reclaim abandoned temporary data
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-24 05:10'
 labels: []
 dependencies: []

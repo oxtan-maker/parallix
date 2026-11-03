@@ -3,11 +3,9 @@ import { describeState, loadLive, loadOverview, loadPage, searchHistory, type Hi
 import { MODAL, RADIUS, SPACE, TYPE } from './palette.js';
 
 /**
- * The mission view (TASK-2749): retained workflow history first, with the
- * newest output appended as it arrives. Earlier history loads page by page,
- * search runs over everything retained, and an optional live pane is shown
- * beside the history, never instead of it. Every poll reads only the bytes
- * after what is already shown; a failed read keeps the displayed history.
+ * The mission view shows the current terminal above retained workflow history.
+ * Earlier history loads page by page and search covers everything retained.
+ * History polls read only new bytes; failed reads keep the displayed output.
  */
 
 const POLL_MS = 1000;
@@ -111,12 +109,16 @@ function usePolling(missionId: string, tick: (_signal: AbortSignal) => Promise<v
 
 function LivePane({ missionId }: { missionId: string }) {
   const [live, setLive] = useState<string | null>(null);
+  const pane = useRef<HTMLPreElement>(null);
+  useLayoutEffect(() => {
+    if (pane.current) { pane.current.scrollTop = pane.current.scrollHeight; }
+  }, [live]);
   usePolling(missionId, async signal => {
     const result = await loadLive(missionId, signal);
     if (signal.aborted || result.ok === false) { return; }
     setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${'detail' in result.value.probe ? `: ${result.value.probe.detail}` : ''}).`);
   });
-  return <pre aria-label="Live pane" style={{ maxHeight: 200, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
+  return <pre ref={pane} aria-label="Live pane" style={{ maxHeight: 200, minHeight: 80, flexShrink: 0, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
 }
 
 function SearchPanel({ missionId, onError, onJump }: { missionId: string; onError: (_detail: string) => void; onJump: (_runId: string, _stream: 'stdout' | 'stderr', _offset: number) => void }) {
@@ -149,9 +151,9 @@ function SearchPanel({ missionId, onError, onJump }: { missionId: string; onErro
   );
 }
 
-function Toolbar({ operations, selection, pinned, follow, showLive, canCopy, onSelect, onCopy, onLive, onFollow }: {
-  operations: readonly HistoryOperation[]; selection: Selection | null; pinned: boolean; follow: boolean; showLive: boolean; canCopy: boolean;
-  onSelect: (_next: Selection | null) => void; onCopy: () => void; onLive: (_on: boolean) => void; onFollow: () => void;
+function Toolbar({ operations, selection, pinned, follow, canCopy, onSelect, onCopy, onFollow }: {
+  operations: readonly HistoryOperation[]; selection: Selection | null; pinned: boolean; follow: boolean; canCopy: boolean;
+  onSelect: (_next: Selection | null) => void; onCopy: () => void; onFollow: () => void;
 }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.md, alignItems: 'center' }}>
@@ -169,7 +171,6 @@ function Toolbar({ operations, selection, pinned, follow, showLive, canCopy, onS
       </label>
       {pinned && <button type="button" onClick={() => onSelect(null)}>newest operation</button>}
       <button type="button" onClick={onCopy} disabled={!canCopy}>copy</button>
-      <label><input type="checkbox" checked={showLive} onChange={event => onLive(event.target.checked)} /> live pane</label>
       {!follow && <button type="button" onClick={onFollow}>follow output</button>}
     </div>
   );
@@ -223,7 +224,6 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
   const [readError, setReadError] = useState<string | null>(null);
   const [pinned, setPinned] = useState<Selection | null>(null);
   const pausedAutomatically = useRef(false);
-  const [showLive, setShowLive] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const selection = selectionFor(pinned, overview);
   const selectionKey = selection ? `${selection.runId}:${selection.stream}` : '';
@@ -267,10 +267,11 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
           <h2 style={{ margin: 0, fontSize: TYPE.title }}>{missionId} — mission history</h2>
           <button type="button" onClick={onClose}>close</button>
         </header>
+        <LivePane key={missionId} missionId={missionId} />
         <p role="status" style={{ margin: 0 }}>{overview ? describeState(overview) : 'Loading mission history…'}</p>
         {readError !== null && <p role="status" style={{ margin: 0, color: MODAL.warning }}>Refresh interrupted ({readError}); showing what was already loaded. Retrying…</p>}
-        <Toolbar operations={overview?.operations ?? []} selection={selection} pinned={pinned !== null} follow={follow} showLive={showLive} canCopy={chunks.length > 0}
-          onSelect={next => { pausedAutomatically.current = false; setPinned(next); }} onCopy={() => copyChunks(chunks, setCopied)} onLive={setShowLive} onFollow={() => { if (pausedAutomatically.current) { setPinned(null); pausedAutomatically.current = false; } setFollow(true); }} />
+        <Toolbar operations={overview?.operations ?? []} selection={selection} pinned={pinned !== null} follow={follow} canCopy={chunks.length > 0}
+          onSelect={next => { pausedAutomatically.current = false; setPinned(next); }} onCopy={() => copyChunks(chunks, setCopied)} onFollow={() => { if (pausedAutomatically.current) { setPinned(null); pausedAutomatically.current = false; } setFollow(true); }} />
         <SearchPanel missionId={missionId} onError={setReadError} onJump={jumpTo} />
         {copied !== null && <p role="status" style={{ margin: 0 }}>{copied}</p>}
         {edges.hasEarlier && <button type="button" onClick={() => loadEarlier(holdPosition)} style={{ alignSelf: 'flex-start' }}>load earlier history</button>}
@@ -291,7 +292,6 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
             <ul style={{ margin: 0 }}>{coverage.map(line => <li key={line}>{line}</li>)}</ul>
           </details>
         )}
-        {showLive && <LivePane missionId={missionId} />}
       </section>
     </div>
   );
