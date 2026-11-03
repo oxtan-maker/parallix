@@ -24,24 +24,25 @@ This contract defines every production statistic shown by the board FLOW surface
 | Current lane age / bottleneck | Which non-terminal lane is waiting longest now? Source: latest lifecycle event plus injected projection clock. | `asOf - enteredCurrentLaneAt`; `done` and `integration` never select the bottleneck. Per-lane median reports its own `n`. Class: lifecycle. |
 | Throughput / weekly throughput | How many missions were delivered over time? Source: first `integration → done` lifecycle event. | Count delivered missions by completion week; FLOW compares the current and preceding non-overlapping seven-day windows. Class: lifecycle. |
 | Review bounce rate | How often did reviewed missions return to active? Source: lifecycle events. | `review → active` bounce events divided by missions that entered review; repeated bounces count as events and denominator is missions. `pr_fix_rounds` is a separate review-fix metric. Class: lifecycle. |
-| Review-fix rounds | How many distinct repair obligations required implementation changes? Source: reconciled Review decisions, human corrections and approval revocations. | Count each obligation once, combining duplicate publications and provider/local evidence. Report review, human and evidenced integration repairs separately from pushback, infrastructure incidents, mechanical re-review and unknown causes. Unknown counts and authorship remain unavailable. Mission summaries use mission totals; agent averages use authored obligations and show their measured mission count (`PR fix n`). Class: review measurement. |
+| Avg reimplementation rounds / mission | On average, how often was a model's delivered work sent back for reimplementation? Source: reconciled Review decisions, human corrections, approval revocations, lifecycle returns to active and gate repairs that never moved a lane (pre-review and pre-approval gates). | Count each distinct return once whatever its cause or sending stage (gate, reviewer, human, integration, infrastructure, pushback, unknown); duplicate publications and provider/local copies are one return, repeated cycles are separate, and initial implementation, no-return failures and approval-only re-reviews count zero. A model's figure is its returns divided by the completed missions it was attributed in (finisher or author of returned work) that have return evidence, so models are comparable. A trailing `+` marks a lower bound when a return could belong to the model but cannot be attributed. Missions without return evidence are left out of the average and named as `(k/m measured)` instead, because their returns could be any number; a model with none measured shows unavailable. Class: review measurement. |
 | Agent runtime | How much measured agent execution was used? Source: agent runs in `usage_statistics`. | Sum measured run duration per delivered mission, then aggregate only measured missions. Missing duration is unavailable, not zero. Class: telemetry. |
 | Tokens, cost, tool calls | What measured resources did delivery use? Source: agent runs in `usage_statistics`. | Sum available values per delivered mission, then aggregate only values observed for that metric. Display numerator/denominator coverage. Class: telemetry. |
-| Agent spend by stage | Which resources were recorded for each stage actor? Source: stage measurements. | Weekly and date-range reports group by the agent that performed each stage and its model, using measurement dates rather than mission completion. Codex shows the peak recorded quota level per stage and across the row, labelled "quota peak"; snapshots are never summed or used for stage shares. Missing or invalid levels show unavailable; a recorded zero remains zero. Quota snapshots lack the baseline and quota-window identity needed to attribute consumption deltas. Claude uses dollars and custom runners use minutes even when their provider is OpenAI; their totals and parenthesized stage shares remain additive. Class: telemetry. |
+| Agent spend by stage | Which resources were recorded for each stage actor? Source: stage measurements. | Weekly and date-range reports group by the agent that performed each stage and its concrete recorded model; amounts whose model is unrecorded or generic (`mixed`, runner family names) appear once as unavailable model attribution instead of a model row, using measurement dates rather than mission completion. Codex shows the highest recorded quota level per stage; the total column adds the stage columns, like dollars and minutes, and no stage shares are shown for quota. Missing or invalid levels show a dash; a recorded zero remains 0%. Unattributed quota levels are not shown. Claude uses dollars and custom runners use minutes even when their provider is OpenAI; their totals and parenthesized stage shares remain additive. Class: telemetry. |
 | Cohort comparison | Did a labelled experiment cohort differ? Source: canonical Mission labels/assignee and agent-run provider/model, plus lifecycle events. | Group completed repository-scoped outcomes by label, implementer, model, provider, or inclusive completion-date range. Show cohort `n`, lifecycle and review figures, runtime/tokens/cost, and per-metric coverage. Class: derived comparison. |
 
-Review-fix authorship follows the submitted work when agents change. Earlier
-agents retain obligations for their work, even when a replacement performs the
-repair. Delivery counts and cohort `n` still use final ownership; repair
-observation counts can therefore include an agent with no final deliveries.
-An implementer cohort uses that agent’s authored repair observations, while
-label and date cohorts use mission totals. Lifecycle metrics keep their own
-populations and denominators.
+Returns follow the submitted work when agents change. The round under review
+when a return happens names the author of the rejected work. The report shows the
+return under the model telemetry proves wrote it: the only model the agent used
+on the mission (when none of its implementation telemetry is generic, mixed or blank), or the model recorded on or before the return when it switched.
+Same-day switches and missing telemetry leave it as unavailable model attribution.
+`# missions as implementer` counts every completed mission a model was attributed
+in, whether it finished the mission or wrote work that was sent back. Lifecycle
+metrics keep their own populations and denominators.
 
 Normal stats and board reads reconcile retained Review history directly, so
 repair observations do not require a backfill first. Reports have no persisted
-snapshot or scalar fallback. Historical scalar counts are export and
-reconstruction outputs of the same calculation; stage telemetry does not
+snapshot or scalar fallback. Stored `pr_fix_rounds` values are legacy authored-fix counts, never
+relabelled as all-cause totals; reconstruction outputs come from the same calculation; stage telemetry does not
 establish a review measurement. `px stats backfill`
 previews reconstruction from retained Mission history, including existing rows,
 with old/new counts, coverage and unresolved histories. `--apply` writes the

@@ -10,6 +10,27 @@ import type { MissionTerminalCapability } from '../../../src/application/ports/m
 import { completed, failure } from '../../../src/application/contracts.js';
 import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 
+test('review SIGTERM disconnects without fencing its detached reviewer (TASK-2826)', async () => {
+  const before = process.listenerCount('SIGTERM');
+  const existing = new Set(process.listeners('SIGTERM'));
+  let fenced = false;
+  let verdict = false;
+  const registry = { review: async () => {} } as Record<string, Command>;
+  const graph = { presentationCapabilities: { commandController: { dispatch: async (request: BoardCommandRequest) => {
+    // The controlled owner has launched independently before the client dies.
+    // Invoke only this client's signal handler, not the runner's shutdown hook.
+    for (const listener of process.listeners('SIGTERM')) { if (!existing.has(listener)) { listener('SIGTERM'); } }
+    fenced = Boolean(request.cancellation?.requested && request.cancellation.stopOwnedWorkflow);
+    verdict = !fenced;
+    return failure('cancelled', 'Stopped waiting; workflow continues independently');
+  } } }, operatorState: { close: async () => {} } } as unknown as ProductionApplicationServices;
+  ownWorkflowCli(registry, async () => graph);
+  await assert.rejects(async () => registry.review(['task-test']), /continues independently/);
+  assert.equal(fenced, false, 'client disconnect must not request an ownership-fencing stop');
+  assert.equal(verdict, true);
+  assert.equal(process.listenerCount('SIGTERM'), before);
+});
+
 test('CLI preserves review flags and reports stop diagnostics while closing its graph (TASK-2750 F4)', async t => {
   const requests: BoardCommandRequest[] = [];
   let closed = 0;
@@ -212,6 +233,25 @@ test('invalid integrate flags fail before workflow admission opens state (TASK-2
   await assert.rejects(async () => registry.integrate(['task-does-not-exist', '--invalid-option']),
     /Unknown integrate option: --invalid-option/);
   assert.equal(opened, false);
+});
+
+test('landed closeout bypasses ordinary integration admission (TASK-2833)', async () => {
+  const calls: string[][] = [];
+  let opened = 0;
+  const registry = {
+    draft: async () => {},
+    review: async () => {},
+    integrate: async (args: string[]) => { calls.push(args); },
+  } as Record<string, Command>;
+  ownWorkflowCli(registry, async () => {
+    opened++;
+    throw new Error('landed closeout must not enter integrate:merge admission');
+  });
+
+  await registry.integrate(['task-landed', '--recover-landed']);
+
+  assert.deepEqual(calls, [['task-landed', '--recover-landed']]);
+  assert.equal(opened, 0);
 });
 
 

@@ -13,12 +13,12 @@ Redirected output uses plain messages. Interactive active, recover and verify
 operations enter the mission terminal automatically. Queries and structured
 writes keep their caller-side output.
 
-For foreground draft, active, review/handoff and integration, Ctrl+C stops the invoked
+For foreground draft, active and integration, Ctrl+C stops the invoked
 workflow and its owned children before returning a non-success result. Repeated
 Ctrl+C keeps the same cleanup running. After cleanup succeeds, retry the same
 command immediately; the Mission and recorded evidence remain available.
-Interrupting `px lead` also ends fleet polling and interrupts the workflows it
-forwarded. Each forwarded command reports confirmed shutdown or continuing
+Interrupting `px lead` also ends fleet polling and interrupts its forwarded
+clients. Each forwarded command reports confirmed shutdown or continuing
 work with instructions; use `px history <slug> list` to inspect its retained output.
 A CLI interrupt does not stop an independently started web workflow or another
 Mission. Use `px stop <slug>` to explicitly settle that Mission's workflow.
@@ -30,6 +30,24 @@ inspection time. Attributed detached executions are also settled. If termination
 cannot be confirmed, Parallix reports a pending stop and refuses replacement;
 inspect the retained history and retry `px stop` after resolving the surviving
 execution.
+
+Review has a detached owner. Once admitted, closing the foreground `px review`
+client, Ctrl+C or SIGTERM ends observation while the owner and reviewer continue
+and can record their verdict. Use `px stop <slug>` to terminate review explicitly;
+it fences writes and confirms attributed work has stopped before allowing a
+replacement.
+
+If an unfinished review loses all its running work, `px review <slug> --status`
+and `px status <slug>` report an orphaned round and name the recovery sequence:
+`px stop <slug>`, then `px review <slug>`. An unconfirmed probe is reported as
+unconfirmed, not as proof that work has ended. Status commands only inspect;
+they do not stop or restart review.
+
+A verdict rejected by the ownership fence remains rejected. Its decision,
+findings and comment are retained at the evidence location printed by
+`px verdict`. A restarted reviewer receives references identifying the original
+round and workflow as unaccepted evidence. The reviewer must assess the current
+tree and submit a fresh verdict; retained evidence never grants approval.
 
 When an owned draft, active, review, integrate or stop command fails, its final
 summary follows the streamed output. It names the workflow stage and command,

@@ -1,8 +1,8 @@
 ---
 id: TASK-2826
 title: Make px review survive client termination and detect orphaned rounds
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-31 16:20'
 labels:
   - bug

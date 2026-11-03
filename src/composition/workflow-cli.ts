@@ -24,7 +24,9 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
       }
       const slug = inferSlug(command === 'review' ? reviewRequest?.explicitSlug : args[0]?.startsWith('-') ? undefined : args[0]);
       if (!slug) { return original(args, options); }
-      const cancellation = { requested: false, stopOwnedWorkflow: true };
+      // Review runs under a detached owner. Losing its observer must not fence
+      // the reviewer; explicit stop retains shutdown authority.
+      const cancellation = { requested: false, stopOwnedWorkflow: command !== 'review' };
       const interrupt = () => { cancellation.requested = true; };
       // Keep this listener through settlement and graph close. Repeated Ctrl+C
       // requests the same cleanup rather than killing its foreground waiter.
@@ -75,6 +77,7 @@ async function dispatchOwnedCli(command: 'draft' | 'review' | 'integrate', args:
 
 function bypassOwnership(command: string, args: readonly string[]): boolean {
   return hasMissionWriteAuthorization() || args.includes('--help') || args.includes('--dry-run')
+    || command === 'integrate' && args.includes('--recover-landed')
     || command === 'review' && !['enter', 'submit'].includes(reviewOperation(args));
 }
 function workflowKind(command: string): 'draft:create' | 'integrate:merge' | 'review:submit' {

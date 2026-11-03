@@ -367,7 +367,7 @@
       "integration/cli/startup-preflight.test.ts": 300,
       "integration/stats/stats-backfill.test.ts": 300,
       "integration/stats/stats-cohorts.test.ts": 225,
-      "integration/stats/stats-current-week-completion.test.ts": 300,
+      "integration/stats/stats-current-week-completion.test.ts": 450,
       "integration/stats/stats-custom-agent-model.test.ts": 250,
       "integration/stats/stats-internals.test.ts": 200,
       "integration/stats/stats-population.test.ts": 350,

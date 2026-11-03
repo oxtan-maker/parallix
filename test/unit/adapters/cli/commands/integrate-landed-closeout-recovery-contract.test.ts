@@ -3,7 +3,7 @@ import { FakeLaneEventRepository, FakeUsageRepository } from '../../../../fixtur
 import { agentFamily } from '../../../../../src/domain/agents.js';
 import { createIntegrationStrategy } from '../../../../../src/application/services/integration-dispatch.js';
 import { integrationBounceSeams } from '../../../../helpers/integration-bounce-seams.js';
-import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { fixtureMission, pendingReview } from '../../../../fixtures/mission-builders.js';
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../../../fixtures/integration-context.js';
 import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
@@ -85,6 +85,25 @@ describe("recovery post-integrate hook", () => {
       { stage: 'cleanup' },
       { stage: 'close' },
     ]);
+  });
+
+  test('landed closeout reconciles an orphaned undecided review without ordinary approval recovery (TASK-2833)', async () => {
+    const slug = 'task-landed-orphan';
+    const orphaned = integrationServices({ store: { load: async () => ({
+      kind: 'found' as const,
+      version: fixtureVersion(1),
+      mission: fixtureMission(slug, { status: 'review', review: pendingReview(slug) }),
+    }) } }) satisfies NonNullable<Parameters<typeof recoverLandedIntegration>[1]>;
+    let ordinaryRecoveries = 0;
+    let persistOptions: unknown;
+
+    await recoverLandedIntegration(slug, orphaned, '/work/base', baseOptions({
+      recoverMissionForIntegration: async () => { ordinaryRecoveries++; return { status: 'integration' }; },
+      persistLandedIntegrationOrAbort: async (_slug: string, _commit: string, _services: unknown, options: unknown) => { persistOptions = options; },
+    }));
+
+    assert.equal(ordinaryRecoveries, 0);
+    assert.deepEqual(persistOptions, { rootDir: '/work/base', landedRecovery: true });
   });
 
   test('recovered landed integration surfaces a post-integrate hook failure as an abort', async () => {

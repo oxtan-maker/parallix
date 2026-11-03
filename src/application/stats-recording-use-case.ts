@@ -98,11 +98,11 @@ export class StatsRecordingUseCase {
     if (!request.slug) { throw new Error('recordIntegrationStats requires a mission slug.'); }
     const classification = await this._port.readStoredClassification(request.slug);
     const review = await this._port.readReview(request.slug);
-    const info = reviewStatistics(review, await this._port.readReviewEvidence(review));
+    const info = reviewStatistics(review, await this._port.readReviewEvidence(request.slug, review));
     const result = this._port.upsert({
       date: request.date, repo: this._port.repositoryName, mission: request.slug, classification,
       implementer: info.implementer,
-      pr_fix_rounds: info.prFixRounds === null ? undefined : String(info.prFixRounds),
+      pr_fix_rounds: info.total === null ? undefined : String(info.total),
     });
     // A failed history read cannot roll back the already-persisted measurement.
     try {
@@ -139,7 +139,8 @@ export class StatsRecordingUseCase {
 function mergeStageRows(existing: StatsRow, incoming: StatsRow): StatsRow {
   const merged = { ...existing, ...incoming,
     provider: mergeLabel(String(existing.provider), String(incoming.provider)),
-    model: mergeLabel(String(existing.model), String(incoming.model)),
+    // Identity includes the model, so a merged pair always shares one concrete model.
+    model: existing.model, actorKey: existing.actorKey,
     cost_usd: accumulateDecimalStrings(String(existing.cost_usd), String(incoming.cost_usd)),
   };
   for (const key of [

@@ -1,5 +1,6 @@
 import './review-prompt-rendering.cases.js';
 import { promptArtifacts } from '../../../../src/adapters/agents/prompt-artifacts.js';
+import { rejectedVerdictContext } from '../../../../src/adapters/agents/prompt-artifacts.js';
 import { readAgentLaunchContext } from '../../../../src/application/agent-launch-context.js';
 import { promptSectionBytes } from '../../../helpers/prompt-section-metrics.js';
 import { buildFreshDiagnosticRepairPrompt } from '../../../../src/application/rebound-prompts.js';
@@ -21,6 +22,24 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { mkdtemp } from '../../../helpers/temp-dir.js';
+
+test('restart context discovers retained verdicts by mission without accepting or replaying them (TASK-2826)', async t => {
+  const root = mkdtemp('verdict-context-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const record = { kind: 'rejected-review-verdict', accepted: false, slug: 'task-one', round: 3,
+    workflowId: 'old-workflow', output: { verdict: 'approve', comment: 'unaccepted comment', findings: [] }, reason: 'fenced' };
+  const file = await promptArtifacts(root).retain(JSON.stringify(record));
+  await promptArtifacts(root).retain(JSON.stringify({ ...record, slug: 'task-other', output: { comment: 'foreign comment' } }));
+  // A new reader instance observes immutable evidence left by the prior writer.
+  const context = rejectedVerdictContext(root, 'task-one');
+  assert.match(context, /Unaccepted.*never replay/i);
+  assert.match(context, /round 3.*old-workflow/);
+  assert.ok(context.includes(file));
+  assert.equal(rejectedVerdictContext(root, 'task-missing'), '');
+  assert.doesNotMatch(context, /foreign comment/);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).accepted, false);
+});
 import {
   buildCompactReviewPrompt,
   buildCompactActOnReviewPrompt,
@@ -31,7 +50,18 @@ import {
 } from '../../../../src/adapters/review/review-prompts.js';
 import { gateFailureReason } from '../../../../src/adapters/review/review-gate-handling.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
-import { createReviewLoopPorts } from '../../../../src/adapters/review/review-loop.js';
+import { createReviewLoopPorts, reviewerLaunchConfiguration } from '../../../../src/adapters/review/review-loop.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+
+test('reviewer source round survives in inherited launch environment without changing the parent (TASK-2826)', () => {
+  const configuration = resolveConfiguration({ PARALLIX_WORKFLOW_OPERATION: 'old-owner', PARALLIX_WORKFLOW_GENERATION: '1' });
+  const facts = { attempt: 3 } as Parameters<typeof reviewerLaunchConfiguration>[2];
+  const launch = reviewerLaunchConfiguration(configuration, 'reviewer', facts)!;
+  assert.equal(launch.forwardedEnvironment.PARALLIX_REVIEW_SOURCE_ROUND, '3');
+  assert.equal(launch.forwardedEnvironment.PARALLIX_WORKFLOW_OPERATION, 'old-owner');
+  assert.equal(configuration.forwardedEnvironment.PARALLIX_REVIEW_SOURCE_ROUND, undefined);
+  assert.equal(reviewerLaunchConfiguration(configuration, 'implementer', facts), configuration);
+});
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';

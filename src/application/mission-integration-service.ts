@@ -5,7 +5,7 @@ import type { MissionTransitionStore, MissionVersion } from './domain-ports.js';
 import type { LaneTransitionEvent } from '../domain/board-event.js';
 import { isDuplicateLaneEvent, isReplayedLaneEvent, lifecycleLaneEvent } from './lifecycle-lane-event.js';
 import { closeMission, type Mission } from '../domain/mission.js';
-import { decideMission } from '../domain/mission-workflow.js';
+import { decideMission, reconcileLandedMission } from '../domain/mission-workflow.js';
 import {
   decisionFailure, isLoaded, loadForCommand, missingCapability, storeEvidence,
   writeFailure, type MissionCommandRequest,
@@ -18,6 +18,8 @@ export interface ObservedIntegrationFacts {
 
 export interface DecideIntegrationRequest extends MissionCommandRequest {
   readonly facts: ObservedIntegrationFacts;
+  /** The payload is already squash-landed; reconcile an open stranded lane. */
+  readonly landedRecovery?: boolean;
   /** Occurrence time recorded on the `integration -> done` event; defaults to now. */
   readonly occurredAt?: string;
   /** Supplying the same key twice records the transition once. */
@@ -59,7 +61,9 @@ export class MissionIntegrationService {
     if (!isLoaded(loaded)) { return loaded; }
     let mission: Mission;
     try {
-      mission = decideMission(loaded.mission, { type: 'integrate' });
+      mission = request.landedRecovery
+        ? reconcileLandedMission(loaded.mission)
+        : decideMission(loaded.mission, { type: 'integrate' });
     } catch (error) { return decisionFailure(error); }
     // `integration -> done` is the transition throughput is derived from, so it
     // is committed with its lane event rather than as a bare aggregate write.

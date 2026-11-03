@@ -1,4 +1,5 @@
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
 import { spawnSync } from 'child_process';
 import { getPrimaryBranch, resolveMissionBaseBranch } from '../filesystem/mission-utils.js';
 import { getTaskImplementer, findTaskFile } from '../backlog/backlog.js';
@@ -8,7 +9,7 @@ import { forgejoApi, forgejoApiAsync } from './forgejo-api.js';
 import type { ForgejoApiCall, ForgejoAsyncApiCall, ForgejoApiError, ForgejoApiResult, ForgejoIssueComment, ForgejoLogFn, ForgejoPrLookupFailure, ForgejoPullRequest, ForgejoReview, ForgejoReviewComment } from './forgejo-types.js';
 import { git } from '../git/git.js';
 import type { ReviewRefFetch } from './forgejo-git.js';
-import { syncPrimaryBaseline, ensureRemoteBaseBranch, fetchReviewBranch, buildCreatePrPushArgs, cLocaleEnv, deleteReviewRef, isStaleInfoPushRejection, annotateLeaseFailure } from './forgejo-git.js';
+import { syncPrimaryBaseline, ensureRemoteBaseBranch, fetchReviewBranch, buildCreatePrPushArgs, cLocaleEnv, deleteReviewRef, annotateLeaseFailure } from './forgejo-git.js';
 
 type GitFetchFn = ReviewRefFetch;
 
@@ -197,7 +198,11 @@ function pushBranchForPr(branch: string, remoteUrl: string, rootDir: string, con
   let attempt = runPrPush(branch, remoteUrl, rootDir, pushOptions);
   if (attempt.failure) { return attempt.failure; }
 
-  if (attempt.result!.status !== 0 && forceWithLease && isStaleInfoPushRejection(attempt.result)) {
+  // runPrPush verifies the remote lease and records git-behind when it changed.
+  // Do not infer a concurrent update from unrelated push text that merely quotes
+  // a stale-info diagnostic, because that would retry non-stale failures.
+  const staleLease = recognizedFailureReason(attempt.result!.failureReason)?.code === 'git-behind';
+  if (attempt.result!.status !== 0 && forceWithLease && staleLease) {
     log(`Stale push rejection for ${branch}; fetching and retrying...`);
     attempt = runPrPush(branch, remoteUrl, rootDir, { ...pushOptions, refreshTrackingRef: true });
     if (attempt.failure) { return attempt.failure; }

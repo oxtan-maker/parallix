@@ -17,6 +17,19 @@ import { type StatusResult } from '../../../../src/application/ports/cli-workflo
 import { renderStatus, statusJson } from '../../../../src/interfaces/cli/status.js';
 import { type CheckpointData } from '../../../../src/domain/checkpoint.js';
 
+test('mission status renders concrete orphan recovery and preserves uncertain liveness (TASK-2826)', () => {
+  for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
+    const lines: string[] = [];
+    const result = statusResult({ slug: 'task-orphan', missionData: { backlogStatus: 'review', reviewHistory: [],
+      reviewRound: 3, reviewPhase: 'reviewing', reviewLiveness: liveness } });
+    renderStatus(result, line => lines.push(line));
+    if (liveness === 'orphaned') { assert.match(lines.join('\n'), /orphaned.*px stop task-orphan.*px review task-orphan/s); }
+    else { assert.doesNotMatch(lines.join('\n'), /orphaned/); }
+    if (liveness === 'unconfirmed') { assert.match(lines.join('\n'), /unconfirmed/); }
+    assert.equal(JSON.parse(statusJson(result)).review?.liveness, liveness);
+  }
+});
+
 describe("focused Mission status reads only the selected Mission", () => {
   // TASK-2402: `px status <slug>` must answer from a focused mission read rather
   // than building the whole board. These tests observe the read boundary itself —

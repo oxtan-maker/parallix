@@ -8,20 +8,28 @@ import { resolveWorktree } from '../adapters/git/worktree.js';
 import { readReviewState } from '../adapters/review/review-state.js';
 import { bindReviewPersistence } from './review-persistence.js';
 import { createMissionAuthority } from './mission-authority.js';
+import { authorizeMissionWrite, authorizedOperationId } from '../application/ports/mission-write-authorization.js';
+import { promptArtifacts } from '../adapters/agents/prompt-artifacts.js';
 
-export function reviewVerbPorts(services: { mission?: { store: MissionStore; lifecycle: MissionLifecycleService } | null }): ReviewVerbPorts {
+export function reviewVerbPorts(services: { mission?: { store: MissionStore; lifecycle: MissionLifecycleService } | null; sourceRound?: number }): ReviewVerbPorts {
   const missionStore = services.mission?.store ?? null;
   const lifecycleService = services.mission?.lifecycle ?? null;
   const persistence = bindReviewPersistence(missionStore, lifecycleService);
   return {
+    retainRejectedVerdict: input => promptArtifacts(input.worktree).retain(JSON.stringify({
+      kind: 'rejected-review-verdict', accepted: false, ...input,
+      workflowId: authorizedOperationId(), retainedAt: new Date().toISOString(),
+    }, null, 2)),
     resolveSlug: (explicit) => inferSlug(explicit),
     resolveWorktree: (slug) => resolveWorktree(slug),
     readReviewState: async (slug, worktree) => {
       const state = await Promise.resolve(readReviewState(slug, worktree, missionStore));
-      return state ? { round: state.round, phase: state.phase } : null;
+      return state ? { round: state.round, phase: state.phase, sourceRound: services.sourceRound } : null;
     },
-    consumeReviewerOutput: (slug, reviewer, output, worktree, expectedVersion) =>
-      persistence.consumeReviewerArtifacts(slug, reviewer, { worktree, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) }),
+    consumeReviewerOutput: async (slug, reviewer, output, worktree, expectedVersion) => {
+      await authorizeMissionWrite(slug);
+      return persistence.consumeReviewerArtifacts(slug, reviewer, { worktree, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) });
+    },
     consumeImplementerOutput: (slug, implementer, output, worktree, expectedVersion) =>
       persistence.consumeImplementerArtifacts(slug, implementer, { worktree, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) }),
   };
@@ -31,7 +39,10 @@ export function reviewVerbPorts(services: { mission?: { store: MissionStore; lif
 export function createReviewVerbCommands(rootDir: string, configuration: ParallixConfiguration): Record<string, Command> {
   const invoke = async (args: string[], create: typeof createVerdictCommand | typeof createResolveCommand) => {
     const mission = await createMissionAuthority(rootDir, { configuration });
-    try { return await create(reviewVerbPorts({ mission }))(args); }
+    const sourceRound = Number(configuration.forwardedEnvironment.PARALLIX_REVIEW_SOURCE_ROUND);
+    try { return await create(reviewVerbPorts({ mission,
+      sourceRound: Number.isSafeInteger(sourceRound) && sourceRound > 0 ? sourceRound : undefined,
+    }))(args); }
     finally { await mission.store.drain?.(); }
   };
   return { verdict: args => invoke(args, createVerdictCommand), resolve: args => invoke(args, createResolveCommand) };

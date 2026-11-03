@@ -40,6 +40,7 @@ export async function createMissionApplicationServices(
   const readStatsMissionFlow = async () => (await import('./stats.js')).createStatsMissionFlowReader({
     rootDir, missionStore: store, repositoryId: repoId,
     laneEventRepo: new SqliteBoardLaneEventRepository(db), usageRepo: new SqliteUsageRepository(db),
+    historyRepo: new SqliteOperationalHistoryRepository(db),
   })();
   bindRecoveryPorts({ operationalHistory: new SqliteOperationalHistoryRepository(db) }, { repositoryId: repoId, store }, rootDir);
   const operationalHistory = new (await import('../application/services/operational-history-service.js')).OperationalHistoryService(new SqliteOperationalHistoryRepository(db));

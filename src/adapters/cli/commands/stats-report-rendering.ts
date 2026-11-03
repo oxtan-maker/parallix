@@ -5,7 +5,8 @@
 
 import { quotaUsageLevel, statsRowActorKey, type StatsRow } from '../../../application/services/statistics-row.js';
 
-import type { ReportRow, DateWindow, MissionGroupOptions, AgentWindowOptions, MissionStats } from './stats-rendering-types.js';
+import type { ReviewStatistics } from '../../../application/services/review-statistics.js';
+import type { ReportRow, DateWindow, AgentWindowOptions } from './stats-rendering-types.js';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as statsReport from './stats-report.js';
@@ -13,6 +14,9 @@ import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 
 export interface AgentStageSpend {
   readonly implementer: string;
+  /** Concrete recorded model; null when no evidence names one. */
+  readonly model: string | null;
+  readonly actor: string;
   readonly family: 'usage' | 'cost' | 'duration';
   readonly byStage: Record<string, number | null>;
   readonly total: number | null;
@@ -29,98 +33,125 @@ import {
 // Core single-mission renderer from stats-report.ts (task-2217)
 const { renderMissionPhaseReport: _renderMissionPhaseReport } = statsReport;
 
+/** A recorded model that is not a runner-family label or a legacy merge marker. */
+function concreteModel(value: unknown): string | null {
+  const model = String(value ?? '').trim();
+  return model && !GENERIC_MODEL_LABELS.has(model.toLowerCase()) ? model : null;
+}
+const GENERIC_MODEL_LABELS = new Set(['codex', 'claude', 'custom', 'mixed', 'unknown', 'vibe', 'mistral', 'openai', 'anthropic']);
+
 /**
- * Shared mission-dedup + agent-grouping pass behind `Agent performance this
- * week`. Deduplicates globally by (repo, mission) so each mission is counted
- * exactly once across all agent groups, then groups the winning per-mission
- * rows by display key (model name, falling back to implementer family).
- * Also returns a mission-key -> displayKey map so other report sections
- * (e.g. the stage-spend table) can fan back out over the *raw*, non-deduped
- * window rows using the same row identity/grouping without re-deriving it.
- *
+ * The model that performed this agent's implementation work on a mission;
+ * reviewer rows never contribute. Without `at` the latest recorded model wins
+ * (the finisher). With `at`: an agent that used exactly one concrete model on
+ * the mission wrote everything with it; otherwise the model must be provable
+ * from the telemetry dates: the newest implementation evidence on or before the
+ * return's day, where a generic, mixed or blank row counts as evidence that
+ * names no model. A same-day switch, newer unknown evidence or nothing earlier
+ * is unavailable (null).
  */
-function shouldReplaceMissionRow(row: ReportRow, previous: ReportRow | undefined): boolean {
-  if (!previous) { return true; }
-  const model = String(row.model || '').trim();
-  const previousModel = String(previous.model || '').trim();
-  if (Boolean(model) !== Boolean(previousModel)) { return Boolean(model); }
-  if (!model) { return true; }
-  const familyMatch = row.implementer && modelBelongsToImplFamily(model, row.implementer);
-  const previousFamilyMatch = previous.implementer && modelBelongsToImplFamily(previousModel, previous.implementer);
-  if (Boolean(familyMatch) !== Boolean(previousFamilyMatch)) { return Boolean(familyMatch); }
-  return row.date !== undefined && previous.date !== undefined && row.date >= previous.date;
+function implementerModel(rows: readonly ReportRow[], agent: string, at?: string | null): string | null {
+  // Unknown-model implementation rows (generic, mixed, blank) are evidence too: they date work no concrete model can claim.
+  // Integration rollup rows (stage default) carry the final model but a blank one is routine, so only a concrete default row counts.
+  const evidence = rows.filter(row => (row.stage || 'default') !== 'review' && statsRowActorKey(row) === agent
+    && ((row.stage || 'default') !== 'default' || concreteModel(row.model)))
+    .map(row => ({ model: concreteModel(row.model), date: String(row.date || '') })).sort((a, b) => a.date.localeCompare(b.date));
+  if (!at) { return evidence.filter(entry => entry.model).at(-1)?.model ?? null; }
+  const known = new Set(evidence.map(entry => entry.model));
+  // One model proves everything only when no implementation row of the agent is unknown.
+  if (known.size === 1 && !known.has(null)) { return evidence[0].model; }
+  const day = at.slice(0, 10);
+  const upTo = evidence.filter(entry => entry.date <= day);
+  const latestDate = upTo.at(-1)?.date;
+  if (!latestDate) { return null; }
+  const latest = new Set(upTo.filter(entry => entry.date === latestDate).map(entry => entry.model));
+  // Work on the return's own day may come before or after it, so the prior evidence stays possible.
+  if (latestDate === day) { upTo.filter(entry => entry.date < day).slice(-1).forEach(entry => latest.add(entry.model)); }
+  return latest.size === 1 ? [...latest][0] : null;
 }
 
-function missionCandidates(rows: readonly ReportRow[]) {
-  const byMission: Record<string, ReportRow> = {};
-  const rowsByMission: Record<string, ReportRow[]> = {};
+/** Every concrete model this agent recorded implementation work with on the mission. */
+function agentModels(rows: readonly ReportRow[], agent: string): string[] {
+  return [...new Set(rows.filter(row => (row.stage || 'default') !== 'review' && statsRowActorKey(row) === agent)
+    .map(row => concreteModel(row.model)).filter((model): model is string => model !== null))];
+}
+
+export interface ModelPerformance {
+  readonly model: string | null;
+  /** Completed missions this model implemented: it finished them or wrote work that was sent back. */
+  readonly missions: number;
+  /** Of those, the missions with return evidence; only they enter the average. */
+  readonly measuredMissions: number;
+  /** Returns of work this model wrote, over its measured missions. */
+  readonly reimplementationRounds: number;
+  /** True when a return could belong to this model but cannot be attributed: its returns are a lower bound. */
+  readonly incomplete: boolean;
+}
+
+/**
+ * A mission counts for every model that implemented it (finisher or author of
+ * returned work) and each return follows the model that wrote the rejected
+ * work, so a model's average is its returns over the missions it was attributed
+ * in. A return no concrete model can claim accumulates under the single
+ * `model: null` entry and marks the mission's named models incomplete; a
+ * mission without return evidence makes its models incomplete, never zero.
+ */
+type AttributedReturn = { author: string | null | undefined; model: string | null };
+
+/** Models a return nobody could pin down might belong to: the author's own models, or every involved model when the author is unknown. */
+function uncertainModels(missionRows: readonly ReportRow[], attributed: readonly AttributedReturn[], involved: ReadonlySet<string | null>): Set<string> {
+  // Collected only after the whole involved set is known, so the result never depends on return order.
+  const uncertain = new Set<string>();
+  for (const { author, model } of attributed) {
+    if (model !== null) { continue; }
+    if (author) { agentModels(missionRows, author).forEach(candidate => uncertain.add(candidate)); }
+    else { involved.forEach(candidate => candidate && uncertain.add(candidate)); }
+  }
+  return uncertain;
+}
+
+function attributeMission(missionRows: readonly ReportRow[], owner: string, info: ReviewStatistics | undefined) {
+  const involved = new Set<string | null>([implementerModel(missionRows, owner)]);
+  for (const author of Object.keys(info?.byImplementer ?? {})) { if (author !== 'unknown') { involved.add(implementerModel(missionRows, author)); } }
+  const rounds = new Map<string | null, number>();
+  const attributed: AttributedReturn[] = (info?.returns ?? []).map(({ author, at }) => ({ author, model: author ? implementerModel(missionRows, author, at) : null }));
+  for (const { model } of attributed) { rounds.set(model, (rounds.get(model) ?? 0) + 1); if (model !== null) { involved.add(model); } }
+  if (rounds.has(null)) { involved.add(null); }
+  return { involved, rounds, uncertain: uncertainModels(missionRows, attributed, involved) };
+}
+
+function rowsByCompletedMission(rows: readonly ReportRow[], keys: ReadonlySet<string>): Map<string, ReportRow[]> {
+  const byMission = new Map<string, ReportRow[]>();
   for (const row of rows) {
     const key = statisticsMissionKey(row);
-   (rowsByMission[key] ||= []).push(row);
-    if (shouldReplaceMissionRow(row, byMission[key])) { byMission[key] = row; }
+    if (keys.has(key)) { (byMission.get(key) ?? byMission.set(key, []).get(key)!).push(row); }
   }
-  return { byMission, rowsByMission };
+  return byMission;
 }
 
-function assignCompletedMissionOwners(byMission: Record<string, ReportRow>, rowsByMission: Record<string, ReportRow[]>, owners?: ReadonlyMap<string, string | null>) {
-  for (const [key, rows] of Object.entries(rowsByMission)) {
-    const rollup = [...rows].reverse().find(row => (row.stage || 'default') === 'default');
-    // An integration rollup records the Review's final implementer explicitly.
-    // Production reports supply the current DB owner, including null for unknown.
-    const owner = owners ? owners.get(key) : rollup?.implementer;
-    if (!owner) { delete byMission[key]; continue; }
-    byMission[key] = { ...(rollup || byMission[key]), reportedImplementer: owner,
-      model: '' };
-  }
-}
-
-function groupMissionCandidates(rows: readonly ReportRow[]) {
-  const groups: Record<string, ReportRow[]> = {};
-  const missionKeyToDisplayKey: Record<string, string> = {};
-  for (const row of rows) {
-    const model = String(row.model || '').trim();
-    const displayKey = row.reportedImplementer
-      ? (model && modelBelongsToImplFamily(model, row.reportedImplementer) ? model : row.reportedImplementer)
-      : (model || row.implementer || 'unknown');
-    missionKeyToDisplayKey[statisticsMissionKey(row)] = displayKey;
-   (groups[displayKey] ||= []).push(row);
-  }
-  return { groups, missionKeyToDisplayKey };
-}
-
-function computeAgentMissionGroups(rows: readonly ReportRow[], window: DateWindow, options: MissionGroupOptions = {}) {
-  const completedMissionKeys = options.completedMissionKeys || new Set();
-  const windowRows = options.completedOnly
-    ? rows.filter((row: ReportRow) => completedMissionKeys.has(statisticsMissionKey(row)))
-    : rows.filter((row: ReportRow) => statisticsRowInWindow(row, window));
-  const allValidWindowRows = windowRows.filter((row: ReportRow) => normalizeClassification(row.classification) !== null);
-  const { byMission, rowsByMission } = missionCandidates(allValidWindowRows);
-  if (options.completedOnly) { assignCompletedMissionOwners(byMission, rowsByMission, options.completedMissionOwners); }
-  const { groups, missionKeyToDisplayKey } = groupMissionCandidates(Object.values(byMission));
-  return { allValidWindowRows, groups, missionKeyToDisplayKey };
-}
-
-function summarizeAgentWindow(rows: readonly ReportRow[], window: DateWindow, options: AgentWindowOptions = {}) {
-
-  const { groups } = computeAgentMissionGroups(rows, window, {
-    completedOnly: true, completedMissionKeys: options.completedMissionKeys, completedMissionOwners: options.completedMissionOwners,
-  });
-  const observations = new Map<string, number[]>();
-  const summaries = [...(options.reviewObservations?.entries() ?? [])]
-    .filter(([key]) => options.completedMissionKeys?.has(key)).map(([, summary]) => summary);
-  for (const summary of summaries) {
-    for (const [agent, count] of Object.entries(summary.byImplementer)) {
-      if (count === null) { continue; }
-      observations.set(agent, [...(observations.get(agent) ?? []), count]);
-      groups[agent] ??= [];
+function summarizeAgentWindow(rows: readonly ReportRow[], _window: DateWindow, options: AgentWindowOptions = {}): ModelPerformance[] {
+  const keys = options.completedMissionKeys ?? new Set<string>();
+  const byMission = rowsByCompletedMission(rows, keys);
+  const groups = new Map<string | null, { missions: number; measured: number; rounds: number; incomplete: boolean }>();
+  const group = (model: string | null) => groups.get(model) ?? groups.set(model, { missions: 0, measured: 0, rounds: 0, incomplete: false }).get(model)!;
+  for (const key of keys) {
+    const owner = options.completedMissionOwners?.get(key);
+    if (!owner) { continue; }
+    const info = options.reviewObservations?.get(key);
+    const measured = Boolean(info) && info!.total !== null;
+    const { involved, rounds, uncertain } = attributeMission(byMission.get(key) ?? [], owner, info);
+    for (const model of involved) {
+      const target = group(model);
+      target.missions += 1;
+      if (!measured) { continue; }
+      target.measured += 1;
+      target.rounds += rounds.get(model) ?? 0;
+      if (model !== null && uncertain.has(model)) { target.incomplete = true; }
     }
   }
-  return Object.entries(groups).map(([implementer, delivered]) => {
-    const values = observations.get(implementer) ?? [];
-    return { implementer, missions: delivered.length,
-      averageFixRounds: values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2) : null,
-      prFixObservationCount: values.length };
-  }).sort((a, b) => a.implementer.localeCompare(b.implementer));
+  return [...groups.entries()].map(([model, value]) => ({ model, missions: value.missions, measuredMissions: value.measured,
+    reimplementationRounds: value.rounds, incomplete: value.incomplete }))
+    .sort((a, b) => String(a.model ?? '\uffff').localeCompare(String(b.model ?? '\uffff')));
 }
 
 // Canonical report stages for the per-agent spend-by-stage table (architecture migration).
@@ -175,19 +206,19 @@ function accumulateStageResource(byStage: Record<string, number | null>, row: St
 }
 
 /**
- * Group windowed telemetry by its stage actor and model. Mission ownership
- * and deduplication belong to delivery performance; they cannot assign a
- * reviewer's dollars or a replacement's runtime to another agent's usage.
- *
+ * Group windowed telemetry by stage actor and recorded model. Evidence with no
+ * concrete model keeps its actor's resource unit under `model: null`, so
+ * totals conserve without inventing a model or showing a generic family row.
+ * Mission ownership cannot assign a reviewer's dollars to another agent.
  */
 function summarizeAgentStageSpend(rows: readonly ReportRow[], window: DateWindow): AgentStageSpend[] {
-  const groups = new Map<string, { displayKey: string; rows: ReportRow[] }>();
+  const groups = new Map<string, { actor: string; model: string | null; rows: ReportRow[] }>();
   for (const row of rows) {
     if (!statisticsRowInWindow(row, window) || normalizeClassification(row.classification) === null) { continue; }
     const actor = statsRowActorKey(row);
-    const displayKey = String(row.model || actor || 'unknown').trim();
-    const key = JSON.stringify([actor, displayKey]);
-    const group = groups.get(key) ?? { displayKey, rows: [] };
+    const model = concreteModel(row.model);
+    const key = JSON.stringify([actor, model]);
+    const group = groups.get(key) ?? { actor, model, rows: [] };
     group.rows.push(row);
     groups.set(key, group);
   }
@@ -195,17 +226,16 @@ function summarizeAgentStageSpend(rows: readonly ReportRow[], window: DateWindow
   const knownStages = new Set(AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.stage));
 
   return [...groups.values()]
-    .sort((a, b) => a.displayKey.localeCompare(b.displayKey))
-    .map(({ displayKey, rows: groupRows }) => {
-      const family = classifyAgentSpendFamily(displayKey, groupRows);
-
+    .sort((a, b) => String(a.model ?? '\uffff').localeCompare(String(b.model ?? '\uffff')) || a.actor.localeCompare(b.actor))
+    .map(({ actor, model, rows: groupRows }) => {
+      const family = classifyAgentSpendFamily(model ?? actor, groupRows);
       const byStage: Record<string, number | null> = {};
       for (const { stage } of AGENT_SPEND_STAGE_COLUMNS) {byStage[stage] = family === 'usage' ? null : 0;}
       for (const row of groupRows) { accumulateStageResource(byStage, row, family, knownStages); }
       const values = Object.values(byStage).filter((value): value is number => value !== null);
-      const total = family === 'usage' ? (values.length ? Math.max(...values) : null)
-        : values.reduce((sum, value) => sum + value, 0);
-      return { implementer: displayKey, family, byStage, total };
+      // Quota levels per stage and dollars/minutes alike: the total adds the stage columns.
+      const total = family === 'usage' && values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0);
+      return { implementer: model ?? 'unavailable', model, actor, family, byStage, total };
     });
 }
 
@@ -219,7 +249,7 @@ function summarizeAgentStageSpend(rows: readonly ReportRow[], window: DateWindow
  */
 function formatAgentSpendCell(value: number | null, total: number | null, family: AgentStageSpend['family']) {
   if (value === null) {return '—';}
-  if (family === 'usage') {return `${value}% quota peak`;}
+  if (family === 'usage') {return `${value}%`;}
   if (!total) {return '—';}
   const pct = Math.round((value / total) * 100);
   if (family === 'cost') {
@@ -227,33 +257,6 @@ function formatAgentSpendCell(value: number | null, total: number | null, family
     return `$${rounded} (${pct}%)`;
   }
   return `${value}m (${pct}%)`;
-}
-
-function colorAverageFixRounds(rows: readonly Pick<MissionStats, 'averageFixRounds'>[]) {
-  const values = rows
-    .map(row => Number.parseFloat(row.averageFixRounds ?? ''))
-    .filter(value => Number.isFinite(value));
-
-  if (values.length === 0) {
-    return rows.map(row => row.averageFixRounds);
-  }
-
-  const best = Math.min(...values);
-  const worst = Math.max(...values);
-  return rows.map(row => {
-    const value = Number.parseFloat(row.averageFixRounds ?? '');
-    if (!Number.isFinite(value)) {return row.averageFixRounds;}
-    if (best === worst) {
-      return fmt.colorize(fmt.colors.green, row.averageFixRounds ?? '');
-    }
-    if (value === best) {
-      return fmt.colorize(fmt.colors.green, row.averageFixRounds ?? '');
-    }
-    if (value === worst) {
-      return fmt.colorize(fmt.colors.red, row.averageFixRounds ?? '');
-    }
-    return fmt.colorize(fmt.colors.yellow, row.averageFixRounds ?? '');
-  });
 }
 
 function colorMissionCounts(rows: readonly { missions: unknown }[]) {
@@ -318,12 +321,10 @@ export {
   isValidClassification,
   normalizeClassification,
   rowInWindow,
-  computeAgentMissionGroups,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   classifyAgentSpendFamily,
   formatAgentSpendCell,
-  colorAverageFixRounds,
   colorMissionCounts,
   AGENT_SPEND_STAGE_COLUMNS,
   MISSION_PHASE_ORDER,

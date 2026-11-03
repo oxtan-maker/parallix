@@ -48,7 +48,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 
 test('live Review observations survive absent telemetry and ignore archived scalar counts (TASK-2818)', async () => {
   const { StatsCommandUseCase } = await import('../../../../src/application/stats-command-use-case.js');
-  const rows = [{ repo: 'r', mission: 'task-stale', stage: 'default', date: '2026-06-23', implementer: 'codex',
+  const rows = [{ repo: 'r', mission: 'task-stale', stage: 'default', date: '2026-06-23', implementer: 'codex', model: 'gpt-6.1-sol',
+    classification: 'ai_sdlc'}, { repo: 'r', mission: 'task-no-telemetry', stage: 'active', date: '2026-06-23', implementer: 'custom', model: 'qwen3.8-flash-next-iq3_s',
     classification: 'ai_sdlc'}];
   const known = reviewStatisticsObservation('custom', 2);
   const result = await new StatsCommandUseCase({ loadMeasurements: async () => rows, loadMissionFlow: async () => [
@@ -56,9 +57,9 @@ test('live Review observations survive absent telemetry and ignore archived scal
     { repo: 'r', mission: 'task-no-telemetry', closedAt: '2026-06-23T13:00:00Z', labels: ['ai_sdlc'], implementer: 'custom', reviewStatistics: known },
   ] }).execute({ mode: 'range', from: '2026-06-23', to: '2026-06-23' });
   const report = stats.renderRangeStatsReport(result.rows, { selection: result.selection });
-  assert.match(report, /codex\s+1\s+unavailable\s+0/);
-  assert.match(report, /custom\s+1\s+2\.00\s+1/);
-  assert.match(report, /Review-fix mission coverage: 1\/2/);
+  assert.match(report, /gpt-6\.1-sol\s+1\s+unavailable/);
+  assert.match(report, /qwen3\.8-flash-next-iq3_s\s+1\s+2\b/);
+  assert.doesNotMatch(report, /coverage/);
 });
 
 const instant = (ms: number) => new Date(Date.UTC(2026, 10, 2) + ms).toISOString();
@@ -370,7 +371,7 @@ test('stats CLI renders the application-selected population without selecting co
   const { createStatsCommand } = await import('../../../../src/interfaces/cli/stats.js');
   const { selectStatsReport } = await import('../../../../src/application/services/statistics-report-selection.js');
   const rows = [
-    { repo: 'r', mission: 'task-done', date: '2026-06-01', implementer: 'codex', stage: 'default', classification: 'user_value', pr_fix_rounds: '2'},
+    { repo: 'r', mission: 'task-done', date: '2026-06-01', implementer: 'codex', model: 'gpt-6.1-sol', stage: 'default', classification: 'user_value', pr_fix_rounds: '2'},
     { repo: 'r', mission: 'task-active', date: '2026-06-23', implementer: 'claude', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '9' },
   ];
   const flow = [
@@ -400,10 +401,10 @@ test('stats CLI renders the application-selected population without selecting co
       exit: () => { throw new Error('unexpected exit'); },
     });
     const report = lines.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
-    assert.match(report, /codex\s+1\s+2\.00/);
+    assert.match(report, /gpt-6\.1-sol\s+1\s+2\b/);
     const performance = report.split(mode === 'weekly' ? 'Agent performance this week' : 'Agent performance')[1]!.split('Agent spend')[0]!;
     assert.doesNotMatch(performance, /claude/, 'active work receives no delivery credit');
-    assert.match(performance, /custom\s+1\s+unavailable\s+0/, 'telemetry-free deliveries retain population credit with no fabricated observation');
+    assert.match(performance, /Unavailable model attribution: 1 missions, unavailable reimplementation rounds/, 'telemetry-free deliveries retain population credit with no fabricated model or count');
     assert.equal(selection.current.flow?.total, 2, 'flow counts lifecycle completions without telemetry');
     assert.match(report.split('Agent performance')[0]!, /2\s+1\s+1\s+0/);
     // Also exercise the real use case rather than just the presentation seam.

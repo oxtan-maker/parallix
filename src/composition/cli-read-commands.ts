@@ -27,6 +27,7 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
         ...options, rootDir, missionStore: services.mission.store,
         laneEventRepo: services.operatorState.repositories?.boardLaneEvents,
         usageRepo: services.operatorState.repositories?.usage,
+        historyRepo: services.operatorState.repositories?.operationalHistory,
         repositoryId: services.mission.repositoryId,
       })(args, options);
     }),

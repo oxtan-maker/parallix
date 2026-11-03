@@ -1,5 +1,6 @@
 import { failureReason, type FailureReason } from '../../domain/failure-reason.js';
 import type { ReviewPhase } from '../../domain/review-phase-policy.js';
+import { authorizeMissionWrite } from '../../application/ports/mission-write-authorization.js';
 import type { postComment, postReview, getPrAuthor } from './review-adapter.js';
 /**
  * Reviewer artifact consumption: resolve the reviewer artifact set, persist
@@ -328,6 +329,7 @@ export async function consumeReviewerArtifacts(
   // compare-and-swap still precedes the audit events below.
   const mirrorStage = async (leadingStage: boolean): Promise<string | null> => {
     if (!providerEnabled || (reviewVerdict === 'approve') !== leadingStage) { return null; }
+    await authorizeMissionWrite(slug);
     return (leadingStage && await approvalLegalDiagnostic(slug, { missionStore: options.missionStore })) || await mirror();
   };
   const leading = await mirrorStage(true);

@@ -70,18 +70,27 @@ it('normal stats and board reads reconcile Review history before backfill withou
       // A legacy value is deliberately wrong; no reconstructed JSON exists.
       upsertMeasurementRow({ repo: REPO, mission: id, date: '2026-06-02', stage: 'default',
         classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '99' }, { store: measurements });
+      upsertMeasurementRow({ repo: REPO, mission: id, date: '2026-06-02', stage: 'active', model: 'gpt-6.1-sol',
+        classification: 'ai_sdlc', implementer: 'codex' }, { store: measurements });
+      upsertMeasurementRow({ repo: REPO, mission: id, date: '2026-06-01', stage: 'active', model: 'qwen3.8-flash-next-iq3_s',
+        classification: 'ai_sdlc', implementer: 'custom' }, { store: measurements });
       const before = measurements.listMeasurements();
       const result = await new StatsCommandUseCase(createStatsWorkflowAdapter({ store: measurements,
         readMissionFlow: createStatsMissionFlowReader({ missionStore, laneEventRepo, usageRepo, repositoryId: REPO }) })).execute(
         { mode: 'range', from: '2026-06-01', to: '2026-06-03' });
       const report = renderRangeStatsReport(result.rows, { selection: result.selection });
-      assert.match(report, /codex\s+1\s+2\.00\s+1/);
-      assert.match(report, /custom\s+0\s+1\.00\s+1/);
-      assert.match(report, /Review-fix mission coverage: 1\/1/);
+      assert.match(report, /gpt-6\.1-sol\s+1\s+2\.0\b/);
+      assert.match(report, /qwen3\.8-flash-next-iq3_s\s+1\s+1\.0\b/);
+      assert.doesNotMatch(report, /coverage/);
       const outcomes = await new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: REPO,
         cohortMetadata: async () => missionCohortMetadata([mission]) }).readOutcomes();
       assert.equal(outcomes[0].reviewFixRounds, 3);
       assert.deepEqual(outcomes[0].reviewFixRoundsByImplementer, { custom: 1, codex: 2 });
+      const unauthored = await new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: REPO,
+        cohortMetadata: async () => missionCohortMetadata([mission], new Map([[id, { equivalentSubmissions: {},
+          workflowReturns: [{ identity: 'lane:x', author: null, at: '2026-06-02T08:00:00Z', source: 'repair' }] }]])) }).readOutcomes();
+      assert.equal(unauthored[0].reviewFixRounds, null, 'a return nobody can claim makes cohort counts unavailable, never a measured number (TASK-2832)');
+      assert.deepEqual(unauthored[0].reviewFixRoundsByImplementer, { custom: null, codex: null });
       assert.deepEqual(measurements.listMeasurements(), before, 'normal reads never apply backfill');
     } finally { measurements.close(); }
   });
@@ -368,8 +377,7 @@ it('operator-only corrections retain their author and do not count as reviewer d
       // Human corrections are repair obligations too (TASK-2818); classifier
       // reviewer-decision coverage below must still exclude operator decisions.
       const statistics = reviewStatistics(loaded.mission.review);
-      assert.equal(statistics.prFixRounds, 1);
-      assert.deepEqual(statistics.obligations.map(value => value.cause), [operator ? 'human' : 'review']);
+      assert.equal(statistics.total, 1);
     }
     const read = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
     assert.deepEqual(read.decisions.map(d => [d.mission, d.source, d.outcome]), [['reviewer-correction', 'reviewer', 'implementer']]);

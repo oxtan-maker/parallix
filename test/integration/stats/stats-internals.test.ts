@@ -186,13 +186,13 @@ test('deriveImplementerAndFixRounds counts fix rounds from reviewEvents (task-23
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-repro',
       root,
-      restoreHome.store,
+      restoreHome.store, async () => undefined,
     );
 
     assert.equal(info.source, 'review-aggregate', 'should use review-aggregate source');
     assert.equal(info.implementer, 'claude', 'should derive implementer');
     assert.equal(
-      info.prFixRounds,
+      info.total,
       1,
       'MUST be 1: one reviewer_outcome with verdict=request-changes = one fix round. ' +
       'Current implementation returns 0 because it counts rounds[].decision.kind which is never set.',
@@ -263,11 +263,11 @@ test('deriveImplementerAndFixRounds counts two fix rounds from reviewEvents (tas
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-two-rounds',
       root,
-      restoreHome.store,
+      restoreHome.store, async () => undefined,
     );
 
     assert.equal(info.source, 'review-aggregate');
-    assert.equal(info.prFixRounds, 2, 'two reviewer_outcome events with verdict=request-changes = 2 fix rounds');
+    assert.equal(info.total, 2, 'two reviewer_outcome events with verdict=request-changes = 2 fix rounds');
   } finally {
     await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
@@ -306,11 +306,11 @@ test('deriveImplementerAndFixRounds returns 0 for approved-first-time mission (t
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-approved-first',
       root,
-      restoreHome.store,
+      restoreHome.store, async () => undefined,
     );
 
     assert.equal(info.source, 'review-aggregate');
-    assert.equal(info.prFixRounds, 0, 'approved first time = 0 fix rounds');
+    assert.equal(info.total, 0, 'approved first time = 0 fix rounds');
   } finally {
     await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
@@ -334,14 +334,14 @@ test('deriveImplementerAndFixRounds returns unknown when no reviewEvents and no 
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2347.10-unknown',
       root,
-      restoreHome.store,
+      restoreHome.store, async () => undefined,
     );
 
     // When review aggregate exists but has no fix-round signal (no events, no decisions),
     // it should report prFixRounds as null/unknown rather than confident 0.
     assert.ok(
-      info.prFixRounds === null || info.prFixRounds === undefined,
-      `must report unknown, got: ${info.prFixRounds}`,
+      info.total === null || info.total === undefined,
+      `must report unknown, got: ${info.total}`,
     );
   } finally {
     await restoreHome();
@@ -498,15 +498,11 @@ test('live stats workflow adapter derives authoritative implementer and reviewFi
   await fixture.store.save(mission, null);
 
   try {
-    const info = await stats._internals.deriveImplementerAndFixRounds(slug, fixture.root, fixture.store) as {
-      implementer: string;
-      prFixRounds: number | null;
-      source: string;
-    };
+    const info = await stats._internals.deriveImplementerAndFixRounds(slug, fixture.root, fixture.store, async () => undefined);
 
     assert.equal(info.source, 'review-aggregate', 'production stats wiring must read the Review aggregate');
     assert.equal(info.implementer, 'configured-implementer', 'implementer comes from the Review aggregate, not the backlog task');
-    assert.equal(info.prFixRounds, 2, 'two request-changes rounds = known 2');
+    assert.equal(info.total, 2, 'two request-changes rounds = known 2');
   } finally {
     await fixture.cleanup();
   }
@@ -728,7 +724,9 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
 function summarizeAgentWindow(rows: readonly (StatsRow & { completedForTest?: string })[], window: Parameters<typeof stats._internals.summarizeAgentWindow>[1], options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
   const completedMissionKeys = new Set(rows.filter(row => row.completedForTest === 'yes')
     .map(row => `${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`));
-  return (stats)._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys, reviewObservations: fixtureReviewObservations(rows) });
+  const completedMissionOwners = new Map(rows.filter(row => row.completedForTest === 'yes' && row.implementer)
+    .map(row => [`${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`, String(row.implementer)] as const));
+  return (stats)._internals.summarizeAgentWindow(rows, window, { completedMissionOwners, ...options, completedMissionKeys, reviewObservations: fixtureReviewObservations(rows) });
 }
 
 // ---------------------------------------------------------------------------
@@ -796,17 +794,9 @@ test('task-2348: mission with two implementers credits reported implementer not 
   ];
 
   const result = summarizeAgentWindow(rows, window);
-  // Mission should be grouped under 'custom' (the reported implementer),
-  // not 'claude-opus-5' (the earlier implementer's model).
-  const customGroup = result.find((g) => g.implementer === 'custom');
-  const claudeGroup = result.find((g) => g.implementer === 'claude-opus-5');
-
-  assert.ok(customGroup, 'mission should be grouped under "custom" (reported implementer)');
-  assert.equal(customGroup.missions, 1, 'custom should have exactly 1 mission');
-  assert.ok(
-    !claudeGroup || claudeGroup.missions === 0,
-    'mission should NOT be grouped under "claude-opus-5" (earlier implementer)',
-  );
+  // The reported implementer owns delivery; the earlier implementer's model
+  // neither receives the mission nor lends its name to the owner.
+  assert.deepEqual(result.map(group => [group.model, group.missions]), [[null, 1]]);
 });
 
 test('task-2348: review-aggregate preserves mission total across implementer replacement', async () => {
@@ -863,12 +853,12 @@ test('task-2348: review-aggregate preserves mission total across implementer rep
     const info = await stats._internals.deriveImplementerAndFixRounds(
       'task-2348-b',
       root,
-      restoreHome.store,
+      restoreHome.store, async () => undefined,
     );
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'custom', 'reported implementer is custom (last round owner)');
     assert.equal(
-      info.prFixRounds,
+      info.total,
       3,
       'mission total preserves earlier implementer rejections; authorship is a separate observation',
     );
@@ -932,10 +922,6 @@ test('task-2348: summarizeAgentWindow reads pr_fix_rounds from closed row not ma
   ];
 
   const result = summarizeAgentWindow(rows, window);
-  assert.equal(result[0].implementer, 'custom');
-  assert.equal(
-    result[0].averageFixRounds,
-    '2.00',
-    'fix rounds from closed row (2), not max across rows (3)',
-  );
+  assert.deepEqual(result, [{ model: 'gpt-5.6-terra', missions: 1, measuredMissions: 1, reimplementationRounds: 2, incomplete: false }],
+    'rounds from closed row (2), not max across rows (3)');
 });

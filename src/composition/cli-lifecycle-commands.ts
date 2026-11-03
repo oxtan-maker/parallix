@@ -1,3 +1,4 @@
+import { integrationRepairContinuation } from './integration-repair-continuation.js';
 import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
@@ -48,6 +49,7 @@ import { createReviewWorkflowAdapter } from '../adapters/review/review-commands.
 import { type Command } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
 import { statusMissionTitle } from './status-board.js';
+import { createReviewLivenessReader } from './review-liveness.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
@@ -80,6 +82,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         missionServicesFn,
         requireReviewAggregate: true,
         readReviewStateFn: persistence.readReviewState,
+        readReviewLiveness: createReviewLivenessReader(services, rootDir, configuration),
         writeReviewStateFn: persistence.writeReviewState,
         resetReviewStateFn: persistence.resetReviewState,
         createEventFn: persistence.createEvent,
@@ -93,6 +96,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
           ...observers,
           configuration,
+          integrationRepair: integrationRepairContinuation(mission, configuration),
           integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
           classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),

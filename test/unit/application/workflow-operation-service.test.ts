@@ -77,6 +77,67 @@ function request(id = 'request-one', mission = 'task-one'): BoardCommandRequest 
   return { operationId: id, requestKey: id, kind: 'active:execute', missionId: mission, missionStatusAtRequest: 'refined', capabilities: new Set(['active:execute']) };
 }
 
+test('review disconnect preserves detached completion and explicit stop excludes replacement (TASK-2826)', async () => {
+  const f = fixture();
+  f.missions.set('task-one', fixtureMission('task-one', { status: 'review' }));
+  const cancellation = { requested: false, stopOwnedWorkflow: false };
+  const review = { ...request(), kind: 'review:submit' as const, missionStatusAtRequest: 'review',
+    capabilities: new Set(['review:submit' as const]), cancellation };
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  let running: Promise<void> | undefined;
+  let verdict = false;
+  f.processes.launch = async id => {
+    running = f.service.run(id, async () => {
+      cancellation.requested = true;
+      await held;
+      await f.service.assertOwner(id, 1);
+      verdict = true;
+      return completed({});
+    });
+    await f.operations.transaction(async () => {});
+  };
+  try {
+    assert.match((await f.service.dispatch(review)).error!.message, /continues independently/);
+    assert.equal((await f.service.operation('request-one'))?.phase, 'executing');
+    assert.equal((await f.service.admit({ ...review, operationId: 'competitor', requestKey: 'competitor', cancellation: undefined })).status, 'failed');
+  } finally { release(); await running; }
+  assert.equal(verdict, true);
+  assert.equal((await f.service.operation('request-one'))?.phase, 'completed');
+  f.processes.launch = async () => {};
+  const next = { ...review, operationId: 'next', requestKey: 'next', cancellation: undefined };
+  assert.equal((await f.service.admit(next)).status, 'accepted');
+  f.setEffectsSettled(false);
+  assert.equal((await f.service.stop('task-one')).status, 'failed');
+  assert.equal((await f.service.admit({ ...next, operationId: 'replacement', requestKey: 'replacement' })).status, 'failed');
+  f.setEffectsSettled(true);
+  assert.equal((await f.service.stop('task-one')).status, 'completed');
+  await assert.rejects(() => f.service.assertOwner('next', 0), /fenced|stopped/);
+});
+
+test('review disconnect during admission cancels before insertion or leaves a valid detached launch (TASK-2826)', async () => {
+  for (const boundary of ['load', 'insert'] as const) {
+    const f = fixture();
+    f.missions.set('task-one', fixtureMission('task-one', { status: 'review' }));
+    const cancellation = { requested: false, stopOwnedWorkflow: false };
+    if (boundary === 'load') {
+      const load = f.store.load;
+      f.store.load = async id => { cancellation.requested = true; return load(id); };
+    } else {
+      const insert = f.operations.insert;
+      f.operations.insert = async row => { await insert(row); cancellation.requested = true; };
+    }
+    const result = await f.service.admit({ ...request(), kind: 'review:submit', missionStatusAtRequest: 'review',
+      capabilities: new Set(['review:submit']), cancellation });
+    assert.equal(result.status, boundary === 'load' ? 'cancelled' : 'accepted');
+    assert.equal(f.launches.length, boundary === 'load' ? 0 : 1);
+    if (boundary === 'insert') {
+      await f.service.run('request-one', async () => completed({}));
+      assert.equal((await f.service.operation('request-one'))?.phase, 'completed');
+    }
+  }
+});
+
 test('accepted continuation does not repeat activation before workspace preparation (TASK-2822)', async t => {
   t.after(() => configureMissionWriteAuthorization(null));
   const f = fixture();

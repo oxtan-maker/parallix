@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createReviewStatisticsEvidenceReader } from '../../review/review-statistics-evidence.js';
+import { createReviewStatisticsEvidenceReader, createWorkflowReturnReader } from '../../review/review-statistics-evidence.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 
 type StatisticsMeasurementStore = Pick<MeasurementStorePort, 'listMeasurements' | 'upsertMeasurement'>
@@ -29,7 +29,7 @@ import type { MissionStore } from '../../../application/domain-ports.js';
 import { missionId } from '../../../domain/mission.js';
 
 
-import { statsCohorts } from './stats-cohorts.js';
+import { statsCohorts, resolveOperatorRepositories } from './stats-cohorts.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import * as statsReport from './stats-report.js';
 import { resolveMeasurementStore } from '../../sqlite/measurement-store.js';
@@ -43,12 +43,10 @@ import { reviewStatistics } from '../../../application/services/review-statistic
 // Report rendering lives in its own module (task-2369.02). Re-exported below so
 // every existing caller keeps importing it from `./stats.js`.
 import {
-  computeAgentMissionGroups,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   classifyAgentSpendFamily,
   formatAgentSpendCell,
-  colorAverageFixRounds,
   colorMissionCounts,
   renderMissionPhaseReport,
   AGENT_SPEND_STAGE_COLUMNS,
@@ -57,7 +55,7 @@ import {
 import {
   STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer,
   parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow,
-  sameStatsIdentity, statsRowActorKey, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel,
+  sameStatsIdentity, statsRowActorKey, statsRowIdentityKey, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel,
   normalizeClassification, isValidClassification, normalizeRow, normalizeRows, parseBooleanish, statsMissionKey, modelBelongsToImplFamily, rowInWindow,
 } from './stats-normalization.js';
 
@@ -100,12 +98,13 @@ function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementS
  * defaults except for nullable observations and quota levels, whose absence
  * must survive storage rather than becoming an invented measured zero.
  */
-function measurementToStatsRow(record: import('../../../application/ports/mission-measurements.js').UsageRecord): StatsRow {
+function measurementToStatsRow(record: import('../../../application/ports/mission-measurements.js').UsageRecord & { readonly actorKey?: string }): StatsRow {
   const numeric = (value: unknown) => (value === null || value === undefined ? '0' : String(value));
   // Missing review observations and quota levels are not measured zeros.
   const nullableNumeric = (value: unknown) => (value === null || value === undefined ? undefined : String(value));
   return {
     date: record.date || '',
+    actorKey: record.actorKey,
     repo: record.repo || '',
     mission: record.mission || '',
     classification: record.classification || '',
@@ -148,7 +147,7 @@ function statsRowToMeasurement(row: StatsRow) {
     repo: String(row.repo || ''),
     mission: String(row.mission || ''),
     stage: String(row.stage || 'default'),
-    actorKey: statsRowActorKey(row),
+    actorKey: row.actorKey || statsRowIdentityKey(row),
     date: row.date || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
@@ -221,15 +220,31 @@ async function loadMissionReview(slug: string, _rootDir = process.cwd(), mission
   return result.kind === 'found' ? result.mission.review : null;
 }
 
+type WorkflowReturnReader = (_missionId: string) => Promise<readonly import('../../../application/services/review-statistics.js').WorkflowReturn[] | undefined>;
+
+/**
+ * Recording reads the same workflow history as reports and reconstruction, so a
+ * stored count never misses pre-review or lane-only returns. Without an
+ * injected reader the operator state supplies it.
+ */
+async function readReviewEvidenceWithHistory(slug: string, review: import('../../../domain/review.js').Review | null, rootDir: string,
+  workflowReturns: WorkflowReturnReader | undefined, configuration?: ParallixConfiguration) {
+  const returns = workflowReturns ?? await (async () => {
+    const { laneEventRepo, historyRepo } = await resolveOperatorRepositories(configuration);
+    return createWorkflowReturnReader(laneEventRepo, historyRepo);
+  })();
+  return createReviewStatisticsEvidenceReader(rootDir)(review, await returns(slug));
+}
+
 /** Derive the recorded implementer and fix-round count for one mission. */
-async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd(), missionStore: ReviewReadStore | null | undefined) {
+async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd(), missionStore: ReviewReadStore | null | undefined, workflowReturns?: WorkflowReturnReader) {
   if (!missionStore) {
     throw new Error(
       `deriveImplementerAndFixRounds requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no PR, Git, or backlog fallback.`,
     );
   }
   const review = await loadMissionReview(slug, rootDir, missionStore);
-  return reviewStatistics(review, await createReviewStatisticsEvidenceReader(rootDir)(review));
+  return reviewStatistics(review, await readReviewEvidenceWithHistory(slug, review, rootDir, workflowReturns));
 }
 
 /**
@@ -277,7 +292,13 @@ function upsertMeasurementRow(row: StatsRow, options: StatsOptions = {}) {
   }
 
   const store = getMeasurementStore(options);
-  const { changed } = store.upsertMeasurement(statsRowToMeasurement(canonicalRow));
+  // canonicalization drops the key. A row written before keys carried the model
+  // keeps its stored key, so a re-record updates it instead of adding a duplicate.
+  const legacyKey = statsRowActorKey(canonicalRow);
+  const stored = store.listMeasurements().find(record => record.repo === canonicalRow.repo && record.mission === canonicalRow.mission
+    && record.stage === (canonicalRow.stage || 'default') && record.actorKey === legacyKey && (record.model || '') === (canonicalRow.model || ''));
+  const actorKey = row.actorKey || stored?.actorKey;
+  const { changed } = store.upsertMeasurement(statsRowToMeasurement(actorKey ? { ...canonicalRow, actorKey } : canonicalRow));
   const data = { headers: [...STATS_HEADERS], rows: store.listMeasurements().map(measurementToStatsRow) };
 
   return { changed, row: canonicalRow, data };
@@ -294,6 +315,8 @@ export interface StatsRecordingOptions extends StatsOptions {
   model?: string | null;
   missionStore?: ReviewReadStore | null;
   readMissionFlow?: StatsReadBinding['readMissionFlow'];
+  /** Injected workflow history; defaults to the operator state's lane and rebound history. */
+  workflowReturns?: WorkflowReturnReader;
 }
 
 export function createStatsRecordingUseCase(options: StatsRecordingOptions): StatsRecordingUseCase {
@@ -303,7 +326,7 @@ export function createStatsRecordingUseCase(options: StatsRecordingOptions): Sta
     readClassification: slug => resolveMissionClassification(slug, rootDir, undefined, options.configuration),
     readStoredClassification: slug => resolveStoredMissionClassification(slug, options.missionStore),
     readReview: slug => loadMissionReview(slug, rootDir, options.missionStore),
-    readReviewEvidence: createReviewStatisticsEvidenceReader(rootDir),
+    readReviewEvidence: (slug, review) => readReviewEvidenceWithHistory(slug, review, rootDir, options.workflowReturns, options.configuration),
     readMeasurements: () => loadMeasurementRows(options).rows,
     upsert: row => upsertMeasurementRow(row, options),
     readMissionFlow: options.readMissionFlow ?? (async () => null),
@@ -371,7 +394,6 @@ const _internals = {
   summarizeAgentStageSpend,
   classifyAgentSpendFamily,
   formatAgentSpendCell,
-  colorAverageFixRounds,
   colorMissionCounts,
 };
 
@@ -399,12 +421,10 @@ const stats = {
   telemetryToStatsFields,
   formatDateOnly,
   formatStatsTable,
-  computeAgentMissionGroups,
   createRangeWindow,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   formatAgentSpendCell,
-  colorAverageFixRounds,
   colorMissionCounts,
   AGENT_SPEND_STAGE_COLUMNS,
   MISSION_PHASE_ORDER,
@@ -415,4 +435,4 @@ const stats = {
 };
 
 export default stats;
-export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
+export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };

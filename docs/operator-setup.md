@@ -409,8 +409,10 @@ original approval, bound to the revision it judged. Historical approval does not
 authorize landing: pending repair, failed or cancelled gates and uncommitted work
 block integration, including after interruption. Resume verification with
 `px integrate <slug>`.
-After a successful repair, `px review <slug>` also resumes the pending patch
-assessment before considering the recorded approval.
+`px review <slug>` and `px active <slug>` also resume the authorized exact check,
+repair certification and pending patch assessment before review preparation.
+This includes an approved mission already in review with preparation pending;
+continuation preserves its approval without launching an agent to escape routing.
 Restart rebases onto the current base before comparison and certifies outstanding
 repair checkpoints through their authorized verifier. Missing repair evidence or
 a contract blocker requires recovery before integration.

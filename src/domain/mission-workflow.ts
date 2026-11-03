@@ -417,6 +417,12 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
   }
 }
 
+/** Reconcile bookkeeping after Git proves an open Mission payload already landed. */
+export function reconcileLandedMission(mission: Mission): Mission {
+  requireStatus(mission, ['active', 'review', 'integration'], { type: 'integrate' });
+  return { ...mission, status: 'done', closedAt: null };
+}
+
 function refineMission(mission: Mission, command: Extract<MissionCommand, { type: 'refine' }>): Mission {
   requireStatus(mission, ['backlog', 'refined'], command);
   requireDraftedContract(mission, command);

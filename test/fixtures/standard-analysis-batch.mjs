@@ -17,7 +17,9 @@ fs.mkdirSync(path.join(root, 'src'), { recursive: true });
 fs.writeFileSync(path.join(root, 'package.json'), '{"type":"module"}');
 fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: {
   strict: true, noEmit: true, skipLibCheck: true, target: 'ES2024',
-  module: 'NodeNext', moduleResolution: 'NodeNext', types: [], lib: ['ES2015'],
+  // Scenarios use ES5 globals and Promise. Avoid parsing the unrelated
+  // collection, iterator and reflection libraries in this one-shot project.
+  module: 'NodeNext', moduleResolution: 'NodeNext', types: [], lib: ['ES5', 'ES2015.Promise'],
 }, include: ['src/**/*.ts', 'scripts/**/*.ts', 'test/**/*.ts'] }));
 const files = scenarios.map((scenario, index) => {
   const file = path.join(root, scenario.file.replace('fixture.ts', `fixture-${index}.ts`));
@@ -26,7 +28,9 @@ const files = scenarios.map((scenario, index) => {
   return file;
 });
 const eslint = new ESLint({ cwd: root, overrideConfigFile: config });
-const lint = await eslint.lintFiles(files.filter(file => file.includes(`${path.sep}src${path.sep}`)));
+const lintFiles = files.filter((file, index) => file.includes(`${path.sep}src${path.sep}`)
+  && !scenarios[index].name.includes('compiler'));
+const lint = await eslint.lintFiles(lintFiles);
 // Reuse the real project service program used by the lint rules instead of
 // parsing and binding the same project a second time for compiler diagnostics.
 const { services } = parser.parseForESLint(fs.readFileSync(files[0], 'utf8'), {
@@ -36,7 +40,8 @@ if (!services.program) throw new Error('fixture TypeScript program was not creat
 const program = services.program;
 // Diagnose the scenario sources, rather than traversing unrelated library
 // files. The real checker and the lint project still share the same program.
-const diagnostics = files.flatMap(file => {
+const compilerFiles = files.filter((_file, index) => scenarios[index].name.includes('compiler'));
+const diagnostics = compilerFiles.flatMap(file => {
   const source = program.getSourceFile(file);
   if (!source) throw new Error(`fixture source missing from TypeScript program: ${file}`);
   return [...program.getSyntacticDiagnostics(source), ...program.getSemanticDiagnostics(source)];

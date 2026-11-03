@@ -105,6 +105,19 @@ test('integration recording orders classification, authoritative Review, write a
   assert.equal(result.metadataSource.implementer, 'review-aggregate');
 });
 
+test('recorded fix rounds include the workflow returns reports and reconstruction count (TASK-2832)', async () => {
+  const asked: string[] = [];
+  const review: Review = requestedChangesReview('task-1', { startedAt: '2026-06-23T08:00:00Z', decidedAt: '2026-06-23T09:00:00Z' });
+  const useCase = new StatsRecordingUseCase(recordingPort({
+    readReview: async () => review,
+    readReviewEvidence: async slug => { asked.push(slug); return { equivalentSubmissions: {}, workflowReturns: [
+      { identity: 'repair:pre', author: 'codex', at: '2026-06-23T07:00:00Z', source: 'repair' }] }; },
+  }));
+  const result = await useCase.recordIntegration({ slug: 'task-1', date: '2026-06-23' });
+  assert.deepEqual(asked, ['task-1'], 'evidence is read per Mission so workflow history can be bound');
+  assert.equal(result.row.pr_fix_rounds, '2', 'the reviewer return plus the pre-review gate return');
+});
+
 test('integration classification failure stops before Review and measurement effects (TASK-2637.04)', async () => {
   const calls: string[] = [];
   const useCase = new StatsRecordingUseCase(recordingPort({
@@ -144,7 +157,7 @@ test('stage accumulation sequences classification, read, merge and write without
   }));
   const result = useCase.accumulateStage({
     slug: 'task-1', stage: 'active', date: '2026-06-23', implementer: 'codex',
-    telemetry: { provider: 'openai', model: 'gpt-new', inputTokens: 20, outputTokens: 7,
+    telemetry: { provider: 'openai', model: 'gpt-old', inputTokens: 20, outputTokens: 7,
       cachedTokens: 3, thoughtsTokens: 2, totalTokens: 27, toolCalls: 2, usagePercent: 40, cost_usd: 0.3 },
     durationMinutes: 3,
   });
@@ -161,9 +174,28 @@ test('stage accumulation sequences classification, read, merge and write without
   assert.equal(result.row.openai_usage_after, '50');
   assert.equal(result.row.openai_usage_delta, '4');
   assert.equal(result.row.provider, 'openai');
-  assert.equal(result.row.model, 'mixed');
+  assert.equal(result.row.model, 'gpt-old');
   assert.equal(result.row.pr_fix_rounds, undefined);
   assert.ok(!(result instanceof Promise), 'stage telemetry API remains synchronous');
+});
+
+test('a same-stage model switch keeps both models as separate measurements, never mixed (TASK-2832)', () => {
+  const stored: StatsRow[] = [];
+  const useCase = new StatsRecordingUseCase(recordingPort({
+    readMeasurements: () => stored,
+    upsert: row => { const at = stored.findIndex(item => item.model === row.model && item.reviewer_agent === row.reviewer_agent); if (at >= 0) { stored[at] = row; } else { stored.push(row); }
+      return { changed: true, row, data: { headers: [], rows: stored } }; },
+  }));
+  const run = (model: string, cost: number, reviewer = 'claude') => useCase.accumulateStage({ slug: 'task-1', stage: 'review', date: '2026-06-23',
+    implementer: 'codex', reviewer, telemetry: { provider: 'anthropic', model, inputTokens: 1, outputTokens: 1, cost_usd: cost } });
+  run('claude-sonnet-5-5', 1); run('claude-opus-5-5', 2); run('claude-opus-5-5', 0.5);
+  assert.deepEqual(stored.map(row => [row.model, row.cost_usd]), [['claude-sonnet-5-5', '1'], ['claude-opus-5-5', '2.5']]);
+  // A different reviewer on the same stage is a different actor, never merged into the first.
+  const other = useCase.accumulateStage({ slug: 'task-1', stage: 'review', date: '2026-06-23', implementer: 'codex', reviewer: 'vibe',
+    telemetry: { provider: 'mistral', model: 'devstral', inputTokens: 1, outputTokens: 1, cost_usd: 4 } });
+  assert.equal(other.row.reviewer_agent, 'vibe');
+  assert.equal(other.row.cost_usd, '4');
+  assert.ok(stored.every(row => row.implementer_agent === 'codex'), 'reviewer resources never overwrite the implementer');
 });
 
 test('active and review recording preserve implementer credit without fabricating review observations (TASK-2637.04)', () => {

@@ -34,9 +34,12 @@ export const isOpenWorkflow = (operation: WorkflowOperation): boolean =>
 
 export function requireWorkflowOwner(operation: WorkflowOperation, generation: number): void {
   if (operation.generation !== generation || operation.phase !== 'executing' || !operation.owner) {
-    throw new Error('Workflow ownership was fenced or stopped');
+    throw new WorkflowOwnershipError('Workflow ownership was fenced or stopped');
   }
 }
+
+/** Distinguishes ownership rejection from validation or persistence failures. */
+export class WorkflowOwnershipError extends Error {}
 
 export function finishWorkflow(operation: WorkflowOperation, generation: number, success: boolean, reason: string | null, now: string): WorkflowOperation {
   requireWorkflowOwner(operation, generation);

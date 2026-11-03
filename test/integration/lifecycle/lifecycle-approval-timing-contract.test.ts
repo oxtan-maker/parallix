@@ -542,7 +542,7 @@ test('R10: first-pass approval yields known reviewFixRounds=0 (task-2376)', asyn
     const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'configured-implementer');
-    assert.equal(info.prFixRounds, 0, 'first-pass approval = known zero (not unknown)');
+    assert.equal(info.total, 0, 'first-pass approval = known zero (not unknown)');
   } finally {
     await database.close();
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
@@ -621,7 +621,7 @@ test('R11: two request-changes cycles yield known reviewFixRounds=2 (task-2376)'
   try {
     const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, store);
     assert.equal(info.source, 'review-aggregate');
-    assert.equal(info.prFixRounds, 2, 'two request-changes = known 2');
+    assert.equal(info.total, 2, 'two request-changes = known 2');
   } finally {
     await database.close();
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
@@ -707,7 +707,7 @@ test('R12: external artifacts with misleading values do not affect authoritative
     const info = await stats._internals.deriveImplementerAndFixRounds(slug, root, store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'terra', 'authoritative implementer wins over backlog codex');
-    assert.equal(info.prFixRounds, 1, 'authoritative fixRounds=1 wins over backlog round 5');
+    assert.equal(info.total, 1, 'authoritative fixRounds=1 wins over backlog round 5');
   } finally {
     await database.close();
     if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }

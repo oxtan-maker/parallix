@@ -11,7 +11,7 @@ export function workflowEligible(command: WorkflowCommand, mission: Mission, rev
   switch (command) {
     case 'draft:create': return mission.status === 'backlog';
     case 'active:execute': return executionEligible(mission);
-    case 'review:submit': return !pendingIntegrationApproval(mission) && ( ['active', 'review'].includes(mission.status) || mission.status === 'integration' && reviewMode === 'enter');
+    case 'review:submit': return (!pendingIntegrationApproval(mission) || ['enter', 'status'].includes(reviewMode)) && ( ['active', 'review'].includes(mission.status) || mission.status === 'integration' && reviewMode === 'enter');
     case 'integrate:merge': return integrationEligible(mission, approval);
   }
 }

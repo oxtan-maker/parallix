@@ -18,8 +18,9 @@ export async function completeLandedCloseout(options: {
   landing: CloseoutPort;
   afterCleanup?: () => void;
   legacyClosedRecovery?: { skipStats: boolean };
+  landedRecovery?: boolean;
 }): Promise<void> {
-  const { slug, landedCommit, missionServices, baseWorktree, baseBranch, variant, landing, afterCleanup, legacyClosedRecovery } = options;
+  const { slug, landedCommit, missionServices, baseWorktree, baseBranch, variant, landing, afterCleanup, legacyClosedRecovery, landedRecovery } = options;
   // `done` with no `closedAt` is the durable marker that the payload already
   // landed and its delivery transition committed.  Retrying closeout must not
   // try to decide that transition a second time: the remaining effects are
@@ -29,7 +30,7 @@ export async function completeLandedCloseout(options: {
   const beforeCloseout = await missionServices.store.load(missionId(slug));
   if (beforeCloseout.kind === 'found' && typeof beforeCloseout.mission.closedAt === 'string' && !legacyClosedRecovery) { return; }
   if (beforeCloseout.kind !== 'found' || beforeCloseout.mission.status !== 'done') {
-    await landing.persistLandedIntegrationOrAbort(slug, landedCommit, missionServices, { rootDir: baseWorktree });
+    await landing.persistLandedIntegrationOrAbort(slug, landedCommit, missionServices, { rootDir: baseWorktree, ...(landedRecovery ? { landedRecovery: true } : {}) });
   }
   if (!legacyClosedRecovery?.skipStats) {
     await landing.recordPostIntegrationStatsOrAbort(slug, {

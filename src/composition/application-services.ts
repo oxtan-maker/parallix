@@ -1,5 +1,5 @@
-import { certifyPendingIntegrationRepair } from '../application/integrate/repair-resumption.js';
-import { createIntegratePorts } from '../adapters/cli/commands/integrate.js';
+import { createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
+import { integrationRepairContinuation } from './integration-repair-continuation.js';
 import { SqliteExecutionActivityStore } from '../adapters/sqlite/execution-activity-store.js';
 import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
 import { resolveProcessConfiguration } from './config.js';
@@ -282,6 +282,7 @@ export async function createProductionApplicationServices(
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
       configuration: options.configuration,
+      integrationRepair: integrationRepairContinuation(mission, options.configuration),
       classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
       performReviewPreparationFn: reviewPreparationWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
@@ -293,10 +294,7 @@ export async function createProductionApplicationServices(
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
   }, executeRuntime);
-  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? { integrationRepair: { async resume(slug: string) {
-    const result = await certifyPendingIntegrationRepair(slug, mission, createIntegratePorts(options.configuration));
-    return !result || result.outcome === 'not-pending' ? 'none' : result.outcome;
-  } } } : {}) };
+  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? { integrationRepair: integrationRepairContinuation(mission, options.configuration) } : {}) };
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second execution activity projection.
   const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);
@@ -310,7 +308,8 @@ export async function createProductionApplicationServices(
     executeMission: new ExecuteMissionService(executePorts, activeProgress, currentWork),
     executePorts,
     presentationCapabilities,
-    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, { configuration: options.configuration }, mission?.store ?? null)),
+    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, { configuration: options.configuration }, mission?.store ?? null,
+      operatorState.repositories ? createWorkflowReturnReader(operatorState.repositories.boardLaneEvents, operatorState.repositories.operationalHistory) : undefined)),
     // A nested review command can finish while integration still uses another
     // service graph backed by the same process-lifetime handle. Drain this
     // scope's accepted operations without invoking the process shutdown closer;

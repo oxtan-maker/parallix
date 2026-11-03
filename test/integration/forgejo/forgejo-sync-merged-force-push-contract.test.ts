@@ -522,6 +522,39 @@ describe("syncMerged hardening", () => {
     assert.ok(logMessages.some(m => m.includes('force-with-lease still stale')), 'Should log second rejection');
   });
 
+  test('syncMerged retries stale-info output when the push adapter has no structured reason', () => {
+    const pushCalls: { src: string; dest: string; opts: PushReviewRefOptions | undefined; }[] = [];
+    const options = {
+      log: () => {},
+      gitPush: (src, dest, _dir, opts) => {
+        pushCalls.push({ src, dest, opts });
+        if (pushCalls.length === 1 || pushCalls.length === 3) {
+          return { signal: null, status: 0, stdout: '', stderr: '' };
+        }
+        return {
+          signal: null,
+          status: 1,
+          stdout: '',
+          stderr: ' ! [rejected] 4ee9c37c7 -> mission/task-2832 (stale info)\nfel: misslyckades sända vissa referenser'
+        };
+      },
+      gitFetch: () => ({ signal: null, status: 0, stdout: '', stderr: '' }),
+      verifyCommit: () => ({ signal: null, status: 0, stdout: '', stderr: '' }),
+      resolvePrNumber: () => 809,
+      apiCall: forgejoApiFixture(() => ({ ok: true as const })),
+      gitDelete: () => ({ signal: null, status: 0, stdout: '', stderr: '' }),
+      gitRunner: () => ({ signal: null, status: 0, stdout: 'same-base-sha', stderr: '' }),
+      forgejoUser: 'test-user',
+      token: 'test-token'
+    } satisfies NonNullable<Parameters<typeof syncMerged>[2]>;
+
+    const result = syncMerged('mission/task-2832', '4ee9c37c7', options);
+
+    assert.strictEqual(result.ok, true, 'the stale-info rejection should enter the fetch-and-retry path');
+    assert.strictEqual(pushCalls.length, 3, 'primary push, rejected branch push, then branch retry');
+    assert.strictEqual(pushCalls[2].opts?.forceWithLease, true);
+  });
+
   test('syncMerged fails to retry if output is not captured (REPRODUCTION)', (t) => {
     const branch = 'mission/task-1080';
     const mergedCommit = 'abc1234';

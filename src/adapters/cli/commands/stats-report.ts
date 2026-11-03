@@ -11,7 +11,6 @@ import {
   summarizeAgentWindow,
   summarizeAgentStageSpend,
   formatAgentSpendCell,
-  colorAverageFixRounds,
   colorMissionCounts,
   AGENT_SPEND_STAGE_COLUMNS,
   MISSION_PHASE_ORDER,
@@ -88,27 +87,30 @@ function selectedAgentStats(selected: ReturnType<typeof selectStatsReport>['curr
   });
 }
 
-function repairCauseSection(selected: ReturnType<typeof selectStatsReport>['current']): string {
-  const counts = new Map<string, number>();
-  let observed = 0;
-  for (const info of selected.completedReviewStatistics.values()) {
-    if (info.prFixRounds !== null) { observed += 1; }
-    for (const obligation of info.obligations) { counts.set(obligation.cause, (counts.get(obligation.cause) ?? 0) + 1); }
+function performanceTable(selected: ReturnType<typeof selectStatsReport>['current']): string[] {
+  if (selected.flow === null) { return ['Agent performance unavailable: lifecycle history was not read.']; }
+  const stats = selectedAgentStats(selected);
+  const named = stats.filter(row => row.model !== null);
+  const colors = colorMissionCounts(named);
+  // Rounds over the missions with return evidence. A + is a valid lower bound only when every mission was measured;
+  // otherwise the missing missions could hold any number of returns, so the measured share is named instead.
+  const average = (row: (typeof stats)[number]) => {
+    if (row.measuredMissions === 0) { return 'unavailable'; }
+    const partial = row.measuredMissions < row.missions;
+    return `${(row.reimplementationRounds / row.measuredMissions).toFixed(1)}${partial ? ` (${row.measuredMissions}/${row.missions} measured)` : row.incomplete ? '+' : ''}`;
+  };
+  const lines = [formatStatsTable(['Model', '# missions as implementer', 'Avg reimplementation rounds / mission'],
+    named.length > 0 ? named.map((row, index) => [row.model!, colors[index], average(row)]) : [['none', '0', 'unavailable']])];
+  const unattributed = stats.find(row => row.model === null);
+  if (unattributed) {
+    lines.push(`Unavailable model attribution: ${unattributed.missions} missions, ${unattributed.measuredMissions === 0 ? 'unavailable' : unattributed.reimplementationRounds} reimplementation rounds.`);
   }
-  const owned = [...selected.completedMissionOwners.values()].filter(owner => owner && owner !== 'unknown').length;
-  return `Delivery ownership coverage: ${owned}/${selected.flow?.total ?? 0}.\nReview-fix mission coverage: ${observed}/${selected.flow?.total ?? 0}. Delivery counts use final ownership; PR fix n counts missions with measured authorship for that agent.\n`
-    + formatStatsTable(['Repair/re-review cause', 'Obligations'],
-      ['review', 'human', 'integration', 'infrastructure', 'pushback', 'mechanical', 'unknown'].map(cause => [cause, String(counts.get(cause) ?? 0)]));
+  return lines;
 }
 
 function formatStatsTable(headers: string[], rows: string[][]) {
   const headerRow = headers.map(header => fmt.bold(header));
-  const renderedRows = rows.map(row => row.map((cell, index) => {
-    if (index === 0 && headers[0] === 'Agent family' && cell !== 'none') {
-      return fmt.agent(String(cell), String(cell));
-    }
-    return String(cell ?? '');
-  }));
+  const renderedRows = rows.map(row => row.map(cell => String(cell ?? '')));
 
   return fmt.table([headerRow, ...renderedRows], {
     indent: 0,
@@ -118,18 +120,20 @@ function formatStatsTable(headers: string[], rows: string[][]) {
 
 function agentSpendSection(heading: string, selected: ReturnType<typeof selectStatsReport>['current']): string[] {
   const spend = summarizeAgentStageSpend(selected.windowedRows, selected.window);
+  const named = spend.filter(row => row.model !== null);
+  // Quota levels of unattributed rows are not shown: they cannot be summed into anything meaningful.
+  const unavailable = spend.filter(row => row.model === null && row.family !== 'usage' && Boolean(row.total));
   return [
-    fmt.bold(`${heading} (${selected.window.label}) — resources and quota levels`),
+    fmt.bold(`${heading} (${selected.window.label}) — resources`),
     formatStatsTable(
-      ['Agent family', ...AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.label), 'total / peak'],
-      spend.length > 0
-        ? spend.map(row => [row.implementer,
+      ['Model', ...AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.label), 'total'],
+      named.length > 0
+        ? named.map(row => [row.implementer,
           ...AGENT_SPEND_STAGE_COLUMNS.map(entry => formatAgentSpendCell(row.byStage[entry.stage], row.total, row.family)),
           formatAgentSpendCell(row.total, row.total, row.family)])
         : [['none', ...AGENT_SPEND_STAGE_COLUMNS.map(() => '—'), '—']],
     ),
-    'Spend follows the stage actor and measurement date. Parentheses show stage shares for dollars and runtime.',
-    'Codex cells show the recorded quota peak per stage; the final column is the row’s peak quota level, not consumption. Quota snapshots lack attributable per-run deltas; missing levels show —.',
+    ...(unavailable.length ? [`Unavailable model attribution: ${unavailable.map(row => `${formatAgentSpendCell(row.total, row.total, row.family).replace(/ \(100%\)$/, '')} ${row.actor || 'unknown'}`).join(', ')}.`] : []),
   ];
 }
 
@@ -138,13 +142,6 @@ function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReport
   const previous = selection.previous;
   if (!previous) { throw new Error('Weekly statistics selection requires a previous window.'); }
   const windows = { current: selection.current.window, previous: previous.window };
-  const missionFlow = selection.current.flow;
-  const currentAgentStats = selectedAgentStats(selection.current);
-  const previousAgentStats = selectedAgentStats(previous);
-  const currentMissionColors = colorMissionCounts(currentAgentStats);
-  const currentAgentColors = colorAverageFixRounds(currentAgentStats);
-  const previousMissionColors = colorMissionCounts(previousAgentStats);
-  const previousAgentColors = colorAverageFixRounds(previousAgentStats);
 
   const lines = [`Reporting timezone: ${selection.current.window.timeZone ?? localReportingTimeZone()}; current period updates with new completions.`];
   lines.push(...missionFlowSection('Mission flow — current week', selection.current));
@@ -154,33 +151,18 @@ function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReport
   lines.push(...bugTrendSection(selection));
   lines.push('');
   lines.push(fmt.bold(`Agent performance this week (${windows.current.label}) — completed Missions`));
-  lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average authored PR fix rounds', 'PR fix n'],
-    currentAgentStats.length > 0
-      ? currentAgentStats.map((row, index) => [row.implementer, currentMissionColors[index], currentAgentColors[index] ?? 'unavailable', String(row.prFixObservationCount)])
-      : [['none', '0', 'unavailable', '0']]
-  ));
-  lines.push(repairCauseSection(selection.current));
+  lines.push(...performanceTable(selection.current));
   lines.push('');
   lines.push(...agentSpendSection('Agent spend by stage this week', selection.current));
   lines.push('');
   lines.push(fmt.bold(`Agent performance previous week (${windows.previous.label}) — completed Missions`));
-  lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average authored PR fix rounds', 'PR fix n'],
-    previousAgentStats.length > 0
-      ? previousAgentStats.map((row, index) => [row.implementer, previousMissionColors[index], previousAgentColors[index] ?? 'unavailable', String(row.prFixObservationCount)])
-      : [['none', '0', 'unavailable', '0']]
-  ));
+  lines.push(...performanceTable(previous));
   return lines.join('\n');
 }
 
 function renderRangeStatsReport(rows: readonly StatsRow[], options: StatsReportOptions = {}) {
   const selection = options.selection ?? selectStatsReport(rows, options.missionFlow ?? null, { mode: 'range', from: options.from, to: options.to });
   const window = selection.current.window;
-  const missionFlow = selection.current.flow;
-  const agentStats = selectedAgentStats(selection.current);
-  const missionColors = colorMissionCounts(agentStats);
-  const agentColors = colorAverageFixRounds(agentStats);
 
   const lines = [`Reporting timezone: ${selection.current.window.timeZone ?? localReportingTimeZone()}; inclusive local calendar dates.`];
   lines.push(...missionFlowSection('Mission flow', selection.current));
@@ -188,13 +170,7 @@ function renderRangeStatsReport(rows: readonly StatsRow[], options: StatsReportO
   lines.push(...bugTrendSection(selection));
   lines.push('');
   lines.push(fmt.bold(`Agent performance (${window.label}) — completed Missions`));
-  lines.push(missionFlow === null ? 'Agent performance unavailable: lifecycle history was not read.' : formatStatsTable(
-    ['Agent family', '# missions as implementer', 'Average authored PR fix rounds', 'PR fix n'],
-    agentStats.length > 0
-      ? agentStats.map((row, index) => [row.implementer, missionColors[index], agentColors[index] ?? 'unavailable', String(row.prFixObservationCount)])
-      : [['none', '0', 'unavailable', '0']]
-  ));
-  lines.push(repairCauseSection(selection.current));
+  lines.push(...performanceTable(selection.current));
   lines.push('');
   lines.push(...agentSpendSection('Agent spend by stage', selection.current));
   return lines.join('\n');

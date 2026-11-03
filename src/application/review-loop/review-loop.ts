@@ -249,8 +249,8 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   persisted = await resetAtEntry(request, persisted, ports, out);
   const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
   if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
-  if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
   if (await resumeIntegrationAssessment(start, ports)) { return; }
+  if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
   persisted = await ports.state.read();
   const prepared = await prepareStart(start, request.skipReviewPreparation ?? false, implementer, ports, out);
   if (!prepared) { return; }

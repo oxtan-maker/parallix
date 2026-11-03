@@ -13,6 +13,6 @@ export interface AgentWindowOptions extends MissionGroupOptions {
   readonly reviewObservations?: ReadonlyMap<string, ReviewStatistics>;
 }
 export interface MissionStats {
-  implementer: string; missions: number; averageFixRounds: string | null; prFixObservationCount: number;
+  readonly model: string | null; readonly missions: number;
+  readonly measuredMissions: number; readonly reimplementationRounds: number;
 }
-

@@ -337,6 +337,26 @@ describe("Mission integration service", () => {
       assert.match(outcome.error!.message, /Cannot integrate while/);
     });
 
+    it('reconciles a proven landed payload from a stranded review lane (TASK-2833)', async () => {
+      let saved: Mission | null = null;
+      const events: LaneTransitionEvent[] = [];
+      const reviewMission = { ...mission, status: 'review' as const, closedAt: null };
+      const outcome = await new MissionIntegrationService(store({
+        load: async () => ({ kind: 'found' as const, mission: reviewMission, version: missionVersion(3) }),
+        save: async next => { saved = next; return missionVersion(4); },
+      }, events)).decideIntegration({
+        operationId: 'recover-landed', missionId: ID, capabilities,
+        occurredAt: '2026-07-30T06:00:00Z', landedRecovery: true,
+        facts: { git: fresh({ merged: true }), verification: fresh({ passed: true }) },
+      });
+
+      assert.equal(outcome.status, 'completed');
+      assert.equal(saved!.status, 'done');
+      assert.deepEqual(events.map(event => ({ from: event.from, to: event.to, trigger: event.trigger })), [
+        { from: 'review', to: 'done', trigger: 'integrate' },
+      ]);
+    });
+
     it('reports a non-stale persistence failure after a valid integration decision', async () => {
       const outcome = await new MissionIntegrationService(store({
         save: async () => { throw new Error('disk unavailable'); },

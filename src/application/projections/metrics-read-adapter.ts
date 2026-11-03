@@ -25,6 +25,15 @@ export interface MissionCohortMetadata {
   readonly reviewStatistics?: ReviewStatistics;
 }
 
+/** A return no author can claim could belong to anyone: every count becomes unavailable, never a measured number. */
+function cohortReturns(info: NonNullable<MissionCohortMetadata['reviewStatistics']>) {
+  const unattributed = info.returns.some(item => !item.author);
+  return { reviewFixRounds: unattributed ? null : info.total,
+    reviewFixRoundsByImplementer: unattributed
+      ? Object.fromEntries(Object.keys(info.byImplementer).filter(agent => agent !== 'unknown').map(agent => [agent, null]))
+      : info.byImplementer };
+}
+
 export function missionCohortMetadata(missions: readonly Mission[], evidence: ReadonlyMap<string, ReviewStatisticsEvidence> = new Map()) {
   return new Map(missions.map(mission => {
     const finalImplementer = mission.review?.rounds.at(-1)?.implementer;
@@ -219,8 +228,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       return canonical === undefined
         ? outcome
         : { ...outcome, labels: canonical.labels, implementer: canonical.assignee,
-          ...(canonical.reviewStatistics ? { reviewFixRounds: canonical.reviewStatistics.prFixRounds,
-            reviewFixRoundsByImplementer: canonical.reviewStatistics.byImplementer } : {}) };
+          ...(canonical.reviewStatistics ? cohortReturns(canonical.reviewStatistics) : {}) };
     });
   }
 

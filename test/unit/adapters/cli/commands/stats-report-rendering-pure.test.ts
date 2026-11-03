@@ -34,21 +34,9 @@ const WIN = { start: new Date('2024-01-01'), end: new Date('2024-01-31') };
 
 test('formatAgentSpendCell handles empty total and usage/cost/duration shapes', () => {
   assert.equal(sr.formatAgentSpendCell(null, null, 'usage'), '—');
-  assert.equal(sr.formatAgentSpendCell(100, 200, 'usage'), '100% quota peak');
+  assert.equal(sr.formatAgentSpendCell(100, 200, 'usage'), '100%');
   assert.equal(sr.formatAgentSpendCell(1.234, 10, 'cost'), '$1.23 (12%)');
   assert.equal(sr.formatAgentSpendCell(5, 10, 'duration'), '5m (50%)');
-});
-
-test('colorAverageFixRounds colorizes best/worst and passes through non-finite values', () => {
-  const out = sr.colorAverageFixRounds([
-    { averageFixRounds: '1' },
-    { averageFixRounds: '5' },
-    { averageFixRounds: 'n/a' },
-  ]);
-  assert.equal(out.length, 3);
-  assert.ok(out[0] != null);
-  assert.ok(out[0].length > 0);
-  assert.equal(out[2], 'n/a', 'non-finite value passes through unchanged');
 });
 
 test('colorMissionCounts colorizes and passes through non-finite counts', () => {
@@ -61,23 +49,17 @@ test('colorMissionCounts colorizes and passes through non-finite counts', () => 
   assert.ok(out[0].length > 0);
 });
 
-test('computeAgentMissionGroups deduplicates by mission key and builds display groups', () => {
-  const { groups, missionKeyToDisplayKey } = sr.computeAgentMissionGroups([
-    row({ mission: 'task-1' }),
-    row({ mission: 'task-1' }),
-    row({ mission: 'task-2' }),
-  ], WIN);
-  // groups are keyed by displayKey (both missions map to the 'gpt-4' family);
-  // the mission-key map retains one entry per distinct mission.
-  assert.ok('gpt-4' in groups);
-  assert.equal(Object.keys(missionKeyToDisplayKey).length, 2);
+test('summarizeAgentWindow groups deliveries and returns by concrete model (TASK-2832)', () => {
+  const out = sr.summarizeAgentWindow([row({ stage: 'default'})], WIN, { completedMissionKeys: new Set(['acme/app::task-1']), completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', reviewStatisticsObservation('codex', 2)]]) });
+  assert.deepEqual(out, [{ model: 'gpt-4', missions: 1, measuredMissions: 1, reimplementationRounds: 2, incomplete: false }]);
 });
 
-test('summarizeAgentWindow returns per-agent fix-round summaries', () => {
-  const out = sr.summarizeAgentWindow([row({ stage: 'default'})], WIN, { completedMissionKeys: new Set(['acme/app::task-1']), completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', reviewStatisticsObservation('codex', 2)]]) });
-  assert.equal(out.length, 1);
-  assert.equal(out[0].implementer, 'codex');
-  assert.equal(out[0].averageFixRounds, '2.00');
+test('one unmeasured mission never hides the measured returns of the same model (TASK-2832)', () => {
+  const keys = ['acme/app::task-1', 'acme/app::task-2'];
+  const out = sr.summarizeAgentWindow([row({ stage: 'default' }), row({ stage: 'default', mission: 'task-2' })], WIN, {
+    completedMissionKeys: new Set(keys), completedMissionOwners: new Map(keys.map(key => [key, 'codex'])),
+    reviewObservations: new Map([[keys[0], reviewStatisticsObservation('codex', 4)], [keys[1], reviewStatisticsObservation('codex', null)]]) });
+  assert.deepEqual(out, [{ model: 'gpt-4', missions: 2, measuredMissions: 1, reimplementationRounds: 4, incomplete: false }]);
 });
 
 test('summarizeAgentStageSpend keeps peak quota levels and folds unknown stages into default', () => {
@@ -92,7 +74,7 @@ test('summarizeAgentStageSpend keeps peak quota levels and folds unknown stages 
   assert.equal(out[0].byStage.active, 100);
   // the unknown 'ignored' stage rolls up into the default bucket.
   assert.equal(out[0].byStage.default, 5);
-  assert.equal(out[0].total, 100);
+  assert.equal(out[0].total, 105, 'the total adds the stage columns');
 });
 
 test('AGENT_SPEND_STAGE_COLUMNS and MISSION_PHASE_ORDER expose their stage buckets', () => {
@@ -131,7 +113,7 @@ test('custom stage actor keeps time units when its model or provider is OpenAI (
 });
 
 // End-of-run quota levels do not measure attributable consumption.
-test('Codex snapshots 20 and 25 remain a 25 percent quota peak without shares (TASK-2818 F1)', () => {
+test('Codex stage levels keep the highest snapshot per stage and the total adds the stages (TASK-2832)', () => {
   const snapshots = [
     row({ stage: 'active', openai_usage_before: '0', openai_usage_after: '20' }),
     row({ stage: 'follow-up', openai_usage_before: '0', openai_usage_after: '25' }),
@@ -142,8 +124,8 @@ test('Codex snapshots 20 and 25 remain a 25 percent quota peak without shares (T
     assert.equal(result.byStage.active, 20);
     assert.equal(result.byStage['follow-up'], 25);
     assert.equal(result.byStage.review, null);
-    assert.equal(result.total, 25);
-    assert.equal(sr.formatAgentSpendCell(result.total, result.total, result.family), '25% quota peak');
+    assert.equal(result.total, 45);
+    assert.equal(sr.formatAgentSpendCell(result.total, result.total, result.family), '45%');
   }
 });
 
@@ -155,5 +137,74 @@ test('quota peaks preserve zero and reject missing or invalid snapshots (TASK-28
   }
   const [zero] = sr.summarizeAgentStageSpend([row({ openai_usage_after: '0' })], WIN);
   assert.equal(zero.total, 0);
-  assert.equal(sr.formatAgentSpendCell(zero.total, zero.total, zero.family), '0% quota peak');
+  assert.equal(sr.formatAgentSpendCell(zero.total, zero.total, zero.family), '0%');
+});
+
+test('a same-family model replacement keeps earlier returns with the model that wrote the work (TASK-2832)', () => {
+  const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' }),
+    row({ stage: 'default', model: '', date: '2024-01-25' })];
+  const observation = { ...reviewStatisticsObservation('codex', 3, { codex: 3 }), returns: [
+    { identity: 'r1', author: 'codex', at: '2024-01-12T00:00:00Z' }, { identity: 'r2', author: 'codex', at: '2024-01-13T00:00:00Z' }, { identity: 'r3', author: 'codex', at: '2024-01-22T00:00:00Z' }] };
+  const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']), completedMissionOwners: new Map([['acme/app::task-1', 'codex']]),
+    reviewObservations: new Map([['acme/app::task-1', observation]]) });
+  assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds]), [['gpt-6-astra', 1], ['gpt-6.1-sol', 2]]);
+});
+
+test('same-day model switches leave a return unattributed; a single model owns all of an agent work (TASK-2832)', () => {
+  const observed = (at: string) => ({ ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [{ identity: 'r', author: 'codex', at }] });
+  const summarize = (rows: ReturnType<typeof row>[], at: string) => sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observed(at)]]) });
+  const sameDay = summarize([row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-10' })], '2024-01-10T09:00:00Z');
+  assert.deepEqual(sameDay.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6-astra', 0, true], [null, 1, false]]);
+  const futureOnly = summarize([row({ stage: 'active', model: 'gpt-6-astra', date: '2024-01-11' })], '2024-01-10T09:00:00Z');
+  assert.deepEqual(futureOnly.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6-astra', 1, false]]);
+});
+
+test('a return no author can claim makes named model cells incomplete, never a measured zero (TASK-2832)', () => {
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 0, unknown: 1 }), returns: [{ identity: 'r', author: null, at: null }] };
+  const out = sr.summarizeAgentWindow([row({ stage: 'active', model: 'gpt-6.1-sol' })], WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
+  assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6.1-sol', 0, true], [null, 1, false]]);
+});
+
+test('an unattributable return only makes incomplete the models its author could have used (TASK-2832)', () => {
+  const rows = [row({ stage: 'active', model: 'gpt-6.1-sol' }), row({ stage: 'default', model: '' })];
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 0, claude: 1 }), returns: [{ identity: 'r', author: 'claude', at: null }] };
+  const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
+  assert.deepEqual(out.map(item => [item.model, item.measuredMissions, item.reimplementationRounds, item.incomplete]), [['gpt-6.1-sol', 1, 0, false], [null, 1, 1, false]]);
+});
+
+test('mixed earlier telemetry voids the single-model shortcut for work returned before the replacement (TASK-2832)', () => {
+  const rows = [row({ stage: 'active', model: 'mixed', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-12' })];
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [{ identity: 'r', author: 'codex', at: '2024-01-11T09:00:00Z' }] };
+  const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
+  assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6-astra', 0, true], [null, 1, false]]);
+});
+
+test('unknown-author uncertainty does not depend on return order (TASK-2832)', () => {
+  const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' })];
+  const unknown = { identity: 'u', author: null, at: null }, sol = { identity: 's', author: 'codex', at: '2024-01-12T00:00:00Z' };
+  const run = (returns: { identity: string; author: string | null; at: string | null }[]) => sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', { ...reviewStatisticsObservation('codex', 2, { codex: 1, unknown: 1 }), returns }]]) });
+  assert.deepEqual(run([unknown, sol]), run([sol, unknown]));
+  assert.equal(run([unknown, sol]).find(item => item.model === 'gpt-6.1-sol')?.incomplete, true);
+});
+
+test('a mission without return evidence is named as unmeasured, never turned into a false lower bound (TASK-2832)', () => {
+  const rows = [row({ mission: 'task-1', stage: 'active', model: 'gpt-6.1-sol' }), row({ mission: 'task-2', stage: 'active', model: 'gpt-6.1-sol' })];
+  const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1', 'acme/app::task-2']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex'], ['acme/app::task-2', 'codex']]),
+    reviewObservations: new Map([['acme/app::task-1', reviewStatisticsObservation('codex', 10, { codex: 10 })]]) });
+  assert.deepEqual(out, [{ model: 'gpt-6.1-sol', missions: 2, measuredMissions: 1, reimplementationRounds: 10, incomplete: false }]);
+});
+
+test('newer unknown telemetry between a concrete model and the return prevents a stale attribution (TASK-2832)', () => {
+  const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-05' }), row({ stage: 'follow-up', model: 'mixed', date: '2024-01-10' }),
+    row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' })];
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [{ identity: 'r', author: 'codex', at: '2024-01-15T09:00:00Z' }] };
+  const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+    completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
+  assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6-astra', 0, true], [null, 1, false]]);
 });

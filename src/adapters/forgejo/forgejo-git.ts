@@ -387,8 +387,10 @@ function pushOutput(result: { stderr?: string | null, stdout?: string | null }):
 function isMissingRemoteRef(result: { failureReason?: unknown }): boolean {
   return recognizedFailureReason(result.failureReason)?.code === 'git-remote-missing';
 }
-function isStaleInfoPushRejection(result: { status: number | null; failureReason?: unknown }): boolean {
-  return result.status !== 0 && recognizedFailureReason(result.failureReason)?.code === 'git-behind';
+function isStaleInfoPushRejection(result: { status: number | null; failureReason?: unknown; stderr?: string | null; stdout?: string | null }): boolean {
+  if (result.status === 0) { return false; }
+  return recognizedFailureReason(result.failureReason)?.code === 'git-behind'
+    || /\bstale info\b|\bstale ref\b|fetch first/i.test(pushOutput(result));
 }
 
 /** Ports the sync-merged flow drives. Every one is a seam a test can replace. */

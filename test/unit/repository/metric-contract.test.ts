@@ -15,7 +15,7 @@ test('statistics metric contract names every board and CLI decision metric with 
     'Current lane age / bottleneck',
     'Throughput / weekly throughput',
     'Review bounce rate',
-    'Review-fix rounds',
+    'Avg reimplementation rounds / mission',
     'Agent runtime',
     'Tokens, cost, tool calls',
     'Cohort comparison',

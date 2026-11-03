@@ -15,6 +15,25 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { bindReviewPersistence } from '../../../../src/composition/review-persistence.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { showReviewStatus } from '../../../../src/adapters/review/review-commands.js';
+
+test('review status prints orphan recovery and distinguishes uncertain, live and completed rounds (TASK-2826)', async () => {
+  for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
+    const lines: string[] = [];
+    await showReviewStatus('task-orphan', { log: line => lines.push(line), resolveWorktreeFn: () => '/fixture',
+      readReviewStateFn: async () => ({ round: 3, phase: 'reviewing' } as ReviewState),
+      readReviewLiveness: async () => ({ workflow: liveness === 'live' ? true : liveness === 'unconfirmed' ? null : false,
+        coordinator: false, execution: false, reviewer: false }) });
+    if (liveness === 'orphaned') { assert.match(lines.join('\n'), /orphaned.*px stop task-orphan.*px review task-orphan/s); }
+    else { assert.doesNotMatch(lines.join('\n'), /orphaned/); }
+    if (liveness === 'unconfirmed') { assert.match(lines.join('\n'), /unconfirmed/); }
+  }
+  const completed: string[] = [];
+  await showReviewStatus('task-orphan', { log: line => completed.push(line), resolveWorktreeFn: () => '/fixture',
+    readReviewStateFn: async () => ({ round: 3, phase: 'approved' } as ReviewState),
+    readReviewLiveness: async () => ({ workflow: false, coordinator: false, execution: false, reviewer: false }) });
+  assert.doesNotMatch(completed.join('\n'), /orphaned|unconfirmed/);
+});
 
 /** Bound loop mechanisms whose held controller fence declines the run. */
 const declinedLoop = () => fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports;

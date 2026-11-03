@@ -22,14 +22,17 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
         // This short batch pays more CPU for background compilation than it
         // saves in elapsed time. Keep V8 work on one thread and disable
         // optimizing JIT: this one-shot batch cannot amortize that compilation.
-        ['--single-threaded', '--no-opt', '--v8-pool-size=1', '--max-semi-space-size=64', path.join(repoRoot, 'test/fixtures/standard-analysis-batch.mjs'), root,
+        // Give transient tool initialization enough young-generation space to
+        // avoid repeatedly collecting it before the diagnostic batch finishes.
+        ['--single-threaded', '--no-opt', '--v8-pool-size=1', '--max-semi-space-size=256', path.join(repoRoot, 'test/fixtures/standard-analysis-batch.mjs'), root,
           path.join(repoRoot, 'eslint.config.mjs'), JSON.stringify(scenarios)], {
           encoding: 'utf8',
           // Tool dependencies supply diagnostics, not product coverage. Reuse
-          // their bytecode without inheriting the covered workers' cache ban.
+          // their bytecode without contending with the gate's concurrent
+          // workers or inheriting the covered workers' cache ban.
           env: { ...process.env, NODE_V8_COVERAGE: '', NODE_OPTIONS: '',
             NODE_DISABLE_COMPILE_CACHE: undefined,
-            NODE_COMPILE_CACHE: path.join(checkoutTestTmpdir(repoRoot), 'node-compile-cache') },
+            NODE_COMPILE_CACHE: path.join(checkoutTestTmpdir(repoRoot), 'standard-analysis-node-compile-cache') },
         });
       assert.equal(result.status, 0, `${result.error ?? ''}\n${result.stderr}`);
       const results = JSON.parse(result.stdout) as Array<{ name: string; lint: Array<{ ruleId: string | null }>; compiler: string[] }>;

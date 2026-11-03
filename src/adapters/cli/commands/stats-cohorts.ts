@@ -1,6 +1,6 @@
-import { createMissionCohortMetadataReader } from '../../review/review-statistics-evidence.js';
+import { createMissionCohortMetadataReader, createWorkflowReturnReader } from '../../review/review-statistics-evidence.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
-import type { BoardLaneEventRepository } from '../../../application/ports/operation-history.js';
+import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../../../application/ports/operation-history.js';
 import type { UsageRepository } from '../../../application/ports/mission-measurements.js';
 import {
   LOW_SAMPLE_THRESHOLD,
@@ -36,6 +36,7 @@ export interface StatsCohortsOptions {
   /** Injected by tests and by callers that already hold operator state. */
   readonly laneEventRepo?: BoardLaneEventRepository;
   readonly usageRepo?: UsageRepository;
+  readonly historyRepo?: OperationalHistoryRepository;
   readonly repositoryId?: RepositoryId;
   /** Net engineering lines per mission, when the caller can supply them. */
   readonly netEngineeringLines?: ReadonlyMap<MissionId, number | null>;
@@ -115,14 +116,17 @@ function parseCohortOption(arg: string | undefined, next: string | undefined): P
 export async function resolveOperatorRepositories(configuration?: ParallixConfiguration): Promise<{
   laneEventRepo: BoardLaneEventRepository;
   usageRepo: UsageRepository;
+  historyRepo: OperationalHistoryRepository;
 }> {
   const { initOperatorState } = await import('../../sqlite/adapter-factory.js');
   const { SqliteBoardLaneEventRepository } = await import('../../sqlite/board-lane-event-repository.js');
   const { SqliteUsageRepository } = await import('../../sqlite/usage-repository.js');
+  const { SqliteOperationalHistoryRepository } = await import('../../sqlite/operational-history-repository.js');
   const { db } = await initOperatorState({ configuration });
   return {
     laneEventRepo: new SqliteBoardLaneEventRepository(db),
     usageRepo: new SqliteUsageRepository(db),
+    historyRepo: new SqliteOperationalHistoryRepository(db),
   };
 }
 
@@ -210,7 +214,7 @@ export async function statsCohorts(
       const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
       const { db } = await initOperatorState({ configuration: options.configuration });
       const loaded = await new SqliteMissionStore(db).loadByRepository(repositoryId);
-      return createMissionCohortMetadataReader(rootDir)(loaded);
+      return createMissionCohortMetadataReader(rootDir, createWorkflowReturnReader(repositories.laneEventRepo, repositories.historyRepo))(loaded);
     });
     const comparison = await buildCohortComparison({
       ...repositories,
@@ -230,5 +234,5 @@ export async function statsCohorts(
 export default statsCohorts;
 
 function configuredCohortRepositories(options: StatsCohortsOptions) {
-  return options.laneEventRepo && options.usageRepo ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo } : null;
+  return options.laneEventRepo && options.usageRepo ? { laneEventRepo: options.laneEventRepo, usageRepo: options.usageRepo, historyRepo: options.historyRepo } : null;
 }

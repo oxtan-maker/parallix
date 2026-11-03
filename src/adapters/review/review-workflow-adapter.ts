@@ -52,6 +52,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     verifyReviewFn?: ReviewCommandObserver<typeof verifyReview>; submitForReviewFn?: ReviewCommandObserver<typeof submitForReview>; pushRoundFn?: ReviewCommandObserver<typeof pushRound>; readCommentsFn?: ReviewCommandObserver<typeof readComments>; commentRoundFn?: ReviewCommandObserver<typeof commentRound>; submitReviewRoundFn?: ReviewCommandObserver<typeof submitReviewRound>; closeMissionPrFn?: ReviewCommandObserver<typeof closeMissionPr>; readReviewStateFn?: ReviewStateInstanceReader; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedReviewPreparationFn?: typeof reconcileInterruptedReviewPreparation;
     getPrStatusFn?: typeof getPrStatus; isReviewProviderEnabledFn?: typeof isProviderEnabled;
     operatorResume?: import('../../application/ports/review-round.js').ReviewOperatorResumePort;
+    readReviewLiveness?: import('../../application/projections/review-liveness.js').ReviewLivenessReader;
     missionServicesFn?: NonNullable<Parameters<typeof submitForReview>[2]>['missionServicesFn'];
     writeReviewStateFn?: typeof import('./review-state.js').writeReviewState;
     resetReviewStateFn?: typeof import('./review-state.js').resetReviewState;

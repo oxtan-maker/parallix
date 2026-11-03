@@ -2,6 +2,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import type { StatusResult } from '../../application/status-command-use-case.js';
 import type { StatusMissionData, StatusPrInfo } from '../../application/ports/cli-workflows.js';
 import { describeCoordinatorEvidence, describeMissionWork } from '../../application/projections/mission-activity.js';
+import { describeReviewLiveness, reviewRoundLiveness } from '../../application/projections/review-liveness.js';
 import { staleApprovalSentence } from '../../domain/approval-coverage.js';
 import { integrationRepairSummary } from '../../application/integration-repair-review.js';
 
@@ -112,6 +113,7 @@ function statusReviewJson(result: StatusResult) {
       ? {
         round: md.reviewRound ?? 1,
         phase: md.reviewPhase,
+        liveness: md.reviewLiveness ?? reviewRoundLiveness(md.reviewPhase),
         disposition: md.reviewDisposition ?? null,
         approvalOwed: md.approvalOwed ?? false,
         approvalCoverage: md.approvalCoverage ?? null,
@@ -236,7 +238,7 @@ function logCheckpointPlan(missionData: StatusMissionData, log: (_msg: string) =
   }
 }
 
-function logMissionData(missionData: StatusMissionData | null, log: (_msg: string) => void): void {
+function logMissionData(missionData: StatusMissionData | null, log: (_msg: string) => void, slug: string): void {
   if (!missionData) {
     log('Mission status: unknown (projection unavailable)');
     log('Last checkpoint: none');
@@ -269,6 +271,12 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log('Last checkpoint: none');
   }
   logReviewRounds(missionData, log);
+  logReviewLiveness(slug, missionData, log);
+}
+
+function logReviewLiveness(slug: string, data: StatusMissionData, log: (_msg: string) => void): void {
+  const diagnostic = describeReviewLiveness(slug, data.reviewLiveness ?? reviewRoundLiveness(data.reviewPhase));
+  if (diagnostic) { log(diagnostic); }
 }
 
 function logCloseoutStatus(missionData: StatusMissionData, log: (_msg: string) => void): void {
@@ -343,7 +351,7 @@ export function renderStatus(result: StatusResult, log: (_msg: string) => void):
   }
 
   if (result.slug) {
-    logMissionData(result.missionData, log);
+    logMissionData(result.missionData, log, result.slug!);
     logPrInfo(result.prInfo, log);
   }
 

@@ -88,6 +88,7 @@ export interface StatusMissionData {
   readonly reviewPhase?: string | null;
   /** Current review round. */
   readonly reviewRound?: number | null;
+  readonly reviewLiveness?: import('../projections/review-liveness.js').ReviewLiveness | null;
   /** Current review disposition. */
   readonly reviewDisposition?: string | null;
   /** A local self-review awaits an external formal approval. */

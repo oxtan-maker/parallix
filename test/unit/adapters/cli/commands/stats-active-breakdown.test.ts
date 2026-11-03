@@ -144,7 +144,7 @@ test('task-2213: weekly agent performance table excludes active-stage agents', (
   );
 
   // Agent performance: only closed missions appear
-  assert.ok(performance.includes('codex'),
+  assert.ok(performance.includes('gpt-5'),
     'closed mission model gpt-5 should appear in weekly report');
   assert.ok(!performance.includes('cyankiwi/Qwen3.6-35B-A3B-AWQ-4bit'),
     'active-stage agent must NOT appear in agent performance table');
@@ -205,7 +205,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
   if (previousDebug === undefined) { delete environment.DEBUG; } else { environment.DEBUG = previousDebug; }
 });
 
-test('task-2213: completed missions use recorded-family credit and averages', () => {
+test('task-2213: completed missions total returns per recorded model', () => {
   const rows = [
     {
       date: '2026-06-20',
@@ -239,10 +239,10 @@ test('task-2213: completed missions use recorded-family credit and averages', ()
   const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
-  assert.match(plain, /custom\s+2\s+1\.50/,
-    'the qwen3.5 model row must average only its own completed missions');
-  assert.match(plain, /codex\s+1\s+1\.00/,
-    'the gpt-5 model row must average only its own completed mission');
+  assert.match(plain, /qwen3\.5\s+2\s+1\.5\b/,
+    'the qwen3.5 model row must total only its own completed missions');
+  assert.match(plain, /gpt-5\s+1\s+1\b/,
+    'the gpt-5 model row must total only its own completed mission');
 });
 
 test('task-1409: active and closed rows coexist without double-counting', () => {
@@ -289,12 +289,12 @@ test('task-1409: active and closed rows coexist without double-counting', () => 
 
   // Agent performance: gpt-5 shows 1 mission (only the closed row)
   // Active rows must NOT inflate agent performance counts
-  assert.match(plain, /codex\s+1\s+2\.00/);
+  assert.match(plain, /gpt-5\s+1\s+2\b/);
 
   if (previousDebug === undefined) { delete environment.DEBUG; } else { environment.DEBUG = previousDebug; }
 });
 
-test('task-2213: a blank-model rollup supplies the recorded family', () => {
+test('task-2213: a blank-model rollup keeps the implementer recorded model', () => {
   const rows = [
     {
       date: '2026-06-20',
@@ -321,6 +321,6 @@ test('task-2213: a blank-model rollup supplies the recorded family', () => {
   const report = renderWeeklyStatsReport(rows, { today: '2026-06-24' });
   const plain = __mm1.stripAnsi(report);
 
-  assert.match(plain, /custom\s+1\s+1\.00/,
-    'mission must keep its model-row label while averaging the fix rounds recorded on its rollup row');
+  assert.match(plain, /Qwen3\.6-35B-A3B-AWQ-4bit\s+1\s+1\b/,
+    'mission must keep its model-row label while totalling the returns recorded on its rollup row');
 });

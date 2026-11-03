@@ -373,6 +373,7 @@ export interface ReviewControllerLock {
  * ------------------------------------------------------------------ */
 
 export interface ReviewLoopPorts {
+  readonly integrationRepair?: { resume(_slug: string): Promise<'none' | 'retained' | 'changed' | 'blocked'> };
   readonly integrationApprovalEvidence?: import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
   readonly retainedRepair?: RetainedRepairPort;
   readonly branch: string;

@@ -232,9 +232,16 @@ function canonicalizeStatsRow(row: StatsRow, options: NormalizeStatsRowOptions =
   return canonical;
 }
 
+/** Persisted measurement identity: the stage actor plus the concrete model that ran it. */
+export function statsRowIdentityKey(row: StatsRow): string {
+  const model = String(row.model || '').trim();
+  return model ? `${statsRowActorKey(row)}\u001f${model}` : statsRowActorKey(row);
+}
+
 function sameStatsIdentity(a: StatsRow, b: StatsRow) {
-  const actor = (row: StatsRow) => normalizeImplementer(row.implementer_agent || row.implementer || '') || '';
-  return a.repo === b.repo && a.mission === b.mission && (a.stage || 'default') === (b.stage || 'default') && actor(a) === actor(b);
+  const model = (row: StatsRow) => String(row.model || '').trim();
+  return a.repo === b.repo && a.mission === b.mission && (a.stage || 'default') === (b.stage || 'default')
+    && statsRowActorKey(a) === statsRowActorKey(b) && model(a) === model(b);
 }
 
 function accumulateIntegerStrings(existing: string, incoming: string, options: { mode?: string } = {}) {

@@ -530,3 +530,267 @@ for (const interrupted of [false, true]) {
     assert.deepEqual(decisions, ['repaired-revision']);
   });
 }
+
+import { certifyPendingIntegrationRepair } from '../../../../src/application/integrate/repair-resumption.js';
+import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
+import { integrationServices } from '../../../helpers/stub-integration-services.js';
+import type { IntegrationApprovalEvidencePort } from '../../../../src/application/ports/integration-approval-evidence.js';
+
+async function approvedRepairScenario() {
+  const scenario = changedRepairScenario('review');
+  const { fake, store } = scenario;
+  const initial = store.mission();
+  await store.save({ ...initial, reviewPreparationPending: true, checkpoints: initial.checkpoints.map(cp => ({ ...cp,
+    repair: { ...cp.repair!, command: 'npm test', verified: false,
+      occurrence: { openedMissionRevision: 1, worktree: fake.ports.worktree, failureRevision: 'fixture-revision', failureEvidenceId: 'original:1' } },
+  })) });
+  const original = store.mission().review!;
+  const calls: string[] = [];
+  let validation: Awaited<ReturnType<IntegrationApprovalEvidencePort['validation']>> = null;
+  const evidence: IntegrationApprovalEvidencePort = {
+    now: () => new Date().toISOString(), reconcileHumanFeedback: async () => true,
+    samePatch: async () => { calls.push('compare'); assert.equal(store.mission().checkpoints[0].repair?.verified, true); return true; },
+    validation: async () => validation,
+  };
+  const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store), operationalHistory: {
+    loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async input => {
+      calls.push('validation'); validation = { ...input, baseline: input.baseline ?? null,
+        createdAt: new Date().toISOString(), reference: 'operational_history:manual' };
+    },
+  } });
+  const integration = stubIntegrateWorkflowPorts({
+    process: { cwd: () => fake.ports.worktree },
+    missionPaths: { resolveWorktree: () => fake.ports.worktree, resolveMissionBaseBranch: () => 'main', resolveBaseWorktree: () => fake.ports.worktree, missionBranchName: () => `mission/${slug}` },
+    git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
+    gates: { approvalEvidence: () => evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'repaired-revision' }),
+      loadPhaseGates: () => [{ key: 'unit', command: 'npm test', order: 1 }],
+      runPhaseGates: async () => { calls.push('verify'); return { ok: true }; } },
+  });
+  Object.assign(fake.ports, { retainedRepair: {
+    read: async () => ({ evidence: { incidentId: 'original', attempt: 1, command: 'npm test', cwd: fake.ports.worktree,
+      exitCode: 1, captureComplete: true, stdoutPath: '/original/out', stderrPath: '/original/err' }, stdout: 'failed', stderr: '' }),
+    verify: async (command: string, worktree: string) => { calls.push('exact'); return { ok: true, command, exactExecution: { command, worktree, exitCode: 0 as const } }; }, checkpoints: new RepairCheckpointService(store),
+  }, integrationRepair: { resume: async () => (await certifyPendingIntegrationRepair(slug, services, integration, undefined, fake.ports.retainedRepair))?.outcome ?? 'none' } });
+  return { fake, store, original, calls, integration, evidence };
+}
+
+test('direct approved review certifies before retaining without generic repair or launch (TASK-2833)', async () => {
+  const { fake, store, original, calls } = await approvedRepairScenario();
+  await runReviewLoop({ slug, isContinue: true }, fake.ports);
+  assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
+  assert.deepEqual(calls, ['exact', 'verify', 'validation', 'compare']);
+  assert.deepEqual(fake.launches, []);
+  assert.equal(store.mission().status, 'integration');
+  assert.deepEqual(currentReviewRound(store.mission().review!).decision, currentReviewRound(original).decision);
+  assert.match(fake.logs.join('\n'), /human px integrate/);
+});
+
+import { failureReason, type FailureReason } from '../../../../src/domain/failure-reason.js';
+
+test('approved direct review requires an available certification owner (TASK-2833)', async () => {
+  const s = await approvedRepairScenario();
+  const before = structuredClone(s.store.mission());
+  Object.assign(s.fake.ports, { integrationRepair: undefined });
+  await assert.rejects(runReviewLoop({ slug, isContinue: true }, s.fake.ports), error => {
+    assert.equal((error as { failureReason?: FailureReason }).failureReason?.code, 'approval-retention-pending');
+    return true;
+  });
+  assert.deepEqual(s.store.mission(), before, 'unavailable certification preserves approval and original repair evidence');
+  assert.deepEqual(s.calls, [], 'cannot verify or retain approval through a missing owner');
+  assert.deepEqual(s.fake.launches, []);
+});
+
+for (const fault of ['failed', 'missing-evidence', 'missing-receipt', 'incomplete-capture', 'stale-head', 'stale-version', 'human-blocker'] as const) {
+  test(`approved direct review stops without certification on ${fault} (TASK-2833)`, async () => {
+    const s = await approvedRepairScenario();
+    const before = structuredClone(s.store.mission());
+    const retained = s.fake.ports.retainedRepair!;
+    if (fault === 'missing-evidence') {
+      Object.assign(retained, { read: async () => { throw new Error('missing original capture'); } });
+    } else if (fault === 'incomplete-capture') {
+      const read = retained.read;
+      Object.assign(retained, { read: async () => { const original = await read('npm test'); return { ...original, evidence: { ...original.evidence, captureComplete: false } }; } });
+    } else if (fault === 'human-blocker') {
+      await s.store.save({ ...before, checkpoints: before.checkpoints.map(cp => ({ ...cp, repair: { ...cp.repair!, blocker: {
+        command: 'npm test', diagnostic: 'operator-owned contract', authorityReason: 'locked gate', proposedCorrection: 'operator decision',
+      } } })) });
+    } else {
+      Object.assign(retained, { verify: async () => {
+        if (fault === 'stale-head') { s.integration.gates.captureFinalIntegrationTree = () => ({ ok: true, commit: 'other-head' }); }
+        if (fault === 'stale-version') { await s.store.save({ ...s.store.mission() }); }
+        return fault === 'failed' ? { ok: false, diagnostic: 'arbitrary diagnostic', reason: {
+          kind: 'gate-failure', area: 'repair', command: 'npm test', exitCode: 1,
+          failureReason: failureReason('cpu-budget-exceeded', 'verification'),
+        } } : { ok: true, ...(fault !== 'missing-receipt' ? { exactExecution: { command: 'npm test', worktree: s.fake.ports.worktree, exitCode: 0 } } : {}) };
+      } });
+    }
+    await assert.rejects(runReviewLoop({ slug, isContinue: true }, s.fake.ports), error => {
+      const reason = (error as { failureReason?: FailureReason }).failureReason;
+      assert.equal(reason?.code, fault === 'failed' ? 'cpu-budget-exceeded' : ['incomplete-capture', 'missing-evidence'].includes(fault) ? 'incomplete-evidence'
+        : fault === 'human-blocker' ? 'mission-contract-incomplete' : fault.startsWith('stale') ? 'state-machine' : 'incomplete-evidence');
+      return true;
+    });
+    assert.equal(s.store.mission().checkpoints[0].repair?.verified, false);
+    assert.deepEqual(currentReviewRound(s.store.mission().review!).decision, currentReviewRound(before.review!).decision);
+    assert.equal(s.store.mission().checkpoints[0].repair?.occurrence?.failureEvidenceId, 'original:1');
+    assert.deepEqual(s.fake.launches, []);
+    assert.deepEqual(s.calls, [], 'neither phase verification nor retention runs on unproven exact evidence');
+  });
+}
+
+test('repeated approved direct review does not rerun certification or launch (TASK-2833)', async () => {
+  const s = await approvedRepairScenario();
+  await runReviewLoop({ slug, isContinue: true }, s.fake.ports);
+  const after = structuredClone(s.store.mission());
+  s.calls.length = 0;
+  await runReviewLoop({ slug, isContinue: true }, s.fake.ports);
+  assert.deepEqual(s.store.mission(), after);
+  assert.deepEqual(s.fake.launches, []);
+  assert.deepEqual(s.calls, []);
+});
+
+// TASK-2831: an approved round with an uncertified integration gate repair resumes the
+// integration owners (exact check, then retention), never the generic review repair.
+const authorizedRepairCommand = 'npm run test:e2e:browser';
+
+function approvedIntegrationRepairScenario(options: { verifyOk?: boolean; blocker?: boolean } = {}) {
+  const verifyOk = options.verifyOk !== false;
+  const effects: string[] = [];
+  const fake = fakeReviewLoopPorts({ slug,
+    preReview: { head: () => 'repaired-revision', reviewBaseline: () => 'base' },
+    reviewPreparation: { reviewPreparation: async () => assert.fail('an uncertified integration repair must not reach review preparation') },
+  });
+  const worktree = fake.ports.worktree;
+  const approved = approvedReview(slug);
+  const original = currentReviewRound(approved);
+  const cause = { kind: 'integration-gate-failure' as const, gate: 'browser-e2e', command: authorizedRepairCommand };
+  const review = { ...approved, rounds: replaceCurrentRound(approved, { ...original,
+    subject: { ...original.subject, baseline: changeRevision('base') },
+    decision: { ...original.decision!, revision: changeRevision('approved-revision') },
+    integrationRepairAssessment: { assessedAt: '2026-11-01T12:00:00Z', approvedRevision: 'approved-revision',
+      candidateRevision: 'approved-revision', failedGate: 'browser-e2e', outcome: 'pending' as const,
+      repair: { startedAt: '2026-11-01T12:00:00Z', cause } },
+  }) };
+  const mission = fixtureMission(slug, { status: 'review', reviewPreparationPending: true, assignee: agentFamily('codex'),
+    declaredGates: [authorizedRepairCommand], successCriteria: ['browser e2e passes'], review,
+    checkpoints: [{ missionId: fixtureMission(slug).id, name: 'CP-7',
+      goalCheck: [{ criterion: 'browser e2e passes', evidence: 'test/e2e/browser.test.ts' }],
+      nextActionText: 'rerun the authorized required check',
+      recording: { recordedAt: '2026-11-01T11:00:00Z', recordedRound: 7, missionRevision: 1 },
+      repair: { incidentId: 'incident-7', command: authorizedRepairCommand, attempt: 1,
+        authorizedGates: [authorizedRepairCommand], authorizedCriteria: ['browser e2e passes'],
+        evidenceRecorded: true, verified: false,
+        ...(options.blocker ? { blocker: { command: authorizedRepairCommand, diagnostic: 'the declared gate cannot prove the criterion',
+          authorityReason: 'the criterion names a check the declaration does not run', proposedCorrection: 'operator corrects the declared gate' } } : {}),
+        occurrence: { openedMissionRevision: 1, worktree, failureRevision: 'approved-revision', failureEvidenceId: 'incident-7:1' } },
+    }] });
+  const store = inMemoryTransitionStore(mission);
+  const approvalEvidence: IntegrationApprovalEvidencePort = {
+    samePatch: async () => { effects.push('same-patch'); return true; },
+    validation: async () => { effects.push('validation'); return { missionId: slug, sha: 'repaired-revision', baseline: 'base',
+      hooks: ['browser-e2e'], createdAt: '2026-11-01T13:00:00Z', reference: 'operational_history:1' }; },
+    reconcileHumanFeedback: async () => true,
+    now: () => '2026-11-01T14:00:00Z',
+  };
+  const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store) });
+  const integration = stubIntegrateWorkflowPorts({
+    process: { cwd: () => worktree },
+    missionPaths: { resolveWorktree: () => worktree, resolveMissionBaseBranch: () => 'main',
+      resolveBaseWorktree: () => worktree, missionBranchName: () => `mission/${slug}` },
+    git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
+    gates: { approvalEvidence: () => approvalEvidence,
+      captureFinalIntegrationTree: () => ({ ok: true, commit: 'repaired-revision' }),
+      loadPhaseGates: () => [{ key: 'browser-e2e', command: authorizedRepairCommand, order: 1 }],
+      runPhaseGates: async () => ({ ok: true }) },
+  });
+  Object.assign(fake.ports, { missionStore: store, lifecycle: new MissionLifecycleService(store),
+    retainedRepair: {
+      read: async () => ({ evidence: { version: 1, incidentId: 'incident-7', attempt: 1, command: authorizedRepairCommand,
+        cwd: worktree, capturedRevision: 'approved-revision', exitCode: 1, signal: null, stdoutPath: '/retained/out',
+        stderrPath: '/retained/err', stdoutBytes: 20, stderrBytes: 0, captureComplete: true, truncatedFrom: null,
+        redacted: false, capturedAt: '2026-11-01T12:00:00Z' }, stdout: 'browser e2e failed', stderr: '' }),
+      verify: async () => { effects.push('exact-check'); return verifyOk
+        ? { ok: true as const, command: authorizedRepairCommand, exactExecution: { command: authorizedRepairCommand, worktree, exitCode: 0 as const } }
+        : { ok: false as const, command: authorizedRepairCommand, diagnostic: 'AssertionError: browser e2e still fails' }; },
+      checkpoints: new RepairCheckpointService(store),
+    },
+    integrationApprovalEvidence: approvalEvidence,
+    integrationRepair: { resume: async () => (await certifyPendingIntegrationRepair(slug, services, integration,
+      undefined, fake.ports.retainedRepair))?.outcome ?? 'none' } });
+  return { fake, store, mission, effects };
+}
+
+test('direct review certifies the authorized exact check then assesses retention (TASK-2831)', async () => {
+  const { fake, store, mission, effects } = approvedIntegrationRepairScenario();
+  const approvedDecision = structuredClone(currentReviewRound(mission.review!).decision);
+  await runReviewLoop({ slug, isContinue: true }, fake.ports);
+  assert.doesNotMatch(fake.errors.join('\n'), /requires an undecided review round/, 'generic review repair must not gate the integration owners');
+  assert.ok(effects.includes('exact-check'), 'the authorized exact check is re-run');
+  assert.ok(effects.indexOf('exact-check') < effects.indexOf('same-patch'), 'certification precedes the retention assessment');
+  const after = store.mission();
+  assert.equal(after.status, 'integration', 'retention returns the mission to the human integrate lane, never the active repair lane');
+  assert.deepEqual(currentReviewRound(after.review!).decision, approvedDecision, 'the independent approval is preserved');
+  assert.equal(after.review!.rounds.length, 1, 'no duplicate review decision');
+  const repaired = after.checkpoints.find(cp => cp.name === 'CP-7')!;
+  assert.equal(repaired.repair?.verified, true, 'the exact check certifies the repair');
+  assert.equal(repaired.repair?.exactSuccessCoverage?.producer, 'harness-exact-check');
+  assert.equal(currentReviewRound(after.review!).integrationRepairAssessment?.outcome, 'retained');
+  assert.deepEqual(fake.launches, [], 'no reviewer or implementer is launched to escape the deadlock');
+  assert.deepEqual(fake.exits, []);
+  assert.match(fake.logs.join('\n'), /px integrate/);
+});
+
+test('direct review leaves a locked integration contract to the operator (TASK-2831)', async () => {
+  const { fake, store, effects } = approvedIntegrationRepairScenario({ blocker: true });
+  const before = structuredClone(store.mission().checkpoints);
+  await assert.rejects(runReviewLoop({ slug, isContinue: true }, fake.ports), error => {
+    assert.equal((error as { failureReason?: FailureReason }).failureReason?.code, 'mission-contract-incomplete');
+    assert.match(String(error), /Invalid locked contract requires human review/);
+    assert.match(String(error), /"authorityReason":"the criterion names a check the declaration does not run"/,
+      'the blocker evidence survives routing');
+    return true;
+  });
+  assert.deepEqual(effects, [], 'a human-only contract stop consumes no exact-check rerun and no retention assessment');
+  assert.deepEqual(store.mission().checkpoints, before, 'the stop and its authorization remain for the operator');
+  assert.deepEqual(fake.launches, []);
+  assert.deepEqual(fake.exits, []);
+});
+
+test('direct review stops on a red exact check without certifying or assessing retention (TASK-2831)', async () => {
+  const { fake, store, mission, effects } = approvedIntegrationRepairScenario({ verifyOk: false });
+  const approvedDecision = structuredClone(currentReviewRound(mission.review!).decision);
+  await assert.rejects(runReviewLoop({ slug, isContinue: true }, fake.ports), error => {
+    assert.equal((error as { failureReason?: FailureReason }).failureReason?.code, 'gate-failed');
+    assert.match(String(error), /AssertionError: browser e2e still fails/, 'the verifier diagnostic survives routing');
+    return true;
+  });
+  assert.deepEqual(effects, ['exact-check'], 'a red exact check may not reach the retention assessment');
+  const after = store.mission();
+  assert.equal(after.status, 'review', 'a red exact check keeps the mission in its lane');
+  assert.equal(after.checkpoints.find(cp => cp.name === 'CP-7')!.repair?.verified, false, 'a red check certifies nothing');
+  assert.equal(after.checkpoints.find(cp => cp.name === 'CP-7')!.repair?.exactSuccessCoverage, undefined);
+  assert.deepEqual(currentReviewRound(after.review!).decision, approvedDecision, 'the approval is neither revoked nor claimed retained');
+  assert.equal(currentReviewRound(after.review!).integrationRepairAssessment?.outcome, 'pending');
+  assert.deepEqual(fake.launches, []);
+  assert.deepEqual(fake.exits, []);
+});
+
+
+test('direct review preserves one red-check diagnostic when command exit throws (TASK-2831 F1)', async () => {
+  const { fake, store, mission, effects } = approvedIntegrationRepairScenario({ verifyOk: false });
+  const stopped = Object.freeze({ kind: 'command-exit' });
+  fake.ports.output.exit = code => { fake.exits.push(code!); throw stopped; };
+  await assert.rejects(runReviewLoop({ slug, isContinue: true }, fake.ports), error => {
+    assert.notEqual(error, stopped, 'typed certification failure must not route through command exit');
+    assert.equal((error as { failureReason?: FailureReason }).failureReason?.code, 'gate-failed');
+    assert.match(String(error), /AssertionError: browser e2e still fails/);
+    return true;
+  });
+  assert.deepEqual(fake.errors, [], 'the typed failure is surfaced once instead of being reported again');
+  assert.deepEqual(fake.exits, []);
+  assert.deepEqual(effects, ['exact-check']);
+  assert.deepEqual(store.mission().checkpoints, mission.checkpoints, 'the repair remains uncertified');
+  assert.deepEqual(store.mission().review, mission.review, 'the original decision and pending assessment survive');
+  assert.equal(store.mission().status, 'review');
+  assert.deepEqual(fake.launches, []);
+});

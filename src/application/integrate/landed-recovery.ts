@@ -13,6 +13,7 @@ import type { IntegrationRecoveryContext } from './recovery.js';
 // closeout performs zero new remote side effects.
 import * as fmt from '../presentation/cli-format.js';
 import { missionId } from '../../domain/mission.js';
+import { reviewStatus } from '../../domain/review.js';
 import type { IntegrateLandingPort, IntegrateCheckoutPort } from '../ports/integrate-workflow.js';
 import { completeLandedCloseout } from './landed-closeout.js';
 
@@ -34,6 +35,30 @@ function closedRecoveryEvidence(mission: Extract<MissionLoadResult, { kind: 'fou
   const artifactsRemain = alreadyClosed && hasCleanupArtifacts
     ? hasCleanupArtifacts(slug, rootDir) : false;
   return { alreadyClosed, alreadyMeasured, artifactsRemain };
+}
+
+function needsLandedReconciliation(mission: Extract<MissionLoadResult, { kind: 'found' }>['mission']): boolean {
+  return (mission.status === 'active' || mission.status === 'review')
+    && (!mission.review || reviewStatus(mission.review) !== 'approved');
+}
+
+async function restoreApprovedLaneIfRequired(
+  reconcileLanded: boolean,
+  slug: string,
+  missionServices: IntegrationMissionServices,
+  missionLoad: Extract<MissionLoadResult, { kind: 'found' }>,
+  recoverMissionForIntegration: (_context: IntegrationRecoveryContext, _opts: { missionServices: IntegrationMissionServices; missionLoad: MissionLoadResult }) => Promise<{ status: string }>,
+  createAbort: () => Error,
+): Promise<void> {
+  if (reconcileLanded) { return; }
+  const context = { slug, approval: { ok: true, providerDisabled: true }, missionStatus: undefined };
+  const restored = await recoverMissionForIntegration(context, { missionServices, missionLoad });
+  if (restored.status !== 'integration' && restored.status !== 'done') {
+    fail(
+      createAbort,
+      `Mission ${slug} is ${restored.status}; integration requires an authoritative approved Review before closeout.`,
+    );
+  }
 }
 
 export async function recoverLandedIntegration(
@@ -81,18 +106,14 @@ export async function recoverLandedIntegration(
   if (alreadyClosed && !artifactsRemain && hasCleanupArtifacts && !alreadyMeasured) {
     fail(createAbort, `Mission ${slug} is closed with no cleanup artifacts but lacks integration statistics; recovery cannot prove whether its post-integrate hook ran.`);
   }
-  // The payload is already delivered, so the stored approved round is the
-  // authority for recovery even when its provider is no longer reachable.
-  const context = { slug, approval: { ok: true, providerDisabled: true }, missionStatus: undefined };
-  const restored = await recoverMissionForIntegration(context, { missionServices, missionLoad });
-  if (restored.status !== 'integration' && restored.status !== 'done') {
-    fail(
-      createAbort,
-      `Mission ${slug} is ${restored.status}; integration requires an authoritative approved Review before closeout.`,
-    );
-  }
+  const strandedWithoutCurrentApproval = needsLandedReconciliation(missionLoad.mission);
+  // A current approval still recovers through the normal lifecycle owner. A
+  // later orphaned round cannot undo an already-landed Git fact, so the typed
+  // integration decision below reconciles that stranded lane instead.
+  await restoreApprovedLaneIfRequired(strandedWithoutCurrentApproval, slug, missionServices, missionLoad, recoverMissionForIntegration, createAbort);
   await completeLandedCloseout({
     slug, landedCommit, missionServices, baseWorktree: rootDir, baseBranch, variant: 'variant-b-resumed',
+    ...(strandedWithoutCurrentApproval ? { landedRecovery: true } : {}),
     ...(alreadyClosed && artifactsRemain ? { legacyClosedRecovery: { skipStats: alreadyMeasured } } : {}),
     landing: {
       createAbort, persistLandedIntegrationOrAbort, recordPostIntegrationStatsOrAbort,

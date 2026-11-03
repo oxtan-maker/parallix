@@ -15,6 +15,7 @@ import { ReviewCommandUseCase } from '../../../../src/application/review-command
 import { parseReviewCliRequest } from '../../../../src/interfaces/cli/review.js';
 import { createRevokeReviewCommand } from '../../../../src/interfaces/cli/revoke-review.js';
 import type { RevokeReviewDecisionRequest } from '../../../../src/application/revoke-review-decision-use-case.js';
+import { WorkflowOwnershipError } from '../../../../src/domain/workflow-operation.js';
 
 describe('revoke-review CLI version contract', () => {
   test('resolves an omitted version and forwards an explicit pin (TASK-2710)', async () => {
@@ -102,6 +103,24 @@ describe("review verbs", { concurrency: false }, () => {
       },
     };
   }
+
+  test('fenced verdict retains attributed unaccepted output and reports rejection (TASK-2826)', async () => {
+    for (const action of ['approve', 'request-changes']) {
+      const retained: unknown[] = [];
+      const { ports: p, recorded } = ports({
+        readReviewState: async () => ({ round: 2, phase: 'reviewing', sourceRound: 1 }),
+        consumeReviewerOutput: async () => { throw new WorkflowOwnershipError('Workflow ownership was fenced or stopped'); },
+        retainRejectedVerdict: async input => { retained.push(input); return '/retained/verdict.json'; },
+      });
+      const findings = action === 'approve' ? [] : ['--finding', 'F1', '--summary', 'keep me'];
+      await assert.rejects(() => createVerdictCommand(p)([action, '--actor', 'codex', '--comment', 'original comment', ...findings]), /rejected.*fenced.*retained.*\/retained\/verdict.json/i);
+      assert.equal(retained.length, 1);
+      assert.deepEqual(retained[0], { slug: 'task-2521.03', worktree: '/tmp/worktree', round: 1, reviewer: 'codex',
+        output: { verdict: action, comment: 'original comment', findings: action === 'approve' ? [] : [{ id: 'F1', summary: 'keep me', location: null }] },
+        reason: 'Workflow ownership was fenced or stopped' });
+      assert.deepEqual(recorded.reviewerOutputs, []);
+    }
+  });
 
   test('px verdict request-changes pairs each finding with the summary that follows it', async () => {
     const { ports: p, recorded } = ports();

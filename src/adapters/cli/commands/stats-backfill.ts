@@ -48,7 +48,7 @@ Notes:
     which is the authority for statistics. It never reads or writes a legacy CSV.
   - Classification comes only from stored px Mission labels.
   - Dry-run is the default. --apply updates existing measurements idempotently.
-  - Unknown counts stay unknown; missing causes or authorship are disclosed.
+  - Unknown counts stay unknown; missing return evidence or authorship are disclosed.
   - Non-done missions are skipped. Raw Review history is never rewritten.`);
 }
 
@@ -125,7 +125,7 @@ function printBackfillResult(report: ReturnType<typeof backfillReport>, payload:
   } else {
     log(renderBackfillSummary(report));
     log(`Reconciled mission coverage: ${report.changes.filter(item => item.beforeObserved).length} -> ${report.changes.filter(item => item.after !== null).length}/${report.changes.length}`);
-    for (const item of report.changes) { log(`${item.mission}: stored [${item.before.map(count => count ?? 'unknown').join(', ')}] -> ${item.after ?? 'unknown'}; authors=${JSON.stringify(item.byImplementer)}; causes=${item.causes.join(',')}`); }
+    for (const item of report.changes) { log(`${item.mission}: stored [${item.before.map(count => count ?? 'unknown').join(', ')}] -> ${item.after ?? 'unknown'}; authors=${JSON.stringify(item.byImplementer)}`); }
     if (apply) {
       log('');
       log(fmt.status('PASS', `Applied ${changed} stats rows to the measurement database`));

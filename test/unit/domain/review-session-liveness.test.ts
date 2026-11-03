@@ -18,6 +18,33 @@ import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { changeRevision, type Review } from '../../../src/domain/review.js';
 import { repositoryId } from '../../../src/domain/repository.js';
+import { reviewRoundLiveness } from '../../../src/application/projections/review-liveness.js';
+
+test('unfinished review is orphaned only when every attributed liveness source confirms absence (TASK-2826)', () => {
+  const absent = { workflow: false, coordinator: false, execution: false, reviewer: false } as const;
+  assert.equal(reviewRoundLiveness('reviewing', absent), 'orphaned');
+  for (const source of Object.keys(absent)) {
+    assert.equal(reviewRoundLiveness('reviewing', { ...absent, [source]: true }), 'live');
+    assert.equal(reviewRoundLiveness('reviewing', { ...absent, [source]: null }), 'unconfirmed');
+  }
+  assert.equal(reviewRoundLiveness('approved', absent), null);
+  assert.equal(reviewRoundLiveness('pending-approval', absent), null);
+});
+
+test('read-only review status processes never count as live review coordinators (TASK-2826)', () => {
+  assert.deepEqual(detectRunningMissionSessions({ rootDir: '/repo',
+    listProcesses: () => [{ pid: 4242, elapsedSeconds: 0, args: 'node /repo/px review task-2274 --status' }],
+    listWorktrees: () => new Map(), resolveCwd: () => '/repo',
+  }), []);
+});
+
+test('focused review liveness is not made uncertain by an unrelated unobservable Mission (TASK-2826)', () => {
+  const options = { rootDir: '/repo',
+    listProcesses: () => [{ pid: 9999, elapsedSeconds: 10, args: 'node /unknown/px review task-foreign' }],
+    listWorktrees: () => new Map(), resolveCwd: () => null };
+  assert.equal(detectRunningMissionSessions(options), null);
+  assert.deepEqual(detectRunningMissionSessions({ ...options, missionId: reviewed }), []);
+});
 
 const repo = repositoryId('parallix');
 const reviewed = missionId('task-2274');

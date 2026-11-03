@@ -12,6 +12,8 @@ import type { MissionStore } from '../application/domain-ports.js';
 import type { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { ProductionApplicationServices } from './application-services.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
+import { createReviewLivenessReader } from './review-liveness.js';
+import { reviewRoundLiveness } from '../application/projections/review-liveness.js';
 
 interface StatusBoardServices {
   presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
@@ -35,7 +37,13 @@ export async function createStatusReadBoard(
     laneEventRepo: repositories.boardLaneEvents, usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir), sessionMarkers: new SqliteSessionMarkerRepository(db, mission.repositoryId),
   });
-  return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } });
+  const board = createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } });
+  const liveness = createReviewLivenessReader(services, rootDir, configuration);
+  return { ...board, async getMissionData(slug, root) {
+    const data = await board.getMissionData(slug, root);
+    return data ? { ...data, reviewLiveness: reviewRoundLiveness(data.reviewPhase,
+      data.reviewPhase === 'reviewing' || data.reviewPhase === 'fixing' ? await liveness(slug) : undefined) } : null;
+  } };
 }
 
 /** Build the StatusBoardPort `px status` reads a Mission through. */

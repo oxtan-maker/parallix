@@ -53,19 +53,18 @@ export function reconstructReviewMeasurements(missions: readonly import('../doma
     const rollups = prior.filter(isIntegrationObservation);
     for (const row of prior) {
       const rollup = isIntegrationObservation(row);
-      rows.push({ ...row, pr_fix_rounds: rollup ? info.prFixRounds : null });
+      rows.push({ ...row, pr_fix_rounds: rollup ? info.total : null });
     }
     if (!rollups.length) {
       rows.push({ repo: mission.repositoryId, mission: mission.id, date: mission.closedAt.slice(0, 10),
         stage: 'default', implementer: info.implementer,
         classification: mission.labels.find(label => label === 'ai_sdlc' || label === 'user_value') ?? 'unknown',
-        pr_fix_rounds: info.prFixRounds });
+        pr_fix_rounds: info.total });
     }
     changes.push({ mission: mission.id,
       before: rollups.map(storedCount),
       beforeObserved: rollups.some(row => storedCount(row) !== null),
-      after: info.prFixRounds, byImplementer: info.byImplementer,
-      causes: info.obligations.map(obligation => obligation.cause) });
+      after: info.total, byImplementer: info.byImplementer });
   }
   const knownIds = new Set(missions.map(mission => String(mission.id)));
   for (const row of existing) {
@@ -83,8 +82,8 @@ function storedCount(row: import('./services/statistics-row.js').StatsRow): numb
 function reconstructionIssue(mission: import('../domain/mission.js').Mission,
   info: import('./services/review-statistics.js').ReviewStatistics): import('./ports.js').StatsBackfillUnresolved | undefined {
   if (!mission.review) { return { slug: mission.id, reason: 'missing-review-history' }; }
-  if (info.prFixRounds === null || Object.values(info.byImplementer).some(count => count === null)) {
-    return { slug: mission.id, reason: 'incomplete-cause-or-authorship', prFixRounds: info.prFixRounds };
+  if (info.total === null) {
+    return { slug: mission.id, reason: 'incomplete-return-evidence', prFixRounds: info.total };
   }
   return undefined;
 }

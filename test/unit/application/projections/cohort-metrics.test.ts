@@ -568,7 +568,7 @@ describe("Review bounce rate — SC4", () => {
 
   async function labelCohort() {
     const outcomes = (await metricsAdapter(REPO, LANE_EVENTS, USAGE_RECORDS).readOutcomes()).map(outcome => ({ ...outcome,
-      reviewFixRounds: fixtureCohortMetadata(USAGE_RECORDS).get(outcome.missionId)?.reviewStatistics?.prFixRounds ?? null }));
+      reviewFixRounds: fixtureCohortMetadata(USAGE_RECORDS).get(outcome.missionId)?.reviewStatistics?.total ?? null }));
     assert.equal(outcomes.length, 3, 'all three missions must project as completed outcomes');
     const comparison = compareCohorts({ outcomes, transitions: TRANSITIONS, dimension: 'label' });
     const cohort = comparison.cohorts.find((entry) => entry.key === 'ai_sdlc');

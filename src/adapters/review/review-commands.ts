@@ -1,4 +1,5 @@
 import type { ReviewStateReader } from './review-state.js';
+import { reviewRoundLiveness, describeReviewLiveness } from '../../application/projections/review-liveness.js';
 import { reviewPushIdentity } from '../../domain/review-command-policy.js';
 /**
  * Review Commands Module
@@ -177,6 +178,7 @@ export async function showReviewStatus(
     log?: (_msg: string) => void;
     readReviewStateFn?: ReviewStateReader;
     resolveWorktreeFn?: typeof resolveWorktree;
+    readReviewLiveness?: import('../../application/projections/review-liveness.js').ReviewLivenessReader;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -198,6 +200,9 @@ export async function showReviewStatus(
   log(`  Reviewer:    ${fmt.agent(state.reviewer ?? '')}`);
   log(`  Implementer: ${fmt.agent(state.implementer ?? '')}`);
   log(`  Started at:  ${state.startedAt}`);
+  const liveness = reviewRoundLiveness(state.phase, await options.readReviewLiveness?.(slug));
+  const diagnostic = describeReviewLiveness(slug, liveness);
+  if (diagnostic) { log(diagnostic); }
   if (state.disposition) {
     log(`  Disposition: ${state.disposition}`);
   }

@@ -20,12 +20,23 @@
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
+import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
+
+export interface RejectedVerdictInput {
+  readonly slug: string;
+  readonly worktree: string;
+  readonly round: number;
+  readonly reviewer: string;
+  readonly output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string };
+  readonly reason: string;
+}
 
 /** The existing recorders, supplied by composition. */
 export interface ReviewVerbPorts {
+  readonly retainRejectedVerdict?: (_input: RejectedVerdictInput) => Promise<string>;
   readonly resolveSlug: (_explicit?: string) => string | null;
   readonly resolveWorktree: (_slug: string) => string | null;
-  readonly readReviewState: (_slug: string, _worktree: string) => Promise<{ round: number; phase: string } | null>;
+  readonly readReviewState: (_slug: string, _worktree: string) => Promise<{ round: number; phase: string; sourceRound?: number } | null>;
   readonly consumeReviewerOutput: (
     _slug: string,
     _reviewer: string,
@@ -182,7 +193,7 @@ export function createVerdictCommand(ports: ReviewVerbPorts) {
     if (!state) {
       fail(`no review state for ${slug}: start a review with \`px review ${slug}\` before recording a verdict`);
     }
-    const { round } = state;
+    const round = state.sourceRound ?? state.round;
 
     let collected: ReviewFinding[] = [];
     if (action === 'request-changes') {
@@ -191,11 +202,19 @@ export function createVerdictCommand(ports: ReviewVerbPorts) {
     } else if (findings(args).length > 0) {
       fail('approve takes no --finding: request changes instead of approving with findings');
     }
-    const result = await ports.consumeReviewerOutput(slug, actor, {
-      findings: collected, comment, verdict: action,
-    }, worktree, version);
+    const output = { findings: collected, comment, verdict: action };
+    const result = await (async () => {
+      try {
+        // Authorization is checked by the consumer before any provider effect.
+        return await ports.consumeReviewerOutput(slug, actor, output, worktree, version);
+      } catch (error) {
+        if (!(error instanceof WorkflowOwnershipError) || !ports.retainRejectedVerdict) { throw error; }
+        const location = await ports.retainRejectedVerdict({ slug, worktree, round, reviewer: actor, output, reason: error.message });
+        fail(`Verdict rejected: ${error.message}. Unaccepted evidence retained at ${location}`);
+      }
+    })();
     if (!result.consumed || !result.ok) { fail(`could not record the reviewer verdict: ${result.diagnostic ?? 'unknown error'}`); }
-    fmt.log.plain(fmt.status('PASS', `Recorded ${action} for ${slug} (round ${round}).`));
+    fmt.log.plain(fmt.status('PASS', `Recorded ${action} for ${slug} (round ${state.round}).`));
   };
 }
 

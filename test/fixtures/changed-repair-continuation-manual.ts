@@ -15,7 +15,10 @@ import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } fr
 import { configureMissionWriteAuthorization } from '../../src/application/ports/mission-write-authorization.js';
 import { run } from '../../src/composition/create-cli.js';
 
+const equivalent = process.argv.includes('--equivalent');
+const failingCheck = process.argv.includes('--failing-check');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-changed-repair-manual-'));
+const exactCommand = `test -f ${temporary}/allow-check`;
 const repo = path.join(temporary, 'repo');
 const worktree = path.join(temporary, 'repo-task-manual-repair');
 const slug = 'task-manual-repair';
@@ -34,7 +37,8 @@ try {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-    verification: { command: ':', defaultArea: 'all' }, review: { provider: 'none', tmpDir: path.join(temporary, 'review') },
+    verification: { command: ':', defaultArea: 'all' },
+    gates: { preIntegration: [{ key: 'unit', command: equivalent ? exactCommand : ':', order: 1 }] }, review: { provider: 'none', tmpDir: path.join(temporary, 'review') },
   } }));
   fs.writeFileSync(path.join(repo, 'config', 'agents.json'), JSON.stringify({ steps: {
     draft: { eligible: ['custom'], selection: 'random' }, active: { eligible: ['codex', 'custom'], selection: 'random' },
@@ -52,8 +56,8 @@ try {
   fs.writeFileSync(path.join(worktree, 'deliverable.txt'), 'old behavior\n');
   git(worktree, 'add', '.'); git(worktree, 'commit', '-qm', 'original reviewed change');
   const approvedRevision = git(worktree, 'rev-parse', 'HEAD');
-  fs.writeFileSync(path.join(worktree, 'deliverable.txt'), 'repaired behavior\n');
-  git(worktree, 'add', '.'); git(worktree, 'commit', '-qm', 'repair changed behavior');
+  if (!equivalent) { fs.writeFileSync(path.join(worktree, 'deliverable.txt'), 'repaired behavior\n'); }
+  git(worktree, 'add', '.'); git(worktree, 'commit', '--allow-empty', '-qm', 'committed repair candidate');
   const repairedRevision = git(worktree, 'rev-parse', 'HEAD');
   process.env.PARALLIX_HOME = path.join(temporary, 'state');
   process.env.PARALLIX_CUSTOM_ADMISSION_HOME = process.env.PARALLIX_HOME;
@@ -79,7 +83,47 @@ try {
   });
   const active = decideMission(approved, { type: 'rebound-to-active', agent: agentFamily('codex'),
     cause: { kind: 'integration-gate-failure', gate: 'unit', command: ':' }, occurredAt: '2026-10-01T10:00:00Z' });
-  await services.store.save({ ...active, status: lane, closedAt: null }, null);
+  await services.store.save({ ...active, status: equivalent ? 'review' : lane, ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
+  if (equivalent) {
+    const { captureRecoveryEvidence } = await import('../../src/application/recovery-evidence.js');
+    const { RepairCheckpointService } = await import('../../src/application/repair-checkpoint-service.js');
+    const { MissionCheckpointService } = await import('../../src/application/mission-checkpoint-service.js');
+    const captured = captureRecoveryEvidence({ missionId: slug, command: exactCommand, cwd: worktree,
+      capturedRevision: approvedRevision, exitCode: 1, signal: null, stdout: '', stderr: 'original missing marker', diagnostic: 'original failure' });
+    assert.ok(captured.ok && captured.ref);
+    if (!captured.ok || !captured.ref) { throw new Error('capture failed'); }
+    const ref = captured.ref;
+    const repair = new RepairCheckpointService(services.store);
+    const current = await services.store.load(missionId(slug));
+    if (current.kind !== 'found') { throw new Error('missing fixture'); }
+    await services.store.save({ ...current.mission, declaredGates: [exactCommand], checkpoints: current.mission.checkpoints.map(cp => ({ ...cp,
+      repair: { ...cp.repair!, command: exactCommand, authorizedGates: [exactCommand] } })) }, current.version);
+    const opened = await repair.open({ slug, incidentId: 'manual-approved-repair', command: exactCommand, attempt: 1,
+      worktree, failureRevision: approvedRevision, failureEvidenceId: `${ref.incidentId}:${ref.attempt}` });
+    assert.ok(opened, 'brief-backed disposable mission must open a repair checkpoint');
+    const checkpoints = new MissionCheckpointService(services.store);
+    const recorded = await checkpoints.record({ missionId: missionId(slug), operationId: 'manual-record', capabilities: new Set(['checkpoint:record']),
+      checkpoint: { missionId: missionId(slug), name: opened.name, goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt' }], nextActionText: 'Certify repair' } });
+    assert.equal(recorded.status, 'completed', JSON.stringify(recorded));
+    if (!failingCheck) { fs.writeFileSync(path.join(temporary, 'allow-check'), 'authorized verifier can pass'); }
+    let launches = 0;
+    setWorkflowLaunchPort(() => { launches++; throw new Error('No agent may launch during approved certification'); });
+    console.log(`COMMAND: px review ${slug}`);
+    const code = await run(['review', slug], { baseCwd: worktree });
+    const after = await services.store.load(missionId(slug));
+    assert.equal(after.kind, 'found');
+    if (after.kind !== 'found') { throw new Error('missing disposable mission'); }
+    assert.equal(code, failingCheck ? 1 : 0);
+    assert.equal(launches, 0);
+    assert.equal(after.mission.status, failingCheck ? 'review' : 'integration');
+    assert.deepEqual(currentReviewRound(after.mission.review!).decision, currentReviewRound(review).decision);
+    assert.equal(after.mission.checkpoints.at(-1)?.repair?.verified, !failingCheck);
+    assert.equal(fs.readFileSync(ref.stderrPath, 'utf8'), 'original missing marker');
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), baseline, 'human landing never ran');
+    console.log(JSON.stringify({ observation: 'approved direct-review continuation', control: failingCheck, code,
+      lane: after.mission.status, verified: after.mission.checkpoints.at(-1)?.repair?.verified, launches,
+      originalDecisionPreserved: true, originalFailurePreserved: true, exactCommand }));
+  } else {
   console.log(JSON.stringify({ observation: 'seeded repaired Mission', lane, approvedRevision, repairedRevision }));
   const seeded = await services.store.load(missionId(slug));
   assert.equal(seeded.kind, 'found');
@@ -129,6 +173,7 @@ try {
   console.log(JSON.stringify({ observation: 'fresh decision persisted', approvedRevision, repairedRevision,
     decisionRevision: current.decision?.revision, round: current.number, lane: result.mission.status, reviewerLaunches,
     boundaries: 'canonical public px review/verdict CLI; real Git, SQLite, preparation, prompts and patch comparison; injected deterministic reviewer launch only' }));
+  }
 } finally {
   configureMissionWriteAuthorization(null);
   setWorkflowLaunchPort(null);

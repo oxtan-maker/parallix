@@ -53,16 +53,27 @@ function missionFlow(rows: readonly FixtureStatsRow[]) {
   });
 }
 
-function renderWeeklyStatsReport(rows: readonly FixtureStatsRow[], options: NonNullable<Parameters<typeof stats.renderWeeklyStatsReport>[1]> = {}) {
+/** Reports show concrete models only; fixtures that omit one get `<family>-1`. */
+function withModels<T extends FixtureStatsRow>(rows: readonly T[]): T[] {
+  return rows.map(row => ({ ...row, model: row.model ?? (row.implementer ? `${row.implementer}-1` : row.model) }));
+}
+
+function renderWeeklyStatsReport(rawRows: readonly FixtureStatsRow[], options: NonNullable<Parameters<typeof stats.renderWeeklyStatsReport>[1]> = {}) {
+  const rows = withModels(rawRows);
   return stats.renderWeeklyStatsReport(rows, { ...options, missionFlow: options.missionFlow ?? missionFlow(rows) });
 }
 
-function renderRangeStatsReport(rows: readonly FixtureStatsRow[], options: NonNullable<Parameters<typeof stats.renderRangeStatsReport>[1]> = {}) {
+function renderRangeStatsReport(rawRows: readonly FixtureStatsRow[], options: NonNullable<Parameters<typeof stats.renderRangeStatsReport>[1]> = {}) {
+  const rows = withModels(rawRows);
   return stats.renderRangeStatsReport(rows, { ...options, missionFlow: options.missionFlow ?? missionFlow(rows) });
 }
 
-function summarizeAgentWindow(rows: readonly FixtureStatsRow[], window: { start: Date; end: Date }, options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
-  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows), reviewObservations: fixtureReviewObservations(rows) });
+function summarizeAgentWindow(rawRows: readonly FixtureStatsRow[], window: { start: Date; end: Date }, options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
+  const rows = withModels(rawRows);
+  const keys = completedMissionKeys(rows);
+  const owners = new Map(rows.filter(row => keys.has(`${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`) && row.implementer)
+    .map(row => [`${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`, row.implementer!] as const));
+  return stats._internals.summarizeAgentWindow(rows, window, { completedMissionOwners: owners, ...options, completedMissionKeys: completedMissionKeys(rows), reviewObservations: fixtureReviewObservations(rows) });
 }
 
 // visualBoard's Ways of Working use Forgejo review. Tests that exercise
@@ -433,11 +444,11 @@ test('stats command defaults to the shared PARALLIX_HOME database across target 
   assert.match(report, /Mission flow — current week \(2026-05-12 → 2026-05-18\)/);
   assert.match(report, /Mission flow — previous week \(2026-05-05 → 2026-05-11\)/);
   assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
-  assert.match(report, /codex\s+1\s+2\.00/);
-  assert.match(report, /gemini\s+1\s+1\.00/);
+  assert.match(report, /codex-1\s+1\s+2\b/);
+  assert.match(report, /gemini-1\s+1\s+1\b/);
   assert.match(report, /Agent performance previous week \(2026-05-05 → 2026-05-11\)/);
-  assert.match(report, /claude\s+1\s+4\.00/);
-  assert.match(report, /\bcustom\s+1\s+0\.00/);
+  assert.match(report, /claude-1\s+1\s+4\b/);
+  assert.match(report, /\bcustom-1\s+1\s+0\b/);
 });
 
 test('renderRangeStatsReport filters inclusive boundary dates and summarizes mission counts', () => {
@@ -453,8 +464,8 @@ test('renderRangeStatsReport filters inclusive boundary dates and summarizes mis
   assert.match(plain, /Mission flow \(2026-05-01 → 2026-05-31\)/);
   assert.doesNotMatch(plain, /Agent telemetry/);
   assert.match(plain, /Agent performance \(2026-05-01 → 2026-05-31\)/);
-  assert.match(plain, /codex\s+2\s+3\.00/);
-  assert.match(plain, /gemini\s+1\s+1\.00/);
+  assert.match(plain, /codex-1\s+2\s+3\.0\b/);
+  assert.match(plain, /gemini-1\s+1\s+1\b/);
   assert.doesNotMatch(plain, /claude/);
 });
 
@@ -509,19 +520,6 @@ test('renderWeeklyStatsReport sorts agent tables alphabetically by family name',
   assert.ok(codexIndex < geminiIndex);
 });
 
-test('renderWeeklyStatsReport colors best and worst average fix rounds', () => {
-  process.env.FORCE_COLOR = '1';
-  const report = renderWeeklyStatsReport([
-    { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'claude', pr_fix_rounds: '4', completedForTest: 'yes' },
-    { date: '2026-05-17', mission: 'task-b', classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '2', completedForTest: 'yes' },
-    { date: '2026-05-16', mission: 'task-c', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '0', completedForTest: 'yes' },
-  ], { today: '2026-05-18' });
-
-  assert.match(report, /\x1b\[31m4\.00\x1b\[39m/);
-  assert.match(report, /\x1b\[33m2\.00\x1b\[39m/);
-  assert.match(report, /\x1b\[32m0\.00\x1b\[39m/);
-});
-
 test('renderWeeklyStatsReport colors best and worst mission counts', () => {
   process.env.FORCE_COLOR = '1';
   const report = renderWeeklyStatsReport([
@@ -533,9 +531,9 @@ test('renderWeeklyStatsReport colors best and worst mission counts', () => {
     { date: '2026-05-13', mission: 'task-f', classification: 'ai_sdlc', implementer: 'gemini', pr_fix_rounds: '1', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
-  assert.match(report, /\x1b\[34mclaude\x1b\[39m\s+\x1b\[31m1\x1b\[39m/);
-  assert.match(report, /\x1b\[35mcodex\x1b\[39m\s+\x1b\[33m2\x1b\[39m/);
-  assert.match(report, /\x1b\[36mgemini\x1b\[39m\s+\x1b\[32m3\x1b\[39m/);
+  assert.match(report, /claude-1\s+\x1b\[31m1\x1b\[39m/);
+  assert.match(report, /codex-1\s+\x1b\[33m2\x1b\[39m/);
+  assert.match(report, /gemini-1\s+\x1b\[32m3\x1b\[39m/);
 });
 
 test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with the contracted columns', () => {
@@ -545,7 +543,7 @@ test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with
 
   const plain = __mm2.stripAnsi(report);
   assert.match(plain, /Agent spend by stage this week/);
-  assert.match(plain, /Agent family\s+draft\s+execute\s+review\s+follow-up\s+default\s+total \/ peak/);
+  assert.match(plain, /Model\s+draft\s+execute\s+review\s+follow-up\s+default\s+total/);
 });
 
 test('task-1414: renderWeeklyStatsReport keeps Codex quota peaks with stage active shown as execute', () => {
@@ -557,7 +555,7 @@ test('task-1414: renderWeeklyStatsReport keeps Codex quota peaks with stage acti
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /codex\s+20% quota peak\s+30% quota peak\s+50% quota peak\s+—\s+—\s+50% quota peak/);
+  assert.match(spendSection, /codex-1\s+20%\s+30%\s+50%\s+—\s+—\s+100%/);
   // Not fed by cost_usd or duration_minutes for a Codex/OpenAI row.
   assert.doesNotMatch(spendSection, /\$/);
   assert.doesNotMatch(spendSection, /\dm \(/);
@@ -572,7 +570,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, 
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /claude\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+\$0 \(0%\)\s+\$0 \(0%\)\s+\$10 \(100%\)/);
+  assert.match(spendSection, /claude-1\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+\$0 \(0%\)\s+\$0 \(0%\)\s+\$10 \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
 });
 
@@ -585,7 +583,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from dura
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /custom\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+0m \(0%\)\s+0m \(0%\)\s+50m \(100%\)/);
+  assert.match(spendSection, /custom-1\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+0m \(0%\)\s+0m \(0%\)\s+50m \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
 });
 
@@ -610,7 +608,7 @@ test('task-1414: renderWeeklyStatsReport spend table renders a stable empty stat
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /custom\s+—\s+—\s+—\s+—\s+—\s+—/);
+  assert.match(spendSection, /custom-1\s+—\s+—\s+—\s+—\s+—\s+—/);
   assert.doesNotMatch(spendSection, /0%/);
 });
 
@@ -782,7 +780,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
     assert.doesNotMatch(report, /Agent telemetry/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
     assert.match(report, /Agent performance previous week \(2026-05-05 → 2026-05-11\)/);
-    assert.match(report, /Agent family\s+# missions as implementer\s+Average authored PR fix rounds/);
+    assert.match(report, /Model\s+# missions as implementer\s+Avg reimplementation rounds \/ mission/);
     assert.doesNotMatch(report, /Mission flow \(2026-05-12 → 2026-05-18\)/);
   } finally {
     await restoreHome();
@@ -868,6 +866,24 @@ test('task-1251: upsertMeasurementRow keys on (mission, stage) so stages do not 
   }
 });
 
+test('re-recording a row stored before model-keyed identity updates it instead of duplicating it (TASK-2832)', () => {
+  const dbFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-stats-legacy-key-')), 'parallix.db');
+  const options = { configuration: resolveConfiguration(process.env), dbPath: dbFile };
+  try {
+    const base = { date: '2026-06-07', repo: 'r', mission: 'task-3000', classification: 'ai_sdlc', implementer: 'codex', stage: 'active', model: 'gpt-6.1-sol' };
+    stats.upsertMeasurementRow({ ...base, actorKey: 'codex', cost_usd: '1', input_tokens: '100' }, options); // legacy key: actor only
+    stats.upsertMeasurementRow({ ...base, cost_usd: '2', input_tokens: '200' }, options);
+    const rows = stats.loadMeasurementRows(options).rows;
+    assert.equal(rows.length, 1, 'no duplicate row for the legacy identity');
+    assert.equal(rows[0].input_tokens, '200');
+    // A different model is a new identity, not a merge.
+    stats.upsertMeasurementRow({ ...base, model: 'gpt-6.2', input_tokens: '5' }, options);
+    assert.equal(stats.loadMeasurementRows(options).rows.length, 2);
+  } finally {
+    fs.rmSync(path.dirname(dbFile), { recursive: true, force: true });
+  }
+});
+
 test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero fallback', () => {
   const mapped = stats.telemetryToStatsFields(
     { provider: 'openai', model: 'gpt-5.4-mini', inputTokens: 1000, outputTokens: 50, cachedTokens: 900, totalTokens: 1050, toolCalls: 7, usagePercent: 42.6 },
@@ -902,8 +918,8 @@ test('task-1301: renderRangeStatsReport counts unique missions when a mission ha
   ];
   const report = renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /codex\s+1\s+2\.00/); // 1 unique codex mission with pr_fix_rounds=2
-  assert.match(plain, /\bcustom\s+1\s+1\.00/); // 1 unique custom mission with pr_fix_rounds=1
+  assert.match(plain, /codex-1\s+1\s+2\b/); // 1 unique codex mission with pr_fix_rounds=2
+  assert.match(plain, /\bcustom-1\s+1\s+1\b/); // 1 unique custom mission with pr_fix_rounds=1
 });
 
 test('task-1314: renderRangeStatsReport counts same mission separately across repos', () => {
@@ -916,8 +932,8 @@ test('task-1314: renderRangeStatsReport counts same mission separately across re
   ];
   const report = renderRangeStatsReport(rows, { from: '2026-06-10', to: '2026-06-10' });
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /codex\s+1\s+3\.00/); // repo-distinct codex mission with pr_fix_rounds=3
-  assert.match(plain, /\bcustom\s+1\s+1\.00/); // repo-distinct custom mission with pr_fix_rounds=1
+  assert.match(plain, /codex-1\s+1\s+3\b/); // repo-distinct codex mission with pr_fix_rounds=3
+  assert.match(plain, /\bcustom-1\s+1\s+1\b/); // repo-distinct custom mission with pr_fix_rounds=1
 });
 
 // task-1318: review rows keep the MISSION implementer for grouping while
@@ -1055,7 +1071,7 @@ test('deriveImplementerAndFixRounds counts the rounds the reviewer sent back to 
     const info = await stats._internals.deriveImplementerAndFixRounds('task-3000', root, restoreHome.store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'codex');
-    assert.equal(info.prFixRounds, 2);
+    assert.equal(info.total, 2);
   } finally {
     await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
@@ -1089,7 +1105,7 @@ test('deriveImplementerAndFixRounds prefers the Review aggregate over the event 
     const info = await stats._internals.deriveImplementerAndFixRounds('task-3010', root, restoreHome.store);
     assert.equal(info.source, 'review-aggregate');
     assert.equal(info.implementer, 'gemini');
-    assert.equal(info.prFixRounds, 1, 'one round the reviewer sent back');
+    assert.equal(info.total, 1, 'one round the reviewer sent back');
   } finally {
     await restoreHome();
     fs.rmSync(root, { recursive: true, force: true });
@@ -1109,9 +1125,7 @@ test('summarizeAgentWindow reports the reconciled stored observation (task-1318)
   ];
 
   const stored = summarizeAgentWindow(rows, window);
-  assert.equal(stored[0].implementer, 'codex');
-  assert.equal(stored[0].missions, 1);
-  assert.equal(stored[0].averageFixRounds, '2.00', 'pr_fix_rounds from closed rollup row');
+  assert.deepEqual(stored, [{ model: 'codex-1', missions: 1, measuredMissions: 1, reimplementationRounds: 2, incomplete: false }], 'pr_fix_rounds from closed rollup row');
 
 
 });
@@ -1219,7 +1233,7 @@ test('task-1342: review row with OpenAI reviewer shows Usage % even when claude 
   assert.equal(usageCol, '37', 'Usage % should be 37 for review row with OpenAI reviewer');
 });
 
-test('completed-mission credit groups by the recorded family, not telemetry models', () => {
+test('completed-mission credit groups by the recorded model, never a family row', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-1001', implementer: 'custom', model: 'qwen3.5', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
@@ -1229,9 +1243,7 @@ test('completed-mission credit groups by the recorded family, not telemetry mode
 
   const result = summarizeAgentWindow(rows, window);
 
-  assert.deepEqual(result, [
-    { implementer: 'custom', missions: 3, averageFixRounds: '1.00', prFixObservationCount: 3 },
-  ]);
+  assert.deepEqual(result.map(row => [row.model, row.missions, row.reimplementationRounds]), [['llama3', 1, 0], ['qwen3.5', 2, 3]]);
 });
 
 test('task-2213: summarizeAgentWindow falls back to the recorded implementer when the telemetry model is blank', () => {
@@ -1243,14 +1255,11 @@ test('task-2213: summarizeAgentWindow falls back to the recorded implementer whe
 
   const result = summarizeAgentWindow(rows, window);
 
-  assert.equal(result.length, 1, 'should have one group when model is empty');
-  const claudeEntry = result.find(r => r.implementer === 'claude');
-  assert.ok(claudeEntry, 'claude group should exist as fallback');
-  assert.equal(claudeEntry.missions, 2, 'claude should have 2 missions');
-  assert.equal(claudeEntry.averageFixRounds, '2.00', 'claude avg fix rounds should be 2.00');
+  assert.equal(result.length, 1, 'blank models never become a generic family row');
+  assert.deepEqual(result[0], { model: null, missions: 2, measuredMissions: 2, reimplementationRounds: 4, incomplete: false });
 });
 
-test('completed-mission credit does not invent mixed model owners', () => {
+test('completed-mission credit shows each recorded model and never invents a family row', () => {
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-20T00:00:00Z') };
   const rows = [
     { date: '2026-06-12', mission: 'task-3001', implementer: 'codex', model: 'gpt-5', classification: 'ai_sdlc', pr_fix_rounds: '1', completedForTest: 'yes' },
@@ -1262,33 +1271,31 @@ test('completed-mission credit does not invent mixed model owners', () => {
 
   const result = summarizeAgentWindow(rows, window);
 
-  assert.deepEqual(result, [
-    { implementer: 'claude', missions: 1, averageFixRounds: '3.00', prFixObservationCount: 1 },
-    { implementer: 'codex', missions: 1, averageFixRounds: '1.00', prFixObservationCount: 1 },
-    { implementer: 'custom', missions: 2, averageFixRounds: '1.50', prFixObservationCount: 2 },
-    { implementer: 'gemini', missions: 1, averageFixRounds: '0.00', prFixObservationCount: 1 },
+  assert.deepEqual(result.map(row => [row.model, row.missions, row.reimplementationRounds]), [
+    ['gemini-2.5-pro', 1, 0], ['gpt-5', 1, 1], ['llama3', 1, 1], ['qwen3.5', 1, 2], [null, 1, 3],
   ]);
 });
 
-test('weekly delivery credit displays recorded agent families', () => {
+test('weekly delivery credit displays recorded models', () => {
   const report = renderWeeklyStatsReport([
     { date: '2026-05-18', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', completedForTest: 'yes' },
     { date: '2026-05-17', mission: 'task-b', classification: 'user_value', implementer: 'codex', model: 'gpt-5', pr_fix_rounds: '1', completedForTest: 'yes' },
   ], { today: '2026-05-18' });
 
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /custom\s+1\s+2\.00/);
-  assert.match(plain, /codex\s+1\s+1\.00/);
+  assert.match(plain, /qwen3\.5\s+1\s+2\b/);
+  assert.match(plain, /gpt-5\s+1\s+1\b/);
 });
 
-test('range delivery credit displays recorded agent families', () => {
+test('range delivery credit displays recorded models', () => {
   const report = renderRangeStatsReport([
     { date: '2026-05-10', mission: 'task-a', classification: 'ai_sdlc', implementer: 'custom', model: 'qwen3.5', pr_fix_rounds: '2', completedForTest: 'yes' },
     { date: '2026-05-15', mission: 'task-b', classification: 'user_value', implementer: 'custom', model: 'llama3', pr_fix_rounds: '0', completedForTest: 'yes' },
   ], { from: '2026-05-01', to: '2026-05-31' });
 
   const plain = __mm2.stripAnsi(report);
-  assert.match(plain, /custom\s+2\s+1\.00/);
+  assert.match(plain, /qwen3\.5\s+1\s+2\b/);
+  assert.match(plain, /llama3\s+1\s+0\b/);
 });
 
 test('weekly and range delivery credit ignores failed families and mixed attempt models', () => {
@@ -1303,7 +1310,7 @@ test('weekly and range delivery credit ignores failed families and mixed attempt
     stats.renderRangeStatsReport(rows, { from: '2026-05-01', to: '2026-05-31', missionFlow: completion }),
   ]) {
     const performance = __mm2.stripAnsi(report).split('Agent performance')[1].split('Agent spend')[0];
-    assert.match(performance, /custom\s+1\s/);
+    assert.match(performance, /Unavailable model attribution: 1 missions/);
     assert.doesNotMatch(performance, /codex|claude|mixed|opus/);
   }
   const unknown = stats.renderRangeStatsReport(rows, { from: '2026-05-01', to: '2026-05-31', missionFlow: [{ ...completion[0], implementer: null }] });

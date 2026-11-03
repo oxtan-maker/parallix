@@ -622,12 +622,12 @@ test('R5/R6: Agent Performance follows completed Missions, not telemetry dates',
   const currentPerformance = stats.summarizeAgentWindow(rows, current, { completedMissionKeys: new Set(['parallix::task-2371-a']), completedMissionOwners: new Map([['parallix::task-2371-a', 'codex']]) });
   const previousPerformance = stats.summarizeAgentWindow(rows, previous, { completedMissionKeys: new Set(['parallix::task-2371-b']), completedMissionOwners: new Map([['parallix::task-2371-b', 'codex']]) });
 
-  assert.deepEqual(currentPerformance.map(row => [row.implementer, row.missions]), [['codex', 1]], 'A completed Aug 10 belongs to current despite Aug 4/5 telemetry');
-  assert.deepEqual(previousPerformance.map(row => [row.implementer, row.missions]), [['codex', 1]], 'B completed Aug 4 belongs to previous despite Aug 8 closeout telemetry');
-  assert.deepEqual(stats.summarizeAgentStageSpend(rows, current).map(row => row.implementer), ['terra'], 'spend remains intentionally telemetry-date windowed');
+  assert.deepEqual(currentPerformance.map(row => row.missions), [1], 'A completed Aug 10 belongs to current despite Aug 4/5 telemetry');
+  assert.deepEqual(previousPerformance.map(row => row.missions), [1], 'B completed Aug 4 belongs to previous despite Aug 8 closeout telemetry');
+  assert.deepEqual(stats.summarizeAgentStageSpend(rows, current).map(row => row.actor), ['terra'], 'spend remains intentionally telemetry-date windowed');
 });
 
-test('R7/R8: PR-fix averages exclude unknown rounds and retain known zero', async () => {
+test('R7/R8: unmeasured missions stay out of the average and known zero stays zero (TASK-2832)', async () => {
   const stats = await import('../../../src/adapters/cli/commands/stats.js');
   const window = { start: new Date('2026-08-06T00:00:00Z'), end: new Date('2026-08-12T00:00:00Z') };
   const rows = [
@@ -637,13 +637,14 @@ test('R7/R8: PR-fix averages exclude unknown rounds and retain known zero', asyn
     { repo: 'parallix', mission: 'task-2371-unknown-b', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default' },
   ];
   const keys = new Set(rows.map(row => `${row.repo}::${row.mission}`));
-  const [summary] = stats.summarizeAgentWindow(rows, window, { completedMissionKeys: keys, reviewObservations: fixtureReviewObservations(rows) });
-  assert.equal(summary.implementer, 'terra');
-  assert.equal(summary.missions, 4);
-  assert.equal(((summary)).prFixObservationCount, 2);
-  assert.equal(summary.averageFixRounds, '1.00');
-  const unavailable = stats.summarizeAgentWindow(rows.slice(2), window, { completedMissionKeys: new Set(['parallix::task-2371-unknown-a', 'parallix::task-2371-unknown-b']) });
-  assert.deepEqual(unavailable.map(row => [((row)).prFixObservationCount, row.averageFixRounds]), [[0, null]]);
+  const modelled = rows.map(row => ({ ...row, model: 'terra-1' }));
+  const owners = new Map([...keys].map(key => [key, 'terra'] as const));
+  const [summary] = stats.summarizeAgentWindow(modelled, window, { completedMissionKeys: keys, completedMissionOwners: owners,
+    reviewObservations: new Map(fixtureReviewObservations(rows)) });
+  assert.deepEqual(summary, { model: 'terra-1', missions: 4, measuredMissions: 2, reimplementationRounds: 2, incomplete: false });
+  const unavailable = stats.summarizeAgentWindow(modelled.slice(2), window, { completedMissionKeys: new Set(['parallix::task-2371-unknown-a', 'parallix::task-2371-unknown-b']),
+    completedMissionOwners: owners });
+  assert.deepEqual(unavailable.map(row => [row.reimplementationRounds, row.incomplete]), [[0, false]]);
 });
 
 

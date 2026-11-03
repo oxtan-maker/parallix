@@ -14,6 +14,7 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
     private readonly _rootDir: string,
     private readonly _measurementStore: { configuration?: ParallixConfiguration; dbPath?: string; store?: import('../../application/measurement-ports.js').MeasurementStorePort } = {},
     private readonly _missionStore: Pick<import('../../application/domain-ports.js').MissionStore, 'loadByRepository'> | null = null,
+    private readonly _workflowReturns?: (_missionId: string) => Promise<readonly import('../../application/services/review-statistics.js').WorkflowReturn[] | undefined>,
   ) { this.evidenceReader = createReviewStatisticsEvidenceReader(_rootDir); }
 
   async readProjection(): Promise<StatsProjection> {
@@ -25,7 +26,8 @@ export class LegacyStatsBackfillAdapter implements StatsBackfillPort {
       .map(record => ({ ...stats.measurementToStatsRow(record), actorKey: record.actorKey }));
     const evidence = new Map<string, import('../../application/services/review-statistics.js').ReviewStatisticsEvidence>();
     for (const mission of missions) {
-      if (mission.status === 'done') { evidence.set(mission.id, await this.evidenceReader(mission.review)); }
+      if (mission.status === 'done') { evidence.set(mission.id, await this.evidenceReader(mission.review,
+        await this._workflowReturns?.(mission.id))); }
     }
     return reconstructReviewMeasurements(missions, existing, evidence);
   }

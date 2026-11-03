@@ -1,3 +1,6 @@
+import { StructuredFailure, failureReason } from '../../domain/failure-reason.js';
+import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
+import type { RetainedRepairPort } from '../ports/review-round.js';
 import { createIntegrationRebase } from './rebase.js';
 import { integrationRepairCertified, verifyRestartedRepair } from './repair-certification.js';
 import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
@@ -29,16 +32,34 @@ export async function resumePendingIntegrationRepair(slug: string, services: Int
 
 /** Shared continuation only certifies and assesses; it has no landing or review launch path. */
 export async function certifyPendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
-  ports: IntegrateWorkflowPorts, verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }) {
+  ports: IntegrateWorkflowPorts, verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }, exact?: RetainedRepairPort) {
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
   const pending = pendingIntegrationApproval(loaded.mission);
   if (!pending) { return null; }
   const failure = repairCheckpointFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria);
-  if (failure) { throw new Error(failure); }
+  if (failure) { throw new StructuredFailure(failure, failureReason('mission-contract-incomplete', 'verification')); }
   const worktree = ports.missionPaths.resolveWorktree(slug, { cwd: ports.process.cwd() });
   if (!worktree) { throw abortWith(ports.landing, 'Integration repair checkout is unavailable.'); }
   const execution = await resolveRepairExecution(slug, services, ports, pending, verification, worktree);
+  if (exact) {
+    const obligations = effectiveRepairObligations(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria, worktree);
+    const command = obligations.at(-1)?.repair?.command;
+    if (command) {
+      // Read immutable original diagnostics before running the authorized verifier.
+      const retained = await exact.read(command).catch(cause => {
+        throw new StructuredFailure('Original repair evidence is unavailable', failureReason('incomplete-evidence', 'verification'), cause);
+      });
+      if (retained.evidence.command !== command || retained.evidence.cwd !== worktree
+        || retained.evidence.exitCode === 0 || !retained.evidence.captureComplete) {
+        throw new StructuredFailure('Original repair evidence is incomplete or mismatched', failureReason('incomplete-evidence', 'verification'));
+      }
+      await verifyRestartedRepair({ slug, services, worktree, revision: execution.revision,
+        gates: [{ key: 'repair', command, order: 1 }], head: () => committedRepairHead(execution),
+        run: async () => { throw new Error('Exact verification owns this check'); },
+        exact: () => exact.verify(command, worktree) });
+    }
+  }
   const gatesPassed = await ensureRepairVerification(execution);
   const outcome = await retainIntegrationApproval({ slug, services, evidence: execution.evidence,
     candidate: { revision: execution.revision, baseline: execution.baseline }, worktree, head: () => committedRepairHead(execution) });
@@ -78,7 +99,7 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
   const failure = repairCheckpointFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria);
-  if (failure) { throw new Error(failure); }
+  if (failure) { throw new StructuredFailure(failure, failureReason('mission-contract-incomplete', 'verification')); }
   const needsCertification = !integrationRepairCertified(loaded.mission, worktree);
   const validation = await evidence.validation(slug).catch(() => null);
   const assessment = pending.integrationRepairAssessment!;

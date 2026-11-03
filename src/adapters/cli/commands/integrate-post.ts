@@ -235,7 +235,7 @@ function resolveLandedCommitTimestamp(landedCommit: string, rootDir: string) {
  * @param {string} slug @param {string} landedCommit @param {any} missionServices
  * @param{{rootDir?: string; landedAt?: string}} options
  */
-export async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: IntegrationDecisionServices, { rootDir = process.cwd(), landedAt: landedAtOpt }: { rootDir?: string; landedAt?: string } = {}) {
+export async function persistLandedIntegrationOrAbort(slug: string, landedCommit: string, missionServices: IntegrationDecisionServices, { rootDir = process.cwd(), landedAt: landedAtOpt, landedRecovery = false }: { rootDir?: string; landedAt?: string; landedRecovery?: boolean } = {}) {
   let loaded = await missionServices.store.load(missionId(slug));
   if (loaded.kind !== 'found') {
     fmt.log.fail(`Mission ${missionId(slug)} is unavailable after landing; statistics will not run.`);
@@ -254,6 +254,7 @@ export async function persistLandedIntegrationOrAbort(slug: string, landedCommit
       capabilities: new Set(['integration:decide']),
       idempotencyKey: `integrate:${slug}:${landedCommit}`,
       actor: loaded.mission.assignee ?? 'custom',
+      landedRecovery,
       // Delivery completion time. Distinct from the administrative `closedAt`
       // below, which records when the operator ran closeout: a mission resumed
       // two days later delivered on the landing day but was closed out on the

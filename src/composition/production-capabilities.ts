@@ -1,3 +1,7 @@
+import { OperationalHistoryService } from '../application/services/operational-history-service.js';
+import { SqliteOperationalHistoryRepository } from '../adapters/sqlite/operational-history-repository.js';
+import { MissionIntegrationService } from '../application/mission-integration-service.js';
+import { integrationRepairContinuation } from './integration-repair-continuation.js';
 import type { DraftAdapterDependencies } from '../adapters/cli/commands/draft-adapter-types.js';
 import type { GitReader } from '../adapters/git/worktree.js';
 import { randomUUID } from 'node:crypto';
@@ -172,9 +176,12 @@ function createBoardReviewPreparationWorkflow(
   store: MissionStore & MissionTransitionStore,
   configuration: ParallixConfiguration,
   reviewLoop: typeof runReviewLoop = runReviewLoop,
+  database?: SqliteDatabaseAdapter | null,
 ) {
   const lifecycle = new MissionLifecycleService(store);
   const missionServices = {
+    operationalHistory: database ? new OperationalHistoryService(new SqliteOperationalHistoryRepository(database)) : null,
+    integration: new MissionIntegrationService(store),
     store,
     lifecycle,
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
@@ -199,7 +206,7 @@ function createBoardReviewPreparationWorkflow(
         invalidateResolvedBlocker: async () => undefined,
         invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
-        mechanisms: () => createReviewLoopPorts(slug, {}, { configuration, pinnedReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
+        mechanisms: () => createReviewLoopPorts(slug, {}, { integrationRepair: integrationRepairContinuation(missionServices, configuration), configuration, pinnedReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };
@@ -235,7 +242,7 @@ export function composeProductionCapabilities(
         missionStore,
       ),
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
-      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(missionStore, overrides.configuration, overrides.reviewPreparationReviewLoop),
+      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(missionStore, overrides.configuration, overrides.reviewPreparationReviewLoop, database),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

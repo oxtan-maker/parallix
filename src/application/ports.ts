@@ -49,8 +49,7 @@ export interface StatsReconstructionChange {
   readonly before: readonly (number | null)[];
   readonly beforeObserved: boolean;
   readonly after: number | null;
-  readonly byImplementer: Readonly<Record<string, number | null>>;
-  readonly causes: readonly string[];
+  readonly byImplementer: Readonly<Record<string, number>>;
 }
 export interface StatsProjection {
   readonly changes?: readonly StatsReconstructionChange[];

@@ -53,7 +53,7 @@ certify a passing check, or change capture completeness. Inspect the original
 cause and machine facts before deciding how to resume.
 
 An integration repair with an effective approval resumes certification and
-approval-retention assessment before review preparation. Execute and integrate
+approval-retention assessment before review preparation. Direct review, execute and integrate
 use the same owners; board and lead offer the safe execute continuation while
 that assessment is pending. Equivalent repairs retain the independent judgment
 and stop in the integration lane for human landing. Changed patches follow the

@@ -17,6 +17,7 @@
  */
 
 import { applyOperatorCorrection } from '../../domain/operator-review-correction.js';
+import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
 import { settleRequestedChanges } from './review-request-changes-transition.js';
 import { verdictBlockForReview, type VerdictBlock } from '../../application/review-verdict-readiness.js';
 import { readReviewForDecision, type ReviewRoundObservation } from './review-round-read.js';
@@ -474,5 +475,6 @@ function changesRequestedDisposition(value: ReviewDisposition | undefined): Excl
 }
 
 function roundWriteFailure(error: unknown, fallback: string): ReviewRoundResult {
+  if (error instanceof WorkflowOwnershipError) { throw error; }
   return { outcome: 'failed', diagnostic: diagnosticFrom(error, fallback), ...(isStaleWrite(error) ? { kind: 'stale-write' as const } : {}) };
 }

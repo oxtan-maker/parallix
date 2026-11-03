@@ -1,3 +1,4 @@
+import { workflowEligible } from '../../../src/domain/workflow-command-policy.js';
 import { replaceCurrentRound } from '../../../src/domain/review.js';
 import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 /**
@@ -625,10 +626,15 @@ for (const status of ['active', 'review'] as const) {
     const card = projectMissionCard(before, { latestGate: 'unconfigured', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
     assert.equal(card.pendingApprovalRetention, true);
     assert.equal(attentionAction(card, attentionReason(card))?.kind, 'active:execute', 'board and lead admit safe certification');
-    assert.equal(card.commands.find(command => command.command === 'review')?.enabled, false);
+    assert.equal(card.commands.find(command => command.command === 'review')?.enabled, true);
+    assert.equal(workflowEligible('review:submit', before, 'enter'), true, 'direct continuation is admitted');
+    assert.equal(workflowEligible('review:submit', before, 'submit'), false, 'submission cannot bypass certification');
     const result = await new ExecuteMissionService(execution).execute({ operationId: 'retained-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
     assert.equal(result.status, 'completed', JSON.stringify(result));
     assert.equal(verifications, 1);
+    const after = projectMissionCard(s.store.mission(), { latestGate: 'passed', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
+    assert.equal(after.pendingApprovalRetention, false);
+    assert.equal(attentionAction(after, attentionReason(after))?.kind, 'integrate:merge', 'board and lead leave landing to the human');
     assert.equal(s.store.mission().status, 'integration');
     assert.deepEqual(currentReviewRound(s.store.mission().review!).decision, currentReviewRound(before.review!).decision);
     assert.equal(s.store.mission().review!.rounds.length, 1);

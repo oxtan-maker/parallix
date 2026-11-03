@@ -66,6 +66,8 @@ export interface ProcessEntry {
 
 export interface DetectRunningSessionsOptions {
   readonly rootDir: string;
+  /** A focused status read need not establish liveness for unrelated Missions. */
+  readonly missionId?: MissionId;
   /** Process listing seam; defaults to `ps -eo pid=,args=`. */
   readonly listProcesses?: () => readonly ProcessEntry[] | null;
   /** Worktree listing seam; defaults to `git worktree list --porcelain`. */
@@ -205,12 +207,18 @@ export function detectRunningMissionSessions(
 
   const found = new Map<string, RunningMissionSession>();
   for (const process of processes) {
+    if (belongsToOtherMission(process.args, options.missionId)) { continue; }
     const entry = runningMissionSession(process, options.rootDir, worktrees, resolveCwd, nowMs);
     if (entry === 'unknown') { return null; }
     if (entry === null) { continue; }
     found.set(entry.key, entry.session);
   }
   return [...found.values()];
+}
+
+function belongsToOtherMission(args: string, selected?: MissionId): boolean {
+  const explicit = parsePxInvocation(args)?.missionId;
+  return Boolean(selected && explicit && explicit !== selected);
 }
 
 function runningMissionSession(
@@ -222,6 +230,7 @@ function runningMissionSession(
 ): { readonly key: string; readonly session: RunningMissionSession } | null | 'unknown' {
     const invocation = parsePxInvocation(process.args);
     if (invocation === null) { return null; }
+    if (isReviewObserver(invocation.subcommand, process.args)) { return null; }
     const role = AGENT_COMMAND_ROLES[invocation.subcommand];
     if (role === undefined) { return null; }
 
@@ -264,6 +273,10 @@ function runningMissionSession(
         pinnedAgent: invocation.pinnedAgent,
       },
     };
+}
+
+function isReviewObserver(command: string, args: string): boolean {
+  return command === 'review' && /(?:^|\s)--(?:status|help|dry-run)(?:\s|$)/.test(args);
 }
 
 /**

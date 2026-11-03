@@ -13,7 +13,7 @@ export interface StatisticsRecordingPort {
   readClassification(_slug: string): { readonly classification: string | null; readonly error?: string };
   readStoredClassification(_slug: string): Promise<string>;
   readReview(_slug: string): Promise<Review | null>;
-  readReviewEvidence(_review: Review | null): Promise<import('../services/review-statistics.js').ReviewStatisticsEvidence>;
+  readReviewEvidence(_slug: string, _review: Review | null): Promise<import('../services/review-statistics.js').ReviewStatisticsEvidence>;
   readMeasurements(): readonly StatsRow[];
   upsert(_row: StatsRow): StatisticsWriteResult;
   readonly repositoryName: string;

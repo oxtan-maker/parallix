@@ -1,8 +1,8 @@
 ---
 id: TASK-2831
 title: Resume approved integration repairs through direct review
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-02 19:59'
 labels:
   - bug
@@ -46,3 +46,7 @@ Scope excludes px-0024 success-exit/closed-card implementation, forced lane chan
 - [ ] #5 Docs updated to reflect any workflow or user-facing behavior change
 - [ ] #6 Bug-labeled missions include a red-to-green reproduction test that fails before the fix and passes after
 <!-- DOD:END -->
+
+## Implementation overlap
+
+TASK-2833 owns this same direct-review correction and its focused regression. Use its shared integration certification and approval-retention path; no separate implementation is needed for TASK-2831. Lifecycle disposition remains operator-owned.

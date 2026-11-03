@@ -235,7 +235,7 @@ export interface IntegrateLandingPort {
   reportSyncMergedFailure(_syncResult: { statusCode?: number | null; error?: string; raw?: string }): void;
   resolveForgejoUserForIntegration(_taskAssignee: string | null): { forgejoUser: string | null; warning: string | null };
   isNoMergeToAbortResult(_result: IntegrateCommandResult): boolean;
-  persistLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: IntegrationMissionServices, _options: { rootDir: string }): Promise<unknown>;
+  persistLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: IntegrationMissionServices, _options: { rootDir: string; landedRecovery?: boolean }): Promise<unknown>;
   closeLandedIntegrationOrAbort(_slug: string, _commit: string, _missionServices: IntegrationMissionServices): Promise<unknown>;
   recordPostIntegrationStatsOrAbort(_slug: string, _options: { rootDir: string; missionStore: MissionStore; readMissionFlow?: () => Promise<readonly import('./cli-workflows.js').StatsMissionFlow[] | null> }): Promise<unknown>;
   hasIntegrationMeasurement?(_slug: string, _rootDir: string): boolean;

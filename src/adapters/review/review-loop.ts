@@ -5,7 +5,7 @@ import { providerReviewObservation, providerReviewChanges, providerResolution } 
 import { reviewVerdictBlock } from '../../application/review-verdict-readiness.js';
 import { readAgentLaunchContext } from '../../application/agent-launch-context.js';
 import { recordImplementerLaunch } from '../../application/rebase-identity.js';
-import { promptArtifacts } from '../agents/prompt-artifacts.js';
+import { promptArtifacts, rejectedVerdictContext } from '../agents/prompt-artifacts.js';
 import { retainedRepairPort } from './retained-repair.js';
 import { composeHumanFeedback } from './review-loop-human-feedback.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
@@ -62,6 +62,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly integrationRepair?: ReviewLoopPorts['integrationRepair'];
   readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
   readonly pinnedReviewer?: string;
   readonly configuration?: ParallixConfiguration;
@@ -193,6 +194,14 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
 }
 
 /** Role prompts and launches through the configured agent launcher. */
+export function reviewerLaunchConfiguration(configuration: ParallixConfiguration | undefined,
+  role: ReviewAgentLaunch['role'], prompt?: ReviewPromptFacts): ParallixConfiguration | undefined {
+  if (!configuration || role !== 'reviewer' || !prompt) { return configuration; }
+  return { ...configuration, forwardedEnvironment: { ...configuration.forwardedEnvironment,
+    PARALLIX_REVIEW_SOURCE_ROUND: String(prompt.attempt),
+  } };
+}
+
 function agentPort(slug: string, branch: string, worktree: string, missionPath: string | undefined, target: ReviewLoopTarget, bindings: ReviewLoopBindings, writeState: typeof writeReviewState, log: (_msg: string) => void, error: (_msg: string) => void): ReviewAgentPort {
   const focus = target.focus ?? 'all';
   const rolePrompt = async (role: ReviewAgentLaunch['role'], facts: ReviewPromptFacts, actual: string): Promise<string> => {
@@ -201,7 +210,9 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     const stage = role === 'reviewer'
     ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: typeof facts.integrationRepair === 'string' ? facts.integrationRepair : undefined })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
     : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome === undefined ? undefined : `${facts.reviewOutcome}`, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
-    return [snapshot, stage, role === 'reviewer' ? facts.preReviewRepair : null].filter(Boolean).join('\n\n');
+    return [snapshot, stage, role === 'reviewer' ? facts.preReviewRepair : null,
+      role === 'reviewer' ? rejectedVerdictContext(worktree, slug) : null,
+    ].filter(Boolean).join('\n\n');
   };
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
@@ -210,7 +221,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
       }
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', {
-        configuration: bindings.configuration,
+        configuration: reviewerLaunchConfiguration(bindings.configuration, role, prompt),
         agent,
         pinnedAgent: role === 'reviewer' && bindings.pinnedReviewer !== undefined,
         prompt: async (actual: string) => [prompt ? await rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
@@ -306,6 +317,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     branch,
     worktree,
     classification: bindings.classification,
+    integrationRepair: bindings.integrationRepair,
     integrationApprovalEvidence: createIntegrationApprovalEvidence(worktree, bindings.integrationValidation ?? (async () => null), bindings.configuration),
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,

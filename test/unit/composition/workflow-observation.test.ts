@@ -1,5 +1,20 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { createReviewLivenessReader, reviewLivenessSystem } from '../../../src/composition/review-liveness.js';
+import type { ProductionApplicationServices } from '../../../src/composition/application-services.js';
+import type { MissionTerminalCapability } from '../../../src/application/ports/mission-terminal.js';
+
+test('orphan observation excludes the querying CLI capture and preserves unknown execution (TASK-2826)', async t => {
+  const runs = [{ record: { captureKind: 'coordinator', supervisorPid: process.pid }, state: 'running', execution: 'unknown' }];
+  t.mock.method(reviewLivenessSystem, 'startProcessTableRead', async () => []);
+  t.mock.method(reviewLivenessSystem, 'detectRunningMissionSessions', () => []);
+  t.mock.method(reviewLivenessSystem, 'createMissionTerminalCapability', () => ({ history: () => ({ ok: true, runs, unattributed: [] }) }) as unknown as MissionTerminalCapability);
+  const graph = { operatorState: { db: { query: async () => [] } }, mission: { repositoryId: 'repo' } } as unknown as ProductionApplicationServices;
+  const read = createReviewLivenessReader(graph, '/unused', resolveConfiguration({}));
+  assert.deepEqual(await read('task-one'), { workflow: false, coordinator: false, execution: false, reviewer: false });
+  runs.push({ record: { captureKind: 'agent', supervisorPid: 10 }, state: 'interrupted', execution: 'unknown' });
+  assert.deepEqual(await read('task-one'), { workflow: false, coordinator: false, execution: null, reviewer: null });
+});
 import { EventEmitter } from 'node:events';
 import { workflowObservationCapabilities, workflowObservationSystem } from '../../../src/composition/workflow-observation.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
