@@ -2,12 +2,17 @@ import { resolveVerificationResource, usesAdmittedVerification } from '../config
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { runPhaseGates } from '../config/repository-gates.js';
 import { formatVerificationCommand, resolveVerificationAdapter, runVerificationGate, type VerificationGateResult } from './verification.js';
+import { observeVerificationCommand } from '../../application/recording/verification-command.js';
+import { randomUUID } from 'node:crypto';
 
 /** The enabled path uses the same admitted child runner as lifecycle gates. */
 export async function runConfiguredVerification(area: string | undefined, root: string, configuration?: ParallixConfiguration): Promise<VerificationGateResult> {
-  if (!usesAdmittedVerification(root)) { return runVerificationGate(area, { rootDir: root, env: configuration?.forwardedEnvironment }); }
   if (!resolveVerificationAdapter(root).command) { return { status: 0 }; }
   const command = formatVerificationCommand(area, root);
+  if (!usesAdmittedVerification(root)) {
+    return observeVerificationCommand({ root, mission: '', batchId: randomUUID(), gate: 'verification', command,
+      phase: 'verification', after: [] }, () => runVerificationGate(area, { rootDir: root, env: configuration?.forwardedEnvironment }));
+  }
   const result = await runPhaseGates('handoff', { configuration, slug: '', checkoutPath: root,
     gates: [{ key: 'verification', command, order: 0, resource: resolveVerificationResource(root) }], maxParallel: 1,
   });

@@ -286,6 +286,7 @@ export interface IntegrateWorkflowPort {
 /** Adapter operations required by the stats reporting workflow. The application
  * owns the sequence; CLI and infrastructure provide these operations. */
 export interface StatsWorkflowPort<Row = unknown> {
+  loadVerificationStatistics?(_missions?: ReadonlySet<string>): Promise<import('../projections/verification-statistics.js').VerificationStatistics | null>;
   loadClassifierStatistics?(): Promise<import('../review-classification/statistics.js').ClassifierStatisticsInput | null>;
   loadMeasurements(): Promise<readonly Row[]>;
   loadMissionFlow(): Promise<readonly StatsMissionFlow[] | null>;

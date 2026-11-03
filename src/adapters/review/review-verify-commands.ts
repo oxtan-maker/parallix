@@ -20,6 +20,8 @@ import { reboundRejectedReviewPreparation } from '../../application/review-task-
 import type { ReviewReviewPreparationFailurePort } from '../../application/ports/review-task-mirror.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
+import { observeVerificationCommand } from '../../application/recording/verification-command.js';
+import { randomUUID } from 'node:crypto';
 import { performReviewPreparation } from "../cli/commands/review-preparation.js";
 
 type ReviewVerdict = { failures: string[]; warnings: string[] };
@@ -101,14 +103,17 @@ function verifyMissionLocation(missionDir: string | null, slug: string, current:
   log(fmt.status('FAIL', `Branch: current branch is ${fmt.branch(current)}, expected ${fmt.branch(branch)}`));
 }
 
-function runReviewerGate(area: string, rootDir: string, skipped: boolean, verdict: ReviewVerdict, deps: { runVerificationGateFn: typeof runVerificationGate; runFn: NonNullable<Parameters<typeof runVerificationGate>[1]>['runFn']; log: (_msg: string) => void }): void {
+async function runReviewerGate(area: string, rootDir: string, skipped: boolean, verdict: ReviewVerdict, deps: { runVerificationGateFn: typeof runVerificationGate; runFn: NonNullable<Parameters<typeof runVerificationGate>[1]>['runFn']; log: (_msg: string) => void }): Promise<void> {
   const { runVerificationGateFn, runFn, log } = deps;
   if (skipped) {
     log(fmt.status('WARN', `Verification gate skipped (--no-gate) for area ${area}`));
     return;
   }
   log(`Running reviewer gate: ${fmt.command(formatVerificationCommand(area, rootDir))}`);
-  if (runVerificationGateFn(area, { rootDir, stdio: 'inherit', runFn }).status === 0) {
+  const result = await observeVerificationCommand({ root: rootDir, mission: '', batchId: randomUUID(), gate: 'reviewer-verification',
+    command: formatVerificationCommand(area, rootDir), phase: 'review', after: [] },
+    () => runVerificationGateFn(area, { rootDir, stdio: 'inherit', runFn }));
+  if (result.status === 0) {
     log(fmt.status('PASS', 'Reviewer gate passed.'));
     return;
   }
@@ -175,7 +180,7 @@ export async function verifyReview(
   verifyReviewPullRequest(pr, { providerEnabled, taskResolution, taskStatus, virtualStatus, branch, slug }, verdict, log);
 
   if (missionDir) {
-    runReviewerGate(findMissionAreaFn(missionDir), rootDir, Boolean(skipGate || options.skipGate), verdict, { runVerificationGateFn, runFn, log });
+    await runReviewerGate(findMissionAreaFn(missionDir), rootDir, Boolean(skipGate || options.skipGate), verdict, { runVerificationGateFn, runFn, log });
   }
   if (taskResolution.ok) {
     logAcceptanceChecklist(getAcceptanceCriteriaFn(taskResolution.taskFile!), log);

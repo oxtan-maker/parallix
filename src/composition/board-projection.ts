@@ -26,6 +26,7 @@ import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
+import { verificationStatisticsReader } from './verification-statistics.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { SourceFact } from '../application/contracts.js';
 import { BoardCommandController, type BoardMissionServices } from '../application/controller/board-controller.js';
@@ -146,6 +147,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const catalog = createRepositoryMissionCatalog(deps);
   const loadBoardMissions = () => catalog.loadAllMissions();
   const currentWork = deps.executionActivity ?? (deps.database ? new SqliteExecutionActivityStore(deps.database, deps.repositoryId) : undefined);
+  const workflowOperations = deps.database ? new SqliteWorkflowOperationStore(deps.database, deps.repositoryId) : undefined;
   const runningSessions = createRunningSessionScan(deps);
   const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
   const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
@@ -183,7 +185,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     new ConcreteGitReadAdapter({ rootDir: deps.rootDir, repositoryId: deps.repositoryId, gitRunner: deps.gitFn ?? undefined }),
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     {
-      workflowOperations: deps.database ? new SqliteWorkflowOperationStore(deps.database, deps.repositoryId) : undefined,
+      workflowOperations,
       providerExecution: deps.providerExecution ?? { observe: (scope, currentOperationId) => {
         terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION, mission => topology?.resolveWorktree(mission) ?? null);
         const result = terminal.execution?.(scope.missionId, currentOperationId);
@@ -208,6 +210,13 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       changeIdentity,
       completedMissionRetentionDays,
       metricsAdapter: new ConcreteMetricsReadAdapter({
+        verification: verificationStatisticsReader(async () => {
+          const [history, operations, lifecycle] = await Promise.all([
+            deps.historyRepo.findAll(), workflowOperations?.all() ?? [],
+            deps.laneEventRepo.findByRepositoryId(deps.repositoryId),
+          ]);
+          return { repositoryId: deps.repositoryId, history, operations, lifecycle };
+        }),
         laneEventRepo: deps.laneEventRepo,
         usageRepo: deps.usageRepo,
         repositoryId: deps.repositoryId,

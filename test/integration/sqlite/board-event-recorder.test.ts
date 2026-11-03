@@ -1,18 +1,14 @@
 import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
 import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
-import { describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
+import { mkdtemp } from '../../helpers/temp-dir.js';
+import { copyMigratedSchema, prepareMigratedSchema } from '../../fixtures/migrated-database.js';
 
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
-import {
-  SqliteMigrationRunner,
-  loadDefaultMigrations,
-} from '../../../src/adapters/sqlite/migration-runner.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
-import type { BoardLaneEventRepository } from '../../../src/application/ports/operation-history.js';
 import {
   BoardEventRecorder,
   recordLaneTransitionSafely,
@@ -28,32 +24,24 @@ import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createTempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-recorder-'));
-}
-
-function cleanup(dir: string): void {
-  try {
-    fs.rmSync(dir, { recursive: true, force: true });
-  } catch {
-    // best-effort
-  }
-}
+// Migration contracts own fresh installs and upgrades. Recorder cases use the
+// current real schema, with a separate writable database for every case.
+before(prepareMigratedSchema);
 
 async function withRepo(
   run: (repo: SqliteBoardLaneEventRepository, db: SqliteDatabaseAdapter) => Promise<void>,
 ): Promise<void> {
-  const dir = createTempDir();
+  const dir = mkdtemp('parallix-recorder-');
   const db = new SqliteDatabaseAdapter();
-  await db.open({ path: path.join(dir, 'test.db') });
   try {
-    const runner = new SqliteMigrationRunner(db);
-    await runner.applyPending(loadDefaultMigrations());
+    const databasePath = path.join(dir, 'test.db');
+    copyMigratedSchema(databasePath);
+    await db.open({ path: databasePath });
     const repo = new SqliteBoardLaneEventRepository(db);
     await run(repo, db);
   } finally {
-    await db.close();
-    cleanup(dir);
+    try { await db.close(); }
+    finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
 }
 

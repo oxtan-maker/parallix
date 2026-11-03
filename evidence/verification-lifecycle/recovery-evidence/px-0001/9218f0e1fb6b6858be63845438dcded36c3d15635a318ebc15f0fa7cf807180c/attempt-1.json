@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "failureReason": {
+    "version": 1,
+    "code": "gate-failed"
+  },
+  "incidentId": "9218f0e1fb6b6858be63845438dcded36c3d15635a318ebc15f0fa7cf807180c",
+  "attempt": 1,
+  "command": "node check.mjs",
+  "cwd": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+  "capturedRevision": null,
+  "exitCode": 1,
+  "signal": null,
+  "stdoutPath": "/tmp/px-verification-manual-OFRvsv/repo-px-0001/.workflow/recovery-evidence/px-0001/9218f0e1fb6b6858be63845438dcded36c3d15635a318ebc15f0fa7cf807180c/attempt-1.stdout.txt",
+  "stderrPath": "/tmp/px-verification-manual-OFRvsv/repo-px-0001/.workflow/recovery-evidence/px-0001/9218f0e1fb6b6858be63845438dcded36c3d15635a318ebc15f0fa7cf807180c/attempt-1.stderr.txt",
+  "stdoutBytes": 0,
+  "stderrBytes": 38,
+  "captureComplete": true,
+  "truncatedFrom": null,
+  "redacted": false,
+  "capturedAt": "2026-11-02T10:10:14.886Z"
+}

@@ -1,0 +1,39 @@
+Mission telemetry by phase: px-0001
+Phase      Provider     Model        Implementer  Input  Output  Cached  Tool calls  Duration (min)  Usage %  Cost ($)  
+draft      stub/custom  stub/custom  custom       0      0       0       0           0               —        0         
+execute    stub/custom  stub/custom  custom       0      0       0       0           0               —        0         
+review     stub/custom  stub/custom  custom       0      0       0       0           0               —        0         
+follow-up  —            —            —            0      0       0       0           0               —        0         
+default    —            —            custom       0      0       0       0           0               —        0         
+total                                             0      0       0       0           0               —        0         
+
+Verification measurements · retained history · 1 completed missions
+Attempts 7; failures 1 (infrastructure 0); reruns 3; reused proofs 2; incomplete 0
+Elapsed lifetime union 2699 ms; gate execution union 140 ms; exclusive observed waiting 24 ms; overlapping execution 67 ms
+OS waited-tree CPU 105000 us (observations 6/7; partial when missing)
+Rerun execution 83 ms; CPU 63000 us
+Failure-to-success recovery 504 ms; observed gate CPU 30000 us; repair activity 271 ms; re-review activity 445 ms
+Observed gate DAG critical path unknown; end-to-end workflow critical path unknown
+Gate batch ff862167-ae7f-4614-bc55-28910588e01f: dependency path 10 ms
+Gate batch fb0b52d4-c77c-40b5-9f3d-5735eab7edda: dependency path 0 ms
+Gate batch 595e5365-bab7-41bd-b0ac-16595a34eb7d: dependency path unknown
+Gate batch bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df: dependency path 81 ms
+Gate batch 6983273b-c49c-42b3-bc7f-b9d4cd355c6b: dependency path 11 ms
+Gate batch ddee5b6b-4d63-4751-a9b9-580d6642d497: dependency path 0 ms
+Elapsed bottleneck parallel: 108 ms (n=2)
+Elapsed bottleneck contract: 68 ms (n=2)
+Elapsed bottleneck verification: 21 ms (n=2)
+Elapsed bottleneck dependent: 10 ms (n=1)
+CPU bottleneck contract: 61000 us (n=2)
+CPU bottleneck parallel: 27000 us (n=2)
+CPU bottleneck verification: 12000 us (n=2)
+CPU bottleneck dependent: 5000 us (n=1)
+Revision comparison verification: 49bf7f87dbd37098cb0a4d25c6fee9d98803785c n=1, 10 ms → 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8 n=1, 11 ms; configuration equivalent true; workload equivalent unknown
+Revision comparison contract: 25c678f185eebcaefa54fe8a44f0082c98808fef n=1, 35 ms → 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8 n=1, 33 ms; configuration equivalent true; workload equivalent unknown
+Revision comparison parallel: 25c678f185eebcaefa54fe8a44f0082c98808fef n=1, 37 ms → 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8 n=1, 71 ms; configuration equivalent true; workload equivalent unknown
+Profiling evidence: /mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json; sample coverage of these attempts unknown (OS CPU is not samples)
+Contention and optimization benefit: unknown; overlap alone does not establish contention or a speedup. Revision comparisons do not establish equivalent discovered workloads.
+Unknown: Workflow join unavailable for some attempts
+Unknown: OS CPU missing for some attempts; observed CPU is partial
+Unknown: Repair and re-review agent CPU unavailable; gate CPU is not agent CPU
+Unknown: End-to-end critical path unknown; only complete observed gate DAGs are measured

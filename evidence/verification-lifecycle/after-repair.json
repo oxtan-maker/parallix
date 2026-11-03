@@ -1,0 +1,182 @@
+{
+  "slug": "px-0001",
+  "title": "exercise disposable verification",
+  "branch": "mission/px-0001",
+  "missionStatus": "integration",
+  "backlogStatus": "backlog",
+  "closedAt": null,
+  "assignee": "custom",
+  "classification": "ai_sdlc",
+  "externalTaskRef": null,
+  "legacyTaskContent": null,
+  "legacyTaskError": null,
+  "legacyMissionContent": null,
+  "legacyMissionError": null,
+  "legacyReviewStateContent": null,
+  "legacyReviewStateError": null,
+  "version": 32,
+  "brief": {
+    "goal": "The disposable change survives verification and review",
+    "why": "Measure verification recovery",
+    "scope": "Disposable lifecycle",
+    "outOfScope": [
+      "Real operator state"
+    ]
+  },
+  "description": null,
+  "declaredGates": [
+    "node --version"
+  ],
+  "successCriteria": [
+    "The disposable change survives verification and review"
+  ],
+  "successCriterionIds": [
+    "sc-1"
+  ],
+  "completedSuccessCriteria": [
+    0
+  ],
+  "dependencies": [],
+  "checkpoints": [
+    {
+      "name": "CP-1",
+      "description": "Exercise the contract",
+      "recorded": true,
+      "goalCheck": [
+        {
+          "criterion": "The disposable change survives verification and review",
+          "criterionId": "sc-1",
+          "evidence": "answer.txt"
+        }
+      ]
+    },
+    {
+      "name": "CP-2",
+      "repair": {
+        "incidentId": "cd519ea2-08be-40a1-8675-1d247eb5fa53",
+        "command": "node check.mjs",
+        "authorizedGates": [
+          "node --version"
+        ],
+        "authorizedCriteria": [
+          "The disposable change survives verification and review"
+        ],
+        "attempt": 1,
+        "evidenceRecorded": true,
+        "verified": true
+      },
+      "description": "Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs",
+      "recorded": true,
+      "goalCheck": [
+        {
+          "criterion": "The disposable change survives verification and review",
+          "criterionId": "sc-1",
+          "evidence": "answer.txt"
+        }
+      ]
+    }
+  ],
+  "predictedNelBucket": "Small",
+  "reproductionTest": null,
+  "latestCheckpoint": {
+    "name": "CP-2",
+    "description": "Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs",
+    "goalCheck": [
+      {
+        "criterion": "The disposable change survives verification and review",
+        "criterionId": "sc-1",
+        "evidence": "answer.txt"
+      }
+    ],
+    "nextAction": "Verify the repaired contract and review the revision"
+  },
+  "review": {
+    "round": 2,
+    "phase": "approved",
+    "disposition": "APPROVED",
+    "approvalOwed": false,
+    "approvalCoverage": {
+      "kind": "covers",
+      "round": 2,
+      "approvedRevision": "4550285e24d7a29669a62dc8a1dd29717ab9f5fa"
+    },
+    "integrationRepair": {
+      "gate": "contract",
+      "command": "node check.mjs",
+      "log": "AssertionError: expected fixed answer",
+      "approvedRevision": "f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5",
+      "approvedBaseline": "fdb7e9aaa05f8d50fd54ce8f6964b515024490be",
+      "repairedBaseline": "fdb7e9aaa05f8d50fd54ce8f6964b515024490be",
+      "repairedRevision": "4550285e24d7a29669a62dc8a1dd29717ab9f5fa",
+      "withdrawnAt": "2026-11-02T10:10:15.567Z",
+      "reReview": "approved"
+    },
+    "history": [
+      {
+        "number": 1,
+        "startRevision": "49bf7f87dbd37098cb0a4d25c6fee9d98803785c",
+        "decidedRevision": "f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5",
+        "integrationRepairAssessment": {
+          "assessedAt": "2026-11-02T10:10:15.567Z",
+          "approvedRevision": "f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5",
+          "candidateRevision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+          "failedGate": "contract",
+          "outcome": "mission-change-differs",
+          "repair": {
+            "startedAt": "2026-11-02T10:10:14.890Z",
+            "cause": {
+              "kind": "integration-gate-failure",
+              "gate": "contract",
+              "command": "node check.mjs",
+              "log": "AssertionError: expected fixed answer"
+            }
+          },
+          "validation": {
+            "missionId": "px-0001",
+            "sha": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+            "hooks": [
+              "contract",
+              "parallel",
+              "dependent"
+            ],
+            "baseline": "fdb7e9aaa05f8d50fd54ce8f6964b515024490be",
+            "createdAt": "2026-11-02T10:10:15.480Z",
+            "reference": "operational_history:36",
+            "failed": false
+          }
+        },
+        "reviewer": "custom",
+        "implementer": "custom",
+        "disposition": "APPROVED",
+        "comment": "Outcome: approve\nVerdict: approve",
+        "findingSummaries": [],
+        "fixes": [],
+        "pushbacks": [],
+        "revocation": {
+          "by": "workflow",
+          "reason": "Integration repair changed the approved mission patch.",
+          "at": "2026-11-02T10:10:15.567Z"
+        },
+        "supersession": null
+      },
+      {
+        "number": 2,
+        "startRevision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+        "decidedRevision": "4550285e24d7a29669a62dc8a1dd29717ab9f5fa",
+        "reviewer": "custom",
+        "implementer": "custom",
+        "disposition": "APPROVED",
+        "comment": "Outcome: approve\nVerdict: approve",
+        "findingSummaries": [],
+        "fixes": [],
+        "pushbacks": [],
+        "revocation": null,
+        "supersession": null
+      }
+    ]
+  },
+  "pullRequest": {
+    "exists": false,
+    "raw": "Forgejo PR: skipped (review provider is not forgejo)."
+  }
+}

@@ -1,4 +1,5 @@
 import { gateFailureReasonFromProcess } from '../domain/failure-classification.js';
+import { observeVerificationCommand } from './recording/verification-command.js';
 /**
  * Declared gate validation and execution: reject prose, unbalanced, or
  * missing-file gate commands, then run recorded or document gates.
@@ -332,16 +333,20 @@ export class DeclaredGateRunner {
     log: ReviewPreparationLog,
   ): Promise<DeclaredGatesResult> {
     const { verification, process: processPort } = this.ports;
+    const batchId = globalThis.crypto.randomUUID();
     // Execute each gate command
     for (const cmd of cleanCommands) {
       const reusableProof = verification.readReusableVerificationProof(cmd, rootDir);
       if (reusableProof.ok) {
+        await observeVerificationCommand({ root: rootDir, mission: '', batchId, gate: cmd, command: cmd,
+          phase: 'handoff', after: null }, () => ({ status: 0, reused: true }));
         if (reusableProof.diagnostic) { log(reusableProof.diagnostic); }
         log(`  Gate already verified: ${cmd}`);
         continue;
       }
       log(`  Gate: ${cmd}`);
-      const result = await processPort.run('bash', ['-c', cmd], { cwd: rootDir });
+      const result = await observeVerificationCommand({ root: rootDir, mission: '', batchId, gate: cmd, command: cmd,
+        phase: 'handoff', after: null }, () => processPort.run('bash', ['-c', cmd], { cwd: rootDir }));
 
       if (result.status !== 0) {
         const stdout = (result.stdout || '').trim();

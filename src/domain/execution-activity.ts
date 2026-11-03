@@ -30,6 +30,7 @@ export type ExecutionActivityStage =
 export type ExecutionActivityState = 'running' | 'ended' | 'blocked';
 
 export interface ExecutionActivity {
+  readonly purpose?: 'repair';
   readonly missionId: MissionId;
   /** Correlates the events of one operation. Not a durable run identity. */
   readonly operationId: string;

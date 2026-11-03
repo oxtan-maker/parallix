@@ -1,0 +1,101 @@
+[
+  {
+    "id": 1,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": null,
+    "to_status": "backlog",
+    "trigger": "intake",
+    "agent": "unknown",
+    "occurred_at": "2026-11-02T10:10:13.301Z",
+    "idempotency_key": "px-0001:intake:2026-11-02T10:10:13.301Z"
+  },
+  {
+    "id": 2,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "backlog",
+    "to_status": "refined",
+    "trigger": "refine",
+    "agent": "draft",
+    "occurred_at": "2026-11-02T10:10:13.437Z",
+    "idempotency_key": "px-0001:refine"
+  },
+  {
+    "id": 3,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "refined",
+    "to_status": "active",
+    "trigger": "activate",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:13.652Z",
+    "idempotency_key": "active:px-0001:fd5ebfe8-2bc5-4500-ba32-f230a1d72f7a:activate"
+  },
+  {
+    "id": 4,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "active",
+    "to_status": "review",
+    "trigger": "begin-review-preparation",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:13.972Z",
+    "idempotency_key": "review-preparation:px-0001:6"
+  },
+  {
+    "id": 5,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "review",
+    "to_status": "integration",
+    "trigger": "approve",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:14.384Z",
+    "idempotency_key": "approve:px-0001:round-1"
+  },
+  {
+    "id": 6,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "integration",
+    "to_status": "active",
+    "trigger": "rebound-to-active",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:14.890Z",
+    "idempotency_key": "integration-gate-rebound:px-0001:18"
+  },
+  {
+    "id": 7,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "active",
+    "to_status": "review",
+    "trigger": "begin-review-preparation",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:15.619Z",
+    "idempotency_key": "review-preparation:px-0001:23"
+  },
+  {
+    "id": 8,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "review",
+    "to_status": "integration",
+    "trigger": "approve",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:16.019Z",
+    "idempotency_key": "approve:px-0001:round-2"
+  },
+  {
+    "id": 9,
+    "repository_id": "repo",
+    "mission_id": "px-0001",
+    "from_status": "integration",
+    "to_status": "done",
+    "trigger": "integrate",
+    "agent": "custom",
+    "occurred_at": "2026-11-02T10:10:16.000Z",
+    "idempotency_key": "integrate:px-0001:1d463b82af50c42ab4ea4d11343e8c62d6027079"
+  }
+]

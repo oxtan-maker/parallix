@@ -1,0 +1,87 @@
+{
+  "incident": "dab9e43904260c921a05ff7a03764a9ba301bb8eb017a0cd4ffc1064f80ec420",
+  "diagnosedRevision": "f60fafd3d192e38ff725a4b49b54ac16ef2de711",
+  "authority": "px status px-0025 --json version 68; locked criteria and gates retained. Prompt approved revision 51362598ed5b85719af402a8cb2050ca1910eb71 is unreadable in this checkout; no claim of validating that revision.",
+  "requiredCommand": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+  "diagnosticGate": {
+    "exitCode": 0,
+    "log": "diagnostic-gate.log.gz",
+    "tests": 2693,
+    "passed": 2669,
+    "failed": 0,
+    "limitation": "Pre-repair diagnostic only, not harness repair-success evidence. Original fixture was loaded before editing; focused covered reproduction failed separately."
+  },
+  "cause": "Intermittent 100 ms case CPU overrun from rebuilding the complete disk-backed SQLite schema, including migration backups, for each recorder case. No persistence assertion failure.",
+  "historyInspected": [
+    "7246f90a5 (fixture unchanged except typed IDs)",
+    "4becaed9f (preserve canonical UTC ordering assertions)",
+    "67480fc03 (existing empty-schema copy fixture owner)"
+  ],
+  "productionTrace": [
+    "BoardEventRecorder.append -> eventToEntry -> SqliteBoardLaneEventRepository.append -> SqliteDatabaseAdapter.execute",
+    "createMissionApplicationServices and materializeOperatorState supply the same SQLite lane-event adapter used by verification-statistics. No changed mission production path participates in repeated test fixture migrations."
+  ],
+  "costProbe": {
+    "command": "npx tsx /tmp/px-0025-board-probe.ts",
+    "source": "cost-probe.ts.gz",
+    "runtime": "Node v24.21.0; plain; process.cpuUsage user+system microseconds; diagnostic phase measurements, not profiler samples",
+    "migrationCpuUs": [
+      79491,
+      66301,
+      60932
+    ],
+    "recordAndReadCpuUs": [
+      919,
+      409,
+      226
+    ]
+  },
+  "repair": "Reuse existing prepareMigratedSchema/copyMigratedSchema fixture. Migrate real current schema once in before hook; each case writes a private file copy. Register roots for runner cleanup on child exit or signal, and clean up even if open/close fails.",
+  "riskAssessment": "Test setup only; production, all 14 behavioral assertions, SQLite adapter, ordering, idempotency, failure isolation and migration contracts unchanged. Empty closed schema is shared, never mutable case state. Existing board-lane-events-migration and sqlite-schema-and-migrations suites retain fresh-install, upgrade and migration safety coverage. No gate, budget, tier, concurrency, scheduling, timeout or resource-limit changes.",
+  "checks": [
+    {
+      "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/px-0025-board-before PARALLIX_PREBUILT_PACK=1 npm test -- test/integration/sqlite/board-event-recorder.test.ts",
+      "exitCode": 1,
+      "cpuMs": 112.987,
+      "log": "before-covered.log.gz",
+      "caseMeasurements": "before-covered.jsonl"
+    },
+    {
+      "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/px-0025-board-after PARALLIX_PREBUILT_PACK=1 npm test -- test/integration/sqlite/board-event-recorder.test.ts",
+      "exitCode": 0,
+      "passed": 14,
+      "durationMs": 528.642325,
+      "previouslyFailingCaseCpuMs": 3.65,
+      "log": "after-covered.log.gz",
+      "caseMeasurements": "after-covered.jsonl"
+    },
+    {
+      "command": "PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/px-0025-board-plain PARALLIX_PREBUILT_PACK=1 npm test -- test/integration/sqlite/board-event-recorder.test.ts",
+      "exitCode": 0,
+      "passed": 14,
+      "durationMs": 423.187479,
+      "log": "after-plain.log.gz",
+      "caseMeasurements": "after-plain.jsonl"
+    },
+    {
+      "command": "npx tsc --noEmit --project tsconfig.test.json",
+      "exitCode": 0
+    },
+    {
+      "command": "npx eslint test/integration/sqlite/board-event-recorder.test.ts",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  ],
+  "manualCheck": {
+    "command": "npx tsx /tmp/px-0025-board-manual.ts",
+    "source": "manual-probe.ts.gz",
+    "result": "manual.json",
+    "exitCode": 0,
+    "observations": "Three independent copies from the existing real migrated-schema fixture start empty; the application recorder appends and the repository reads the event, including after closing and reopening each database. Disposable temp state removed; no operator mission statistics touched."
+  },
+  "next": "Commit repair and retain fresh CP-7 evidence. Only automatic harness rerun of requiredCommand establishes repair success."
+}

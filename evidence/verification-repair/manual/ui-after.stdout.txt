@@ -1,0 +1,40 @@
+px board repository wip 0 · attention 0                                   ▥ FLOW
+agents: unavailable
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                                                                              │
+│ ▲ NEEDS YOU NEXT 0                                                           │
+│                                                                              │
+│ nothing needs attention                                                      │
+│                                                                              │
+│ ranked: integrate>review>active                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ ── BACKLOG 0
+
+ nothing in backlog
+
+ ── REFINED 0
+
+ nothing in refined
+
+ ── ACTIVE 0
+
+ nothing in active
+
+ ── REVIEW 0
+
+ nothing in review
+
+ ── INTEGRATION 0
+
+ nothing in integration
+
+ ── DONE 0
+
+ nothing in done
+
+
+2026-11-02T00:00:00.000Z verification.attempt verification.attempt
+$ ▌
+arrows/WASD: move · Enter: execute · Ctrl+D/A/R: lifecycle · Shift+X: cancel ·
+Shift+S: done · f: FLOW · ?: help · q: quit

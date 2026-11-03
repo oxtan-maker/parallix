@@ -223,6 +223,7 @@ export interface WebSourceFact {
 }
 
 export interface WebBoardMetrics {
+  readonly verification?: readonly string[];
   /** Deliveries in the server-selected local reporting week; absent when unavailable. */
   readonly weeklyCompletedMissions?: number;
   readonly health: { readonly state: string };

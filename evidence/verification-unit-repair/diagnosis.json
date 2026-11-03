@@ -1,0 +1,30 @@
+{
+  "parentRevision": "84635343975448a0730939f4ff0ff51f770284b7",
+  "rootCause": "The px-0025 observation fixture predates task-2829 (4fc3afd02184aed4c25dadc2cbfd7410197da643), which replaced diagnostic keyword inference with machine facts. Status 1 plus connection-refused text correctly yields gate-failed. EX_TEMPFAIL status 75 remains infrastructure.",
+  "decision": "Repair the owning test, preserve production policy, exercise statuses 75, 1 and 0 with identical diagnostic text; retain starts, distinct attempt IDs, failed/failed/passed terminals, missing CPU, identity joins and profiler-disabled assertions.",
+  "risk": "Restoring text inference would misclassify coding failures as infrastructure and alter recovery policy outside scope. Changing only the expected value would lose infrastructure preservation coverage; both classifications are asserted instead.",
+  "checks": [
+    {
+      "command": "PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom",
+      "result": "Parent fails with the exact reported assertion; gate-parent.log.gz"
+    },
+    {
+      "command": "npm test -- --unit-test-headroom test/unit/adapters/verification/gate-result-recording.test.ts",
+      "result": "Parent: 3 pass, 1 fail; focused-parent.log.gz"
+    },
+    {
+      "command": "PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom test/unit/adapters/verification/gate-result-recording.test.ts test/unit/application/rebound-classification.test.ts",
+      "result": "Repair: 10 pass, 0 fail; changed case 31.49 ms; focused-fixed.log.gz"
+    },
+    {
+      "command": "node --import tsx evidence/verification-unit-repair/manual.mjs",
+      "result": "Real shell exits 75, 1 and 0 preserve classification through observation capture; manual.json. In-memory history and disposable directory."
+    },
+    {
+      "command": "node --import tsx test/fixtures/verification-measurements-manual.ts /tmp/px-0025-repair-lifecycle",
+      "result": "Exit 0; failed integration -> repair -> rerun -> completion through public commands in disposable Git/operator state; lifecycle.log.gz. 7 attempts, 1 failure, 3 reruns, 6 CPU observations, 1 completed mission."
+    }
+  ],
+  "requiredHarnessRerun": "Pending; local focused success is not a passing harness gate.",
+  "unchanged": "Production classification, locked gates, budgets, tiers, scope, success criteria and prior valid evidence."
+}

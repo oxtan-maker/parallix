@@ -11,6 +11,7 @@ export interface StatsCommandRequest {
 }
 
 export interface StatsCommandResult<Row extends StatisticsRow = StatisticsRow> {
+  readonly verification?: import('./projections/verification-statistics.js').VerificationStatistics | null;
   readonly mode: StatsCommandRequest['mode'];
   readonly rows: readonly Row[];
   readonly missionKey?: string;
@@ -25,16 +26,19 @@ export class StatsCommandUseCase<Row extends StatisticsRow = StatisticsRow> {
 
   async execute(request: StatsCommandRequest): Promise<StatsCommandResult<Row>> {
     const rows = await this._workflow.loadMeasurements();
+    const verification = await this._workflow.loadVerificationStatistics?.(request.mode === 'mission'
+      ? new Set([request.mission ?? '']) : undefined) ?? null;
     if (request.mode === 'mission') {
       const mission = request.mission || '';
       return {
         mode: 'mission',
+        verification,
         rows: rows.filter(row => statisticsMissionKey(row) === statisticsMissionKey({ repo: row.repo, mission })),
         missionKey: statisticsMissionKey({ repo: '', mission }),
       };
     }
     const missionFlow = await this._workflow.loadMissionFlow();
     const classifierStatistics = await this._workflow.loadClassifierStatistics?.() ?? null;
-    return { mode: request.mode, rows, missionFlow, classifierStatistics, selection: selectStatsReport(rows, missionFlow, { ...request, mode: request.mode }) };
+    return { mode: request.mode, rows, missionFlow, classifierStatistics, verification, selection: selectStatsReport(rows, missionFlow, { ...request, mode: request.mode }) };
   }
 }

@@ -37,6 +37,8 @@ export class SqliteWorkflowOperationStore implements WorkflowOperationStore {
   open(): Promise<readonly WorkflowOperation[]> {
     return this.read("phase IN ('accepted','executing','stopping')", []);
   }
+  /** Historical operations retain their original repository and mission joins. */
+  all(): Promise<readonly WorkflowOperation[]> { return this.read('1 = 1 ORDER BY rowid', []); }
   async latest(mission: string): Promise<WorkflowOperation | null> {
     return (await this.read('mission_id = ? ORDER BY rowid DESC LIMIT 1', [mission]))[0] ?? null;
   }

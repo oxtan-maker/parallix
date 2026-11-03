@@ -22,7 +22,21 @@ import {
   emptyMetrics,
 } from '../../../fixtures/board-projection.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
+import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 import type { AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
+
+test('web FLOW transport carries shared verification wording without recalculation (px-0025)', () => {
+  const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
+  const snapshot = toWebBoardSnapshot(makeProjection({}));
+  const projection = { ...makeProjection({}), metrics: { ...emptyMetrics, verification } };
+  const output = toWebBoardSnapshot(projection);
+  assert.ok(snapshot.metrics.verification);
+  assert.match(output.metrics.verification!.join('\n'), /historical work is unavailable, not zero/);
+  const parsed = validateWebBoardSnapshot(JSON.parse(JSON.stringify(output)));
+  assert.ok(parsed.ok);
+  assert.deepEqual(parsed.value, output);
+  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, verification: [4] } }).ok, false);
+});
 import type { LiveMissionWork, MissionCard, ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { MissionId } from '../../../../src/domain/mission.js';

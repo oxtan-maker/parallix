@@ -1,0 +1,8 @@
+{
+  "sourceRevision": "f7b7b3e2b01924867ed28b4b85b87064a3246145",
+  "sourceDirty": false,
+  "node": "v24.21.0",
+  "script": "test/fixtures/verification-measurements-manual.ts",
+  "boundary": "Public in-process CLI commands with a deterministic fake agent and an explicit worker authorization; no durable workflow operation row is fabricated. Missing workflow joins remain unknown.",
+  "operatorIsolation": "Temporary PARALLIX_HOME and PARALLIX_CUSTOM_ADMISSION_HOME; disposable Git repository removed after raw evidence and bundle retention."
+}

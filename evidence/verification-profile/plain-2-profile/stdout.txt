@@ -1,0 +1,25 @@
+✔ stop signals descendants and reparented group members, preserves other missions and rejects recycled PID (TASK-2750 F9) (4.884233ms)
+✔ launch surfaces spawn failure and stop delegates attributed external effects (TASK-2750 F7) (1.154651ms)
+✔ stop escalates a SIGTERM-resistant provider safely: terminated (TASK-2750) (5.04913ms)
+✔ stop escalates a SIGTERM-resistant provider safely: recycled (TASK-2750) (12.123408ms)
+✔ stop escalates a SIGTERM-resistant provider safely: permission-denied (TASK-2750) (9.089636ms)
+✔ stop remains pending when permission prevents freezing its owner (TASK-2750) (2.637648ms)
+✔ task-2347.08 repro: CLI and board agree on identity, completions, and cycle time (9.804975ms)
+✔ task-2347.08: CLI delegates identity, completion, and window rules to statistics service (0.472353ms)
+✔ task-2347.08: board metrics accept named input without positional overload casts (0.290966ms)
+✔ task-2347.08: cumulative flow evaluates ordered transitions once (0.231596ms)
+✔ metrics-read adapter failure projects explicit unavailable statistics instead of default zero values (task-2347.07 repro) (1.704133ms)
+✔ metrics projection reports controlled provenance and distinguishes no-completions from no-telemetry (task-2347.07 repro) (5.312135ms)
+✔ stats CLI renders the application-selected population without selecting completion again (TASK-2637.04) (12.015559ms)
+✔ px stats fallback-reasons table renders each distinguishable classifier failure cause (TASK-2704) (2.899324ms)
+✔ classifier clear statistics separate omissions and historical unknowns (TASK-2751) (1.335509ms)
+✔ decided rounds ignore missing and undecided samples and use decision weeks (TASK-2758) (1.24404ms)
+✔ deciders are exclusive and partial telemetry leaves decided share available (TASK-2758) (1.25275ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 314.368033

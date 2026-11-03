@@ -1,0 +1,16 @@
+=== Static Analysis Gate ===
+[1/4] Running ESLint...
+PASS: ESLint clean (zero warnings)
+[2/4] Running npm run typecheck...
+
+> @magnusekdahl/parallix@1.5.466 typecheck
+> tsc --noEmit && tsc --noEmit --project tsconfig.scripts.json
+
+PASS: tsc typecheck clean
+[3/4] Running test-hygiene check...
+PASS: no test-hygiene violations
+PASS: test layout and registrations are consistent
+PASS: test-hygiene clean
+[4/4] Running test typecheck...
+PASS: test typecheck clean
+=== Static Analysis Gate: ALL STAGES PASSED ===

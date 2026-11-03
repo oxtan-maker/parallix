@@ -1,0 +1,325 @@
+{
+  "rankings": [
+    {
+      "coverage": false,
+      "samples": 1423,
+      "rankedSelfSamples": [
+        {
+          "function": "lineLengths",
+          "url": "node:internal/source_map/source_map_cache",
+          "samples": 114
+        },
+        {
+          "function": "compileSourceTextModule",
+          "url": "node:internal/modules/esm/utils",
+          "samples": 95
+        },
+        {
+          "function": "compileForInternalLoader",
+          "url": "node:internal/bootstrap/realm",
+          "samples": 87
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+          "samples": 84
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "samples": 81
+        },
+        {
+          "function": "localReportingTimeZone",
+          "url": "file:///mnt/data/code/parallix-px-0025/src/domain/decision-window.ts",
+          "samples": 48
+        },
+        {
+          "function": "__require",
+          "url": "node:internal/deps/undici/undici",
+          "samples": 43
+        },
+        {
+          "function": "apply",
+          "url": "node:internal/test_runner/mock/mock",
+          "samples": 33
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/require-CBjy4Foe.mjs",
+          "samples": 32
+        },
+        {
+          "function": "wrapSafe",
+          "url": "node:internal/modules/cjs/loader",
+          "samples": 28
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/register-nyXW-TH3.mjs",
+          "samples": 25
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "samples": 21
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/register-B1c7OH6V.cjs",
+          "samples": 20
+        },
+        {
+          "function": "decisionWindowDay",
+          "url": "file:///mnt/data/code/parallix-px-0025/src/domain/decision-window.ts",
+          "samples": 18
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/index-DE3OBZuV.mjs",
+          "samples": 15
+        },
+        {
+          "function": "spawnSync",
+          "url": "node:internal/child_process",
+          "samples": 15
+        },
+        {
+          "function": "detectModuleFormat",
+          "url": "node:internal/modules/esm/get_format",
+          "samples": 14
+        },
+        {
+          "function": "normalizeString",
+          "url": "node:path",
+          "samples": 13
+        },
+        {
+          "function": "parse",
+          "url": "",
+          "samples": 12
+        },
+        {
+          "function": "internalBinding",
+          "url": "node:internal/bootstrap/realm",
+          "samples": 9
+        },
+        {
+          "function": "realpathSync",
+          "url": "node:fs",
+          "samples": 9
+        },
+        {
+          "function": "readGuardFingerprints",
+          "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+          "samples": 9
+        },
+        {
+          "function": "set TextDecoder",
+          "url": "",
+          "samples": 9
+        },
+        {
+          "function": "requireBuiltin",
+          "url": "node:internal/bootstrap/realm",
+          "samples": 8
+        },
+        {
+          "function": "(idle)",
+          "url": "",
+          "samples": 8
+        },
+        {
+          "function": "defaultLoadSync",
+          "url": "node:internal/modules/esm/load",
+          "samples": 8
+        },
+        {
+          "function": "syncLink",
+          "url": "node:internal/modules/esm/module_job",
+          "samples": 7
+        },
+        {
+          "function": "alive",
+          "url": "file:///mnt/data/code/parallix-px-0025/src/adapters/process/workflow-process.ts",
+          "samples": 7
+        },
+        {
+          "function": "update",
+          "url": "node:internal/crypto/hash",
+          "samples": 7
+        },
+        {
+          "function": "",
+          "url": "node:internal/crypto/util",
+          "samples": 6
+        }
+      ]
+    },
+    {
+      "coverage": true,
+      "samples": 1837,
+      "rankedSelfSamples": [
+        {
+          "function": "lineLengths",
+          "url": "node:internal/source_map/source_map_cache",
+          "samples": 203
+        },
+        {
+          "function": "compileSourceTextModule",
+          "url": "node:internal/modules/esm/utils",
+          "samples": 121
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "samples": 110
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+          "samples": 98
+        },
+        {
+          "function": "compileForInternalLoader",
+          "url": "node:internal/bootstrap/realm",
+          "samples": 76
+        },
+        {
+          "function": "localReportingTimeZone",
+          "url": "file:///mnt/data/code/parallix-px-0025/src/domain/decision-window.ts",
+          "samples": 61
+        },
+        {
+          "function": "__require",
+          "url": "node:internal/deps/undici/undici",
+          "samples": 59
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/require-CBjy4Foe.mjs",
+          "samples": 58
+        },
+        {
+          "function": "apply",
+          "url": "node:internal/test_runner/mock/mock",
+          "samples": 41
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/register-nyXW-TH3.mjs",
+          "samples": 36
+        },
+        {
+          "function": "wrapSafe",
+          "url": "node:internal/modules/cjs/loader",
+          "samples": 31
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "samples": 24
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/register-B1c7OH6V.cjs",
+          "samples": 24
+        },
+        {
+          "function": "spawnSync",
+          "url": "node:internal/child_process",
+          "samples": 24
+        },
+        {
+          "function": "decisionWindowDay",
+          "url": "file:///mnt/data/code/parallix-px-0025/src/domain/decision-window.ts",
+          "samples": 20
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/index-DE3OBZuV.mjs",
+          "samples": 18
+        },
+        {
+          "function": "detectModuleFormat",
+          "url": "node:internal/modules/esm/get_format",
+          "samples": 14
+        },
+        {
+          "function": "",
+          "url": "file:///mnt/data/code/parallix-px-0025/test/unit/application/services/statistics-contract.test.ts",
+          "samples": 14
+        },
+        {
+          "function": "internalBinding",
+          "url": "node:internal/bootstrap/realm",
+          "samples": 11
+        },
+        {
+          "function": "normalizeString",
+          "url": "node:path",
+          "samples": 11
+        },
+        {
+          "function": "parse",
+          "url": "",
+          "samples": 10
+        },
+        {
+          "function": "maybeCacheSourceMap",
+          "url": "node:internal/source_map/source_map_cache",
+          "samples": 10
+        },
+        {
+          "function": "init",
+          "url": "node:internal/test_runner/harness",
+          "samples": 10
+        },
+        {
+          "function": "set TextDecoder",
+          "url": "",
+          "samples": 10
+        },
+        {
+          "function": "requireBuiltin",
+          "url": "node:internal/bootstrap/realm",
+          "samples": 9
+        },
+        {
+          "function": "readGuardFingerprints",
+          "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+          "samples": 9
+        },
+        {
+          "function": "resolvePackageTargetString",
+          "url": "node:internal/modules/esm/resolve",
+          "samples": 8
+        },
+        {
+          "function": "alive",
+          "url": "file:///mnt/data/code/parallix-px-0025/src/adapters/process/workflow-process.ts",
+          "samples": 8
+        },
+        {
+          "function": "emit",
+          "url": "node:events",
+          "samples": 8
+        },
+        {
+          "function": "readFileSync",
+          "url": "node:fs",
+          "samples": 8
+        }
+      ]
+    }
+  ],
+  "decision": "Investigate repeated timezone construction in localReportingTimeZone before changing assertion execution or gate concurrency. It is the strongest recurring named application self-frame in these small workloads. Do not implement an optimization in this mission.",
+  "assessment": {
+    "assertionsAndFixtures": "No dominant assertion self-frame in the retained ranking; default-db-guard fixture setup is visible. Inclusive assertion and fixture costs remain unresolved.",
+    "startupImportsLoading": "Source-map lineLengths, module compilation, loader wrapSafe and test mocks recur among leading frames; fresh process startup is included in paired wall and OS CPU.",
+    "v8CompilationGc": "Garbage collection and compileSourceTextModule are visible. Sampling does not uniquely separate V8 compile from import evaluation.",
+    "coverage": "Covered and plain workloads retained separately; coverage includes report overhead. Concurrent host load and cache warming confound a causal coverage-only cost estimate.",
+    "externalCommands": "wait4 CPU includes waited children. spawnSync samples are parent-side blocking, not external process CPU hotspots. Arbitrary non-inheriting children are not V8-profiled.",
+    "overhead": "3 pairs per coverage configuration; observed profile/control mean wall ratios 0.720 plain and 0.843 covered, CPU ratios 0.797 and 0.884. Faster sampled runs indicate order/cache/contention noise, not negative intrinsic profiler overhead. Small local population does not resolve causal overhead; retain all paired measurements."
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "result": "passed",
+  "boundary": "Real Bash exits through runPhaseGates and observation capture; in-memory history, disposable directory, no operator statistics writes",
+  "entries": [
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "c2ece48f-eb36-4b36-a710-a7908ef23379",
+      "operationId": null,
+      "batchId": "5d0c1f22-5f16-4a85-a939-a27aa697baa1",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 75",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.661Z",
+      "startedAt": null,
+      "finishedAt": null,
+      "result": "running",
+      "failureReason": null,
+      "exitCode": null,
+      "wallMs": null,
+      "cpu": null,
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "c2ece48f-eb36-4b36-a710-a7908ef23379",
+      "operationId": null,
+      "batchId": "5d0c1f22-5f16-4a85-a939-a27aa697baa1",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 75",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.661Z",
+      "startedAt": "2026-11-03T06:02:23.661Z",
+      "finishedAt": null,
+      "result": "running",
+      "failureReason": null,
+      "exitCode": null,
+      "wallMs": null,
+      "cpu": null,
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "c2ece48f-eb36-4b36-a710-a7908ef23379",
+      "operationId": null,
+      "batchId": "5d0c1f22-5f16-4a85-a939-a27aa697baa1",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 75",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.661Z",
+      "startedAt": "2026-11-03T06:02:23.661Z",
+      "finishedAt": "2026-11-03T06:02:23.668Z",
+      "result": "failed",
+      "failureReason": {
+        "version": 1,
+        "code": "infrastructure"
+      },
+      "exitCode": 75,
+      "wallMs": 7,
+      "cpu": {
+        "userUs": 2000,
+        "systemUs": 0,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "16336bd6-0273-46d1-b028-f57be4b8fb13",
+        "parent": null
+      },
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "378e8cdd-9bb2-4593-b7d4-d09db42c0478",
+      "operationId": null,
+      "batchId": "61c6f64e-6478-4ccc-b056-e768a171263d",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 1",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.671Z",
+      "startedAt": null,
+      "finishedAt": null,
+      "result": "running",
+      "failureReason": null,
+      "exitCode": null,
+      "wallMs": null,
+      "cpu": null,
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "378e8cdd-9bb2-4593-b7d4-d09db42c0478",
+      "operationId": null,
+      "batchId": "61c6f64e-6478-4ccc-b056-e768a171263d",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 1",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.671Z",
+      "startedAt": "2026-11-03T06:02:23.671Z",
+      "finishedAt": null,
+      "result": "running",
+      "failureReason": null,
+      "exitCode": null,
+      "wallMs": null,
+      "cpu": null,
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "378e8cdd-9bb2-4593-b7d4-d09db42c0478",
+      "operationId": null,
+      "batchId": "61c6f64e-6478-4ccc-b056-e768a171263d",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 1",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.671Z",
+      "startedAt": "2026-11-03T06:02:23.671Z",
+      "finishedAt": "2026-11-03T06:02:23.676Z",
+      "result": "failed",
+      "failureReason": {
+        "version": 1,
+        "code": "gate-failed"
+      },
+      "exitCode": 1,
+      "wallMs": 5,
+      "cpu": {
+        "userUs": 1000,
+        "systemUs": 0,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "ed6c7adc-9f9c-42c2-9ed5-a0b20d1357fa",
+        "parent": null
+      },
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "05cb5e78-3d52-432a-818d-c6b088e6c5d1",
+      "operationId": null,
+      "batchId": "5036b995-3808-404d-b1ed-7b84ad6c55d3",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 0",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.679Z",
+      "startedAt": null,
+      "finishedAt": null,
+      "result": "running",
+      "failureReason": null,
+      "exitCode": null,
+      "wallMs": null,
+      "cpu": null,
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "05cb5e78-3d52-432a-818d-c6b088e6c5d1",
+      "operationId": null,
+      "batchId": "5036b995-3808-404d-b1ed-7b84ad6c55d3",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 0",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.679Z",
+      "startedAt": "2026-11-03T06:02:23.679Z",
+      "finishedAt": null,
+      "result": "running",
+      "failureReason": null,
+      "exitCode": null,
+      "wallMs": null,
+      "cpu": null,
+      "profile": null
+    },
+    {
+      "repositoryId": "disposable-repository",
+      "missionId": "disposable-mission",
+      "revision": null,
+      "id": "05cb5e78-3d52-432a-818d-c6b088e6c5d1",
+      "operationId": null,
+      "batchId": "5036b995-3808-404d-b1ed-7b84ad6c55d3",
+      "gate": "check",
+      "command": "echo 'connection refused' >&2; exit 0",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "check"
+      ],
+      "requestedAt": "2026-11-03T06:02:23.679Z",
+      "startedAt": "2026-11-03T06:02:23.679Z",
+      "finishedAt": "2026-11-03T06:02:23.684Z",
+      "result": "passed",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": 5,
+      "cpu": {
+        "userUs": 2000,
+        "systemUs": 0,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "03341c89-1723-4772-a17b-552a2ccce06c",
+        "parent": null
+      },
+      "profile": null
+    }
+  ]
+}

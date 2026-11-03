@@ -54,6 +54,9 @@ export function FlowPanel({ metrics }: { readonly metrics: WebBoardMetrics }) {
   const longest = Math.max(1, ...cycle.map((point) => point.value!));
   const total = cycle.reduce((sum, point) => sum + point.value!, 0);
   return <section id="flow-metrics" aria-label="FLOW metrics" style={{ display: 'flex', gap: 26, padding: `${SPACE.xl}px ${SPACE.xxl}px`, borderBottom: `1px solid ${C.rule}`, background: C.panel, flexShrink: 0, alignItems: 'flex-start', overflowX: 'auto' }}>
+    {metrics.verification && <div aria-label="Verification measurements" style={{ minWidth: 320, maxWidth: 520, flexShrink: 0, fontSize: TYPE.micro, color: C.dim }}>
+      {metrics.verification.map((line, index) => <div key={index}>{line}</div>)}
+    </div>}
     <div style={{ flexShrink: 0 }}>
       <h2 style={{ color: C.dim, fontFamily: DISPLAY, fontSize: TYPE.micro, fontWeight: 400, letterSpacing: TRACK.display, margin: `0 0 ${SPACE.md}px` }}>CUMULATIVE FLOW · {metrics.weeklyCumulativeFlow?.window.label ?? 'RECORDED HISTORY'}</h2>
       {metrics.weeklyCumulativeFlow && <div style={{ color: C.faint, fontSize: TYPE.micro, marginBottom: SPACE.sm }}>Local calendar days · current period live</div>}

@@ -1,0 +1,442 @@
+{
+  "attempts": [
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "49bf7f87dbd37098cb0a4d25c6fee9d98803785c",
+      "id": "179039e5-b455-4e58-a2e9-e067a3c1a38e",
+      "operationId": "manual-lifecycle",
+      "batchId": "ff862167-ae7f-4614-bc55-28910588e01f",
+      "gate": "verification",
+      "command": "node --version",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "verification"
+      ],
+      "requestedAt": "2026-11-02T10:10:14.053Z",
+      "startedAt": "2026-11-02T10:10:14.053Z",
+      "finishedAt": "2026-11-02T10:10:14.063Z",
+      "result": "passed",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": 23,
+      "cpu": {
+        "userUs": 3000,
+        "systemUs": 3000,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "d8b4aedf-cb61-4939-b61a-15fc621f4bac",
+        "parent": null
+      }
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "49bf7f87dbd37098cb0a4d25c6fee9d98803785c",
+      "id": "1d3286c6-285f-408c-a315-d1f037cb9c21",
+      "operationId": "manual-lifecycle",
+      "batchId": "fb0b52d4-c77c-40b5-9f3d-5735eab7edda",
+      "gate": "declared-0",
+      "command": "node --version",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "declared-0"
+      ],
+      "requestedAt": "2026-11-02T10:10:14.201Z",
+      "startedAt": "2026-11-02T10:10:14.202Z",
+      "finishedAt": "2026-11-02T10:10:14.216Z",
+      "result": "reused",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": null,
+      "cpu": null
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "25c678f185eebcaefa54fe8a44f0082c98808fef",
+      "id": "837e7ca8-b221-4113-a2e8-b672e40cd533",
+      "operationId": "manual-lifecycle",
+      "batchId": "595e5365-bab7-41bd-b0ac-16595a34eb7d",
+      "gate": "contract",
+      "command": "node check.mjs",
+      "phase": "integration",
+      "after": [],
+      "plan": [
+        "contract",
+        "parallel",
+        "dependent"
+      ],
+      "requestedAt": "2026-11-02T10:10:14.740Z",
+      "startedAt": "2026-11-02T10:10:14.752Z",
+      "finishedAt": "2026-11-02T10:10:14.787Z",
+      "result": "failed",
+      "failureReason": {
+        "version": 1,
+        "code": "gate-failed"
+      },
+      "exitCode": 1,
+      "wallMs": 60,
+      "cpu": {
+        "userUs": 22000,
+        "systemUs": 9000,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "0616eb76-1b24-478c-9d36-bf05a1f048d5",
+        "parent": null
+      }
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "25c678f185eebcaefa54fe8a44f0082c98808fef",
+      "id": "9a5db37c-ed32-4228-b825-2e5692aecb37",
+      "operationId": "manual-lifecycle",
+      "batchId": "595e5365-bab7-41bd-b0ac-16595a34eb7d",
+      "gate": "parallel",
+      "command": "node -e \"setTimeout(() => {}, 40)\"",
+      "phase": "integration",
+      "after": [],
+      "plan": [
+        "contract",
+        "parallel",
+        "dependent"
+      ],
+      "requestedAt": "2026-11-02T10:10:14.751Z",
+      "startedAt": "2026-11-02T10:10:14.752Z",
+      "finishedAt": "2026-11-02T10:10:14.789Z",
+      "result": "interrupted",
+      "failureReason": {
+        "version": 1,
+        "code": "process-terminated"
+      },
+      "exitCode": null,
+      "wallMs": 62,
+      "cpu": null
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "id": "85192d30-4199-43fd-a57a-d5b9feefd823",
+      "operationId": "manual-lifecycle",
+      "batchId": "bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df",
+      "gate": "contract",
+      "command": "node check.mjs",
+      "phase": "integration",
+      "after": [],
+      "plan": [
+        "contract",
+        "parallel",
+        "dependent"
+      ],
+      "requestedAt": "2026-11-02T10:10:15.246Z",
+      "startedAt": "2026-11-02T10:10:15.258Z",
+      "finishedAt": "2026-11-02T10:10:15.291Z",
+      "result": "passed",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": 58,
+      "cpu": {
+        "userUs": 21000,
+        "systemUs": 9000,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "b90938b9-819a-48a8-a6e6-bc3ca4e1fbb3",
+        "parent": null
+      }
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "id": "46100bba-819d-46aa-bb5b-94f5a9974fbb",
+      "operationId": "manual-lifecycle",
+      "batchId": "bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df",
+      "gate": "parallel",
+      "command": "node -e \"setTimeout(() => {}, 40)\"",
+      "phase": "integration",
+      "after": [],
+      "plan": [
+        "contract",
+        "parallel",
+        "dependent"
+      ],
+      "requestedAt": "2026-11-02T10:10:15.258Z",
+      "startedAt": "2026-11-02T10:10:15.259Z",
+      "finishedAt": "2026-11-02T10:10:15.330Z",
+      "result": "passed",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": 97,
+      "cpu": {
+        "userUs": 17000,
+        "systemUs": 10000,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "dbd96643-6501-4769-8ea1-82b756b98b5a",
+        "parent": null
+      }
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "id": "f62202f0-b624-4c6c-8ed1-5081f28d5824",
+      "operationId": "manual-lifecycle",
+      "batchId": "bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df",
+      "gate": "dependent",
+      "command": "node --version",
+      "phase": "integration",
+      "after": [
+        "contract",
+        "parallel"
+      ],
+      "plan": [
+        "contract",
+        "parallel",
+        "dependent"
+      ],
+      "requestedAt": "2026-11-02T10:10:15.346Z",
+      "startedAt": "2026-11-02T10:10:15.346Z",
+      "finishedAt": "2026-11-02T10:10:15.356Z",
+      "result": "passed",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": 25,
+      "cpu": {
+        "userUs": 5000,
+        "systemUs": 0,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "2c730981-0743-44c6-9921-1cc827e3389b",
+        "parent": null
+      }
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "id": "f741ee2c-74e6-4b02-b4fe-e2bd2ca78794",
+      "operationId": "manual-lifecycle",
+      "batchId": "6983273b-c49c-42b3-bc7f-b9d4cd355c6b",
+      "gate": "verification",
+      "command": "node --version",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "verification"
+      ],
+      "requestedAt": "2026-11-02T10:10:15.694Z",
+      "startedAt": "2026-11-02T10:10:15.694Z",
+      "finishedAt": "2026-11-02T10:10:15.705Z",
+      "result": "passed",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": 25,
+      "cpu": {
+        "userUs": 6000,
+        "systemUs": 0,
+        "provenance": "bash-time-waited-tree",
+        "boundary": "916646b0-fa53-4a1e-910e-83f0e854916f",
+        "parent": null
+      }
+    },
+    {
+      "repositoryId": "repo",
+      "configuration": "807863865963404a3e20bf9812d84a7bac71e39241224f80f05e95c5af18723c",
+      "runtime": "v24.21.0",
+      "profile": {
+        "reference": "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json",
+        "samples": null
+      },
+      "missionId": "px-0001",
+      "revision": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "id": "08e500bc-d8cf-4e36-b268-1cf1f9aa279c",
+      "operationId": "manual-lifecycle",
+      "batchId": "ddee5b6b-4d63-4751-a9b9-580d6642d497",
+      "gate": "declared-0",
+      "command": "node --version",
+      "phase": "handoff",
+      "after": [],
+      "plan": [
+        "declared-0"
+      ],
+      "requestedAt": "2026-11-02T10:10:15.854Z",
+      "startedAt": "2026-11-02T10:10:15.855Z",
+      "finishedAt": "2026-11-02T10:10:15.868Z",
+      "result": "reused",
+      "failureReason": null,
+      "exitCode": 0,
+      "wallMs": null,
+      "cpu": null
+    }
+  ],
+  "attemptCount": 7,
+  "failureCount": 1,
+  "infrastructureFailureCount": 0,
+  "reusedProofCount": 2,
+  "incompleteCount": 0,
+  "endToEndMs": 2699,
+  "completedMissions": 1,
+  "executionMs": 140,
+  "waitingMs": 24,
+  "overlapMs": 67,
+  "cpuUs": 105000,
+  "cpuObservations": 6,
+  "rerunCount": 3,
+  "rerun": {
+    "wallMs": 83,
+    "cpuUs": 63000,
+    "cpuObservations": 3
+  },
+  "recovery": {
+    "cpuUs": 30000,
+    "cpuObservations": 1,
+    "wallMs": 504
+  },
+  "repairMs": 271,
+  "reReviewMs": 445,
+  "criticalPathMs": null,
+  "batches": [
+    {
+      "batchId": "ff862167-ae7f-4614-bc55-28910588e01f",
+      "criticalPathMs": 10
+    },
+    {
+      "batchId": "fb0b52d4-c77c-40b5-9f3d-5735eab7edda",
+      "criticalPathMs": 0
+    },
+    {
+      "batchId": "595e5365-bab7-41bd-b0ac-16595a34eb7d",
+      "criticalPathMs": null
+    },
+    {
+      "batchId": "bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df",
+      "criticalPathMs": 81
+    },
+    {
+      "batchId": "6983273b-c49c-42b3-bc7f-b9d4cd355c6b",
+      "criticalPathMs": 11
+    },
+    {
+      "batchId": "ddee5b6b-4d63-4751-a9b9-580d6642d497",
+      "criticalPathMs": 0
+    }
+  ],
+  "ranked": [
+    {
+      "gate": "parallel",
+      "attempts": 2,
+      "wallMs": 108,
+      "cpuUs": 27000
+    },
+    {
+      "gate": "contract",
+      "attempts": 2,
+      "wallMs": 68,
+      "cpuUs": 61000
+    },
+    {
+      "gate": "verification",
+      "attempts": 2,
+      "wallMs": 21,
+      "cpuUs": 12000
+    },
+    {
+      "gate": "dependent",
+      "attempts": 1,
+      "wallMs": 10,
+      "cpuUs": 5000
+    }
+  ],
+  "unknowns": [
+    "Workflow join unavailable for some attempts",
+    "OS CPU missing for some attempts; observed CPU is partial",
+    "Repair and re-review agent CPU unavailable; gate CPU is not agent CPU",
+    "End-to-end critical path unknown; only complete observed gate DAGs are measured"
+  ],
+  "comparisons": [
+    {
+      "gate": "verification",
+      "before": "49bf7f87dbd37098cb0a4d25c6fee9d98803785c",
+      "after": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "beforeN": 1,
+      "afterN": 1,
+      "configurationEquivalent": true,
+      "workloadEquivalent": "unknown",
+      "beforeWallMs": 10,
+      "afterWallMs": 11
+    },
+    {
+      "gate": "contract",
+      "before": "25c678f185eebcaefa54fe8a44f0082c98808fef",
+      "after": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "beforeN": 1,
+      "afterN": 1,
+      "configurationEquivalent": true,
+      "workloadEquivalent": "unknown",
+      "beforeWallMs": 35,
+      "afterWallMs": 33
+    },
+    {
+      "gate": "parallel",
+      "before": "25c678f185eebcaefa54fe8a44f0082c98808fef",
+      "after": "08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8",
+      "beforeN": 1,
+      "afterN": 1,
+      "configurationEquivalent": true,
+      "workloadEquivalent": "unknown",
+      "beforeWallMs": 37,
+      "afterWallMs": 71
+    }
+  ],
+  "profileReferences": [
+    "/mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json"
+  ]
+}

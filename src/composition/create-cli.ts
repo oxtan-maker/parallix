@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { missionCommandTarget } from './mission-command-context.js';
 import { bindGateAdmission } from './gate-admission.js';
+import { bindVerificationObservation } from './verification-observation.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +65,7 @@ interface RunOptions {
 
 async function runtimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorInvocation = false, command = ''): Promise<Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'>> {
   bindGateAdmission(configuration);
+  bindVerificationObservation(configuration);
   const base = {
     runtime: configuration.runtime,
     ensureStandaloneGitRepoFn: ensureStandaloneGitRepo,

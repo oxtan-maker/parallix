@@ -35,7 +35,7 @@ function recorder() {
   const board = () => projectActivityPublications(appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []), {
     nowMs: Date.now(), ttlMs: 60_000, isProcessAlive: () => true,
   }).get(missionId(SLUG)) ?? null;
-  return { port, board };
+  return { port, board, appended };
 }
 
 test('inherited child completion cannot settle parent activity (TASK-2822)', async t => {
@@ -59,7 +59,7 @@ function reviewWorkflow(onContinue: (_context: ReviewWorkflowContext) => Promise
 }
 
 test('integration, its repair agent and its nested re-review keep the mission live with the running family', async () => {
-  const { port, board } = recorder();
+  const { port, board, appended } = recorder();
   const seen: Array<{ phase: string | undefined; agent: string | null | undefined } | null> = [];
   const snapshot = () => { const work = board()?.currentWork ?? null; seen.push(work ? { phase: work.phase, agent: work.agent } : null); };
 
@@ -78,7 +78,7 @@ test('integration, its repair agent and its nested re-review keep the mission li
         await (launchOptions.onLaunch as (_info: { agent: string }) => Promise<void>)({ agent: 'custom' });
         snapshot();
         return { agent: 'custom', result: { status: 0 } };
-      }, nested, 'execute', (agent) => `integration repair: implementer ${agent}`);
+      }, nested, 'execute', (agent) => `integration repair: implementer ${agent}`, 'repair');
       await launch('act-on-review', { agent: 'claude' });
       snapshot();
       await review.execute([SLUG], { nestedWork: nested });
@@ -100,6 +100,8 @@ test('integration, its repair agent and its nested re-review keep the mission li
   ], 'no gap in live work from integrate start to integrate end, and the actual family is shown');
   assert.equal(board()?.currentWork ?? null, null, 'a finished integrate ends its live work');
   assert.equal(board()?.blockingReason ?? null, null, 'a clean stop in the integration lane shows no stop reason');
+  assert.ok(appended.some(entry => parseExecutionActivityEntry(entry)?.purpose === 'repair'),
+    'repair purpose survives publication without parsing the display summary');
 });
 
 test('an integrate that cannot continue shows why, not a silent end', async () => {

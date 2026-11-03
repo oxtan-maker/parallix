@@ -2,6 +2,18 @@ import type { GitFn } from './verification.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { VerificationMeasurement } from '../../application/ports/verification-observation.js';
+
+/** Observational metadata only; it cannot certify a tree or a sampled workload. */
+export function verificationObservationContext(root: string, reference?: string): {
+  configuration: string | null; runtime: string; profile: VerificationMeasurement['profile'];
+} {
+  let configuration: string | null = null;
+  try { configuration = createHash('sha256').update(fs.readFileSync(path.join(root, 'workflow.config.json')))
+    .update(process.version).digest('hex'); } catch { /* Unknown configuration equivalence. */ }
+  return { configuration, runtime: process.version,
+    profile: reference && fs.existsSync(reference) ? { reference, samples: null } : null };
+}
 
 export function verificationDigest(value: string): string {
   return createHash('sha256').update(value).digest('hex');

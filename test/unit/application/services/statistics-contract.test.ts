@@ -40,6 +40,9 @@ import { repositoryId, type RepositoryId } from '../../../../src/domain/reposito
 // module's named exports, so this must be the default import.
 import stats from '../../../../src/adapters/cli/commands/stats.js';
 import { reviewStatistics, type ReviewStatistics } from '../../../../src/application/services/review-statistics.js';
+import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
+import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../../../../src/application/ports/verification-observation.js';
+import { renderVerificationStatistics } from '../../../../src/application/presentation/verification-statistics.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
 
@@ -56,6 +59,108 @@ test('live Review observations survive absent telemetry and ignore archived scal
   assert.match(report, /codex\s+1\s+unavailable\s+0/);
   assert.match(report, /custom\s+1\s+2\.00\s+1/);
   assert.match(report, /Review-fix mission coverage: 1\/2/);
+});
+
+const instant = (ms: number) => new Date(Date.UTC(2026, 10, 2) + ms).toISOString();
+function attempt(id: string, start: number, end: number, extra: Partial<VerificationMeasurement> = {}): VerificationMeasurement {
+  return { id, repositoryId: 'repo', missionId: 'px-1', operationId: 'op', revision: 'rev', batchId: 'batch',
+    gate: id, command: 'check', phase: 'integration', after: [], plan: ['a', 'b', 'c'],
+    requestedAt: instant(0), startedAt: instant(start), finishedAt: instant(end), result: 'passed',
+    failureReason: null, exitCode: 0, wallMs: end - start,
+    cpu: { userUs: 1000, systemUs: 0, boundary: id, parent: null, provenance: 'bash-time-waited-tree' },
+    profile: null, ...extra };
+}
+function verificationReport(attempts: readonly VerificationMeasurement[], lifecycle: readonly BoardLaneEventEntry[] = []) {
+  return verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle,
+    history: attempts.map(a => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(a), createdAt: a.finishedAt ?? a.requestedAt })) });
+}
+
+test('verification unions overlap, accounts nested CPU once and measures complete dependency paths (px-0025)', () => {
+  const rows = [attempt('a', 0, 10), attempt('b', 5, 15, {
+    cpu: { userUs: 300, systemUs: 0, boundary: 'b', parent: 'a', provenance: 'bash-time-waited-tree' },
+  }), attempt('c', 15, 20, { after: ['a', 'b'] })];
+  const report = verificationReport(rows);
+  assert.equal(report.executionMs, 20);
+  assert.equal(report.overlapMs, 5);
+  assert.equal(report.cpuUs, 2000);
+  assert.equal(report.waitingMs, 0, 'waiting covered by active execution is not counted again');
+  assert.equal(report.criticalPathMs, 15);
+  assert.equal(report.cpuObservations, 3);
+  assert.equal(verificationReport([rows[0], rows[2]]).criticalPathMs, null, 'missing dependency is not zero');
+  assert.equal(verificationReport([attempt('a', 0, 10, { after: ['c'] }), rows[2]]).criticalPathMs, null);
+});
+
+test('verification retains attempts through repairs and completion without mixing repository or mission identities (px-0025)', () => {
+  const first = attempt('first', 0, 10, { gate: 'check', batchId: 'one', plan: ['check'], result: 'failed', exitCode: 1,
+    failureReason: { version: 1, code: 'infrastructure' }, cpu: null });
+  const next = attempt('next', 25, 35, { gate: 'check', batchId: 'two', plan: ['check'], revision: 'fixed' });
+  const other = attempt('other', 0, 100, { repositoryId: 'other', missionId: 'px-1' });
+  const events: BoardLaneEventEntry[] = [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: null, toStatus: 'active', occurredAt: instant(0), trigger: 'start', agent: 'codex', idempotencyKey: 'one' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(50), trigger: 'done', agent: 'codex', idempotencyKey: 'two' },
+  ];
+  const report = verificationReport([first, { ...first, result: 'running', finishedAt: null }, first, next, other], events);
+  assert.equal(report.attemptCount, 2);
+  assert.equal(report.infrastructureFailureCount, 1);
+  assert.equal(report.failureCount, 1);
+  assert.equal(report.rerunCount, 1);
+  assert.equal(report.rerun.wallMs, 10);
+  assert.equal(report.recovery.wallMs, 25);
+  assert.equal(report.recovery.cpuUs, 1000);
+  assert.equal(report.endToEndMs, 50);
+  assert.equal(report.completedMissions, 1);
+  assert.equal(report.criticalPathMs, null, 'inter-batch dependencies are unknown');
+  assert.ok(report.unknowns.some(value => value.includes('partial')));
+});
+
+test('verification distinguishes absent samples and interrupted work from measured zero and proof reuse (px-0025)', () => {
+  const missing = verificationReport([]);
+  assert.equal(missing.executionMs, null);
+  assert.equal(missing.cpuUs, null);
+  const zero = attempt('zero', 0, 0, { plan: ['zero'], cpu: {
+    userUs: 0, systemUs: 0, boundary: 'zero', parent: null, provenance: 'bash-time-waited-tree',
+  } });
+  assert.equal(verificationReport([zero]).cpuUs, 0);
+  assert.equal(verificationReport([zero]).executionMs, 0);
+  const partial = verificationReport([attempt('partial', 0, 1, { result: 'running', finishedAt: null, cpu: null }),
+    attempt('reused', 0, 0, { result: 'reused', startedAt: null, cpu: null })]);
+  assert.equal(partial.incompleteCount, 1);
+  assert.equal(partial.attemptCount, 1);
+  assert.equal(partial.reusedProofCount, 1);
+  assert.equal(partial.executionMs, null);
+  assert.equal(partial.cpuUs, null);
+});
+
+test('verification scopes activity by repository and source while retaining repair and re-review intervals (px-0025)', () => {
+  const history = [
+    ['review', 'running', 0], ['review', 'ended', 10],
+    ['review-response', 'running', 10], ['review-response', 'ended', 20],
+    ['review', 'running', 20], ['review', 'ended', 35],
+  ].map(([phase, state, ms]) => ({ eventType: 'mission.current-work', createdAt: instant(Number(ms)),
+    eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', sourceId: 'source', phase, state }) }));
+  const report = verificationStatistics({ repositoryId: 'repo', history, operations: [], lifecycle: [] }, new Set(['px-1']));
+  assert.equal(report.repairMs, 10);
+  assert.equal(report.reReviewMs, 15);
+  assert.equal(verificationStatistics({ repositoryId: 'other', history, operations: [], lifecycle: [] }).repairMs, null);
+});
+
+test('verification reporting discloses samples, configuration and unknown workload equivalence (px-0025)', () => {
+  const report = verificationReport([
+    attempt('a', 0, 10, { gate: 'check', revision: 'before', configuration: 'same' }),
+    attempt('b', 20, 25, { gate: 'check', revision: 'after', configuration: 'same',
+      profile: { reference: 'retained/report.json', samples: null } }),
+  ]);
+  assert.equal(report.comparisons[0].beforeN, 1);
+  assert.equal(report.comparisons[0].afterN, 1);
+  assert.equal(report.comparisons[0].configurationEquivalent, true);
+  assert.equal(report.comparisons[0].workloadEquivalent, 'unknown');
+  const rendered = renderVerificationStatistics(report).join('\n');
+  assert.match(rendered, /retained history/);
+  assert.match(rendered, /OS waited-tree CPU 2000 us/);
+  assert.match(rendered, /retained\/report.json/);
+  assert.match(rendered, /configuration equivalent true; workload equivalent unknown/);
+  assert.match(rendered, /Contention and optimization benefit: unknown/);
+  assert.deepEqual(renderVerificationStatistics(null), ['Verification measurements: unavailable']);
 });
 
 // task-2347.07 repro uses a distinct repository identity from the task-2347.08

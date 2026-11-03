@@ -17,11 +17,14 @@ export const EXECUTION_ACTIVITY_EVENT_TYPE = 'mission.current-work';
  * renders, so the same row is readable by `ConcreteOperationLogReadAdapter`
  * without a second encoding.
  */
-export function executionActivityToEntry(event: ExecutionActivity): OperationalHistoryEntry {
+export function executionActivityToEntry(event: ExecutionActivity, sourceId?: string, repositoryId?: string): OperationalHistoryEntry {
   return {
     eventType: EXECUTION_ACTIVITY_EVENT_TYPE,
     eventData: JSON.stringify({
       missionId: event.missionId,
+      sourceId,
+      repositoryId,
+      purpose: event.purpose,
       operationId: event.operationId,
       phase: event.phase,
       state: event.state,
@@ -50,6 +53,7 @@ export function parseExecutionActivityEntry(entry: OperationalHistoryEntry): Exe
   const state = typeof data.state === 'string' ? data.state : null;
   if (!missionId || !validOperationId(data.operationId) || !isPhase(phase) || !isState(state)) { return null; }
   return {
+    ...activityPurpose(data.purpose),
     missionId: missionId as MissionId,
     operationId: data.operationId,
     phase,
@@ -67,6 +71,9 @@ export function parseExecutionActivityEntry(entry: OperationalHistoryEntry): Exe
 }
 
 function validOperationId(value: unknown): value is string { return typeof value === 'string' && Boolean(value.trim()); }
+function activityPurpose(value: unknown): Pick<ExecutionActivity, 'purpose'> {
+  return value === 'repair' ? { purpose: value } : {};
+}
 
 function isPhase(value: string | null): value is ExecutionActivityStage {
   return value === 'waiting' || value === 'draft' || value === 'execute' || value === 'review'
@@ -79,6 +86,7 @@ function isState(value: string | null): value is ExecutionActivityState {
 
 /** What a caller must say to open or update a mission's current work. */
 export interface ExecutionActivityIntent {
+  readonly purpose?: 'repair';
   readonly missionId: MissionId;
   readonly operationId: string;
   readonly phase: ExecutionActivityStage;
@@ -221,7 +229,7 @@ export function reviewLoopPublisher(
 export interface NestedWorkPublisher {
   readonly parent: ExecutionActivityIntent;
   /** Nested work is running under the outer operation. */
-  running(_phase: ExecutionActivityStage, _summary: string, _agent?: string | null): Promise<void>;
+  running(_phase: ExecutionActivityStage, _summary: string, _agent?: string | null, _purpose?: 'repair'): Promise<void>;
   /** Nested work finished; the outer operation is still the mission's current work. */
   resume(): Promise<void>;
 }
@@ -234,7 +242,8 @@ export function nestedWorkPublisher(port: ExecutionActivityPort, parent: Executi
   };
   return {
     parent,
-    running: (phase, summary, agent) => publish({ ...parent, phase, summary, agent: parseFamily(agent ?? null) }),
+    running: (phase, summary, agent, purpose) => publish({ ...parent, phase, summary, agent: parseFamily(agent ?? null),
+      ...(purpose ? { purpose } : {}) }),
     resume: () => publish(parent),
   };
 }
@@ -254,16 +263,17 @@ export function publishedAgentLaunch<T, Options extends Record<string, unknown>>
   nested: NestedWorkPublisher,
   phase: ExecutionActivityStage,
   describe: (_agent: string) => string,
+  purpose?: 'repair',
 ): (_step: string, _options: Options) => Promise<T> {
   return async (step, launchOptions) => {
     const requested = typeof launchOptions.agent === 'string' ? launchOptions.agent : null;
     const onLaunch = launchOptions.onLaunch as ((_info: { agent: string }) => unknown) | undefined;
-    await nested.running(phase, describe(requested ?? 'agent'), requested);
+    await nested.running(phase, describe(requested ?? 'agent'), requested, purpose);
     try {
       return await start(step, {
         ...launchOptions,
         onLaunch: async (info: { agent: string }) => {
-          await nested.running(phase, describe(info.agent), info.agent);
+          await nested.running(phase, describe(info.agent), info.agent, purpose);
           return onLaunch?.(info);
         },
       });
@@ -331,6 +341,7 @@ export class ExecutionActivityRecorder implements ExecutionActivityPort {
     publication = { ...publication, operationId: authorizedOperationId() ?? sourceId };
     await authorizeMissionWrite(publication.missionId);
     const event: ExecutionActivity = {
+      ...activityPurpose(publication.purpose),
       missionId: publication.missionId,
       operationId: publication.operationId,
       phase: publication.phase,

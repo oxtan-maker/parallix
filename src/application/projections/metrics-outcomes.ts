@@ -162,7 +162,7 @@ interface MissionLifecycle {
  * the first event that moved it to `done`. Both are lane facts, so cycle time never
  * depends on how much telemetry an agent happened to emit.
  */
-function missionLifecycles(
+export function missionLifecycles(
   entries: readonly BoardLaneEventEntry[],
   repositoryId: RepositoryId,
 ): ReadonlyMap<MissionId, MissionLifecycle> {

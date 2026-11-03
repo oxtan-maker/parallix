@@ -1,4 +1,5 @@
 import { renderClassifierStatistics } from '../../application/presentation/classifier-statistics.js';
+import { renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { createRangeWindow } from '../../application/services/statistics-row.js';
 import type { StatsRow } from '../../application/services/statistics-row.js';
@@ -107,7 +108,7 @@ function renderStatsResult(result: StatsCommandResult, mission: string | null, r
     }
 
   }
-  return report;
+  return `${report}\n\n${renderVerificationStatistics(result.verification).join('\n')}`;
 }
 
 const STATS_VALUE_FLAGS: Readonly<Record<string, 'mission' | 'outputFile' | 'today' | 'from' | 'to'>> = {

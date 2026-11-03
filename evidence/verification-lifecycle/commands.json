@@ -1,0 +1,229 @@
+[
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo",
+    "args": [
+      "draft",
+      "exercise disposable verification",
+      "--agent",
+      "custom"
+    ],
+    "status": 0,
+    "stdout": "Drafting mission px-0001\n  branch    mission/px-0001\n  worktree  /tmp/px-verification-manual-OFRvsv/repo-px-0001\n\nRunning custom to write the mission contract...\n[INFO] Selected agent for step \"draft\": custom (opencode)\n[INFO] Using configured model for custom: stub/custom\n\n[PASS] Drafted px-0001 in 0s: exercise disposable verification\n  contract  px status px-0001\n  branch    mission/px-0001\n  agent     custom\n\nGoal\n  The disposable change survives verification and review\n\n  1 success criterion · 1 checkpoint · 1 gate · NEL Small\n\n[INFO] Working directory: /tmp/px-verification-manual-OFRvsv/repo-px-0001\n[INFO] Next: px active\n",
+    "stderr": "[✓] git commit (0.0s)\n[✓] git commit (0.0s)\n[✓] git commit (0.0s)\n[✓] git commit (0.0s)\n[✓] git commit (0.0s)\n"
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "mission",
+      "author",
+      "--slug",
+      "px-0001",
+      "--goal",
+      "The disposable change survives verification and review",
+      "--why",
+      "Measure verification recovery",
+      "--scope",
+      "Disposable lifecycle",
+      "--out-of-scope",
+      "Real operator state",
+      "--criterion",
+      "The disposable change survives verification and review",
+      "--checkpoint",
+      "CP-1",
+      "--checkpoint-text",
+      "Exercise the contract",
+      "--gate",
+      "node --version",
+      "--predicted",
+      "Small",
+      "--classification",
+      "ai_sdlc"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Launching: manual-fake-agent \n[INFO] Agent working directory: /tmp/px-verification-manual-OFRvsv/repo-px-0001\n{\n  \"mission\": {\n    \"id\": \"px-0001\",\n    \"repositoryId\": \"repo\",\n    \"title\": \"exercise disposable verification\",\n    \"labels\": [\n      \"ai_sdlc\"\n    ],\n    \"assignee\": null,\n    \"checkpoints\": [\n      {\n        \"missionId\": \"px-0001\",\n        \"name\": \"CP-1\",\n        \"firstLine\": \"Exercise the contract\",\n        \"goalCheck\": [],\n        \"nextActionText\": \"\"\n      }\n    ],\n    \"brief\": {\n      \"goal\": \"The disposable change survives verification and review\",\n      \"why\": \"Measure verification recovery\",\n      \"scope\": \"Disposable lifecycle\",\n      \"outOfScope\": [\n        \"Real operator state\"\n      ]\n    },\n    \"declaredGates\": [\n      \"node --version\"\n    ],\n    \"successCriteria\": [\n      \"The disposable change survives verification and review\"\n    ],\n    \"successCriterionIds\": [\n      \"sc-1\"\n    ],\n    \"nextSuccessCriterionId\": 2,\n    \"completedSuccessCriteria\": [],\n    \"dependencies\": [],\n    \"predictedNelBucket\": \"Small\",\n    \"reproductionTest\": null,\n    \"review\": null,\n    \"netEngineeringLines\": null,\n    \"rawStatus\": \"backlog\",\n    \"status\": \"backlog\",\n    \"closedAt\": null\n  },\n  \"version\": 2\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "active",
+      "px-0001",
+      "--implementer",
+      "custom",
+      "--reviewer",
+      "custom"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Mission px-0001: exercise disposable verification\n[PASS] Execute safety harness: no uncommitted mission changes left behind.\n[PASS] Implementation complete (custom).\n[PASS] All 1 planned checkpoint(s) have recorded evidence.\n[INFO] Repository gates (handoff): none configured — skipping.\n[PASS] Recorded checkpoint evidence verified: 1 recorded checkpoint(s), 1 Goal Check row(s).\n[INFO] Verifying the repository: node --version\nRepository gate (handoff): verification started (1/1 active).\nv24.21.0\nRepository gate (handoff): verification passed.\n[PASS] Repository verification passed.\n[INFO] Running mission-declared gates for px-0001.\n[WARN] No reviewer available besides custom; falling back to self-review for this review preparation. All eligible agents for step \"review\" are exhausted (limit-hit or excluded). Tried: custom.\n[PASS] Implementation is ready for independent review.\n\nStarting autonomous review loop (implementer: custom)...\n[INFO] Auto-derived implementer from backlog task: custom\n[INFO] Selected reviewer: custom (explicit)\n[INFO] REVIEW — px-0001\n[INFO] Implementer: custom\n[INFO] Reviewer: custom\n[INFO] Independence: same-family fallback / self-review\n[INFO] Branch: mission/px-0001\n\n[INFO] ========== Round 1 / 5 ==========\n[INFO] Review round 1 open for px-0001.\n[INFO] Pre-review gate for area \"all\": node --version\nActive/review verification: reused successful proof.\n[PASS] Pre-review gate reused successful active/review proof for area \"all\".\n[INFO] Reviewer classifier not used (ineligible due to review context), continuing with general reviewer.\n[INFO] Round 1: launching reviewer (custom)...\n[INFO] Selected agent for step \"review\": custom (opencode)\n[INFO] No prior custom session for px-0001 (reviewer); launching fresh.\n[INFO] Using configured model for custom: stub/custom\n[PASS] ========== APPROVED ==========\n[PASS] Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.\n[PASS] Task px-0001 transitioned to ready-for-integration and committed.\n",
+    "stderr": "[✓] git commit (0.0s)\n[✓] git commit (0.0s)\n"
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "status",
+      "px-0001",
+      "--json"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Implementer: custom\n{\n  \"slug\": \"px-0001\",\n  \"title\": \"exercise disposable verification\",\n  \"branch\": \"mission/px-0001\",\n  \"missionStatus\": \"active\",\n  \"backlogStatus\": \"backlog\",\n  \"closedAt\": null,\n  \"assignee\": \"custom\",\n  \"classification\": \"ai_sdlc\",\n  \"externalTaskRef\": null,\n  \"legacyTaskContent\": null,\n  \"legacyTaskError\": null,\n  \"legacyMissionContent\": null,\n  \"legacyMissionError\": null,\n  \"legacyReviewStateContent\": null,\n  \"legacyReviewStateError\": null,\n  \"version\": 4,\n  \"brief\": {\n    \"goal\": \"The disposable change survives verification and review\",\n    \"why\": \"Measure verification recovery\",\n    \"scope\": \"Disposable lifecycle\",\n    \"outOfScope\": [\n      \"Real operator state\"\n    ]\n  },\n  \"description\": null,\n  \"declaredGates\": [\n    \"node --version\"\n  ],\n  \"successCriteria\": [\n    \"The disposable change survives verification and review\"\n  ],\n  \"successCriterionIds\": [\n    \"sc-1\"\n  ],\n  \"completedSuccessCriteria\": [],\n  \"dependencies\": [],\n  \"checkpoints\": [\n    {\n      \"name\": \"CP-1\",\n      \"description\": \"Exercise the contract\",\n      \"recorded\": false,\n      \"goalCheck\": []\n    }\n  ],\n  \"predictedNelBucket\": \"Small\",\n  \"reproductionTest\": null,\n  \"latestCheckpoint\": null,\n  \"review\": null,\n  \"pullRequest\": {\n    \"exists\": false,\n    \"raw\": \"Forgejo PR: skipped (review provider is not forgejo).\"\n  }\n}\n",
+    "stderr": "[✓] git commit (0.0s)\n"
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "checkpoint",
+      "record",
+      "--slug",
+      "px-0001",
+      "--name",
+      "CP-1",
+      "--criterion",
+      "The disposable change survives verification and review",
+      "--evidence",
+      "answer.txt",
+      "--next",
+      "Verify the repaired contract and review the revision"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"checkpoint\": {\n    \"missionId\": \"px-0001\",\n    \"name\": \"CP-1\",\n    \"goalCheck\": [\n      {\n        \"criterion\": \"The disposable change survives verification and review\",\n        \"evidence\": \"answer.txt\"\n      }\n    ],\n    \"nextActionText\": \"Verify the repaired contract and review the revision\"\n  },\n  \"replaced\": true,\n  \"version\": 5\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "mission",
+      "mark-complete",
+      "--slug",
+      "px-0001",
+      "--all"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"completed\": [\n    0\n  ],\n  \"version\": 6\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "verdict",
+      "approve",
+      "--slug",
+      "px-0001",
+      "--actor",
+      "custom"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Launching: manual-fake-agent \n[INFO] Agent working directory: /tmp/px-verification-manual-OFRvsv/repo-px-0001\n[PASS] Persisted review event to SQLite: reviewer_findings round 1\n[PASS] Recorded review event: reviewer_findings round 1 [custom]\n[PASS] Persisted review event to SQLite: reviewer_outcome round 1\n[PASS] Recorded review event: reviewer_outcome round 1 [custom]\n[PASS] Recorded approve for px-0001 (round 1).\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "integrate",
+      "px-0001"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Rebasing mission/px-0001 onto local main...\n[PASS] Rebase completed cleanly.\n[INFO] Verification: the workflow handles integration checks.\n[INFO] Integration eligibility requires the lifecycle-authorized lane and current policy-authorized approval.\n[INFO] Rebased mission/px-0001 onto the primary branch. Integration gates and the probe merge now run against the rebased branch.\nRepository gate (integration): contract started (1/2 active).\nRepository gate (integration): parallel started (2/2 active).\n\n--- Repository gate (integration): contract output (exit 1) ---\nCommand: node check.mjs\nAssertionError: expected fixed answer\n--- End repository gate (integration): contract ---\nRepository gate (integration): contract failed.\n\n--- Repository gate (integration): parallel output (exit unknown) ---\nCommand: node -e \"setTimeout(() => {}, 40)\"\n--- End repository gate (integration): parallel ---\n[PASS] Task px-0001 transitioned to active and committed.\n[INFO] Bouncing to implementer (custom) with fresh-diagnostic GateFailure repair. Attempt 1/2.\n[INFO] Selected agent for step \"act-on-review\": custom (opencode)\n[INFO] No prior custom session for px-0001 (implementer); launching fresh.\n[INFO] Using configured model for custom: stub/custom\nRepository gate (integration): contract started (1/2 active).\nRepository gate (integration): parallel started (2/2 active).\nRepository gate (integration): contract passed.\nRepository gate (integration): parallel passed.\nRepository gate (integration): dependent started (1/2 active).\nRepository gate (integration): dependent passed.\nFailure classification: legacy fallback (missing); command=node check.mjs\n[PASS] PRE-REVIEW GATE FAILURE repaired: the failing check re-ran and passed (attempt 1/2).\n[INFO] RECOVERY_TELEMETRY strategy=fresh-diagnostic outcome=rescue\n[PASS] Integration gate contract repaired by custom and re-ran green (1/2 integration-gate repairs allowed per integrate).\n[INFO] Sending px-0001 back through review for the repaired revision 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8.\n[INFO] Auto-derived implementer from backlog task: custom\n[INFO] No completed review preparation for mission/px-0001 (task in active) — performing review preparation (attempting automatic review preparation) via px review px-0001...\n[INFO] Repository gates (handoff): none configured — skipping.\n[PASS] Recorded checkpoint evidence verified: 2 recorded checkpoint(s), 2 Goal Check row(s).\n[INFO] Verifying the repository: node --version\nRepository gate (handoff): verification started (1/1 active).\nv24.21.0\nRepository gate (handoff): verification passed.\n[PASS] Repository verification passed.\n[INFO] Running mission-declared gates for px-0001.\n[WARN] No reviewer available besides custom; falling back to self-review for this review preparation. All eligible agents for step \"review\" are exhausted (limit-hit or excluded). Tried: custom.\n[PASS] Implementation is ready for independent review.\n[INFO] Resuming persisted reviewer: custom (round 2)\n[INFO] Selected reviewer: custom (persisted)\n[INFO] Resuming review loop from round 2 (reviewing).\n[INFO] REVIEW — px-0001\n[INFO] Implementer: custom\n[INFO] Reviewer: custom\n[INFO] Independence: same-family fallback / self-review\n[INFO] Branch: mission/px-0001\n\n[INFO] ========== Round 2 / 6 ==========\n[INFO] Review round 2 open for px-0001.\n[INFO] Pre-review gate for area \"all\": node --version\nActive/review verification: reused successful proof.\n[PASS] Pre-review gate reused successful active/review proof for area \"all\".\n[PASS] ✓ verification passed against the revised tree (round 2)\n[INFO] Reviewer classifier not used (ineligible due to review context), continuing with general reviewer.\n[INFO] Round 2: launching reviewer (custom)...\n[INFO] Selected agent for step \"review\": custom (opencode)\n[INFO] Resuming custom session for px-0001 (reviewer).\n[INFO] Using configured model for custom: stub/custom\n[PASS] ========== APPROVED · round 2 ==========\n[PASS] Autonomous review stopped: reviewer approved the PR. Hand off to human review/integration.\n[PASS] Task px-0001 transitioned to ready-for-integration and committed.\n[PASS] Mission px-0001 was re-reviewed and approved; stopping before integration.\n[INFO] 3 integration gate(s) passed after 1 integration-gate rebound(s); the repaired revision was re-reviewed and approved. Read the fresh PR and run px integrate px-0001 to land.\n",
+    "stderr": "[✓] git rebase (0.0s)\n[FAIL] Repository gate \"contract\" exited with code 1 for integration.\n[FAIL] \n[FAIL] Integration gates failed for px-0001 (root=/tmp/px-verification-manual-OFRvsv/repo-px-0001) — Repository gate \"contract\" exited with code 1 for integration.\n[✓] git commit (0.0s)\n[INFO] The integration-gate repair of px-0001 requires a fresh review: prior approved revision f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5, repaired revision 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8. The withdrawn approval cannot authorize the merge.\n[INFO] px-0001 must go back through review: run px review px-0001 to review the repaired revision 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8; an approval returns it to the integration lane.\n[✓] git commit (0.0s)\n[✓] git commit (0.0s)\n"
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "status",
+      "px-0001",
+      "--json"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Launching: manual-fake-agent \n[INFO] Agent working directory: /tmp/px-verification-manual-OFRvsv/repo-px-0001\n{\n  \"slug\": \"px-0001\",\n  \"title\": \"exercise disposable verification\",\n  \"branch\": \"mission/px-0001\",\n  \"missionStatus\": \"active\",\n  \"backlogStatus\": \"backlog\",\n  \"closedAt\": null,\n  \"assignee\": \"custom\",\n  \"classification\": \"ai_sdlc\",\n  \"externalTaskRef\": null,\n  \"legacyTaskContent\": null,\n  \"legacyTaskError\": null,\n  \"legacyMissionContent\": null,\n  \"legacyMissionError\": null,\n  \"legacyReviewStateContent\": null,\n  \"legacyReviewStateError\": null,\n  \"version\": 19,\n  \"brief\": {\n    \"goal\": \"The disposable change survives verification and review\",\n    \"why\": \"Measure verification recovery\",\n    \"scope\": \"Disposable lifecycle\",\n    \"outOfScope\": [\n      \"Real operator state\"\n    ]\n  },\n  \"description\": null,\n  \"declaredGates\": [\n    \"node --version\"\n  ],\n  \"successCriteria\": [\n    \"The disposable change survives verification and review\"\n  ],\n  \"successCriterionIds\": [\n    \"sc-1\"\n  ],\n  \"completedSuccessCriteria\": [\n    0\n  ],\n  \"dependencies\": [],\n  \"checkpoints\": [\n    {\n      \"name\": \"CP-1\",\n      \"description\": \"Exercise the contract\",\n      \"recorded\": true,\n      \"goalCheck\": [\n        {\n          \"criterion\": \"The disposable change survives verification and review\",\n          \"criterionId\": \"sc-1\",\n          \"evidence\": \"answer.txt\"\n        }\n      ]\n    },\n    {\n      \"name\": \"CP-2\",\n      \"repair\": {\n        \"incidentId\": \"cd519ea2-08be-40a1-8675-1d247eb5fa53\",\n        \"command\": \"node check.mjs\",\n        \"authorizedGates\": [\n          \"node --version\"\n        ],\n        \"authorizedCriteria\": [\n          \"The disposable change survives verification and review\"\n        ],\n        \"attempt\": 1,\n        \"evidenceRecorded\": false,\n        \"verified\": false\n      },\n      \"description\": \"Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs\",\n      \"recorded\": true,\n      \"goalCheck\": [\n        {\n          \"criterion\": \"The disposable change survives verification and review\",\n          \"criterionId\": \"sc-1\",\n          \"evidence\": \"answer.txt\",\n          \"carriedFrom\": \"CP-1\"\n        }\n      ]\n    }\n  ],\n  \"predictedNelBucket\": \"Small\",\n  \"reproductionTest\": null,\n  \"latestCheckpoint\": {\n    \"name\": \"CP-2\",\n    \"description\": \"Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs\",\n    \"goalCheck\": [\n      {\n        \"criterion\": \"The disposable change survives verification and review\",\n        \"criterionId\": \"sc-1\",\n        \"evidence\": \"answer.txt\",\n        \"carriedFrom\": \"CP-1\"\n      }\n    ],\n    \"nextAction\": \"Record authorized repair evidence, complete remaining checkpoints and rerun the authorized required check.\"\n  },\n  \"review\": {\n    \"round\": 1,\n    \"phase\": \"approved\",\n    \"disposition\": \"APPROVED\",\n    \"approvalOwed\": false,\n    \"approvalCoverage\": {\n      \"kind\": \"stale\",\n      \"round\": 1,\n      \"approvedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n      \"landedRevision\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n      \"recorded\": null\n    },\n    \"integrationRepair\": null,\n    \"history\": [\n      {\n        \"number\": 1,\n        \"startRevision\": \"49bf7f87dbd37098cb0a4d25c6fee9d98803785c\",\n        \"decidedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n        \"integrationRepairAssessment\": {\n          \"assessedAt\": \"2026-11-02T10:10:14.890Z\",\n          \"approvedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n          \"candidateRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n          \"failedGate\": \"contract\",\n          \"outcome\": \"pending\",\n          \"repair\": {\n            \"startedAt\": \"2026-11-02T10:10:14.890Z\",\n            \"cause\": {\n              \"kind\": \"integration-gate-failure\",\n              \"gate\": \"contract\",\n              \"command\": \"node check.mjs\",\n              \"log\": \"AssertionError: expected fixed answer\"\n            }\n          }\n        },\n        \"reviewer\": \"custom\",\n        \"implementer\": \"custom\",\n        \"disposition\": \"APPROVED\",\n        \"comment\": \"Outcome: approve\\nVerdict: approve\",\n        \"findingSummaries\": [],\n        \"fixes\": [],\n        \"pushbacks\": [],\n        \"revocation\": null,\n        \"supersession\": null\n      }\n    ]\n  },\n  \"pullRequest\": {\n    \"exists\": false,\n    \"raw\": \"Forgejo PR: skipped (review provider is not forgejo).\"\n  }\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "checkpoint",
+      "record",
+      "--slug",
+      "px-0001",
+      "--name",
+      "CP-2",
+      "--criterion",
+      "The disposable change survives verification and review",
+      "--evidence",
+      "answer.txt",
+      "--next",
+      "Verify the repaired contract and review the revision"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"checkpoint\": {\n    \"missionId\": \"px-0001\",\n    \"name\": \"CP-2\",\n    \"goalCheck\": [\n      {\n        \"criterion\": \"The disposable change survives verification and review\",\n        \"evidence\": \"answer.txt\"\n      }\n    ],\n    \"nextActionText\": \"Verify the repaired contract and review the revision\"\n  },\n  \"replaced\": true,\n  \"version\": 20\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "mission",
+      "mark-complete",
+      "--slug",
+      "px-0001",
+      "--all"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"completed\": [\n    0\n  ],\n  \"version\": 21\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "verdict",
+      "approve",
+      "--slug",
+      "px-0001",
+      "--actor",
+      "custom"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Launching: manual-fake-agent \n[INFO] Agent working directory: /tmp/px-verification-manual-OFRvsv/repo-px-0001\n[PASS] Persisted review event to SQLite: reviewer_findings round 2\n[PASS] Recorded review event: reviewer_findings round 2 [custom]\n[PASS] Persisted review event to SQLite: reviewer_outcome round 2\n[PASS] Recorded review event: reviewer_outcome round 2 [custom]\n[PASS] Recorded approve for px-0001 (round 2).\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "status",
+      "px-0001",
+      "--json"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"slug\": \"px-0001\",\n  \"title\": \"exercise disposable verification\",\n  \"branch\": \"mission/px-0001\",\n  \"missionStatus\": \"integration\",\n  \"backlogStatus\": \"backlog\",\n  \"closedAt\": null,\n  \"assignee\": \"custom\",\n  \"classification\": \"ai_sdlc\",\n  \"externalTaskRef\": null,\n  \"legacyTaskContent\": null,\n  \"legacyTaskError\": null,\n  \"legacyMissionContent\": null,\n  \"legacyMissionError\": null,\n  \"legacyReviewStateContent\": null,\n  \"legacyReviewStateError\": null,\n  \"version\": 32,\n  \"brief\": {\n    \"goal\": \"The disposable change survives verification and review\",\n    \"why\": \"Measure verification recovery\",\n    \"scope\": \"Disposable lifecycle\",\n    \"outOfScope\": [\n      \"Real operator state\"\n    ]\n  },\n  \"description\": null,\n  \"declaredGates\": [\n    \"node --version\"\n  ],\n  \"successCriteria\": [\n    \"The disposable change survives verification and review\"\n  ],\n  \"successCriterionIds\": [\n    \"sc-1\"\n  ],\n  \"completedSuccessCriteria\": [\n    0\n  ],\n  \"dependencies\": [],\n  \"checkpoints\": [\n    {\n      \"name\": \"CP-1\",\n      \"description\": \"Exercise the contract\",\n      \"recorded\": true,\n      \"goalCheck\": [\n        {\n          \"criterion\": \"The disposable change survives verification and review\",\n          \"criterionId\": \"sc-1\",\n          \"evidence\": \"answer.txt\"\n        }\n      ]\n    },\n    {\n      \"name\": \"CP-2\",\n      \"repair\": {\n        \"incidentId\": \"cd519ea2-08be-40a1-8675-1d247eb5fa53\",\n        \"command\": \"node check.mjs\",\n        \"authorizedGates\": [\n          \"node --version\"\n        ],\n        \"authorizedCriteria\": [\n          \"The disposable change survives verification and review\"\n        ],\n        \"attempt\": 1,\n        \"evidenceRecorded\": true,\n        \"verified\": true\n      },\n      \"description\": \"Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs\",\n      \"recorded\": true,\n      \"goalCheck\": [\n        {\n          \"criterion\": \"The disposable change survives verification and review\",\n          \"criterionId\": \"sc-1\",\n          \"evidence\": \"answer.txt\"\n        }\n      ]\n    }\n  ],\n  \"predictedNelBucket\": \"Small\",\n  \"reproductionTest\": null,\n  \"latestCheckpoint\": {\n    \"name\": \"CP-2\",\n    \"description\": \"Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs\",\n    \"goalCheck\": [\n      {\n        \"criterion\": \"The disposable change survives verification and review\",\n        \"criterionId\": \"sc-1\",\n        \"evidence\": \"answer.txt\"\n      }\n    ],\n    \"nextAction\": \"Verify the repaired contract and review the revision\"\n  },\n  \"review\": {\n    \"round\": 2,\n    \"phase\": \"approved\",\n    \"disposition\": \"APPROVED\",\n    \"approvalOwed\": false,\n    \"approvalCoverage\": {\n      \"kind\": \"covers\",\n      \"round\": 2,\n      \"approvedRevision\": \"4550285e24d7a29669a62dc8a1dd29717ab9f5fa\"\n    },\n    \"integrationRepair\": {\n      \"gate\": \"contract\",\n      \"command\": \"node check.mjs\",\n      \"log\": \"AssertionError: expected fixed answer\",\n      \"approvedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n      \"approvedBaseline\": \"fdb7e9aaa05f8d50fd54ce8f6964b515024490be\",\n      \"repairedBaseline\": \"fdb7e9aaa05f8d50fd54ce8f6964b515024490be\",\n      \"repairedRevision\": \"4550285e24d7a29669a62dc8a1dd29717ab9f5fa\",\n      \"withdrawnAt\": \"2026-11-02T10:10:15.567Z\",\n      \"reReview\": \"approved\"\n    },\n    \"history\": [\n      {\n        \"number\": 1,\n        \"startRevision\": \"49bf7f87dbd37098cb0a4d25c6fee9d98803785c\",\n        \"decidedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n        \"integrationRepairAssessment\": {\n          \"assessedAt\": \"2026-11-02T10:10:15.567Z\",\n          \"approvedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n          \"candidateRevision\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n          \"failedGate\": \"contract\",\n          \"outcome\": \"mission-change-differs\",\n          \"repair\": {\n            \"startedAt\": \"2026-11-02T10:10:14.890Z\",\n            \"cause\": {\n              \"kind\": \"integration-gate-failure\",\n              \"gate\": \"contract\",\n              \"command\": \"node check.mjs\",\n              \"log\": \"AssertionError: expected fixed answer\"\n            }\n          },\n          \"validation\": {\n            \"missionId\": \"px-0001\",\n            \"sha\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n            \"hooks\": [\n              \"contract\",\n              \"parallel\",\n              \"dependent\"\n            ],\n            \"baseline\": \"fdb7e9aaa05f8d50fd54ce8f6964b515024490be\",\n            \"createdAt\": \"2026-11-02T10:10:15.480Z\",\n            \"reference\": \"operational_history:36\",\n            \"failed\": false\n          }\n        },\n        \"reviewer\": \"custom\",\n        \"implementer\": \"custom\",\n        \"disposition\": \"APPROVED\",\n        \"comment\": \"Outcome: approve\\nVerdict: approve\",\n        \"findingSummaries\": [],\n        \"fixes\": [],\n        \"pushbacks\": [],\n        \"revocation\": {\n          \"by\": \"workflow\",\n          \"reason\": \"Integration repair changed the approved mission patch.\",\n          \"at\": \"2026-11-02T10:10:15.567Z\"\n        },\n        \"supersession\": null\n      },\n      {\n        \"number\": 2,\n        \"startRevision\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n        \"decidedRevision\": \"4550285e24d7a29669a62dc8a1dd29717ab9f5fa\",\n        \"reviewer\": \"custom\",\n        \"implementer\": \"custom\",\n        \"disposition\": \"APPROVED\",\n        \"comment\": \"Outcome: approve\\nVerdict: approve\",\n        \"findingSummaries\": [],\n        \"fixes\": [],\n        \"pushbacks\": [],\n        \"revocation\": null,\n        \"supersession\": null\n      }\n    ]\n  },\n  \"pullRequest\": {\n    \"exists\": false,\n    \"raw\": \"Forgejo PR: skipped (review provider is not forgejo).\"\n  }\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo-px-0001",
+    "args": [
+      "integrate",
+      "px-0001"
+    ],
+    "status": 0,
+    "stdout": "[INFO] Rebasing mission/px-0001 onto local main...\n[PASS] Rebase completed cleanly.\n[INFO] Verification: the workflow handles integration checks.\n[INFO] Integration eligibility requires the lifecycle-authorized lane and current policy-authorized approval.\n[INFO] Rebased mission/px-0001 onto the primary branch. Integration gates and the probe merge now run against the rebased branch.\nIntegration gates for px-0001: 3 hook(s) already validated at 08f167dcb16a (finalized cb6d965a4de2 differs only in backlog bookkeeping); skipping contract, parallel, dependent.\nRepository gates (integration): none configured — skipping.\n\nREADY TO INTEGRATE\n  Mission       px-0001                                        \n  Review        approved (round 2)                             \n  Reviewer      custom                                         \n  Independence  same agent family as the implementer (custom)  \n  Verification  all validated integration hooks skipped        \n  Target        main                                           \n  Workspace     clean                                          \n\n[INFO] Moving process directory to /tmp/px-verification-manual-OFRvsv/repo before mission worktree deletion.\n[INFO] Workflow stats recorded: px-0001: implementer=custom, pr_fix_rounds=0, classification=ai_sdlc, date=2026-11-02\nReporting timezone: Europe/Stockholm; current period updates with new completions.\nMission flow — current week (2026-10-27 → 2026-11-02)\n# completed missions  # user value missions  # AI SDLC missions  # unclassified missions  \n1                     0                      1                   0                        \n\nMission flow — previous week (2026-10-20 → 2026-10-26)\n# completed missions  # user value missions  # AI SDLC missions  # unclassified missions  \n0                     0                      0                   0                        \n\nBug-labeled mission share — local calendar days (Europe/Stockholm)\nPeriod                   Local days               # bug missions  # completed  Bug share           \nCurrent rolling 7 days   2026-10-27 → 2026-11-02  0               1            0.0%                \nPrevious rolling 7 days  2026-10-20 → 2026-10-26  0               0            — (no completions)  \n\nAgent performance this week (2026-10-27 → 2026-11-02) — completed Missions\nAgent family  # missions as implementer  Average PR fix rounds to complete mission  PR fix n  \ncustom        1                          0.00                                       1         \n\nAgent spend by stage this week (2026-10-27 → 2026-11-02) — resource consumption\nAgent family  draft  execute  review  follow-up  default  total  \nstub/custom   —      —        —       —          —        —      \n\nAgent performance previous week (2026-10-20 → 2026-10-26) — completed Missions\nAgent family  # missions as implementer  Average PR fix rounds to complete mission  PR fix n  \nnone          0                          unavailable                                0         \n[INFO] No existing graphify graph found. Skipping knowledge graph update.\n[PASS] Mission worktree cleaned up.\n\n[PASS] ✓ integrated into main\n  main  fdb7e9aaa05f8d50fd54ce8f6964b515024490be → 1d463b82af50c42ab4ea4d11343e8c62d6027079\n[INFO] Next: cd /tmp/px-verification-manual-OFRvsv/repo\n",
+    "stderr": "[✓] git rebase (0.0s)\n[✓] git merge (0.0s)\n[✓] git merge (0.0s)\n[✓] git merge (0.0s)\n[✓] git commit (0.0s)\n"
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo",
+    "args": [
+      "status",
+      "px-0001",
+      "--json"
+    ],
+    "status": 0,
+    "stdout": "{\n  \"slug\": \"px-0001\",\n  \"title\": \"exercise disposable verification\",\n  \"branch\": \"main\",\n  \"missionStatus\": \"done\",\n  \"backlogStatus\": \"backlog\",\n  \"closedAt\": \"2026-11-02T10:10:16.734Z\",\n  \"assignee\": \"custom\",\n  \"classification\": \"ai_sdlc\",\n  \"externalTaskRef\": null,\n  \"legacyTaskContent\": null,\n  \"legacyTaskError\": null,\n  \"legacyMissionContent\": null,\n  \"legacyMissionError\": null,\n  \"legacyReviewStateContent\": null,\n  \"legacyReviewStateError\": null,\n  \"version\": 34,\n  \"brief\": {\n    \"goal\": \"The disposable change survives verification and review\",\n    \"why\": \"Measure verification recovery\",\n    \"scope\": \"Disposable lifecycle\",\n    \"outOfScope\": [\n      \"Real operator state\"\n    ]\n  },\n  \"description\": null,\n  \"declaredGates\": [\n    \"node --version\"\n  ],\n  \"successCriteria\": [\n    \"The disposable change survives verification and review\"\n  ],\n  \"successCriterionIds\": [\n    \"sc-1\"\n  ],\n  \"completedSuccessCriteria\": [\n    0\n  ],\n  \"dependencies\": [],\n  \"checkpoints\": [\n    {\n      \"name\": \"CP-1\",\n      \"description\": \"Exercise the contract\",\n      \"recorded\": true,\n      \"goalCheck\": [\n        {\n          \"criterion\": \"The disposable change survives verification and review\",\n          \"criterionId\": \"sc-1\",\n          \"evidence\": \"answer.txt\"\n        }\n      ]\n    },\n    {\n      \"name\": \"CP-2\",\n      \"repair\": {\n        \"incidentId\": \"cd519ea2-08be-40a1-8675-1d247eb5fa53\",\n        \"command\": \"node check.mjs\",\n        \"authorizedGates\": [\n          \"node --version\"\n        ],\n        \"authorizedCriteria\": [\n          \"The disposable change survives verification and review\"\n        ],\n        \"attempt\": 1,\n        \"evidenceRecorded\": true,\n        \"verified\": true\n      },\n      \"description\": \"Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs\",\n      \"recorded\": true,\n      \"goalCheck\": [\n        {\n          \"criterion\": \"The disposable change survives verification and review\",\n          \"criterionId\": \"sc-1\",\n          \"evidence\": \"answer.txt\"\n        }\n      ]\n    }\n  ],\n  \"predictedNelBucket\": \"Small\",\n  \"reproductionTest\": null,\n  \"latestCheckpoint\": {\n    \"name\": \"CP-2\",\n    \"description\": \"Repair incident cd519ea2-08be-40a1-8675-1d247eb5fa53: node check.mjs\",\n    \"goalCheck\": [\n      {\n        \"criterion\": \"The disposable change survives verification and review\",\n        \"criterionId\": \"sc-1\",\n        \"evidence\": \"answer.txt\"\n      }\n    ],\n    \"nextAction\": \"Verify the repaired contract and review the revision\"\n  },\n  \"review\": {\n    \"round\": 2,\n    \"phase\": \"approved\",\n    \"disposition\": \"APPROVED\",\n    \"approvalOwed\": false,\n    \"approvalCoverage\": null,\n    \"integrationRepair\": {\n      \"gate\": \"contract\",\n      \"command\": \"node check.mjs\",\n      \"log\": \"AssertionError: expected fixed answer\",\n      \"approvedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n      \"approvedBaseline\": \"fdb7e9aaa05f8d50fd54ce8f6964b515024490be\",\n      \"repairedBaseline\": \"fdb7e9aaa05f8d50fd54ce8f6964b515024490be\",\n      \"repairedRevision\": \"4550285e24d7a29669a62dc8a1dd29717ab9f5fa\",\n      \"withdrawnAt\": \"2026-11-02T10:10:15.567Z\",\n      \"reReview\": \"approved\"\n    },\n    \"history\": [\n      {\n        \"number\": 1,\n        \"startRevision\": \"49bf7f87dbd37098cb0a4d25c6fee9d98803785c\",\n        \"decidedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n        \"integrationRepairAssessment\": {\n          \"assessedAt\": \"2026-11-02T10:10:15.567Z\",\n          \"approvedRevision\": \"f51a562c4f59e9dbfe7ae2a39f3d91b67ca257c5\",\n          \"candidateRevision\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n          \"failedGate\": \"contract\",\n          \"outcome\": \"mission-change-differs\",\n          \"repair\": {\n            \"startedAt\": \"2026-11-02T10:10:14.890Z\",\n            \"cause\": {\n              \"kind\": \"integration-gate-failure\",\n              \"gate\": \"contract\",\n              \"command\": \"node check.mjs\",\n              \"log\": \"AssertionError: expected fixed answer\"\n            }\n          },\n          \"validation\": {\n            \"missionId\": \"px-0001\",\n            \"sha\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n            \"hooks\": [\n              \"contract\",\n              \"parallel\",\n              \"dependent\"\n            ],\n            \"baseline\": \"fdb7e9aaa05f8d50fd54ce8f6964b515024490be\",\n            \"createdAt\": \"2026-11-02T10:10:15.480Z\",\n            \"reference\": \"operational_history:36\",\n            \"failed\": false\n          }\n        },\n        \"reviewer\": \"custom\",\n        \"implementer\": \"custom\",\n        \"disposition\": \"APPROVED\",\n        \"comment\": \"Outcome: approve\\nVerdict: approve\",\n        \"findingSummaries\": [],\n        \"fixes\": [],\n        \"pushbacks\": [],\n        \"revocation\": {\n          \"by\": \"workflow\",\n          \"reason\": \"Integration repair changed the approved mission patch.\",\n          \"at\": \"2026-11-02T10:10:15.567Z\"\n        },\n        \"supersession\": null\n      },\n      {\n        \"number\": 2,\n        \"startRevision\": \"08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8\",\n        \"decidedRevision\": \"4550285e24d7a29669a62dc8a1dd29717ab9f5fa\",\n        \"reviewer\": \"custom\",\n        \"implementer\": \"custom\",\n        \"disposition\": \"APPROVED\",\n        \"comment\": \"Outcome: approve\\nVerdict: approve\",\n        \"findingSummaries\": [],\n        \"fixes\": [],\n        \"pushbacks\": [],\n        \"revocation\": null,\n        \"supersession\": null\n      }\n    ]\n  },\n  \"pullRequest\": {\n    \"exists\": false,\n    \"raw\": \"Forgejo PR: skipped (review provider is not forgejo).\"\n  }\n}\n",
+    "stderr": ""
+  },
+  {
+    "root": "/tmp/px-verification-manual-OFRvsv/repo",
+    "args": [
+      "stats",
+      "--mission",
+      "px-0001"
+    ],
+    "status": 0,
+    "stdout": "Mission telemetry by phase: px-0001\nPhase      Provider     Model        Implementer  Input  Output  Cached  Tool calls  Duration (min)  Usage %  Cost ($)  \ndraft      stub/custom  stub/custom  custom       0      0       0       0           0               —        0         \nexecute    stub/custom  stub/custom  custom       0      0       0       0           0               —        0         \nreview     stub/custom  stub/custom  custom       0      0       0       0           0               —        0         \nfollow-up  —            —            —            0      0       0       0           0               —        0         \ndefault    —            —            custom       0      0       0       0           0               —        0         \ntotal                                             0      0       0       0           0               —        0         \n\nVerification measurements · retained history · 1 completed missions\nAttempts 7; failures 1 (infrastructure 0); reruns 3; reused proofs 2; incomplete 0\nElapsed lifetime union 2699 ms; gate execution union 140 ms; exclusive observed waiting 24 ms; overlapping execution 67 ms\nOS waited-tree CPU 105000 us (observations 6/7; partial when missing)\nRerun execution 83 ms; CPU 63000 us\nFailure-to-success recovery 504 ms; observed gate CPU 30000 us; repair activity 271 ms; re-review activity 445 ms\nObserved gate DAG critical path unknown; end-to-end workflow critical path unknown\nGate batch ff862167-ae7f-4614-bc55-28910588e01f: dependency path 10 ms\nGate batch fb0b52d4-c77c-40b5-9f3d-5735eab7edda: dependency path 0 ms\nGate batch 595e5365-bab7-41bd-b0ac-16595a34eb7d: dependency path unknown\nGate batch bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df: dependency path 81 ms\nGate batch 6983273b-c49c-42b3-bc7f-b9d4cd355c6b: dependency path 11 ms\nGate batch ddee5b6b-4d63-4751-a9b9-580d6642d497: dependency path 0 ms\nElapsed bottleneck parallel: 108 ms (n=2)\nElapsed bottleneck contract: 68 ms (n=2)\nElapsed bottleneck verification: 21 ms (n=2)\nElapsed bottleneck dependent: 10 ms (n=1)\nCPU bottleneck contract: 61000 us (n=2)\nCPU bottleneck parallel: 27000 us (n=2)\nCPU bottleneck verification: 12000 us (n=2)\nCPU bottleneck dependent: 5000 us (n=1)\nRevision comparison verification: 49bf7f87dbd37098cb0a4d25c6fee9d98803785c n=1, 10 ms → 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8 n=1, 11 ms; configuration equivalent true; workload equivalent unknown\nRevision comparison contract: 25c678f185eebcaefa54fe8a44f0082c98808fef n=1, 35 ms → 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8 n=1, 33 ms; configuration equivalent true; workload equivalent unknown\nRevision comparison parallel: 25c678f185eebcaefa54fe8a44f0082c98808fef n=1, 37 ms → 08f167dcb16a447d847b38daf1d1bb3a5d2c6ce8 n=1, 71 ms; configuration equivalent true; workload equivalent unknown\nProfiling evidence: /mnt/data/code/parallix-px-0025/evidence/verification-profile/report.json; sample coverage of these attempts unknown (OS CPU is not samples)\nContention and optimization benefit: unknown; overlap alone does not establish contention or a speedup. Revision comparisons do not establish equivalent discovered workloads.\nUnknown: Workflow join unavailable for some attempts\nUnknown: OS CPU missing for some attempts; observed CPU is partial\nUnknown: Repair and re-review agent CPU unavailable; gate CPU is not agent CPU\nUnknown: End-to-end critical path unknown; only complete observed gate DAGs are measured\n",
+    "stderr": ""
+  }
+]

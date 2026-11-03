@@ -1,0 +1,30 @@
+{
+  "disposableState": true,
+  "commands": [
+    "px ui (empty history)",
+    "px ui (one retained attempt)",
+    "px stats"
+  ],
+  "results": "all exit 0; stats reconciles 1 passed attempt, 0 ms execution, CPU unknown",
+  "fixture": {
+    "id": "manual-attempt",
+    "repositoryId": "repository",
+    "missionId": null,
+    "operationId": null,
+    "revision": null,
+    "batchId": "manual-batch",
+    "gate": "manual-gate",
+    "command": "manual-fixture",
+    "phase": "integration",
+    "after": [],
+    "requestedAt": "2026-11-02T00:00:00.000Z",
+    "startedAt": "2026-11-02T00:00:00.000Z",
+    "finishedAt": "2026-11-02T00:00:00.000Z",
+    "result": "passed",
+    "failureReason": null,
+    "exitCode": 0,
+    "wallMs": 0,
+    "cpu": null,
+    "profile": null
+  }
+}

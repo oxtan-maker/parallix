@@ -1,0 +1,33 @@
+{
+  "executionMs": 140,
+  "overlapMs": 67,
+  "cpuUs": 105000,
+  "waitingMs": 24,
+  "endToEndMs": 2699,
+  "recoveryMs": 504,
+  "completedGateDag": {
+    "batchId": "bfbb0e0c-97c4-457b-b795-f8e8e4c4e9df",
+    "durations": {
+      "contract": 33,
+      "parallel": 71,
+      "dependent": 10
+    },
+    "criticalPathMs": 81
+  },
+  "population": {
+    "executions": 7,
+    "reusedProofs": 2,
+    "knownCpuTrees": 6,
+    "missingCpuTrees": 1
+  },
+  "qualifications": "Cancelled peer CPU is unknown, not zero. Unions remove concurrent elapsed double counting. No OS CPU is inferred from V8 samples. Workflow joins are unknown for the explicitly authorized in-process fixture. Agent CPU and inter-batch critical path are unknown. repairMs/reReviewMs come from typed, closed activity sources.",
+  "profilingDecision": "The separate retained profiler experiment identifies repeated timezone construction as a candidate investigation. It does not profile these lifecycle gates, establish their workload equivalence or predict an optimization speedup.",
+  "references": [
+    "history.json",
+    "lifecycle.json",
+    "report.json",
+    "stats.txt",
+    "../verification-profile/report.json",
+    "../verification-profile/analysis.json"
+  ]
+}

@@ -72,8 +72,48 @@ the report unavailable. Administrative closure never moves a delivery into a
 later period. These shares describe delivery effort, not a defect rate per line
 of code or proof of causation.
 
-## Implementation inventory
+## Verification measurements
 
-The only lifecycle write path is `MissionTransitionStore.saveWithTransition`: intake, lifecycle transitions, integration, and administrative closure use it. `SqliteMissionStore` performs state and lane-event writes together. `ConcreteMetricsReadAdapter` scopes lane events and usage rows before building the shared projection. The remaining pre-consolidation identity derivations in production composition are repaired in CP-2; no adapter may infer a statistics identity from an arbitrary worktree path.
+FLOW and `px stats` share a repository-scoped verification breakdown labelled
+**retained history**. It includes open work and historical attempts independently
+of the weekly delivery cohort. A mission stats report limits it to that mission.
+Collection begins with the installed measurement support; older work has unknown
+attempt and CPU coverage. These observations do not authorize proof reuse.
+
+Each gate execution has a distinct attempt identity and start/terminal
+observations. Reused proofs are counted separately. Reruns are later executions
+of the same mission, phase, gate key and command, including across revisions.
+Failures retain their typed classification; infrastructure failures remain a
+separate count. Starts without terminal observations are incomplete, with no
+invented finish time or CPU value.
+
+Elapsed values are milliseconds. Execution and waiting totals use interval
+unions, so concurrent or nested intervals count once. Waiting reports only
+observed admission/activity intervals outside execution; unrecorded scheduling
+or dependency waiting remains unknown. Lifetime is the union of observed mission
+intake-to-first-delivery intervals, not a sum of agent runtimes. Overlap is
+summed execution duration minus its union, not a contention measurement.
+
+The gate DAG path is the longest sum of execution durations along observed
+dependencies in a fully recorded batch. It excludes admission and agent work;
+it is not an end-to-end workflow critical path. Missing plan nodes, dependency
+edges, terminals or links between batches produce unknown paths. Failure-to-
+success recovery spans include waiting, repair and rerun time; their CPU shows
+only observed gates within those spans. Repair and re-review activity report
+closed source intervals. Unscoped historical activity and agent CPU are unknown.
+
+OS CPU is reported in microseconds from Bash's OS accounting for the command
+and descendants it waited for, with millisecond collection precision. Detached
+or unwaited descendants are outside this boundary. CPU boundaries suppress
+observations already included by a measured parent. Legacy synchronous commands
+may supply wall time without CPU; coverage is shown alongside observed totals.
+Measured zero differs from missing values.
+
+Revision comparisons disclose observation counts and configuration fingerprint
+agreement. Matching command text or configuration does not prove equivalent
+discovered workloads or host load. Ranked observed costs identify investigation
+candidates; missing coverage prevents a trustworthy optimization-benefit or
+contention estimate. See [opt-in profiling](verification-profiling.md) for sample
+semantics and retained experiments.
 
 Legacy CSV is an explicit read-only import/analysis boundary. It cannot silently join a repository-scoped production projection.

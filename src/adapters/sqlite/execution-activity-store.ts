@@ -35,7 +35,7 @@ export class SqliteExecutionActivityStore implements ExecutionActivityStore {
         await this.db.execute('INSERT INTO execution_activity (repository_id, mission_id, snapshot_json) VALUES (?, ?, ?) ON CONFLICT(repository_id, mission_id) DO UPDATE SET snapshot_json = excluded.snapshot_json',
           [this.repository, event.missionId, JSON.stringify(next)]);
       }
-      await new SqliteOperationalHistoryRepository(this.db).append(executionActivityToEntry(event));
+      await new SqliteOperationalHistoryRepository(this.db).append(executionActivityToEntry(event, sourceId, this.repository));
       await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
   }

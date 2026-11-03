@@ -1,0 +1,52 @@
+{
+  "baselineRevision": "faff86e581a672da804894afef739dc6cafa6f30",
+  "gateCommand": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+  "gateReproduction": {
+    "exitCode": 1,
+    "failures": [
+      "board-worktree-mission-scope: 148 ms CPU > unchanged 100 ms limit",
+      "review: gate failure assertion before async verifyReview completes"
+    ]
+  },
+  "causes": [
+    "Board metrics reader opened ambient SQLite and ran Git instead of using supplied board repositories and repository identity. V8 samples include database execute and spawnSync.",
+    "Eight owning review test calls were not awaited after production became asynchronous; production dispatcher already awaits completion."
+  ],
+  "repair": [
+    "Compose shared verification calculation from existing board history, lifecycle and workflow-operation repositories.",
+    "Await all eight review calls; retain gate-failure log assertion and assert exit code 1."
+  ],
+  "regression": {
+    "parentProductionExitCode": 1,
+    "expectedAttempt": [
+      "board-attempt"
+    ],
+    "actualParentAttempts": [],
+    "method": "Retained board assertion against HEAD production files, restored repaired production files in finally; parent-regression.log.gz"
+  },
+  "focused": {
+    "command": "PARALLIX_TEST_COVERAGE=1 PARALLIX_TEST_CPU_PROFILE_DIR=/tmp/px-0025-repair-cpu npm run test:integration:ci:prebuilt -- test/integration/presentation/board-worktree-mission-scope.test.ts test/integration/review/review.test.ts",
+    "exitCode": 0,
+    "passed": 64,
+    "skipped": 0,
+    "cpuEvidence": "case-cpu.json"
+  },
+  "profiles": {
+    "command": "PARALLIX_PROFILE_SAMPLES=1 npx tsx scripts/profile-verification.ts OUTPUT test/integration/presentation/board-worktree-mission-scope.test.ts",
+    "before": "board-before/report.json",
+    "after": "board-after/report.json",
+    "limits": "One paired run per mode is diagnostic, not a general performance estimate; V8 samples are not OS CPU; after includes retained assertion and dirty repaired source."
+  },
+  "risks": "Board verification now follows the same supplied state and identity as other board metrics; no calculation, gate, budget, tier, policy or limit changed. Missing workflow history remains qualified by the shared calculation.",
+  "harnessRerun": "pending; local focused results do not establish integration repair success",
+  "staticAnalysis": {
+    "command": "./scripts/verify-local.sh static-analysis",
+    "exitCode": 0,
+    "evidence": "static-analysis.log"
+  },
+  "build": {
+    "command": "npm run build",
+    "exitCode": 0,
+    "evidence": "build.log"
+  }
+}

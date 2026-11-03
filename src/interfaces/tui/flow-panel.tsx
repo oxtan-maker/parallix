@@ -1,4 +1,5 @@
 import React from 'react';
+import { renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
 import { Box, Text } from 'ink';
 import type {
   BoardMetrics,
@@ -173,6 +174,9 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
         </Box>
       </Box>
       <CohortRows metrics={metrics} />
+      <Box flexDirection="column">
+        {renderVerificationStatistics(metrics.verification).map((line, index) => <Text key={index}>{line}</Text>)}
+      </Box>
     </Box>
   );
 }

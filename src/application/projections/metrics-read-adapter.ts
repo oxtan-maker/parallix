@@ -60,6 +60,7 @@ export interface MetricsReadAdapter {
 // ---------------------------------------------------------------------------
 
 export interface ConcreteMetricsReadAdapterOptions {
+  readonly verification?: import('../ports/verification-statistics.js').VerificationStatisticsReadPort;
   readonly laneEventRepo: BoardLaneEventRepository;
   readonly usageRepo: UsageRepository;
   /** Repository this projection is scoped to. Lane events and usage records
@@ -92,6 +93,7 @@ export interface ConcreteMetricsReadAdapterOptions {
  * them into `buildMetrics()`.
  */
 export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
+  private readonly verification: ConcreteMetricsReadAdapterOptions['verification'];
   private readonly laneEventRepo: BoardLaneEventRepository;
   private readonly usageRepo: UsageRepository;
   private readonly repositoryId: RepositoryId;
@@ -102,6 +104,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly cohortMetadata: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
+    this.verification = options.verification;
     this.laneEventRepo = options.laneEventRepo;
     this.usageRepo = options.usageRepo;
     this.repositoryId = options.repositoryId;
@@ -172,7 +175,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       netEngineeringLines: await this.netEngineeringLines(),
       window: decisionWindows.current,
     });
-    return { ...metrics, health, provenance, cohorts };
+    const verification = await this.verification?.read().catch(() => null);
+    return { ...metrics, health, provenance, cohorts, ...(verification === undefined ? {} : { verification }) };
   }
 
   // -----------------------------------------------------------------------

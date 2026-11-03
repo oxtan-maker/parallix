@@ -3,6 +3,7 @@ import { requestedChangesReview } from '../../fixtures/mission-builders.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { StatsCommandUseCase } from '../../../src/application/stats-command-use-case.js';
+import { verificationStatistics } from '../../../src/application/projections/verification-statistics.js';
 
 function port(rows: StatsRow[] = [], overrides: Partial<StatsWorkflowPort<StatsRow>> = {}): StatsWorkflowPort<StatsRow> {
   return {
@@ -50,6 +51,14 @@ test('StatsCommandUseCase empty store returns an empty report result', async () 
   const result = await new StatsCommandUseCase(port()).execute({ mode: 'weekly', today: '2026-06-23' });
   assert.deepEqual(result.rows, []);
   assert.deepEqual(result.selection?.current.completedMissions, []);
+});
+
+test('mission stats delegates verification scope and shared calculation to its read port (px-0025)', async () => {
+  const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
+  const result = await new StatsCommandUseCase(port([], {
+    loadVerificationStatistics: async missions => { assert.deepEqual([...missions!], ['px-1']); return verification; },
+  })).execute({ mode: 'mission', mission: 'px-1' });
+  assert.equal(result.verification, verification);
 });
 
 

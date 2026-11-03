@@ -1,0 +1,24 @@
+
+> @magnusekdahl/parallix@1.5.466 build
+> npm run bundle
+
+
+> @magnusekdahl/parallix@1.5.466 bundle
+> tsx scripts/build-canonical-bundle.ts
+
+
+> @magnusekdahl/parallix@1.5.466 build:web
+> node scripts/run-build-web.mjs --outDir /mnt/data/code/parallix-px-0025/.build-staging.2032530/web
+
+vite v8.3.4 building client environment for production...
+transforming...
+✓ 74 modules transformed.
+rendering chunks...
+computing gzip size...
+.build-staging.2032530/web/index.html                   0.40 kB │ gzip:  0.27 kB
+.build-staging.2032530/web/assets/index-BLNC0e_y.css    3.68 kB │ gzip:  1.10 kB
+.build-staging.2032530/web/assets/index-Dg6hg3-P.js   320.93 kB │ gzip: 97.42 kB
+
+✓ built in 925ms
+[bundle-size] /mnt/data/code/parallix-px-0025/build/px.mjs: 2 653 088 bytes (2.5 MB)
+[bundle-size] PASS: 2.5 MB within 5 MB stop rule

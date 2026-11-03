@@ -13,9 +13,17 @@ import type { MissionStore } from '../../../src/application/domain-ports.js';
 import type { Mission, MissionId, MissionStatus } from '../../../src/domain/mission.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
+import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../../../src/application/ports/verification-observation.js';
 
 const repository = repositoryId('task-2438-repository');
 const foreignRepository = repositoryId('task-2438-foreign');
+const observedAt = '2026-11-02T00:00:00.000Z';
+const verificationAttempt: VerificationMeasurement = {
+  id: 'board-attempt', repositoryId: repository, missionId: 'task-2438-active', operationId: null,
+  revision: 'recorded-revision', batchId: 'board-batch', gate: 'check', command: 'check', phase: 'integration', after: [],
+  requestedAt: observedAt, startedAt: observedAt, finishedAt: observedAt, result: 'passed',
+  failureReason: null, exitCode: 0, wallMs: 0, cpu: null, profile: null,
+};
 
 function mission(id: string, status: MissionStatus, repositoryId = repository, title = id): Mission {
   return {
@@ -57,7 +65,7 @@ function board(rootDir: string) {
     missionStore: store,
     repositoryId: repository,
     blocklistRepo: { async findAll() { return []; }, async findByAgent() { return undefined; }, async save() { throw new Error('Unexpected block save'); }, async deleteByAgent() { throw new Error('Unexpected block delete'); }, async clear() { throw new Error('Unexpected block clear'); } },
-    historyRepo: { async findAll() { return []; }, async findByType() { return []; }, async append() { throw new Error('Unexpected history append'); }, async clear() { throw new Error('Unexpected history clear'); } },
+    historyRepo: { async findAll() { return [{ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(verificationAttempt), createdAt: observedAt }]; }, async findByType() { return []; }, async append() { throw new Error('Unexpected history append'); }, async clear() { throw new Error('Unexpected history clear'); } },
     laneEventRepo: { async findAll() { return []; }, async findByMissionId() { return []; }, async findByRepositoryId() { return []; }, async append() { throw new Error('Unexpected lane append'); }, async clear() { throw new Error('Unexpected lane clear'); } },
     usageRepo: { async findAll() { return []; }, async findWhere() { return []; } },
     knownAgentFamilies: [],
@@ -97,6 +105,13 @@ test('task-2438 board reads persisted repository missions from every worktree', 
     const firstBoard = board(root);
     const projection = await firstBoard.builder.build();
     const secondProjection = await board(secondRoot).builder.build();
+    // Metrics must use the board's supplied repository identity and history,
+    // even when the worktree has no Git metadata or operator database.
+    for (const result of [projection, secondProjection]) {
+      assert.deepEqual(result.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
+      assert.equal(result.metrics.verification?.executionMs, 0);
+      assert.equal(result.metrics.verification?.cpuUs, null);
+    }
     const lanes = new Map(
       projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.lane])),
     );

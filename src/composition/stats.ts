@@ -12,6 +12,7 @@ import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identit
 import { StatsCommandUseCase } from '../application/stats-command-use-case.js';
 import { createStatsCommand } from '../interfaces/cli/stats.js';
 import { repositoryId } from '../domain/repository.js';
+import { createVerificationStatisticsReader } from './verification-statistics.js';
 
 export interface StatsCompositionOptions extends StatsCohortsOptions {
   readonly store?: StatsReadBinding['store'];
@@ -52,7 +53,8 @@ export function createStatisticsCommand(options: StatsCompositionOptions = {}) {
   const useCase = new StatsCommandUseCase({ ...createStatsWorkflowAdapter({
     configuration: options.configuration, rootDir: options.rootDir, store: options.store, dbPath: options.dbPath,
     readMissionFlow: options.readMissionFlow ?? createStatsMissionFlowReader(options),
-  }), loadClassifierStatistics: async () => {
+  }), loadVerificationStatistics: missions => createVerificationStatisticsReader(options.rootDir ?? process.cwd(), options.configuration)
+    .read(missions).catch(() => null), loadClassifierStatistics: async () => {
     try { return await (await createClassifierStatisticsReader(options.rootDir ?? process.cwd(), options.configuration)).read(); }
     catch { return null; }
   } });

@@ -1,0 +1,607 @@
+{
+  "revision": "faff86e581a672da804894afef739dc6cafa6f30",
+  "dirty": true,
+  "node": "v24.21.0",
+  "platform": "linux",
+  "arch": "x64",
+  "tsx": "4.23.15",
+  "workload": [
+    "test/integration/presentation/board-worktree-mission-scope.test.ts"
+  ],
+  "intervalUs": 1000,
+  "comparisons": [
+    {
+      "coverage": false,
+      "pairs": 1,
+      "wallOverheadRatio": 0.3865815674732298,
+      "cpuOverheadRatio": 0.7490563620315874
+    },
+    {
+      "coverage": true,
+      "pairs": 1,
+      "wallOverheadRatio": 0.6272541747622923,
+      "cpuOverheadRatio": 0.864356899105301
+    }
+  ],
+  "runs": [
+    {
+      "name": "plain-0-control",
+      "coverage": false,
+      "profiled": false,
+      "pair": 0,
+      "command": [
+        "/home/magnus/.nvm/versions/node/v24.21.0/bin/node",
+        "--import",
+        "tsx",
+        "--import",
+        "./test/bootstrap-parallix-home.ts",
+        "--test",
+        "test/integration/presentation/board-worktree-mission-scope.test.ts"
+      ],
+      "wallMs": 1543.2187,
+      "cpuUs": 983428,
+      "cpuProvenance": "wait4: supervisor plus waited process tree",
+      "profiles": []
+    },
+    {
+      "name": "plain-0-profile",
+      "coverage": false,
+      "profiled": true,
+      "pair": 0,
+      "command": [
+        "/home/magnus/.nvm/versions/node/v24.21.0/bin/node",
+        "--cpu-prof",
+        "--cpu-prof-interval=1000",
+        "--cpu-prof-dir=/tmp/px-0025-board-after/plain-0-profile",
+        "--import",
+        "tsx",
+        "--import",
+        "./test/bootstrap-parallix-home.ts",
+        "--test",
+        "test/integration/presentation/board-worktree-mission-scope.test.ts"
+      ],
+      "wallMs": 596.5799039999999,
+      "cpuUs": 736643,
+      "cpuProvenance": "wait4: supervisor plus waited process tree",
+      "profiles": [
+        {
+          "file": "plain-0-profile/CPU.20261102.114551.2017834.0.001.cpuprofile.gz",
+          "samples": 396,
+          "hotspots": [
+            {
+              "functionName": "(garbage collector)",
+              "scriptId": "0",
+              "url": "",
+              "lineNumber": -1,
+              "columnNumber": -1,
+              "samples": 20
+            },
+            {
+              "functionName": "localReportingTimeZone",
+              "scriptId": "396",
+              "url": "file:///mnt/data/code/parallix-px-0025/src/domain/decision-window.ts",
+              "lineNumber": 0,
+              "columnNumber": 174,
+              "samples": 17
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 12
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 9
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 8
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 6
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 5
+            },
+            {
+              "functionName": "",
+              "scriptId": "223",
+              "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+              "lineNumber": 0,
+              "columnNumber": 684,
+              "samples": 4
+            },
+            {
+              "functionName": "defaultLoadSync",
+              "scriptId": "78",
+              "url": "node:internal/modules/esm/load",
+              "lineNumber": 135,
+              "columnNumber": 24,
+              "samples": 4
+            },
+            {
+              "functionName": "",
+              "scriptId": "223",
+              "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+              "lineNumber": 0,
+              "columnNumber": 684,
+              "samples": 4
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 3
+            },
+            {
+              "functionName": "wrapSafe",
+              "scriptId": "68",
+              "url": "node:internal/modules/cjs/loader",
+              "lineNumber": 1818,
+              "columnNumber": 17,
+              "samples": 3
+            },
+            {
+              "functionName": "spawnSync",
+              "scriptId": "171",
+              "url": "node:internal/child_process",
+              "lineNumber": 1144,
+              "columnNumber": 18,
+              "samples": 3
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 3
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 3
+            },
+            {
+              "functionName": "(program)",
+              "scriptId": "0",
+              "url": "",
+              "lineNumber": -1,
+              "columnNumber": -1,
+              "samples": 2
+            },
+            {
+              "functionName": "compileForInternalLoader",
+              "scriptId": "6",
+              "url": "node:internal/bootstrap/realm",
+              "lineNumber": 382,
+              "columnNumber": 26,
+              "samples": 2
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 2
+            },
+            {
+              "functionName": "detectModuleFormat",
+              "scriptId": "79",
+              "url": "node:internal/modules/esm/get_format",
+              "lineNumber": 93,
+              "columnNumber": 27,
+              "samples": 2
+            },
+            {
+              "functionName": "",
+              "scriptId": "223",
+              "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+              "lineNumber": 0,
+              "columnNumber": 924,
+              "samples": 2
+            },
+            {
+              "functionName": "compileForInternalLoader",
+              "scriptId": "6",
+              "url": "node:internal/bootstrap/realm",
+              "lineNumber": 382,
+              "columnNumber": 26,
+              "samples": 2
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 2
+            },
+            {
+              "functionName": "Hash",
+              "scriptId": "134",
+              "url": "node:internal/crypto/hash",
+              "lineNumber": 97,
+              "columnNumber": 13,
+              "samples": 2
+            },
+            {
+              "functionName": "syncLink",
+              "scriptId": "75",
+              "url": "node:internal/modules/esm/module_job",
+              "lineNumber": 259,
+              "columnNumber": 10,
+              "samples": 2
+            },
+            {
+              "functionName": "#getOrCreateModuleJobAfterResolve",
+              "scriptId": "72",
+              "url": "node:internal/modules/esm/loader",
+              "lineNumber": 525,
+              "columnNumber": 35,
+              "samples": 2
+            },
+            {
+              "functionName": "#translate",
+              "scriptId": "72",
+              "url": "node:internal/modules/esm/loader",
+              "lineNumber": 428,
+              "columnNumber": 12,
+              "samples": 2
+            },
+            {
+              "functionName": "maybeCacheSourceMap",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 156,
+              "columnNumber": 28,
+              "samples": 2
+            },
+            {
+              "functionName": "readFileUtf8",
+              "scriptId": "0",
+              "url": "",
+              "lineNumber": -1,
+              "columnNumber": -1,
+              "samples": 2
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 2
+            },
+            {
+              "functionName": "",
+              "scriptId": "119",
+              "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/register-nyXW-TH3.mjs",
+              "lineNumber": 1,
+              "columnNumber": 9768,
+              "samples": 2
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "covered-0-control",
+      "coverage": true,
+      "profiled": false,
+      "pair": 0,
+      "command": [
+        "/home/magnus/.nvm/versions/node/v24.21.0/bin/node",
+        "--import",
+        "tsx",
+        "--import",
+        "./test/bootstrap-parallix-home.ts",
+        "--test",
+        "--experimental-test-coverage",
+        "test/integration/presentation/board-worktree-mission-scope.test.ts"
+      ],
+      "wallMs": 1471.4891700000003,
+      "cpuUs": 1354422,
+      "cpuProvenance": "wait4: supervisor plus waited process tree",
+      "profiles": []
+    },
+    {
+      "name": "covered-0-profile",
+      "coverage": true,
+      "profiled": true,
+      "pair": 0,
+      "command": [
+        "/home/magnus/.nvm/versions/node/v24.21.0/bin/node",
+        "--cpu-prof",
+        "--cpu-prof-interval=1000",
+        "--cpu-prof-dir=/tmp/px-0025-board-after/covered-0-profile",
+        "--import",
+        "tsx",
+        "--import",
+        "./test/bootstrap-parallix-home.ts",
+        "--test",
+        "--experimental-test-coverage",
+        "test/integration/presentation/board-worktree-mission-scope.test.ts"
+      ],
+      "wallMs": 922.9977250000006,
+      "cpuUs": 1170704,
+      "cpuProvenance": "wait4: supervisor plus waited process tree",
+      "profiles": [
+        {
+          "file": "covered-0-profile/CPU.20261102.114553.2019159.0.001.cpuprofile.gz",
+          "samples": 588,
+          "hotspots": [
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 29
+            },
+            {
+              "functionName": "localReportingTimeZone",
+              "scriptId": "396",
+              "url": "file:///mnt/data/code/parallix-px-0025/src/domain/decision-window.ts",
+              "lineNumber": 0,
+              "columnNumber": 174,
+              "samples": 21
+            },
+            {
+              "functionName": "(garbage collector)",
+              "scriptId": "0",
+              "url": "",
+              "lineNumber": -1,
+              "columnNumber": -1,
+              "samples": 19
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 19
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 18
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 15
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 13
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 12
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 12
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 10
+            },
+            {
+              "functionName": "",
+              "scriptId": "223",
+              "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+              "lineNumber": 0,
+              "columnNumber": 684,
+              "samples": 7
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 6
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 6
+            },
+            {
+              "functionName": "wrapSafe",
+              "scriptId": "68",
+              "url": "node:internal/modules/cjs/loader",
+              "lineNumber": 1818,
+              "columnNumber": 17,
+              "samples": 5
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 5
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 5
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 5
+            },
+            {
+              "functionName": "",
+              "scriptId": "223",
+              "url": "file:///mnt/data/code/parallix-px-0025/test/lib/default-db-guard.ts",
+              "lineNumber": 0,
+              "columnNumber": 684,
+              "samples": 5
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 4
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 4
+            },
+            {
+              "functionName": "",
+              "scriptId": "141",
+              "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/require-CBjy4Foe.mjs",
+              "lineNumber": 7,
+              "columnNumber": 120,
+              "samples": 4
+            },
+            {
+              "functionName": "(program)",
+              "scriptId": "0",
+              "url": "",
+              "lineNumber": -1,
+              "columnNumber": -1,
+              "samples": 3
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 3
+            },
+            {
+              "functionName": "compileSourceTextModule",
+              "scriptId": "76",
+              "url": "node:internal/modules/esm/utils",
+              "lineNumber": 316,
+              "columnNumber": 32,
+              "samples": 3
+            },
+            {
+              "functionName": "detectModuleFormat",
+              "scriptId": "79",
+              "url": "node:internal/modules/esm/get_format",
+              "lineNumber": 93,
+              "columnNumber": 27,
+              "samples": 3
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 3
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 3
+            },
+            {
+              "functionName": "lineLengths",
+              "scriptId": "47",
+              "url": "node:internal/source_map/source_map_cache",
+              "lineNumber": 259,
+              "columnNumber": 20,
+              "samples": 3
+            },
+            {
+              "functionName": "",
+              "scriptId": "152",
+              "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/index-DE3OBZuV.mjs",
+              "lineNumber": 13,
+              "columnNumber": 4209,
+              "samples": 3
+            },
+            {
+              "functionName": "",
+              "scriptId": "169",
+              "url": "file:///mnt/data/code/parallix-px-0025/node_modules/.pnpm/tsx@4.23.15/node_modules/tsx/dist/register-B1c7OH6V.cjs",
+              "lineNumber": 0,
+              "columnNumber": 0,
+              "samples": 2
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limits": "Samples are V8 isolate observations, not OS CPU. Test workers inherit profiling flags; arbitrary external commands do not. Concurrent isolate sample counts cannot be summed as CPU. wait4 includes waited descendants only. No assertion/fixture or coverage-exclusive attribution is inferred from a hot frame. Paired local runs do not establish universal speedups."
+}

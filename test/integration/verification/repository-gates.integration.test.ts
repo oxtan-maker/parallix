@@ -88,6 +88,9 @@ test('gate output retention keeps a bounded tail', async () => {
     cwd: process.cwd(), env: process.env, stdio: 'pipe',
   });
   assert.equal(result.status, 0);
+  assert.equal(result.cpu?.provenance, 'bash-time-waited-tree');
+  assert.ok((result.cpu?.userUs ?? -1) >= 0);
+  assert.ok((result.cpu?.systemUs ?? -1) >= 0);
   assert.ok(result.stdout.length <= MAX_GATE_OUTPUT_CHARS);
   assert.match(result.stdout, /^\[Earlier gate output truncated\]/);
   assert.match(result.stdout, /x+$/);

@@ -1,0 +1,63 @@
+[INFO] Loaded 0 measurements from the statistics database
+Reporting timezone: Europe/Stockholm; current period updates with new completions.
+Mission flow — current week (2026-10-27 → 2026-11-02)
+# completed missions  # user value missions  # AI SDLC missions  # unclassified missions  
+0                     0                      0                   0                        
+
+Mission flow — previous week (2026-10-20 → 2026-10-26)
+# completed missions  # user value missions  # AI SDLC missions  # unclassified missions  
+0                     0                      0                   0                        
+
+Bug-labeled mission share — local calendar days (Europe/Stockholm)
+Period                   Local days               # bug missions  # completed  Bug share           
+Current rolling 7 days   2026-10-27 → 2026-11-02  0               0            — (no completions)  
+Previous rolling 7 days  2026-10-20 → 2026-10-26  0               0            — (no completions)  
+
+Agent performance this week (2026-10-27 → 2026-11-02) — completed Missions
+Agent family  # missions as implementer  Average PR fix rounds to complete mission  PR fix n  
+none          0                          unavailable                                0         
+
+Agent spend by stage this week (2026-10-27 → 2026-11-02) — resource consumption
+Agent family  draft  execute  review  follow-up  default  total  
+none          —      —        —       —          —        —      
+
+Agent performance previous week (2026-10-20 → 2026-10-26) — completed Missions
+Agent family  # missions as implementer  Average PR fix rounds to complete mission  PR fix n  
+none          0                          unavailable                                0         
+
+PR Classification analysis
+| Period                                                | Round kind | Decided rounds | Classifier | Mechanical restoration | General reviewer | Classifier share of decisions | Classifier not attempted | Attempted, fell back | Classifier called | Classifier cleared | Classifier returned |
+| ----------------------------------------------------- | ---------- | -------------: | ---------: | ---------------------: | ---------------: | ----------------------------: | -----------------------: | -------------------: | ----------------: | -----------------: | ------------------: |
+| This week (2026-10-27 to 2026-11-02 Europe/Stockholm) | re-review  |              0 |          0 |                      0 |                0 |                           n/a |              0 (partial) |          0 (partial) |       0 (partial) |                  0 |                   0 |
+| Last week (2026-10-20 to 2026-10-26 Europe/Stockholm) | re-review  |              0 |          0 |                      0 |                0 |                           n/a |              0 (partial) |          0 (partial) |       0 (partial) |                  0 |                   0 |
+Sample coverage starts: none recorded. Partial applies to sample measurements only; samples use sample time.
+
+| Clears by omission evidence |   This week |   Last week |
+| --------------------------- | ----------: | ----------: |
+| With omissions              | 0 (partial) | 0 (partial) |
+| Without omissions           | 0 (partial) | 0 (partial) |
+| Historical unknown          | 0 (partial) | 0 (partial) |
+
+Fallback reasons (sampled review rounds routed to the general reviewer)
+| Reason |   This week |   Last week |
+| ------ | ----------: | ----------: |
+| none   | 0 (partial) | 0 (partial) |
+
+Verification measurements · retained history · 0 completed missions
+Attempts 1; failures 0 (infrastructure 0); reruns 0; reused proofs 0; incomplete 0
+Elapsed lifetime union unknown; gate execution union 0 ms; exclusive observed waiting 0 ms; overlapping execution 0 ms
+OS waited-tree CPU unknown (observations 0/1; partial when missing)
+Rerun execution unknown; CPU unknown
+Failure-to-success recovery unknown; observed gate CPU unknown; repair activity unknown; re-review activity unknown
+Observed gate DAG critical path unknown; end-to-end workflow critical path unknown
+Gate batch manual-batch: dependency path unknown
+Elapsed bottleneck manual-gate: 0 ms (n=1)
+CPU bottleneck manual-gate: unknown (n=1)
+Profiling evidence: none; sample coverage of these attempts unknown (OS CPU is not samples)
+Contention and optimization benefit: unknown; overlap alone does not establish contention or a speedup. Revision comparisons do not establish equivalent discovered workloads.
+Unknown: Some attempts have no workflow operation
+Unknown: Some attempts have no observed revision
+Unknown: Some attempts have no mission identity
+Unknown: OS CPU missing for some attempts; observed CPU is partial
+Unknown: Repair and re-review agent CPU unavailable; gate CPU is not agent CPU
+Unknown: End-to-end critical path unknown; only complete observed gate DAGs are measured

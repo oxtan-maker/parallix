@@ -1,0 +1,84 @@
+{
+  "boundary": "Baseline inventory before measurement changes; executable owners remain authoritative. No historical measurements are backfilled.",
+  "sources": [
+    {
+      "facts": "latest declared result and reusable proofs",
+      "owner": "src/adapters/verification/verification.ts",
+      "units": "ISO UTC observation; exit status",
+      "coverage": "latest outcome per checkout/input identity",
+      "gaps": "no retained starts, repeated attempts, execution/wait separation or OS CPU"
+    },
+    {
+      "facts": "integration run and proof reuse",
+      "owner": "src/adapters/verification/integration-verification-proof.ts",
+      "units": "ISO UTC start/end, exit status",
+      "coverage": "latest configured integration phase; workflow operation:generation when supplied",
+      "gaps": "overwritten on rerun; outcomes strip durations; no per-gate start or CPU"
+    },
+    {
+      "facts": "configured gate execution/dependencies",
+      "owner": "src/adapters/config/repository-gates.ts",
+      "units": "durationMs wall milliseconds; after gate keys",
+      "coverage": "executed configured lifecycle gates",
+      "gaps": "in-memory durations; resource wait included; reused proof represented as zero duration"
+    },
+    {
+      "facts": "workflow identities and terminals",
+      "owner": "src/adapters/sqlite/workflow-operation-store.ts",
+      "units": "ISO UTC created/updated",
+      "coverage": "repository, mission, request, operation, generation, command and terminal phase",
+      "gaps": "latest update is not a phase interval log; cannot infer execution CPU"
+    },
+    {
+      "facts": "waiting, recovery, agent/review-response activity",
+      "owner": "src/application/recording/execution-activity-recorder.ts",
+      "units": "ISO UTC event boundaries",
+      "coverage": "typed activity and retained operational history; nested publication sources",
+      "gaps": "not OS CPU; missing activity cannot imply zero repair or wait"
+    },
+    {
+      "facts": "rebound and failure classification",
+      "owner": "src/application/rebound-telemetry.ts",
+      "units": "typed failure reasons and recovery outcomes",
+      "coverage": "recorded rebounds; infrastructure remains distinct",
+      "gaps": "not a universal gate-attempt ledger"
+    },
+    {
+      "facts": "completion and shared FLOW cohort",
+      "owner": "src/application/projections/metrics-read-adapter.ts",
+      "units": "ISO UTC first done; derived minutes",
+      "coverage": "canonical repository-scoped lane events and usage; shared stats semantics",
+      "gaps": "no attempt or CPU projection; no gate dependency critical path"
+    },
+    {
+      "facts": "CLI statistics presentation",
+      "owner": "src/composition/stats.ts",
+      "units": "minutes, counts, tokens, currency",
+      "coverage": "existing stats command consumes shared lifecycle and usage facts",
+      "gaps": "no retained verification breakdown"
+    },
+    {
+      "facts": "test wall timing",
+      "owner": "test/lib/file-timing-profile.ts",
+      "units": "wall milliseconds",
+      "coverage": "opt-in runner files",
+      "gaps": "not CPU or phase attribution"
+    },
+    {
+      "facts": "OS CPU and descendant accounting",
+      "owner": "test/lib/cpu-supervisor.c",
+      "units": "userUs/systemUs microseconds via wait4/getrusage",
+      "coverage": "supervised suite and waited descendants; finite existing budgets",
+      "gaps": "test-only; reports are local runner artifacts; detached/unwaited descendants excluded"
+    },
+    {
+      "facts": "worker overhead/dependencies",
+      "owner": "scripts/profile-test-worker-cost.ts",
+      "units": "wall milliseconds and loader events",
+      "coverage": "synthetic fresh workers, import/fixture/subprocess controls",
+      "gaps": "not a sampling profiler; placeholder cpuMs is not measured zero"
+    }
+  ],
+  "extensionPlan": "Extend typed verification evidence and existing operational history through composition; retain attempt starts and terminals without changing proof authority. Shared application projection feeds both FLOW and stats. Keep samples and OS CPU separate; unknown observations stay null. Profile only on explicit operator invocation.",
+  "unavailable": "Historical attempt counts, historical CPU, unwaited subprocess CPU, unrecorded dependencies and missing phase intervals cannot be reconstructed reliably."
+}

@@ -199,6 +199,7 @@ export interface BoardProjection {
 }
 
 export interface BoardMetrics {
+  readonly verification?: import('./verification-statistics.js').VerificationStatistics | null;
   /** Collection health is separate from metric-level missing-history fallbacks. */
   readonly health: StatisticsHealth;
   /** The exact data set used to derive this metrics projection. */

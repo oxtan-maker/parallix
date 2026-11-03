@@ -1,0 +1,149 @@
+✔ stop signals descendants and reparented group members, preserves other missions and rejects recycled PID (TASK-2750 F9) (4.245543ms)
+✔ launch surfaces spawn failure and stop delegates attributed external effects (TASK-2750 F7) (0.937465ms)
+✔ stop escalates a SIGTERM-resistant provider safely: terminated (TASK-2750) (5.521663ms)
+✔ stop escalates a SIGTERM-resistant provider safely: recycled (TASK-2750) (14.905194ms)
+✔ stop escalates a SIGTERM-resistant provider safely: permission-denied (TASK-2750) (7.735358ms)
+✔ stop remains pending when permission prevents freezing its owner (TASK-2750) (3.366076ms)
+✔ task-2347.08 repro: CLI and board agree on identity, completions, and cycle time (9.600878ms)
+✔ task-2347.08: CLI delegates identity, completion, and window rules to statistics service (0.435233ms)
+✔ task-2347.08: board metrics accept named input without positional overload casts (0.285866ms)
+✔ task-2347.08: cumulative flow evaluates ordered transitions once (0.212897ms)
+✔ metrics-read adapter failure projects explicit unavailable statistics instead of default zero values (task-2347.07 repro) (1.991779ms)
+✔ metrics projection reports controlled provenance and distinguishes no-completions from no-telemetry (task-2347.07 repro) (5.223927ms)
+✔ stats CLI renders the application-selected population without selecting completion again (TASK-2637.04) (22.72394ms)
+✔ px stats fallback-reasons table renders each distinguishable classifier failure cause (TASK-2704) (33.844905ms)
+✔ classifier clear statistics separate omissions and historical unknowns (TASK-2751) (1.210181ms)
+✔ decided rounds ignore missing and undecided samples and use decision weeks (TASK-2758) (0.975774ms)
+✔ deciders are exclusive and partial telemetry leaves decided share available (TASK-2758) (1.307889ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1103.175495
+ℹ start of coverage report
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ file                                     | line % | branch % | funcs % | uncovered lines
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ src                                      |        |          |         | 
+ℹ  adapters                                |        |          |         | 
+ℹ   agents                                 |        |          |         | 
+ℹ    launcher-probes.ts                    |  76.92 |    66.67 |   60.00 | 4-9 13-18
+ℹ   assets                                 |        |          |         | 
+ℹ    asset-store.ts                        |  74.29 |    75.00 |   25.00 | 8-13 16 21 23
+ℹ    repair-prompts.ts                     |  75.00 |   100.00 |   66.67 | 6-9
+ℹ    runtime-assets.ts                     |  83.16 |   100.00 |   14.29 | 18-31 34-35
+ℹ   cli                                    |        |          |         | 
+ℹ    commands                              |        |          |         | 
+ℹ     cohort-report.ts                     |  49.47 |   100.00 |   20.00 | 9-11 13-42 44-46 48-59
+ℹ     mission-classification.ts            |  45.95 |   100.00 |   50.00 | 6-25
+ℹ     stats-cohorts.ts                     |  57.87 |   100.00 |   11.11 | 13-26 30-39 42-51 54-64 70-75 78-84 87-122 126-130
+ℹ     stats-normalization.ts               |  65.00 |   100.00 |   33.33 | 9-11 13-16
+ℹ     stats-report-rendering.ts            |  74.00 |    57.32 |   73.81 | 14-17 20-25 27-42 46-59 62-99 101-132 138-139 144-145 202 248 256-257 268-271 278 286-289 295-297
+ℹ     stats-report.ts                      |  71.71 |    55.32 |   72.73 | 72-73 114 121-122 145-149 151 154-163 165-229
+ℹ     stats.ts                             |  61.56 |   100.00 |    5.00 | 37 39 41-61 66-86 90-92 95-98 101-103 106-115 119-126 129-149 153-164 167-194 200-204 206-223 228 230-233 236 239-244
+ℹ   filesystem                             |        |          |         | 
+ℹ    package-root.ts                       |  79.41 |   100.00 |   50.00 | 7-20
+ℹ    recovery-evidence-fs.ts               |  96.15 |   100.00 |   11.11 | 8
+ℹ   git                                    |        |          |         | 
+ℹ    command-identity.ts                   |  51.22 |   100.00 |   25.00 | 5-9 16-30
+ℹ    command-progress.ts                   |  67.57 |   100.00 |   33.33 | 21-34 37-46
+ℹ    git.ts                                |  59.84 |    75.00 |   11.11 | 24-25 27-28 30-33 35-37 41-61 63-77 80 83-84 90-101 104 106-108 110-112 114-140 143 146
+ℹ    repository-identity.ts                |  88.46 |   100.00 |   33.33 | 7-11 15
+ℹ   process                                |        |          |         | 
+ℹ    process-liveness.ts                   |  46.51 |   100.00 |   16.67 | 6 9-21 23-27 33-35 37
+ℹ    workflow-process.ts                   |  98.44 |    82.86 |   80.77 | 25 67
+ℹ   sqlite                                 |        |          |         | 
+ℹ    database-adapter.ts                   |  65.19 |    75.00 |    8.00 | 10 13-14 16-45 47-63 65-76 78-81 83 85-93 95-103 105-112 114-124 126-127 129-134 136-147 149-155 157-165 167-171 173-182 184-197 199-202
+ℹ    database-backups.ts                   |  58.70 |   100.00 |   33.33 | 8-16 19-28
+ℹ    database-path-resolver.ts             |  92.68 |    75.00 |   66.67 | 13-15
+ℹ    measurement-store.ts                  |  58.60 |    80.00 |   12.50 | 53 55-62 65-68 70-83 85 87-100 102-104 106-110 112-113 116-139 141-157 163-166 169-174 176-206 212-217 220-221 224-235
+ℹ    migration-checksums.ts                |  73.68 |   100.00 |   50.00 | 6-10
+ℹ    migration-runner.ts                   |  62.23 |    75.00 |   20.00 | 12 14-17 19-42 44-45 47-66 68-87
+ℹ    mission-classification-reader.ts      |  70.00 |   100.00 |   50.00 | 9-23
+ℹ   storage                                |        |          |         | 
+ℹ    storage.ts                            |  71.21 |    50.00 |   33.33 | 22 26 31-38 43-46 49-52 55-67 72-91 94-99
+ℹ  application                             |        |          |         | 
+ℹ   approval-coverage.ts                   |  62.32 |   100.00 |   12.50 | 13-26 30-36 39 43 47 49-67 70-78
+ℹ   checkpoint-recovery-commands.ts        |  62.50 |   100.00 |   50.00 | 3-5
+ℹ   contracts.ts                           |  90.28 |   100.00 |   25.00 | 4 7-11 13
+ℹ   domain-ports.ts                        |  92.49 |    75.00 |   33.33 | 3 8-15 17-20
+ℹ   measurement-ports.ts                   | 100.00 |    75.00 |   50.00 | 
+ℹ   mission-command-support.ts             |  67.19 |   100.00 |   12.50 | 7-14 18-31 38-45 51-57 60-62 65-66
+ℹ   mission-terminal-compat.ts             |  71.05 |   100.00 |   20.00 | 6-7 9-19 24-29 33-35
+ℹ   ports                                  |        |          |         | 
+ℹ    configuration.ts                      | 100.00 |   100.00 |  100.00 | 
+ℹ    repair-prompts.ts                     |  68.42 |   100.00 |   66.67 | 4-9
+ℹ   presentation                           |        |          |         | 
+ℹ    classifier-statistics.ts              | 100.00 |    97.30 |  100.00 | 
+ℹ    cli-format.ts                         |  72.73 |    50.00 |   39.39 | 27-30 32-34 51-52 55-56 61-62 64 67 74-77 79-80 82-84 91-92 96 98-99 102-104 108 112-114 117-122 124-141
+ℹ    progress-frames.ts                    | 100.00 |   100.00 |  100.00 | 
+ℹ    stats-table.ts                        | 100.00 |    93.33 |  100.00 | 
+ℹ   projections                            |        |          |         | 
+ℹ    agent-status.ts                       |  91.36 |    50.00 |   85.71 | 14 17-18 29-30 35 37
+ℹ    board-readers.ts                      |  85.53 |    55.17 |   53.57 | 17-19 55-63 74-94 96-98 109-110 112-126 136-137 155 159-164 166-167 184-188
+ℹ    board.ts                              |  87.26 |    64.29 |   44.44 | 6-21 24-42 44-51 82-84 101-107 110-113 118-119
+ℹ    cohorts.ts                            |  95.82 |    77.78 |   76.74 | 6 19-21 34 46-53 97-98
+ℹ    done-cohort.ts                        |  69.23 |    50.00 |   28.57 | 7 10-16
+ℹ    metrics-completion.ts                 | 100.00 |    85.71 |   86.36 | 
+ℹ    metrics-flow.ts                       |  86.43 |    94.87 |   75.00 | 7-20 22-32 35-36
+ℹ    metrics-outcomes.ts                   |  97.34 |    66.10 |   94.74 | 29 67-71 100 114
+ℹ    metrics-read-adapter.ts               |  95.65 |    93.88 |   89.29 | 8-11 92-101
+ℹ    metrics.ts                            |  93.33 |    66.15 |   87.10 | 43-59 66-67 73 87-94 112-113
+ℹ    mission-board.ts                      |  71.35 |   100.00 |    8.33 | 10-13 17 20-24 27-52 55-95 98-100 102-105 110-112 114-117 119-124 127-135
+ℹ    provider-execution.ts                 |  44.37 |   100.00 |    8.33 | 6-7 9-27 30-40 42-48 50-51 54-67 70 75 77-87 92-102
+ℹ    review-history.ts                     |  45.38 |   100.00 |   11.11 | 5-11 13-26 28 30-58 60-67 70-72 74-80 83-84
+ℹ    workflow-board.ts                     |  58.97 |    85.71 |   35.71 | 12-18 21-25 27 30-32
+ℹ   prompt-context-policy.ts               |  40.00 |   100.00 |   50.00 | 3-8
+ℹ   recovery-evidence-types.ts             | 100.00 |   100.00 |  100.00 | 
+ℹ   recovery-evidence.ts                   |  70.30 |   100.00 |    6.90 | 17 20 24 27 32 36-37 41-42 44 46-49 54-66 70-76 78-82 85-125 127-132 135-138 140-145 147-153 156-168 177-189 191-196 202-207 209-210 214-217
+ℹ   repair-checkpoint-service.ts           |  38.38 |    75.00 |   10.00 | 10-11 13-36 38-39 41-64 66-92 94-113 115-125 127-138 140-141 143-147 149-158 160-166 170-172 174-181 185-191 195-197
+ℹ   review-classification                  |        |          |         | 
+ℹ    statistics.ts                         | 100.00 |    96.43 |  100.00 | 
+ℹ   run-history-types.ts                   |  95.68 |   100.00 |   14.29 | 19 27-30 32 35
+ℹ   run-history.ts                         |  45.55 |   100.00 |    3.45 | 11-12 15-41 43-50 55-77 79 82-89 91-93 95-96 99 101 103 109-111 114-120 122-149 151-198 201-210 212-226 229-235 238-264 267-273 276-283 285-289 291-305
+ℹ   services                               |        |          |         | 
+ℹ    decision-window.ts                    | 100.00 |   100.00 |  100.00 | 
+ℹ    review-statistics.ts                  |  51.85 |   100.00 |   50.00 | 6-18
+ℹ    statistics-bug-trend.ts               | 100.00 |    87.50 |  100.00 | 
+ℹ    statistics-report-selection.ts        | 100.00 |    69.23 |  100.00 | 
+ℹ    statistics-row.ts                     |  57.36 |    47.37 |   29.63 | 29-35 39-47 50-53 56-60 63-66 68-71 82 89-90 96-100 111-113 119-120 126 131-142 144-150 152-153 155-157 160-163 173 175-192 195-201 204-210 213-214
+ℹ    statistics-service.ts                 |  92.42 |    69.23 |   87.50 | 31-35
+ℹ   static-evidence.ts                     |  39.34 |   100.00 |    4.17 | 7-8 11 14-16 18-37 40-58 60-67 70-74 76-81 84-86 89-94 96-105 108-118 121-127 129-132 135-137 140-147 153-162 165-177 179-181 185-190
+ℹ   stats-command-use-case.ts              |  85.00 |    75.00 |   83.33 | 11-16
+ℹ   stats-recording-use-case.ts            |  43.98 |    75.00 |   14.29 | 8-16 20-31 38-43 45 47-52 54-57 59-61 63-84 86-101 103-116
+ℹ  composition                             |        |          |         | 
+ℹ   config.ts                              | 100.00 |    56.67 |   90.00 | 
+ℹ  domain                                  |        |          |         | 
+ℹ   agent-run.ts                           |  71.25 |   100.00 |   16.67 | 6-9 11-22 24-25 30-31 34-36
+ℹ   agents.ts                              |  52.41 |    72.73 |   35.71 | 3 10 23-24 27-37 41 43-47 49-75 77-92 95-109
+ℹ   approval-coverage.ts                   |  65.52 |   100.00 |   14.29 | 13 17 20-22 25-44 47-61 63-72
+ℹ   checkpoint.ts                          |  70.68 |   100.00 |    5.56 | 10-20 23-24 26-40 47-54 58-65 68-70 73 75-82 88-94 96-108 112-118 121-129 131-133
+ℹ   comparators.ts                         | 100.00 |   100.00 |   50.00 | 
+ℹ   decision-window.ts                     |  98.16 |    85.29 |  100.00 | 33 36 63
+ℹ   execution-activity.ts                  |  61.61 |   100.00 |   15.38 | 6-26 29-32 35-38 41-46 50 52-58 61-72 78 81-102 104-110 116
+ℹ   failure-classification.ts              |  56.87 |   100.00 |   10.00 | 34-45 49-57 60-77 79-92 96-110 112-124 126-147 150-159
+ℹ   failure-reason.ts                      |  75.00 |   100.00 |   33.33 | 4-5 8-9
+ℹ   instant.ts                             |  74.67 |   100.00 |   20.00 | 5-15 19-24 26-27
+ℹ   integration-approval-retention.ts      |  71.79 |   100.00 |   33.33 | 3-12 16
+ℹ   integration-repair-policy.ts           |  60.22 |   100.00 |   11.11 | 5-8 11-15 18-19 21-34 36-39 42 44 47-52
+ℹ   mission-review-preparation-policy.ts   |  80.49 |   100.00 |   25.00 | 5-7 11-15
+ℹ   mission.ts                             |  78.75 |    66.67 |   31.25 | 7 11-12 14-15 18-24 36-38 43-59 61-65 69-70 75-89 94-97
+ℹ   rebound-policy.ts                      |  58.02 |   100.00 |    7.14 | 6-9 15-30 33-40 43-105 108-109 112-114 122-124 130 133-134 137-142 146-147
+ℹ   repair-coverage.ts                     |  44.74 |   100.00 |    9.09 | 5 8-19 22-29 32-39 42-46 48-52 55-57 59-67 69-76 78-81
+ℹ   repository.ts                          | 100.00 |    75.00 |  100.00 | 
+ℹ   review-decision-source.ts              |  92.73 |   100.00 |   50.00 | 5-8
+ℹ   review-phase-policy.ts                 |  60.00 |    75.00 |   28.57 | 12-13 15-18 21-24 27-32
+ℹ   review.ts                              |  62.08 |    75.00 |    4.65 | 5-6 12-14 22-29 31-54 61-71 75-81 85-97 101-110 116-132 135-138 140-144 150 153-154 160-167 170-175 178-181 184-204 206-217 221-222 225-230 232-267 270-273 276-286 289-296 299-330 333-341 346-350 354-357 360-372 375-376 380-392 395-424 428-451 455-459 464-467 469-485
+ℹ   usage.ts                               |  86.73 |    76.92 |   75.00 | 34-35 56-83
+ℹ   workflow-command-policy.ts             |  40.74 |   100.00 |   25.00 | 4-10 12 15-22
+ℹ   workflow-operation.ts                  |  57.50 |   100.00 |   10.00 | 7 11-13 16-19 22-27 30-40 42-46 49-52
+ℹ  interfaces                              |        |          |         | 
+ℹ   cli                                    |        |          |         | 
+ℹ    stats.ts                              |  70.90 |    50.00 |   87.50 | 6-39 52-53 89-91
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ all files                                |  72.04 |    75.28 |   43.19 | 
+ℹ -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ℹ end of coverage report

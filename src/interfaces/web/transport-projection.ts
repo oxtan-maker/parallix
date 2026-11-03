@@ -9,6 +9,7 @@ import type { BoardCommand, CommandAvailability, MissionCard } from '../../appli
 import { isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
 import type { ApplicationOutcome, ProgressEvent, SourceFact } from '../../application/contracts.js';
 import { WEB_TRANSPORT_VERSION, WebTransportError, type WebBoardCommandKind, type WebDurationMs, type WebMissionWork, type WebCoordinatorEvidence, type WebCommandAction, type WebMissionCard, type WebAttentionItem, type WebOperationLogEntry, type WebAgentAvailability, type WebSourceFact, type WebBoardMetrics, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent } from './transport-types.js';
+import { renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
 
 export const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> = {
   active: 'active:execute',
@@ -201,6 +202,7 @@ function toSourceFact(fact: SourceFact<string>): WebSourceFact {
 
 function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
   return {
+    verification: renderVerificationStatistics(metrics.verification),
     ...(metrics.decisionWindow === undefined || ['unavailable', 'pre-lifecycle'].includes(metrics.health.state)
       ? {} : { weeklyCompletedMissions: metrics.decisionWindow.current.completedMissions }),
     health: { state: metrics.health.state },

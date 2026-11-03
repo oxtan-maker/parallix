@@ -1,5 +1,7 @@
 import { failureReasonFromCause } from '../../domain/failure-reason.js';
 import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
+import { randomUUID } from 'node:crypto';
+import { verificationObservation, type VerificationMeasurement } from '../../application/ports/verification-observation.js';
 import { normalizeGates, validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 export { validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
 import { verificationEnvironment } from './verification-environment.js';
@@ -96,6 +98,8 @@ export function loadRepositoryGates(rootDir: string): RepositoryGates {
 
 /** Result of running a configured gate. */
 export interface GateRunOutcome {
+  cpu?: VerificationMeasurement['cpu'];
+  reused?: boolean;
   failureReason?: import('../../domain/failure-reason.js').FailureReason;
   signal?: string | null;
   key: string;
@@ -133,7 +137,7 @@ export type GateCommandRunner = (
   _command: string,
   _args: string[],
   _options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void },
-) => { status: number | null, stdout: string, stderr: string, signal?: string | null } | Promise<{ status: number | null, stdout: string, stderr: string, signal?: string | null }>;
+) => { status: number | null, stdout: string, stderr: string, signal?: string | null, cpu?: VerificationMeasurement['cpu'], reused?: boolean } | Promise<{ status: number | null, stdout: string, stderr: string, signal?: string | null, cpu?: VerificationMeasurement['cpu'], reused?: boolean }>;
 
 /** Read a phase's opt-in concurrency limit; serial is the default. */
 export function loadPhaseGateParallelism(rootDir: string, phase: "preHandoff" | 'preReview' | 'preIntegration'): number {
@@ -304,6 +308,8 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
 }
 
 class PhaseGateExecution {
+  private readonly batchId = randomUUID();
+  private readonly observations = new Map<string, Awaited<ReturnType<NonNullable<ReturnType<typeof verificationObservation>>['begin']>>>();
   private readonly state: ReturnType<typeof phaseExecutionState>;
   private readonly resources: PhaseGateResources;
   constructor(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) {
@@ -328,25 +334,33 @@ class PhaseGateExecution {
   /** Tagged gates share their phase's resource slot without changing phase parallelism. */
   private runAdmitted(gate: RepositoryGate) {
     const { opts, controller } = this.state;
-    const invoke = (slot?: GateAdmissionRun) => this.state.runner(gate.command, [], {
+    const invoke = async (slot?: GateAdmissionRun) => {
+      await this.observations.get(gate.key)?.started().catch(() => undefined);
+      return this.state.runner(gate.command, [], {
       cwd: path.resolve(this.state.checkoutPath), stdio: 'pipe', forwardOutput: this.state.liveSerial,
       env: { ...this.state.env, ...slot?.environment },
       signal: slot ? AbortSignal.any([controller.signal, slot.signal]) : controller.signal,
       bindProcessGroup: slot ? (pid: number) => { opts.admissionRun?.bindProcessGroup(pid); slot.bindProcessGroup(pid); } : opts.admissionRun?.bindProcessGroup,
       onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
-    });
+      });
+    };
     if (!gate.resource) { return invoke(); }
     return this.resources.run(gate.resource, invoke);
   }
 
-  launchGate(gate: RepositoryGate, verification: ReusableVerificationProofPort | null): Promise<GateRunOutcome> {
+  async launchGate(gate: RepositoryGate, verification: ReusableVerificationProofPort | null): Promise<GateRunOutcome> {
     const started = Date.now();
+    const observation = await verificationObservation()?.begin({ root: this.state.checkoutPath, mission: this.state.slug,
+      batchId: this.batchId, gate: gate.key, command: gate.command, phase: this.state.phase,
+      after: gate.after ?? [], plan: this.state.gates.map(gate => gate.key) }).catch(() => null);
+    this.observations.set(gate.key, observation ?? null);
     // Delay proof loading until a clean-tree gate actually runs. This keeps
     // bootstrap-only gate planning independent of Git verification modules.
     const proofContext = JSON.stringify({ phase: this.state.phase, slug: this.state.slug, checkoutPath: path.resolve(this.state.checkoutPath), gate: gate.key });
     const reusable: { ok: boolean; identity?: string; error?: string } = gate.reuse === 'clean-tree'
       ? verification!.readReusableVerificationProof(gate.command, this.state.checkoutPath, { context: proofContext, configuration: this.state.opts.configuration }) : { ok: false, identity: undefined, error: 'reuse disabled' };
     if (reusable.ok) {
+      await observation?.complete({ result: 'reused', exitCode: 0, failureReason: null, wallMs: null, cpu: null }).catch(() => undefined);
       const outcome = Promise.resolve({ key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 });
       return outcome;
     }
@@ -359,12 +373,17 @@ class PhaseGateExecution {
           const persisted = beforeProof.ok
             ? verification!.writeReusableVerificationProof(gate.command, this.state.checkoutPath, { context: proofContext, configuration: this.state.opts.configuration, expectedIdentity: beforeProof.identity })
             : beforeProof;
-          return { key: gate.key, command: gate.command, exitCode, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
+          return { key: gate.key, command: gate.command, exitCode, cpu: result.cpu, reused: result.reused, stdout: String(result.stdout || ''), stderr: persisted.ok ? String(result.stderr || '') : `${String(result.stderr || '')}\nproof unavailable: ${persisted.error}`, durationMs: Date.now() - started };
         }
-        return { key: gate.key, command: gate.command, exitCode, signal: result.signal ?? null, failureReason: gateFailureReasonFromProcess(result), stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
+        return { key: gate.key, command: gate.command, exitCode, cpu: result.cpu, reused: result.reused, signal: result.signal ?? null, failureReason: gateFailureReasonFromProcess(result), stdout: String(result.stdout || ''), stderr: String(result.stderr || ''), durationMs: Date.now() - started };
       })
       .catch(cause => ({ failureReason: failureReasonFromCause(cause, 'process'), key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: String(cause), durationMs: Date.now() - started }));
-    return run;
+    const outcome: GateRunOutcome = await run;
+    await observation?.complete({ result: outcome.reused ? 'reused' : outcome.exitCode === 0 ? 'passed'
+      : this.state.controller.signal.aborted ? 'interrupted' : 'failed', exitCode: outcome.exitCode,
+      failureReason: outcome.failureReason ?? null, wallMs: outcome.reused ? null : outcome.durationMs ?? null,
+      cpu: outcome.cpu ?? null }).catch(() => undefined);
+    return outcome;
   }
 
   settleOutcome(run: Promise<GateRunOutcome>, outcome: GateRunOutcome): void {

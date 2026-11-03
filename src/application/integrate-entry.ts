@@ -18,7 +18,7 @@ function integrationSeams(options: IntegrateOptions, ports: IntegrateWorkflowPor
     // context from these so tests keep a mock launch/transition/fallback
     // port instead of a real agent, git, or Forgejo.
     startAgentFn: isNestedWorkPublisher(options.nestedWork)
-      ? publishedAgentLaunch(options.startAgentFn ?? ports.agents.startAgent, options.nestedWork, 'execute', (agent) => `integration repair: implementer ${agent}`)
+      ? publishedAgentLaunch(options.startAgentFn ?? ports.agents.startAgent, options.nestedWork, 'execute', (agent) => `integration repair: implementer ${agent}`, 'repair')
       : options.startAgentFn ?? ports.agents.startAgent,
     transitionTaskFn: options.transitionTaskFn ?? ports.backlog.transitionTask,
     applyAgentFallbackFn: options.applyAgentFallbackFn ?? ports.agents.applyAgentFallback,

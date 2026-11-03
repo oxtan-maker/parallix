@@ -9,8 +9,20 @@ import { missionOutcome } from '../../../fixtures/mission-outcome.js';
 import React from 'react';
 import { renderToString } from 'ink';
 import { FlowPanel } from '../../../../src/interfaces/tui/flow-panel.js';
+import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 
 const id = missionId('task-flow');
+
+test('FLOW renders shared verification costs and missing-data qualifications (px-0025)', () => {
+  const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
+  const output = plain(renderToString(React.createElement(FlowPanel, {
+    metrics: { ...populatedMetrics(), verification }, columns: 160,
+  }), { columns: 160 }));
+  assert.match(output, /Verification measurements/);
+  assert.match(output, /retained history/);
+  assert.match(output, /OS waited-tree CPU unknown/);
+  assert.match(output, /historical work is unavailable, not zero/);
+});
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 const plain = (value: string): string => value.replace(ANSI, '');

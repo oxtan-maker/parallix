@@ -236,7 +236,7 @@ test('verifyReview handles task status edge cases', async () => {
   } satisfies Partial<NonNullable<Parameters<typeof verifyReview>[2]>>;
 
   // 1. Task not found
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     resolveTaskFileFn: () => ({ matches: [],  ok: false as const, reason: 'missing' as const })
   });
@@ -244,7 +244,7 @@ test('verifyReview handles task status edge cases', async () => {
 
   // 2. Task ambiguous
   logs.length = 0;
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     resolveTaskFileFn: () => ({ ok: false as const, reason: 'ambiguous' as const, matches: ['a.md', 'b.md'] })
   });
@@ -252,7 +252,7 @@ test('verifyReview handles task status edge cases', async () => {
 
   // 3. Task status DONE
   logs.length = 0;
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'done'
@@ -261,7 +261,7 @@ test('verifyReview handles task status edge cases', async () => {
 
   // 4. Task status ACTIVE (warning)
   logs.length = 0;
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'active'
@@ -270,7 +270,7 @@ test('verifyReview handles task status edge cases', async () => {
 
   // 5. Unexpected task status
   logs.length = 0;
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     resolveTaskFileFn: () => ({ matches: ['task.md'],  ok: true as const, taskFile: 'task.md' }),
     getTaskStatusFn: () => 'backlog'
@@ -303,7 +303,7 @@ test('verifyReview handles PR state edge cases', async () => {
   } satisfies Partial<NonNullable<Parameters<typeof verifyReview>[2]>>;
 
   // 1. PR closed/merged
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'closed', merged: true, number: 41 })
   });
@@ -311,7 +311,7 @@ test('verifyReview handles PR state edge cases', async () => {
 
   // 2. PR missing
   logs.length = 0;
-  verifyReview(TEST_SLUG, false, {
+  await verifyReview(TEST_SLUG, false, {
     ...baseOptions,
     getPrStatusFn: () => ({ exists: false as const, raw: 'Not found' })
   });
@@ -334,7 +334,7 @@ test('verifyReview handles gate failures', async () => {
   const origCwd = process.cwd();
   process.chdir(tmp);
   try {
-    verifyReview(TEST_SLUG, false, {
+    await verifyReview(TEST_SLUG, false, {
       log: (m: string) => logs.push(m),
       error: () => {},
       exit: (c: number) => exitCodes.push(c),
@@ -361,6 +361,7 @@ test('verifyReview handles gate failures', async () => {
   }
 
   assert.ok(logs.some(l => l.includes('Reviewer gate failed.')), 'Should log gate failure');
+  assert.deepEqual(exitCodes, [1], 'A failed reviewer gate must reject verification');
 });
 
 

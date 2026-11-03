@@ -1,0 +1,450 @@
+[
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "verifyReview handles task status edge cases",
+    "profile": "covered",
+    "cpuMs": 29.134,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "verifyReview handles PR state edge cases",
+    "profile": "covered",
+    "cpuMs": 4.474,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "verifyReview handles gate failures",
+    "profile": "covered",
+    "cpuMs": 8.151,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "review helper functions and error paths",
+    "profile": "covered",
+    "cpuMs": 49.046,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "review function missing argument and env var error paths",
+    "profile": "covered",
+    "cpuMs": 22.532,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "rebaseBeforeReviewRound succeeds after a clean rebase",
+    "profile": "covered",
+    "cpuMs": 11.051,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "rebaseBeforeReviewRound reports shared-file conflicts with recovery instructions",
+    "profile": "covered",
+    "cpuMs": 7.991,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when the conflict-resolution agent launches",
+    "profile": "covered",
+    "cpuMs": 9.24,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "rebaseBeforeReviewRound reports non-conflict rebase failures",
+    "profile": "covered",
+    "cpuMs": 8.153,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForReview waits asynchronously between retries",
+    "profile": "covered",
+    "cpuMs": 2.812,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForDisposition waits asynchronously between retries",
+    "profile": "covered",
+    "cpuMs": 1.185,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForReview honours caller intervalMs and timeoutMs and returns timeout sentinel on timeout",
+    "profile": "covered",
+    "cpuMs": 1.219,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForReview emits a progress line on every tick when verbose=true",
+    "profile": "covered",
+    "cpuMs": 1.099,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "resolvePollTimeoutMs honours AUTONOMOUS_REVIEW_POLL_TIMEOUT_MS env override",
+    "profile": "covered",
+    "cpuMs": 1.811,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForDisposition misses comment if created_at is slightly before sinceIso (clock skew)",
+    "profile": "covered",
+    "cpuMs": 115.941,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForDisposition finds comment with stable round start time despite clock skew from launch",
+    "profile": "covered",
+    "cpuMs": 1.413,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pollForDisposition finds already-posted comment when resuming a round",
+    "profile": "covered",
+    "cpuMs": 48.04,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestReviewForPr correctly handles mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 2.084,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestReviewForPr accepts a human request after round start but excludes stale approval",
+    "profile": "covered",
+    "cpuMs": 0.875,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestReviewForPr correctly sorts mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 0.784,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestDispositionForPr correctly handles mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 1.201,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestDispositionForPr correctly sorts mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 0.707,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestDisposition correctly handles mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 32.215,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestDisposition correctly sorts mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 32.203,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestReview correctly handles mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 34.753,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "getLatestReview correctly sorts mixed-precision ISO timestamps",
+    "profile": "covered",
+    "cpuMs": 34.723,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback returns the original agent when startAgent did not fall back",
+    "profile": "covered",
+    "cpuMs": 2.13,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback rewrites reviewer identity and persists state but does NOT update backlog assignee",
+    "profile": "covered",
+    "cpuMs": 1.077,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback rewrites implementer identity on fallback without touching reviewer",
+    "profile": "covered",
+    "cpuMs": 0.802,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback enforces implementer in backlog when implementer falls back",
+    "profile": "covered",
+    "cpuMs": 0.888,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback handles a missing launchResult gracefully (catastrophic launch failure)",
+    "profile": "covered",
+    "cpuMs": 0.641,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback handles a missing state during an implementer fallback",
+    "profile": "covered",
+    "cpuMs": 0.608,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "applyAgentFallback preserves the original roundStartedAt when rewriting state",
+    "profile": "covered",
+    "cpuMs": 0.912,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "review dispatches to verifyReview with inferred slug and no-gate flag",
+    "profile": "covered",
+    "cpuMs": 0.979,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "review dispatches to commentRound with file-backed message",
+    "profile": "covered",
+    "cpuMs": 0.803,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "review --status inspects the recorded round without binding a workflow",
+    "profile": "covered",
+    "cpuMs": 1.959,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "verifyReview reports success path with gate pass and persisted state",
+    "profile": "covered",
+    "cpuMs": 2.511,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "verifyReview reports failure path and exits when blockers exist",
+    "profile": "covered",
+    "cpuMs": 1.922,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "readComments renders comment list when token and comments exist",
+    "profile": "covered",
+    "cpuMs": 26.208,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "pushRound resolves forgejo user from backlog assignee and reports success",
+    "profile": "covered",
+    "cpuMs": 2.856,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "commentRound and submitReviewRound fail loudly on API errors",
+    "profile": "covered",
+    "cpuMs": 51.675,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitForReview exits when no forgejo user and no task implementer (task-1105)",
+    "profile": "covered",
+    "cpuMs": 1.84,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitForReview and closeMissionPr use injected review preparation and close functions",
+    "profile": "covered",
+    "cpuMs": 22.784,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "review.js does not update Backlog task assignee on reviewer fallback (SC 5)",
+    "profile": "covered",
+    "cpuMs": 0.859,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "buildMetadataFooter returns empty string when no state exists",
+    "profile": "covered",
+    "cpuMs": 0.698,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "commentRound appends metadata footer to message",
+    "profile": "covered",
+    "cpuMs": 1.093,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound appends metadata footer to review message",
+    "profile": "covered",
+    "cpuMs": 4.411,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "showReviewStatus prints state details when state exists",
+    "profile": "covered",
+    "cpuMs": 1.253,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "showReviewStatus prints no-state message when state is absent",
+    "profile": "covered",
+    "cpuMs": 0.95,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "commentRound persists review state after successful post",
+    "profile": "covered",
+    "cpuMs": 1.798,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "commentRound does not persist state when no state exists",
+    "profile": "covered",
+    "cpuMs": 1.107,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound records REQUEST_CHANGES on the current round after request-changes",
+    "profile": "covered",
+    "cpuMs": 4.552,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound records APPROVED on the current round after approve",
+    "profile": "covered",
+    "cpuMs": 5.869,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound promotes an active backlog task to review after provider-backed approval",
+    "profile": "covered",
+    "cpuMs": 4.28,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound keeps YAML and rendered task status aligned when provider-backed approval repairs active",
+    "profile": "covered",
+    "cpuMs": 70.107,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound with provider=none refuses to fabricate a missing review",
+    "profile": "covered",
+    "cpuMs": 1.353,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "submitReviewRound records changes on the current round when provider=none",
+    "profile": "covered",
+    "cpuMs": 1.341,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "consumeImplementerArtifacts posts resolution and normalized disposition from files",
+    "profile": "covered",
+    "cpuMs": 5.707,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "consumeReviewerArtifacts deletes artifacts only after successful comment and review posts",
+    "profile": "covered",
+    "cpuMs": 4.115,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "consumeImplementerArtifacts leaves artifacts in place when posting fails",
+    "profile": "covered",
+    "cpuMs": 9.582,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "consumeReviewerArtifacts proves persist-before-mirror ordering",
+    "profile": "covered",
+    "cpuMs": 1.73,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/review/review.test.ts",
+    "name": "consumeImplementerArtifacts proves persist-before-mirror ordering",
+    "profile": "covered",
+    "cpuMs": 2.07,
+    "limitMs": 275
+  },
+  {
+    "file": "integration/presentation/board-worktree-mission-scope.test.ts",
+    "name": "task-2438 board reads persisted repository missions from every worktree",
+    "profile": "covered",
+    "cpuMs": 69.844,
+    "limitMs": 100
+  },
+  {
+    "file": "integration/presentation/board-worktree-mission-scope.test.ts",
+    "name": "task-2438 mission store scopes board reads to the repository",
+    "profile": "covered",
+    "cpuMs": 1.939,
+    "limitMs": 100
+  }
+]

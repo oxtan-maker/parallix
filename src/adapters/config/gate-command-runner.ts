@@ -1,17 +1,24 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import type { VerificationMeasurement } from '../../application/ports/verification-observation.js';
 import { retainGateOutput } from './gate-dashboard.js';
 import { settleOnExit } from './child-exit.js';
 
-export function runGateCommand(command: string, _args: string[], options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void, terminationGraceMs?: number }): Promise<{ status: number | null, stdout: string, stderr: string, signal: string | null }> {
+export function runGateCommand(command: string, _args: string[], options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void, terminationGraceMs?: number }): Promise<{ status: number | null, stdout: string, stderr: string, signal: string | null, cpu?: VerificationMeasurement['cpu'] }> {
   return new Promise(resolve => {
     if (options.signal?.aborted) { resolve({ status: null, signal: null, stdout: '', stderr: 'Gate cancelled before launch.' }); return; }
     const guarded = Boolean(options.bindProcessGroup);
-    const child = spawn('bash', guarded ? ['-c', 'read -r admission <&3 && exec bash -c "$1"', 'gate', command] : ['-c', command], {
-      cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe', ...(guarded ? ['pipe' as const] : [])], detached: process.platform !== 'win32',
+    // Bash time uses OS rusage for the waited command tree. Dedicated fd 4
+    // keeps measurements independent of command output (including forged text).
+    const timed = `${guarded ? 'read -r admission <&3 || exit 125; ' : ''}TIMEFORMAT='%U %S'; { time bash -c "$1" 2>&5; } 5>&2 2>&4`;
+    const child = spawn('bash', ['-c', timed, 'gate', command], {
+      cwd: options.cwd, env: options.env, stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32',
     });
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let measurement = '';
+    (child.stdio[4] as import('node:stream').Readable).on('data', chunk => { measurement += String(chunk); });
     let watchdog: NodeJS.Timeout | undefined;
     const signalGroup = (signal: NodeJS.Signals) => {
       try {
@@ -24,7 +31,12 @@ export function runGateCommand(command: string, _args: string[], options: { cwd:
       settled = true;
       if (watchdog) { clearTimeout(watchdog); }
       options.signal?.removeEventListener('abort', stop);
-      resolve({ status, signal, stdout, stderr });
+      const match = measurement.trim().replaceAll(',', '.').match(/^(\d+\.\d+) (\d+\.\d+)$/);
+      const cpu: VerificationMeasurement['cpu'] = match && !signal ? {
+        userUs: Math.round(Number(match[1]) * 1e6), systemUs: Math.round(Number(match[2]) * 1e6),
+        provenance: 'bash-time-waited-tree', boundary: randomUUID(), parent: null,
+      } : null;
+      resolve({ status, signal, stdout, stderr, cpu });
     };
     const stop = () => {
       if (settled || watchdog) { return; }

@@ -44,6 +44,8 @@ import {
 } from '../../review/review-static-evidence.js';
 import type { CaptureNelOptions, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions, ReviewPreparationMissionServicesPort } from "../../../application/ports/review-preparation-workflow.js";
 import { recordImplementerLaunch } from '../../../application/rebase-identity.js';
+import { observeVerificationCommand } from '../../../application/recording/verification-command.js';
+import { randomUUID } from 'node:crypto';
 
 function filesystemOperation<T>(operation: () => T): T {
   try { return operation(); } catch (cause) {
@@ -73,7 +75,7 @@ function declaredCommandRunner(root: string, log: (message: string) => void, con
     const reusable = readReusableVerificationProof(command, root, { configuration });
     if (reusable.ok) {
       log(`  Gate reused proof ${reusable.identity}: ${command}`);
-      return { status: 0, stdout: '', stderr: '' };
+      return { status: 0, stdout: '', stderr: '', reused: true };
     }
     const before = createVerificationProofIdentity(command, root, { configuration });
     const result = await runGateCommand(command, args, options);
@@ -163,7 +165,9 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
       writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
       runVerificationGate: (area, options) => usesAdmittedVerification(options.rootDir ?? process.cwd())
         ? runConfiguredVerification(area, options.rootDir ?? process.cwd(), configuration)
-        : runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment }),
+        : observeVerificationCommand({ root: options.rootDir, mission: '', batchId: randomUUID(), gate: 'verification',
+          command: formatVerificationCommand(area, options.rootDir), phase: 'handoff', after: [] },
+          () => runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment })),
       isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
     },
     nel: {

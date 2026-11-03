@@ -66,6 +66,9 @@ const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.
 const LEGACY_ADHOC_MIGRATION_MODULE = 'src/adapters/sqlite/legacy-adhoc-migration.ts';
 
 const CONTRACT_MODULES = new Set([
+  // Read-only verification cost projection and its lane-history wiring.
+  'src/application/projections/verification-statistics.ts',
+  'src/composition/verification-statistics.ts',
   RECORDER_MODULE,
   DOMAIN_MODULE,
   REPOSITORY_MODULE,
