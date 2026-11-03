@@ -83,6 +83,7 @@ export type LegacyInventoryId =
   | 'backlog-task'
   | 'rebase-hook-overlay'
   | 'coverage-manifest'
+  | 'review-patch-proof-cache'
   | 'forgejo-token'
   | 'workflow-config'
   | 'qwen-settings'
@@ -97,6 +98,7 @@ export const LEGACY_INVENTORY_AUTHORITY = {
   'backlog-task': MISSION_FIELD_AUTHORITY.status,
   'rebase-hook-overlay': targetSource,
   'coverage-manifest': { owner: 'operator-local', role: 'cache' } as const,
+  'review-patch-proof-cache': { owner: 'operator-local', role: 'cache' } as const,
   'forgejo-token': localSource,
   'workflow-config': targetSource,
   'legacy-task-body-archive': targetSource,

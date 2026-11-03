@@ -46,7 +46,7 @@ test('statsBackfill reports unresolved missions as an error when applying', asyn
     error: line => errors.push(typeof line === 'string' ? line : JSON.stringify(line)),
     exit: () => {},
   });
-  assert.match(errors.join('\n'), /1 missions remain unresolved and were not written/);
+  assert.match(errors.join('\n'), /1 missions have incomplete reconstruction coverage/);
 });
 
 test('statsBackfill json output includes unresolved and skipped items', async () => {

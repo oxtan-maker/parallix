@@ -1,3 +1,4 @@
+import { fixtureReviewObservations } from '../../../../fixtures/review-statistics.js';
 import type { StatsRow } from "../../../../../src/application/services/statistics-row.js";
 
 
@@ -18,7 +19,7 @@ const WINDOW = {
 interface TestRow extends StatsRow { date: string; repo: string; mission: string; completedForTest: string; }
 
 function row(overrides: Partial<TestRow> = {}): TestRow {
-  return {
+  const result = {
     date: '2026-07-08',
     repo: 'parallix',
     classification: 'ai_sdlc',
@@ -29,6 +30,7 @@ function row(overrides: Partial<TestRow> = {}): TestRow {
     completedForTest: 'yes',
     ...overrides,
   };
+  return { ...result};
 }
 
 function completedMissionKeys(rows: readonly TestRow[], window: typeof WINDOW) {
@@ -38,7 +40,7 @@ function completedMissionKeys(rows: readonly TestRow[], window: typeof WINDOW) {
 
 function missionFlow(rows: readonly TestRow[]) {
   return rows.filter((row) => row.completedForTest === 'yes')
-    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
+    .map(row => ({ repo: row.repo, mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer, reviewStatistics: fixtureReviewObservations(rows).get(`${String(row.repo || "")}::${row.mission.toLowerCase()}`) }));
 }
 
 function renderWeeklyStatsReport(rows: readonly TestRow[]|{ date: string; repo: string; classification: string; implementer: string; model: string; mission: string; pr_fix_rounds: string; completedForTest: string; }[], options = {}) {
@@ -46,7 +48,7 @@ function renderWeeklyStatsReport(rows: readonly TestRow[]|{ date: string; repo: 
 }
 
 function summarizeAgentWindow(rows: readonly TestRow[], window: { start: Date; end: Date; }, options = {}) {
-  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows, window) });
+  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows, window), reviewObservations: fixtureReviewObservations(rows.filter(row => completedMissionKeys(rows, window).has(`${row.repo}::${row.mission.toLowerCase()}`))) });
 }
 
 test('task-2213: agent performance counts and fix-round averages use only each recorded family\'s completed missions', () => {
@@ -197,6 +199,7 @@ test("task-2213: a closed reviewer row does not replace the final implementer af
   // Completion is mission-wide: a reviewer row may carry `completedForTest: yes`, while
   // the last actual implementation was a follow-up by a different agent.
   const summary = summarizeAgentWindow([
+   row({ mission: "task-review-preparation-owner", implementer: "custom", model: "", stage: "default", pr_fix_rounds: "3" }),
    row({ mission: "task-review-preparation-owner", date: '2026-07-07', implementer: 'claude', model: 'claude-sonnet-5', stage: 'follow-up', completedForTest: '' }),
    row({ mission: "task-review-preparation-owner", date: '2026-07-08', implementer: 'custom', model: 'qwen3.6-27b-q8', stage: 'follow-up', completedForTest: '' }),
    row({ mission: "task-review-preparation-owner", date: '2026-07-09', implementer: 'custom', reviewer_agent: 'vibe', model: 'mistral', stage: 'review', pr_fix_rounds: '3', completedForTest: 'yes' }),

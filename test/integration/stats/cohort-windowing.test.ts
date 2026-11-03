@@ -11,6 +11,7 @@
  * linked-worktree fixture (`test/fixtures/statistics-database.ts`)
  * seeds the fixed event history pinned to a rolling seven-day decision window.
  */
+import { fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
@@ -45,7 +46,7 @@ describe("the default FLOW cohort is the current rolling week", () => {
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: RECENT, from: 'backlog', to: 'done', at: '2026-08-06T09:00:00.000Z' }));
       await insertUsageRow(db, {
         repo: REPO, mission: RECENT, date: '2026-08-06',
-        classification: 'ai_sdlc', prFixRounds: 1, durationMinutes: 30,
+        classification: 'ai_sdlc', prFixRounds: 99, durationMinutes: 30,
       });
 
       await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: SIX_MONTHS_OLD, from: null, to: 'backlog', at: '2026-02-01T09:00:00.000Z' }));
@@ -58,6 +59,11 @@ describe("the default FLOW cohort is the current rolling week", () => {
 
       const metrics = await new ConcreteMetricsReadAdapter({
         laneEventRepo, usageRepo, repositoryId: REPO, clock: fixedClock(NOW),
+        // Canonical review observations are independent of legacy telemetry.
+        cohortMetadata: async () => fixtureCohortMetadata([
+          { repo: REPO, mission: RECENT, implementer: 'claude', pr_fix_rounds: 1 },
+          { repo: REPO, mission: SIX_MONTHS_OLD, implementer: 'claude', pr_fix_rounds: 7 },
+        ]),
       }).buildMetrics(new Map<MissionId, MissionStatus>([
         [RECENT, 'done'],
         [SIX_MONTHS_OLD, 'done'],

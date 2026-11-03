@@ -1,3 +1,5 @@
+import type { StatsRow } from './services/statistics-row.js';
+export type { StatsRow } from './services/statistics-row.js';
 import type { DurableEvidence, ProgressEvent, SourceFact } from './contracts.js';
 
 // Re-export operator-state repository ports so presentation consumers (TUI,
@@ -33,16 +35,6 @@ export type {
   ExecuteMissionPorts,
 } from './ports/execute-mission.js';
 
-export interface StatsRow {
-  readonly mission: string;
-  readonly implementer: string;
-  readonly date: string;
-  readonly repo: string;
-  readonly classification: string;
-  readonly pr_fix_rounds: string;
-  readonly sources: { readonly date: string; readonly classification: string; readonly implementer: string };
-}
-
 export interface StatsBackfillUnresolved {
   readonly slug: string; readonly reason: string; readonly detail?: string | null;
   readonly missing?: readonly string[];
@@ -52,7 +44,16 @@ export interface StatsBackfillUnresolved {
 }
 export interface StatsBackfillSkipped { readonly slug: string; readonly reason: string; }
 
+export interface StatsReconstructionChange {
+  readonly mission: string;
+  readonly before: readonly (number | null)[];
+  readonly beforeObserved: boolean;
+  readonly after: number | null;
+  readonly byImplementer: Readonly<Record<string, number | null>>;
+  readonly causes: readonly string[];
+}
 export interface StatsProjection {
+  readonly changes?: readonly StatsReconstructionChange[];
   readonly rows: readonly StatsRow[];
   readonly sources: readonly SourceFact<string>[];
   readonly unresolved?: readonly StatsBackfillUnresolved[];
@@ -60,8 +61,8 @@ export interface StatsProjection {
 }
 
 export interface StatsBackfillPort {
-  readProjection(_options?: { readonly filePath?: string | null }): Promise<StatsProjection>;
-  applyRows(_rows: readonly StatsRow[], _options?: { readonly filePath?: string | null }): Promise<readonly DurableEvidence[]>;
+  readProjection(): Promise<StatsProjection>;
+  applyRows(_rows: readonly StatsRow[]): Promise<readonly DurableEvidence[]>;
 }
 
 export type ProgressPort = (_event: ProgressEvent) => void;

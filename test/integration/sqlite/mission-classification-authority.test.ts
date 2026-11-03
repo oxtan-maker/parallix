@@ -1,3 +1,4 @@
+import { missionLabels } from '../../../src/domain/mission.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { missionLabels as typedMissionLabels } from '../../../src/domain/mission.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -19,7 +20,8 @@ import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-ada
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
 import { closeMeasurementStores } from '../../../src/adapters/sqlite/measurement-store.js';
 import * as stats from '../../../src/adapters/cli/commands/stats.js';
-import { collectHistoricalStatsBackfill } from '../../../src/adapters/cli/commands/stats-backfill.js';
+import { reconstructReviewMeasurements } from '../../../src/application/stats-backfill-service.js';
+import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { recordDraftStats } from '../../../src/adapters/cli/commands/draft-stats.js';
 import { normalizeDraftClassification } from '../../../src/adapters/cli/commands/draft-prompts.js';
 import { startupPreflight } from '../../../src/adapters/cli/startup-preflight.js';
@@ -197,45 +199,13 @@ test('TASK-2604: integration statistics reject absent and unreadable Mission sta
   });
 });
 
-test('TASK-2601: stats backfill keeps stored Mission classification authoritative over provider fallbacks', async () => {
-  for (const [labels, expected] of [[['user_value'], 'user_value'], [['bug'], null]] as const) {
-    await withStoredMission(labels, '[ai_sdlc]', async (root) => {
-      const taskDir = path.join(root, 'backlog', 'tasks');
-      const taskFile = fs.readdirSync(taskDir).map(name => path.join(taskDir, name))[0];
-      fs.writeFileSync(taskFile, fs.readFileSync(taskFile, 'utf8').replace('status: active', "status: done\nupdated_date: '2026-09-27 10:00'\nclassification: ai_sdlc"));
-      const missionDir = path.join(root, 'docs', 'missions', '2026', slug);
-      fs.mkdirSync(missionDir, { recursive: true });
-      fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: workflow review checkpoint cli stats\n');
-      fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# checkpoint\n');
-
-      const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'measurements.db') });
-      const entry = [...report.rows, ...report.unresolved].find(item => ('mission' in item ? item.mission : item.slug) === slug);
-      assert.ok(entry, JSON.stringify(report));
-      assert.equal(entry.classification, expected);
-      assert.ok(entry.sources != null);
-      assert.equal(entry.sources.classification, 'mission-state');
-    });
-  }
-});
-
-test('TASK-2604: historical backfill leaves a labelled task unresolved without a stored Mission', async () => {
-  await withStoredMission(null, '[ai_sdlc]', async (root) => {
-    const taskDir = path.join(root, 'backlog', 'tasks');
-    const taskFile = fs.readdirSync(taskDir).map(name => path.join(taskDir, name))[0];
-    fs.writeFileSync(taskFile, fs.readFileSync(taskFile, 'utf8').replace('status: active', "status: done\nupdated_date: '2026-09-27 10:00'\nclassification: ai_sdlc"));
-    const missionDir = path.join(root, 'docs', 'missions', '2026', slug);
-    fs.mkdirSync(missionDir, { recursive: true });
-    fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# Mission: workflow statistics\n');
-    fs.writeFileSync(path.join(missionDir, 'CP-1.md'), '# checkpoint\n');
-
-    const report = await collectHistoricalStatsBackfill(root, { configuration: resolveConfiguration(process.env), dbPath: path.join(root, 'measurements.db') });
-    assert.equal(report.rows.length, 0);
-    const unresolved = report.unresolved.find(item => item.slug === slug);
-    assert.ok(unresolved, JSON.stringify(report));
-    assert.equal(unresolved.classification, null);
-    assert.ok(unresolved.sources != null);
-    assert.equal(unresolved.sources.classification, 'mission-state');
-  });
+test('TASK-2601: stats reconstruction uses stored Mission labels and discloses missing Mission authority', () => {
+  const mission = fixtureMission(slug, { closedAt: '2026-09-27T10:00:00Z', labels: missionLabels(['user_value']) });
+  const report = reconstructReviewMeasurements([mission], []);
+  assert.equal(report.rows[0].classification, 'user_value');
+  const missing = reconstructReviewMeasurements([], [{ mission: slug, repo: 'parallix', classification: 'ai_sdlc' }]);
+  assert.equal(missing.rows.length, 0);
+  assert.equal(missing.unresolved?.[0].reason, 'missing-mission-history');
 });
 
 function integratePreflightPorts(): IntegrateWorkflowPorts {

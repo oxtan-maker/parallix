@@ -5,10 +5,13 @@
 // under test is the path-declared unit level alone.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import { caseRoot } from '../../fixtures/case-root.js';
+import { cleanupFixtureProcesses, registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
+import { recoverRecordedTempRoots } from '../../../src/adapters/verification/temp-root-registry.js';
 
 const TEST_ROOT = path.join(import.meta.dirname, '..', '..');
 const REPO_ROOT = path.dirname(TEST_ROOT);
@@ -57,6 +60,52 @@ test('the runner executes only the focused nested suite and reports it green', (
   assert.match(result.stdout, /✔ nested passing fixture/);
   assert.doesNotMatch(result.stdout, /nested failing fixture/);
   assert.match(result.stdout, /ℹ tests 1\n/);
+});
+
+test('a hard-killed covered runner leaves recoverable scratch instead of untracked payloads', { timeout: 30_000 }, async t => {
+  const checkout = standInCheckout();
+  const temporary = caseRoot('runner-coverage-recovery-');
+  let child: ReturnType<typeof spawn> | undefined;
+  registerFixtureCleanup(t, () => {
+    child?.kill('SIGKILL');
+    cleanupFixtureProcesses(checkout.root);
+    checkout.dispose(); temporary.dispose();
+  });
+  const marker = path.join(checkout.root, 'scratch.json');
+  // Execution is a stand-in boundary, as is the checkout. This checks the
+  // real supervisor's scratch ownership without requiring another Node version.
+  const executor = path.join(checkout.root, 'coverage-executor.mjs');
+  fs.writeFileSync(executor, `#!${process.execPath}
+    import fs from 'node:fs';
+    import path from 'node:path';
+    if (process.argv.includes('--version')) { console.log('v26.7.0'); }
+    else if (!process.argv.includes('--help')) {
+      fs.mkdirSync(path.join(process.env.TMPDIR, 'node-coverage-fixture'));
+      fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify(process.env.TMPDIR));
+      setTimeout(() => {}, 1500);
+    }`, { mode: 0o755 });
+  const env: NodeJS.ProcessEnv = { ...process.env, GITHUB_ACTIONS: 'true', PARALLIX_EXECUTION_ROOT: checkout.root,
+    PARALLIX_TEST_COVERAGE: '1', PARALLIX_TEST_NODE: executor, TMPDIR: temporary.root, PARALLIX_TEST_MEMORY_BOUNDARY: 'off' };
+  delete env.NODE_TEST_CONTEXT;
+  delete env.NODE_V8_COVERAGE;
+  delete env.PARALLIX_FAST_UNIT;
+  child = spawn(process.execPath, ['--import', 'tsx', path.join(TEST_ROOT, 'run-default-tests.ts'),
+    'test/unit/domain/missions/deep/passing.test.ts'], { cwd: checkout.root, env, stdio: ['ignore', 'ignore', 'pipe'] });
+  let diagnostic = '';
+  child.stderr?.on('data', chunk => { diagnostic += String(chunk); });
+  const closed = once(child, 'close');
+  const deadline = Date.now() + 30_000;
+  while (!fs.existsSync(marker) && Date.now() < deadline && child.exitCode === null) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.ok(fs.existsSync(marker), diagnostic);
+  const scratch: string = JSON.parse(fs.readFileSync(marker, 'utf8'));
+  child.kill('SIGKILL');
+  cleanupFixtureProcesses(checkout.root);
+  await closed;
+  assert.ok(fs.existsSync(scratch), 'SIGKILL bypasses ordinary runner cleanup');
+  recoverRecordedTempRoots({ manifestDir: path.join(temporary.root, 'parallix-temp-root-manifests') });
+  assert.equal(fs.existsSync(scratch), false, 'next-run recovery reclaims runner-owned coverage scratch');
 });
 
 test('the runner propagates a deliberate assertion failure from a nested suite', (t) => {

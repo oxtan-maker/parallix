@@ -1,3 +1,4 @@
+import { reviewStatistics, type ReviewStatistics } from './review-statistics.js';
 import { selectBugTrend, type BugTrendPeriod } from './statistics-bug-trend.js';
 import type { StatsMissionFlow } from '../ports/cli-workflows.js';
 import { weeklyDecisionWindows, reportingWindowContains, type ReportingWindow } from '../../domain/decision-window.js';
@@ -9,6 +10,7 @@ export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
   readonly windowedRows: readonly Row[];
   readonly completedRows: readonly Row[];
   readonly completedMissions: readonly Row[];
+  readonly completedReviewStatistics: ReadonlyMap<string, ReviewStatistics>;
   readonly completedMissionOwners: ReadonlyMap<string, string | null>;
   readonly flow: { readonly total: number; readonly userValue: number; readonly aiSdlc: number; readonly unclassified: number } | null;
 }
@@ -31,10 +33,14 @@ export function selectStatsReport<Row extends StatisticsRow>(
   const select = (window: StatsReportWindow<Row>['window']): StatsReportWindow<Row> => {
     const outcomes = (missionFlow ?? []).filter(outcome => reportingWindowContains(window, outcome.closedAt));
     const completedMissionKeys = new Set(outcomes.map(statisticsMissionKey));
-    const completedMissionOwners = new Map((missionFlow ?? []).map(outcome => [
+    const completedMissionOwners = new Map(outcomes.map(outcome => [
       statisticsMissionKey(outcome), outcome.implementer ?? null,
     ]));
     const completedRows = rows.filter(row => completedMissionKeys.has(statisticsMissionKey(row)));
+    const completedReviewStatistics = new Map(outcomes.map(outcome => {
+      const key = statisticsMissionKey(outcome);
+      return [key, outcome.reviewStatistics ?? reviewStatistics(null)] as const;
+    }));
     const seen = new Set<string>();
     const completedMissions = completedRows.filter(row => {
       const key = statisticsMissionKey(row);
@@ -44,7 +50,7 @@ export function selectStatsReport<Row extends StatisticsRow>(
     });
     return {
       window, windowedRows: rows.filter(row => statisticsRowInWindow(row, window)),
-      completedRows, completedMissions, completedMissionOwners,
+      completedRows, completedMissions, completedMissionOwners, completedReviewStatistics,
       flow: missionFlow === null ? null : {
         total: outcomes.length,
         userValue: outcomes.filter(outcome => outcome.labels.includes('user_value')).length,

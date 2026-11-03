@@ -123,11 +123,13 @@ test('approval patch equality survives rebases and spaced bookkeeping but retain
     commit('backlog/tasks/task with spaces.md', 'lane transition\n', 'bookkeeping');
     assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: git('rev-parse', 'HEAD') }), true);
     assert.notEqual(git('rev-parse', 'HEAD'), rebased);
+    assert.equal(await comparison.samePatch({ baseline: rebased, revision: rebased }, { baseline: rebased, revision: git('rev-parse', 'HEAD') }), true, 'bookkeeping heads prove an empty mission delta');
     // The next contract owns the release-hook version exception. This case
     // keeps the rebase/bookkeeping and real manifest/source-edit boundaries.
     const changed = commit('package.json', json({ ...pkg, version: '1.2.4', scripts: { test: 'false' } }), 'config edit');
     assert.equal(await comparison.samePatch({ baseline: base, revision: approved }, { baseline: advanced, revision: changed }), false);
     const spaceChanged = commit('file with spaces.txt', 'repair\n', 'repair');
+    assert.equal(await comparison.samePatch({ baseline: changed, revision: changed }, { baseline: changed, revision: spaceChanged }), false, 'source edits cannot prove an empty delta');
     assert.equal(await comparison.samePatch({ baseline: advanced, revision: changed }, { baseline: advanced, revision: spaceChanged }), false);
     await assert.rejects(comparison.samePatch({ baseline: base, revision: approved }, { baseline: 'f'.repeat(40), revision: spaceChanged }));
   } finally { rmSync(repo, { recursive: true, force: true }); }

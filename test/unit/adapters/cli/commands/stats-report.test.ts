@@ -76,6 +76,25 @@ test('renderRangeStatsReport rejects invalid ranges', () => {
   assert.throws(() => renderRangeStatsReport([], { from: '2026-06-01', to: '2026-05-31' }), /after/);
 });
 
+test('range and weekly reports show actor-specific resource units without completion history (TASK-2818)', () => {
+  const rows = [
+    { date: '2026-06-20', repo: 'r', mission: 'mixed', classification: 'ai_sdlc', stage: 'active', implementer: 'custom', provider: 'openai', model: 'local-model', duration_minutes: '12', openai_usage_after: '99', cost_usd: '99' },
+    { date: '2026-06-20', repo: 'r', mission: 'mixed', classification: 'ai_sdlc', stage: 'review', implementer: 'custom', reviewer_agent: 'claude', provider: 'anthropic', cost_usd: '2.5' },
+    { date: '2026-06-20', repo: 'r', mission: 'mixed', classification: 'ai_sdlc', stage: 'follow-up', implementer: 'codex', provider: 'openai', openai_usage_after: '7' },
+    { date: '2026-05-01', repo: 'r', mission: 'old', classification: 'ai_sdlc', implementer: 'old-agent', duration_minutes: '999' },
+  ];
+  for (const report of [
+    statsReport.renderRangeStatsReport(rows, { from: '2026-06-20', to: '2026-06-20', missionFlow: null }),
+    statsReport.renderWeeklyStatsReport(rows, { today: '2026-06-20', missionFlow: null }),
+  ]) {
+    assert.match(report, /local-model[^\n]*12m/);
+    assert.match(report, /claude[^\n]*\$2\.5/);
+    assert.match(report, /codex[^\n]*7%/);
+    assert.doesNotMatch(report, /old-agent|99/);
+    assert.match(report, /quota peak/);
+  }
+});
+
 test('renderMissionPhaseReport renders phase table', () => {
   const rows = [
     { date: '2026-06-01', repo: 'r', mission: 't1', stage: 'draft', implementer: 'claude', provider: 'anthropic', model: 'sonnet', input_tokens: '100', output_tokens: '50', cached_tokens: '10', tool_calls: '3', duration_minutes: '5', cost_usd: '0.50', completedForTest: 'no' },
@@ -95,6 +114,22 @@ test('buildWeeklyWindows returns two week windows', () => {
 });
 
 test('formatAgentSpendCell formats metric families', () => {
-  assert.equal(stats.formatAgentSpendCell(50, 100, 'usage'), '50% (50%)');
+  assert.equal(stats.formatAgentSpendCell(50, 100, 'usage'), '50% quota peak');
   assert.equal(stats.formatAgentSpendCell(0, 0, 'duration'), '\u2014');
+});
+
+test('weekly and range reports label Codex peak quota and never add snapshots (TASK-2818 F1)', () => {
+  const rows = [
+    { date: '2026-06-20', repo: 'r', mission: 'quota', classification: 'ai_sdlc', stage: 'active', implementer: 'codex', openai_usage_after: '20' },
+    { date: '2026-06-20', repo: 'r', mission: 'quota', classification: 'ai_sdlc', stage: 'follow-up', implementer: 'codex', openai_usage_after: '25' },
+    { date: '2026-05-01', repo: 'r', mission: 'old', classification: 'ai_sdlc', stage: 'active', implementer: 'codex', openai_usage_after: '90' },
+  ];
+  for (const report of [renderWeeklyStatsReport(rows, { today: '2026-06-20' }),
+    renderRangeStatsReport(rows, { from: '2026-06-20', to: '2026-06-20' })]) {
+    const quotaRow = report.split('\n').find(line => line.includes('quota peak') && line.includes('codex'));
+    assert.ok(quotaRow);
+    assert.match(quotaRow, /20% quota peak/);
+    assert.match(quotaRow, /25% quota peak.*25% quota peak/);
+    assert.doesNotMatch(quotaRow, /45%|90%|\(\d+%\)/);
+  }
 });

@@ -1,3 +1,4 @@
+import { fixtureReviewObservations, fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 // ---------------------------------------------------------------------------
 // TASK-2369 — the four live correctness defects that survived TASK-2367.
 //
@@ -392,7 +393,7 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
     await seedStoredMissionClassification('task-2369-known');
     await seedStoredMissionClassification('task-2369-unknown');
 
-    stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-known', rootDir: root, dbPath, implementer: 'claude', prFixRounds: '0', date: '2026-08-04' });
+    stats.upsertMeasurementRow({ repo: stats.resolveStatsRepoName(root), mission: 'task-2369-known', implementer: 'claude', classification: 'ai_sdlc', pr_fix_rounds: '0',  stage: 'default', date: '2026-08-04' }, { dbPath });
     stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-unknown', rootDir: root, dbPath, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' });
 
     const rows = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), dbPath }).rows;
@@ -426,11 +427,7 @@ test('R5: the live review-fix writers keep known zero and unknown apart', async 
   }
 });
 
-// Old behavior that fails this test: `defaultPrFixRounds()` read prior rows as
-// `Number.parseInt(String(record.pr_fix_rounds ?? 0))`, so a NULL row counted as
-// a zero observation, and its `catch` returned `'0'` — a store that could not be
-// read at all reported a measured zero.
-test('R5: carrying a prior count forward skips NULL rows, and a read failure stays unknown', async () => {
+test('R5: stage writers leave prior integration observations in their owning scope', async () => {
   const stats = await import('../../../src/adapters/cli/commands/stats.js');
   const root = createStatsRepo();
   const dbPath = path.join(root, 'parallix.db');
@@ -446,21 +443,13 @@ test('R5: carrying a prior count forward skips NULL rows, and a read failure sta
     const nulls = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-nulls', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' });
     assert.equal(nulls.row.pr_fix_rounds, undefined, '[NULL, NULL] stays unknown');
 
-    // [NULL, 2] -> the known 2 is carried forward past the NULL row.
+    // A prior integration observation must never become a stage observation.
     stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, implementer: 'claude', date: '2026-08-04' });
-    stats.recordStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', stage: 'handoff', rootDir: root, store, implementer: 'claude', prFixRounds: '2', date: '2026-08-04' });
+    stats.upsertMeasurementRow({ repo: stats.resolveStatsRepoName(root), mission: 'task-2369-carry', implementer: 'claude', classification: 'ai_sdlc', pr_fix_rounds: '2',  stage: 'default', date: '2026-08-04' }, { store });
     const carried = stats.recordReviewStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-carry', rootDir: root, store, reviewer: 'claude', implementer: 'claude', date: '2026-08-04' });
-    assert.equal(carried.row.pr_fix_rounds, '2', 'a real known prior count is carried forward');
+    assert.equal(carried.row.pr_fix_rounds, undefined, 'stage telemetry does not copy a prior review observation');
 
-    // A measurement-store read failure yields unknown, never a manufactured zero.
-    const unreadable = new Proxy(store, {
-      get(target, property, receiver) {
-        if (property === 'findByMission') { return () => { throw new Error('measurement store unavailable'); }; }
-        return Reflect.get(target, property, receiver);
-      },
-    });
-    const broken = stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug: 'task-2369-broken', rootDir: root, store: unreadable, implementer: 'claude', date: '2026-08-04' });
-    assert.equal(broken.row.pr_fix_rounds, undefined, 'a read failure never manufactures zero');
+
   } finally {
     store.close();
     fs.rmSync(root, { recursive: true, force: true });
@@ -489,11 +478,10 @@ test('R6: [0, 2, unknown, unknown] reports exactly two review-fix observations',
       for (const mission of missions) {
         writeTask(checkout.primary, mission.slug);
         await seedStoredMissionClassification(mission.slug);
-        // The LIVE convenience writer, not a direct repository insert.
-        stats.recordActiveStats({ configuration: resolveConfiguration(process.env),
-          slug: mission.slug, rootDir: checkout.primary, store,
-          implementer: 'claude', prFixRounds: mission.rounds, date: '2026-08-04',
-        });
+        stats.upsertMeasurementRow({ repo, mission: mission.slug, date: '2026-08-04',
+          implementer: 'claude', classification: 'ai_sdlc', stage: 'default', pr_fix_rounds: mission.rounds,
+
+        }, { store });
         await events.append(laneEvent({ repositoryId: repo, missionId: mission.slug, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
         await events.append(laneEvent({ repositoryId: repo, missionId: mission.slug, from: 'integration', to: 'done', at: '2026-08-04T21:30:00.000Z' }));
       }
@@ -504,6 +492,7 @@ test('R6: [0, 2, unknown, unknown] reports exactly two review-fix observations',
     const metrics = await new ConcreteMetricsReadAdapter({
       laneEventRepo: events, usageRepo: new SqliteUsageRepository(db),
       repositoryId: repo, clock: () => '2026-08-05T10:00:00.000Z',
+      cohortMetadata: async () => fixtureCohortMetadata(missions.map(mission => ({ repo, mission: mission.slug, implementer: 'claude', pr_fix_rounds: mission.rounds }))),
     }).buildMetrics(new Map(missions.map(mission => [missionId(mission.slug), 'done' as MissionStatus])));
 
     const cohort = metrics.cohorts?.cohorts.find(entry => entry.key === 'ai_sdlc');
@@ -539,7 +528,7 @@ test('the integration-time report, px stats, and BoardMetrics agree on the compl
       for (const [slug, completed] of [['task-2369-landed', true], ['task-2369-open', false]] as const) {
         writeTask(checkout.primary, slug);
         await seedStoredMissionClassification(slug);
-        stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug, rootDir: checkout.primary, store, implementer: 'claude', prFixRounds: '1', date: '2026-08-04' });
+        stats.recordActiveStats({ configuration: resolveConfiguration(process.env), slug, rootDir: checkout.primary, store, implementer: 'claude', date: '2026-08-04' });
         await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: null, to: 'backlog', at: '2026-08-01T09:00:00.000Z' }));
         if (completed) {
           await events.append(laneEvent({ repositoryId: repo, missionId: slug, from: 'integration', to: 'done', at: '2026-08-04T21:30:00.000Z' }));
@@ -642,13 +631,13 @@ test('R7/R8: PR-fix averages exclude unknown rounds and retain known zero', asyn
   const stats = await import('../../../src/adapters/cli/commands/stats.js');
   const window = { start: new Date('2026-08-06T00:00:00Z'), end: new Date('2026-08-12T00:00:00Z') };
   const rows = [
-    { repo: 'parallix', mission: 'task-2371-zero', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '0' },
-    { repo: 'parallix', mission: 'task-2371-two', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '2' },
+    { repo: 'parallix', mission: 'task-2371-zero', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '0'},
+    { repo: 'parallix', mission: 'task-2371-two', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default', pr_fix_rounds: '2'},
     { repo: 'parallix', mission: 'task-2371-unknown-a', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default' },
     { repo: 'parallix', mission: 'task-2371-unknown-b', date: '2026-08-10', classification: 'ai_sdlc', implementer: 'terra', stage: 'default' },
   ];
   const keys = new Set(rows.map(row => `${row.repo}::${row.mission}`));
-  const [summary] = stats.summarizeAgentWindow(rows, window, { completedMissionKeys: keys });
+  const [summary] = stats.summarizeAgentWindow(rows, window, { completedMissionKeys: keys, reviewObservations: fixtureReviewObservations(rows) });
   assert.equal(summary.implementer, 'terra');
   assert.equal(summary.missions, 4);
   assert.equal(((summary)).prFixObservationCount, 2);

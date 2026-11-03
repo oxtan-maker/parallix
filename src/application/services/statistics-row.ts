@@ -6,7 +6,7 @@ import { decisionWindowEndingOn, weeklyDecisionWindows, localReportingTimeZone }
 import { statisticsMissionKey, statisticsRowInWindow } from './statistics-service.js';
 
 export interface StatsRow {
-  date?: string;
+  date?: string; actorKey?: string;
   repo?: string;
   mission?: string;
   classification?: string | null;
@@ -42,7 +42,6 @@ export interface NormalizeStatsRowOptions {
   repo?: string;
   rootDir?: string;
 }
-
 const STATS_HEADERS = [
   'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
   'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
@@ -99,7 +98,7 @@ function statsTokenFields(row: StatsRow) {
 function statsUsageFields(row: StatsRow) {
   return {
     openai_usage_before: row.openai_usage_before || '0',
-    openai_usage_after: row.openai_usage_after || '0',
+    openai_usage_after: row.openai_usage_after || '',
     openai_usage_delta: row.openai_usage_delta || '0',
     duration_minutes: row.duration_minutes || '0',
     cost_usd: row.cost_usd || '0'
@@ -108,6 +107,14 @@ function statsUsageFields(row: StatsRow) {
 
 function normalizeImplementer(value: unknown) {
   return String(value || '').trim().replace(/^@/, '').toLowerCase() || null;
+}
+
+/** The agent that performed this stage, independent of final mission ownership. */
+export function statsRowActorKey(row: StatsRow = {}): string {
+  const stage = String(row.stage || 'default').trim().toLowerCase();
+  return normalizeImplementer(stage === 'review'
+    ? row.reviewer_agent || row.implementer_agent || row.implementer
+    : row.implementer_agent || row.implementer) || '';
 }
 
 function parseDateOnly(value: string) {
@@ -218,6 +225,7 @@ function canonicalizeStatsRow(row: StatsRow, options: NormalizeStatsRowOptions =
   };
   for (const key of USAGE_NUMBERS) {
     const value = (normalized as Record<string, unknown>)[key];
+    if (key === 'openai_usage_after' && quotaUsageLevel(value) === null) { canonical.openai_usage_after = ''; continue; }
     if (key === 'pr_fix_rounds' && (canonical as Record<string, unknown>)[key] === undefined) { continue; }
     (canonical as Record<string, unknown>)[key] = String(Math.max(0, Number.parseInt(String(value), 10) || 0));
   }
@@ -256,3 +264,10 @@ export {
   accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows,
   statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow,
 };
+
+/** End-of-run quota level, never attributable consumption. */
+export function quotaUsageLevel(value: unknown): number | null {
+  const raw = String(value ?? '').trim();
+  const level = raw ? Number(raw) : NaN;
+  return Number.isFinite(level) && level >= 0 && level <= 100 ? level : null;
+}

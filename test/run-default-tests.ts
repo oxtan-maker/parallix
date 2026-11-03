@@ -3,7 +3,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildTestRunPlan, withCoverageReporters } from './lib/test-run-plan.js';
-import { defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
+import { addTrustedTempRoot, createTempRootRegistry, defaultManifestDir, ensureManifestDir, recoverRecordedTempRoots } from '../src/adapters/verification/temp-root-registry.js';
 import { cleanupRunnerTempRoots, signalExitCode } from './lib/test-runner-temp-roots.js';
 import { onGitHubActions } from './lib/unit-test-budget-reporter.mjs';
 import { resolveFileTimingProfile, printFileTimingSummary } from './lib/file-timing-profile.js';
@@ -95,6 +95,11 @@ if (fastUnit && fileTimingProfile) {
 const executedNodeArgs = fastUnit
   ? ['--import', 'tsx', path.join(testRoot, 'run-fast-unit-tests.ts')]
   : suiteNodeArgs;
+// Persist runner-owned scratch too: worker manifests cannot reclaim it if
+// this supervisor itself is killed before its close handlers run.
+addTrustedTempRoot(path.join(executionRoot, 'tmp'));
+const runnerRoots = createTempRootRegistry();
+process.once('exit', runnerRoots.cleanup);
 // The covered fast unit tier writes its group LCOV fragments and bootstrap
 // homes under a scratch root this runner owns, so the root is removed even
 // when the watchdog kills the child. The unit and integration-ci gates may run
@@ -105,7 +110,7 @@ const executedNodeArgs = fastUnit
 let fastUnitScratchDir: string | null = null;
 if (fastUnit && coverageEnabled) {
   fs.mkdirSync(path.join(executionRoot, 'tmp'), { recursive: true });
-  fastUnitScratchDir = fs.mkdtempSync(path.join(executionRoot, 'tmp', 'fast-unit-scratch-'));
+  fastUnitScratchDir = runnerRoots.register(fs.mkdtempSync(path.join(executionRoot, 'tmp', 'fast-unit-scratch-')));
 }
 
 // Node writes raw V8 payloads below TMPDIR. Give each covered invocation an
@@ -116,7 +121,7 @@ if (fastUnit && coverageEnabled) {
 let coverageScratchDir: string | null = null;
 if (coverageEnabled) {
   const stableTmpdir = checkoutTestTmpdir(executionRoot);
-  coverageScratchDir = fs.mkdtempSync(path.join(stableTmpdir, 'coverage-scratch-'));
+  coverageScratchDir = runnerRoots.register(fs.mkdtempSync(path.join(stableTmpdir, 'coverage-scratch-')));
   // The per-invocation scratch would otherwise cold-start tsx's transpile cache
   // for every covered run, so each tsx-loaded child re-transformed the module
   // graph. Keep that cache in the checkout's stable tmp root.
@@ -252,8 +257,7 @@ process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 function cleanupRunnerOwnedRoots() {
   if (launch.unit !== null) { forgetScope(launch.unit); }
   cleanupRunnerTempRoots(testManifestDir);
-  if (fastUnitScratchDir) { fs.rmSync(fastUnitScratchDir, { recursive: true, force: true }); }
-  if (coverageScratchDir) { fs.rmSync(coverageScratchDir, { recursive: true, force: true }); }
+  runnerRoots.cleanup();
 }
 
 // Measure elapsed time for the suite-level budget check.

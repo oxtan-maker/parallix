@@ -110,8 +110,9 @@ export interface MissionOutcome {
   /** Date on the telemetry row that records this mission's closure. */
   readonly closedAt: string;
   readonly cycleTimeMinutes: number;
-  /** Number of request-changes rounds, or null when the count was never derived. */
+  /** Reconciled coding-repair obligations, or null when cause coverage is incomplete. */
   readonly reviewFixRounds: number | null;
+  readonly reviewFixRoundsByImplementer?: Readonly<Record<string, number | null>>;
   /** Backlog labels carried by this mission's telemetry; the first cohort dimension. */
   readonly labels: readonly MissionLabel[];
   /** Agent family that owned the implementation work, or null when unnamed. */
@@ -196,7 +197,6 @@ export function totalInputAndOutputTokens(
 ): number | null {
   return sumMeasured(runs.flatMap((run) => [run.tokens.input, run.tokens.output]));
 }
-
 export function completedMissionStatistics(
   mission: ClosedMission,
   outcome: MissionOutcome,

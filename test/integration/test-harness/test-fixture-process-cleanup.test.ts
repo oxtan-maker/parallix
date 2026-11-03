@@ -48,8 +48,91 @@ import path from 'node:path';
 
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import { cleanupRunnerTempRoots } from '../../lib/test-runner-temp-roots.js';
+import { once } from 'node:events';
+import { registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
 
 const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
+
+test('interrupted gate descendant fixture kills its writer before removing its PID file', { timeout: 30_000 }, async t => {
+  const root = mkdtemp('gate-fixture-interruption-');
+  let writer: number | undefined;
+  let child: ReturnType<typeof spawn> | undefined;
+  registerFixtureCleanup(t, () => {
+    child?.kill('SIGKILL');
+    if (writer) { try { process.kill(writer, 'SIGKILL'); } catch { /* stopped */ } }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const env: NodeJS.ProcessEnv = { ...process.env, TMPDIR: root };
+  delete env.NODE_TEST_CONTEXT;
+  child = spawn(process.execPath, ['--import', 'tsx', '--import', './test/bootstrap-parallix-home.ts',
+    '--test-name-pattern=continuously writing descendant', 'test/integration/verification/repository-gates.integration.test.ts'],
+  { cwd: REPO_ROOT, env, stdio: 'ignore' });
+  const closed = once(child, 'close');
+  await waitFor(() => {
+    const directory = fs.readdirSync(root).find(name => name.startsWith('px-gate-descendant-'));
+    if (!directory) { return false; }
+    try { writer = Number(fs.readFileSync(path.join(root, directory, 'pids'), 'utf8').trim()); }
+    catch { return false; }
+    return Number.isSafeInteger(writer) && writer! > 1;
+  }, 'gate writer PID');
+  child.kill('SIGTERM');
+  await closed;
+  await waitFor(() => {
+    try { return fs.readFileSync(`/proc/${writer}/stat`, 'utf8').split(') ')[1].startsWith('Z'); }
+    catch { return true; }
+  }, 'gate writer termination');
+  assert.equal(fs.readdirSync(root).some(name => name.startsWith('px-gate-descendant-')), false);
+});
+
+for (const termination of ['exit', 'SIGTERM'] as const) {
+  test(`fixture process cleanup stops detached children on ${termination}`, { timeout: 30_000 }, async () => {
+    const root = mkdtemp('fixture-process-cleanup-');
+    const owned = path.join(root, 'owned');
+    const other = path.join(root, 'other');
+    fs.mkdirSync(owned); fs.mkdirSync(other);
+    const marker = path.join(root, 'pids.json');
+    let child: ReturnType<typeof spawn> | undefined;
+    let pids: number[] = [];
+    const alive = (pid: number) => {
+      try { return !fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].startsWith('Z'); }
+      catch { return false; }
+    };
+    try {
+      const script = `
+        import test from 'node:test';
+        import { spawn } from 'node:child_process';
+        import { once } from 'node:events';
+        import fs from 'node:fs';
+        import { cleanupFixtureProcesses, registerFixtureCleanup } from './test/helpers/fixture-cleanup.ts';
+        test('interrupted fixture', async t => {
+          registerFixtureCleanup(t, () => cleanupFixtureProcesses(${JSON.stringify(owned)}));
+          const children = [];
+          for (const cwd of ${JSON.stringify([owned, other])}) {
+            const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd, detached: true, stdio: 'ignore' });
+            await once(child, 'spawn'); child.unref(); children.push(child.pid);
+          }
+          fs.writeFileSync(${JSON.stringify(marker)}, JSON.stringify(children));
+          ${termination === 'exit' ? 'process.exit(0);' : "process.kill(process.pid, 'SIGTERM'); await new Promise(() => {});"}
+        });`;
+      const env = { ...process.env };
+      delete env.NODE_TEST_CONTEXT;
+      child = spawn(process.execPath, ['--import', 'tsx', '--import', './test/bootstrap-parallix-home.ts', '--input-type=module', '-e', script],
+        { cwd: REPO_ROOT, env, stdio: ['ignore', 'ignore', 'pipe'] });
+      let diagnostic = '';
+      child.stderr?.on('data', chunk => { diagnostic += String(chunk); });
+      await once(child, 'close');
+      assert.ok(fs.existsSync(marker), diagnostic);
+      pids = JSON.parse(fs.readFileSync(marker, 'utf8'));
+      await waitFor(() => !alive(pids[0]), 'owned detached child to stop');
+      assert.equal(alive(pids[1]), true, 'another fixture must survive');
+    } finally {
+      child?.kill('SIGKILL');
+      if (fs.existsSync(marker)) { pids = JSON.parse(fs.readFileSync(marker, 'utf8')); }
+      for (const pid of pids) { try { process.kill(pid, 'SIGKILL'); } catch { /* already stopped */ } }
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 const CUTOVER_FILE = path.join('test', 'unit', 'adapters', 'sqlite', 'measurement-store-cutover.test.ts');
 const DRAIN_FILE = path.join('test', 'integration', 'sqlite', 'mission-store-drain.test.ts');

@@ -1,6 +1,6 @@
 import type { StatisticsRecordingPort, StatisticsWriteResult } from './ports/statistics-recording.js';
 import {
-  canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings,
+  canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, quotaUsageLevel,
   accumulateDecimalStrings, mergeLabel, type StatsRow,
 } from './services/statistics-row.js';
 import { reviewStatistics } from './services/review-statistics.js';
@@ -27,7 +27,6 @@ export interface StageStatsRequest {
   readonly date: string;
   readonly implementer?: string;
   readonly reviewer?: string;
-  readonly prFixRounds?: string | null;
   readonly telemetry?: StageTelemetry | null;
   readonly durationMinutes?: number;
   readonly model?: string | null;
@@ -35,6 +34,7 @@ export interface StageStatsRequest {
 
 /** Telemetry field mapping is pure and shared with compatibility consumers. */
 function telemetryUsageFields(t: StageTelemetry | null | undefined) {
+  const quota = quotaUsageLevel(t?.usagePercent);
   return {
     input_tokens: String(t?.inputTokens || 0),
     output_tokens: String(t?.outputTokens || 0),
@@ -43,7 +43,7 @@ function telemetryUsageFields(t: StageTelemetry | null | undefined) {
     context_tokens: String(t?.totalTokens || 0),
     tool_calls: String(t?.toolCalls || 0),
     openai_usage_before: '0',
-    openai_usage_after: String(typeof t?.usagePercent === 'number' ? Math.round(t.usagePercent) : 0),
+    openai_usage_after: quota === null ? '' : String(Math.round(quota)),
     openai_usage_delta: '0',
   };
 }
@@ -67,17 +67,6 @@ export function telemetryToStatsFields(
 export class StatsRecordingUseCase {
   constructor(private readonly _port: StatisticsRecordingPort) {}
 
-  defaultPrFixRounds(slug: string, provided?: string | null): string | undefined {
-    if (provided !== undefined && provided !== null) { return provided; }
-    if (!slug) { return undefined; }
-    try {
-      const recorded = this._port.readFixRoundHistory(slug)
-        .filter(value => value !== null && value !== undefined)
-        .map(value => Number.parseInt(String(value), 10) || 0);
-      return recorded.length ? String(Math.max(...recorded)) : undefined;
-    } catch { return undefined; }
-  }
-
   recordStage(request: StageStatsRequest): StatisticsWriteResult {
     return this._port.upsert(this.stageRow(request, 'recordStageStats'));
   }
@@ -91,7 +80,6 @@ export class StatsRecordingUseCase {
   recordActive(request: Omit<StageStatsRequest, 'stage'> & { readonly stage?: string }) {
     return this.recordStage({
       ...request, stage: request.stage ?? 'active',
-      prFixRounds: this.defaultPrFixRounds(request.slug, request.prFixRounds),
     });
   }
 
@@ -99,7 +87,6 @@ export class StatsRecordingUseCase {
     return this.recordStage({
       ...request, stage: request.stage ?? 'review',
       implementer: request.implementer || request.reviewer,
-      prFixRounds: this.defaultPrFixRounds(request.slug, request.prFixRounds),
     });
   }
 
@@ -110,7 +97,8 @@ export class StatsRecordingUseCase {
   }> {
     if (!request.slug) { throw new Error('recordIntegrationStats requires a mission slug.'); }
     const classification = await this._port.readStoredClassification(request.slug);
-    const info = reviewStatistics(await this._port.readReview(request.slug));
+    const review = await this._port.readReview(request.slug);
+    const info = reviewStatistics(review, await this._port.readReviewEvidence(review));
     const result = this._port.upsert({
       date: request.date, repo: this._port.repositoryName, mission: request.slug, classification,
       implementer: info.implementer,
@@ -141,7 +129,7 @@ export class StatsRecordingUseCase {
     const agentFamily = request.implementer || request.reviewer || 'unknown';
     return canonicalizeStatsRow({
       date: request.date, repo: this._port.repositoryName, mission: request.slug, classification,
-      implementer: agentFamily, pr_fix_rounds: request.prFixRounds ?? undefined,
+      implementer: agentFamily,
       implementer_agent: request.implementer || '', reviewer_agent: request.reviewer || '', stage: request.stage,
       ...telemetryToStatsFields(request.telemetry, { agentFamily, durationMinutes: request.durationMinutes, model: request.model }),
     });
@@ -161,6 +149,7 @@ function mergeStageRows(existing: StatsRow, incoming: StatsRow): StatsRow {
     merged[key] = accumulateIntegerStrings(String(existing[key]), String(incoming[key]));
   }
   merged.openai_usage_before = accumulateIntegerStrings(String(existing.openai_usage_before), String(incoming.openai_usage_before), { mode: 'replace' });
-  merged.openai_usage_after = accumulateIntegerStrings(String(existing.openai_usage_after), String(incoming.openai_usage_after), { mode: 'max' });
+  merged.openai_usage_after = !existing.openai_usage_after && !incoming.openai_usage_after ? ''
+    : accumulateIntegerStrings(String(existing.openai_usage_after), String(incoming.openai_usage_after), { mode: 'max' });
   return merged;
 }

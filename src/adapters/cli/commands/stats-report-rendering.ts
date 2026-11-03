@@ -3,20 +3,19 @@
 // Leaf module: it must never import `./stats.js`. stats.ts imports these symbols
 // and re-exports them, so a back-import would close an import cycle.
 
-import type { StatsRow } from '../../../application/services/statistics-row.js';
+import { quotaUsageLevel, statsRowActorKey, type StatsRow } from '../../../application/services/statistics-row.js';
 
 import type { ReportRow, DateWindow, MissionGroupOptions, AgentWindowOptions, MissionStats } from './stats-rendering-types.js';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 import * as statsReport from './stats-report.js';
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
-import { compareCodeUnits } from '../../../domain/comparators.js';
 
 export interface AgentStageSpend {
   readonly implementer: string;
   readonly family: 'usage' | 'cost' | 'duration';
-  readonly byStage: Record<string, number>;
-  readonly total: number;
+  readonly byStage: Record<string, number | null>;
+  readonly total: number | null;
 }
 import {
   statisticsMissionKey,
@@ -29,141 +28,6 @@ import {
 
 // Core single-mission renderer from stats-report.ts (task-2217)
 const { renderMissionPhaseReport: _renderMissionPhaseReport } = statsReport;
-
-function formatDate(dateStr: string) {
-  if (!dateStr) {return '';}
-  try {
-    const date = new Date(dateStr);
-    return date.toISOString().split('T')[0];
-  } catch (_err) {
-    return dateStr;
-  }
-}
-
-function groupBy(rows: readonly StatsRow[], field: keyof StatsRow) {
-
-  const groups: Record<string, StatsRow[]> = {};
-  for (const row of rows) {
-    const key = String(row[field] || 'unknown');
-    if (!groups[key]) {groups[key] = [];}
-    groups[key].push(row);
-  }
-  return groups;
-}
-
-function computeImplStats(group: readonly StatsRow[]) {
-  const total = group.length;
-  const merged = group.filter(row => row.isMerged).length;
-  const totalReviews = group.reduce((sum, row) => sum + (Number.parseInt(String(row.review_count || ''), 10) || 0), 0);
-  const avgReviews = total > 0 ? (totalReviews / total).toFixed(2) : '0.00';
-  const reviewRounds = group.reduce((sum, row) => sum + Math.max(1, Number.parseInt(String(row.review_count || ''), 10) || 0), 0);
-  const avgRounds = total > 0 ? (reviewRounds / total).toFixed(2) : '0.00';
-  return { total, merged, totalReviews, avgReviews, reviewRounds, avgRounds };
-}
-
-function computePeriodStats(group: readonly StatsRow[]) {
-  const dates = group.map(row => formatDate(String(row.normalizedDate))).filter(Boolean);
-  if (dates.length === 0) {return null;}
-  const sorted = dates.sort(compareCodeUnits);
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const start = new Date(first);
-  const end = new Date(last);
-  const days = Math.max(1, Math.ceil((Number(end) - Number(start)) / (1000 * 60 * 60 * 24)) + 1);
-  const total = group.length;
-  const merged = group.filter(row => row.isMerged).length;
-  const open = total - merged;
-  const totalReviews = group.reduce((sum, row) => sum + (Number.parseInt(String(row.review_count || ''), 10) || 0), 0);
-  const avgReviews = total > 0 ? (totalReviews / total).toFixed(2) : '0.00';
-  return { period: `${first} → ${last}`, days, total, merged, open, totalReviews, avgReviews };
-}
-
-function appendMarkdownGrouping(lines: string[], rows: readonly ReportRow[], groupByField: string | undefined) {
-  if (groupByField === 'implementer') {
-    const groups = groupBy(rows, 'implementer');
-    lines.push('## By Implementer\n', '| Agent | PRs | Merged | Open | Total Reviews | Avg Reviews/PR | Avg Review Rounds |', '|-------|-----|--------|------|---------------|----------------|-------------------|');
-    const implData = Object.entries(groups).map(([implementer, group]) => {
-      const stats = computeImplStats(group);
-      return { implementer, prs: stats.total, merged: stats.merged, open: group.filter(row => !row.isMerged).length, totalReviews: stats.totalReviews, avgReviews: stats.avgReviews, avgRounds: stats.avgRounds };
-    }).sort((a, b) => b.prs - a.prs);
-    for (const row of implData) { lines.push(`| ${row.implementer} | ${row.prs} | ${row.merged} | ${row.open} | ${row.totalReviews} | ${row.avgReviews} | ${row.avgRounds} |`); }
-    lines.push('');
-    return;
-  }
-  if (groupByField === 'period') {
-    const groups: Record<string, ReportRow[]> = {};
-    for (const row of rows) {
-      const date = formatDate(String(row.normalizedDate));
-      if (!date) { continue; }
-     (groups[date.substring(0, 7)] ||= []).push(row);
-    }
-    lines.push('## By Period (Month)\n', '| Period | Days | PRs | Merged | Open | Total Reviews | Avg Reviews/PR |', '|--------|------|-----|--------|------|---------------|----------------|');
-    for (const month of Object.keys(groups).sort(compareCodeUnits)) {
-      const period = computePeriodStats(groups[month]);
-      if (period) { lines.push(`| ${period.period} | ${period.days} | ${period.total} | ${period.merged} | ${period.open} | ${period.totalReviews} | ${period.avgReviews} |`); }
-    }
-    lines.push('');
-    return;
-  }
-  if (groupByField !== 'merged') { return; }
-  const renderRows = (title: string, rowsToRender: ReportRow[]) => {
-    lines.push(title);
-    if (rowsToRender.length === 0) { lines.push('None.', ''); return; }
-    lines.push('| Mission | Implementer | Reviews | Reviewer | Created |', '|---------|-------------|---------|----------|---------|');
-    for (const row of rowsToRender.sort((a, b) => String(a.normalizedDate || '').localeCompare(String(b.normalizedDate || '')))) {
-      lines.push(`| ${row.mission} | ${row.implementer} | ${row.review_count} | ${row.reviewer} | ${formatDate(String(row.normalizedDate))} |`);
-    }
-    lines.push('');
-  };
-  lines.push('## Merged vs Unmerged\n');
-  renderRows('### Merged PRs\n', rows.filter(row => row.isMerged));
-  renderRows('### Unmerged/Closed PRs\n', rows.filter(row => !row.isMerged));
-}
-
-function generateMarkdownReport(data: { headers: string[]; rows: StatsRow[] }, options: { groupBy?: string } = {}) {
-  const rows = normalizeRows(data.rows);
-  const groupByField = options.groupBy;
-
-  if (rows.length === 0) {
-    return 'No data to report.';
-  }
-
-  const lines = [];
-  lines.push('# Forgejo Stats Report\n');
-  lines.push(`Generated: ${new Date().toISOString().split('T')[0]}\n`);
-  lines.push(`Total PRs analyzed: ${rows.length}\n`);
-  const overallMerged = rows.filter(row => row.isMerged).length;
-  const overallOpen = rows.length - overallMerged;
-  const overallReviews = rows.reduce((sum, row) => sum + (Number.parseInt(row.review_count || '', 10) || 0), 0);
-  lines.push('## Overall Summary\n');
-  lines.push(`- **Total PRs:** ${rows.length}`);
-  lines.push(`- **Merged:** ${overallMerged}`);
-  lines.push(`- **Open/Closed:** ${overallOpen}`);
-  lines.push(`- **Total Reviews Submitted:** ${overallReviews}`);
-  lines.push(`- **Avg Reviews/PR:** ${(overallReviews / rows.length).toFixed(2)}`);
-  lines.push('');
-
-  lines.push('## Per-PR Detail\n');
-  lines.push('| Mission | Implementer | Reviewer | Reviews | Merged | Created |');
-  lines.push('|---------|-------------|----------|---------|--------|---------|');
-  const sorted = [...rows].sort((a, b) => String(a.normalizedDate || '').localeCompare(String(b.normalizedDate || '')));
-  for (const row of sorted) {
-    lines.push(`| ${row.mission} | ${row.implementer} | ${row.reviewer} | ${row.review_count} | ${row.normalizedMerged} | ${formatDate(String(row.normalizedDate))} |`);
-  }
-  lines.push('');
-
-  appendMarkdownGrouping(lines, rows, groupByField);
-
-  lines.push('## Raw Data\n');
-  lines.push('```csv');
-  lines.push(data.headers.join(','));
-  for (const row of rows) {
-    lines.push(data.headers.map(header => (row as Record<string, unknown>)[header] || '').join(','));
-  }
-  lines.push('```\n');
-
-  return lines.join('\n');
-}
 
 /**
  * Shared mission-dedup + agent-grouping pass behind `Agent performance this
@@ -206,7 +70,7 @@ function assignCompletedMissionOwners(byMission: Record<string, ReportRow>, rows
     const owner = owners ? owners.get(key) : rollup?.implementer;
     if (!owner) { delete byMission[key]; continue; }
     byMission[key] = { ...(rollup || byMission[key]), reportedImplementer: owner,
-      model: '', pr_fix_rounds: rollup?.pr_fix_rounds ?? byMission[key].pr_fix_rounds };
+      model: '' };
   }
 }
 
@@ -238,65 +102,25 @@ function computeAgentMissionGroups(rows: readonly ReportRow[], window: DateWindo
 
 function summarizeAgentWindow(rows: readonly ReportRow[], window: DateWindow, options: AgentWindowOptions = {}) {
 
-  const opts = options;
-  const { rootDir = null, deriveFixRoundsFn = null } = opts;
-  // Mission counts and repair-round averages describe completed missions only.
-  // Other report sections reuse the grouping helper without this filter so
-  // their live stage telemetry remains unchanged.
-  const { allValidWindowRows, groups } = computeAgentMissionGroups(rows, window, {
+  const { groups } = computeAgentMissionGroups(rows, window, {
     completedOnly: true, completedMissionKeys: options.completedMissionKeys, completedMissionOwners: options.completedMissionOwners,
   });
-  // Build agent groups from the globally deduplicated missions.
-  //
-  // `pr_fix_rounds` comes off the stored measurement rows. This used to be
-  // re-derived here from the mission-local review event files, because those
-  // files were the only complete record of the loop and the stored value could
-  // lag them. After the architecture migration cutover the Review aggregate in the
-  // operator database is that record, and it is what stamps the stored value —
-  // so there is nothing left for a render-time override to correct, and a
-  // synchronous renderer has no business reading the database behind the
-  // application's back to try. `deriveFixRoundsFn` stays as an injection point
-  // for a caller that has already derived a count.
-  //
-  // Review-fix values are nullable telemetry observations, keyed by lifecycle
-  // completion rather than a telemetry completion row.
-  const storedRoundsByMission = collectStoredFixRounds(allValidWindowRows);
-  const roundsFor = (row: ReportRow) => {
-    if (rootDir && deriveFixRoundsFn) {
-      const authoritative = deriveFixRoundsFn(row.mission, rootDir, row.repo);
-      if (authoritative !== null && authoritative !== undefined) {
-        const rounds = Number.parseInt(String(authoritative), 10);
-        return Number.isInteger(rounds) && rounds >= 0 ? rounds : null;
-      }
+  const observations = new Map<string, number[]>();
+  const summaries = [...(options.reviewObservations?.entries() ?? [])]
+    .filter(([key]) => options.completedMissionKeys?.has(key)).map(([, summary]) => summary);
+  for (const summary of summaries) {
+    for (const [agent, count] of Object.entries(summary.byImplementer)) {
+      if (count === null) { continue; }
+      observations.set(agent, [...(observations.get(agent) ?? []), count]);
+      groups[agent] ??= [];
     }
-    return storedRoundsByMission[statisticsMissionKey(row)] ?? null;
-  };
-  return Object.entries(groups)
-    .map(([displayKey, group]) => {
-      const rounds = group.map(roundsFor).filter(value => value !== null);
-      const totalRounds = rounds.reduce((sum: number, value: number) => sum + value, 0);
-      return {
-        implementer: displayKey,
-        missions: group.length,
-        averageFixRounds: rounds.length > 0 ? (totalRounds / rounds.length).toFixed(2) : null,
-        prFixObservationCount: rounds.length,
-      };
-    })
-    .sort((a, b) => a.implementer.localeCompare(b.implementer));
-}
-
-function collectStoredFixRounds(rows: readonly ReportRow[]): Record<string, number> {
-  const storedRoundsByMission: Record<string, number> = {};
-  const roundsFromRollupByMission = new Set<string>();
-  for (const row of rows) {
-    const key = statisticsMissionKey(row);
-    if (row.pr_fix_rounds === undefined || (row.stage !== 'default' && roundsFromRollupByMission.has(key))) { continue; }
-    const rounds = Number.parseInt(String(row.pr_fix_rounds), 10);
-    if (!Number.isInteger(rounds) || rounds < 0) { continue; }
-    storedRoundsByMission[key] = rounds;
-    if (row.stage === 'default') { roundsFromRollupByMission.add(key); }
   }
-  return storedRoundsByMission;
+  return Object.entries(groups).map(([implementer, delivered]) => {
+    const values = observations.get(implementer) ?? [];
+    return { implementer, missions: delivered.length,
+      averageFixRounds: values.length ? (values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2) : null,
+      prFixObservationCount: values.length };
+  }).sort((a, b) => a.implementer.localeCompare(b.implementer));
 }
 
 // Canonical report stages for the per-agent spend-by-stage table (architecture migration).
@@ -313,8 +137,8 @@ const AGENT_SPEND_STAGE_COLUMNS = [
 ];
 
 /**
- * Classifies a grouped agent row into the spend metric family whose stored
- * telemetry field is the right lens for that agent (architecture migration):
+ * Select the resource unit from the stage actor, falling back to telemetry
+ * identity only for legacy rows without a recorded actor:
  *  - Codex / OpenAI-backed rows: `openai_usage_after` (usage % snapshot)
  *  - Claude and Mistral rows: `cost_usd` (dollar spend)
  *  - Custom/local-model rows (and anything else unrecognized, since custom/
@@ -322,70 +146,82 @@ const AGENT_SPEND_STAGE_COLUMNS = [
  *
  */
 function classifyAgentSpendFamily(displayKey: string, groupRows: readonly StatsRow[]): AgentStageSpend['family'] {
-  const probe = [displayKey, ...groupRows.flatMap(row => [row.model, row.implementer, row.provider])]
+  const actor = groupRows.map(statsRowActorKey).find(Boolean);
+  const probe = (actor || [displayKey, ...groupRows.flatMap(row => [row.model, row.provider])]
     .filter(Boolean)
-    .join(' ')
-    .toLowerCase();
+    .join(' ')).toLowerCase();
   if (/codex|openai/.test(probe)) {return 'usage';}
   if (/claude|anthropic/.test(probe)) {return 'cost';}
-  if (/mistral/.test(probe)) {return 'cost';}
+  if (/mistral|vibe/.test(probe)) {return 'cost';}
   return 'duration';
 }
 
+function accumulateStageResource(byStage: Record<string, number | null>, row: StatsRow,
+  family: AgentStageSpend['family'], knownStages: ReadonlySet<string>): void {
+  const rawStage = String(row.stage || 'default').trim().toLowerCase() || 'default';
+  const bucket = knownStages.has(rawStage) ? rawStage : 'default';
+  if (family === 'usage') {
+    // Snapshots can overlap across stages and reset quota windows. No
+    // baseline/window identity proves per-run consumption; keep peaks.
+    const value = quotaUsageLevel(row.openai_usage_after);
+    if (value !== null) {
+      byStage[bucket] = Math.max(byStage[bucket] ?? 0, value);
+    }
+  } else {
+    const value = family === 'cost' ? (Number.parseFloat(String(row.cost_usd)) || 0)
+      : (Number.parseInt(String(row.duration_minutes), 10) || 0);
+    byStage[bucket] = (byStage[bucket] ?? 0) + value;
+  }
+}
+
 /**
- * Builds the current-week per-agent stage-spend breakdown behind the new
- * weekly stats table (architecture migration). Reuses the exact same mission dedup and
- * display-key grouping as `summarizeAgentWindow()` (so rows/ordering match
- * `Agent performance this week`), then fans back out over every raw window
- * row (not just the deduped mission winner) to sum each stage's spend metric,
- * since draft/execute/review/follow-up/default are stored as separate rows
- * per mission.
+ * Group windowed telemetry by its stage actor and model. Mission ownership
+ * and deduplication belong to delivery performance; they cannot assign a
+ * reviewer's dollars or a replacement's runtime to another agent's usage.
  *
  */
 function summarizeAgentStageSpend(rows: readonly ReportRow[], window: DateWindow): AgentStageSpend[] {
-  const { allValidWindowRows, groups, missionKeyToDisplayKey } = computeAgentMissionGroups(rows, window);
-
-  const rawRowsByDisplayKey: Record<string, ReportRow[]> = {};
-  for (const row of allValidWindowRows) {
-    const displayKey = missionKeyToDisplayKey[statisticsMissionKey(row)];
-    if (!displayKey) {continue;}
-    if (!rawRowsByDisplayKey[displayKey]) {rawRowsByDisplayKey[displayKey] = [];}
-    rawRowsByDisplayKey[displayKey].push(row);
+  const groups = new Map<string, { displayKey: string; rows: ReportRow[] }>();
+  for (const row of rows) {
+    if (!statisticsRowInWindow(row, window) || normalizeClassification(row.classification) === null) { continue; }
+    const actor = statsRowActorKey(row);
+    const displayKey = String(row.model || actor || 'unknown').trim();
+    const key = JSON.stringify([actor, displayKey]);
+    const group = groups.get(key) ?? { displayKey, rows: [] };
+    group.rows.push(row);
+    groups.set(key, group);
   }
 
   const knownStages = new Set(AGENT_SPEND_STAGE_COLUMNS.map(entry => entry.stage));
 
-  return Object.keys(groups)
-    .sort((a, b) => a.localeCompare(b))
-    .map(displayKey => {
-      const family = classifyAgentSpendFamily(displayKey, groups[displayKey]);
+  return [...groups.values()]
+    .sort((a, b) => a.displayKey.localeCompare(b.displayKey))
+    .map(({ displayKey, rows: groupRows }) => {
+      const family = classifyAgentSpendFamily(displayKey, groupRows);
 
-      const byStage: Record<string, number> = {};
-      for (const { stage } of AGENT_SPEND_STAGE_COLUMNS) {byStage[stage] = 0;}
-      for (const row of (rawRowsByDisplayKey[displayKey] || [])) {
-        const rawStage = String(row.stage || 'default').trim().toLowerCase() || 'default';
-        const bucket = knownStages.has(rawStage) ? rawStage : 'default';
-        const value = family === 'usage' ? (Number.parseInt(String(row.openai_usage_after), 10) || 0)
-          : family === 'cost' ? (Number.parseFloat(String(row.cost_usd)) || 0)
-          : (Number.parseInt(String(row.duration_minutes), 10) || 0);
-        byStage[bucket] += value;
-      }
-      const total = AGENT_SPEND_STAGE_COLUMNS.reduce((sum, { stage }) => sum + byStage[stage], 0);
+      const byStage: Record<string, number | null> = {};
+      for (const { stage } of AGENT_SPEND_STAGE_COLUMNS) {byStage[stage] = family === 'usage' ? null : 0;}
+      for (const row of groupRows) { accumulateStageResource(byStage, row, family, knownStages); }
+      const values = Object.values(byStage).filter((value): value is number => value !== null);
+      const total = family === 'usage' ? (values.length ? Math.max(...values) : null)
+        : values.reduce((sum, value) => sum + value, 0);
       return { implementer: displayKey, family, byStage, total };
     });
 }
 
 /**
- * Formats one spend-table cell as `<metric> (<share %>)`, matching the
+ * Quota snapshots show a labelled peak without a consumption share. Other
+ * resource cells use `<metric> (<share %>)`, matching the
  * backlog request's example (`1$ (10%)`). Renders a stable empty-state value
  * instead of misleading `0%` share math when the row has no non-zero spend
  * for its metric family (architecture migration, SC-6).
  *
  */
-function formatAgentSpendCell(value: number, total: number, family: AgentStageSpend['family']) {
+function formatAgentSpendCell(value: number | null, total: number | null, family: AgentStageSpend['family']) {
+  if (value === null) {return '—';}
+  if (family === 'usage') {return `${value}% quota peak`;}
   if (!total) {return '—';}
   const pct = Math.round((value / total) * 100);
-  if (family === 'usage') {return `${value}% (${pct}%)`;}
   if (family === 'cost') {
     const rounded = Math.round(value * 100) / 100;
     return `$${rounded} (${pct}%)`;
@@ -474,16 +310,11 @@ function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, optio
 }
 
 export {
-  formatDate,
   parseBooleanish,
   normalizeRow,
   normalizeRows,
   statsMissionKey,
   modelBelongsToImplFamily,
-  groupBy,
-  computeImplStats,
-  computePeriodStats,
-  generateMarkdownReport,
   isValidClassification,
   normalizeClassification,
   rowInWindow,

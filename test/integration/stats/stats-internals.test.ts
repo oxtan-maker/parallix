@@ -1,3 +1,4 @@
+import { fixtureReviewObservations } from '../../fixtures/review-statistics.js';
 import type { ReviewRound, ReviewEventRecord } from '../../../src/domain/review.js';
 import type { StatsRow } from '../../../src/application/services/statistics-row.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
@@ -727,7 +728,7 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
 function summarizeAgentWindow(rows: readonly (StatsRow & { completedForTest?: string })[], window: Parameters<typeof stats._internals.summarizeAgentWindow>[1], options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
   const completedMissionKeys = new Set(rows.filter(row => row.completedForTest === 'yes')
     .map(row => `${String(row.repo || '')}::${String(row.mission).trim().toLowerCase()}`));
-  return (stats)._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys });
+  return (stats)._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys, reviewObservations: fixtureReviewObservations(rows) });
 }
 
 // ---------------------------------------------------------------------------
@@ -808,7 +809,7 @@ test('task-2348: mission with two implementers credits reported implementer not 
   );
 });
 
-test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer rounds', async () => {
+test('task-2348: review-aggregate preserves mission total across implementer replacement', async () => {
   // Scenario: mission had 3 total `changes-requested` rounds across its lifecycle.
   // 1 round sent back to previous implementer `claude`, 2 rounds sent back to
   // reported implementer `custom`.
@@ -868,8 +869,8 @@ test('task-2348: review-aggregate pr_fix_rounds counts only reported implementer
     assert.equal(info.implementer, 'custom', 'reported implementer is custom (last round owner)');
     assert.equal(
       info.prFixRounds,
-      2,
-      'pr_fix_rounds counts only custom\'s changes-requested rounds (2), not all rounds (3)',
+      3,
+      'mission total preserves earlier implementer rejections; authorship is a separate observation',
     );
   } finally {
     await restoreHome();

@@ -1,3 +1,4 @@
+import { reviewStatisticsObservation } from '../../../fixtures/review-statistics.js';
 import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { weeklyDecisionWindows } from '../../../../src/application/services/decision-window.js';
@@ -38,8 +39,24 @@ import { repositoryId, type RepositoryId } from '../../../../src/domain/reposito
 // `createWindow` and friends hang off the default export object, not the
 // module's named exports, so this must be the default import.
 import stats from '../../../../src/adapters/cli/commands/stats.js';
+import { reviewStatistics, type ReviewStatistics } from '../../../../src/application/services/review-statistics.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+
+test('live Review observations survive absent telemetry and ignore archived scalar counts (TASK-2818)', async () => {
+  const { StatsCommandUseCase } = await import('../../../../src/application/stats-command-use-case.js');
+  const rows = [{ repo: 'r', mission: 'task-stale', stage: 'default', date: '2026-06-23', implementer: 'codex',
+    classification: 'ai_sdlc'}];
+  const known = reviewStatisticsObservation('custom', 2);
+  const result = await new StatsCommandUseCase({ loadMeasurements: async () => rows, loadMissionFlow: async () => [
+    { repo: 'r', mission: 'task-stale', closedAt: '2026-06-23T12:00:00Z', labels: ['ai_sdlc'], implementer: 'codex', reviewStatistics: reviewStatistics(null) },
+    { repo: 'r', mission: 'task-no-telemetry', closedAt: '2026-06-23T13:00:00Z', labels: ['ai_sdlc'], implementer: 'custom', reviewStatistics: known },
+  ] }).execute({ mode: 'range', from: '2026-06-23', to: '2026-06-23' });
+  const report = stats.renderRangeStatsReport(result.rows, { selection: result.selection });
+  assert.match(report, /codex\s+1\s+unavailable\s+0/);
+  assert.match(report, /custom\s+1\s+2\.00\s+1/);
+  assert.match(report, /Review-fix mission coverage: 1\/2/);
+});
 
 // task-2347.07 repro uses a distinct repository identity from the task-2347.08
 // suite above.
@@ -248,11 +265,11 @@ test('stats CLI renders the application-selected population without selecting co
   const { createStatsCommand } = await import('../../../../src/interfaces/cli/stats.js');
   const { selectStatsReport } = await import('../../../../src/application/services/statistics-report-selection.js');
   const rows = [
-    { repo: 'r', mission: 'task-done', date: '2026-06-01', implementer: 'codex', stage: 'default', classification: 'user_value', pr_fix_rounds: '2' },
+    { repo: 'r', mission: 'task-done', date: '2026-06-01', implementer: 'codex', stage: 'default', classification: 'user_value', pr_fix_rounds: '2'},
     { repo: 'r', mission: 'task-active', date: '2026-06-23', implementer: 'claude', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '9' },
   ];
   const flow = [
-    { repo: 'r', mission: 'task-done', closedAt: '2026-06-23T12:00:00Z', labels: ['user_value'], implementer: 'codex' },
+    { repo: 'r', mission: 'task-done', closedAt: '2026-06-23T12:00:00Z', labels: ['user_value'], implementer: 'codex', reviewStatistics: reviewStatisticsObservation('codex', 2) },
     { repo: 'r', mission: 'task-no-telemetry', closedAt: '2026-06-23T13:00:00Z', labels: ['ai_sdlc'], implementer: 'custom' },
   ];
   for (const mode of ['weekly', 'range'] as const) {
@@ -280,7 +297,8 @@ test('stats CLI renders the application-selected population without selecting co
     const report = lines.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
     assert.match(report, /codex\s+1\s+2\.00/);
     const performance = report.split(mode === 'weekly' ? 'Agent performance this week' : 'Agent performance')[1]!.split('Agent spend')[0]!;
-    assert.doesNotMatch(performance, /claude|custom/, 'active and telemetry-free missions receive no fabricated performance credit');
+    assert.doesNotMatch(performance, /claude/, 'active work receives no delivery credit');
+    assert.match(performance, /custom\s+1\s+unavailable\s+0/, 'telemetry-free deliveries retain population credit with no fabricated observation');
     assert.equal(selection.current.flow?.total, 2, 'flow counts lifecycle completions without telemetry');
     assert.match(report.split('Agent performance')[0]!, /2\s+1\s+1\s+0/);
     // Also exercise the real use case rather than just the presentation seam.

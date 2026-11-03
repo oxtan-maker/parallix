@@ -1,4 +1,5 @@
 // Historical regression provenance: TASK-2363.
+import { fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -101,7 +102,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
             await persistMission(laneEventRepo, db, {
               repositoryId: REPO, missionId: id, closedAt: CURRENT_CLOSED,
               cycleTimeMinutes: 40, shape: CURRENT_SHAPE, bounced: index < 5, classification: 'ai_sdlc',
-              telemetry: { durationMinutes: 15, prFixRounds: index === 0 ? 0 : index === 1 ? undefined : 1 },
+              telemetry: { durationMinutes: 15, prFixRounds: 99 },
             });
           }
           await recordDone('task-old-unclosed', null);
@@ -131,6 +132,12 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         } satisfies NonNullable<ConstructorParameters<typeof BoardProjectionBuilder>[0]>;
         const metricsAdapter = new ConcreteMetricsReadAdapter({
           laneEventRepo, usageRepo, historyRepo, repositoryId: REPO, clock: fixedClock(NOW),
+          // Review observations come from canonical mission metadata, not usage rows.
+          cohortMetadata: async () => fixtureCohortMetadata([
+            ...Array.from({ length: 240 }, (_, index) => ({ mission: `task-old-${index}`, pr_fix_rounds: 9 })),
+            ...Array.from({ length: 28 }, (_, index) => ({ mission: `task-previous-${index}`, pr_fix_rounds: 1 })),
+            ...Array.from({ length: 31 }, (_, index) => ({ mission: `task-current-${index}`, pr_fix_rounds: index === 0 ? 0 : index === 1 ? null : 1 })),
+          ].map(row => ({ ...row, repo: REPO, implementer: 'claude', classification: 'ai_sdlc' }))),
         });
         const projection = await new BoardProjectionBuilder(
           missionReader,

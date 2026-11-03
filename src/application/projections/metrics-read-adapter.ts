@@ -1,3 +1,4 @@
+import { reviewStatistics, type ReviewStatistics, type ReviewStatisticsEvidence } from '../services/review-statistics.js';
 import { usageRecordsToOutcomes } from './metrics-outcomes.js';
 import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryRepository } from '../ports/operation-history.js';
@@ -18,11 +19,18 @@ import { utcHourBucket } from '../services/statistics-service.js';
 import { weeklyDecisionWindows } from '../../domain/decision-window.js';
 
 /** Delivery belongs to the recorded final review implementer, never an attempt. */
-export function missionCohortMetadata(missions: readonly Mission[]) {
+export interface MissionCohortMetadata {
+  readonly labels: readonly MissionLabel[];
+  readonly assignee: AgentFamily | null;
+  readonly reviewStatistics?: ReviewStatistics;
+}
+
+export function missionCohortMetadata(missions: readonly Mission[], evidence: ReadonlyMap<string, ReviewStatisticsEvidence> = new Map()) {
   return new Map(missions.map(mission => {
     const finalImplementer = mission.review?.rounds.at(-1)?.implementer;
     return [mission.id, { labels: mission.labels,
-      assignee: finalImplementer ? agentFamily(finalImplementer) : mission.assignee }] as const;
+      assignee: finalImplementer ? agentFamily(finalImplementer) : mission.assignee,
+      reviewStatistics: reviewStatistics(mission.review, evidence.get(mission.id)) }] as const;
   }));
 }
 
@@ -75,7 +83,7 @@ export interface ConcreteMetricsReadAdapterOptions {
    */
   readonly netEngineeringLines?: () => Promise<ReadonlyMap<MissionId, number | null>>;
   /** Canonical Mission metadata for cohort labels and implementers. */
-  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
+  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
 }
 
 /**
@@ -91,7 +99,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly historyRepo: OperationalHistoryRepository | undefined;
   private readonly cohortDimension: CohortDimension;
   private readonly netEngineeringLines: () => Promise<ReadonlyMap<MissionId, number | null>>;
-  private readonly cohortMetadata: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
+  private readonly cohortMetadata: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
     this.laneEventRepo = options.laneEventRepo;
@@ -200,13 +208,15 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
 
   private withCanonicalCohortMetadata(
     outcomes: readonly MissionOutcome[],
-    metadata: ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>,
+    metadata: ReadonlyMap<MissionId, MissionCohortMetadata>,
   ): readonly MissionOutcome[] {
     return outcomes.map((outcome) => {
       const canonical = metadata.get(outcome.missionId);
       return canonical === undefined
         ? outcome
-        : { ...outcome, labels: canonical.labels, implementer: canonical.assignee };
+        : { ...outcome, labels: canonical.labels, implementer: canonical.assignee,
+          ...(canonical.reviewStatistics ? { reviewFixRounds: canonical.reviewStatistics.prFixRounds,
+            reviewFixRoundsByImplementer: canonical.reviewStatistics.byImplementer } : {}) };
     });
   }
 

@@ -1,4 +1,5 @@
 import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
+import { fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 import { repositoryId as fixtureRepositoryId } from '../../../src/domain/repository.js';
 // Historical regression provenance: TASK-2347.01, TASK-2357, TASK-2363.
 /**
@@ -536,6 +537,7 @@ describe("defect B: a display product name never splits repository identity", ()
             upsertMeasurementRow({
               date: '2026-06-02', mission, classification: 'ai_sdlc',
               implementer: 'claude', pr_fix_rounds: '1', stage: 'default',
+
             }, { rootDir: root, store });
           } finally {
             store.close();
@@ -544,6 +546,7 @@ describe("defect B: a display product name never splits repository identity", ()
 
         const metrics = await new ConcreteMetricsReadAdapter({
           laneEventRepo, usageRepo, repositoryId: canonical, clock: fixedClock(NOW_2363),
+          cohortMetadata: async () => fixtureCohortMetadata([MISSION_FROM_PRIMARY, MISSION_FROM_WORKTREE].map(mission => ({ repo: canonical, mission, implementer: 'claude', pr_fix_rounds: 1 }))),
         }).buildMetrics(new Map<MissionId, MissionStatus>([
           [MISSION_FROM_PRIMARY, 'done'],
           [MISSION_FROM_WORKTREE, 'done'],

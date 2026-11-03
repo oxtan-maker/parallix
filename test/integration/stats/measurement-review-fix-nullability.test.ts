@@ -1,3 +1,4 @@
+import { fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 // Historical regression provenance: TASK-2363.
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { describe, it } from 'node:test';
@@ -68,20 +69,20 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('keeps an explicitly recorded zero as a zero', async () => {
+  it('stage telemetry cannot manufacture an explicit zero review observation', async () => {
     const root = repoWithMission('task-500');
     await seedStoredMissionClassification('task-500');
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', prFixRounds: '0', store }) });
+        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', store }) });
       } finally {
         store.close();
       }
       const rows = await db.query<{ pr_fix_rounds: unknown }>(
         'SELECT pr_fix_rounds FROM usage_statistics;',
       );
-      assert.equal(rows[0]?.pr_fix_rounds, 0, 'a measured zero stays a zero');
+      assert.equal(rows[0]?.pr_fix_rounds, null, 'stage telemetry remains unmeasured');
     });
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -96,7 +97,7 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
       try {
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
-          implementer: 'claude', pr_fix_rounds: '0', stage: 'default',
+          implementer: 'claude', pr_fix_rounds: '0',  stage: 'default',
         }, { configuration: resolveConfiguration(process.env), store });
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN, classification: 'ai_sdlc',
@@ -108,6 +109,7 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
 
       const adapter = new ConcreteMetricsReadAdapter({
         laneEventRepo, usageRepo, repositoryId: REPO, clock: fixedClock(NOW),
+        cohortMetadata: async () => fixtureCohortMetadata([{ repo: REPO, mission: KNOWN_ZERO, implementer: 'claude', pr_fix_rounds: 0 }, { repo: REPO, mission: UNKNOWN, implementer: 'claude', pr_fix_rounds: null }]),
       });
       const outcomes = await adapter.readOutcomes();
       assert.equal(

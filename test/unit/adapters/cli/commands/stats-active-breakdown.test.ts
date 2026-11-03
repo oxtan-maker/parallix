@@ -1,3 +1,4 @@
+import { fixtureReviewObservations } from '../../../../fixtures/review-statistics.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 
@@ -19,7 +20,7 @@ interface TestRow extends StatsRow { mission: string; date: string; completedFor
 
 function missionFlow(rows: readonly TestRow[]) {
   return rows.filter((row) => row.completedForTest === 'yes')
-    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer }));
+    .map(row => ({ repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer, reviewStatistics: fixtureReviewObservations(rows).get(`${String(row.repo || "")}::${row.mission.toLowerCase()}`) }));
 }
 
 function renderWeeklyStatsReport(rows: readonly TestRow[], options = {}) {
@@ -189,7 +190,7 @@ test('task-2213: range agent performance table excludes active-stage agents', ()
 
   const report = renderRangeStatsReport(rows, { from: '2026-06-15', to: '2026-06-17' });
   const plain = __mm1.stripAnsi(report);
-  const performance = plain.slice(plain.indexOf('Agent performance'));
+  const performance = plain.slice(plain.indexOf('Agent performance'), plain.indexOf('Agent spend'));
 
   assert.doesNotMatch(plain, /# missions with telemetry/, 'telemetry table was removed (TASK-2633)');
 

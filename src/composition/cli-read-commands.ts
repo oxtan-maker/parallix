@@ -17,6 +17,10 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
     history: args => history('createHistoryCommand', args),
     attach: args => history('createAttachCommand', args),
     stats: (args, options) => withGraph(async services => {
+      if (args[0] === 'backfill') {
+        const { statsBackfill } = await import('../adapters/cli/commands/stats-backfill.js');
+        return statsBackfill(args.slice(1), { ...options, rootDir, service: services.statsBackfill });
+      }
       const { createStatisticsCommand } = await import('./stats.js');
       if (!services.mission) { throw new Error('mission services are unavailable'); }
       return createStatisticsCommand({

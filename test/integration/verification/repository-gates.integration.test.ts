@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { MAX_GATE_OUTPUT_CHARS } from '../../../src/adapters/config/gate-dashboard.js';
 import { runGateCommand,runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
+import { registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
 
 test('configured parallel integration gates run real commands through the phase boundary', async () => {
   const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-integration-'));
@@ -73,7 +74,7 @@ test('a stale coverage report cannot release the dependent Sonar gate', async ()
 test('cancel escalates from TERM to KILL when a gate ignores TERM', async () => {
   const controller = new globalThis.AbortController();
   const started = Date.now();
-  const result = await runGateCommand("trap '' TERM; printf ready; while :; do sleep 1; done", [], {
+  const result = await runGateCommand("trap '' TERM; printf ready; remaining=3; while [ \"$remaining\" -gt 0 ]; do sleep 1; remaining=$((remaining - 1)); done", [], {
     cwd: process.cwd(), env: process.env, stdio: 'pipe', signal: controller.signal, terminationGraceMs: 30,
     onOutput: chunk => { if (chunk.includes('ready')) controller.abort(); },
   });
@@ -118,7 +119,7 @@ function descendantPids(t: import('node:test').TestContext): { file: string; pid
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gate-descendant-'));
   const file = path.join(root, 'pids');
   const pids = () => fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map(Number) : [];
-  t.after(() => {
+  registerFixtureCleanup(t, () => {
     for (const pid of pids()) { try { process.kill(pid, 'SIGKILL'); } catch { /* already exited */ } }
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -140,7 +141,7 @@ test('a continuously writing descendant cannot hold a settled gate open (TASK-28
   // The writer ignores SIGPIPE, so its survival shows the runner sent it nothing.
   const descendant = descendantPids(t);
   const started = Date.now();
-  const result = await runGateCommand(`(trap '' PIPE; while :; do printf . 2>/dev/null; sleep 0.05; done) & echo $! > ${descendant.file}; printf done`, [], { cwd: process.cwd(), env: process.env, stdio: 'pipe' });
+  const result = await runGateCommand(`(trap '' PIPE; remaining=40; while [ "$remaining" -gt 0 ]; do printf . 2>/dev/null; sleep 0.05; remaining=$((remaining - 1)); done) & echo $! > ${descendant.file}; printf done`, [], { cwd: process.cwd(), env: process.env, stdio: 'pipe' });
   const elapsedMs = Date.now() - started;
   assert.deepEqual({ status: result.status, signal: result.signal }, { status: 0, signal: null });
   assert.match(result.stdout, /done/);
@@ -159,7 +160,7 @@ test('a quiet live gate is awaited past the exit drain window (TASK-2806)', asyn
 test('cancellation still escalates to the gate group after the gate shell exits on TERM (TASK-2806)', async t => {
   const descendant = descendantPids(t);
   const controller = new globalThis.AbortController();
-  const result = await runGateCommand(`(trap '' TERM; echo $BASHPID > ${descendant.file}; while :; do sleep 0.05; done) & sleep 0.05; printf ready; wait`, [], {
+  const result = await runGateCommand(`(trap '' TERM; echo $BASHPID > ${descendant.file}; remaining=40; while [ "$remaining" -gt 0 ]; do sleep 0.05; remaining=$((remaining - 1)); done) & sleep 0.05; printf ready; wait`, [], {
     cwd: process.cwd(), env: process.env, stdio: 'pipe', signal: controller.signal, terminationGraceMs: 1000,
     onOutput: chunk => { if (chunk.includes('ready')) controller.abort(); },
   });

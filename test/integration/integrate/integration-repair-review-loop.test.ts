@@ -34,6 +34,11 @@ import { run } from '../../../src/composition/create-cli.js';
 // Status is lazy in the CLI. Load its immutable modules alongside the command
 // registry so the case measures status execution rather than cold compilation.
 import '../../../src/composition/status-board.js';
+// createStatusReadBoard loads these lazily. Include the complete immutable
+// status graph here too, so the first case does not pay its compilation cost.
+import '../../../src/composition/board-projection.js';
+import '../../../src/adapters/agents/known-agent-families.js';
+import '../../../src/adapters/sqlite/session-marker-repository.js';
 import '../../../src/application/status-command-use-case.js';
 import '../../../src/interfaces/cli/status.js';
 import '../../../src/adapters/cli/commands/status-adapter.js';
@@ -76,8 +81,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
         // The bounded implementer budget: one repair, committed so the gate
         // re-run verifies a finalized tree.
         fs.writeFileSync(path.join(fixture.worktree, 'repaired.txt'), 'ok\n');
-        fixture.git(fixture.worktree, ['add', 'repaired.txt']);
-        fixture.git(fixture.worktree, ['commit', '-m', 'repair']);
+        seedGit(fixture.worktree, [['add', 'repaired.txt'], ['commit', '-m', 'repair']]);
         // TASK-2665: a committed fix also needs fresh repair-round proof before
         // the real handoff can resume independent review.
         const checkpointName = /Harness-created repair checkpoint: (CP-\d+);/.exec(prompt)?.[1];

@@ -1,3 +1,4 @@
+import { fixtureCohortMetadata } from '../../../fixtures/review-statistics.js';
 import { pendingReview } from '../../../fixtures/mission-builders.js';
 import { fixtureMission as typedMissionFixture } from '../../../fixtures/mission-builders.js';
 // Historical regression provenance: TASK-2347.09.
@@ -546,7 +547,7 @@ describe("Review bounce rate — SC4", () => {
       mission,
       classification: 'ai_sdlc',
       implementer_agent: 'codex',
-      stage: 'execute',
+      stage: 'default',
       provider: 'openai',
       model: 'gpt-5',
       input_tokens: 100,
@@ -555,6 +556,7 @@ describe("Review bounce rate — SC4", () => {
       duration_minutes: 30,
       cost_usd: 1,
       pr_fix_rounds: prFixRounds,
+
     };
   }
 
@@ -565,7 +567,8 @@ describe("Review bounce rate — SC4", () => {
   ];
 
   async function labelCohort() {
-    const outcomes = await metricsAdapter(REPO, LANE_EVENTS, USAGE_RECORDS).readOutcomes();
+    const outcomes = (await metricsAdapter(REPO, LANE_EVENTS, USAGE_RECORDS).readOutcomes()).map(outcome => ({ ...outcome,
+      reviewFixRounds: fixtureCohortMetadata(USAGE_RECORDS).get(outcome.missionId)?.reviewStatistics?.prFixRounds ?? null }));
     assert.equal(outcomes.length, 3, 'all three missions must project as completed outcomes');
     const comparison = compareCohorts({ outcomes, transitions: TRANSITIONS, dimension: 'label' });
     const cohort = comparison.cohorts.find((entry) => entry.key === 'ai_sdlc');

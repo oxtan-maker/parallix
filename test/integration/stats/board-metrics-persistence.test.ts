@@ -1,4 +1,5 @@
 // Historical regression provenance: TASK-2357.
+import { reviewStatisticsObservation } from '../../fixtures/review-statistics.js';
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -10,9 +11,9 @@ import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapt
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteUsageRepository } from '../../../src/adapters/sqlite/usage-repository.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
-import type { MissionId, MissionStatus, MissionLabel } from '../../../src/domain/mission.js';
-import { missionId } from '../../../src/domain/mission.js';
-import type { AgentFamily } from '../../../src/domain/agents.js';
+import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
+import { missionId, missionLabels } from '../../../src/domain/mission.js';
+import type { MissionCohortMetadata } from '../../../src/application/projections/metrics-read-adapter.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { createPrimaryAndWorktree, fixedClock, insertUsageRow, laneEvent } from '../../fixtures/statistics-database.js';
@@ -172,10 +173,11 @@ describe("production certification: full path from persisted facts to BoardMetri
     await laneEventRepo.append(laneEvent({ repositoryId: REPO_B, missionId: task200, from: null, to: 'backlog', at: INTAKE_MON }));
     await laneEventRepo.append(laneEvent({ repositoryId: REPO_B, missionId: task200, from: 'backlog', to: 'done', at: DONE_FRI }));
 
-    // 4. Persist usage rows (real SQLite writes)
-    await insertUsageRow(db, { repo: REPO, mission: task100, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 0, durationMinutes: 45, inputTokens: 5000, costUsd: 2.50 });
+    // 4. Persist usage rows (real SQLite writes). Deliberately stale scalar
+    // counts on task-100 and task-102 cannot replace known zero or unknown.
+    await insertUsageRow(db, { repo: REPO, mission: task100, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 99, durationMinutes: 45, inputTokens: 5000, costUsd: 2.50 });
     await insertUsageRow(db, { repo: REPO, mission: task101, date: '2026-06-03', classification: 'ai_sdlc', prFixRounds: 2, durationMinutes: 30, inputTokens: 3000, costUsd: 1.75 });
-    await insertUsageRow(db, { repo: REPO, mission: task102, date: '2026-06-04', classification: 'user_value', prFixRounds: null, durationMinutes: 60 });
+    await insertUsageRow(db, { repo: REPO, mission: task102, date: '2026-06-04', classification: 'user_value', prFixRounds: 99, durationMinutes: 60 });
     await insertUsageRow(db, { repo: REPO, mission: task103, date: '2026-06-05', classification: 'user_value', prFixRounds: null });
     await insertUsageRow(db, { repo: REPO, mission: task104, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 1, durationMinutes: 20, inputTokens: 2000, costUsd: 0.80 });
     // task-105: no telemetry
@@ -183,16 +185,18 @@ describe("production certification: full path from persisted facts to BoardMetri
     await insertUsageRow(db, { repo: REPO, mission: task107, date: '2026-05-25', classification: 'ai_sdlc', prFixRounds: 0, durationMinutes: 35, inputTokens: 4000, costUsd: 1.50 });
     await insertUsageRow(db, { repo: REPO_B, mission: task200, date: '2026-06-05', classification: 'ai_sdlc', prFixRounds: 3, durationMinutes: 50 });
 
+    // Canonical review observations enter through the mission metadata port;
+    // persisted legacy scalar values are not a review evidence source.
     // 5. Build metrics through ConcreteMetricsReadAdapter (production path)
-    const cohortMetadata: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMetricsReadAdapter>[0]>["cohortMetadata"]> = async () => new Map<MissionId, { labels: readonly MissionLabel[]; assignee: AgentFamily | null }>([
-      [task100, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
-      [task101, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
-      [task102, { labels: ['user_value' as MissionLabel], assignee: agentFamily('claude') }],
-      [task103, { labels: ['user_value' as MissionLabel], assignee: agentFamily('claude') }],
-      [task104, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
-      [task105, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
-      [task106, { labels: ['user_value' as MissionLabel], assignee: agentFamily('claude') }],
-      [task107, { labels: ['ai_sdlc' as MissionLabel], assignee: agentFamily('claude') }],
+    const cohortMetadata: NonNullable<NonNullable<ConstructorParameters<typeof ConcreteMetricsReadAdapter>[0]>["cohortMetadata"]> = async () => new Map<MissionId, MissionCohortMetadata>([
+      [task100, { labels: missionLabels(['ai_sdlc']), assignee: agentFamily('claude'), reviewStatistics: reviewStatisticsObservation('claude', 0) }],
+      [task101, { labels: missionLabels(['ai_sdlc']), assignee: agentFamily('claude'), reviewStatistics: reviewStatisticsObservation('claude', 2) }],
+      [task102, { labels: missionLabels(['user_value']), assignee: agentFamily('claude') }],
+      [task103, { labels: missionLabels(['user_value']), assignee: agentFamily('claude') }],
+      [task104, { labels: missionLabels(['ai_sdlc']), assignee: agentFamily('claude'), reviewStatistics: reviewStatisticsObservation('claude', 1) }],
+      [task105, { labels: missionLabels(['ai_sdlc']), assignee: agentFamily('claude') }],
+      [task106, { labels: missionLabels(['user_value']), assignee: agentFamily('claude') }],
+      [task107, { labels: missionLabels(['ai_sdlc']), assignee: agentFamily('claude') }],
     ]);
 
     const adapter = new ConcreteMetricsReadAdapter({

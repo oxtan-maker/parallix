@@ -10,7 +10,7 @@ import { integrationContext } from '../../fixtures/integration-context.js';
 // squash-merge path and its guards (task-1109) and the completion persistence order before statistics
 // (task-2367). Legacy case names unchanged.
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import test, { mock, describe } from 'node:test';
+import test, { mock, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,6 +32,16 @@ mockModule('../../../src/adapters/verification/verification.js', import.meta.url
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 const { reportMergeConflicts } = await import('../../../src/application/integrate/landing.js');
+const gitFacade = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
+const detectRebaseState = gitFacade.detectRebaseState;
+// These landing fixtures simulate Git. The detector's default runner closes
+// over the real git function, so mocking the exported git alone leaves repeated
+// subprocess probes of nonexistent repositories in the success paths.
+beforeEach(() => {
+  mock.method(gitFacade, 'detectRebaseState', (cwd: Parameters<typeof detectRebaseState>[0], options: Parameters<typeof detectRebaseState>[1]) =>
+    detectRebaseState(cwd, { ...options, gitRunner: gitFacade.git }));
+});
+afterEach(() => mock.reset());
 
 // ---- task-1109 Variant B landing (consolidated from test/task-1109.test.ts, TASK-2622.09) ----
 describe("Variant B landing", () => {

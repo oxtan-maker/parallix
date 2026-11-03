@@ -276,13 +276,26 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
   // The window selects the missions; their full lifecycle history stays intact,
   // so a member's dwell and review passage are read from all of its transitions.
   const outcomes = outcomesCompletedInWindow(input.outcomes, input.window);
-  const groups = groupIntoCohorts(outcomes, input.dimension, input.dateRanges ?? []);
+  const groups = new Map(groupIntoCohorts(outcomes, input.dimension, input.dateRanges ?? []));
+  if (input.dimension === 'implementer') {
+    for (const outcome of outcomes) {
+      for (const [agent, count] of Object.entries(outcome.reviewFixRoundsByImplementer ?? {})) {
+        if (count === null) { continue; }
+        if (!groups.has(agent)) { groups.set(agent, []); }
+      }
+    }
+  }
   const activeDwell = dwellMinutesByMission(input.transitions, 'active');
   const reviewDwell = dwellMinutesByMission(input.transitions, 'review');
   const passages = reviewPassagesByMission(input.transitions);
   const netEngineeringLines = input.netEngineeringLines ?? new Map<MissionId, number | null>();
 
   const cohorts = [...groups.entries()].map(([key, members]) => {
+    const repairValues = (input.dimension === 'implementer'
+      ? outcomes.map(outcome => outcome.reviewFixRoundsByImplementer
+        ? outcome.reviewFixRoundsByImplementer[key] ?? null
+        : outcome.implementer === key ? outcome.reviewFixRounds : null)
+      : members.map(outcome => outcome.reviewFixRounds)).filter((value): value is number => value !== null);
     const cycleTimes = members.map((outcome) => outcome.cycleTimeMinutes);
     const activeDwells = dwellOf(members, activeDwell);
     const reviewDwells = dwellOf(members, reviewDwell);
@@ -305,7 +318,7 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
         activeDwell: activeDwells.length < threshold,
         reviewDwell: reviewDwells.length < threshold,
         reviewBounce: entered.length < threshold,
-        reviewFixRounds: members.filter((outcome) => outcome.reviewFixRounds !== null).length < threshold,
+        reviewFixRounds: repairValues.length < threshold,
         tokens: tokens.length < threshold,
         runtime: runtimes.length < threshold,
         cost: costs.length < threshold,
@@ -318,9 +331,7 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
       // Null, not zero: a cohort where nothing reached review has no bounce
       // rate to report, which is a different claim from "never bounced".
       reviewBounceRate: entered.length === 0 ? null : bounces / entered.length,
-      medianReviewFixRounds: median(
-        members.map((outcome) => outcome.reviewFixRounds).filter((value): value is number => value !== null),
-      ),
+      medianReviewFixRounds: median(repairValues),
       tokensPerMission: meanOfMeasured(members.map((outcome) => outcome.totalInputAndOutputTokens)),
       agentRuntimeMinutesPerMission: meanOfMeasured(members.map((outcome) => agentRuntimeMinutes(outcome))),
       costUsdPerMission: meanOfMeasured(members.map((outcome) => outcome.totalCostUsd)),
@@ -332,7 +343,7 @@ export function compareCohorts(input: CohortComparisonInput): CohortComparison {
         activeDwell: activeDwells.length,
         reviewDwell: reviewDwells.length,
         reviewBounce: entered.length,
-        reviewFixRounds: members.filter((outcome) => outcome.reviewFixRounds !== null).length,
+        reviewFixRounds: repairValues.length,
         tokens: tokens.length,
         runtime: runtimes.length,
         cost: costs.length,

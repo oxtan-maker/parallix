@@ -1,3 +1,4 @@
+import type { ReviewStatistics } from '../services/review-statistics.js';
 /** Application-owned ports for CLI workflow execution. Concrete implementations
  * are supplied only by the composition root. */
 
@@ -297,6 +298,7 @@ export interface StatsMissionFlow {
   readonly closedAt: string;
   readonly labels: readonly string[];
   readonly implementer?: string | null;
+  readonly reviewStatistics?: ReviewStatistics;
 }
 
 /** Source material for an adhoc draft intake. */

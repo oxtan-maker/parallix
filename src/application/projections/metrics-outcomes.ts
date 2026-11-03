@@ -68,13 +68,6 @@ export function usageRecordsToOutcomes(
     const existing = outcomeMap.get(key);
     const timestamp = `${record.date}T00:00:00Z`;
     if (existing) {
-      // Aggregate multiple records for the same (repo, mission)
-      // A NULL row carries no observation, so it never contributes to the
-      // mission's maximum — otherwise `Math.max(-1, null)` would turn two
-      // unknown rows into a measured zero (TASK-2369 Part D carry-forward).
-      existing.reviewFixRounds = record.pr_fix_rounds === null || record.pr_fix_rounds === undefined
-        ? existing.reviewFixRounds
-        : Math.max(existing.reviewFixRounds ?? -1, record.pr_fix_rounds);
       existing.createdAt = existing.createdAt < timestamp ? existing.createdAt : timestamp;
       existing.labelValues.push(...recordLabelValues(record));
       existing.runs.push(usageRecordToRun(record));
@@ -85,7 +78,7 @@ export function usageRecordsToOutcomes(
         createdAt: timestamp,
         closedAt: null,
         cycleTimeMinutes: 0,
-        reviewFixRounds: record.pr_fix_rounds ?? null,
+        reviewFixRounds: null,
         labelValues: [...recordLabelValues(record)],
         runs: [usageRecordToRun(record)],
       });
@@ -295,6 +288,7 @@ interface OutcomeAccumulator {
   closedAt: string | null;
   cycleTimeMinutes: number;
   reviewFixRounds: number | null;
+  reviewFixRoundsByImplementer?: Readonly<Record<string, number | null>>;
   /** Raw classification strings; normalised to `MissionLabel` on emit. */
   labelValues: string[];
   runs: AgentRunMeasurement[];

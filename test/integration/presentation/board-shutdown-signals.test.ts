@@ -16,8 +16,9 @@ import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdtempAt } from '../../helpers/temp-dir.js';
+import { cleanupFixtureProcesses, registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
 import { launchPtySmoke, type PtySmokeSession } from '../../helpers/pty-smoke-harness.js';
 import { createMissionApplicationServices } from '../../../src/composition/application-services.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
@@ -52,9 +53,14 @@ interface BoardFixture {
 }
 
 /** Launch a real interactive `px board` over a throwaway repository fixture. */
-async function launchBoard(): Promise<BoardFixture> {
-  const fixtureRoot = await mkdtemp(path.join(tmpdir(), 'parallix-2373-shutdown-fixture-'));
-  const stateRoot = await mkdtemp(path.join(tmpdir(), 'parallix-2373-shutdown-state-'));
+async function launchBoard(t: TestContext): Promise<BoardFixture> {
+  const fixtureRoot = mkdtemp('parallix-2373-shutdown-fixture-');
+  const stateRoot = mkdtemp('parallix-2373-shutdown-state-');
+  registerFixtureCleanup(t, () => cleanupFixtureProcesses(fixtureRoot));
+  t.after(async () => {
+    await rm(fixtureRoot, { recursive: true, force: true });
+    await rm(stateRoot, { recursive: true, force: true });
+  });
   await mkdir(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
   await writeFile(path.join(fixtureRoot, 'backlog', 'tasks', 'task-2373-shutdown.md'), [
     '---', 'id: TASK-SHUTDOWN', 'title: Shutdown fixture mission', 'status: refined',
@@ -107,8 +113,8 @@ async function assertTerminatesBySignal(fixture: BoardFixture, signal: NodeJS.Si
   assert.equal(await session.terminalRestored(), true, `${description}: terminal raw-mode state must be restored`);
 }
 
-test('SC19: q terminates a real idle px board and leaves its spawned PID gone', async () => {
-  const fixture = await launchBoard();
+test('SC19: q terminates a real idle px board and leaves its spawned PID gone', async t => {
+  const fixture = await launchBoard(t);
   try {
     await assertTerminates(fixture, 'q', 'idle q');
   } finally {
@@ -116,8 +122,8 @@ test('SC19: q terminates a real idle px board and leaves its spawned PID gone', 
   }
 });
 
-test('SC20: Ctrl+C terminates a real idle px board and leaves its spawned PID gone', async () => {
-  const fixture = await launchBoard();
+test('SC20: Ctrl+C terminates a real idle px board and leaves its spawned PID gone', async t => {
+  const fixture = await launchBoard(t);
   try {
     // Ctrl+C must reach the app as a raw keystroke; while the line discipline
     // is still cooked, 0x03 becomes a SIGINT to the whole foreground process
@@ -129,8 +135,8 @@ test('SC20: Ctrl+C terminates a real idle px board and leaves its spawned PID go
   }
 });
 
-test('TASK-2373 defect 6: q terminates a real px board while a confirmation dialog is armed', async () => {
-  const fixture = await launchBoard();
+test('TASK-2373 defect 6: q terminates a real px board while a confirmation dialog is armed', async t => {
+  const fixture = await launchBoard(t);
   try {
     await armConfirmation(fixture.session);
     await assertTerminates(fixture, 'q', 'q with an armed confirmation');
@@ -139,8 +145,8 @@ test('TASK-2373 defect 6: q terminates a real px board while a confirmation dial
   }
 });
 
-test('TASK-2373 defect 6: Ctrl+C terminates a real px board while a confirmation dialog is armed', async () => {
-  const fixture = await launchBoard();
+test('TASK-2373 defect 6: Ctrl+C terminates a real px board while a confirmation dialog is armed', async t => {
+  const fixture = await launchBoard(t);
   try {
     await armConfirmation(fixture.session);
     await assertTerminates(fixture, '\u0003', 'Ctrl+C with an armed confirmation');
@@ -149,8 +155,8 @@ test('TASK-2373 defect 6: Ctrl+C terminates a real px board while a confirmation
   }
 });
 
-test('SC22: SIGTERM terminates the real interactive board cleanly', async () => {
-  const fixture = await launchBoard();
+test('SC22: SIGTERM terminates the real interactive board cleanly', async t => {
+  const fixture = await launchBoard(t);
   try {
     await assertTerminatesBySignal(fixture, 'SIGTERM', 'SIGTERM');
   } finally {
@@ -190,8 +196,8 @@ async function assertSigintExitsCleanly(fixture: BoardFixture, deliver: () => vo
   assert.equal(await session.terminalRestored(), true, `${description}: terminal state must be restored`);
 }
 
-test('TASK-2377: SIGINT while the board is not in raw mode exits with a numeric code', async () => {
-  const fixture = await launchBoard();
+test('TASK-2377: SIGINT while the board is not in raw mode exits with a numeric code', async t => {
+  const fixture = await launchBoard(t);
   try {
     await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
     await fixture.session.leaveRawMode();
@@ -202,8 +208,8 @@ test('TASK-2377: SIGINT while the board is not in raw mode exits with a numeric 
   }
 });
 
-test('TASK-2377: SIGINT after Ink enables raw mode exits the real board with a numeric code', async () => {
-  const fixture = await launchBoard();
+test('TASK-2377: SIGINT after Ink enables raw mode exits the real board with a numeric code', async t => {
+  const fixture = await launchBoard(t);
   try {
     await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
     assert.equal(await fixture.session.isRaw(), true, 'this case must exercise the window after Ink enables raw mode');
@@ -213,8 +219,8 @@ test('TASK-2377: SIGINT after Ink enables raw mode exits the real board with a n
   }
 });
 
-test('TASK-2377: Ctrl+C typed while the line discipline is cooked exits with a numeric code', async () => {
-  const fixture = await launchBoard();
+test('TASK-2377: Ctrl+C typed while the line discipline is cooked exits with a numeric code', async t => {
+  const fixture = await launchBoard(t);
   try {
     await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
     await fixture.session.leaveRawMode();
@@ -228,8 +234,8 @@ test('TASK-2377: Ctrl+C typed while the line discipline is cooked exits with a n
   }
 });
 
-test('TASK-2377: repeated SIGINT during board shutdown still exits with a numeric code', async () => {
-  const fixture = await launchBoard();
+test('TASK-2377: repeated SIGINT during board shutdown still exits with a numeric code', async t => {
+  const fixture = await launchBoard(t);
   try {
     await fixture.session.waitForRaw(LAUNCH_TIMEOUT_MS);
     await assertSigintExitsCleanly(fixture, () => {
@@ -326,7 +332,7 @@ interface InflightBoardFixture {
 
 /** Real board, isolated Mission authority and a bounded barrier provider. */
 async function launchInflightBoard(t: TestContext): Promise<InflightBoardFixture> {
-  const baseRoot = await mkdtemp(path.join(tmpdir(), 'parallix-2375-sc3-'));
+  const baseRoot = mkdtemp('parallix-2375-sc3-');
   const fixtureRoot = path.join(baseRoot, SC3_SLUG);
   const stateRoot = path.join(baseRoot, 'state');
   const stubDir = path.join(baseRoot, 'stubs');
@@ -335,7 +341,8 @@ async function launchInflightBoard(t: TestContext): Promise<InflightBoardFixture
   const releasePath = `${markerPath}.release`;
   const continuedPath = `${markerPath}.continued`;
   // Unix sockets need a short path; the coverage TMPDIR can be deeply nested.
-  const terminalRoot = await mkdtemp('/tmp/px-2375-term-');
+  const terminalRoot = mkdtempAt('/tmp', 'px-2375-term-');
+  registerFixtureCleanup(t, () => cleanupFixtureProcesses(baseRoot));
   let session: PtySmokeSession | undefined;
   let owned: Awaited<ReturnType<typeof composeWorkflowOperations>> | undefined;
   const stopWorkflow = async () => {
@@ -464,7 +471,8 @@ async function assertInflightTermination(fixture: InflightBoardFixture, key: str
   assert.ok(fixture.childPid !== null && pidAlive(fixture.childPid), `${description}: independent provider survives board and PTY teardown (TASK-2750)`);
   assert.equal(existsSync(fixture.signalPath), false, `${description}: provider receives no board-session termination signal`);
   await writeFile(fixture.releasePath, 'release');
-  while (!existsSync(fixture.continuedPath)) {
+  const deadline = Date.now() + SHUTDOWN_BUDGET_MS;
+  while (!existsSync(fixture.continuedPath) && Date.now() < deadline) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
   assert.ok(existsSync(fixture.continuedPath), `${description}: provider progresses after the board exits`);

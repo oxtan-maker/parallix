@@ -1,4 +1,5 @@
 /** Declared row and report models for stats rendering. */
+import type { ReviewStatistics } from '../../../application/services/review-statistics.js';
 import type { StatsRow } from '../../../application/services/statistics-row.js';
 
 export type ReportRow = StatsRow & { reportedImplementer?: string };
@@ -9,8 +10,7 @@ export interface MissionGroupOptions {
   completedMissionOwners?: ReadonlyMap<string, string | null>;
 }
 export interface AgentWindowOptions extends MissionGroupOptions {
-  rootDir?: string | null;
-  deriveFixRoundsFn?: ((_mission: string | undefined, _rootDir: string, _repo: string | undefined) => string | number | null | undefined) | null;
+  readonly reviewObservations?: ReadonlyMap<string, ReviewStatistics>;
 }
 export interface MissionStats {
   implementer: string; missions: number; averageFixRounds: string | null; prFixObservationCount: number;

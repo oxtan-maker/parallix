@@ -23,6 +23,7 @@ export interface StatsPresentation {
 export function printStatsUsage(log: (_message: string) => unknown = fmt.log.plain): void {
   log(`Usage: px stats [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]
        px stats cohorts [--by label|implementer|model|provider] [--min-sample <n>]
+       px stats backfill [--apply] [--json]
 
 Examples:
   px stats

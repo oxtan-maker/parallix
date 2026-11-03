@@ -304,10 +304,6 @@ export async function createProductionApplicationServices(
     executeMission: new ExecuteMissionService(executePorts, activeProgress, currentWork),
     executePorts,
     presentationCapabilities,
-    // TASK-2378: the backfill derivation reads the authoritative Review
-    // aggregate through the operator store when the mission services are
-    // available; pre-cutover missions without a Review keep the historical
-    // git-history fallback.
     statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, { configuration: options.configuration }, mission?.store ?? null)),
     // A nested review command can finish while integration still uses another
     // service graph backed by the same process-lifetime handle. Drain this

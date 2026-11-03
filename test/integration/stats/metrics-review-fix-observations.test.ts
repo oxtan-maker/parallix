@@ -1,6 +1,11 @@
+import { StatsCommandUseCase } from '../../../src/application/stats-command-use-case.js';
+import { createStatsWorkflowAdapter, renderRangeStatsReport } from '../../../src/adapters/cli/commands/stats.js';
+import { fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 // Regression provenance: TASK-2357.c.
 // Historical regression provenance: TASK-2357, task-201, task-202, task-203, task-204.
 import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
+import { createStatsMissionFlowReader } from '../../../src/composition/stats.js';
+import { missionCohortMetadata } from '../../../src/application/projections/metrics-read-adapter.js';
 import { reviewFindingId } from '../../../src/domain/review.js';
 import { before, describe, it } from 'node:test';
 import { prepareMigratedSchema } from '../../fixtures/migrated-database.js';
@@ -45,6 +50,43 @@ const INTAKE = '2026-06-01T09:00:00.000Z';
 const DONE = '2026-06-02T09:00:00.000Z';
 const NOW = '2026-06-03T09:00:00.000Z';
 
+it('normal stats and board reads reconcile Review history before backfill without writing measurements (TASK-2818)', async () => {
+  await withStatisticsDatabase(async ({ db, databasePath, laneEventRepo, usageRepo }) => {
+    const id = missionId('task-live-review-statistics');
+    const rounds = [1, 2, 3].map(number => {
+      const base = repeatReview().rounds[0];
+      const revision = changeRevision(String(number).padStart(40, '0'));
+      return { ...base, number, implementer: agentFamily(number === 1 ? 'custom' : 'codex'),
+        subject: { ...base.subject, revision }, decision: { ...base.decision!, revision } };
+    });
+    const mission = fixtureMission(id, { repositoryId: REPO, status: 'done', closedAt: DONE,
+      review: { ...repeatReview(), rounds: [rounds[0], ...rounds.slice(1)] } });
+    const missionStore = new SqliteMissionStore(db);
+    await missionStore.save(mission, null);
+    await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: id, from: null, to: 'backlog', at: INTAKE }));
+    await laneEventRepo.append(laneEvent({ repositoryId: REPO, missionId: id, from: 'backlog', to: 'done', at: DONE }));
+    const measurements = new SqliteMeasurementStore(databasePath);
+    try {
+      // A legacy value is deliberately wrong; no reconstructed JSON exists.
+      upsertMeasurementRow({ repo: REPO, mission: id, date: '2026-06-02', stage: 'default',
+        classification: 'ai_sdlc', implementer: 'codex', pr_fix_rounds: '99' }, { store: measurements });
+      const before = measurements.listMeasurements();
+      const result = await new StatsCommandUseCase(createStatsWorkflowAdapter({ store: measurements,
+        readMissionFlow: createStatsMissionFlowReader({ missionStore, laneEventRepo, usageRepo, repositoryId: REPO }) })).execute(
+        { mode: 'range', from: '2026-06-01', to: '2026-06-03' });
+      const report = renderRangeStatsReport(result.rows, { selection: result.selection });
+      assert.match(report, /codex\s+1\s+2\.00\s+1/);
+      assert.match(report, /custom\s+0\s+1\.00\s+1/);
+      assert.match(report, /Review-fix mission coverage: 1\/1/);
+      const outcomes = await new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: REPO,
+        cohortMetadata: async () => missionCohortMetadata([mission]) }).readOutcomes();
+      assert.equal(outcomes[0].reviewFixRounds, 3);
+      assert.deepEqual(outcomes[0].reviewFixRoundsByImplementer, { custom: 1, codex: 2 });
+      assert.deepEqual(measurements.listMeasurements(), before, 'normal reads never apply backfill');
+    } finally { measurements.close(); }
+  });
+});
+
 /** Hand-computed expectations, stated beside the fixture they describe. */
 const EXPECTED_POPULATION = 4;
 const EXPECTED_REVIEW_FIX_OBSERVATIONS = 2;
@@ -77,6 +119,7 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
             classification: 'ai_sdlc',
             implementer: 'claude',
             pr_fix_rounds: value === null ? null : String(value),
+
             stage: 'default',
           }, { store });
         }
@@ -98,6 +141,7 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
       // 2. Read it back through the normal adapters to presentation.
       const metrics = await new ConcreteMetricsReadAdapter({
         laneEventRepo, usageRepo, repositoryId: REPO, clock: fixedClock(NOW),
+        cohortMetadata: async () => fixtureCohortMetadata(rounds.map(([mission, count]) => ({ repo: REPO, mission, implementer: 'claude', pr_fix_rounds: count }))),
       }).buildMetrics(new Map<MissionId, MissionStatus>(
         rounds.map(([mission]) => [mission, 'done' as MissionStatus]),
       ));
@@ -125,7 +169,7 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
       try {
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: KNOWN_ZERO, classification: 'ai_sdlc',
-          implementer: 'claude', pr_fix_rounds: '0', stage: 'default',
+          implementer: 'claude', pr_fix_rounds: '0',  stage: 'default',
         }, { store });
         upsertMeasurementRow({
           date: '2026-06-02', repo: REPO, mission: UNKNOWN_A, classification: 'ai_sdlc',
@@ -137,6 +181,7 @@ describe("defect C: unknown review-fix rounds survive to presentation", () => {
 
       const outcomes = await new ConcreteMetricsReadAdapter({
         laneEventRepo, usageRepo, repositoryId: REPO, clock: fixedClock(NOW),
+        cohortMetadata: async () => fixtureCohortMetadata([{ repo: REPO, mission: KNOWN_ZERO, implementer: 'claude', pr_fix_rounds: 0 }, { repo: REPO, mission: UNKNOWN_A, implementer: 'claude', pr_fix_rounds: null }]),
       }).readOutcomes();
 
       const known = outcomes.find((outcome) => outcome.missionId === KNOWN_ZERO);
@@ -320,7 +365,11 @@ it('operator-only corrections retain their author and do not count as reviewer d
       const decision = currentReviewRound(loaded.mission.review!).decision;
       assert.ok(decision?.kind === 'changes-requested');
       assert.deepEqual(decision.source, operator ? { kind: 'operator', author: 'human-reviewer' } : undefined);
-      assert.equal(reviewStatistics(loaded.mission.review).prFixRounds, operator ? 0 : 1);
+      // Human corrections are repair obligations too (TASK-2818); classifier
+      // reviewer-decision coverage below must still exclude operator decisions.
+      const statistics = reviewStatistics(loaded.mission.review);
+      assert.equal(statistics.prFixRounds, 1);
+      assert.deepEqual(statistics.obligations.map(value => value.cause), [operator ? 'human' : 'review']);
     }
     const read = await new SqliteClassifierStatisticsReader(db, telemetry, REPO).read();
     assert.deepEqual(read.decisions.map(d => [d.mission, d.source, d.outcome]), [['reviewer-correction', 'reviewer', 'implementer']]);

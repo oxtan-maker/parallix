@@ -65,9 +65,9 @@ function recordingPort(overrides: Partial<StatisticsRecordingPort> = {}): Statis
     repositoryName: 'parallix',
     readClassification: () => ({ classification: 'ai_sdlc' }),
     readStoredClassification: async () => 'ai_sdlc',
+    readReviewEvidence: async () => ({ equivalentSubmissions: {} }),
     readReview: async () => null,
     readMeasurements: () => [],
-    readFixRoundHistory: () => [],
     upsert: row => ({ changed: true, row, data: { headers: [], rows: [row] } }),
     readMissionFlow: async () => [],
     ...overrides,
@@ -157,33 +157,36 @@ test('stage accumulation sequences classification, read, merge and write without
   assert.ok(!(result instanceof Promise), 'stage telemetry API remains synchronous');
 });
 
-test('active and review recording carry known history forward and preserve implementer credit (TASK-2637.04)', () => {
+test('active and review recording preserve implementer credit without fabricating review observations (TASK-2637.04)', () => {
   const calls: string[] = [];
   const useCase = new StatsRecordingUseCase(recordingPort({
-    readFixRoundHistory: () => { calls.push('history'); return [null, 0, 2]; },
     readClassification: () => { calls.push('classification'); return { classification: 'ai_sdlc' }; },
     upsert: row => { calls.push('write'); return { changed: true, row, data: { headers: [], rows: [row] } }; },
   }));
   const active = useCase.recordActive({ slug: 'task-1', date: '2026-06-23', implementer: 'codex' });
   assert.equal(active.row.stage, 'active');
-  assert.equal(active.row.pr_fix_rounds, '2');
-  assert.deepEqual(calls, ['history', 'classification', 'write']);
+  assert.equal(active.row.pr_fix_rounds, undefined);
+  assert.deepEqual(calls, ['classification', 'write']);
   calls.length = 0;
   const review = useCase.recordReview({
-    slug: 'task-1', date: '2026-06-23', implementer: 'codex', reviewer: 'claude', prFixRounds: '0',
+    slug: 'task-1', date: '2026-06-23', implementer: 'codex', reviewer: 'claude',
   });
   assert.equal(review.row.stage, 'review');
   assert.equal(review.row.implementer, 'codex');
   assert.equal(review.row.reviewer_agent, 'claude');
-  assert.equal(review.row.pr_fix_rounds, '0');
-  assert.deepEqual(calls, ['classification', 'write'], 'provided known zero skips history');
+  assert.equal(review.row.pr_fix_rounds, undefined);
+  assert.deepEqual(calls, ['classification', 'write'], 'stage telemetry does not read review history');
 });
 
-test('fix-round history distinguishes unknown, measured zero and unavailable reads (TASK-2637.04)', () => {
-  for (const [history, expected] of [[[], undefined], [[null, undefined], undefined], [[null, 0], '0']] as const) {
-    const useCase = new StatsRecordingUseCase(recordingPort({ readFixRoundHistory: () => history }));
-    assert.equal(useCase.defaultPrFixRounds('task-1'), expected);
+test('stage recording leaves unavailable review measurements unknown (TASK-2818)', () => {
+  const useCase = new StatsRecordingUseCase(recordingPort());
+  assert.equal(useCase.recordActive({ slug: 'task-1', date: '2026-06-23' }).row.pr_fix_rounds, undefined);
+});
+
+test('missing quota telemetry stays unavailable while recorded zero stays zero (TASK-2818 F1)', () => {
+  const useCase = new StatsRecordingUseCase(recordingPort());
+  for (const usagePercent of [undefined, NaN, Infinity, -1, 101, 0, 25]) {
+    const result = useCase.recordActive({ slug: 'task-quota', date: '2026-06-23', implementer: 'codex', telemetry: { usagePercent } });
+    assert.equal(result.row.openai_usage_after, usagePercent === 0 || usagePercent === 25 ? String(usagePercent) : '');
   }
-  const unavailable = new StatsRecordingUseCase(recordingPort({ readFixRoundHistory: () => { throw new Error('unreadable'); } }));
-  assert.equal(unavailable.defaultPrFixRounds('task-1'), undefined);
 });

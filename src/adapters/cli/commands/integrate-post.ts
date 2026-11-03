@@ -21,7 +21,6 @@ type IntegrationStatsRecorder = (options: StatsRecordingOptions) => IntegrationS
 export {
   recordStageStats,
   accumulateStageStats,
-  defaultPrFixRounds,
   recordIntegrationStats,
   recordActiveStats,
   recordReviewStats,

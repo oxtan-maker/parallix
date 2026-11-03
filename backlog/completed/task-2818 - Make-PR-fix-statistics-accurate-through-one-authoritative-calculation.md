@@ -1,8 +1,8 @@
 ---
 id: TASK-2818
 title: Make PR fix statistics accurate through one authoritative calculation
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-10-24 05:59'
 labels:
   - bug

@@ -1,3 +1,4 @@
+import { createMissionCohortMetadataReader } from '../../review/review-statistics-evidence.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import type { BoardLaneEventRepository } from '../../../application/ports/operation-history.js';
 import type { UsageRepository } from '../../../application/ports/mission-measurements.js';
@@ -7,10 +8,8 @@ import {
   type CohortComparison,
   type CohortDimension,
 } from '../../../application/projections/cohorts.js';
-import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../../../application/projections/metrics-read-adapter.js';
+import { ConcreteMetricsReadAdapter, type MissionCohortMetadata } from '../../../application/projections/metrics-read-adapter.js';
 import type { MissionId } from '../../../domain/mission.js';
-import type { MissionLabel } from '../../../domain/mission.js';
-import type { AgentFamily } from '../../../domain/agents.js';
 import type { MissionStatus } from '../../../domain/mission.js';
 import type { MissionTransition } from '../../../domain/mission-workflow.js';
 import { repositoryId as toRepositoryId, type RepositoryId } from '../../../domain/repository.js';
@@ -41,7 +40,7 @@ export interface StatsCohortsOptions {
   /** Net engineering lines per mission, when the caller can supply them. */
   readonly netEngineeringLines?: ReadonlyMap<MissionId, number | null>;
   /** Canonical Mission metadata; injected by fast isolated tests. */
-  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
+  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
 }
 
 export function printCohortsUsage(log: (_message: string) => unknown = fmt.log.plain): void {
@@ -152,7 +151,7 @@ export async function buildCohortComparison(options: {
   readonly dimension: CohortDimension;
   readonly lowSampleThreshold: number;
   readonly netEngineeringLines?: ReadonlyMap<MissionId, number | null>;
-  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, { readonly labels: readonly MissionLabel[]; readonly assignee: AgentFamily | null }>>;
+  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
 }): Promise<CohortComparison> {
   const adapter = new ConcreteMetricsReadAdapter({
     laneEventRepo: options.laneEventRepo,
@@ -211,7 +210,7 @@ export async function statsCohorts(
       const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
       const { db } = await initOperatorState({ configuration: options.configuration });
       const loaded = await new SqliteMissionStore(db).loadByRepository(repositoryId);
-      return missionCohortMetadata(loaded);
+      return createMissionCohortMetadataReader(rootDir)(loaded);
     });
     const comparison = await buildCohortComparison({
       ...repositories,

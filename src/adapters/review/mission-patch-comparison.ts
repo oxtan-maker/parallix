@@ -33,18 +33,44 @@ export class GitMissionPatchComparison {
       throw readFailure(args, error);
     }
   }
+  private readonly patches = new Map<string, Promise<string>>();
+  private cachedPatch(side: MissionRevision): Promise<string> {
+    const key = JSON.stringify(side);
+    let patch = this.patches.get(key);
+    if (!patch) { patch = this.patch(side); this.patches.set(key, patch); }
+    return patch;
+  }
+  private readonly emptyPatches = new Map<string, Promise<boolean>>();
+  private emptyPatch(side: MissionRevision): Promise<boolean> {
+    const key = JSON.stringify(side);
+    let empty = this.emptyPatches.get(key);
+    if (!empty) { empty = this.readEmptyPatch(side); this.emptyPatches.set(key, empty); }
+    return empty;
+  }
+  private async readEmptyPatch(side: MissionRevision): Promise<boolean> {
+    const paths = await this.changedPaths(side);
+    // Only release manifests can normalize to an empty patch. Every other
+    // non-bookkeeping path proves a changed mission tree without reading its diff.
+    if (paths.some(path => path !== 'package.json' && path !== 'package-lock.json')) { return false; }
+    return (await this.cachedPatch(side)) === '';
+  }
   async samePatch(before: MissionRevision, after: MissionRevision): Promise<boolean> {
-    const [left, right] = await Promise.all([this.patch(before), this.patch(after)]);
+    if (before.baseline === before.revision && before.baseline === after.baseline) { return this.emptyPatch(after); }
+    if (after.baseline === after.revision && after.baseline === before.baseline) { return this.emptyPatch(before); }
+    const [left, right] = await Promise.all([this.cachedPatch(before), this.cachedPatch(after)]);
     return left === right;
   }
-  private async patch(side: MissionRevision): Promise<string> {
+  private async changedPaths(side: MissionRevision): Promise<string[]> {
     // Fail even for empty patches when a recorded subject is missing or not a commit.
     for (const ref of [side.baseline, side.revision]) {
       if (!/^[a-f0-9]{40,64}$/.test(ref)) { throw new Error('recorded revision must be a commit SHA'); }
       await this.read(['cat-file', '-e', `${ref}^{commit}`]);
     }
-    const paths = (await this.read(['diff', '--no-renames', '--name-only', '-z', side.baseline, side.revision]))
+    return (await this.read(['diff', '--no-renames', '--name-only', '-z', side.baseline, side.revision]))
       .split('\0').filter(p => p && !isBookkeepingPath(p)).sort((left, right) => left.localeCompare(right));
+  }
+  private async patch(side: MissionRevision): Promise<string> {
+    const paths = await this.changedPaths(side);
     const patches = [];
     for (const path of paths) {
       let diff = await this.read(['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--binary', '--full-index',

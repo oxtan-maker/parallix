@@ -1,3 +1,4 @@
+import { fixtureReviewObservations } from '../../fixtures/review-statistics.js';
 import type { ReviewRound } from '../../../src/domain/review.js';
 import type { StatsRow } from "../../../src/application/services/statistics-row.js";
 
@@ -48,7 +49,7 @@ function completedMissionKeys(rows: readonly FixtureStatsRow[]) {
 function missionFlow(rows: readonly FixtureStatsRow[]) {
   return rows.filter(row => row.completedForTest === 'yes').map(row => {
     assert.ok(row.mission && row.date);
-    return { repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer ?? null };
+    return { repo: String(row.repo || ''), mission: row.mission, closedAt: `${row.date}T00:00:00Z`, labels: [], implementer: row.implementer ?? null, reviewStatistics: fixtureReviewObservations(rows).get(`${String(row.repo || "")}::${row.mission.toLowerCase()}`) };
   });
 }
 
@@ -61,7 +62,7 @@ function renderRangeStatsReport(rows: readonly FixtureStatsRow[], options: NonNu
 }
 
 function summarizeAgentWindow(rows: readonly FixtureStatsRow[], window: { start: Date; end: Date }, options: NonNullable<Parameters<typeof stats._internals.summarizeAgentWindow>[2]> = {}) {
-  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows) });
+  return stats._internals.summarizeAgentWindow(rows, window, { ...options, completedMissionKeys: completedMissionKeys(rows), reviewObservations: fixtureReviewObservations(rows) });
 }
 
 // visualBoard's Ways of Working use Forgejo review. Tests that exercise
@@ -544,10 +545,10 @@ test('task-1414: renderWeeklyStatsReport adds an agent spend-by-stage table with
 
   const plain = __mm2.stripAnsi(report);
   assert.match(plain, /Agent spend by stage this week/);
-  assert.match(plain, /Agent family\s+draft\s+execute\s+review\s+follow-up\s+default\s+total/);
+  assert.match(plain, /Agent family\s+draft\s+execute\s+review\s+follow-up\s+default\s+total \/ peak/);
 });
 
-test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usage_after with stage active shown as execute', () => {
+test('task-1414: renderWeeklyStatsReport keeps Codex quota peaks with stage active shown as execute', () => {
   const report = renderWeeklyStatsReport([
     { date: '2026-05-16', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'draft', pr_fix_rounds: '0', openai_usage_after: '20', cost_usd: '0', duration_minutes: '0', completedForTest: 'yes' },
     { date: '2026-05-17', repo: 'r', mission: 'task-codex', classification: 'ai_sdlc', implementer: 'codex', provider: 'openai', stage: 'active', pr_fix_rounds: '0', openai_usage_after: '30', cost_usd: '0', duration_minutes: '0', completedForTest: 'yes' },
@@ -556,7 +557,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Codex row from openai_usag
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /codex\s+20% \(20%\)\s+30% \(30%\)\s+50% \(50%\)\s+0% \(0%\)\s+0% \(0%\)\s+100% \(100%\)/);
+  assert.match(spendSection, /codex\s+20% quota peak\s+30% quota peak\s+50% quota peak\s+—\s+—\s+50% quota peak/);
   // Not fed by cost_usd or duration_minutes for a Codex/OpenAI row.
   assert.doesNotMatch(spendSection, /\$/);
   assert.doesNotMatch(spendSection, /\dm \(/);
@@ -781,7 +782,7 @@ test('recordIntegrationStats returns the unchanged weekly report labels for inte
     assert.doesNotMatch(report, /Agent telemetry/);
     assert.match(report, /Agent performance this week \(2026-05-12 → 2026-05-18\)/);
     assert.match(report, /Agent performance previous week \(2026-05-05 → 2026-05-11\)/);
-    assert.match(report, /Agent family\s+# missions as implementer\s+Average PR fix rounds to complete mission/);
+    assert.match(report, /Agent family\s+# missions as implementer\s+Average authored PR fix rounds/);
     assert.doesNotMatch(report, /Mission flow \(2026-05-12 → 2026-05-18\)/);
   } finally {
     await restoreHome();
@@ -801,7 +802,7 @@ test('task-1251 and task-1314: normalizeStatsRow migrates a legacy 5-column row 
   assert.equal(row.repo, stats.resolveStatsRepoName(process.cwd()));
   assert.equal(row.stage, 'default');         // legacy rows fold into the default stage
   assert.equal(row.input_tokens, '0');
-  assert.equal(row.openai_usage_after, '0');
+  assert.equal(row.openai_usage_after, '');
 });
 
 test('task-1314: stats mission reports filter to the active repo', async () => {
@@ -885,7 +886,7 @@ test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero f
   assert.equal(zero.provider, 'claude');
   assert.equal(zero.model, 'claude');
   assert.equal(zero.input_tokens, '0');
-  assert.equal(zero.openai_usage_after, '0');
+  assert.equal(zero.openai_usage_after, '');
 });
 
 test('task-1301: renderRangeStatsReport counts unique missions when a mission has multiple stage rows', () => {
@@ -1095,17 +1096,16 @@ test('deriveImplementerAndFixRounds prefers the Review aggregate over the event 
   }
 });
 
-test('summarizeAgentWindow reports the stored fix-round count, and honors an injected derivation (task-1318)', () => {
+test('summarizeAgentWindow reports the reconciled stored observation (task-1318)', () => {
   // The stored count is what the review loop stamped from the Review
   // aggregate, so the renderer reports it rather than re-deriving it from
-  // mission-local files (which no longer exist). A caller that has already
-  // derived a count can still inject one.
+  // mission-local files (which no longer exist).
   // Only the closed rollup row carries the authoritative pr_fix_rounds.
   const window = { start: new Date('2026-06-10T00:00:00Z'), end: new Date('2026-06-16T00:00:00Z') };
   const rows = [
     { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '0', completedForTest: 'no' },
     { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'review', classification: 'ai_sdlc', pr_fix_rounds: '0', completedForTest: 'no' },
-    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'default', classification: 'ai_sdlc', pr_fix_rounds: '2', completedForTest: 'yes' },
+    { date: '2026-06-13', repo: '', mission: 'task-3000', implementer: 'codex', stage: 'default', classification: 'ai_sdlc', pr_fix_rounds: '2',  completedForTest: 'yes' },
   ];
 
   const stored = summarizeAgentWindow(rows, window);
@@ -1113,11 +1113,7 @@ test('summarizeAgentWindow reports the stored fix-round count, and honors an inj
   assert.equal(stored[0].missions, 1);
   assert.equal(stored[0].averageFixRounds, '2.00', 'pr_fix_rounds from closed rollup row');
 
-  const injected = summarizeAgentWindow(rows, window, {
-    rootDir: '/does-not-matter',
-    deriveFixRoundsFn: () => 5,
-  });
-  assert.equal(injected[0].averageFixRounds, '5.00', 'an injected derivation overrides the stored value');
+
 });
 
 // task-1342: mixed-agent per-mission phase telemetry regression
@@ -1311,7 +1307,7 @@ test('weekly and range delivery credit ignores failed families and mixed attempt
     assert.doesNotMatch(performance, /codex|claude|mixed|opus/);
   }
   const unknown = stats.renderRangeStatsReport(rows, { from: '2026-05-01', to: '2026-05-31', missionFlow: [{ ...completion[0], implementer: null }] });
-  assert.doesNotMatch(__mm2.stripAnsi(unknown).split('Agent performance')[1], /custom|codex|claude|mixed/);
+  assert.doesNotMatch(__mm2.stripAnsi(unknown).split('Agent performance')[1].split('Agent spend')[0], /custom|codex|claude|mixed/);
 });
 
 test('task-2362: thoughts_tokens survives telemetryToStatsFields and the measurement store round-trip', () => {

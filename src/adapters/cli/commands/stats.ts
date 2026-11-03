@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createReviewStatisticsEvidenceReader } from '../../review/review-statistics-evidence.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 
 type StatisticsMeasurementStore = Pick<MeasurementStorePort, 'listMeasurements' | 'upsertMeasurement'>
@@ -42,7 +43,6 @@ import { reviewStatistics } from '../../../application/services/review-statistic
 // Report rendering lives in its own module (task-2369.02). Re-exported below so
 // every existing caller keeps importing it from `./stats.js`.
 import {
-  generateMarkdownReport,
   computeAgentMissionGroups,
   summarizeAgentWindow,
   summarizeAgentStageSpend,
@@ -57,7 +57,7 @@ import {
 import {
   STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer,
   parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow,
-  sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel,
+  sameStatsIdentity, statsRowActorKey, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel,
   normalizeClassification, isValidClassification, normalizeRow, normalizeRows, parseBooleanish, statsMissionKey, modelBelongsToImplFamily, rowInWindow,
 } from './stats-normalization.js';
 
@@ -97,14 +97,12 @@ function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementS
 /**
  * Read every stored measurement back as the string-shaped `StatsRow` the
  * report renderers consume. The mapping restores the historical CSV-era
- * defaults ('' for text, '0' for numeric) so filtering, totals, grouping,
- * formatting, and missing-data behavior are unchanged by the cut-over.
+ * defaults except for nullable observations and quota levels, whose absence
+ * must survive storage rather than becoming an invented measured zero.
  */
 function measurementToStatsRow(record: import('../../../application/ports/mission-measurements.js').UsageRecord): StatsRow {
   const numeric = (value: unknown) => (value === null || value === undefined ? '0' : String(value));
-  // `pr_fix_rounds` is the one measurement that is genuinely nullable: an
-  // unknown number of review-fix rounds is not a measured zero, and collapsing
-  // it here would inflate every observation count downstream (TASK-2369).
+  // Missing review observations and quota levels are not measured zeros.
   const nullableNumeric = (value: unknown) => (value === null || value === undefined ? undefined : String(value));
   return {
     date: record.date || '',
@@ -125,7 +123,7 @@ function measurementToStatsRow(record: import('../../../application/ports/missio
     context_tokens: numeric(record.context_tokens),
     tool_calls: numeric(record.tool_calls),
     openai_usage_before: numeric(record.openai_usage_before),
-    openai_usage_after: numeric(record.openai_usage_after),
+    openai_usage_after: nullableNumeric(record.openai_usage_after),
     openai_usage_delta: numeric(record.openai_usage_delta),
     duration_minutes: numeric(record.duration_minutes),
     cost_usd: numeric(record.cost_usd),
@@ -154,7 +152,7 @@ function statsRowToMeasurement(row: StatsRow) {
     date: row.date || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
-    pr_fix_rounds: row.pr_fix_rounds === undefined ? undefined : int(row.pr_fix_rounds),
+    pr_fix_rounds: row.pr_fix_rounds === null || row.pr_fix_rounds === undefined ? undefined : int(row.pr_fix_rounds),
     provider: row.provider || '',
     model: row.model || '',
     implementer_agent: row.implementer_agent || '',
@@ -166,7 +164,7 @@ function statsRowToMeasurement(row: StatsRow) {
     context_tokens: int(row.context_tokens),
     tool_calls: int(row.tool_calls),
     openai_usage_before: int(row.openai_usage_before),
-    openai_usage_after: int(row.openai_usage_after),
+    openai_usage_after: row.openai_usage_after ? int(row.openai_usage_after) : undefined,
     openai_usage_delta: int(row.openai_usage_delta),
     duration_minutes: int(row.duration_minutes),
     cost_usd: dec(row.cost_usd),
@@ -199,14 +197,6 @@ export function createStatsWorkflowAdapter(binding: StatsReadBinding): StatsWork
 // `saveStatsCsv` was removed by architecture migration: no production path writes CSV.
 // The measurement database is the sole authority (ADR 0053).
 
-function statsRowActorKey(row: StatsRow = {}) {
-  const stage = String(row.stage || 'default').trim().toLowerCase() || 'default';
-  if (stage === 'review') {
-    return normalizeImplementer(row.reviewer_agent || row.implementer_agent || row.implementer || '') || '';
-  }
-  return normalizeImplementer(row.implementer_agent || row.implementer || '') || '';
-}
-
  // Core renderers from stats-report.ts (task-2217)
 const { formatStatsTable, renderWeeklyStatsReport, renderRangeStatsReport } = statsReport;
 
@@ -238,7 +228,8 @@ async function deriveImplementerAndFixRounds(slug: string, rootDir = process.cwd
       `deriveImplementerAndFixRounds requires a MissionStore: the stats caller must supply the operator store so ${slug} is read from the authoritative Review aggregate. Store omission is an invariant error; there is no PR, Git, or backlog fallback.`,
     );
   }
-  return reviewStatistics(await loadMissionReview(slug, rootDir, missionStore));
+  const review = await loadMissionReview(slug, rootDir, missionStore);
+  return reviewStatistics(review, await createReviewStatisticsEvidenceReader(rootDir)(review));
 }
 
 /**
@@ -298,7 +289,6 @@ export interface StatsRecordingOptions extends StatsOptions {
   date?: string;
   implementer?: string;
   reviewer?: string;
-  prFixRounds?: string | null;
   telemetry?: StageStatsRequest['telemetry'];
   durationMinutes?: number;
   model?: string | null;
@@ -313,12 +303,8 @@ export function createStatsRecordingUseCase(options: StatsRecordingOptions): Sta
     readClassification: slug => resolveMissionClassification(slug, rootDir, undefined, options.configuration),
     readStoredClassification: slug => resolveStoredMissionClassification(slug, options.missionStore),
     readReview: slug => loadMissionReview(slug, rootDir, options.missionStore),
+    readReviewEvidence: createReviewStatisticsEvidenceReader(rootDir),
     readMeasurements: () => loadMeasurementRows(options).rows,
-    readFixRoundHistory: slug => {
-      const store = getMeasurementStore(options);
-      if (!store.findByMission) { throw new Error('Measurement history reader is unavailable.'); }
-      return store.findByMission(slug).map(record => record.pr_fix_rounds);
-    },
     upsert: row => upsertMeasurementRow(row, options),
     readMissionFlow: options.readMissionFlow ?? (async () => null),
   };
@@ -329,7 +315,7 @@ function stageRequest(options: StatsRecordingOptions): StageStatsRequest {
   return {
     slug: options.slug || '', stage: options.stage || '',
     date: options.date ?? formatDateOnly(new Date()),
-    implementer: options.implementer, reviewer: options.reviewer, prFixRounds: options.prFixRounds,
+    implementer: options.implementer, reviewer: options.reviewer,
     telemetry: options.telemetry, durationMinutes: options.durationMinutes, model: options.model,
   };
 }
@@ -360,10 +346,6 @@ function accumulateStageStats(options: StatsRecordingOptions) {
   return createStatsRecordingUseCase(options).accumulateStage(stageRequest(options));
 }
 
-function defaultPrFixRounds(slug: string, rootDir: string, provided: string | null | undefined, options: StatsOptions = {}) {
-  return createStatsRecordingUseCase({ ...options, rootDir }).defaultPrFixRounds(slug, provided);
-}
-
 function recordActiveStats(options: StatsRecordingOptions = {}) {
   return createStatsRecordingUseCase(options).recordActive({ ...stageRequest(options), stage: options.stage });
 }
@@ -377,7 +359,6 @@ function recordReviewStats(options: StatsRecordingOptions = {}) {
 // command is built in the composition root with the operator MissionStore
 // (TASK-2378/SC13) — no store-less workflow adapter exists at module level.
 const _internals = {
-  generateMarkdownReport,
   normalizeRow,
   normalizeRows,
   parseBooleanish,
@@ -434,4 +415,4 @@ const stats = {
 };
 
 export default stats;
-export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, defaultPrFixRounds, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };
+export { stats, _internals, statsCohorts, STATS_HEADERS, USAGE_NUMBERS, VALID_CLASSIFICATIONS, normalizeStatsRow, normalizeImplementer, parseDateOnly, parseDateOnlyStrict, formatDateOnly, parseToday, createWindow, createRangeWindow, buildWeeklyWindows, canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, accumulateDecimalStrings, mergeLabel, parseBooleanish, normalizeRow, normalizeRows, statsMissionKey, modelBelongsToImplFamily, isValidClassification, normalizeClassification, rowInWindow, resolveStatsRepoName, recordIntegrationStats, renderWeeklyStatsReport, renderMissionPhaseReport, renderRangeStatsReport, resolveMissionClassification, deriveImplementerAndFixRounds, upsertMeasurementRow, loadMeasurementRows, measurementToStatsRow, statsRowToMeasurement, recordStageStats, accumulateStageStats, recordActiveStats, recordReviewStats, telemetryToStatsFields, formatStatsTable, computeAgentMissionGroups, summarizeAgentWindow, summarizeAgentStageSpend, formatAgentSpendCell, colorAverageFixRounds, colorMissionCounts, AGENT_SPEND_STAGE_COLUMNS, MISSION_PHASE_ORDER, statsRowActorKey };

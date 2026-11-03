@@ -33,7 +33,6 @@
     "unit/adapters/cli/commands/integration-repair-finalized-tree.test.ts",
     "unit/adapters/cli/commands/mission-directory-free-workflow.test.ts",
     "unit/adapters/cli/commands/prompt-split.test.ts",
-    "unit/adapters/cli/commands/stats-backfill-helpers.test.ts",
     "unit/adapters/cli/commands/stats-csv-authority-guard.test.ts",
     "unit/adapters/cli/commands/stats-normalization.test.ts",
     "unit/adapters/cli/commands/stats-report-rendering-pure.test.ts",

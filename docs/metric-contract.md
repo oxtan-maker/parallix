@@ -24,10 +24,29 @@ This contract defines every production statistic shown by the board FLOW surface
 | Current lane age / bottleneck | Which non-terminal lane is waiting longest now? Source: latest lifecycle event plus injected projection clock. | `asOf - enteredCurrentLaneAt`; `done` and `integration` never select the bottleneck. Per-lane median reports its own `n`. Class: lifecycle. |
 | Throughput / weekly throughput | How many missions were delivered over time? Source: first `integration → done` lifecycle event. | Count delivered missions by completion week; FLOW compares the current and preceding non-overlapping seven-day windows. Class: lifecycle. |
 | Review bounce rate | How often did reviewed missions return to active? Source: lifecycle events. | `review → active` bounce events divided by missions that entered review; repeated bounces count as events and denominator is missions. `pr_fix_rounds` is a separate review-fix metric. Class: lifecycle. |
-| Review-fix rounds | How many reviewed revisions required fixes? Source: authoritative review events. | Median over completed missions with an authoritative review decision; unknown when no writer exists. Coverage is measured missions. Class: review measurement. |
+| Review-fix rounds | How many distinct repair obligations required implementation changes? Source: reconciled Review decisions, human corrections and approval revocations. | Count each obligation once, combining duplicate publications and provider/local evidence. Report review, human and evidenced integration repairs separately from pushback, infrastructure incidents, mechanical re-review and unknown causes. Unknown counts and authorship remain unavailable. Mission summaries use mission totals; agent averages use authored obligations and show their measured mission count (`PR fix n`). Class: review measurement. |
 | Agent runtime | How much measured agent execution was used? Source: agent runs in `usage_statistics`. | Sum measured run duration per delivered mission, then aggregate only measured missions. Missing duration is unavailable, not zero. Class: telemetry. |
 | Tokens, cost, tool calls | What measured resources did delivery use? Source: agent runs in `usage_statistics`. | Sum available values per delivered mission, then aggregate only values observed for that metric. Display numerator/denominator coverage. Class: telemetry. |
+| Agent spend by stage | Which resources were recorded for each stage actor? Source: stage measurements. | Weekly and date-range reports group by the agent that performed each stage and its model, using measurement dates rather than mission completion. Codex shows the peak recorded quota level per stage and across the row, labelled "quota peak"; snapshots are never summed or used for stage shares. Missing or invalid levels show unavailable; a recorded zero remains zero. Quota snapshots lack the baseline and quota-window identity needed to attribute consumption deltas. Claude uses dollars and custom runners use minutes even when their provider is OpenAI; their totals and parenthesized stage shares remain additive. Class: telemetry. |
 | Cohort comparison | Did a labelled experiment cohort differ? Source: canonical Mission labels/assignee and agent-run provider/model, plus lifecycle events. | Group completed repository-scoped outcomes by label, implementer, model, provider, or inclusive completion-date range. Show cohort `n`, lifecycle and review figures, runtime/tokens/cost, and per-metric coverage. Class: derived comparison. |
+
+Review-fix authorship follows the submitted work when agents change. Earlier
+agents retain obligations for their work, even when a replacement performs the
+repair. Delivery counts and cohort `n` still use final ownership; repair
+observation counts can therefore include an agent with no final deliveries.
+An implementer cohort uses that agent’s authored repair observations, while
+label and date cohorts use mission totals. Lifecycle metrics keep their own
+populations and denominators.
+
+Normal stats and board reads reconcile retained Review history directly, so
+repair observations do not require a backfill first. Reports have no persisted
+snapshot or scalar fallback. Historical scalar counts are export and
+reconstruction outputs of the same calculation; stage telemetry does not
+establish a review measurement. `px stats backfill`
+previews reconstruction from retained Mission history, including existing rows,
+with old/new counts, coverage and unresolved histories. `--apply` writes the
+same reconstruction idempotently; raw review evidence is preserved. Inspect an
+isolated database copy before applying it to operator state.
 
 ## Bug-labeled mission trend
 

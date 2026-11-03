@@ -1,3 +1,4 @@
+import { createMissionCohortMetadataReader } from '../adapters/review/review-statistics-evidence.js';
 import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { failedExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
@@ -24,7 +25,7 @@ import { processLivenessProbe } from '../adapters/process/process-liveness.js';
 import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { BoardProjectionBuilder } from '../application/projections/board-readers.js';
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
-import { ConcreteMetricsReadAdapter, missionCohortMetadata } from '../application/projections/metrics-read-adapter.js';
+import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { SourceFact } from '../application/contracts.js';
 import { BoardCommandController, type BoardMissionServices } from '../application/controller/board-controller.js';
@@ -216,7 +217,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
         netEngineeringLines: async () => new Map(
           (await missions.loadAllMissions()).map((mission) => [mission.id, mission.netEngineeringLines]),
         ),
-        cohortMetadata: async () => missionCohortMetadata(await missions.loadAllMissions()),
+        cohortMetadata: async () => createMissionCohortMetadataReader(deps.rootDir)(await missions.loadAllMissions()),
       }),
     },
   );

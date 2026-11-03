@@ -82,6 +82,25 @@ export type ADR0053ConceptName =
  * any new durable file read or write must be registered here or the build fails.
  */
 export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
+  // Disposable immutable Git patch proofs; Review remains statistics authority.
+  {
+    id: 'review-patch-proof-cache-read',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/review/review-statistics-evidence.ts',
+    operation: 'read',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
+  {
+    id: 'review-patch-proof-cache-write',
+    concept: 'LargeArtifacts',
+    pathType: 'default',
+    fileLocation: 'src/adapters/review/review-statistics-evidence.ts',
+    operation: 'write',
+    classification: 'generated-artifact',
+    cutoverTask: null,
+  },
   // The typed write port exposes generated metadata snapshots, never Mission
   // authority. The concrete snapshot writers retain their own entries below.
   {
@@ -1482,6 +1501,13 @@ export const MISSION_DOCUMENT_CALL_SITES: readonly MissionDocumentCallSiteEntry[
  * - `backlog-task` ↔ `task-intake-read-backlog`
  */
 export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventoryEntry[] = [
+  {
+    id: 'review-patch-proof-cache',
+    pathPattern: '.workflow/cache/review-patch-proofs-v1.json',
+    writer: 'src/adapters/review/review-statistics-evidence.ts#PatchProofCache.flush',
+    classification: 'cache-scratch-data',
+    persistencePolicy: 'Disposable immutable Git patch proofs, never review counts; atomic temporary-file direct-write exception. Missing or corrupt cache is a miss.',
+  },
   {
     id: 'session-metadata',
     pathPattern: '<PARALLIX_HOME>/parallix.db:session_markers',
