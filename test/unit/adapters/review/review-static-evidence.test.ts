@@ -89,6 +89,29 @@ test('nonexistent test names and test-file paths are rejected (TASK-2662)', () =
   }
 });
 
+test('a repository path cited mid-sentence before more path-like prose is verifiable (px-0016)', () => {
+  const { root, fileSystem } = memoryRepository({ 'src/adapters/review/setup-review.ts': '' });
+  const evidence = 'Audit of src/adapters/review/setup-review.ts and setup-review-auth.ts found discarded passwords';
+  assert.equal(findUnverifiableRecordedRow(fileSystem, [{ criterion: 'audited', evidence }], root), null);
+  const missing = memoryRepository({});
+  assert.ok(findUnverifiableRecordedRow(missing.fileSystem, [{ criterion: 'audited', evidence }], missing.root));
+});
+
+test('prose fragments and numeric dotted tokens are not repository path evidence (px-0016)', () => {
+  const { root, fileSystem } = memoryRepository({
+    'test/example.test.ts': "test('real evidence title', () => {});",
+    'src/example.ts': '',
+    'docs/example.md': '',
+  });
+  for (const evidence of [
+    'test passed in 0.5s',
+    'Ran the src checks at 3.5 GHz',
+    'Verified it works . Version 1.5',
+  ]) {
+    assert.ok(findUnverifiableRecordedRow(fileSystem, [{ criterion: 'covered', evidence }], root), evidence);
+  }
+});
+
 test('a basename-only case module reference is rejected with a repository-relative path hint (TASK-2657)', () => {
   const { root, fileSystem } = caseRepository();
   const basename = findUnverifiableRecordedRow(fileSystem, [{ criterion: 'board interaction', evidence: 'web-board-interaction.cases.ts' }], root);

@@ -15,6 +15,8 @@ import { ReviewPreparationCommandUseCase } from '../../../../../src/application/
 import { SLUG, LEGACY_MISSION_LOAD, makePorts, makeRecorder, runOptions } from "../../../../helpers/review-preparation-ports.js";
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 
+const REPOSITORY_ROOT = path.resolve(import.meta.dirname, '../../../../..');
+
 function containsFile(directory: string): boolean {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     const target = path.join(directory, entry.name);
@@ -57,7 +59,7 @@ function containsRetiredWorkflowMetadata(root: string): boolean {
 
 test('the self-hosted tree contains no retired workflow ledger roots', () => {
   // Completed and cancelled task-provider records remain history, not ledgers.
-  assert.equal(containsRetiredWorkflowMetadata(process.cwd()), false);
+  assert.equal(containsRetiredWorkflowMetadata(REPOSITORY_ROOT), false);
 });
 
 test('the retired archive guard permits cancelled task history (TASK-2794)', () => {

@@ -4,6 +4,10 @@ const environment: NodeJS.ProcessEnv = { ...process.env };
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createReviewWorkflowAdapter } from '../../../../src/adapters/review/review-workflow-adapter.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
+import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { pushRound } from '../../../../src/adapters/review/review-commands.js';
 import {
   defaultRepoSlug,
@@ -130,4 +134,143 @@ test('setup-review buildNonInteractiveAnswers defaults owner to human without en
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// Publication belongs to the recorded implementer, independently of the reviewer.
+for (const explicit of [false, true]) {
+  test(`review push preserves recorded codex authorship with custom reviewer; explicit=${explicit} (px-0016)`, async () => {
+    const published: string[] = [];
+    const adapter = createReviewWorkflowAdapter();
+    await adapter.push({ slug: mockSlug, args: ['--push', ...(explicit ? ['--implementer', 'codex'] : [])], options: {
+      missionStore: { load: async () => ({ kind: 'found', version: missionVersion(1), mission: fixtureMission(mockSlug, { assignee: agentFamily('codex') }) }) },
+      resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+      resolveReviewUserFn: (user: string) => user, isReviewProviderEnabledFn: () => true,
+      readTokenFn: (user: string) => `${user}-token`, transitionTaskFn: async () => true,
+      createPrFn: (_branch: string, user: string, token: string) => { published.push(`${user}:${token}`); return { ok: true }; },
+      log: () => {}, error: (message: string) => assert.fail(message), exit: (code: number) => assert.fail(`exit ${code}`),
+    } });
+    assert.deepEqual(published, ['codex:codex-token']);
+  });
+}
+
+test('review push cannot override recorded implementer with a flag or stale review metadata (px-0016)', async () => {
+  const publications: string[] = [];
+  const errors: string[] = [];
+  const exits: number[] = [];
+  const adapter = createReviewWorkflowAdapter();
+  const options = {
+    missionStore: { load: async () => ({ kind: 'found', version: missionVersion(1), mission: fixtureMission(mockSlug, { assignee: agentFamily('codex') }) }) },
+    resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'custom', reviewer: 'custom' }),
+    resolveReviewUserFn: (user: string) => user, isReviewProviderEnabledFn: () => true,
+    readTokenFn: (user: string) => `${user}-token`, transitionTaskFn: async () => true,
+    createPrFn: (_branch: string, user: string) => { publications.push(user); return { ok: true }; },
+    log: () => {}, error: (message: string) => errors.push(message), exit: (code: number) => exits.push(code),
+  };
+  await adapter.push({ slug: mockSlug, args: ['--push'], options });
+  assert.deepEqual(publications, ['codex']);
+  await adapter.push({ slug: mockSlug, args: ['--push', '--implementer', 'custom'], options });
+  assert.deepEqual(publications, ['codex'], 'a CLI override cannot authorize a different publisher');
+  assert.deepEqual(exits, [1]);
+  assert.match(errors.join('\n'), /differs from recorded implementer codex/);
+});
+
+for (const mode of ['unavailable', 'unassigned']) {
+  test(`review push refuses ${mode} Mission identity instead of using reviewer or task (px-0016)`, async () => {
+    const errors: string[] = [];
+    const exits: number[] = [];
+    await createReviewWorkflowAdapter().push({ slug: mockSlug, args: ['--push', '--implementer', 'codex'], options: {
+      missionStore: { load: async () => mode === 'unavailable'
+        ? { kind: 'unavailable', reason: 'fixture unavailable' }
+        : { kind: 'found', version: missionVersion(1), mission: fixtureMission(mockSlug, { assignee: null }) } },
+      resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+      resolveTaskFileFn: () => assert.fail('Mission identity cannot fall back to task metadata'),
+      isReviewProviderEnabledFn: () => true, readTokenFn: () => assert.fail('no credential selection without identity'),
+      createPrFn: () => assert.fail('no publication without identity'),
+      log: () => {}, error: (message: string) => errors.push(message), exit: (code: number) => exits.push(code),
+    } });
+    assert.deepEqual(exits, [1]);
+    assert.match(errors.join('\n'), /recorded implementer|No review identity/);
+  });
+}
+
+test('legacy review push uses the recorded implementer rather than reviewer (px-0016)', async () => {
+  const published: string[] = [];
+  await pushRound(mockSlug, {
+    resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+    resolveReviewUserFn: user => user, isReviewProviderEnabledFn: () => true,
+    readTokenFn: user => `${user}-token`, transitionTaskFn: async () => true,
+    createPrFn: (_branch, user) => { published.push(user); return { ok: true }; },
+    log: () => {}, error: message => assert.fail(message), exit: code => assert.fail(`exit ${code}`),
+  });
+  assert.deepEqual(published, ['codex']);
+});
+
+test('review push retains configured credential home through lookup bootstrap and publication (px-0016)', async () => {
+  const configuration = resolveConfiguration({ FORGEJO_HOME: '/configured/forgejo' });
+  let publications = 0;
+  let bootstraps = 0;
+  await createReviewWorkflowAdapter().push({ slug: mockSlug, args: ['--push', '--implementer', 'codex'], options: {
+    configuration,
+    resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+    resolveReviewUserFn: (user: string) => user, isReviewProviderEnabledFn: () => true,
+    readTokenFn: (user: string, options: { rootDir?: string; configuration?: typeof configuration }) => {
+      assert.equal(user, 'codex'); assert.equal(options.rootDir, '/fixture');
+      assert.strictEqual(options.configuration, configuration); return 'codex-token';
+    },
+    transitionTaskFn: async () => true,
+    createPrFn: (_branch: string, user: string, _token: string, options: { configuration?: typeof configuration }) => {
+      assert.equal(user, 'codex'); assert.strictEqual(options.configuration, configuration);
+      return ++publications === 1 ? { ok: false, error: 'Repository not found' } : { ok: true };
+    },
+    bootstrapReviewSurfaceFn: async (_root: string, _setup: unknown, options: { configuration?: typeof configuration }) => {
+      assert.strictEqual(options.configuration, configuration); bootstraps++; return { ok: true };
+    },
+    resolveReviewAdapterFn: () => ({ provider: 'forgejo', baseUrl: 'http://fixture', repo: 'human/fixture', remote: 'review' }),
+    log: () => {}, error: (message: string) => assert.fail(message), exit: (code: number) => assert.fail(`exit ${code}`),
+  } });
+  assert.equal(publications, 2); assert.equal(bootstraps, 1);
+});
+
+test('review push rejects unreadable recorded implementer (px-0016)', async () => {
+  const errors: string[] = [];
+  const exits: number[] = [];
+  await pushRound(mockSlug, {
+    resolveWorktreeFn: () => '/fixture', isReviewProviderEnabledFn: () => true,
+    readReviewStateFn: () => { throw new Error('state unreadable'); },
+    readTokenFn: () => assert.fail('no credential lookup without identity'),
+    createPrFn: () => assert.fail('no publication without identity'),
+    log: () => {}, error: message => errors.push(message), exit: code => exits.push(code),
+  });
+  assert.deepEqual(exits, [1]);
+  assert.match(errors.join('\n'), /Cannot read the recorded implementer/);
+});
+
+test('review push rejects requested implementer differing from recorded one (px-0016)', async () => {
+  const errors: string[] = [];
+  const exits: number[] = [];
+  await pushRound(mockSlug, {
+    implementer: 'claude',
+    resolveWorktreeFn: () => '/fixture', isReviewProviderEnabledFn: () => true,
+    readReviewStateFn: () => ({ implementer: 'codex' }),
+    readTokenFn: () => assert.fail('no credential lookup on identity mismatch'),
+    createPrFn: () => assert.fail('no publication on identity mismatch'),
+    log: () => {}, error: message => errors.push(message), exit: code => exits.push(code),
+  });
+  assert.deepEqual(exits, [1]);
+  assert.match(errors.join('\n'), /differs from recorded implementer codex/);
+});
+
+test('review push warns when it defaults the identity to autonomous (px-0016)', async () => {
+  const logs: string[] = [];
+  const published: string[] = [];
+  await pushRound(mockSlug, {
+    resolveWorktreeFn: () => '/fixture', isReviewProviderEnabledFn: () => false,
+    readReviewStateFn: () => null,
+    resolveTaskFileFn: () => ({ ok: false }) as ReturnType<NonNullable<Parameters<typeof pushRound>[1]>['resolveTaskFileFn'] & {}>,
+    resolveReviewUserFn: user => user, readTokenFn: user => `${user}-token`, transitionTaskFn: async () => true,
+    createPrFn: (_branch, user) => { published.push(user); return { ok: true }; },
+    log: message => logs.push(message), error: message => assert.fail(message), exit: code => assert.fail(`exit ${code}`),
+  });
+  assert.match(logs.join('\n'), /defaulting to "autonomous"/);
+  assert.deepEqual(published, ['autonomous']);
 });

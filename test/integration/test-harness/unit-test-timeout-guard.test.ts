@@ -64,6 +64,9 @@ let runnerBundle: string;
 let bootstrapBundle: string;
 before(async () => {
   runnerDirectory = mkdtemp('cpu-runner-bundle-');
+  // Bundled local imports can still load external packages (such as esbuild).
+  // ESM resolves those from the bundle location, not the child checkout cwd.
+  fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(runnerDirectory, 'node_modules'));
   runnerBundle = path.join(runnerDirectory, 'runner.mjs');
   await build({ entryPoints: [RUNNER_PATH], outfile: runnerBundle, bundle: true,
     minify: true, platform: 'node', format: 'esm', packages: 'external' });

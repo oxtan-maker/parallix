@@ -54,12 +54,15 @@ export function scopeProperties(limitMiB: number): string[] {
 
 /** Wrap `command` so it starts inside a memory-limited scope. */
 export function wrapInScope(limitMiB: number, command: string, args: readonly string[], unit = scopeUnitName(), retainFailure = false): ScopeLaunch {
+  // systemd-run otherwise copies the full command line into the unit description;
+  // a suite-list argv of tens of KiB makes scope start intermittently fail with
+  // "Unit ... not found", so the description stays fixed and short.
   // A retained failed scope keeps systemd's terminal Result (`oom-kill`) readable
   // after the cgroup is gone; the owner must call forgetScope.
   return {
     unit,
     command: 'systemd-run',
-    args: ['--user', '--scope', '--quiet', ...(retainFailure ? [] : ['--collect']), '--unit', unit, ...scopeProperties(limitMiB), '--', command, ...args],
+    args: ['--user', '--scope', '--quiet', '--description', 'parallix test runner', ...(retainFailure ? [] : ['--collect']), '--unit', unit, ...scopeProperties(limitMiB), '--', command, ...args],
   };
 }
 

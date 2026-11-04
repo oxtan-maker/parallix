@@ -129,6 +129,18 @@ function existsInRepository(fileSystem: EvidenceFileSystemPort, rootDir: string,
   return resolved !== null && fsExistsSync(fileSystem, resolved);
 }
 
+function isRepositoryFile(fileSystem: EvidenceFileSystemPort, rootDir: string, candidatePath: string): boolean {
+  if (candidatePath === '' || candidatePath === '.' || candidatePath === '..') { return false; }
+  const resolved = repositoryPath(rootDir, candidatePath);
+  if (resolved === null) { return false; }
+  try {
+    return fsListEntries(fileSystem, path.dirname(resolved))
+      .some(entry => entry.name === path.basename(resolved) && entry.isFile());
+  } catch {
+    return false;
+  }
+}
+
 function hasFileLineReference(fileSystem: EvidenceFileSystemPort, normalized: string, rootDir: string): boolean {
   const fileLinePattern = /(?:^|[\s(`])((?:\/|\.\/)?[\w./-]+\.[\w-]+):(\d+)(?:-\d+)?/g;
   let fileLineMatch: RegExpExecArray | null;
@@ -150,6 +162,16 @@ function hasBarePathReference(fileSystem: EvidenceFileSystemPort, normalized: st
   let barePathMatch: RegExpExecArray | null;
   while ((barePathMatch = barePathPattern.exec(normalized)) !== null) {
     const words = barePathMatch[1].trim().split(' ');
+    // A greedy match spans prose up to the last path-like word, so a path cited
+    // mid-sentence is only a single word of it, not a suffix. Only accept a
+    // path-shaped token that names a file; prose words, directories and a lone
+    // period must not become evidence merely because they resolve in the root.
+    if (words.some(word => {
+      const candidatePath = word.replace(/\.+$/, '');
+      const pathShaped = candidatePath.includes('/') || candidatePath.includes('\\')
+        || /\.[A-Za-z][\w-]*$/.test(candidatePath);
+      return pathShaped && isRepositoryFile(fileSystem, rootDir, candidatePath);
+    })) { return true; }
     for (let start = 0; start < words.length; start += 1) {
       const candidatePath = words.slice(start).join(' ');
       if (existsInRepository(fileSystem, rootDir, candidatePath)) { return true; }

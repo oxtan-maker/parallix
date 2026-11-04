@@ -1,5 +1,7 @@
 import type { ReviewStateReader } from './review-state.js';
 import { reviewRoundLiveness, describeReviewLiveness } from '../../application/projections/review-liveness.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import { rebaseImplementer } from '../../application/rebase-identity.js';
 import { reviewPushIdentity } from '../../domain/review-command-policy.js';
 /**
  * Review Commands Module
@@ -98,6 +100,9 @@ export async function readComments(
 export async function pushRound(
   slug: string,
   options: {
+    configuration?: ParallixConfiguration;
+    missionStore?: Pick<MissionStore, 'load'> | null;
+    implementer?: string;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => void;
@@ -124,10 +129,10 @@ export async function pushRound(
   const branch = missionBranchName(slug, rootDir);
   const providerEnabled = isReviewProviderEnabledFn(rootDir);
 
-  const reviewIdentity = await resolvePushReviewIdentity(slug, rootDir, providerEnabled, readReviewStateFn, resolveTaskFileFn, getTaskImplementerFn, log, error, exit);
+  const reviewIdentity = await resolvePushReviewIdentity(slug, rootDir, providerEnabled, readReviewStateFn, resolveTaskFileFn, getTaskImplementerFn, log, error, exit, options);
   if (!reviewIdentity) { return; }
   const resolvedIdentity = resolveReviewUserFn(reviewIdentity) || reviewIdentity;
-  const token = readTokenFn(resolvedIdentity, { rootDir: worktree || undefined });
+  const token = readTokenFn(resolvedIdentity, { rootDir, configuration: options.configuration });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${resolvedIdentity}".`));
     exit(1);
@@ -142,8 +147,8 @@ export async function pushRound(
     log(fmt.status('INFO', `Found dedicated worktree: ${worktree}`));
   }
 
-  let result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true });
-  result = await bootstrapReviewPr(result, rootDir, branch, resolvedIdentity, token, { bootstrapReviewSurfaceFn, resolveReviewAdapterFn, createPrFn, log, error });
+  let result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true, configuration: options.configuration });
+  result = await bootstrapReviewPr(result, rootDir, branch, resolvedIdentity, token, { bootstrapReviewSurfaceFn, resolveReviewAdapterFn, createPrFn, log, error }, options.configuration);
 
   if (!result.ok) {
     error(fmt.status('FAIL', `Push to review provider failed: ${reviewPrError(result)}`));
@@ -154,15 +159,27 @@ export async function pushRound(
   log(fmt.status('PASS', `Branch pushed and PR updated for ${branch}.`));
 }
 
-async function resolvePushReviewIdentity(slug: string, rootDir: string, providerEnabled: boolean, readState: ReviewStateReader, resolveTask: typeof resolveTaskFile, getImplementer: typeof getTaskImplementer, log: (_message: string) => void, error: (_message: string) => void, exit: (_code: number) => void): Promise<string | null> {
-  const { identityUser } = await resolveReviewIdentity(slug, rootDir, { readReviewStateFn: readState });
-  const task = identityUser ? null : resolveTask(slug, rootDir);
+async function resolvePushReviewIdentity(slug: string, rootDir: string, providerEnabled: boolean, readState: ReviewStateReader, resolveTask: typeof resolveTaskFile, getImplementer: typeof getTaskImplementer, log: (_message: string) => void, error: (_message: string) => void, exit: (_code: number) => void, options: NonNullable<Parameters<typeof pushRound>[1]>): Promise<string | null> {
+  let identityUser: string | null;
+  try {
+    identityUser = options.missionStore === undefined
+      ? (await Promise.resolve(readState(slug, rootDir)))?.implementer || null
+      : await rebaseImplementer(options.missionStore, slug);
+  } catch {
+    error(fmt.status('FAIL', `Cannot read the recorded implementer for --push on ${slug}. Check px status before retrying.`));
+    exit(1); return null;
+  }
+  const task = identityUser || options.missionStore !== undefined ? null : resolveTask(slug, rootDir);
   const taskImplementer = task?.ok ? getImplementer(task.taskFile!) : null;
   const { identity, defaulted } = reviewPushIdentity(identityUser, taskImplementer, providerEnabled);
   if (!identity) {
     error(fmt.status('FAIL', providerEnabled ? `No review identity resolved for --push on ${slug}. Start the review with px review ${slug}, or set the task implementer.` : 'No review identity resolved for push.'));
     exit(1);
     return null;
+  }
+  if (options.implementer && options.implementer !== identity) {
+    error(fmt.status('FAIL', `Requested implementer ${options.implementer} differs from recorded implementer ${identity}; record the actual execute/repair launch before publication.`));
+    exit(1); return null;
   }
   if (defaulted) { log(fmt.status('WARN', 'No reviewer/implementer identity resolved for --push; defaulting to "autonomous"')); }
   return identity;
@@ -335,7 +352,7 @@ function renderProviderReviewComments(comments: NonNullable<Awaited<ReturnType<t
 
 function reviewPrError(result: ReturnType<typeof createPr>): string | null | undefined { return 'error' in result ? result.error : undefined; }
 
-async function bootstrapReviewPr(result: ReturnType<typeof createPr>, rootDir: string, branch: string, resolvedIdentity: string, token: string, bindings: Pick<ReturnType<typeof pushRoundBindings>, 'bootstrapReviewSurfaceFn' | 'resolveReviewAdapterFn' | 'createPrFn' | 'log' | 'error'>): Promise<ReturnType<typeof createPr>> {
+async function bootstrapReviewPr(result: ReturnType<typeof createPr>, rootDir: string, branch: string, resolvedIdentity: string, token: string, bindings: Pick<ReturnType<typeof pushRoundBindings>, 'bootstrapReviewSurfaceFn' | 'resolveReviewAdapterFn' | 'createPrFn' | 'log' | 'error'>, configuration?: ParallixConfiguration): Promise<ReturnType<typeof createPr>> {
   const { bootstrapReviewSurfaceFn, resolveReviewAdapterFn, createPrFn, log, error } = bindings;
   if (!result.ok && /Repository not found/i.test(reviewPrError(result) || '')) {
     const reviewAdapter = resolveReviewAdapterFn(rootDir);
@@ -348,11 +365,12 @@ async function bootstrapReviewPr(result: ReturnType<typeof createPr>, rootDir: s
       agentPasswords: [],
     }, {
       interactive: false,
+      configuration,
       log,
       error,
     });
     if (bootstrap.ok) {
-      result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true });
+      result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true, configuration });
     }
   }
   return result;

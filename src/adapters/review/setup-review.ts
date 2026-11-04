@@ -18,7 +18,7 @@ import type { AgentPassword, ApiRequestFn, BootstrapFacts, BootstrapTokens, Crea
 
 const { spawnSync } = _cp;
 type BootstrapTokenOptions = { log: SetupLog; promptFn?: PromptFn; requestFn: ApiRequestFn; maxPasswordAttempts: number };
-type ReviewBootstrapOptions = Partial<BootstrapTokenOptions> & { error?: SetupLog; interactive?: boolean; forgejoHome?: string; reviewRemoteUrlFn?: (rootDir: string) => string | null };
+type ReviewBootstrapOptions = Partial<BootstrapTokenOptions> & { configuration?: ParallixConfiguration; error?: SetupLog; interactive?: boolean; forgejoHome?: string; reviewRemoteUrlFn?: (rootDir: string) => string | null };
 type SetupOptions = SetupAnswerOptions & ReviewBootstrapOptions & { rootDir?: string; error?: SetupLog; exit?: (code: number) => unknown; verifyFn?: (cwd: string) => { status: number | null } | Promise<{ status: number | null }> };
 
 
@@ -191,6 +191,22 @@ function readBootstrapOwnerToken(setup: ReviewBootstrapSetup, forgejoHome: strin
     : { ok: false as const, error: `No owner token found for ${setup.ownerLogin} at ${file}. A token file for an existing user (typically human) is required to bootstrap new agent tokens.` };
 }
 
+/** A first noninteractive setup may authenticate its owner before any PAT exists. */
+function bootstrapNoninteractiveOwner(setup: ReviewBootstrapSetup, baseUrl: string, forgejoHome: string, requestFn: ApiRequestFn): BootstrapTokens {
+  if (!setup.ownerPassword) { return readBootstrapOwnerToken(setup, forgejoHome); }
+  const repo = parseRepoSlug(setup.repo)!;
+  const minted = createToken(baseUrl, setup.ownerLogin, setup.ownerPassword,
+    buildTokenName(repo.repo, setup.ownerLogin), requestFn, SETUP_OWNER_TOKEN_SCOPES);
+  if (!minted.ok) { return { ok: false, error: minted.error }; }
+  if (minted.skipped) { return { ok: false, error: 'Owner authentication did not produce a token.' }; }
+  try {
+    const tokenPath = writeToken(setup.ownerLogin, minted.token, forgejoHome);
+    return { ok: true, ownerToken: minted.token, createdTokens: [{ user: setup.ownerLogin, path: tokenPath }] };
+  } catch {
+    return { ok: false, error: 'Could not persist owner credential. Check Forgejo home permissions and re-run px setup-review.' };
+  }
+}
+
 /** Report what the bootstrap created, granted, wrote and skipped. */
 function logBootstrapOutcome(setup: ReviewBootstrapSetup, log: SetupLog, facts: BootstrapFacts): void {
   if (facts.grantedCollaborators.length) { log(fmt.status('PASS', `Granted access on ${setup.repo} to ${facts.grantedCollaborators.join(', ')}`)); }
@@ -204,12 +220,18 @@ function logBootstrapOutcome(setup: ReviewBootstrapSetup, log: SetupLog, facts: 
 }
 
 function ensureBootstrapAccounts(setup: ReviewBootstrapSetup, baseUrl: string, collaborators: string[], ownerToken: string, requestFn: ApiRequestFn, log: SetupLog) {
-    for (const user of collaborators) {
-      const account = ensureForgejoUser(baseUrl, user, setup.ownerLogin, '', randomBytes(32).toString('base64url'), requestFn, { ownerToken });
-      if (!account.ok) { return account; }
-      if (account.created) { log(fmt.status('PASS', `Created Forgejo user ${user}.`)); }
-    }
-  return { ok: true };
+  const credentials: AgentPassword[] = [];
+  for (const user of collaborators) {
+    const supplied = setup.agentPasswords?.find(agent => agent.user === user)?.password || '';
+    const password = supplied || randomBytes(32).toString('base64url');
+    const account = ensureForgejoUser(baseUrl, user, setup.ownerLogin, '', password, requestFn, { ownerToken });
+    if (!account.ok) { return { ...account, ok: false as const }; }
+    if (account.created) { log(fmt.status('PASS', `Created Forgejo user ${user}.`)); }
+    // Only a newly created account owns our generated password. Never reset an
+    // existing account or pass the owner's credential as the agent's password.
+    credentials.push({ user, password: account.created ? password : supplied });
+  }
+  return { ok: true as const, credentials };
 }
 
 function grantBootstrapCollaborators(setup: ReviewBootstrapSetup, baseUrl: string, ownerToken: string, collaborators: string[], requestFn: ApiRequestFn): { ok: false; error?: string; response?: unknown } | { ok: true; created: string[] } {
@@ -239,9 +261,11 @@ type BootstrapSurface = { setup: ReviewBootstrapSetup; baseUrl: string; forgejoH
 
 function provisionBootstrapSurface(context: BootstrapSurface): { ok: false; error?: string; response?: unknown } | { ok: true; repoCreated?: boolean; grantedCollaborators: string[] } {
   const { setup, baseUrl, forgejoHome, collaborators, ownerToken, createdTokens, warnings, interactive, requestFn, log, repoInfo } = context;
+  let agentCredentials = setup.agentPasswords ?? [];
   if (!interactive) {
     const accounts = ensureBootstrapAccounts(setup, baseUrl, collaborators, ownerToken, requestFn, log);
     if (!accounts.ok) { return { ...accounts, ok: false }; }
+    agentCredentials = accounts.credentials!;
   }
 
   const repo = ensureRepo(baseUrl, setup.repo ?? '', setup.ownerLogin, ownerToken, requestFn);
@@ -250,7 +274,7 @@ function provisionBootstrapSurface(context: BootstrapSurface): { ok: false; erro
   if (!collaboratorResult.ok) { return collaboratorResult; }
 
   if (!interactive) {
-    const tokens = tokenCreateViaOwnerToken(baseUrl, setup.repo ?? '', ownerToken, setup.agentPasswords ?? [], repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome });
+    const tokens = tokenCreateViaOwnerToken(baseUrl, setup.repo ?? '', ownerToken, agentCredentials, repoInfo, { requestFn, writeTokenFn: writeToken, forgejoHome });
     if (!tokens.ok) { return { ...tokens, ok: false }; }
     createdTokens.push(...tokens.createdTokens);
     warnings.push(...tokens.warnings);
@@ -265,8 +289,15 @@ function bootstrapOptions(options: ReviewBootstrapOptions) {
 }
 
 export async function bootstrapReviewSurface(rootDir: string, setup: ReviewBootstrapSetup, options: ReviewBootstrapOptions = {}) {
+  try { return await bootstrapReviewSurfaceUnchecked(rootDir, setup, options); }
+  catch {
+    return { ok: false as const, error: 'Could not read or persist Forgejo credentials. Check the configured Forgejo home permissions and re-run px setup-review.' };
+  }
+}
+
+async function bootstrapReviewSurfaceUnchecked(rootDir: string, setup: ReviewBootstrapSetup, options: ReviewBootstrapOptions) {
   const { log, promptFn, requestFn, maxPasswordAttempts, interactive, reviewRemoteUrlFn } = bootstrapOptions(options);
-  const forgejoHome = resolveBootstrapForgejoHome(rootDir, options.forgejoHome);
+  const forgejoHome = resolveBootstrapForgejoHome(rootDir, options.forgejoHome, options.configuration);
   const repoInfo = parseRepoSlug(setup.repo);
   const baseUrl = normalizeBaseUrl(setup.baseUrl);
   if (!baseUrl || !repoInfo) { return { ok: false, error: 'workflow.config.json must define adapters.review.baseUrl and adapters.review.repo before setup can run.' }; }
@@ -275,7 +306,7 @@ export async function bootstrapReviewSurface(rootDir: string, setup: ReviewBoots
   const tokenOptions = { log, promptFn, requestFn, maxPasswordAttempts };
   const bootstrapped: BootstrapTokens = interactive
     ? await bootstrapInteractiveTokens(setup, baseUrl, forgejoHome, tokenOptions)
-    : readBootstrapOwnerToken(setup, forgejoHome);
+    : bootstrapNoninteractiveOwner(setup, baseUrl, forgejoHome, requestFn);
   if (!bootstrapped.ok) { return bootstrapped; }
   const ownerToken = bootstrapped.ownerToken;
   const createdTokens: CreatedToken[] = bootstrapped.createdTokens ?? [];
@@ -290,7 +321,7 @@ export async function bootstrapReviewSurface(rootDir: string, setup: ReviewBoots
   return interactive ? { ok: true, warnings } : { ok: true, warnings, createdTokens };
 }
 
-export async function setupReview(_args: string[], options: SetupOptions = {}) { const rootDir = options.rootDir || process.cwd(); const log = options.log || fmt.log.plain; const error = options.error || fmt.log.plainError; const exit = options.exit || process.exit; const result = await bootstrapReviewSurface(rootDir, await collectSetupAnswers(rootDir, { promptFn: options.promptFn || promptLine, log }), { ...options, forgejoHome: resolveBootstrapForgejoHome(rootDir, options.forgejoHome) }); if (!result.ok) {error(fmt.status('FAIL', ('error' in result ? result.error : '') || '')); if (('response' in result ? result.response : undefined)) {error(fmt.status('INFO', `Forgejo response: ${JSON.stringify(('response' in result ? result.response : undefined))}`));} exit(1);} }
+export async function setupReview(_args: string[], options: SetupOptions = {}) { const rootDir = options.rootDir || process.cwd(); const log = options.log || fmt.log.plain; const error = options.error || fmt.log.plainError; const exit = options.exit || process.exit; const result = await bootstrapReviewSurface(rootDir, await collectSetupAnswers(rootDir, { promptFn: options.promptFn || promptLine, log }), { ...options, forgejoHome: resolveBootstrapForgejoHome(rootDir, options.forgejoHome, options.configuration) }); if (!result.ok) {error(fmt.status('FAIL', ('error' in result ? result.error : '') || '')); if (('response' in result ? result.response : undefined)) {error(fmt.status('INFO', `Forgejo response: ${JSON.stringify(('response' in result ? result.response : undefined))}`));} exit(1);} }
 export async function runVerifyEnv(rootDir: string, options: Pick<SetupOptions, 'verifyFn'> = {}) { return (options.verifyFn || ((cwd: string) => spawnSync('node', ['workflow', 'verify-env'], { cwd, stdio: 'inherit', encoding: 'utf8' })))(rootDir); }
 function reportGitignore(rootDir: string, log: SetupLog) {
   const gitignore = ensureWorkflowGitignore(rootDir, { logFn: log });
@@ -301,6 +332,27 @@ function reportGitignore(rootDir: string, log: SetupLog) {
 }
 
 function nonInteractiveSetup(args: string[], options: SetupOptions) { return args?.includes('--non-interactive') || (options.configuration?.setup.nonInteractive ?? DEFAULT_CONFIGURATION.setup.nonInteractive) === '1'; }
+
+/** Run the review bootstrap for the wizard's answers; false means the operator must see the failure. */
+async function bootstrapWizardSurface(
+  rootDir: string, args: string[], options: SetupOptions, answers: ReviewSetupAnswers, error: SetupLog,
+): Promise<boolean> {
+  const result = await bootstrapReviewSurface(rootDir, {
+    baseUrl: answers.baseUrl,
+    repo: answers.reviewRepo,
+    ownerLogin: answers.ownerLogin ?? 'human',
+    ownerPassword: answers.ownerPassword,
+    agentPasswords: answers.agentPasswords,
+    agentUsers: answers.agentUsers,
+  }, {
+    ...options,
+    interactive: options.interactive ?? !nonInteractiveSetup(args, options),
+    forgejoHome: resolveBootstrapForgejoHome(rootDir, options.forgejoHome, options.configuration),
+  });
+  if (result.ok) { return true; }
+  error(fmt.status('FAIL', ('error' in result ? result.error : '') || ''));
+  return false;
+}
 
 export async function setupWizard(args: string[], options: SetupOptions = {}) {
   const rootDir = options.rootDir || process.cwd();
@@ -313,8 +365,8 @@ export async function setupWizard(args: string[], options: SetupOptions = {}) {
   log(fmt.status('PASS', `Wrote ${writeWorkflowConfig(rootDir, buildWorkflowConfig(answers))}`));
   reportGitignore(rootDir, log);
   if (answers.bootstrapReview) {
-    const result = await bootstrapReviewSurface(rootDir, { baseUrl: answers.baseUrl, repo: answers.reviewRepo, ownerLogin: answers.ownerLogin ?? 'human', ownerPassword: answers.ownerPassword, agentPasswords: answers.agentPasswords, agentUsers: answers.agentUsers }, { ...options, forgejoHome: resolveBootstrapForgejoHome(rootDir, options.forgejoHome) });
-    if (!result.ok) { error(fmt.status('FAIL', ('error' in result ? result.error : '') || '')); exit(1); return; }
+    const bootstrapped = await bootstrapWizardSurface(rootDir, args, options, answers, error);
+    if (!bootstrapped) { exit(1); return; }
   } else { log(fmt.status('INFO', 'Skipped Forgejo bootstrap. You can run `px setup-review` later if needed.')); }
   const verified = await runVerifyEnv(rootDir, options);
   if (verified?.status) { exit(verified.status); }

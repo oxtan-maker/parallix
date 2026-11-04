@@ -1,3 +1,4 @@
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import _cp from 'child_process';
@@ -23,7 +24,7 @@ export function buildTokenName(repoName: string, user: string, suffix: string = 
 export function passwordPrompt(user: string, options: { allowBlank?: boolean } = {}): string { return options.allowBlank ? `Password for ${user} (input visible, leave blank to skip token creation): ` : `Password for ${user} (input visible): `; }
 export function tokenFilePath(user: string, forgejoHome?: string): string { return path.join(forgejoHome || resolveForgejoHome(), 'tokens', user); }
 export function ensureTokenDir(forgejoHome?: string): string { const dir = path.join(forgejoHome || resolveForgejoHome(), 'tokens'); fs.mkdirSync(dir, { recursive: true }); return dir; }
-export function resolveBootstrapForgejoHome(rootDir?: string, explicitForgejoHome?: string): string { return explicitForgejoHome || path.join(rootDir || process.cwd(), '.forgejo-local'); }
+export function resolveBootstrapForgejoHome(rootDir?: string, explicitForgejoHome?: string, configuration?: ParallixConfiguration): string { return explicitForgejoHome || configuration?.forgejo.home || path.join(rootDir || process.cwd(), '.forgejo-local'); }
 export function writeToken(user: string, token: string, forgejoHome?: string): string { ensureTokenDir(forgejoHome); const file = tokenFilePath(user, forgejoHome); fs.writeFileSync(file, `${token}\n`, { mode: 0o600 }); return file; }
 export function isAuthFailure(result: { statusCode?: number | null }): boolean { return Boolean(result && (result.statusCode === 401 || result.statusCode === 403)); }
 
@@ -91,15 +92,40 @@ function endsTokenRetry(result: TokenResult, attempt: number, maxAttempts: numbe
   return result.ok || !isAuthFailure(result) || attempt === maxAttempts || !promptFn;
 }
 
+/** Why an owner-token token creation did not yield a usable credential. */
+function ownerTokenFailureReason(result: ApiResult, agentUser: string): string {
+  if (result.statusCode === 401) {
+    return `provider requires Basic authentication as ${agentUser}; run px setup-review with that agent's password, or install its own token from the Forgejo administrator CLI`;
+  }
+  if (!result.ok) {
+    return `token creation via owner token failed (HTTP ${result.statusCode || 'n/a'}); bootstrap requires a Forgejo site-admin owner with write:admin token scope. Re-run px setup-review with the agent password; an owner token may not be supported for this endpoint`;
+  }
+  return 'token creation did not return a token';
+}
+
+/** Credential request for one agent: its own password when known, otherwise the owner token. */
+function agentTokenRequest(agent: AgentPassword, ownerToken: string, tokenName: string): ApiRequestOptions {
+  const auth = agent.password ? { basicAuth: { user: agent.user, password: agent.password } } : { token: ownerToken };
+  return { ...auth, body: { name: tokenName, scopes: REVIEW_TOKEN_SCOPES } };
+}
+
 export function tokenCreateViaOwnerToken(baseUrl: string, _repoSlug: string, ownerToken: string, agentPasswords: readonly AgentPassword[], repoInfo: { owner: string; repo: string }, options: { requestFn?: ApiRequestFn; writeTokenFn?: (user: string, token: string, forgejoHome?: string) => string; buildTokenNameFn?: (repoName: string, user: string) => string; forgejoHome?: string } = {}): { ok: boolean; createdTokens: CreatedToken[]; warnings: TokenWarning[]; error?: string } {
   const { requestFn = apiRequest, writeTokenFn = writeToken, buildTokenNameFn = buildTokenName, forgejoHome: injectedForgejoHome } = options;
   const forgejoHome = typeof injectedForgejoHome === 'string' ? injectedForgejoHome : resolveForgejoHome();
   const createdTokens: CreatedToken[] = []; const warnings: TokenWarning[] = [];
   for (const agent of agentPasswords) {
-    const result = requestFn('POST', `${normalizeBaseUrl(baseUrl)}/api/v1/users/${encodeURIComponent(agent.user)}/tokens`, { token: ownerToken, body: { name: buildTokenNameFn(repoInfo.repo, agent.user), scopes: REVIEW_TOKEN_SCOPES } });
+    const result = requestFn('POST', `${normalizeBaseUrl(baseUrl)}/api/v1/users/${encodeURIComponent(agent.user)}/tokens`, agentTokenRequest(agent, ownerToken, buildTokenNameFn(repoInfo.repo, agent.user)));
     const sha1 = tokenSha1(result.data);
-    if (!result.ok || !sha1) { warnings.push({ user: agent.user, error: !result.ok ? `token creation via owner token failed (HTTP ${result.statusCode || 'n/a'}); bootstrap requires a Forgejo site-admin owner with write:admin token scope. Re-run px setup-review with that owner's password to rotate the token` : 'token creation via owner token did not return a token', response: result.data }); continue; }
-    createdTokens.push({ user: agent.user, path: writeTokenFn(agent.user, sha1, forgejoHome) });
+    if (!result.ok || !sha1) {
+      warnings.push({ user: agent.user, error: ownerTokenFailureReason(result, agent.user) });
+      continue;
+    }
+
+    try {
+      createdTokens.push({ user: agent.user, path: writeTokenFn(agent.user, sha1, forgejoHome) });
+    } catch {
+      return { ok: false, createdTokens, warnings, error: `Could not persist credential for ${agent.user}. Check Forgejo home permissions and re-run px setup-review.` };
+    }
   }
   if (createdTokens.length === 0) {const first = warnings[0]; return { ok: false, createdTokens, warnings, error: first ? `${first.user}: ${first.error}` : 'no requested agent token was created' };}
   return { ok: true, createdTokens, warnings };

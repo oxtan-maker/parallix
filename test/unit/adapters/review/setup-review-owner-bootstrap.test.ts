@@ -24,7 +24,7 @@ test('owner-token setup creates a missing parallix account before granting admin
       requestFn(method, url, options) {
         assert.ok(options);
         calls.push(`${method} ${new URL(url).pathname}`);
-        assert.equal(options.token, 'owner-token');
+        if (!url.endsWith('/users/parallix/tokens')) assert.equal(options.token, 'owner-token');
         if (method === 'GET' && url.endsWith('/users/parallix')) return { error: null, data: null,  ok: false as const, statusCode: 404 };
         if (url.endsWith('/admin/users')) {
           assert.ok(options.body && typeof options.body === 'object' && 'username' in options.body && 'must_change_password' in options.body && 'password' in options.body);
@@ -38,6 +38,9 @@ test('owner-token setup creates a missing parallix account before granting admin
           assert.equal(options.body.permission, 'admin');
         }
         if (url.endsWith('/users/parallix/tokens')) {
+          assert.equal(options.basicAuth?.user, 'parallix');
+          assert.ok((options.basicAuth?.password.length ?? 0) >= 32);
+          assert.equal(options.token, undefined);
           assert.ok(options.body && typeof options.body === 'object' && 'scopes' in options.body && Array.isArray(options.body.scopes));
           assert.ok(!options.body.scopes.includes('write:admin'), 'the service token receives repository privileges only');
           return { error: null,  ok: true as const, statusCode: 201, data: { sha1: 'service-token' } };
@@ -70,4 +73,57 @@ test('setup suggests a dedicated Jev review identity without making it a coding 
   const users = suggestedForgejoUsers();
   assert.ok(users.includes('jev'));
   assert.equal(users.filter(user => user === 'jev').length, 1);
+});
+
+
+test('owner-token provisioning reports token persistence failure without exposing it (px-0016)', async () => {
+  const { tokenCreateViaOwnerToken } = await import('../../../../src/adapters/review/setup-review-auth.js');
+  const result = tokenCreateViaOwnerToken('http://fixture', 'human/project', 'owner-secret',
+    [{ user: 'codex', password: '' }], { owner: 'human', repo: 'project' }, {
+      forgejoHome: '/fixture',
+      requestFn: () => ({ ok: true, statusCode: 201, error: null, data: { sha1: 'agent-secret' } }),
+      writeTokenFn: () => { throw new Error('EACCES agent-secret'); },
+    });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.createdTokens, []);
+  assert.match(result.error ?? '', /persist.*codex.*permissions.*setup-review/);
+  assert.doesNotMatch(JSON.stringify(result), /agent-secret|owner-secret/);
+});
+
+
+test('setup provisions into the same configured Forgejo home used for lookup (px-0016)', async () => {
+  const { resolveBootstrapForgejoHome } = await import('../../../../src/adapters/review/setup-review-auth.js');
+  const { DEFAULT_CONFIGURATION } = await import('../../../../src/application/ports/configuration.js');
+  const configuration = { ...DEFAULT_CONFIGURATION, forgejo: { ...DEFAULT_CONFIGURATION.forgejo, home: '/configured/forgejo' } };
+  assert.equal(resolveBootstrapForgejoHome('/mission', undefined, configuration), '/configured/forgejo');
+  assert.equal(resolveBootstrapForgejoHome('/mission', '/explicit', configuration), '/explicit');
+});
+
+
+test('owner-only token recovery explains a provider BasicAuth requirement without leaking its payload (px-0016)', async () => {
+  const { tokenCreateViaOwnerToken } = await import('../../../../src/adapters/review/setup-review-auth.js');
+  const result = tokenCreateViaOwnerToken('http://fixture', 'human/project', 'owner-secret',
+    [{ user: 'codex', password: '' }], { owner: 'human', repo: 'project' }, {
+      forgejoHome: '/fixture',
+      requestFn: () => ({ ok: false, statusCode: 401, error: null, data: { message: 'owner-secret' } }),
+      writeTokenFn: () => { throw new Error('must not persist'); },
+    });
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? '', /Basic.*codex.*setup-review/);
+  assert.doesNotMatch(JSON.stringify(result), /owner-secret/);
+});
+
+
+test('setup refuses unreadable token storage with an actionable diagnostic (px-0016)', async () => {
+  const root = mkdtemp('setup-token-permission-');
+  try {
+    const home = path.join(root, 'forgejo');
+    fs.mkdirSync(path.join(home, 'tokens', 'human'), { recursive: true });
+    const result = await bootstrapReviewSurface(root, { baseUrl: 'http://fixture', repo: 'human/project', ownerLogin: 'human' }, {
+      forgejoHome: home, interactive: false, log: () => {},
+      requestFn: () => { throw new Error('must not reach provider'); },
+    });
+    assert.equal(result.ok, false);
+    assert.match('error' in result ? result.error ?? '' : '', /permissions.*setup-review/);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

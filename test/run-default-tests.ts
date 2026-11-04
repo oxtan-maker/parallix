@@ -186,6 +186,20 @@ if (memoryPolicy.mode === 'cgroup' && !insideEnclosingScope) {
 } else if (memoryPolicy.mode === 'off') {
   console.error(`[test-memory-boundary] WARNING: no aggregate memory boundary (${memoryPolicy.reason}); a memory-growing test is not contained.`);
 }
+// The workflow-child fixture bundle is an immutable, content-keyed asset that
+// every real-process suite in the integration lane spawns from. Building it
+// costs ~1.6 s of wall time (measured: first cold case 3,109 ms versus
+// 1,447 ms warm). Left to the lane, the first process suite pays that build
+// inside its own measured case, and the sibling workers that start before the
+// build is published rebuild the same key concurrently instead of waiting, so a
+// cold lane spends several esbuild passes at once and the sibling suites miss
+// their child-startup deadlines (the TASK-2792 "Timed out: active preparation"
+// failures). Build it once here, before any worker starts, so no case is
+// charged for it and no worker races it.
+if (runsIntegrationSuite && fs.existsSync(path.join(testRoot, 'fixtures', 'workflow-bundle.ts'))) {
+  const { bundleWorkflowChild } = await import('./fixtures/workflow-bundle.js');
+  await bundleWorkflowChild();
+}
 runnerRoots.prepareChild();
 const child = spawn(launch.command, launch.args, {
   stdio: ['inherit', 'pipe', 'pipe'],

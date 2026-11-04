@@ -369,6 +369,41 @@ test('pushRound exits when no forgejo identity can be resolved', async () => {
   assert.equal(exited, true);
 });
 
+test('pushRound refuses an unreadable Mission store before publication (px-0016)', async () => {
+  const errors: string[] = [];
+  const exits: number[] = [];
+  await pushRound(mockSlug, {
+    missionStore: { load: async () => { throw new Error('store down'); } },
+    resolveWorktreeFn: () => mockWorktree,
+    isReviewProviderEnabledFn: () => true,
+    readTokenFn: () => { throw new Error('no credential without identity'); },
+    createPrFn: () => { throw new Error('no publication without identity'); },
+    log: () => {},
+    error: (message: string) => errors.push(message),
+    exit: (code: number) => exits.push(code)
+  });
+  assert.deepEqual(exits, [1]);
+  assert.match(errors.join('\n'), /Cannot read the recorded implementer/);
+});
+
+test('pushRound refuses a requested implementer that differs from the recorded one (px-0016)', async () => {
+  const errors: string[] = [];
+  const exits: number[] = [];
+  await pushRound(mockSlug, {
+    implementer: 'other',
+    readReviewStateFn: () => ({ implementer: 'user' }),
+    resolveWorktreeFn: () => mockWorktree,
+    isReviewProviderEnabledFn: () => true,
+    readTokenFn: () => { throw new Error('no credential for a mismatched publisher'); },
+    createPrFn: () => { throw new Error('no publication for a mismatched publisher'); },
+    log: () => {},
+    error: (message: string) => errors.push(message),
+    exit: (code: number) => exits.push(code)
+  });
+  assert.deepEqual(exits, [1]);
+  assert.match(errors.join('\n'), /Requested implementer other differs from recorded implementer user/);
+});
+
 test('pushRound exits when no token', async () => {
   let exited = false;
   await pushRound(mockSlug, {

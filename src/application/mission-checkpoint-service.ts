@@ -241,7 +241,7 @@ export class MissionCheckpointService {
       ? { ...stamped, goalCheck: retainPriorGoalCheckRows(prior.goalCheck, stamped.goalCheck) }
       : stamped;
     if (prior?.repair) {
-      if (stamped.goalCheck.some(row => !(mission.successCriteria ?? []).includes(row.criterion))) {
+      if (!namesRecordableRepairCriteria(mission, prior.goalCheck, stamped.goalCheck)) {
         return { ok: false, failure: failure('validation', 'Repair evidence must name an exact recorded success criterion') };
       }
       if (prior.repair.blocker && !request.force) { return { ok: false, failure: failure('validation', 'Invalid locked contract awaits operator decision; use px checkpoint correct-invalid-contract to clear a corrected or false blocker before recording evidence') }; }
@@ -408,6 +408,16 @@ function stampCheckpointRecord(identified: CheckpointData, mission: Mission, rou
       })
     };
 
+}
+
+/**
+ * Repair rows name a current success criterion, or a since-retired wording the
+ * repair checkpoint already holds: that row is replaced in place, so re-recording
+ * it adds no criterion.
+ */
+function namesRecordableRepairCriteria(mission: Mission, priorRows: readonly GoalCheckRow[], rows: readonly GoalCheckRow[]): boolean {
+  const recordable = new Set([...(mission.successCriteria ?? []), ...priorRows.map(row => row.criterion)]);
+  return rows.every(row => recordable.has(row.criterion));
 }
 
 function checkpointRecordDetail(updated: Mission, request: RecordCheckpointRequest, replaced: boolean): string {

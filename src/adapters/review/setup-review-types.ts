@@ -78,6 +78,7 @@ export type TokenRetryOptions = {
 
 /** Knobs shared by the bootstrap entry points. */
 export type BootstrapOptions = TokenRetryOptions & {
+  configuration?: ParallixConfiguration;
   interactive?: boolean;
   forgejoHome?: string;
   reviewRemoteUrlFn?: (rootDir: string) => string | null;

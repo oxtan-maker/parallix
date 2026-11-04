@@ -327,6 +327,26 @@ describe('Repair incidents carry accepted Goal Check rows', () => {
     assert.equal(store.mission().checkpoints[1].repair?.verified, true);
   });
 
+  test('a repair re-records a carried row by its exact retired criterion and still refuses invented criteria (px-0016)', async () => {
+    const { mission, store, repair } = incidentFixture();
+    await store.save({ ...store.mission(), checkpoints: [{ ...store.mission().checkpoints[0],
+      goalCheck: [...store.mission().checkpoints[0].goalCheck, row('retired wording', 'removed/file.ts', 1)] }] } as Mission);
+    await open(repair, mission.id);
+    const checkpoints = new MissionCheckpointService(store);
+    const record = async (criterion: string) => checkpoints.record({
+      operationId: 'record', missionId: mission.id, expectedVersion: (await store.load()).version,
+      capabilities: new Set(['checkpoint:record']), checkpoint: { missionId: mission.id, name: 'CP-2',
+        goalCheck: [{ criterion, evidence: 'npm test' }], nextActionText: 'handoff' },
+    });
+    const invented = await record('invented wording');
+    assert.equal(invented.status, 'failed');
+    assert.match(invented.error?.message ?? '', /exact recorded success criterion/);
+    const retired = await record('retired wording');
+    assert.equal(retired.status, 'completed', retired.error?.message ?? 'retired criterion should be recordable');
+    assert.deepEqual(store.mission().checkpoints[1].goalCheck.map(item => [item.criterion, item.evidence, item.carriedFrom]),
+      [['first', 'npm test', 'CP-1'], ['second', 'npm test', 'CP-1'], ['retired wording', 'npm test', undefined]]);
+  });
+
   test('reopening the same incident keeps its rows and provenance and still owes fresh evidence (TASK-2755)', async () => {
     const { mission, store, repair, record } = incidentFixture();
     await open(repair, mission.id);

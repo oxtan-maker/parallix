@@ -71,7 +71,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
   async verify(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...o }); }
   async submit(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.submitForReviewFn || submitForReview)(context.slug, context.args.includes('--no-gate'), o); }
-  async push(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.pushRoundFn || pushRound)(context.slug, { ...o, force: context.args.includes('--force') }); }
+  async push(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.pushRoundFn || pushRound)(context.slug, { ...o, implementer: flagValue(context.args, '--implementer') ?? undefined, force: context.args.includes('--force') }); }
   async enter(context: ReviewWorkflowContext): Promise<void> {
     // Helpers historically relied on process.exit. Fence this invocation even
     // when a host's exit observer returns; keep cancellation inside the adapter.

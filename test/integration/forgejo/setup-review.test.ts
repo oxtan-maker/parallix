@@ -1219,3 +1219,37 @@ test('bootstrapReviewSurface non-interactive reports agent token failure via war
     }
   });
 });
+
+test('noninteractive setup provisions a newly requested agent with its generated password (px-0016)', async () => {
+  const { DEFAULT_CONFIGURATION } = await import('../../../src/application/ports/configuration.js');
+  await withTempDir(async root => {
+    const home = path.join(root, '.forgejo-local');
+    fs.mkdirSync(path.join(home, 'tokens'), { recursive: true });
+    fs.writeFileSync(path.join(home, 'tokens', 'human'), 'owner-token');
+    const calls: string[] = [];
+    const exits: number[] = [];
+    await setupWizard(['--non-interactive'], {
+      rootDir: root, forgejoHome: home, reviewRemoteUrlFn: () => null,
+      configuration: { ...DEFAULT_CONFIGURATION, setup: {
+        ...DEFAULT_CONFIGURATION.setup, reviewProvider: 'forgejo', forgejoUrl: 'http://fixture',
+        forgejoRepo: 'human/project', ownerLogin: 'human', ownerPassword: 'owner-password', agentUsers: 'codex',
+      } },
+      verifyFn: () => ({ status: 0 }), log: () => {}, error: () => {}, exit: code => { exits.push(code); },
+      requestFn(method, url, options) {
+        calls.push(`${method} ${new URL(url).pathname}`);
+        if (method === 'GET' && url.endsWith('/users/codex')) return { ok: false, statusCode: 404, data: null, error: null };
+        if (url.endsWith('/users/human/tokens')) return { ok: true, statusCode: 201, data: { sha1: 'owner-token' }, error: null };
+        if (url.endsWith('/users/codex/tokens')) {
+          assert.equal(options?.basicAuth?.user, 'codex');
+          assert.ok((options?.basicAuth?.password.length ?? 0) >= 32);
+          assert.equal(options?.token, undefined);
+          return { ok: true, statusCode: 201, data: { sha1: 'agent-token' }, error: null };
+        }
+        return { ok: true, statusCode: 200, data: {}, error: null };
+      },
+    });
+    assert.deepEqual(exits, []);
+    assert.ok(calls.includes('POST /api/v1/admin/users'));
+    assert.equal(fs.readFileSync(path.join(home, 'tokens', 'codex'), 'utf8').trim(), 'agent-token');
+  });
+});

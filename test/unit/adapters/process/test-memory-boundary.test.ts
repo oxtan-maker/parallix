@@ -75,7 +75,7 @@ test('workloads are classified from the selection, tier and coverage (TASK-2722)
 test('the scope launch carries the memory cap, no swap and whole-scope kill before the command (TASK-2722)', () => {
   const launch = wrapInScope(2048, 'node', ['--test'], 'u.scope');
   assert.equal(launch.command, 'systemd-run');
-  assert.deepEqual(launch.args.slice(0, 6), ['--user', '--scope', '--quiet', '--collect', '--unit', 'u.scope']);
+  assert.deepEqual(launch.args.slice(0, 8), ['--user', '--scope', '--quiet', '--description', 'parallix test runner', '--collect', '--unit', 'u.scope']);
   for (const property of ['MemoryMax=2048M', 'MemorySwapMax=0', 'OOMPolicy=kill']) { assert.ok(launch.args.includes(property), property); }
   assert.deepEqual(launch.args.slice(launch.args.indexOf('--') + 1), ['node', '--test']);
 });

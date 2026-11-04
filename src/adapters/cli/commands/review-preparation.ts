@@ -138,7 +138,7 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
       resolveReviewIdentity: (slug, rootDir) => resolveReviewIdentity(slug, rootDir),
     },
     setupReview: {
-      bootstrapReviewSurface: (rootDir, setup, options) => setupReview.bootstrapReviewSurface(rootDir, setup, options),
+      bootstrapReviewSurface: (rootDir, setup, options) => setupReview.bootstrapReviewSurface(rootDir, setup, { ...options, forgejoHome: forgejo.resolveForgejoHome(rootDir, configuration) }),
       get apiRequest() { return setupReview.apiRequest; },
     },
     rebase: {

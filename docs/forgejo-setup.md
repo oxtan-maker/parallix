@@ -25,7 +25,7 @@ Standalone workflow installs need three review-surface pieces before `active`, `
 
 ## Create the agent accounts (fresh instance)
 
-`px setup` / `px setup-review` mint tokens and grant repository access. Interactive setup creates missing agent accounts using the site admin owner’s credentials and the supplied agent passwords. Noninteractive bootstrap creates missing accounts using the owner token with `write:admin` and generated passwords, then mints their tokens. The site admin owner must already exist; a repository owner without site admin privileges cannot create accounts or mint other users’ tokens.
+`px setup` / `px setup-review` mint tokens and grant repository access. Interactive setup creates missing agent accounts using the site admin owner’s credentials and the supplied agent passwords. Noninteractive bootstrap creates missing accounts using the owner token with `write:admin`, then uses each new account’s generated password to mint its own token. The generated password is used only during provisioning; the token is persisted. Existing accounts keep their passwords. The site admin owner must already exist; a repository owner without site admin privileges cannot create accounts or mint other users’ tokens.
 
 Create one account per identity the workflow uses:
 
@@ -51,9 +51,13 @@ Then run `px setup` and enter each account's password so the token files are min
 
 > **Adding or renaming an agent family later** (e.g. the `qwen` → `custom` rename): the new family name is a new Forgejo identity. Create its account with `forgejo admin user create`, grant it write on the review repo, then re-run `px setup-review` to mint its token. Without this, `integrate`/`review` fail with `no token file found for <family>` even though every other agent works.
 
+Setup honors an explicitly configured Forgejo home when writing token files. Without one, interactive setup writes into the repository's `.forgejo-local`; automatic handoff provisioning uses the home selected for credential lookup. A storage failure reports how to repair permissions. Existing publication fallback policy still applies when agent provisioning fails.
+
 ## Notes
 
-An owner token minted before setup included `write:admin` may return HTTP 403 when bootstrapping another user’s token even if its owner is a site admin. Re-run `px setup-review` with the site admin’s password to rotate that token. Repository admin access, such as the access granted to `parallix`, does not confer site admin privileges.
+Forgejo 14 requires Basic authentication at its user-token creation endpoint. For an existing agent account whose password is unknown, automatic recovery can stop with HTTP 401 even when the owner token is valid. Run `px setup-review` with that agent’s password, or have the Forgejo administrator generate a token for that user and install it in the configured home’s `tokens/<agent>` file. Never copy an owner token into that file.
+
+An owner token minted before setup included `write:admin` may return HTTP 403 when creating an account even if its owner is a site admin. Re-run `px setup-review` with the site admin’s password to rotate that token. Repository admin access, such as the access granted to `parallix`, does not confer site admin privileges.
 
 If the human who may approve integration uses a Forgejo login other than `human`, set `FORGEJO_AUTHORIZED_APPROVER` to that login in the integration environment. This is an approval-identity setting: `FORGEJO_USER` still selects credentials and does not make an account's approval authoritative by itself.
 
@@ -63,7 +67,7 @@ If the human who may approve integration uses a Forgejo login other than `human`
 - Re-running `px setup` lets you change config and rotate the local token files.
 - `px setup-review` still exists as a narrower Forgejo-only repair path if you only need to refresh token or remote wiring.
 
-Publication prefers the actual implementer’s credentials and can fall back to the Parallix repository account after bootstrap fails. The Mission keeps the actual implementer identity regardless of the publication account. Review prefers another runnable agent family; when only one family can run, self-author review can approve locally while formal provider approval remains owed.
+Publication prefers the actual implementer’s credentials and can fall back to the Parallix repository account after bootstrap fails. The Mission keeps the actual implementer identity regardless of the publication account. Review prefers another runnable agent family; when only one family can run, self-author review can approve locally while formal provider approval remains owed. `px review --push` uses the recorded Mission implementer rather than the reviewer. Its `--implementer` flag checks that identity; it does not reassign the Mission.
 
 Between review rounds, automatic publication retries a stale lease once after fetching the review branch. If another publisher advances the branch again, publication reports failure and preserves that remote commit; the review loop continues to the next round.
 

@@ -1,4 +1,7 @@
 // Lead borrows active's owner; interruption must settle that forwarded workflow.
+// The fixture modules are imported statically, like the sibling suites in this
+// directory, so the case measures lead supervision and not the first tsx
+// transpile of the fixture graph.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bundleWorkflowChild } from '../../fixtures/workflow-bundle.js';
