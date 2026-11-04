@@ -64,6 +64,12 @@ const BOARD_COMPOSITION_MODULE = 'src/composition/board-projection.ts';
 const PRODUCTION_CAPABILITIES_MODULE = 'src/composition/production-capabilities.ts';
 /** Reads the schema of every mission_id table (incl. board_lane_events); never appends. */
 const LEGACY_ADHOC_MIGRATION_MODULE = 'src/adapters/sqlite/legacy-adhoc-migration.ts';
+/** Historical recovery reads lane events without receiving append authority. */
+const RECOVERY_LANE_READER_MODULES = [
+  'src/adapters/mission/stats-backfill-adapter.ts',
+  'src/adapters/review/stats-recovery-collector.ts',
+  'src/adapters/sqlite/isolated-operator-copy.ts',
+] as const;
 
 const CONTRACT_MODULES = new Set([
   // Read-only verification cost projection and its lane-history wiring.
@@ -86,6 +92,7 @@ const CONTRACT_MODULES = new Set([
   BOARD_COMPOSITION_MODULE,
   PRODUCTION_CAPABILITIES_MODULE,
   LEGACY_ADHOC_MIGRATION_MODULE,
+  ...RECOVERY_LANE_READER_MODULES,
 ]);
 
 function sourceFiles(): string[] {
@@ -158,6 +165,27 @@ test('SC5: the designated writer appends the event inside saveWithTransition', (
     appendIndex > transitionStart,
     'the append call must live inside saveAggregateWithTransition',
   );
+});
+
+test('SC5: historical recovery receives read-only lane-event capability (TASK-2834)', () => {
+  const adapter = codeOnly(read('src/adapters/mission/stats-backfill-adapter.ts'));
+  const isolatedCopy = codeOnly(read('src/adapters/sqlite/isolated-operator-copy.ts'));
+
+  assert.ok(
+    adapter.includes("Pick<import('../../application/ports/operation-history.js').BoardLaneEventRepository, 'findByRepositoryId'>"),
+    'stats recovery must receive only the lane-history read operation',
+  );
+  assert.ok(
+    isolatedCopy.includes("Pick<BoardLaneEventRepository, 'findByRepositoryId'>"),
+    'the isolated-copy boundary must not expose lane-event append authority',
+  );
+  for (const relPath of RECOVERY_LANE_READER_MODULES) {
+    const content = codeOnly(read(relPath));
+    assert.ok(!/\b(?:laneMoves|boardLaneEvents)\.append\s*\(/.test(content),
+      `${relPath} must not append lane events`);
+    assert.ok(!content.includes('recordLaneTransitionSafely'),
+      `${relPath} must not reach the lane-event recorder`);
+  }
 });
 
 test('SC5: the Markdown transition seam delegates instead of writing its own event', () => {

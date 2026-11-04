@@ -1,4 +1,5 @@
-import { reportAuthorizedActivity, authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
+import { reportAuthorizedActivity, authorizedOperationGeneration, authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
+import { git } from '../git/git.js';
 import * as fmt from "../../application/presentation/cli-format.js";
 import { resolveReviewArtifactDir } from "../config/product-config.js";
 import { RESUME_CAPABLE, LAUNCHERS, resolveNoOutputWatchdogConfig, resolveCustomLauncher } from "./launcher-selection.js";
@@ -258,7 +259,12 @@ export async function prepareLaunch(state: StartAgentLoopState, deps: StartAgent
     ? await waitForCustomCapacity(worktree, async () => {
       const operationId = authorizedOperationId();
       if (operationId && deps.slug) {
-        await reportAuthorizedActivity({ missionId: sessionMissionId(deps.slug)!, operationId, phase: 'waiting', state: 'running', summary: 'waiting for provider capacity', agent: null, processId: process.pid, processIdentity: null, blockedReason: null, occurredAt: new Date().toISOString() }, operationId);
+        const head = git(['-C', worktree || process.cwd(), 'rev-parse', 'HEAD']);
+        await reportAuthorizedActivity({ missionId: sessionMissionId(deps.slug)!, operationId,
+          operationGeneration: authorizedOperationGeneration(), revision: head.status === 0 ? head.stdout.trim() : null,
+          phase: 'waiting', state: 'running', summary: 'waiting for provider capacity', actor: 'parallix', model,
+          timeState: 'waiting', agent: null, processId: process.pid, processIdentity: null, blockedReason: null,
+          occurredAt: new Date().toISOString() }, operationId);
       }
       log(fmt.status('INFO', 'Custom-agent capacity is saturated; waiting for an available slot.'));
     }, root => tryAcquireCustomCapacity(root, deps.configuration))

@@ -298,7 +298,9 @@ been recorded. A failed decision write leaves the same correction available.
 New corrections join unresolved reviewer findings; resolved rounds open a new
 round first. Older requests superseded by the latest review are retained as
 audit notes when that correction commits. Operator-only corrections do not
-count as reviewer send-backs in statistics.
+count as agent-reviewer send-backs. Statistics count them separately as human
+send-backs with an explicit human-review episode, so the numerator and eligible
+population always describe the same actor.
 
 Revocation preserves the original decision, its reviewed revision, the named
 operator, and the stated reason in the review history. It returns the mission
@@ -369,6 +371,25 @@ its budget, Parallix reports the remaining Git state and recovery instructions,
 then stops without automatic push or workflow advancement. Resolve and stage the
 remaining conflicts, continue the rebase, and restore the mission checkout before retrying; use
 `git rebase --abort` to abandon the rebase.
+Git contention is an admission wait. Parallix reports the resource path, its
+worktree or shared-repository scope, and whether ownership is known. It proceeds
+when the resource is released without spending an agent repair attempt. Unknown
+or external lock files are preserved; an old timestamp does not authorize removal.
+There is no default elapsed-time cutoff for an external Git holder because hooks
+and other Git processes can run for an unknown duration. Ctrl-C cancels waiting;
+an explicitly bounded caller reports when its wait limit is reached. Cooperating
+mutations require the host's `flock` utility (util-linux on Linux).
+
+A lock failure during rebase preserves Git's paused state. After release, Parallix
+inspects that state and continues a supported paused rebase. A later `px rebase`
+can also resume a clean paused rebase whose recorded branch matches the mission,
+including detached HEAD. Unsupported or uncertain progress stops with instructions
+to inspect Git state instead of replaying the original operation. Other active
+sequencers block a new rebase. Workflow completion and publication require the expected
+branch, completed sequencer, no conflicts and the expected base ancestry. Nested
+hooks can reuse an active mutation resource; a nested wait on a different held
+resource stops with a diagnostic rather than deadlocking.
+
 Current conflicts come from the paused Git index. Before a pause, replacement
 launches retain the workflow’s predicted conflicts and identify them as predicted.
 Task-construction failures report the Mission or Git read error before agent launch.

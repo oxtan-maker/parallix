@@ -10,7 +10,7 @@ import { emptyMetrics } from '../../fixtures/board-projection.js';
 import { projectExecutionActivity, isWorkInProgress } from '../../../src/domain/execution-activity.js';
 import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { ExecutionActivityRecorder } from '../../../src/application/recording/execution-activity-recorder.js';
+import { ExecutionActivityRecorder, nestedWorkPublisher } from '../../../src/application/recording/execution-activity-recorder.js';
 // TASK-2375 regression: A starts, B replaces it, then late A terminal reports
 // must leave B standing. Drive the production recorder, current snapshot store
 // and projection over migrated SQLite, including reload and durable ordering.
@@ -219,6 +219,40 @@ test('TASK-2375 SC2: nested phases retain the same operationId', async () => {
   }
 });
 
+test('nested workflow sources retain distinct attempts and close before their parent resumes (TASK-2835)', async () => {
+  const subject = await fixture();
+  try {
+    const parent = { ...publication('execute:task-9101:flow'), sourceId: 'execute-run', actor: 'parallix' as const,
+      model: null, timeState: 'working' as const };
+    const nested = nestedWorkPublisher(subject.recorder, parent);
+    await subject.recorder.running(parent);
+    await nested.running('review', 'first reviewer', 'codex');
+    await nested.running('review-response', 'implementer repair', 'claude', 'repair');
+    await nested.resume();
+    await subject.recorder.ended(parent);
+
+    const rows = await subject.db.query<{ event_data: string }>("SELECT event_data FROM operational_history WHERE event_type = 'mission.current-work' ORDER BY id");
+    const values = rows.map(row => JSON.parse(row.event_data) as { sourceId: string; state: string; attempt: number | null;
+      dependencies: string[] | null; actor: string; model: string | null; timeState: string });
+    assert.deepEqual(values.map(value => [value.sourceId, value.state, value.attempt]), [
+      ['execute-run', 'running', null],
+      ['execute-run:nested:1', 'running', 1],
+      ['execute-run:nested:1', 'ended', 1],
+      ['execute-run:nested:2', 'running', 2],
+      ['execute-run:nested:2', 'ended', 2],
+      ['execute-run', 'running', null],
+      ['execute-run', 'ended', null],
+    ]);
+    assert.deepEqual(values.filter(value => value.state === 'running').map(value => value.dependencies), [
+      null, ['execute-run'], ['execute-run:nested:1'], ['execute-run:nested:2'],
+    ]);
+    assert.deepEqual(values.filter(value => value.state === 'running').map(value => [value.actor, value.model, value.timeState]), [
+      ['parallix', null, 'working'], ['codex', null, 'working'], ['claude', null, 'working'], ['parallix', null, 'working'],
+    ]);
+    assert.deepEqual((await subject.readAdapter.loadMissionCurrentWork(MISSION))[0].frames, []);
+  } finally { await subject.dispose(); }
+});
+
 test('worker identity replaces a live independent publisher and audit cannot change current activity (TASK-2822)', async () => {
   const subject = await fixture();
   try {
@@ -298,7 +332,11 @@ test('persisted closed integration blockers disappear on repeatable board and we
     for (let read = 0; read < 2; read++) {
       const reloaded = new SqliteExecutionActivityStore(subject.db, repo);
       const snapshots = await reloaded.loadCurrentWork();
-      assert.ok(snapshots.every(snapshot => snapshot.frames.at(-1)?.event.state === 'blocked'));
+      const snapshotsByMission = new Map(snapshots.map(snapshot => [snapshot.missionId, snapshot]));
+      for (const slug of ['px-0008', 'px-0020', 'task-open-failure']) {
+        assert.equal(snapshotsByMission.get(missionId(slug))?.frames.at(-1)?.event.state, 'blocked',
+          'completing the root must retain its unresolved nested blocker');
+      }
       const facts = projectExecutionActivity(snapshots, { nowMs: NOW, ttlMs: 300000 });
       const cards = [];
       for (const snapshot of snapshots) {

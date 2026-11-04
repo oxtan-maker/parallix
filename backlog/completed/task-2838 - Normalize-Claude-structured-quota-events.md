@@ -1,8 +1,8 @@
 ---
 id: TASK-2838
 title: Normalize Claude structured quota events
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-03 18:37'
 labels:
   - bug

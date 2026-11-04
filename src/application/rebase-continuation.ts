@@ -1,3 +1,4 @@
+import { recoverRebaseLock } from './rebase-lock-recovery.js';
 import { recordImplementerLaunch } from './rebase-identity.js';
 import { rebaseHookRecoveryEligible, replacementImplementer, preContinueAction, postContinueAction, continueBudgetExceeded } from '../domain/rebase-policy.js';
 import * as fmt from './presentation/cli-format.js';
@@ -5,6 +6,20 @@ import { classifyHookFailure } from './hook-failure-workflow.js';
 import { rebound } from './rebound-kernel.js';
 import { combineOutput, continueSucceeded, hasConflictMarkers, type RebaseContext } from './rebase-context.js';
 import type { GitCommandResult, MissionConflictClassification } from './ports/rebase-workflow.js';
+import type { RebaseWorkflowPort } from './ports/rebase-workflow.js';
+import { failureReason } from '../domain/failure-reason.js';
+
+/** Start one initial or resumed rebase round from the context's selected worktree. */
+export function startRebaseRound(ctx: RebaseContext, resumeInPlace: boolean,
+  existingRebase: ReturnType<RebaseWorkflowPort['detectRebaseState']>): GitCommandResult {
+  if (resumeInPlace) {
+    fmt.log.warn('Rebase already paused on conflicts. Re-classifying...');
+    return { failureReason: failureReason('git-conflict', 'git'), status: 1, stdout: '', stderr: existingRebase.unmergedFiles
+      .map(file => `CONFLICT (content): Merge conflict in ${file}`).join('\n') };
+  }
+  fmt.log.info(`Rebasing ${fmt.branch(ctx.branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
+  return ctx.gitFn(['-C', ctx.executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', ctx.baseBranch]);
+}
 
 /**
  * Implementer that owns a hook fix: the recorded assignee, else a launcher
@@ -201,7 +216,8 @@ async function attemptContinue(ctx: RebaseContext, driver: ContinueDriver): Prom
     failContinueBudget(ctx, driver, rebaseDiagnosticBranch(ctx));
     return { outcome: 'exited' };
   }
-  const result = driver.run();
+  const result = await recoverRebaseLock(ctx, driver.run(), ['-C', ctx.executionRoot, 'rebase', '--continue']);
+  if (!result) { return { outcome: 'exited' }; }
   if (result.status === 0) { return { result }; }
   const recovery = await recoverHookFailureFromContinue(ctx, driver, result);
   if (recovery.stranded) { return { outcome: 'exited' }; }
@@ -303,7 +319,8 @@ export async function autoResolveMissionConflicts(ctx: RebaseContext, conflictRe
   }
 
   fmt.log.info('Continuing rebase...');
-  const first = driver.run();
+  const first = await recoverRebaseLock(ctx, driver.run(), ['-C', executionRoot, 'rebase', '--continue']);
+  if (!first) { return 'exited'; }
   const recovery = await recoverHookFailureFromContinue(ctx, driver, first);
   if (recovery.stranded) { return 'exited'; }
   return await driveRebaseToCompletion(ctx, driver, recovery.result);

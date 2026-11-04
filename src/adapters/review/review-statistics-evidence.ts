@@ -5,7 +5,8 @@ import type { Mission } from '../../domain/mission.js';
 import { missionCohortMetadata } from '../../application/projections/metrics-read-adapter.js';
 import type { Review, ReviewRound } from '../../domain/review.js';
 import { normalizeImplementer } from '../../application/services/statistics-row.js';
-import type { ReviewStatisticsEvidence, WorkflowReturn } from '../../application/services/review-statistics.js';
+import type { ReviewEpisode, ReviewStatisticsEvidence, WorkflowReturn } from '../../application/services/review-statistics.js';
+import type { StatsRecoveryEvidence } from '../../application/stats-recovery-evidence.js';
 import { GitMissionPatchComparison } from './mission-patch-comparison.js';
 
 /** The lane-move facts a return needs; read-only, never a lane write. */
@@ -22,7 +23,8 @@ export interface LaneMove {
 export function createReviewStatisticsEvidenceReader(root: string) {
   const comparison = new GitMissionPatchComparison(root);
   const proofs = new PatchProofCache(root, comparison);
-  return async (review: Review | null, workflowReturns?: readonly WorkflowReturn[]): Promise<ReviewStatisticsEvidence> => {
+  return async (review: Review | null, workflowReturns?: readonly WorkflowReturn[],
+    reviewEpisodes?: readonly ReviewEpisode[]): Promise<ReviewStatisticsEvidence> => {
     const equivalentSubmissions: Record<string, string[]> = {};
     // Only returned work needs judged-work proofs. Plain approvals must not
     // turn every stats read into a Git audit of all delivered work.
@@ -33,7 +35,8 @@ export function createReviewStatisticsEvidenceReader(root: string) {
       if (round.decision?.revision) { equivalentSubmissions[round.decision.revision] = [...new Set([...(equivalentSubmissions[round.decision.revision] ?? []), ...proof])]; }
     }
     proofs.flush();
-    return workflowReturns ? { equivalentSubmissions, workflowReturns } : { equivalentSubmissions };
+    return { equivalentSubmissions, ...(workflowReturns ? { workflowReturns } : {}),
+      ...(reviewEpisodes ? { reviewEpisodes } : {}) };
   };
 }
 
@@ -87,19 +90,79 @@ export function workflowReturnsFromHistory(entries: readonly LaneMove[], repairs
 export function createWorkflowReturnReader(lane: { findByMissionId(_missionId: string): Promise<readonly LaneMove[]> },
   history?: { findByTypeForMission?(_type: string, _missionId: string): Promise<readonly { eventData: string; createdAt: string }[]> }) {
   return async (missionId: string): Promise<WorkflowReturn[] | undefined> => {
-    const first = new Map<string, ReboundRepairMove>();
-    for (const entry of await history?.findByTypeForMission?.('rebound.repair', missionId) ?? []) {
-      let data: Record<string, unknown>;
-      try { data = JSON.parse(entry.eventData) as Record<string, unknown>; } catch { continue; }
-      const occurrenceId = String(data.occurrenceId ?? '');
-      const held = first.get(occurrenceId);
-      if (!occurrenceId || (held && held.occurredAt <= entry.createdAt)) { continue; }
-      first.set(occurrenceId, { occurrenceId, reasonKind: String(data.reasonKind ?? ''), area: typeof data.area === 'string' ? data.area : null,
-        agent: String(data.agent ?? ''), occurredAt: entry.createdAt });
-    }
-    const moves = await lane.findByMissionId(missionId);
+    const [repairs, recovered, moves] = await Promise.all([
+      readReboundRepairs(history, missionId),
+      readRecoveredWorkflowReturns(history, missionId),
+      lane.findByMissionId(missionId),
+    ]);
     // A Mission with no retained workflow history has no return evidence; that is unknown, not zero.
-    return moves.length === 0 && first.size === 0 ? undefined : workflowReturnsFromHistory(moves, [...first.values()]);
+    return moves.length === 0 && repairs.length === 0 && recovered.length === 0 ? undefined
+      : [...workflowReturnsFromHistory(moves, repairs), ...recovered];
+  };
+}
+
+type WorkflowHistoryReader = { findByTypeForMission?(_type: string, _missionId: string):
+  Promise<readonly { eventData: string; createdAt: string }[]> } | undefined;
+
+async function readReboundRepairs(history: WorkflowHistoryReader, missionId: string): Promise<ReboundRepairMove[]> {
+  const first = new Map<string, ReboundRepairMove>();
+  for (const entry of await history?.findByTypeForMission?.('rebound.repair', missionId) ?? []) {
+    const repair = parseReboundRepair(entry);
+    if (!repair) { continue; }
+    const held = first.get(repair.occurrenceId);
+    if (!held || repair.occurredAt < held.occurredAt) { first.set(repair.occurrenceId, repair); }
+  }
+  return [...first.values()];
+}
+
+function parseReboundRepair(entry: { eventData: string; createdAt: string }): ReboundRepairMove | undefined {
+  try {
+    const data = JSON.parse(entry.eventData) as Record<string, unknown>;
+    const occurrenceId = String(data.occurrenceId ?? '');
+    if (!occurrenceId) { return undefined; }
+    return { occurrenceId, reasonKind: String(data.reasonKind ?? ''), area: typeof data.area === 'string' ? data.area : null,
+      agent: String(data.agent ?? ''), occurredAt: entry.createdAt };
+  } catch { return undefined; }
+}
+
+async function readRecoveredWorkflowReturns(history: WorkflowHistoryReader, missionId: string): Promise<WorkflowReturn[]> {
+  const recovered: WorkflowReturn[] = [];
+  for (const entry of await history?.findByTypeForMission?.('stats.recovery.evidence', missionId) ?? []) {
+    try {
+      const item = (JSON.parse(entry.eventData) as { evidence?: StatsRecoveryEvidence }).evidence;
+      if (item) { recovered.push(...workflowReturnsFromRecoveredEvidence([item])); }
+    } catch { /* A malformed audit row is unavailable evidence, never zero. */ }
+  }
+  return recovered;
+}
+
+/** Only provider request-changes decisions are returns; publications and approvals are not. */
+export function workflowReturnsFromRecoveredEvidence(records: readonly StatsRecoveryEvidence[]): WorkflowReturn[] {
+  return records.flatMap(record => {
+    if (record.source !== 'forgejo-review' || record.kind !== 'review-decision'
+      || String(record.raw.state ?? '').toUpperCase().replaceAll(' ', '_') !== 'REQUEST_CHANGES') { return []; }
+    const sender = typeof record.raw.user === 'object' && record.raw.user !== null
+      ? String((record.raw.user as { login?: unknown }).login ?? '') || null : null;
+    return [{ identity: `recovered:${record.identity}`, author: null, at: record.observedAt, source: 'judgment' as const,
+      origin: { actor: 'human' as const, stage: 'human-review' as const, decisionIdentity: record.identity,
+        revision: record.links.revision, sender, pullRequest: record.links.pullRequest === null
+          ? null : String(record.links.pullRequest), cause: 'changes-requested' } }];
+  });
+}
+
+/** Explicit human-review eligibility comes from the durable integration handoff, not from a send-back. */
+export function createHumanReviewEpisodeReader(lane: { findByMissionId(_missionId: string): Promise<readonly LaneMove[]> }) {
+  return async (missionId: string): Promise<ReviewEpisode[] | undefined> => {
+    const moves = [...await lane.findByMissionId(missionId)].sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+    if (moves.length === 0) { return undefined; }
+    return moves.flatMap((move, index) => {
+      if (move.toStatus !== 'integration') { return []; }
+      const terminal = moves.slice(index + 1).find(next => next.occurredAt >= move.occurredAt);
+      if (!terminal) { return []; }
+      return [{ identity: `human-handoff:${move.idempotencyKey}`, actor: 'human' as const,
+        stage: 'human-review' as const, startedAt: move.occurredAt, endedAt: terminal.occurredAt,
+        revision: null, sender: terminal.agent || 'operator' }];
+    });
   };
 }
 
@@ -127,7 +190,9 @@ async function judgmentProof(round: ReviewRound,
 }
 
 /** Bind one proof reader to a read session; Git objects are immutable by SHA. */
-export function createMissionCohortMetadataReader(root: string, workflowReturns?: (_missionId: string) => Promise<readonly WorkflowReturn[] | undefined>) {
+export function createMissionCohortMetadataReader(root: string,
+  workflowReturns?: (_missionId: string) => Promise<readonly WorkflowReturn[] | undefined>,
+  humanEpisodes?: (_missionId: string) => Promise<readonly ReviewEpisode[] | undefined>) {
   const readEvidence = createReviewStatisticsEvidenceReader(root);
   return async (missions: readonly Mission[]) => {
     const evidence = new Map<string, ReviewStatisticsEvidence>();
@@ -136,7 +201,7 @@ export function createMissionCohortMetadataReader(root: string, workflowReturns?
     for (let offset = 0; offset < completed.length; offset += 4) {
       await Promise.all(completed.slice(offset, offset + 4).map(async mission => {
         evidence.set(mission.id, await readEvidence(mission.review,
-          await workflowReturns?.(mission.id)));
+          await workflowReturns?.(mission.id), await humanEpisodes?.(mission.id)));
       }));
     }
     return missionCohortMetadata(missions, evidence);

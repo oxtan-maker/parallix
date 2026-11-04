@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { createBootstrapGitBindings } from './git-admission.js';
 import { missionCommandTarget } from './mission-command-context.js';
 import { bindGateAdmission } from './gate-admission.js';
 import { bindVerificationObservation } from './verification-observation.js';
+import { bindRebaseObservation } from './rebase-observation.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +15,7 @@ import { withinCliInvocation } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import { packageRoot } from '../adapters/filesystem/package-root.js';
-import { hasGitRepository, ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
+import { hasGitRepository } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import { deriveAliases, shouldLaunchDefaultUi, type MainOptions } from '../interfaces/cli/runtime.js';
 import { missionTerminalRequest } from '../interfaces/cli/mission-terminal-policy.js';
@@ -66,9 +68,10 @@ interface RunOptions {
 async function runtimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorInvocation = false, command = ''): Promise<Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'>> {
   bindGateAdmission(configuration);
   bindVerificationObservation(configuration);
+  bindRebaseObservation(configuration);
   const base = {
     runtime: configuration.runtime,
-    ensureStandaloneGitRepoFn: ensureStandaloneGitRepo,
+    ensureStandaloneGitRepoFn: createBootstrapGitBindings(configuration).ensureStandaloneGitRepo,
     loadAliasesFn: (options: { readonly rootDir?: string }) => deriveAliases(loadStateMap(options)),
     product: { name: packageJson.name, version: packageJson.version },
   };

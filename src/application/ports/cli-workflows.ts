@@ -301,6 +301,8 @@ export interface StatsMissionFlow {
   readonly labels: readonly string[];
   readonly implementer?: string | null;
   readonly reviewStatistics?: ReviewStatistics;
+  readonly flowObservation?: Omit<import('../projections/flow-statistics.js').FlowMissionFacts,
+    'repositoryId' | 'missionId' | 'closedAt' | 'reviewStatistics'>;
 }
 
 /** Source material for an adhoc draft intake. */

@@ -1,3 +1,4 @@
+import type { RebaseWorkflowPort } from './ports/rebase-workflow.js';
 import { missionId } from '../domain/mission.js';
 import type { MissionStore } from './domain-ports.js';
 import { agentFamily } from '../domain/agents.js';
@@ -27,4 +28,24 @@ export async function recordImplementerLaunch(slug: string, actual: string, stor
     actor: actual, occurredAt: new Date().toISOString(),
   });
   if (result.status !== 'completed') { throw new Error(result.error?.message ?? `Cannot record actual implementer ${actual}`); }
+}
+
+/** Capture database identity before replay; uncomposed legacy seams support older callers. */
+export async function resolveRecordedImplementer(slug: string, executionRoot: string, port: RebaseWorkflowPort): Promise<string | null> {
+  if (port.missionServices) {
+    const { store } = await port.missionServices(executionRoot);
+    return rebaseImplementer(store, slug);
+  }
+  let missionRecord: { implementer?: string | null } | null = null;
+  try {
+    missionRecord = await Promise.resolve(port.readReviewState(slug, executionRoot)) as { implementer?: string | null } | null;
+  } catch (_) {
+    // An unreadable mission record is local metadata unavailability, not an
+    // infrastructure failure: fall back to the Backlog task file below.
+    missionRecord = null;
+  }
+  const taskResolution = port.resolveTaskFile(slug, executionRoot);
+  return (missionRecord?.implementer || '').trim()
+    || (taskResolution.ok && taskResolution.taskFile ? port.getTaskImplementer(taskResolution.taskFile) : null)
+    || null;
 }

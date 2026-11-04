@@ -90,7 +90,7 @@ try {
 } catch {}
 if (process.argv[2] === 'rebase') {
   try {
-    const read = args => cp.execFileSync('git', args, { encoding: 'utf8' }).trim();
+    const read = args => cp.execFileSync('git', args, { encoding: 'utf8', env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' } }).trim();
     const mappings = input.toString('utf8').trim().split('\\n').filter(Boolean).map(line => line.trim().split(/\\s+/).slice(0, 2));
     const record = { from: read(['rev-parse', 'ORIG_HEAD']), to: read(['rev-parse', 'HEAD']),
       branch: read(['symbolic-ref', '--quiet', '--short', 'HEAD']), mappings };

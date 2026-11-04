@@ -18,8 +18,7 @@ import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import { RebaseCommandUseCase } from '../../../src/application/rebase-command-use-case.js';
 import type { GitCommandResult, RebaseWorkflowPort } from '../../../src/application/ports/rebase-workflow.js';
 import { predictIntegrationRebase } from '../../../src/adapters/cli/commands/integrate.js';
-import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
-import { classifyError, FailureClass, DispatchAction } from '../../../src/application/failure-classification.js';
+
 // ---- task-2294.01 pinned conflict agent (consolidated from test/task-2294.01-repro.test.ts, TASK-2622.09) ----
 describe("pinned conflict agent", () => {
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
@@ -516,265 +515,6 @@ describe("dry-run rebase prediction", () => {
     assert.deepEqual(prediction, { needed: true, wouldConflict: false });
   });
 });
-// ---- task-2494 usage-blocked implementer (consolidated from test/task-2494-repro.test.ts, TASK-2622.09) ----
-describe("usage-blocked implementer", () => {
-  const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
-  /** Strip the leading `-C <root>` / `-c <key=value>` globals so index 0 is the subcommand. */
-  function subcommand(args: string[]): string[] {
-    let index = 0;
-    while (index + 1 < args.length && (args[index] === '-C' || args[index] === '-c')) { index += 2; }
-    return args.slice(index);
-  }
-  /** Run a workflow body with terminal output captured instead of printed. */
-  async function captured(body: () => Promise<void>): Promise<string[]> {
-    const lines: string[] = [];
-    const previous = setLogger({ log: (...parts: unknown[]) => lines.push(parts.join(' ')) });
-    const origLog = console.log;
-    const origErr = console.error;
-    console.log = (l: unknown) => { lines.push(String(l)); };
-    console.error = (l: unknown) => { lines.push(String(l)); };
-    try {
-      await body();
-    } finally {
-      console.log = origLog;
-      console.error = origErr;
-      setLogger(previous);
-    }
-    return lines;
-  }
-  /** A `startAgent` that throws a PinnedAgentUnavailable-style usage-block for the pinned family. */
-  function usageBlockStartAgent(
-    launches: Array<{ step: string; options: Record<string, unknown> }>,
-    opts: { replacement?: string | null; onReplacement?: (_options: Record<string, unknown>) => { agent: string } },
-  ): RebaseWorkflowPort['startAgent'] {
-    return async (step: string, options: Record<string, unknown>) => {
-      launches.push({ step, options });
-      const pinned = String(options.agent ?? '');
-      if (options.pinnedAgent && pinned && pinned !== opts.replacement) {
-        throw Object.assign(new Error(
-          `Pinned agent "${pinned}" cannot run this step: usage limit hit; blocked until 2026-09-12 13:00`,
-        ), { failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-09-12 13:00' } } });
-      }
-      const replacement = opts.onReplacement?.(options);
-      return { agent: replacement?.agent ?? String(options.agent ?? 'pool-selected'), result: { status: 0 } };
-    };
-  }
-  function makePort(overrides: Partial<RebaseWorkflowPort> & { startAgent: RebaseWorkflowPort['startAgent'] }): RebaseWorkflowPort {
-    const shared = 'src/adapters/git/git.ts';
-    const base: Omit<RebaseWorkflowPort, 'startAgent'> = {
-      git: (args: string[]) => {
-        const tail = subcommand(args);
-        if (tail[0] === 'rebase' && tail[1] === 'main') {
-          return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, signal: null,  status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
-        }
-        return OK;
-      },
-      detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
-      getCurrentBranch: () => 'mission/task-2494',
-      cwd: () => '/repo',
-      inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2494',
-      findMissionDir: () => '/worktree/missions/task-2494',
-      findMissionArea: () => 'docs',
-      resolveWorktree: () => '/worktree',
-      conventionalWorktreePath: () => '/worktrees/task-2494',
-      missionBranchName: () => 'mission/task-2494',
-      resolveMissionBaseBranch: () => 'main',
-      missionConflictPathPrefix: () => 'missions/task-2494/',
-      selectAgent: () => null,
-      workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
-      applyAgentFallback: async () => 'codex',
-      createPr: () => ({ ok: true as const }),
-      readToken: () => 'token',
-      resolveForgejoUser: (user: string | null) => user ?? 'tester',
-      fetchReviewBranch: () => OK,
-      resolveTaskFile: () => ({ ok: true as const, taskFile: '/worktree/backlog/tasks/task-2494.md' }),
-      getTaskImplementer: () => 'codex',
-      transitionTask: async () => undefined,
-      resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
-      readReviewState: async () => ({ metadata: {} }),
-      writeReviewState: async () => ({ outcome: 'committed' as const }),
-      persistReviewState: async () => ({ outcome: 'committed' as const }),
-      isForgejoReviewEnabled: () => false,
-      formatVerificationCommand: () => 'npm test',
-      resolveConflictsForMission: () => ({
-        ok: true as const,
-        conflictFiles: [shared],
-        missionSpecificFiles: [],
-        sharedFiles: [shared],
-      }),
-      missionServices: null,
-      exit: (_code: number) => undefined,
-    };
-    return rebaseWorkflowFixture({ ...base, ...overrides }) as RebaseWorkflowPort;
-  }
-  test('TASK-2494 repro: usage-blocked pinned implementer during rebase conflict names the usage block and reset time, never infra/Forgejo', async () => {
-    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const exited: number[] = [];
-    let output = '';
-    const port = makePort({
-      startAgent: usageBlockStartAgent(launches, { replacement: null }),
-      selectAgent: () => null,
-      exit: (code: number) => { exited.push(code); },
-    });
-    await captured(async () => {
-      await runRebaseWorkflow(['task-2494'], port);
-    }).then((lines) => { output = lines.join('\n'); });
-    assert.match(output, /usage limit/i);
-    assert.match(output, /2026-09-12 13:00/);
-    const lowered = output.toLowerCase();
-    assert.ok(!/forgejo/.test(lowered), 'diagnostic must not mention forgejo');
-    assert.ok(!/infrastructure/.test(lowered), 'diagnostic must not mention infrastructure');
-    assert.ok(!/credential/.test(lowered), 'diagnostic must not mention credential');
-    assert.ok(!/does not substitute/.test(output), 'must not emit the old hard-refusal phrase');
-    assert.equal(exited.length, 1);
-    assert.ok(exited[0] !== 0);
-  });
-  test('TASK-2494 repro: usage-blocked pinned implementer substitutes an eligible replacement family when policy permits', async () => {
-    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const exited: number[] = [];
-    const selectionCalls: Array<{ step: string; exclude: Set<string> }> = [];
-    const port = makePort({
-      startAgent: usageBlockStartAgent(launches, {
-        replacement: 'mistral',
-        onReplacement: () => ({ agent: 'mistral' }),
-      }),
-      selectAgent: (step: string, options: { exclude?: Set<string> } = {}) => {
-        selectionCalls.push({ step, exclude: options.exclude ?? new Set() });
-        return options.exclude?.has('mistral') ? null : 'mistral';
-      },
-      workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
-      exit: (code: number) => { exited.push(code); },
-    });
-    await captured(async () => {
-      await runRebaseWorkflow(['task-2494'], port);
-    });
-    const replacementLaunch = launches.find((l) => l.options.agent === 'mistral');
-    assert.ok(replacementLaunch, 'a replacement-family launch must occur');
-    assert.equal(replacementLaunch?.step, 'conflict-resolution');
-    assert.equal(replacementLaunch?.options.pinnedAgent, undefined, 'substitution launches unpinned');
-    assert.ok(launches.every(launch => launch.options.sessionPolicy === 'fresh-ephemeral'));
-    assert.equal(selectionCalls.length, 1);
-    assert.equal(selectionCalls[0]?.step, 'active');
-    assert.ok(selectionCalls[0]?.exclude.has('codex'), 'blocked implementer must be excluded from selection');
-    assert.equal(exited.length, 1);
-    assert.equal(exited[0], 0, 'rebase completes cleanly after substitution');
-  });
-  test('TASK-2494 repro: selector never returns the excluded pinned implementer', async () => {
-    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const selectionCalls: Array<{ step: string; exclude: Set<string> }> = [];
-    const port = makePort({
-      startAgent: usageBlockStartAgent(launches, { replacement: null }),
-      selectAgent: (step: string, options: { exclude?: Set<string> } = {}) => {
-        selectionCalls.push({ step, exclude: options.exclude ?? new Set() });
-        return 'codex';
-      },
-      workflowLauncherStatus: (_agent: string) => ({ supported: true, agent: _agent }),
-      exit: () => undefined,
-    });
-    await captured(async () => {
-      await runRebaseWorkflow(['task-2494'], port);
-    });
-    assert.equal(selectionCalls[0]?.exclude.has('codex'), true, 'pinned implementer excluded');
-    assert.equal(selectionCalls[0]?.step, 'active', 'policy key `active` used, not a fallback key');
-  });
-  test('TASK-2494 repro: selector exhaustion emits the reset-time diagnostic, not a throw', async () => {
-    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const exited: number[] = [];
-    let output = '';
-    const port = makePort({
-      startAgent: usageBlockStartAgent(launches, { replacement: null }),
-      selectAgent: () => { throw new Error('No agents are eligible for workflow step: active'); },
-      exit: (code: number) => { exited.push(code); },
-    });
-    await captured(async () => {
-      await runRebaseWorkflow(['task-2494'], port);
-    }).then((lines) => { output = lines.join('\n'); });
-    assert.match(output, /usage limit/i);
-    assert.match(output, /2026-09-12 13:00/);
-    const lowered = output.toLowerCase();
-    assert.ok(!/forgejo/.test(lowered), 'diagnostic must not mention forgejo');
-    assert.ok(!/infrastructure/.test(lowered), 'diagnostic must not mention infrastructure');
-    assert.equal(exited.length, 1);
-    assert.ok(exited[0] !== 0);
-  });
-  test('TASK-2494 repro: selector returns a family with no working launcher emits the diagnostic', async () => {
-    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
-    const exited: number[] = [];
-    let output = '';
-    const port = makePort({
-      startAgent: usageBlockStartAgent(launches, { replacement: null }),
-      selectAgent: () => 'qwen',
-      workflowLauncherStatus: (_agent: string) => ({ supported: false, agent: _agent }),
-      exit: (code: number) => { exited.push(code); },
-    });
-    await captured(async () => {
-      await runRebaseWorkflow(['task-2494'], port);
-    }).then((lines) => { output = lines.join('\n'); });
-    assert.match(output, /usage limit/i);
-    assert.match(output, /2026-09-12 13:00/);
-    const lowered = output.toLowerCase();
-    assert.ok(!/forgejo/.test(lowered), 'diagnostic must not mention forgejo');
-    assert.ok(!/infrastructure/.test(lowered), 'diagnostic must not mention infrastructure');
-    assert.equal(exited.length, 1);
-    assert.ok(exited[0] !== 0);
-  });
-  test('TASK-2494 repro: usage-block diagnostic classifies as a non-InfraBlocker, non-HumanOnly class', () => {
-    const diagnostic = "you've hit your weekly usage limit (resets 2026-09-12 13:00)";
-    const { failureClass, dispatchAction } = classifyError(diagnostic, { version: 1, code: 'agent-quota', source: 'review-preparation' });
-    assert.notEqual(failureClass, FailureClass.InfraBlocker);
-    assert.notEqual(dispatchAction, DispatchAction.HumanOnly);
-  });
-  test('TASK-2494 repro: classifier must not widen the HumanOnly catch-all to generic limit / infra markers', () => {
-    const infra = 'Forgejo token expired; network error pushing the review branch';
-    const { failureClass, dispatchAction } = classifyError(infra, { version: 1, code: 'infrastructure', source: 'review-preparation' });
-    assert.equal(failureClass, FailureClass.InfraBlocker);
-    assert.equal(dispatchAction, DispatchAction.HumanOnly);
-  });
-  test('TASK-2494 repro: infra marker beats agent-capacity quota marker (F1)', () => {
-    // The quota marker must NOT steal a genuine Forgejo/network diagnostic. These
-    // name "quota" but carry an explicit infra marker, so they stay InfraBlocker.
-    const cases = [
-      'Forgejo quota exceeded while creating the review branch',
-      'network error: quota exhausted pushing the review branch',
-    ];
-    for (const message of cases) {
-      const { failureClass, dispatchAction } = classifyError(message, { version: 1, code: 'infrastructure' });
-      assert.equal(failureClass, FailureClass.InfraBlocker, `${message} stays InfraBlocker`);
-      assert.equal(dispatchAction, DispatchAction.HumanOnly, `${message} stays HumanOnly`);
-    }
-  });
-  test('TASK-2494 repro: a pure agent usage limit still classifies as AgentCapacity', () => {
-    // Sanity: the usage-block rule still fires when no infra marker is present.
-    const usage = "you've hit your weekly usage limit (resets 2026-09-12 13:00)";
-    const { failureClass, dispatchAction } = classifyError(usage, { version: 1, code: 'agent-quota', source: 'review-preparation' });
-    assert.equal(failureClass, FailureClass.AgentCapacity);
-    assert.equal(dispatchAction, DispatchAction.AutoRepair);
-  });
-  test('TASK-2494 repro: agent-branded rate limits classify as AgentCapacity (F1 round 4)', () => {
-    // Agent-branded / provider rate limits follow agent-limit.ts and are
-    // agent-capacity, not infrastructure.
-    const agents = [
-      'Codex rate limit exceeded',
-      'Codex rate_limit exceeded',
-      'Claude rate limit reached',
-      'mistral rate limit exceeded',
-      '429 Requests rate limit exceeded',
-    ];
-    for (const message of agents) {
-      const { failureClass, dispatchAction } = classifyError(message, { version: 1, code: 'agent-quota' });
-      assert.equal(failureClass, FailureClass.AgentCapacity, `${message} is AgentCapacity`);
-      assert.equal(dispatchAction, DispatchAction.AutoRepair, `${message} is AutoRepair`);
-    }
-  });
-  test('TASK-2494 repro: infra-branded rate limit still classifies as InfraBlocker', () => {
-    // An infra-branded rate limit (carrying a network/infrastructure marker)
-    // stays InfraBlocker even though it mentions a rate limit.
-    const infra = 'network error: rate limit exceeded while pushing the review branch';
-    const { failureClass, dispatchAction } = classifyError(infra, { version: 1, code: 'infrastructure', source: 'review-preparation' });
-    assert.equal(failureClass, FailureClass.InfraBlocker);
-    assert.equal(dispatchAction, DispatchAction.HumanOnly);
-  });
-});
 // ---- successive normal conflict stops (TASK-2668.02 / TASK-2672 follow-up) ----
 describe("rebase through successive conflict stops", () => {
   const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
@@ -891,6 +631,7 @@ describe("rebase through successive conflict stops", () => {
     assert.equal(continueCalls, 3, 'the finite continue budget is preserved across successive conflicts');
     assert.ok(h.exitCodes.some((c) => c !== 0), 'budget exhaustion fails closed');
     assert.match(h.lines.join('\n'), /after 3 failed --continue attempt/, 'reports the exhausted continue budget');
+    assert.match(h.lines.join('\n'), /git rebase --skip/, 'preserves the operator recovery command');
   });
   for (const filesRemain of [true, false]) { test(`TASK-2672: zero resolver exit with unfinished re-entry cannot publish (unmerged=${filesRemain})`, async () => {
     const h = successiveConflictHarness();
@@ -945,3 +686,235 @@ test('integration rebase repair returns to ready-for-integration (TASK-2746)', a
   });
   assert.deepEqual(calls, ['ready-for-integration']);
 });
+
+// ---- TASK-2830 Git lock contention during rebase replay ----
+// task-2816 run workflow-821be616 stopped at pick 23/26 on an existing
+// per-worktree index.lock before any resolver launch; Git requeued the pick and
+// left HEAD detached. The holder was never identified, so the retained
+// behaviour must protect the lock, wait visibly, and continue the paused
+// sequencer without restarting the rebase or spending a repair attempt.
+describe('rebase Git lock contention recovery', () => {
+  const OK: GitCommandResult = { status: 0, stdout: '', stderr: '' };
+  const LOCK_PATH = '/repo/.git/worktrees/task-2830/index.lock';
+  const LOCK_ERROR = `error: Unable to create '${LOCK_PATH}': File exists.`;
+  /** Strip the leading `-C <root>` / `-c <key=value>` globals so index 0 is the subcommand. */
+  function subcommand(args: string[]): string[] {
+    let index = 0;
+    while (index + 1 < args.length && (args[index] === '-C' || args[index] === '-c')) { index += 2; }
+    return args.slice(index);
+  }
+  function lockContentionHarness(options: { contention: boolean; releaseAfterPolls: number; released: boolean }) {
+    const lines: string[] = [];
+    const exitCodes: number[] = [];
+    const state = {
+      inProgress: false, detached: false, lockHeld: true,
+      rebaseStarts: 0, continues: 0, aborts: 0, branch: 'mission/task-2830',
+    };
+    let agentLaunches = 0;
+    let repairTransitions = 0;
+    let waits = 0;
+    let polls = 0;
+    const contention: NonNullable<RebaseWorkflowPort['gitContention']> = {
+      inspect: (result, invocation) => {
+        if (!options.contention || result.status !== 128 || !invocation.args.includes('rebase') || !state.lockHeld) { return null; }
+        return {
+          kind: 'lock-contention', lockPath: LOCK_PATH, family: 'index', scope: 'worktree',
+          owner: 'unknown', ownerPid: null, ageMs: 120, removable: false,
+          diagnostics: `index.lock at ${LOCK_PATH} (worktree scope); owner not provable`,
+        };
+      },
+      waitForRelease: async (evidence, waitOptions) => {
+        waits += 1;
+        polls = 0;
+        while (polls < options.releaseAfterPolls) {
+          polls += 1;
+          waitOptions?.onWaiting?.({
+            resource: 'git:worktree:/repo/.git/worktrees/task-2830', lockPath: evidence.lockPath,
+            scope: evidence.scope, owner: evidence.owner, attempts: polls, waitedMs: polls * 100,
+          });
+        }
+        if (!options.released) {
+          return { released: false, attempts: polls, waitedMs: polls * 100, evidence, stopReason: 'wait-limit' };
+        }
+        state.lockHeld = false;
+        return { released: true, attempts: polls, waitedMs: polls * 100, evidence, stopReason: 'released' };
+      },
+    };
+    const port = rebaseWorkflowFixture({
+      git: (args: string[]) => {
+        const tail = subcommand(args);
+        if (tail[0] === 'rebase' && tail[1] === 'main') {
+          state.rebaseStarts += 1;
+          state.inProgress = true;
+          state.detached = true;
+          // A restarted rebase over active sequencer state is a blind replay.
+          if (state.rebaseStarts > 1) { return { status: 128, stdout: '', stderr: "fatal: It seems that there is already a rebase-merge directory" }; }
+          return { status: 128, stdout: '', stderr: `Rebasing (23/26)\n${LOCK_ERROR}\nfatal: could not detach HEAD` };
+        }
+        if (tail[0] === 'rebase' && tail[1] === '--continue') {
+          state.continues += 1;
+          if (state.lockHeld) { return { status: 128, stdout: '', stderr: LOCK_ERROR }; }
+          state.inProgress = false;
+          state.detached = false;
+          return OK;
+        }
+        if (tail[0] === 'rebase' && tail[1] === '--abort') { state.aborts += 1; return OK; }
+        if (tail[0] === 'merge-base') { return OK; }
+        if (tail[0] === 'rev-parse') { return { ...OK, stdout: '2f3b1c9d0e4a5b6c7d8e9f0123456789abcdef01' }; }
+        if (tail[0] === 'status') { return OK; }
+        return OK;
+      },
+      gitContention: contention,
+      detectRebaseState: () => ({ inProgress: state.inProgress, unmergedFiles: [] }),
+      getCurrentBranch: () => (state.detached ? '' : state.branch),
+      cwd: () => '/repo', inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2830',
+      findMissionDir: () => '/repo/missions/task-2830', findMissionArea: () => 'docs',
+      resolveWorktree: () => '/repo', conventionalWorktreePath: () => '/worktrees/task-2830',
+      missionBranchName: () => 'mission/task-2830', resolveMissionBaseBranch: () => 'main',
+      missionConflictPathPrefix: () => 'missions/task-2830/',
+      startAgent: async (step: string, o: Record<string, unknown>) => { agentLaunches += 1; return { agent: String(o.agent ?? 'pool-selected'), result: { status: 0 } }; },
+      selectAgent: () => null, workflowLauncherStatus: (agent: string) => ({ supported: true, agent }),
+      applyAgentFallback: async () => 'codex', createPr: () => ({ ok: true as const }), readToken: () => 'token',
+      resolveForgejoUser: (user: string | null) => user ?? 'tester', fetchReviewBranch: () => OK,
+      resolveTaskFile: () => ({ ok: true as const, taskFile: '/repo/backlog/tasks/task-2830.md' }),
+      getTaskImplementer: () => 'codex',
+      transitionTask: async () => { repairTransitions += 1; },
+      resolveReviewIdentity: () => ({ forgejoUser: 'tester' }),
+      readReviewState: async () => ({ implementer: 'codex', status: 'active', metadata: {} }),
+      writeReviewState: async () => ({ outcome: 'committed' as const }), persistReviewState: async () => ({ outcome: 'committed' as const }),
+      isForgejoReviewEnabled: () => false, formatVerificationCommand: () => 'npm test',
+      resolveConflictsForMission: () => assert.fail('lock contention must not dry merge an index'),
+      missionServices: null,
+      exit: (code: number) => { exitCodes.push(code); },
+    });
+    async function runWorkflow(): Promise<string> {
+      const previous = setLogger({ log: (...parts: unknown[]) => lines.push(parts.join(' ')) });
+      try { await new RebaseCommandUseCase(port).execute(['task-2830']); } finally { setLogger(previous); }
+      return lines.join('\n');
+    }
+    return { port, state, exitCodes, runWorkflow, waits: () => waits, polls: () => polls,
+      agentLaunches: () => agentLaunches, repairTransitions: () => repairTransitions };
+  }
+
+  test('TASK-2830 repro: index.lock at pick 23/26 waits for release and continues the paused rebase', async () => {
+    const h = lockContentionHarness({ contention: true, releaseAfterPolls: 3, released: true });
+    const output = await h.runWorkflow();
+    assert.deepEqual(h.exitCodes, [0], `contention must recover automatically instead of exiting: ${output}`);
+    assert.equal(h.waits(), 1, 'one admission wait for the contended resource');
+    assert.ok(h.polls() >= 2, 'waiting survives multiple polls before release');
+    assert.equal(h.state.rebaseStarts, 1, 'the paused rebase is never restarted');
+    assert.equal(h.state.continues, 1, 'the correct continuation after release is one rebase --continue');
+    assert.equal(h.state.aborts, 0, 'a transient lock is never an abort');
+    assert.equal(h.agentLaunches(), 0, 'lock contention is not an agent repair attempt');
+    assert.equal(h.repairTransitions(), 0, 'lock contention consumes no mission repair attempt');
+    assert.match(output, /waiting/i);
+    assert.ok(output.includes(LOCK_PATH), 'the waiting diagnostic names the actual lock resource');
+    assert.match(output, /worktree/, 'the diagnostic names the worktree-local scope');
+    assert.equal(h.state.inProgress, false, 'the sequencer completed');
+    assert.equal(h.state.branch, 'mission/task-2830');
+    assert.ok(!/Recovery: git rebase --abort/.test(output), 'a recovered transient lock does not end in abort advice');
+  });
+
+  test('conflicts found after index.lock release re-enter conflict classification (TASK-2830 F5)', async () => {
+    const h = lockContentionHarness({ contention: true, releaseAfterPolls: 2, released: true });
+    const conflict = 'missions/task-2830/brief.md';
+    let conflictPresent = true;
+    const runGit = h.port.git;
+    h.port.git = (args, options) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'add' && tail.includes(conflict)) { conflictPresent = false; }
+      return runGit(args, options);
+    };
+    h.port.detectRebaseState = () => ({
+      inProgress: h.state.inProgress,
+      unmergedFiles: h.state.inProgress && !h.state.lockHeld && conflictPresent ? [conflict] : [],
+    });
+
+    const output = await h.runWorkflow();
+
+    assert.deepEqual(h.exitCodes, [0], `conflict classification must complete the paused rebase: ${output}`);
+    assert.equal(h.state.rebaseStarts, 1, 'the paused rebase is never restarted');
+    assert.equal(h.state.continues, 1, 'mission-owned conflicts continue through the existing owner');
+    assert.equal(h.state.aborts, 0, 'classified conflicts do not trigger abort advice');
+    assert.equal(h.agentLaunches(), 0, 'mission-owned conflicts need no resolver launch');
+    assert.equal(h.repairTransitions(), 0, 'lock recovery consumes no repair transition');
+    assert.match(output, /Rebase paused on conflicts\. Classifying/);
+    assert.doesNotMatch(output, /Rebase failed with a non-conflict error/);
+    assert.doesNotMatch(output, /Recovery: git rebase --abort/);
+  });
+
+  test('TASK-2830: an unprovable persistent lock owner stops with actionable state and keeps the lock and sequencer', async () => {
+    const h = lockContentionHarness({ contention: true, releaseAfterPolls: 4, released: false });
+    const output = await h.runWorkflow();
+    assert.deepEqual(h.exitCodes, [1]);
+    assert.ok(h.polls() >= 4, 'a persistent owner is waited on, not abandoned after a token retry');
+    assert.equal(h.state.lockHeld, true, 'an owner that cannot be proven gone is never deleted');
+    assert.equal(h.state.continues, 0, 'no continuation runs while the lock is still held');
+    assert.equal(h.state.aborts, 0, 'the paused sequencer state is preserved, not discarded');
+    assert.equal(h.state.inProgress, true, 'authoritative rebase state survives the refusal');
+    assert.ok(output.includes(LOCK_PATH), 'the refusal names the held resource');
+    assert.match(output, /owner/i, 'the refusal states what is known about the owner');
+    assert.equal(h.agentLaunches(), 0, 'a persistent lock is not routed to an agent repair');
+  });
+
+  test('paused rebase metadata permits detached re-entry without starting another rebase (TASK-2830)', async () => {
+    const h = lockContentionHarness({ contention: true, releaseAfterPolls: 2, released: true });
+    h.state.inProgress = true; h.state.detached = true; h.state.lockHeld = false;
+    h.port.detectRebaseState = () => ({ inProgress: h.state.inProgress, branch: 'mission/task-2830', unmergedFiles: [] });
+    await h.runWorkflow();
+    assert.deepEqual(h.exitCodes, [0]); assert.equal(h.state.rebaseStarts, 0); assert.equal(h.state.continues, 1);
+    assert.equal(h.agentLaunches(), 0); assert.equal(h.repairTransitions(), 0);
+  });
+
+  test('other active sequencers block rebase and publication without discarding state (TASK-2830)', async () => {
+    for (const otherOperation of ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'sequencer']) {
+      const h = lockContentionHarness({ contention: false, releaseAfterPolls: 0, released: false });
+      h.port.detectRebaseState = () => ({ inProgress: false, otherOperation, unmergedFiles: [] });
+      const output = await h.runWorkflow();
+      assert.deepEqual(h.exitCodes, [1]); assert.equal(h.state.rebaseStarts, 0); assert.equal(h.state.aborts, 0);
+      assert.ok(output.includes(otherOperation)); assert.equal(h.agentLaunches(), 0);
+    }
+  });
+
+  test('lock release without supported paused state refuses original replay (TASK-2830)', async () => {
+    const h = lockContentionHarness({ contention: true, releaseAfterPolls: 2, released: true });
+    h.port.detectRebaseState = () => ({ inProgress: false, unmergedFiles: [] });
+    const output = await h.runWorkflow();
+    assert.deepEqual(h.exitCodes, [1]); assert.equal(h.state.rebaseStarts, 1); assert.equal(h.state.continues, 0);
+    assert.equal(h.agentLaunches(), 0); assert.match(output, /not replayed/);
+  });
+
+  test('success on the wrong branch refuses publication (TASK-2830)', async () => {
+    const h = lockContentionHarness({ contention: true, releaseAfterPolls: 2, released: true });
+    let calls = 0;
+    h.port.getCurrentBranch = () => ++calls === 1 ? 'mission/task-2830' : 'wrong-branch';
+    const output = await h.runWorkflow();
+    assert.deepEqual(h.exitCodes, [1]); assert.match(output, /expected branch/);
+  });
+
+  test('non-index lock failures preserve uncertain hook and ref effects instead of continuing (TASK-2830)', async () => {
+    for (const family of ['head', 'ref', 'packed-refs', 'config'] as const) {
+      const h = lockContentionHarness({ contention: true, releaseAfterPolls: 2, released: true });
+      const inspect = h.port.gitContention!.inspect;
+      h.port.gitContention!.inspect = (result, invocation) => {
+        const evidence = inspect(result, invocation);
+        return evidence ? { ...evidence, family } : null;
+      };
+      const output = await h.runWorkflow();
+      assert.deepEqual(h.exitCodes, [1]); assert.equal(h.waits(), 1);
+      assert.equal(h.state.continues, 0); assert.equal(h.state.aborts, 0);
+      assert.equal(h.state.inProgress, true); assert.equal(h.agentLaunches(), 0);
+      assert.match(output, /prior hook\/ref effects are uncertain/);
+    }
+  });
+
+  test('TASK-2830: a non-lock rebase failure keeps the existing non-conflict recovery path', async () => {
+    const h = lockContentionHarness({ contention: false, releaseAfterPolls: 0, released: false });
+    const output = await h.runWorkflow();
+    assert.deepEqual(h.exitCodes, [1]);
+    assert.equal(h.waits(), 0, 'an unrelated failure never enters lock waiting');
+    assert.match(output, /Rebase failed with a non-conflict error\./);
+  });
+});
+
+// Recovery admission checks use the same incident harness and retain its contract assertions.

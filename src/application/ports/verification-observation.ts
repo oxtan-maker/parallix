@@ -6,6 +6,8 @@ export interface VerificationMeasurement {
   readonly repositoryId: string;
   readonly missionId: string | null;
   readonly operationId: string | null;
+  readonly operationGeneration?: number | null;
+  readonly sourceId?: string | null;
   readonly revision: string | null;
   readonly configuration?: string | null;
   readonly runtime?: string;
@@ -15,6 +17,8 @@ export interface VerificationMeasurement {
   readonly phase: string;
   /** null means dependencies were not observed, [] means an observed root. */
   readonly after: readonly string[] | null;
+  /** Stable causal observation identities, including dependencies outside this batch. */
+  readonly dependencies?: readonly string[] | null;
   readonly plan?: readonly string[];
   readonly requestedAt: string;
   readonly startedAt: string | null;
@@ -25,14 +29,21 @@ export interface VerificationMeasurement {
   readonly wallMs: number | null;
   readonly cpu: { readonly userUs: number; readonly systemUs: number;
     readonly provenance: 'bash-time-waited-tree'; readonly boundary: string; readonly parent: string | null } | null;
-  readonly profile: { readonly reference: string; readonly samples: number | null } | null;
+  readonly profile: { readonly reference: string; readonly samples: number | null;
+    readonly controlledComparisons?: readonly import('./verification-profile.js').ControlledVerificationComparison[] } | null;
 }
 export const VERIFICATION_MEASUREMENT_EVENT = 'verification.attempt';
 export interface VerificationObservationInput {
   readonly root: string; readonly mission: string; readonly batchId: string;
   readonly gate: string; readonly command: string; readonly phase: string;
   readonly after: readonly string[] | null;
+  readonly dependencies?: readonly string[] | null;
   readonly plan?: readonly string[];
+}
+export interface VerificationOperationContext {
+  readonly id: string;
+  readonly generation: number;
+  readonly sourceId: string;
 }
 export interface VerificationObservationPort {
   begin(_input: VerificationObservationInput): Promise<{

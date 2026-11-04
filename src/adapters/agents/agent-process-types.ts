@@ -11,6 +11,8 @@ export type AgentProcessResult = Partial<Awaited<ReturnType<typeof spawnAndTee>>
   provider?: string | null;
   transientRetries?: number;
   telemetryFresh?: boolean;
+  /** The workflow's persisted outcome completed the assignment before provider exit. */
+  completedAuthoritatively?: boolean;
   _jsonFallback?: boolean;
 };
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { GitReviewEvidence } from '../../../../src/adapters/review/review-evidence.js';
 import { EvidenceReadError } from '../../../../src/application/ports/review-evidence.js';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
+import type { Review } from '../../../../src/domain/review.js';
 
 // Contract of the Git evidence adapter: bounded reads report typed errors.
 test('an oversized or failed git read is a typed evidence error rather than a raw child-process error (TASK-2704)', async () => {
@@ -121,6 +122,48 @@ test('an independent gate failure shortly after a reviewer return is its own ret
     { fromStatus: 'review', toStatus: 'active', trigger: 'request-changes', agent: 'claude', occurredAt: '2026-10-01T11:00:00Z', idempotencyKey: 'pr' }];
   const returns = workflowReturnsFromHistory(lane, [{ occurrenceId: 'gate', reasonKind: 'gate-failure', area: 'declared gate', agent: 'codex', occurredAt: '2026-10-01T11:05:00Z' }]);
   assert.deepEqual(returns.map(item => item.source).sort(), ['judgment', 'repair']);
+});
+
+test('durable integration handoffs expose clean and returned human review episodes (TASK-2835 review F5)', async () => {
+  const { createHumanReviewEpisodeReader } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
+  const lane = [
+    { fromStatus: 'review', toStatus: 'integration', trigger: 'approve', agent: 'claude', occurredAt: '2026-10-01T10:00:00Z', idempotencyKey: 'handoff-1' },
+    { fromStatus: 'integration', toStatus: 'active', trigger: 'request-changes', agent: 'magnus', occurredAt: '2026-10-01T10:05:00Z', idempotencyKey: 'return-1' },
+    { fromStatus: 'review', toStatus: 'integration', trigger: 'approve', agent: 'claude', occurredAt: '2026-10-01T11:00:00Z', idempotencyKey: 'handoff-2' },
+    { fromStatus: 'integration', toStatus: 'done', trigger: 'land', agent: 'magnus', occurredAt: '2026-10-01T11:05:00Z', idempotencyKey: 'done' },
+  ];
+  const episodes = await createHumanReviewEpisodeReader({ findByMissionId: async () => lane })('task-1');
+  assert.deepEqual(episodes?.map(episode => [episode.identity, episode.startedAt, episode.endedAt]), [
+    ['human-handoff:handoff-1', '2026-10-01T10:00:00Z', '2026-10-01T10:05:00Z'],
+    ['human-handoff:handoff-2', '2026-10-01T11:00:00Z', '2026-10-01T11:05:00Z'],
+  ]);
+});
+
+test('a revocation decision inside its durable handoff is one human episode (TASK-2835 review F10)', async () => {
+  const { createHumanReviewEpisodeReader } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
+  const { reviewStatistics } = await import('../../../../src/application/services/review-statistics.js');
+  const { repeatReview } = await import('../../../fixtures/repeat-review.js');
+  const lane = [
+    { fromStatus: 'review', toStatus: 'integration', trigger: 'approve', agent: 'claude', occurredAt: '2026-10-01T01:00:00Z', idempotencyKey: 'handoff-return' },
+    { fromStatus: 'integration', toStatus: 'active', trigger: 'revoke-review', agent: 'magnus', occurredAt: '2026-10-01T01:30:00Z', idempotencyKey: 'return' },
+    { fromStatus: 'review', toStatus: 'integration', trigger: 'approve', agent: 'claude', occurredAt: '2026-10-01T02:00:00Z', idempotencyKey: 'handoff-clean' },
+    { fromStatus: 'integration', toStatus: 'done', trigger: 'land', agent: 'magnus', occurredAt: '2026-10-01T02:30:00Z', idempotencyKey: 'done' },
+  ];
+  const episodes = await createHumanReviewEpisodeReader({ findByMissionId: async () => lane })('task-1');
+  const aggregate = repeatReview();
+  const submitted = aggregate.rounds[0];
+  const review: Review = { ...aggregate, rounds: [{ ...submitted, decision: {
+    kind: 'approved' as const, revision: submitted.subject.revision, decidedAt: '2026-10-01T00:30:00Z', comment: null,
+    source: { kind: 'local' as const }, revocation: { revokedAt: '2026-10-01T01:30:00Z', revokedBy: 'magnus',
+      reason: 'Supported human send-back', cause: { kind: 'operator' as const } },
+  } }] as Review['rounds'] };
+
+  const result = reviewStatistics(review, { equivalentSubmissions: {}, reviewEpisodes: episodes });
+
+  assert.deepEqual(result.episodes.filter(episode => episode.actor === 'human').map(episode => episode.identity),
+    ['human-handoff:handoff-return', 'human-handoff:handoff-clean']);
+  assert.deepEqual(result.sendBacks.human, { numerator: 1, eligibleEpisodes: 2, coverage: 1,
+    rate: { state: 'measured', value: 0.5 } });
 });
 
 test('an integration repair belongs to the rebound that opened it however long it runs (TASK-2832)', async () => {

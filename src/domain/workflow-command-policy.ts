@@ -7,13 +7,25 @@ import type { ReviewOperation } from './review-command-policy.js';
 /** Business eligibility shared by command acceptance, continuation and action projection. */
 export function workflowEligible(command: WorkflowCommand, mission: Mission, reviewMode: ReviewOperation = 'status', operatorInvocation = false, approval?: ReviewedRevision | null): boolean {
   if (isClosedMission(mission)) { return false; }
-  if (!operatorInvocation && mission.checkpoints.some(cp => cp.repair?.blocker) && ['active:execute', 'review:submit'].includes(command)) { return false; }
+  if (blockedByRepair(command, mission, operatorInvocation)) { return false; }
   switch (command) {
     case 'draft:create': return mission.status === 'backlog';
     case 'active:execute': return executionEligible(mission);
-    case 'review:submit': return (!pendingIntegrationApproval(mission) || ['enter', 'status'].includes(reviewMode)) && ( ['active', 'review'].includes(mission.status) || mission.status === 'integration' && reviewMode === 'enter');
+    case 'review:submit': return reviewEligible(mission, reviewMode);
+    case 'rebase:run': return ['refined', 'active', 'review', 'integration'].includes(mission.status);
     case 'integrate:merge': return integrationEligible(mission, approval);
   }
+}
+
+function blockedByRepair(command: WorkflowCommand, mission: Mission, operatorInvocation: boolean): boolean {
+  return !operatorInvocation && mission.checkpoints.some(cp => cp.repair?.blocker)
+    && ['active:execute', 'review:submit'].includes(command);
+}
+
+function reviewEligible(mission: Mission, reviewMode: ReviewOperation): boolean {
+  const integrationAllowed = !pendingIntegrationApproval(mission) || ['enter', 'status'].includes(reviewMode);
+  const statusAllowed = ['active', 'review'].includes(mission.status) || mission.status === 'integration' && reviewMode === 'enter';
+  return integrationAllowed && statusAllowed;
 }
 
 function executionEligible(mission: Mission): boolean {

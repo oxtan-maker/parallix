@@ -5,6 +5,7 @@ export type WorkflowOwnerRead = (_id: string) => Promise<WorkflowOperation | nul
 /** Composition installs the process owner's authorization before workflow effects. */
 export interface MissionWriteAuthorization {
   readonly operationId: string;
+  readonly generation?: number;
   readonly start?: import('../execution-start-service.js').ExecutionStart;
   /** Child CLI writes are fenced by the parent, without inheriting control of it. */
   readonly inherited?: boolean;
@@ -25,6 +26,7 @@ export function inheritedMissionWrite(): boolean { return authorization?.inherit
 
 export function hasMissionWriteAuthorization(): boolean { return authorization !== null; }
 export function authorizedOperationId(): string | null { return authorization?.operationId ?? null; }
+export function authorizedOperationGeneration(): number | null { return authorization?.generation ?? null; }
 
 export async function reportWorkflowProviderStarted(agent: string): Promise<void> { await authorization?.providerStarted?.(agent); }
 

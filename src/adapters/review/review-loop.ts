@@ -76,7 +76,7 @@ export interface ReviewLoopBindings {
   readonly missionStore?: MissionStore | null;
   readonly lifecycleService?: MissionLifecycleService | null;
   readonly performReviewPreparationFn?: (_slug: string, _options: Record<string, unknown>) => Promise<ReviewPreparationFacts>;
-  readonly onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response') => Promise<void> | void;
+  readonly onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response', _model?: string | null) => Promise<void> | void;
   readonly onAutonomousStop?: (_reason: string) => Promise<void> | void;
   readonly log?: (_msg: string) => void;
   readonly error?: (_msg: string) => void;
@@ -226,13 +226,17 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
         pinnedAgent: role === 'reviewer' && bindings.pinnedReviewer !== undefined,
         prompt: async (actual: string) => [prompt ? await rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
         worktree, slug, role, exclude: exclude.filter((family): family is string => family !== undefined),
+        ...(role === 'reviewer' && prompt ? { authoritativeCompletion: async () => {
+          const current = await (bindings.readReviewState ?? readReviewState)(slug, worktree, bindings.missionStore);
+          return current?.round === prompt.attempt && current.disposition !== null;
+        } } : {}),
         ...(recovery?.sessionPolicy === undefined ? {} : { sessionPolicy: recovery.sessionPolicy }),
         // A bare repair launch is not review work the board reports.
-        onLaunch: async ({ agent: launched }: { agent: string }) => {
+        onLaunch: async ({ agent: launched, model }: { agent: string; model: string | null }) => {
           if (role === 'implementer' && bindings.missionStore) {
             await recordImplementerLaunch(slug, launched, bindings.missionStore, bindings.lifecycleService);
           }
-          if (prompt) { await bindings.onAgentLaunched?.(launched, phase); }
+          if (prompt) { await bindings.onAgentLaunched?.(launched, phase, model); }
         },
       });
     },

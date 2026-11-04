@@ -1,5 +1,6 @@
 import { failureReason, recognizedFailureReason } from '../domain/failure-reason.js';
-import { rebaseImplementer, recordImplementerLaunch } from './rebase-identity.js';
+import { recoverRebaseLock } from './rebase-lock-recovery.js';
+import { resolveRecordedImplementer, recordImplementerLaunch } from './rebase-identity.js';
 import { replacementImplementer } from '../domain/rebase-policy.js';
 /**
  * Rebase workflow policy (TASK-2332.12).
@@ -22,33 +23,14 @@ import type {
 // bounce itself is the rebound kernel's (TASK-2377.05).
 import { classifyHookFailure } from './hook-failure-workflow.js';
 export { classifyHookFailure };
-import { autoResolveMissionConflicts, handleNonConflictRebaseFailure, type ContinueOutcome } from './rebase-continuation.js';
+import { autoResolveMissionConflicts, handleNonConflictRebaseFailure, startRebaseRound, type ContinueOutcome } from './rebase-continuation.js';
 import { buildCurrentRebasePrompt } from './rebase-prompt.js';
 export { buildRebasePrompt } from './rebase-prompt.js';
 import { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
 export { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
 import { combineOutput, continueSucceeded, hasConflictMarkers, type RebaseContext } from './rebase-context.js';
 import { recoverAgentRebaseCompletion } from './rebase-agent-completion.js';
-
-/** Capture database identity before replay; uncomposed legacy seams support older callers. */
-async function resolveRecordedImplementer(slug: string, executionRoot: string, port: RebaseWorkflowPort): Promise<string | null> {
-  if (port.missionServices) {
-    const { store } = await port.missionServices(executionRoot);
-    return rebaseImplementer(store, slug);
-  }
-  let missionRecord: { implementer?: string | null } | null = null;
-  try {
-    missionRecord = await Promise.resolve(port.readReviewState(slug, executionRoot)) as { implementer?: string | null } | null;
-  } catch (_) {
-    // An unreadable mission record is local metadata unavailability, not an
-    // infrastructure failure: fall back to the Backlog task file below.
-    missionRecord = null;
-  }
-  const taskResolution = port.resolveTaskFile(slug, executionRoot);
-  return (missionRecord?.implementer || '').trim()
-    || (taskResolution.ok && taskResolution.taskFile ? port.getTaskImplementer(taskResolution.taskFile) : null)
-    || null;
-}
+import { completedRebaseOutcome, currentRevision, observeRebase } from './rebase-observation.js';
 
 function reportRebaseAlreadyInProgress(existingRebase: ReturnType<RebaseWorkflowPort['detectRebaseState']>, branch: string, port: RebaseWorkflowPort): void {
   fmt.log.fail(`Rebase already in progress for ${fmt.branch(branch)}.`);
@@ -120,12 +102,21 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
 /** The one success tail: verify ancestry, announce, push, then name what is next. */
 async function finishRebase(ctx: RebaseContext, message: string): Promise<void> {
   const state = ctx.port.detectRebaseState(ctx.executionRoot);
-  if (state.inProgress || state.unmergedFiles.length > 0) {
+  if (state.inProgress || state.otherOperation || state.unmergedFiles.length > 0) {
     fmt.log.fail('Rebase is unfinished. Skipping automatic push.');
+    await observeRebase(ctx, 'failed', currentRevision(ctx));
     ctx.port.exit(1);
     return;
   }
-  if (!verifyBaseAncestry(ctx)) { return; }
+  if (ctx.port.getCurrentBranch(ctx.executionRoot) !== ctx.branch) {
+    fmt.log.fail(`Rebase postcondition failed: expected branch ${ctx.branch}; inspect git status and refs before publication.`);
+    await observeRebase(ctx, 'failed', currentRevision(ctx));
+    ctx.port.exit(1);
+    return;
+  }
+  if (!verifyBaseAncestry(ctx)) { await observeRebase(ctx, 'failed', currentRevision(ctx)); return; }
+  const after = (ctx.gitFn(['-C', ctx.executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null;
+  await observeRebase(ctx, completedRebaseOutcome(ctx, after), after);
   // The branch just moved: record, at this moment, an approval it no longer
   // covers (TASK-2555). Recording is an audit fact; standing the approval down
   // stays an operator decision.
@@ -206,7 +197,8 @@ async function finishMissionConflictPhase(ctx: RebaseContext, outcome: ContinueO
   if (outcome === 'completed') {
     await finishRebase(ctx, 'Mission-specific conflicts resolved. Rebase completed.');
   } else if (outcome === 'recursed') {
-    await runRebaseWorkflow(ctx.args, ctx.port, { resumeInPlace: true });
+    ctx.rebaseAttempt = (ctx.rebaseAttempt ?? 1) + 1;
+    await runRebaseWorkflow(ctx.args, ctx.port, { resumeInPlace: true, context: ctx });
   }
 }
 
@@ -348,10 +340,42 @@ async function resolveSharedConflicts(ctx: RebaseContext, conflictResult: Missio
   await finishRebase(ctx, `Agent (${fmt.agent(agent)}) completed conflict resolution.`);
 }
 
+function validateRebaseEntry(port: RebaseWorkflowPort, existingRebase: ReturnType<RebaseWorkflowPort['detectRebaseState']>, branch: string, executionRoot: string, opts?: { resumeInPlace?: boolean }): boolean | null {
+  if (existingRebase.otherOperation) {
+    fmt.log.fail(`Cannot start rebase over active ${existingRebase.otherOperation}; inspect git status and continue with that operation owner.`);
+    port.exit(1); return null;
+  }
+  const resumeRecorded = existingRebase.inProgress && existingRebase.branch === branch && existingRebase.unmergedFiles.length === 0;
+  if (blocksRebaseStart(opts, existingRebase) && !resumeRecorded) {
+    reportRebaseAlreadyInProgress(existingRebase, branch, port);
+    return null;
+  }
+
+  // Verify we are on the correct branch.
+  const currentBranch = port.getCurrentBranch(executionRoot);
+  if (currentBranch !== branch && !resumeRecorded && !opts?.resumeInPlace) {
+    fmt.log.fail(`Expected branch ${fmt.branch(branch)}, found ${fmt.branch(currentBranch)}`);
+    fmt.log.info(`Switch to the mission branch first: ${fmt.command(`git checkout ${branch}`)}`);
+    port.exit(1);
+    return null;
+  }
+
+  return resumeRecorded;
+}
+
+function initialRebaseResult(ctx: RebaseContext, existingRebase: ReturnType<RebaseWorkflowPort['detectRebaseState']>, resumeRecorded: boolean, opts?: { resumeInPlace?: boolean }): GitCommandResult {
+  const { gitFn, executionRoot, branch } = ctx;
+  if (resumeRecorded) {
+    fmt.log.info(`Continuing recorded rebase for ${fmt.branch(branch)} from authoritative Git metadata...`);
+    return gitFn(['-C', executionRoot, '-c', 'core.editor=true', 'rebase', '--continue']);
+  }
+  return startRebaseRound(ctx, Boolean(opts?.resumeInPlace), existingRebase);
+}
+
 export async function runRebaseWorkflow(
   args: string[],
   port: RebaseWorkflowPort,
-  opts?: { resumeInPlace?: boolean },
+  opts?: { resumeInPlace?: boolean; context?: RebaseContext },
 ): Promise<void> {
   const gitFn: GitRunner = port.git;
   const flags = args.filter(a => a.startsWith('--'));
@@ -363,55 +387,35 @@ export async function runRebaseWorkflow(
     port.exit(1);
     return;
   }
-
   // Select the mission root exactly once at the command boundary. All later
   // lifecycle, Git, proof, and publication calls use this value explicitly.
   const launchRoot = port.cwd();
   const executionRoot = port.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
   const missionDir = port.findMissionDir(slug, executionRoot);
   const branch = port.missionBranchName(slug, executionRoot);
-
   const existingRebase = port.detectRebaseState(executionRoot);
   // A rebase already in progress is a blocker only on the initial entry: a
   // re-entrant `resumeInPlace` call is resuming the rebase this command started,
   // so it re-classifies the new conflicts instead of bailing (TASK-2668.02).
-  if (blocksRebaseStart(opts, existingRebase)) {
-    reportRebaseAlreadyInProgress(existingRebase, branch, port);
-    return;
-  }
+  const resumeRecorded = validateRebaseEntry(port, existingRebase, branch, executionRoot, opts);
+  if (resumeRecorded === null) { return; }
 
-  // Verify we are on the correct branch.
-  const currentBranch = port.getCurrentBranch(executionRoot);
-  if (currentBranch !== branch) {
-    fmt.log.fail(`Expected branch ${fmt.branch(branch)}, found ${fmt.branch(currentBranch)}`);
-    fmt.log.info(`Switch to the mission branch first: ${fmt.command(`git checkout ${branch}`)}`);
-    port.exit(1);
-    return;
-  }
+  const ctx = opts?.context ?? await prepareRebaseContext(args, port, slug, branch, executionRoot, missionDir, flags, gitFn);
+  if (!opts?.context) { await observeRebase(ctx, 'running', ctx.movedFrom); }
 
-  const ctx = await prepareRebaseContext(args, port, slug, branch, executionRoot, missionDir, flags, gitFn);
+  let rebaseResult = initialRebaseResult(ctx, existingRebase, resumeRecorded, opts);
 
-  let rebaseResult: GitCommandResult;
-  if (opts?.resumeInPlace) {
-    // The rebase is already paused on a conflict discovered by a prior
-    // `--continue`. Re-classify the current state; a fresh `git rebase` would
-    // fail with "rebase in progress" (TASK-2668.02).
-    fmt.log.warn('Rebase already paused on conflicts. Re-classifying...');
-    rebaseResult = { failureReason: failureReason('git-conflict', 'git'), status: 1, stdout: '', stderr: existingRebase.unmergedFiles
-      .map(file => `CONFLICT (content): Merge conflict in ${file}`).join('\n') };
-  } else {
-    fmt.log.info(`Rebasing ${fmt.branch(branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
-    rebaseResult = gitFn(['-C', executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', ctx.baseBranch]);
-  }
+  const recovered = await recoverRebaseLock(ctx, rebaseResult, ['-C', executionRoot, 'rebase', resumeRecorded ? '--continue' : ctx.baseBranch]);
+  if (!recovered) { await observeRebase(ctx, 'failed', currentRevision(ctx)); return; }
+  rebaseResult = recovered;
 
+  await handleRebaseRound(ctx, rebaseResult);
+}
+
+async function handleRebaseRound(ctx: RebaseContext, rebaseResult: GitCommandResult): Promise<void> {
+  const { port, executionRoot, gitFn } = ctx;
   // Rebase succeeded (status 0) or was already up to date.
   if (continueSucceeded(rebaseResult)) {
-    // TASK-2828: the rebase-state owner answers this with metadata only. The previous
-    // `rebase --show-current` probe is git's prefix match for `--show-current-patch`,
-    // which buffers the whole current commit patch and fails past the default buffer.
-    // REBASE_HEAD is the commit identity that patch was being read to obtain; git keeps it
-    // resolvable after a `--continue` finishes, so it only means "mid-replay" together with
-    // live rebase state.
     const postRoundState = port.detectRebaseState(executionRoot);
     if (postRoundState.inProgress && postRoundState.rebaseHead) {
       // The round reported success but the worktree still holds rebase state — incomplete.
@@ -419,25 +423,29 @@ export async function runRebaseWorkflow(
       fmt.log.warn('Rebase is still in progress. Skipping automatic push.');
       fmt.log.info('Verification: the workflow handles integration checks.');
       fmt.log.info(`Next: ${fmt.command('git rebase --continue')}`);
+      await observeRebase(ctx, 'failed', currentRevision(ctx));
       port.exit(0);
       return;
     }
     await finishRebase(ctx, 'Rebase completed cleanly.');
     return;
   }
-
   // Rebase paused on conflicts — classify and resolve.
   const rebaseOutput = combineOutput(rebaseResult);
   if (!hasConflictMarkers(rebaseResult)) {
     if (await handleNonConflictRebaseFailure(ctx, rebaseResult, rebaseOutput)) {
       await finishRebase(ctx, 'Rebase completed after hook fix.');
+    } else {
+      await observeRebase(ctx, 'failed', currentRevision(ctx));
     }
     return;
   }
 
   fmt.log.warn('Rebase paused on conflicts. Classifying...');
   const conflictResult = classifyRebaseConflicts(ctx, rebaseOutput);
-  if (!conflictResult) { return; }
+  if (!conflictResult) { await observeRebase(ctx, 'failed', currentRevision(ctx)); return; }
+  ctx.rebaseConflicts = [...conflictResult.conflictFiles];
+  await observeRebase(ctx, 'conflict', (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null);
 
   // All conflicts are mission-specific — auto-resolve with --theirs.
   if (conflictResult.sharedFiles.length === 0) {
@@ -449,6 +457,7 @@ export async function runRebaseWorkflow(
   }
 
   await resolveSharedConflicts(ctx, conflictResult);
+  if (!ctx.rebaseTerminalObserved) { await observeRebase(ctx, 'failed', currentRevision(ctx)); }
 }
 
 async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, slug: string, branch: string, executionRoot: string, missionDir: ReturnType<RebaseWorkflowPort['findMissionDir']>, flags: string[], gitFn: GitRunner): Promise<RebaseContext> {
@@ -466,9 +475,10 @@ async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, sl
     baseBranch: port.resolveMissionBaseBranch(slug, executionRoot, { gitFn }),
     isPush: flags.includes('--push'),
     recordedImplementer: await resolveRecordedImplementer(slug, executionRoot, port),
-    movedFrom: port.recordBranchMove ? (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null : null,
+    movedFrom: (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null,
+    rebaseObservationId: port.newRebaseObservationId?.(),
+    rebaseAttempt: 1,
   };
-
 }
 
 function blocksRebaseStart(opts: { resumeInPlace?: boolean } | undefined, state: ReturnType<RebaseWorkflowPort['detectRebaseState']>): boolean { return !opts?.resumeInPlace && state.inProgress; }

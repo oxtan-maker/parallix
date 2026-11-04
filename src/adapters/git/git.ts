@@ -1,4 +1,6 @@
 import { failureReason, normalizeProcessFailure } from '../../domain/failure-reason.js';
+export { inspectGitContention } from './git-contention.js';
+import { runAdmittedGitAsync, spawnAdmittedGit } from './git-mutation-admission.js';
 import { spawn, spawnSync } from 'node:child_process';
 import type { SpawnOptions, SpawnSyncOptions } from 'node:child_process';
 import * as fsMod from 'node:fs';
@@ -8,6 +10,9 @@ import { withAsyncCommandProgress, withCommandProgress } from './command-progres
 import { commandProgressLabel } from './command-identity.js';
 
 export interface GitOptions {
+  /** Explicit wall bound for admission; default waits until release/cancellation. */
+  gitWaitLimitMs?: number;
+  signal?: AbortSignal;
   progressLabel?: string;
   encoding?: BufferEncoding;
   stdio?: import('node:child_process').StdioOptions;
@@ -75,11 +80,12 @@ export function git(args: string[], options: GitOptions = {}): GitResult {
   const spawnOptions: SpawnSyncOptions = {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'] as const,
-    ...processOptions
+    ...processOptions,
+    env: { ...process.env, ...processOptions.env, GIT_OPTIONAL_LOCKS: '0' },
   };
   // Never include remote URLs/arguments: authenticated Git URLs contain tokens.
   const operation = args.find(value => ['push', 'fetch', 'rebase', 'commit', 'merge'].includes(value));
-  const execute = () => spawnSync('git', args, spawnOptions);
+  const execute = () => spawnAdmittedGit(args, spawnOptions, spawnSync);
   const result = operation
     ? withCommandProgress(progressLabel ?? `git ${operation}`, execute, {
       ...(options.stdio === 'inherit' ? { animate: false as const } : {}),
@@ -93,7 +99,7 @@ export function git(args: string[], options: GitOptions = {}): GitResult {
   return { status: result.status, signal: result.signal, stdout: String(result.stdout ?? ''), stderr: String(result.stderr ?? ''), error: result.error, failureReason: reason };
 }
 
-function gitFailureIdentity(result: ReturnType<typeof spawnSync>, args: string[], options: GitOptions, operation: string | undefined) {
+function gitFailureIdentity(result: Pick<ReturnType<typeof spawnSync>, 'status' | 'signal'>, args: string[], options: GitOptions, operation: string | undefined) {
   let reason = result.status === 0 && !result.signal ? undefined : failureReason('git-failed', 'git', { operation: subcommandLabel('git', args), exitCode: result.status });
   if (result.status !== 0 && (operation === 'rebase' || operation === 'merge')) {
     const state = spawnSync('git', [...(options.cwd ? [] : args.slice(0, args.indexOf(operation))), 'ls-files', '-u'], { encoding: 'utf8', cwd: options.cwd });
@@ -111,12 +117,13 @@ export function run(command: string, args: string[], options: GitOptions = {}): 
   const spawnOptions: SpawnSyncOptions = {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'] as const,
-    ...processOptions
+    ...processOptions,
+    env: { ...process.env, ...processOptions.env, GIT_OPTIONAL_LOCKS: '0' },
   };
   // codeql[js/shell-command-injection-from-environment] -- `command` is the git executable and `args` are internal filesystem paths
   // (repo root, config dirs) resolved from trusted sources, never user input;
   // spawnSync runs with no shell, so there is no command-injection surface.
-  const execute = () => spawnSync(command, args, spawnOptions);
+  const execute = () => pathMod.basename(command) === 'git' ? spawnAdmittedGit(args, spawnOptions, spawnSync) : spawnSync(command, args, spawnOptions);
   const result = options.stdio === 'ignore' || args.includes('--help')
     ? execute()
     : withCommandProgress(commandProgressLabel(command, args, progressLabel), execute, {
@@ -157,6 +164,7 @@ export type CommandRunner = (_command: string, _args: string[], _options?: GitOp
  * the command (SIGTERM, then SIGKILL after a grace) and throws ENOBUFS.
  */
 export async function runToExit(command: string, args: string[], options: GitOptions = {}): Promise<GitResult> {
+  if (pathMod.basename(command) === 'git' && !options.gitAdmissionGranted) { return runAdmittedGitAsync(args, options, runToExit); }
   const { progressLabel, maxBuffer = DEFAULT_MAX_CAPTURE_BYTES, encoding: _encoding, stdio: _stdio, ...spawnOptions } = options;
   const root = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'px-exit-capture-'));
   const files = [pathMod.join(root, 'stdout'), pathMod.join(root, 'stderr')] as const;
@@ -167,7 +175,7 @@ export async function runToExit(command: string, args: string[], options: GitOpt
       let escalation: NodeJS.Timeout | undefined;
       let settled = false;
       // codeql[js/shell-command-injection-from-environment] -- same trusted command surface as run().
-      const child = spawn(command, args, { ...(spawnOptions as SpawnOptions), stdio: ['ignore', fds[0], fds[1]] });
+      const child = spawn(command, args, { ...(spawnOptions as SpawnOptions), env: { ...process.env, ...spawnOptions.env, GIT_OPTIONAL_LOCKS: '0' }, stdio: ['ignore', fds[0], fds[1]] });
       const exceeded = () => fds.some(fd => fsMod.fstatSync(fd).size > maxBuffer);
       const overflowError = () => new CommandOutputLimitError(subcommandLabel(command, args), 'ENOBUFS', maxBuffer, NARROW_RECOVERY);
       const poll = setInterval(() => {
@@ -257,6 +265,8 @@ export function parseUnmergedFiles(output: string = ''): string[] {
 }
 
 interface RebaseStateResult {
+  branch?: string | null;
+  otherOperation?: string | null;
   inProgress: boolean;
   rebaseHead: string;
   detached: boolean;
@@ -270,8 +280,17 @@ interface GitRunner {
 
 interface DetectRebaseOptions {
   gitRunner?: GitRunner;
-  fsModule?: { existsSync(_path: string): boolean };
+  fsModule?: { existsSync(_path: string): boolean; readFileSync?: typeof fsMod.readFileSync };
   pathModule?: Pick<typeof pathMod, 'isAbsolute' | 'join'>;
+}
+
+function sequencerMetadata(gitDir: string, rebaseDir: string | null, fsModule: NonNullable<DetectRebaseOptions['fsModule']>, pathModule: NonNullable<DetectRebaseOptions['pathModule']>) {
+  let branch: string | null = null;
+  if (rebaseDir) {
+    try { branch = String(fsModule.readFileSync?.(pathModule.join(rebaseDir, 'head-name'), 'utf8') ?? '').trim().replace(/^refs\/heads\//, '') || null; } catch { /* Unknown origin must not authorize continuation. */ }
+  }
+  const otherOperation = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'sequencer'].find(name => fsModule.existsSync(pathModule.join(gitDir, name))) ?? null;
+  return { branch, otherOperation };
 }
 
 export function detectRebaseState(cwd: string = process.cwd(), options: DetectRebaseOptions = {}): RebaseStateResult {
@@ -306,7 +325,9 @@ export function detectRebaseState(cwd: string = process.cwd(), options: DetectRe
 
   const inProgress = Boolean(rebaseDir || unmergedFiles.length > 0);
 
+  const { branch, otherOperation } = sequencerMetadata(gitDir, rebaseDir, fsModule, pathModule);
   return {
+    branch, otherOperation,
     inProgress,
     rebaseHead,
     detached,

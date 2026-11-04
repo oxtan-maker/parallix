@@ -307,7 +307,7 @@ test('responsibility guard fails hidden service location in an adapter module', 
 
 test('responsibility guard fails complete-graph construction outside the composition root', () => {
   withTempRoot(root => {
-    writeModule(root, path.join('src', 'adapters', 'mission', 'sneaky-root.ts'), 'export const build = () => { const ports = createExecuteMissionPorts(); return [ports, new LegacyStatsBackfillAdapter()]; };\n');
+    writeModule(root, path.join('src', 'adapters', 'mission', 'sneaky-root.ts'), 'export const build = () => { const ports = createExecuteMissionPorts(); return [ports, new StatsRecoveryAdapter()]; };\n');
     const violations = findServiceLocationViolations(root);
     assert.deepEqual(violations.map(violation => [violation.file, violation.rule, violation.expectedOwner]), [
       [path.join('src', 'adapters', 'mission', 'sneaky-root.ts'), 'complete-graph-outside-composition', 'composition'],

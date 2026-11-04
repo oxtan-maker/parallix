@@ -224,6 +224,8 @@ export interface WebSourceFact {
 
 export interface WebBoardMetrics {
   readonly verification?: readonly string[];
+  /** Typed shared FLOW statistics; browser consumers format but never recalculate these values. */
+  readonly flow?: import('../../application/projections/flow-statistics.js').FlowStatistics;
   /** Deliveries in the server-selected local reporting week; absent when unavailable. */
   readonly weeklyCompletedMissions?: number;
   readonly health: { readonly state: string };

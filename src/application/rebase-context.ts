@@ -3,6 +3,11 @@ import type { GitRunner, GitCommandResult, RebaseWorkflowPort } from './ports/re
 /** Everything the rebase phases share, resolved once at the command boundary. */
 export interface RebaseContext {
   repairImplementer?: string;
+  rebaseConflicts?: string[];
+  rebaseObservationId?: string;
+  rebaseAttempt?: number;
+  rebaseObservationPredecessor?: string;
+  rebaseTerminalObserved?: boolean;
   readonly args: string[];
   readonly port: RebaseWorkflowPort;
   readonly gitFn: GitRunner;

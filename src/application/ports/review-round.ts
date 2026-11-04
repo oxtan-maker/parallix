@@ -358,7 +358,7 @@ export interface ReviewLoopOutput {
   log(_message: string): void;
   error(_message: string): void;
   exit(_code: number): void;
-  onAgentLaunched?(_agent: string, _phase: 'review' | 'review-response'): Promise<void> | void;
+  onAgentLaunched?(_agent: string, _phase: 'review' | 'review-response', _model?: string | null): Promise<void> | void;
   onAutonomousStop?(_reason: string): Promise<void> | void;
 }
 

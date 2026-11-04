@@ -2,27 +2,43 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 import { resolveCanonicalMaxConcurrentCustom, resolveCanonicalRepositoryRoot } from '../config/product-config.js';
 import { processIdentity } from '../process/process-liveness.js';
 import { initCustomAdmissionState } from '../sqlite/custom-admission-state.js';
+import { waitForAdmission, type AdmissionWaitPolicy } from '../process/admission-wait.js';
 export { initCustomAdmissionState } from '../sqlite/custom-admission-state.js';
 import { SqliteCustomAgentLeaseRepository } from '../sqlite/custom-agent-lease-repository.js';
 
 import type { CustomCapacityReservation } from '../../application/ports/custom-agent-admission.js';
 export type { CustomCapacityReservation } from '../../application/ports/custom-agent-admission.js';
 
+/**
+ * Capacity is released when a launcher's process group settles, so a saturated
+ * pool can stay saturated for the whole agent run. The wait therefore carries no
+ * admission-side bound; the launcher's watchdog and signal own it. Progress is
+ * reported once, then at most every 15 s, so a saturated pool stays visible.
+ */
+export const CUSTOM_CAPACITY_ADMISSION_POLICY: AdmissionWaitPolicy = {
+  resource: 'custom-agent-capacity',
+  initialDelayMs: 1000,
+  maxDelayMs: 1000,
+  maxWaitMs: null,
+  progressEveryMs: 15_000,
+};
+
 /** Wait for admission without changing the selected agent or consuming a retry. */
 export async function waitForCustomCapacity(
   rootDir?: string,
   onWaiting: () => void | Promise<void> = () => {},
   acquire = tryAcquireCustomCapacity,
-  pause: () => Promise<void> = () => new Promise(resolve => setTimeout(resolve, 1000)),
+  pause?: () => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<CustomCapacityReservation> {
-  let reservation = await acquire(rootDir);
-  if (reservation) { return reservation; }
-  await onWaiting();
-  do {
-    await pause();
-    reservation = await acquire(rootDir);
-  } while (!reservation);
-  return reservation;
+  const admitted = await waitForAdmission<CustomCapacityReservation>(
+    () => acquire(rootDir),
+    CUSTOM_CAPACITY_ADMISSION_POLICY,
+    { signal, onWaiting, ...(pause ? { pause: () => pause() } : {}) },
+  );
+  if (!admitted.value) { throw new Error(`Custom-agent capacity wait closed after ${admitted.attempts} attempts`); }
+  if (signal?.aborted) { admitted.value.release(); signal.throwIfAborted(); }
+  return admitted.value;
 }
 
 export async function tryAcquireCustomCapacity(rootDir?: string, configuration?: ParallixConfiguration): Promise<CustomCapacityReservation | null> {
@@ -31,8 +47,8 @@ export async function tryAcquireCustomCapacity(rootDir?: string, configuration?:
   if (!Number.isFinite(capacity)) { return { bindChild() {}, release() {} }; }
   const launcher = processIdentity(process.pid);
   if (!launcher) { throw new Error('Cannot establish launcher process identity for custom-agent admission'); }
-  const { db } = await initCustomAdmissionState(configuration);
-  const leases = new SqliteCustomAgentLeaseRepository(db);
+  const { db, leaseDb } = await initCustomAdmissionState(configuration);
+  const leases = new SqliteCustomAgentLeaseRepository(db, 'agents', leaseDb);
   const leaseId = await leases.acquire(repositoryRoot, capacity, launcher);
   if (!leaseId) { return null; }
   let released = false;

@@ -71,11 +71,23 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   activity.publish = async (event, source) => { publications.push(event.summary); await publish(event, source); };
   const service = new WorkflowOperationService(operations, store, { canExecute: () => true, async dispatch<T>() { return completed({} as T); } }, processes,
     repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true));
-  return { service, store, operations, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
+  return { service, store, operations, activity, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
 }
 function request(id = 'request-one', mission = 'task-one'): BoardCommandRequest {
   return { operationId: id, requestKey: id, kind: 'active:execute', missionId: mission, missionStatusAtRequest: 'refined', capabilities: new Set(['active:execute']) };
 }
+
+test('direct rebase admission owns a durable generation without changing the mission lane (TASK-2835)', async () => {
+  const f = fixture();
+  const admitted = await f.service.admit({ operationId: 'rebase-one', requestKey: 'rebase-one', kind: 'rebase:run',
+    missionId: 'task-one', missionStatusAtRequest: 'refined', capabilities: new Set(['rebase:run']),
+    invocation: { command: 'rebase', args: ['task-one'], interactive: false } });
+  assert.equal(admitted.status, 'accepted');
+  assert.equal(admitted.status === 'accepted' && admitted.operation.command, 'rebase:run');
+  assert.equal(admitted.status === 'accepted' && admitted.operation.generation, 0);
+  assert.equal(f.missions.get('task-one')?.status, 'refined');
+  assert.deepEqual(f.launches, ['rebase-one']);
+});
 
 test('review disconnect preserves detached completion and explicit stop excludes replacement (TASK-2826)', async () => {
   const f = fixture();
@@ -392,6 +404,7 @@ test('recovery dispatches accepted intent and never replays a crashed external w
     await f.operations.transaction(async () => {});
     f.setLive(false); await f.service.recover();
     assert.equal((await f.service.operation('request-one'))?.phase, 'interrupted');
+    assert.equal((await f.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.terminal?.state, 'interrupted');
     assert.equal(f.launches.length, 2);
   } finally { release(); await run; }
   assert.equal((await f.service.operation('request-one'))?.phase, 'interrupted');
@@ -526,6 +539,7 @@ test('recovery cannot steal a stop while process termination is held (TASK-2750 
   };
   assert.equal((await f.service.stop('task-one')).status, 'completed');
   assert.equal((await f.service.operation('request-one'))?.reason, 'Stopped by operator');
+  assert.equal((await f.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.terminal?.state, 'cancelled');
 });
 
 

@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import { git } from '../git/git.js';
+import { git, inspectGitContention } from '../git/git.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { clearTaskAgentAssignee, enforceTaskAssignee, findFieldBlock, parseAssigneeFamilies } from './task-metadata.js';
 import { commitTaskFileUpdate, getTaskStorage, resolveTaskFile } from './task-file-io.js';
@@ -412,9 +412,15 @@ function synchronizeMissionWorktree(slug: string, stateRoot: string, rootDir: st
     return true;
   }
   const detail = [result.stdout, result.stderr].filter(Boolean).join('\n').trim();
-  const abort = git(['-C', missionWorktree, 'rebase', '--abort']);
-  const abortDetail = abort.status === 0 ? ' Rebase aborted; the mission worktree was restored to its pre-rebase state.' : ` Rebase abort also failed${[abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() ? ': ' + [abort.stdout, abort.stderr].filter(Boolean).join('\n').trim() : '.'}`;
-  log(fmt.status('WARN', `Backlog state updated on integration branch, but mission/${slug} could not rebase onto ${baseBranch}${detail ? ': ' + detail : '.'}${abortDetail}`));
+  // Preserve partial/uncertain failures. The established shared-conflict owner
+  // may still abort a confirmed content conflict to restore the original branch.
+  if (!inspectGitContention(result, { cwd: missionWorktree, args: ['rebase', baseBranch] }) && unresolvedRebaseFiles(missionWorktree).length > 0) {
+    const abort = git(['-C', missionWorktree, 'rebase', '--abort']);
+    const abortDetail = abort.status === 0 ? ' Rebase aborted; the mission worktree was restored to its pre-rebase state.' : ' Rebase abort also failed; inspect git status.';
+    log(fmt.status('WARN', `Backlog shared-file conflict: ${detail}${abortDetail}`));
+  } else {
+  log(fmt.status('WARN', `Backlog state updated on integration branch, but mission/${slug} could not rebase onto ${baseBranch}${detail ? ': ' + detail : '.'} Git operation state was preserved; inspect git status and use px rebase ${slug} to continue a recorded clean paused rebase.`));
+  }
   return false;
 }
 

@@ -42,6 +42,8 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   // Real SQLite/Git approval timing; no extra workstation dependency.
   'integration/lifecycle/lifecycle-approval-timing-contract.test.ts',
   'integration/agents/pi-worker-process-contract.test.ts',
+  // Real bash/Node process tree; no provider or workstation dependency.
+  'integration/agents/agent-process-resources.test.ts',
   // Review contracts exercising SQLite backfill and durable CLI recovery.
   'integration/review/review-status-history.integration.test.ts',
   'integration/review/review-intervention-resume.integration.test.ts',

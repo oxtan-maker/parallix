@@ -1,6 +1,9 @@
 import type { StatsRow } from './services/statistics-row.js';
 export type { StatsRow } from './services/statistics-row.js';
 import type { DurableEvidence, ProgressEvent, SourceFact } from './contracts.js';
+import type { StatsRecoveryCollection } from './stats-recovery-evidence.js';
+export type { StatsRecoveryCollection, StatsRecoveryConflict, StatsRecoveryEvidence,
+  StatsRecoveryFactKind, StatsRecoveryLinks, StatsRecoverySource, StatsRecoveryAudit } from './stats-recovery-evidence.js';
 
 // Re-export operator-state repository ports so presentation consumers (TUI,
 // CLI status) can import them from the application layer without referencing
@@ -50,6 +53,8 @@ export interface StatsReconstructionChange {
   readonly beforeObserved: boolean;
   readonly after: number | null;
   readonly byImplementer: Readonly<Record<string, number>>;
+  /** The final counting owner's distinct returns and their provenance. */
+  readonly returns: import('./services/review-statistics.js').ReviewStatistics['returns'];
 }
 export interface StatsProjection {
   readonly changes?: readonly StatsReconstructionChange[];
@@ -57,11 +62,20 @@ export interface StatsProjection {
   readonly sources: readonly SourceFact<string>[];
   readonly unresolved?: readonly StatsBackfillUnresolved[];
   readonly skipped?: readonly StatsBackfillSkipped[];
+  readonly recovery?: StatsRecoveryCollection;
+  readonly recoveryAudit?: import('./stats-recovery-evidence.js').StatsRecoveryAudit;
+}
+
+/** Where a recovery run reads and writes operator state. Apply is copy-only. */
+export interface StatsRecoveryTarget {
+  readonly databasePath: string;
+  /** Only an explicit apply may materialize the consistent copy. */
+  readonly materialize?: boolean;
 }
 
 export interface StatsBackfillPort {
-  readProjection(): Promise<StatsProjection>;
-  applyRows(_rows: readonly StatsRow[]): Promise<readonly DurableEvidence[]>;
+  readProjection(_target?: StatsRecoveryTarget): Promise<StatsProjection>;
+  applyProjection(_projection: StatsProjection, _target?: StatsRecoveryTarget): Promise<readonly DurableEvidence[]>;
 }
 
 export type ProgressPort = (_event: ProgressEvent) => void;

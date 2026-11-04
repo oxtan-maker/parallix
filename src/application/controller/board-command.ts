@@ -24,6 +24,7 @@ export type BoardCommandKind =
   | 'review:act-on-findings'
   | 'approve:review'
   | 'integrate:merge'
+  | 'rebase:run'
   | 'mission:cancel';
 
 /**
@@ -169,6 +170,7 @@ export const INTEGRATED_CAPABILITIES = new Set<BoardCommandKind>([
   'draft:create',
   'checkpoint:record',
   'integrate:merge',
+  'rebase:run',
   'mission:cancel',
 ]);
 

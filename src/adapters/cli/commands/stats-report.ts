@@ -57,6 +57,29 @@ function missionFlowSection(heading: string, selected: ReturnType<typeof selectS
   return lines;
 }
 
+function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>): string[] {
+  if (!selection.flowStatistics) { return []; }
+  const renderRate = (metric: import('../../../application/projections/flow-statistics.js').FlowRate) => metric.state === 'measured'
+    ? `${((metric.value ?? 0) * 100).toFixed(1)}% (${metric.numerator}/${metric.denominator}, coverage ${(metric.coverage * 100).toFixed(0)}%)`
+    : metric.state === 'no-eligible-population' ? 'n/a (no eligible population)' : `unavailable (coverage ${(metric.coverage * 100).toFixed(0)}%)`;
+  const period = (name: string, flow: import('../../../application/projections/flow-statistics.js').FlowWindowStatistics) => {
+    const largest = flow.time.largestHolder;
+    return [fmt.bold(`${name} — shared FLOW lifecycle (${flow.label})`), formatStatsTable(
+      ['Nodes/edges', 'First-pass yield', 'Extra launches', 'Agent send-backs', 'Human send-backs', 'Largest elapsed holder'],
+      [[`${flow.diagram.nodeCount}/${flow.diagram.edgeCount}`, renderRate(flow.firstPassYield),
+        flow.extraAgentLaunches.total === null ? `unavailable (n=${flow.extraAgentLaunches.n})`
+          : flow.completedMissions === 0 ? 'n/a (no completed missions)'
+            : `${flow.extraAgentLaunches.total} (mean ${flow.extraAgentLaunches.meanPerMission!.toFixed(1)}, n=${flow.extraAgentLaunches.n})`,
+        renderRate(flow.sendBacks.agent), renderRate(flow.sendBacks.human), largest
+          ? `${largest.step}/${largest.actor}${largest.model ? `/${largest.model}` : ''}/${largest.state} ${largest.totalMs}ms (${(largest.share * 100).toFixed(1)}%)`
+          : 'n/a (no elapsed observations)']]),
+      ...flow.time.rows.map(row => `${row.step}/${row.actor}${row.model ? `/${row.model}` : ''}/${row.state}: total ${row.totalMs}ms, mean ${row.meanMs.toFixed(1)}ms, p90 ${row.p90Ms}ms, n=${row.n}`),
+      ...flow.defects.map(defect => `Collection defect: ${defect}`)];
+  };
+  return [...period('Current week', selection.flowStatistics.current),
+    ...period('Previous week', selection.flowStatistics.previous)];
+}
+
 function bugTrendSection(selection: ReturnType<typeof selectStatsReport>) {
   const lines = [fmt.bold(`Bug-labeled mission share — local calendar days (${selection.current.window.timeZone ?? localReportingTimeZone()})`)];
   if (selection.bugTrend === null) {
@@ -145,6 +168,7 @@ function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReport
 
   const lines = [`Reporting timezone: ${selection.current.window.timeZone ?? localReportingTimeZone()}; current period updates with new completions.`];
   lines.push(...missionFlowSection('Mission flow — current week', selection.current));
+  lines.push(...sharedFlowSection(selection));
   lines.push('');
   lines.push(...missionFlowSection('Mission flow — previous week', selection.previous));
   lines.push('');

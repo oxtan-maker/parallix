@@ -161,7 +161,7 @@ function resolveGitMetadataMounts(worktree: string): string[] {
   const cached = GitMetadataCache.get(resolvedWorktree);
   if (cached) { return [...cached]; }
   const run = (args: string[]) =>
-    childProcess.spawnSync('git', ['-C', worktree, ...args], {
+    childProcess.spawnSync('git', ['-C', worktree, ...args], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       // A busy host can push a cold git spawn past 1 s; 5 s keeps the lookup

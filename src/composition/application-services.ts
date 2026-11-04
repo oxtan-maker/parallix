@@ -33,12 +33,15 @@ import type { SessionMarkerRepository } from '../application/ports/mission-store
 import { type RepositoryId } from '../domain/repository.js';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
+import { git } from '../adapters/git/git.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
 import integrate from '../adapters/cli/commands/integrate.js';
 import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { reviewLoopBindings } from './review-persistence.js';
-import { LegacyStatsBackfillAdapter } from '../adapters/mission/stats-backfill-adapter.js';
+import { StatsRecoveryAdapter } from '../adapters/mission/stats-backfill-adapter.js';
+import { collectForgejoStatsRecovery } from '../adapters/forgejo/forgejo-stats-recovery.js';
+import { readToken, resolveForgejoUser } from '../adapters/forgejo/forgejo-auth.js';
 import type { ProgressPort } from '../application/ports.js';
 import type { MissionStore, MissionTransitionStore } from '../application/domain-ports.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
@@ -308,8 +311,13 @@ export async function createProductionApplicationServices(
     executeMission: new ExecuteMissionService(executePorts, activeProgress, currentWork),
     executePorts,
     presentationCapabilities,
-    statsBackfill: new StatsBackfillService(new LegacyStatsBackfillAdapter(rootDir, { configuration: options.configuration }, mission?.store ?? null,
-      operatorState.repositories ? createWorkflowReturnReader(operatorState.repositories.boardLaneEvents, operatorState.repositories.operationalHistory) : undefined)),
+    statsBackfill: new StatsBackfillService(new StatsRecoveryAdapter(rootDir, { configuration: options.configuration }, mission?.store ?? null,
+      operatorState.repositories ? createWorkflowReturnReader(operatorState.repositories.boardLaneEvents, operatorState.repositories.operationalHistory) : undefined,
+      operatorState.repositories ? { laneMoves: operatorState.repositories.boardLaneEvents,
+        operationalHistory: operatorState.repositories.operationalHistory,
+        provider: repository => collectForgejoStatsRecovery(repository,
+          readToken(resolveForgejoUser(undefined, options.configuration), rootDir, options.configuration) ?? undefined,
+          { rootDir, configuration: options.configuration }) } : {})),
     // A nested review command can finish while integration still uses another
     // service graph backed by the same process-lifetime handle. Drain this
     // scope's accepted operations without invoking the process shutdown closer;
@@ -415,6 +423,7 @@ function bindCurrentWork(operatorState: OperatorStateServices, rootDir: string, 
   const currentWork: ExecutionActivityPort = operatorState.repositories
     ? new ExecutionActivityRecorder(new SqliteExecutionActivityStore(operatorState.db, resolveCanonicalRepositoryId(rootDir)), {
       processId: process.pid,
+      revision: git(['-C', rootDir, 'rev-parse', 'HEAD']).stdout.trim() || null,
       onPublication: work => correlateMissionCapture(rootDir, configuration, work),
       // Pid plus start identity: a recycled pid must not keep a dead run's
       // work displayed as live (TASK-2373 SC13).

@@ -1,3 +1,4 @@
+import { createBootstrapGitBindings } from './git-admission.js';
 import { attachWorkflowOperations } from './workflow-operations.js';
 import { ownWorkflowCli } from './workflow-cli.js';
 import { createCliServiceScope, type CliCommandContext } from './cli-service-scope.js';
@@ -14,7 +15,6 @@ import * as fmt from '../application/presentation/cli-format.js';
 
 import { packageRoot } from '../adapters/filesystem/package-root.js';
 import packageJson from '../../package.json' with { type: 'json' };
-import { ensureStandaloneGitRepo } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import activeWorkflow from '../adapters/cli/commands/active.js';
 import { createActiveCommand } from '../interfaces/cli/active.js';
@@ -64,13 +64,32 @@ let leadComposition: ReturnType<typeof loadLeadComposition> | undefined;
 
 const packageDir = packageRoot(path.dirname(fileURLToPath(import.meta.url)));
 
-function judgedRecoveryLaunch(request: import('../application/recovery-supervisor.js').RecoveryRequest, supervisor: SupervisorPort, publish: () => Promise<void>) {
-  if (!request.admission) { return {}; }
+function judgedRecoveryLaunch(request: import('../application/recovery-supervisor.js').RecoveryRequest, supervisor: SupervisorPort,
+  publish: (_info?: { agent: string }) => Promise<void>) {
+  if (!request.admission) { return { onLaunch: publish }; }
   const admission = request.admission;
   return { launchAdmission: { assert: async () => {
     if (!supervisor.admitRecovery) { throw new Error('Recovery launch admission unavailable'); }
     await supervisor.admitRecovery(admission);
   } }, onLaunch: publish };
+}
+
+function createConfiguredCommands(context: CliCommandContext, commands: {
+  config: Command; diff: Command; resolveConflict: Command; setup: Command; verify: Command;
+}): Record<string, Command> {
+  return {
+    config: commands.config,
+    diff: commands.diff,
+    'verify-env': startupPreflight,
+    'resolve-conflict': commands.resolveConflict,
+    setup: commands.setup,
+    'setup-review': async (args, options) => {
+      const { default: setupReview } = await import('../adapters/cli/commands/setup-review.js');
+      return setupReview(args, options);
+    },
+    verify: commands.verify,
+    ...createAuthoringCommands(context), ...createLegacyCommands(context), ...createReadCommands(context), ...createLifecycleCommands(context),
+  };
 }
 
 function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Record<string, Command> {
@@ -86,19 +105,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
   });
   const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
   const context: CliCommandContext = { rootDir, configuration, packageDir, scope, active, operatorReview, commands: () => registry };
-  const configuredCommands: Record<string, Command> = {
-    config,
-    diff,
-    'verify-env': startupPreflight,
-    'resolve-conflict': resolveConflict,
-    setup,
-    'setup-review': async (args, options) => {
-      const { default: setupReview } = await import('../adapters/cli/commands/setup-review.js');
-      return setupReview(args, options);
-    },
-    verify,
-    ...createAuthoringCommands(context), ...createLegacyCommands(context), ...createReadCommands(context), ...createLifecycleCommands(context),
-  };
+  const configuredCommands = createConfiguredCommands(context, { config, diff, resolveConflict, setup, verify });
   const registry: Record<string, Command> = Object.fromEntries(["active", "recover", "config", "goal", "repro", "classification", "scope", "gate", "criterion", "mission", "depends", "nel", "checkpoint", "assign", "verdict", "resolve", "revoke-review", "revoke", "unassign", "diff", "history", "attach", "draft", "integrate", "cancel", "import-legacy", "migrate-legacy-adhoc-ids", "audit-legacy", "verify-env", "rebase", "resolve-conflict", "review", "setup", "setup-review", "stats", "github-publish-status", "status", "verify", "web", "ui"].map(name => [name, configuredCommands[name]]));
   registry.lead = (args: string[], options: Record<string, unknown> = {}) => withGraph(async services => {
     // Fleet supervision is unused by short CLI commands and autonomous review.
@@ -110,9 +117,18 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
       fmt.log.info(`[lead] Starting fresh recovery agent for ${fmt.slug(request.missionId)} with a general diagnostic prompt`);
       let publication: ReturnType<typeof executionActivityIntent> = null;
       let published = false;
-      const publish = async () => { if (publication) { published = true; await currentWork.running(publication); } };
+      let recoveryWorktree: string | null = null;
+      const publish = async (info?: { agent: string }) => {
+        if (info) {
+          publication = executionActivityIntent({ slug: request.missionId, operationId: publication?.operationId ?? `recovery-${Date.now()}`,
+            phase: 'recovery', summary: `recovery agent ${info.agent} working ${request.missionId} after ${request.attemptedOperation}`,
+            agent: info.agent, model: recoveryWorktree ? resolveAgentModel(info.agent, recoveryWorktree) : null, timeState: 'working' });
+        }
+        if (publication) { published = true; await currentWork.running(publication); }
+      };
       try {
         const { worktree, prompt } = leadRecoveryWorkspace(request);
+        recoveryWorktree = worktree;
         fmt.log.info(`[lead] Recovery prompt for ${fmt.slug(request.missionId)}:\n---\n${prompt}\n---`);
         const assigned = await services.mission?.store.load(missionId(request.missionId));
         const assignedAgent = assigned?.kind === 'found' ? assigned.mission.assignee ?? undefined : undefined;
@@ -121,6 +137,8 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
           operationId: `recovery-${Date.now()}`,
           phase: 'recovery',
           summary: `recovery agent working ${request.missionId} after ${request.attemptedOperation}`,
+          actor: 'lead',
+          timeState: 'working',
         });
         // A judged recovery is published only after spawn: otherwise its own
         // publication would appear as competing work at final admission.
@@ -189,7 +207,7 @@ export function createRuntimeOptions(rootDir: string, configuration: ParallixCon
   return {
     commandFns: Object.fromEntries(Object.entries(createCommandRegistry(rootDir, configuration, operatorReview)).map(([name, command]) => [name, (args: string[], options: Record<string, unknown> = {}) => command(args, { ...options, configuration })])),
     runtime: configuration.runtime,
-    ensureStandaloneGitRepoFn: ensureStandaloneGitRepo,
+    ensureStandaloneGitRepoFn: createBootstrapGitBindings(configuration).ensureStandaloneGitRepo,
     loadAliasesFn: options => deriveAliases(loadStateMap(options)),
     product: { name: packageJson.name, version: packageJson.version },
   };

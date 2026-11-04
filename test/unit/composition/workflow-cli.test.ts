@@ -53,6 +53,28 @@ test('CLI preserves review flags and reports stop diagnostics while closing its 
   assert.equal(closed, 3);
 });
 
+test('public rebase enters durable workflow ownership and the inherited worker runs it without readmission (TASK-2835)', async () => {
+  const requests: BoardCommandRequest[] = [];
+  let directRuns = 0; let opened = 0;
+  const registry = { rebase: async () => { directRuns++; } } as Record<string, Command>;
+  const graph = { presentationCapabilities: { commandController: { dispatch: async (request: BoardCommandRequest) => {
+    requests.push(request); return completed({});
+  } } }, operatorState: { close: async () => {} } } as unknown as ProductionApplicationServices;
+  ownWorkflowCli(registry, async () => { opened++; return graph; });
+  await registry.rebase(['task-test', '--push']);
+  assert.equal(directRuns, 0);
+  assert.equal(opened, 1);
+  assert.equal(requests[0].kind, 'rebase:run');
+  assert.deepEqual(requests[0].invocation, { command: 'rebase', args: ['task-test', '--push'], interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
+
+  configureMissionWriteAuthorization({ operationId: 'owned-rebase', generation: 2, inherited: true, assert: async () => {} });
+  try {
+    await registry.rebase(['task-test']);
+    assert.equal(directRuns, 1);
+    assert.equal(opened, 1);
+  } finally { configureMissionWriteAuthorization(null); }
+});
+
 test('CLI streams only its coordinator bytes incrementally and renders phase changes (TASK-2750 F4)', async () => {
   const text: string[] = []; const phases: string[] = []; const after: number[] = [];
   const terminal = { history: () => ({ ok: true, runs: [
@@ -171,7 +193,7 @@ test('foreground repeated interrupts share cancellation and remain handled throu
 
 test('owned CLI failure footer follows verbose trailing output and preserves outcome metadata (TASK-2772)', async () => {
   const { workflowFailureController } = await import('../../../src/composition/workflow-cli.js');
-  for (const kind of ['draft:create', 'review:submit', 'integrate:merge', 'active:execute', 'workflow:stop'] as const) {
+  for (const kind of ['draft:create', 'review:submit', 'rebase:run', 'integrate:merge', 'active:execute', 'workflow:stop'] as const) {
     const output: string[] = [];
     const original = failure('execution', 'Workflow exited with status 7', [{ id: 'evidence', source: 'mission-store', detail: 'kept' }]);
     const controller = workflowFailureController({ canExecute: () => true, dispatch: async <T>() => {

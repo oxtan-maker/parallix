@@ -2,9 +2,11 @@ import type { ParallixConfiguration } from "../../../src/application/ports/confi
 import type { SqliteDatabaseAdapter } from "../../../src/adapters/sqlite/database-adapter.js";
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { tryAcquireCustomCapacity, resetCustomCapacity, waitForCustomCapacity, initCustomAdmissionState } from '../../../src/adapters/agents/custom-capacity.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 
@@ -31,12 +33,95 @@ test('repositories sharing PARALLIX_HOME share custom capacity', async (t) => {
   first.release();
 });
 
+test('default-home custom capacity polls through operator writer contention (TASK-2840)', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-contention-'));
+  const root = path.join(temp, 'repository');
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 1 } } }));
+  const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(temp, 'operator') });
+  const { db } = await initOperatorState({ configuration });
+  let writerHeld = false;
+  t.after(async () => {
+    if (writerHeld) { await db.rollbackTransaction(); }
+    await clearCustomAdmissionStateCache();
+    await clearOperatorStateCache();
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+
+  await db.beginImmediateTransaction();
+  writerHeld = true;
+  let waits = 0;
+  const reservation = await waitForCustomCapacity(root, () => { waits++; },
+    candidate => tryAcquireCustomCapacity(candidate, configuration), async () => {
+      await db.rollbackTransaction();
+      writerHeld = false;
+    });
+  assert.equal(waits, 1, 'SQLite writer contention enters the existing capacity wait path');
+  reservation.release();
+  const state = await initCustomAdmissionState(configuration);
+  assert.deepEqual(await state.db.query('SELECT * FROM custom_agent_leases'), []);
+});
+
+test('default-home lease bindings and release tolerate external writer contention (TASK-2840)', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-bind-contention-'));
+  const root = path.join(temp, 'repository');
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 1 } } }));
+  const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(temp, 'operator') });
+  const children: ReturnType<typeof spawn>[] = [];
+  t.after(async () => {
+    for (const child of children) { if (child.exitCode === null) { child.kill('SIGKILL'); } }
+    await clearCustomAdmissionStateCache();
+    await clearOperatorStateCache();
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+
+  const reservation = await tryAcquireCustomCapacity(root, configuration);
+  assert.ok(reservation);
+  const state = await initCustomAdmissionState(configuration);
+  const { SqliteCustomAgentLeaseRepository } = await import('../../../src/adapters/sqlite/custom-agent-lease-repository.js');
+  const { processIdentity } = await import('../../../src/adapters/process/process-liveness.js');
+  const identity = processIdentity(process.pid)!;
+  const gates = new SqliteCustomAgentLeaseRepository(state.db, 'verification:test', state.leaseDb);
+  const gateLease = await gates.acquire(root, 1, identity);
+  assert.ok(gateLease);
+
+  const script = `import { DatabaseSync } from 'node:sqlite'; import fs from 'node:fs'; import path from 'node:path';
+    const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    const db = new DatabaseSync(process.argv[1]); db.exec('PRAGMA busy_timeout=5000;');
+    for (let turn = 0; turn < 2; turn++) { db.exec('BEGIN IMMEDIATE;');
+      fs.writeFileSync(path.join(process.argv[2], 'ready-' + turn), 'ready'); sleep(150); db.exec('ROLLBACK;');
+      while (!fs.existsSync(path.join(process.argv[2], 'continue-' + turn))) sleep(5); }
+    db.close();`;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script, state.db.getPath()!, temp], { stdio: 'pipe' });
+  children.push(child);
+  const exit = new Promise<number | null>(resolve => child.once('exit', resolve));
+  const actions = [
+    () => gates.bindProcessGroup(gateLease, { pid: process.pid, startId: identity.startId! }),
+    () => gates.release(gateLease),
+  ];
+  let failure: unknown;
+  for (const [turn, action] of actions.entries()) {
+    const ready = path.join(temp, `ready-${turn}`);
+    while (!fs.existsSync(ready)) {
+      assert.equal(child.exitCode, null, 'external writer must acquire each transaction');
+      await delay(5);
+    }
+    try { action(); } catch (error) { failure ??= error; }
+    fs.writeFileSync(path.join(temp, `continue-${turn}`), 'continue');
+  }
+  assert.equal(await exit, 0);
+  if (failure) { throw failure; }
+  reservation.bindChild(process.pid);
+  reservation.release();
+  assert.deepEqual(await state.db.query('SELECT * FROM custom_agent_leases'), []);
+  assert.deepEqual(await state.db.query('SELECT * FROM admission_process_groups'), []);
+});
+
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
 import { initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { mkdtemp } from '../../helpers/temp-dir.js';
-import { spawnSync } from 'node:child_process';
-
 test('disposable repositories and mission worktrees share canonical capacity two without sharing operator state (TASK-2727)', async (t) => {
   const temp = mkdtemp('smoke-admission-');
   const reservations: { release(): void }[] = [];

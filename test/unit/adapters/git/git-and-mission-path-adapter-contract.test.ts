@@ -153,6 +153,7 @@ describe("git adapter wrappers", () => {
     });
 
     assert.deepEqual(result, {
+      branch: null, otherOperation: null,
       inProgress: true,
       rebaseHead: 'abc123def456',
       detached: true,
@@ -188,6 +189,7 @@ describe("git adapter wrappers", () => {
     });
 
     assert.deepEqual(result, {
+      branch: null, otherOperation: null,
       inProgress: false,
       rebaseHead: '',
       detached: false,

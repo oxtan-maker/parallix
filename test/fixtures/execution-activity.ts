@@ -20,14 +20,19 @@ export function projectActivityPublications(events: readonly ExecutionActivity[]
 }
 
 /** Case-owned state and an optional audit sink; reads never reconstruct from audit. */
-export function memoryExecutionActivity(history?: OperationalHistoryRepository): ExecutionActivityStore {
+export interface MemoryExecutionActivityStore extends ExecutionActivityStore {
+  snapshots(): readonly ExecutionActivitySnapshot[];
+}
+
+export function memoryExecutionActivity(history?: OperationalHistoryRepository): MemoryExecutionActivityStore {
   const snapshots = new Map<string, ExecutionActivitySnapshot>();
   return {
+    snapshots: () => [...snapshots.values()],
     async loadCurrentWork() { return [...snapshots.values()]; },
     async loadMissionCurrentWork(mission) { const value = snapshots.get(mission); return value ? [value] : []; },
     async publish(event, source) {
       const next = advanceExecutionActivity(snapshots.get(event.missionId) ?? null, event, source);
-      await history?.append(executionActivityToEntry(event));
+      await history?.append(executionActivityToEntry(event, source));
       if (next) { snapshots.set(event.missionId, next); }
     },
   };
@@ -42,7 +47,10 @@ export function activityFixture(history: OperationalHistoryRepository): Executio
 
 /** Existing command fixtures retain their audit sink while publishing real checked state. */
 export class ActivityRecorderFixture extends ExecutionActivityRecorder {
+  readonly activity: MemoryExecutionActivityStore;
   constructor(history: OperationalHistoryRepository, options?: ConstructorParameters<typeof ExecutionActivityRecorder>[1]) {
-    super(activityFixture(history), options);
+    const activity = activityFixture(history) as MemoryExecutionActivityStore;
+    super(activity, options);
+    this.activity = activity;
   }
 }

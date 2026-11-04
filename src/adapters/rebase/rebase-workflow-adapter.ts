@@ -1,3 +1,4 @@
+import { createGitContentionPort } from '../git/git-contention.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { recordImplementerLaunch } from '../../application/rebase-identity.js';
 /**
@@ -13,6 +14,7 @@ import { recordImplementerLaunch } from '../../application/rebase-identity.js';
  * tests keep injecting the same doubles they always did.
  */
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { detectRebaseState, git, getCurrentBranch } from '../git/git.js';
 import integrate from '../cli/commands/integrate.js';
 import {
@@ -34,6 +36,7 @@ import { createGitChangeIdentity } from '../git/change-identity.js';
 import { agentFamily } from '../../domain/agents.js';
 import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { CONFIG_PATH } from '../agents/agent-config.js';
+import { rebaseObservation } from '../../application/ports/rebase-workflow.js';
 
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
 export interface RebaseCommandOptions {
@@ -59,6 +62,8 @@ export interface RebaseCommandOptions {
   fetchReviewBranchFn?: typeof fetchReviewBranch;
   missionServicesFn?: (_root: string) => Promise<import('../../application/ports/rebase-workflow.js').RebaseMissionServices>;
   missionIdentityServices?: NonNullable<RebaseWorkflowPort['missionServices']>;
+  observeRebaseFn?: RebaseWorkflowPort['observeRebase'];
+  rebaseObservationStage?: NonNullable<RebaseWorkflowPort['rebaseObservationStage']>;
 }
 
 const defaultExit = (code: number) => process.exit(code);
@@ -97,7 +102,8 @@ function missionConflictPathPrefix(slug: string, worktreePath: string): string {
 
 /** Bind the rebase workflow to the concrete adapters, honoring the legacy seams. */
 function launchIdentityOptions(options: RebaseCommandOptions, launch: NonNullable<Parameters<typeof startAgent>[1]>) {
-  return { ...launch, configuration: options.configuration, onLaunch: async (event: { agent: string; invocation: import('../agents/agent-process-types.js').AgentInvocation | null | undefined; startedAtMs: number }) => {
+  return { ...launch, configuration: options.configuration, onLaunch: async (event: { agent: string; model: string | null;
+    invocation: import('../agents/agent-process-types.js').AgentInvocation | null | undefined; startedAtMs: number }) => {
     const services = options.missionIdentityServices ?? options.missionServicesFn;
     if (services) {
       const authority = await services(launch.worktree || process.cwd());
@@ -153,7 +159,11 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
   };
 
   return {
+    observeRebase: options.observeRebaseFn ?? rebaseObservation() ?? undefined,
+    newRebaseObservationId: randomUUID,
+    rebaseObservationStage: options.rebaseObservationStage ?? 'direct-rebase',
     git: gitFn,
+    gitContention: createGitContentionPort(),
     detectRebaseState: detectRebaseStateFn,
     getCurrentBranch: getCurrentBranchFn,
 

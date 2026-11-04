@@ -80,7 +80,9 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
       reviewMode: e('PARALLIX_JEV_REVIEW')?.trim().toLowerCase(),
     }),
     runtime: Object.freeze({
+      gitAdmissionMarkers: gitAdmissionMarkers(e('PARALLIX_GIT_ADMISSION')),
       workflowOperation: e('PARALLIX_WORKFLOW_OPERATION'), workflowGeneration: positiveInteger(e('PARALLIX_WORKFLOW_GENERATION')),
+      resourceBoundary: e('PARALLIX_RESOURCE_BOUNDARY'),
       gitIdentity: resolveGitIdentity(source),
       ci: Boolean(e('CI')), noTui: e('PARALLIX_NO_TUI') === '1', debug: Boolean(e('DEBUG')),
       noColor: e('NO_COLOR'), forceColor: e('FORCE_COLOR'), term: e('TERM'),
@@ -115,4 +117,12 @@ function resolveGitIdentity(source: Source) {
         committerName: e('GIT_COMMITTER_NAME') || e('GIT_AUTHOR_NAME') || 'Workflow Setup',
         committerEmail: e('GIT_COMMITTER_EMAIL') || e('GIT_AUTHOR_EMAIL') || 'workflow@example.invalid',
   });
+}
+
+function gitAdmissionMarkers(value: string | undefined): Readonly<Record<string, string>> {
+  try {
+    const parsed: unknown = JSON.parse(value ?? '{}');
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { return {}; }
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+  } catch { return {}; }
 }

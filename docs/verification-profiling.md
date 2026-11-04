@@ -21,6 +21,14 @@ overwritten. A dirty revision is explicitly identified; preserve the correspondi
 source patch or commit it before collecting a comparison. Captures can contain
 local paths and function names; review them before sharing.
 
+The report also records whether each control/sampled pair used the same normalized
+workload, configuration and runtime. It reports the selected component's V8
+self-sample share and a hypothetical optimization-benefit bound. That bound assumes
+the sampled share represents removable serial CPU, the component can be removed at
+zero replacement cost and all other work remains unchanged. It is an investigation
+limit, not a forecast; the paired wall and OS CPU observations remain visible even
+when their ordering contradicts an overhead or speedup story.
+
 V8 samples describe individual isolates. Test workers inherit profiling flags;
 arbitrary external programs and children that replace those flags do not.
 Summing concurrent isolate samples does not produce OS process-tree CPU.

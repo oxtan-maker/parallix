@@ -40,11 +40,85 @@ import { repositoryId, type RepositoryId } from '../../../../src/domain/reposito
 // module's named exports, so this must be the default import.
 import stats from '../../../../src/adapters/cli/commands/stats.js';
 import { reviewStatistics, type ReviewStatistics } from '../../../../src/application/services/review-statistics.js';
+import { reconcileRecoveryEvidence, recoveryConflictIdentity, recoveryIdentity, recoveryInstant,
+  type StatsRecoveryEvidence } from '../../../../src/application/stats-recovery-evidence.js';
+import { analyzeStatsRecovery } from '../../../../src/application/stats-recovery-analysis.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
+import { flowStatistics, type FlowMissionFacts } from '../../../../src/application/projections/flow-statistics.js';
 import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../../../../src/application/ports/verification-observation.js';
 import { renderVerificationStatistics } from '../../../../src/application/presentation/verification-statistics.js';
+import { controlledVerificationComparisons } from '../../../../src/application/projections/verification-profile-comparison.js';
+import type { RunRecord } from '../../../../src/application/run-history-types.js';
+import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+
+test('historical recovery identities normalize offsets and retain conflicts (TASK-2834)', () => {
+  const identity = recoveryIdentity('forgejo-review', ['repo', 735, 42]);
+  const evidence = (raw: Readonly<Record<string, unknown>>): StatsRecoveryEvidence => ({ identity,
+    source: 'forgejo-review', kind: 'review-decision', observedAt: recoveryInstant('2026-11-03T07:00:00+01:00'),
+    links: { repositoryId: 'repo', missionId: 'task-2834', revision: 'abc', pullRequest: 735 },
+    provenance: 'Forgejo GET /pulls/735/reviews id=42', collectionEra: 'historical-reconstruction',
+    classification: 'direct-observation', raw });
+  assert.equal(evidence({ state: 'REQUEST_CHANGES' }).observedAt, '2026-11-03T06:00:00.000Z');
+  assert.throws(() => recoveryInstant('not-a-timestamp'), /Invalid recovery timestamp/);
+  const first = evidence({ state: 'REQUEST_CHANGES' });
+  const result = reconcileRecoveryEvidence([first, first, evidence({ state: 'APPROVED' })]);
+  assert.equal(result.evidence.length, 1);
+  assert.equal(result.duplicateCount, 1);
+  assert.deepEqual(result.conflicts.map(conflict => conflict.fields), [['raw']]);
+  assert.equal(result.conflicts[0]?.retained.raw.state, 'REQUEST_CHANGES');
+  const conflict = result.conflicts[0]!;
+  assert.equal(recoveryConflictIdentity({ ...conflict, fields: ['raw', 'provenance'] }),
+    recoveryConflictIdentity({ ...conflict, retained: conflict.conflicting, conflicting: conflict.retained,
+      fields: ['provenance', 'raw'] }), 'conflict identity is independent of collection and field order');
+});
+
+function workflowOperation(overrides: Partial<WorkflowOperation> = {}): WorkflowOperation {
+  return { id: 'op', repositoryId: repositoryId('repo'), missionId: fixtureMissionId('px-1'), requestKey: 'request',
+    command: 'active:execute', generation: 1, phase: 'completed', providerStarted: true,
+    agent: agentFamily('codex'), reviewer: agentFamily('codex'), originalStatus: 'active',
+    previousAssignee: agentFamily('codex'), owner: null, createdAt: instant(0), updatedAt: instant(40), reason: null,
+    ...overrides };
+}
+
+test('shared FLOW projection keeps completion windows, actor rates and typed time populations (TASK-2835)', () => {
+  const windows = weeklyDecisionWindows('2026-11-03', 'UTC');
+  const fact = (mission: string, closedAt: string, launches: number, human = false): FlowMissionFacts => {
+    const observed = reviewStatisticsObservation('codex', human ? 1 : 0);
+    const reviewStatistics = human ? { ...observed,
+      returns: observed.returns.map(item => ({ ...item, at: '2026-11-02T10:00:00Z' })),
+      sendBacks: { agent: { numerator: 0, eligibleEpisodes: 1, coverage: 1,
+        rate: { state: 'measured' as const, value: 0 } }, human: { numerator: 1, eligibleEpisodes: 1, coverage: 1,
+        rate: { state: 'measured' as const, value: 1 } } } } : observed;
+    return { repositoryId: 'repo', missionId: mission, closedAt,
+      diagramNodeIds: [`${mission}:implement`, `${mission}:review`], diagramEdgeIds: [`${mission}:implement->review`],
+      actualAgentLaunches: launches, observedDisqualifiers: human ? ['human-return'] : [], reviewStatistics,
+      agentLaunches: [{ runId: `${mission}:run`, startedAt: '2026-11-01T00:00:00Z', family: 'codex', model: 'gpt-6.1-sol' }],
+      ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 10 },
+        { step: 'human-review', actor: 'human', model: null, state: 'held', durationMs: 20 }] };
+  };
+  const result = flowStatistics([
+    fact('task-current-a', '2026-11-03T12:00:00Z', 1),
+    fact('task-current-b', '2026-11-02T12:00:00Z', 3, true),
+    fact('task-previous', '2026-10-25T12:00:00Z', 2),
+  ], windows);
+  assert.deepEqual(result.current.diagram, { nodeCount: 4, edgeCount: 2 });
+  assert.deepEqual(result.current.firstPassYield, { numerator: 1, denominator: 2, coverage: 1,
+    state: 'measured', value: 0.5 });
+  assert.deepEqual(result.current.extraAgentLaunches, { total: 2, meanPerMission: 1, n: 2 });
+  assert.deepEqual(result.current.sendBacks.human, { numerator: 1, denominator: 1, coverage: 1,
+    state: 'measured', value: 1 });
+  assert.equal(result.current.returns[0]?.responsibleModel, 'gpt-6.1-sol');
+  assert.deepEqual(result.current.time.rows.map(row => [row.step, row.state, row.totalMs, row.meanMs, row.p90Ms, row.n]), [
+    ['human-review', 'held', 40, 20, 20, 2], ['implement', 'working', 20, 10, 10, 2],
+  ]);
+  assert.equal(result.current.time.rows.find(row => row.step === 'implement')?.model, 'gpt-6.1-sol');
+  assert.deepEqual(result.current.time.largestHolder, { step: 'human-review', actor: 'human', model: null, state: 'held',
+    totalMs: 40, share: 2 / 3 });
+  assert.equal(result.previous.completedMissions, 1);
+  assert.equal(result.current.defects.length, 0);
+});
 
 test('live Review observations survive absent telemetry and ignore archived scalar counts (TASK-2818)', async () => {
   const { StatsCommandUseCase } = await import('../../../../src/application/stats-command-use-case.js');
@@ -64,7 +138,8 @@ test('live Review observations survive absent telemetry and ignore archived scal
 
 const instant = (ms: number) => new Date(Date.UTC(2026, 10, 2) + ms).toISOString();
 function attempt(id: string, start: number, end: number, extra: Partial<VerificationMeasurement> = {}): VerificationMeasurement {
-  return { id, repositoryId: 'repo', missionId: 'px-1', operationId: 'op', revision: 'rev', batchId: 'batch',
+  return { id, repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1,
+    sourceId: 'op:1', revision: 'rev', batchId: 'batch',
     gate: id, command: 'check', phase: 'integration', after: [], plan: ['a', 'b', 'c'],
     requestedAt: instant(0), startedAt: instant(start), finishedAt: instant(end), result: 'passed',
     failureReason: null, exitCode: 0, wallMs: end - start,
@@ -75,6 +150,297 @@ function verificationReport(attempts: readonly VerificationMeasurement[], lifecy
   return verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle,
     history: attempts.map(a => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(a), createdAt: a.finishedAt ?? a.requestedAt })) });
 }
+
+test('fully observed repair chain reports a measured cross-batch dependency path (TASK-2835)', () => {
+  const first = attempt('failed-gate', 0, 10, { batchId: 'pre-review-1', plan: ['check'], gate: 'check',
+    result: 'failed', exitCode: 1, failureReason: { version: 1, code: 'gate-failed' },
+    ...({ dependencies: [] } as object) });
+  const second = attempt('successful-gate', 25, 35, { batchId: 'pre-review-2', plan: ['check'], gate: 'check',
+    revision: 'fixed', ...({ dependencies: ['review-1'] } as object) });
+  const history = [first, second].map(value => ({ eventType: VERIFICATION_MEASUREMENT_EVENT,
+    eventData: JSON.stringify(value), createdAt: value.finishedAt ?? value.requestedAt }));
+  history.push(...[
+    { id: 'repair-1', dependencies: ['failed-gate'], phase: 'repair', state: 'running', at: 10 },
+    { id: 'repair-1', dependencies: ['failed-gate'], phase: 'repair', state: 'ended', at: 20 },
+    { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'running', at: 20 },
+    { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'ended', at: 25 },
+  ].map(value => ({ eventType: 'mission.current-work', createdAt: instant(value.at), eventData: JSON.stringify({
+    repositoryId: 'repo', missionId: 'px-1', operationId: 'op', sourceId: value.id,
+    operationGeneration: 1, revision: 'rev', dependencies: value.dependencies, phase: value.phase, state: value.state,
+  }) })));
+  const operation = workflowOperation({ updatedAt: instant(35) });
+
+  const report = verificationStatistics({ repositoryId: 'repo', history, operations: [operation], lifecycle: [] });
+  const measured = report as typeof report & { dependencyPath?: { durationMs: number; nodeIds: readonly string[] } };
+  assert.equal(report.criticalPathMs, 35);
+  assert.deepEqual(measured.dependencyPath, {
+    durationMs: 35,
+    nodeIds: ['failed-gate', 'repair-1', 'review-1', 'successful-gate'],
+  });
+  assert.equal(report.unknowns.some(value => value.includes('End-to-end critical path unknown')), false);
+});
+
+test('exclusive elapsed ownership reconciles overlap from observed ownership rather than row order (TASK-2835)', () => {
+  const gate = attempt('gate', 25, 35, { gate: 'check', plan: ['check'], requestedAt: instant(25) });
+  const history = [
+    { eventType: 'mission.current-work', createdAt: instant(0), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'queue', dependencies: [], revision: 'rev',
+      phase: 'waiting', state: 'running', actor: 'parallix', model: null, timeState: 'waiting' }) },
+    { eventType: 'mission.current-work', createdAt: instant(10), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'queue', dependencies: [], revision: 'rev',
+      phase: 'waiting', state: 'ended', actor: 'parallix', model: null, timeState: 'waiting' }) },
+    { eventType: 'mission.current-work', createdAt: instant(10), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'agent', dependencies: [], revision: 'rev',
+      phase: 'execute', state: 'running', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
+    { eventType: 'mission.current-work', createdAt: instant(30), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'agent', dependencies: [], revision: 'rev',
+      phase: 'execute', state: 'ended', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
+    { eventType: VERIFICATION_MEASUREMENT_EVENT, createdAt: instant(35), eventData: JSON.stringify(gate) },
+    { eventType: 'mission.current-work', createdAt: instant(35), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'human-review', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
+      phase: 'review', state: 'blocked', actor: 'human', model: null, timeState: 'held' }) },
+    { eventType: 'mission.current-work', createdAt: instant(50), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'human-review', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
+      phase: 'review', state: 'ended', actor: 'human', model: null, timeState: 'held' }) },
+  ];
+  const report = verificationStatistics({ repositoryId: 'repo', history, operations: [], lifecycle: [
+    { id: 1, repositoryId: 'repo', missionId: 'px-1', fromStatus: null, toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { id: 2, repositoryId: 'repo', missionId: 'px-1', fromStatus: 'refined', toStatus: 'active', occurredAt: instant(0), trigger: 'activate', agent: 'codex', idempotencyKey: 'active' },
+    { id: 3, repositoryId: 'repo', missionId: 'px-1', fromStatus: 'active', toStatus: 'review', occurredAt: instant(35), trigger: 'review', agent: 'codex', idempotencyKey: 'review' },
+    { id: 4, repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(50), trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
+  ] });
+  assert.equal(report.elapsedOwnership?.totalMs, 50);
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 0);
+  assert.deepEqual(report.elapsedOwnership?.rows, [
+    { step: 'workflow-admission', actor: 'parallix', model: null, state: 'waiting', durationMs: 10 },
+    { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 15 },
+    { step: 'declared-gates', actor: 'parallix', model: null, state: 'working', durationMs: 10 },
+    { step: 'human-review', actor: 'human', model: null, state: 'held', durationMs: 15 },
+  ]);
+  assert.deepEqual(report.elapsedOwnership?.terminalStates, { blocked: 1, interrupted: 0, cancelled: 0 });
+  assert.equal(report.executionMs, 10, 'exclusive elapsed ownership does not replace true gate work');
+  assert.equal(history.some(entry => entry.eventType === 'flow.elapsed-segment'), false, 'production facts drive ownership');
+});
+
+test('nested causal ownership replaces only its parent interval and reconciles exactly (TASK-2835)', () => {
+  const activity = (sourceId: string, at: number, state: string, actor: string, dependencies: string[]) => ({
+    eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId, dependencies, revision: 'rev',
+      phase: 'execute', state, actor, model: actor === 'codex' ? 'gpt-6.1-sol' : null, timeState: 'working' }),
+  });
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [], history: [
+    activity('parent', 0, 'running', 'parallix', []),
+    activity('child', 10, 'running', 'codex', ['parent']),
+    activity('child', 20, 'ended', 'codex', ['parent']),
+    activity('parent', 30, 'ended', 'parallix', []),
+  ], lifecycle: [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'refined', toStatus: 'active', occurredAt: instant(0), trigger: 'activate', agent: 'codex', idempotencyKey: 'active' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(30), trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
+  ] });
+  assert.deepEqual(report.elapsedOwnership?.rows, [
+    { step: 'preparation', actor: 'parallix', model: null, state: 'working', durationMs: 10 },
+    { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 10 },
+    { step: 'preparation', actor: 'parallix', model: null, state: 'working', durationMs: 10 },
+  ]);
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 0);
+  assert.equal(report.elapsedOwnership?.rows.reduce((sum, row) => sum + row.durationMs, 0), report.endToEndMs);
+});
+
+test('fresh run resources preserve units and deduplicate nested waited trees on the exact dependency path (TASK-2835)', () => {
+  const activity = (sourceId: string, at: number, state: string, dependencies: string[], phase = 'execute', actor = 'codex', timeState = 'working') => ({
+    eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId, dependencies, revision: 'rev',
+      phase, state, actor, model: actor === 'codex' ? 'gpt-6.1-sol' : null, timeState }),
+  });
+  const operation = workflowOperation();
+  const run = (runId: string, role: string, start: number, end: number, boundary: string, parent: string | null): RunRecord => ({
+    version: 1, runId, repositoryId: 'repo', missionId: 'px-1', captureKind: 'agent', operationId: 'op', operationGeneration: 1,
+    sourceId: runId, revision: 'rev', configuredModel: 'gpt-6.1-sol', dependencies: [], execution: null,
+    role, family: agentFamily('codex'), attempt: 1, terminalHost: 'pipe', hostFallbackReason: null, tmux: null, supervisorPid: 1,
+    state: 'exited', startedAt: instant(start), endedAt: instant(end), exitCode: 0, signal: null, providerSessionId: null,
+    redacted: false, streams: { stdout: { bytes: 0, retainedBytes: 0, omitted: [] }, stderr: { bytes: 0, retainedBytes: 0, omitted: [] } },
+    sources: [], omissions: [], resources: { localProcessTreeCpu: { userUs: boundary === 'outer' ? 100 : 50,
+      systemUs: boundary === 'outer' ? 20 : 10, provenance: 'bash-time-waited-tree', boundary, parent },
+      provider: { provenance: 'provider-reported', provider: 'openai', model: 'gpt-6.1-sol',
+        values: [{ name: 'input', value: boundary === 'outer' ? 40 : 10, unit: 'tokens' }] } },
+  });
+  const failed = attempt('failed-gate', 10, 15, { batchId: 'pre-review-1', gate: 'check', plan: ['check'], result: 'failed',
+    requestedAt: instant(10), exitCode: 1, failureReason: { version: 1, code: 'gate-failed' }, dependencies: ['implement'] });
+  const passed = attempt('passed-gate', 25, 30, { batchId: 'pre-review-2', gate: 'check', plan: ['check'],
+    requestedAt: instant(25), revision: 'fixed', dependencies: ['review'] });
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [operation], history: [
+    activity('queue', 0, 'running', [], 'waiting', 'parallix', 'waiting'), activity('queue', 5, 'ended', [], 'waiting', 'parallix', 'waiting'),
+    activity('implement', 5, 'running', []), activity('repair', 15, 'running', ['implement'], 'review-response'),
+    activity('repair', 20, 'ended', ['implement'], 'review-response'), activity('review', 20, 'running', ['repair'], 'review'),
+    activity('review', 25, 'ended', ['repair'], 'review'), activity('implement', 30, 'ended', []),
+    activity('human', 30, 'blocked', ['passed-gate'], 'review', 'human', 'held'),
+    activity('human', 40, 'ended', ['passed-gate'], 'review', 'human', 'held'),
+    ...[failed, passed].map(value => ({ eventType: VERIFICATION_MEASUREMENT_EVENT,
+      eventData: JSON.stringify(value), createdAt: value.finishedAt! })),
+  ], lifecycle: [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'refined', toStatus: 'active', occurredAt: instant(0), trigger: 'activate', agent: 'codex', idempotencyKey: 'active' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'active', toStatus: 'review', occurredAt: instant(30), trigger: 'review', agent: 'codex', idempotencyKey: 'review' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(40), trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
+  ], runs: [run('agent-codex-execute-1-a', 'execute', 5, 30, 'outer', null),
+    run('agent-codex-repair-1-b', 'review-response', 15, 20, 'repair', 'outer'),
+    run('agent-codex-review-1-c', 'review', 20, 25, 'reviewer', 'outer'),
+    run('agent-codex-review-1-c', 'review', 20, 25, 'reviewer', 'outer')] });
+  assert.equal(report.agentResources.cpuUs, 120, 'the outer waited tree already includes its nested descendant');
+  assert.equal(report.agentResources.cpuObservations, 3);
+  assert.equal(report.agentResources.runs.length, 3, 'a retained provider/local copy is counted once');
+  assert.deepEqual(report.agentResources.runs[1]?.provider?.values, [{ name: 'input', value: 10, unit: 'tokens' }]);
+  assert.equal(report.dependencyPath?.durationMs, 40, 'the path is exclusive elapsed time, not concurrent run time');
+  assert.ok(report.dependencyPath?.nodeIds.includes('gate:failed-gate'));
+  assert.ok(report.dependencyPath?.nodeIds.includes('gate:passed-gate'));
+  assert.ok(report.dependencyPath?.nodeIds.includes('run:agent-codex-execute-1-a'), JSON.stringify(report.dependencyPath));
+  assert.ok(report.dependencyPath?.nodeIds.includes('run:agent-codex-repair-1-b'));
+  assert.ok(report.dependencyPath?.nodeIds.includes('run:agent-codex-review-1-c'));
+  assert.ok(report.dependencyPath?.nodeIds.some(value => value.startsWith('activity:human')));
+  assert.equal(report.unknowns.some(value => /Agent .* missing|identity incomplete/.test(value)), false);
+  const incomplete = { ...run('agent-codex-execute-2-d', 'execute', 5, 10, 'missing', null), operationGeneration: null };
+  const defective = verificationStatistics({ repositoryId: 'repo', operations: [operation], history: [], lifecycle: [], runs: [incomplete] });
+  assert.ok(defective.unknowns.some(value => value.includes(`Agent run identity incomplete for px-1 source ${incomplete.runId}`)
+    && value.includes('rerun the affected workflow with FLOW collection enabled')));
+});
+
+test('ownership retains lead handoffs and bounded partial terminal states (TASK-2835)', () => {
+  const activity = (sourceId: string, at: number, state: string, actor: string, dependencies: string[] = []) => ({
+    eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
+      missionId: 'px-1', operationId: 'lead-op', operationGeneration: 1, sourceId, dependencies, revision: 'rev',
+      phase: 'recovery', state, actor, model: actor === 'lead' ? 'operator-model' : null,
+      timeState: state === 'blocked' ? 'held' : 'working' }),
+  });
+  const lifecycle = [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'refined', toStatus: 'active', occurredAt: instant(5), trigger: 'activate', agent: 'codex', idempotencyKey: 'active' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(40), trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
+  ];
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle, history: [
+    activity('lead', 5, 'running', 'lead'), activity('lead', 20, 'interrupted', 'lead'),
+    activity('human', 20, 'blocked', 'human'), activity('human', 30, 'cancelled', 'human'),
+    { eventType: 'lead.operator-judgment', createdAt: instant(30), eventData: JSON.stringify({
+      repositoryId: 'repo', missionId: 'px-1', action: 'escalate', summary: 'operator required', evidenceRefs: ['progress:blocked'], invocations: 1,
+    }) },
+  ] });
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 5, 'lane state alone does not fabricate a human-held owner');
+  assert.deepEqual(report.elapsedOwnership?.terminalStates, { blocked: 1, interrupted: 1, cancelled: 1 });
+  assert.deepEqual(report.elapsedOwnership?.rows, [
+    { step: 'recovery', actor: 'lead', model: 'operator-model', state: 'working', durationMs: 15 },
+    { step: 'recovery', actor: 'human', model: null, state: 'held', durationMs: 10 },
+    { step: 'lead-escalation', actor: 'human', model: null, state: 'held', durationMs: 10 },
+  ]);
+});
+
+test('dependency path scopes mission ownership and never sums concurrent cohort windows (TASK-2835 review F2/F3)', () => {
+  const lifecycle = ['m1', 'm2'].flatMap(missionId => [
+    { repositoryId: 'repo', missionId, fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: `${missionId}:refined` },
+    { repositoryId: 'repo', missionId, fromStatus: 'integration', toStatus: 'done', occurredAt: instant(10), trigger: 'land', agent: 'codex', idempotencyKey: `${missionId}:done` },
+  ]);
+  const history = ['m1', 'm2'].flatMap(missionId => ['running', 'ended'].map((state, index) => ({
+    eventType: 'mission.current-work', createdAt: instant(index * 10), eventData: JSON.stringify({ repositoryId: 'repo', missionId,
+      operationId: `${missionId}:op`, operationGeneration: 1, sourceId: `${missionId}:run`, dependencies: [], revision: 'rev',
+      phase: 'execute', state, actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }),
+  })));
+  const all = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle, history });
+  assert.equal(all.elapsedOwnership?.totalMs, 20, 'cohort work totals remain additive');
+  assert.equal(all.dependencyPath?.durationMs, 10, 'concurrent mission windows are alternative paths');
+  const one = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle, history }, new Set(['m1']));
+  assert.equal(one.elapsedOwnership?.totalMs, 10);
+  assert.equal(one.dependencyPath?.durationMs, 10);
+  assert.ok(one.dependencyPath?.nodeIds.every(id => id.includes('m1')));
+  assert.equal(one.unknowns.some(value => value.includes('m2')), false, 'out-of-cohort missions emit no collection defects');
+  assert.equal(one.unknowns.some(value => value.includes('Activity identity incomplete')), false,
+    'durable generation identity remains valid after the live operation advances or is cleaned up');
+});
+
+test('lane and unattributed blocked state remain unexplained instead of becoming human work (TASK-2835 review F3)', () => {
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle: [
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(10), trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
+  ], history: [{ eventType: 'mission.current-work', createdAt: instant(2), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'm1',
+    operationId: 'op', operationGeneration: 1, sourceId: 'blocked', dependencies: [], revision: 'rev', phase: 'review', state: 'blocked',
+    actor: 'unattributed', model: null, timeState: 'waiting' }) }] });
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 10);
+  assert.deepEqual(report.elapsedOwnership?.rows, []);
+  assert.ok(report.unknowns.some(value => value.includes('Activity ownership incomplete for m1 operation op source blocked')));
+});
+
+test('observed operation handoffs and same-source actor changes reconcile without human inference (TASK-2835 review F3/F4)', () => {
+  const activity = (at: number, operationId: string, sourceId: string, state: string, phase: string,
+    actor: string, model: string | null, summary: string) => ({ eventType: 'mission.current-work', createdAt: instant(at),
+    eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'm1', operationId, operationGeneration: 1,
+      sourceId, dependencies: [], revision: 'rev', phase, state, actor, model, timeState: 'working', summary }) });
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle: [
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'draft', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(30), trigger: 'land', agent: 'custom', idempotencyKey: 'done' },
+  ], history: [
+    activity(0, 'draft-op', 'draft-op', 'running', 'draft', 'parallix', null, 'preparing workflow'),
+    activity(5, 'draft-op', 'draft-op', 'ended', 'draft', 'parallix', null, 'workflow completed'),
+    activity(10, 'active-op', 'active-op', 'running', 'execute', 'parallix', null, 'preparing workflow'),
+    activity(12, 'active-op', 'active-op', 'running', 'execute', 'custom', 'manual/local-runner', 'running execute agent'),
+    activity(20, 'active-op', 'active-op', 'running', 'review', 'custom', 'manual/local-runner', 'reviewer custom reviewing'),
+    activity(24, 'active-op', 'active-op', 'ended', 'execute', 'parallix', null, 'execute run finished'),
+    activity(25, 'active-op', 'active-op', 'ended', 'execute', 'parallix', null, 'workflow completed'),
+  ] });
+  assert.deepEqual(report.elapsedOwnership?.rows, [
+    { step: 'draft', actor: 'parallix', model: null, state: 'working', durationMs: 5 },
+    { step: 'responsibility-handoff', actor: 'external', model: null, state: 'waiting', durationMs: 5 },
+    { step: 'preparation', actor: 'parallix', model: null, state: 'working', durationMs: 2 },
+    { step: 'implement', actor: 'custom', model: 'manual/local-runner', state: 'working', durationMs: 8 },
+    { step: 'agent-review', actor: 'custom', model: 'manual/local-runner', state: 'working', durationMs: 4 },
+    { step: 'preparation', actor: 'parallix', model: null, state: 'working', durationMs: 1 },
+  ]);
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 5, 'post-operation time remains unexplained without a next observed handoff');
+  assert.equal(report.elapsedOwnership?.rows.some(row => row.actor === 'human'), false);
+});
+
+test('shared reader deduplicates rebase snapshots without collapsing repeated cycles (TASK-2835)', () => {
+  const operation = (id: string, generation: number) => workflowOperation({ id, requestKey: id,
+    command: 'review:submit', generation, originalStatus: 'review', updatedAt: instant(20) });
+  const observation = (id: string, operationId: string, generation: number, outcome: string, at: number) => ({
+    eventType: 'flow.rebase', createdAt: instant(at), eventData: JSON.stringify({ id, repositoryId: 'repo', missionId: 'px-1',
+      operationId, generation, sourceId: id, stage: 'pre-review-rebase', attempt: 1, outcome,
+      revisionBefore: 'before', revisionAfter: outcome === 'resolved' ? 'after' : 'before', conflicts: outcome === 'conflict' ? ['shared.ts'] : [],
+      dependencies: [], occurredAt: instant(at) }),
+  });
+  const duplicate = observation('cycle-1', 'op-1', 1, 'conflict', 5);
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [operation('op-1', 1), operation('op-2', 2)], lifecycle: [], history: [
+    observation('cycle-1', 'op-1', 1, 'running', 0), duplicate, duplicate,
+    observation('cycle-1', 'op-1', 1, 'resolved', 10),
+    observation('cycle-2', 'op-2', 2, 'running', 11), observation('cycle-2', 'op-2', 2, 'no-op', 12),
+  ] });
+  assert.deepEqual(report.rebases.map(value => [value.id, value.outcome]), [
+    ['cycle-1', 'running'], ['cycle-1', 'conflict'], ['cycle-1', 'resolved'], ['cycle-2', 'running'], ['cycle-2', 'no-op'],
+  ]);
+  assert.equal(report.unknowns.some(value => value.includes('Rebase workflow join missing')), false);
+});
+
+test('shared reader retains repeated conflict attempts and their elapsed ownership (TASK-2835 review F9)', () => {
+  const operation = workflowOperation({ id: 'op-1', requestKey: 'rebase', command: 'rebase:run', updatedAt: instant(10) });
+  const observation = (outcome: string, attempt: number, at: number) => ({ eventType: 'flow.rebase', createdAt: instant(at),
+    eventData: JSON.stringify({ id: 'resumed-cycle', repositoryId: 'repo', missionId: 'px-1', operationId: 'op-1', generation: 1,
+      sourceId: 'resumed-cycle', stage: 'pre-review-rebase', attempt, outcome, revisionBefore: 'before',
+      revisionAfter: outcome === 'resolved' ? 'after' : 'before', conflicts: outcome === 'conflict' ? [`shared-${attempt}.ts`] : [],
+      dependencies: [], occurredAt: instant(at) }) });
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [operation], history: [
+    observation('running', 1, 0), observation('conflict', 1, 5), observation('conflict', 2, 8), observation('resolved', 2, 10),
+  ], lifecycle: [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0),
+      trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(10),
+      trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
+  ] });
+
+  assert.deepEqual(report.rebases.map(value => [value.attempt, value.outcome]), [
+    [1, 'running'], [1, 'conflict'], [2, 'conflict'], [2, 'resolved'],
+  ]);
+  assert.deepEqual(report.elapsedOwnership?.rows, [
+    { step: 'pre-review-rebase', actor: 'parallix', model: null, state: 'working', durationMs: 10 },
+  ]);
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 0);
+});
 
 test('verification unions overlap, accounts nested CPU once and measures complete dependency paths (px-0025)', () => {
   const rows = [attempt('a', 0, 10), attempt('b', 5, 15, {
@@ -97,7 +463,7 @@ test('verification retains attempts through repairs and completion without mixin
   const next = attempt('next', 25, 35, { gate: 'check', batchId: 'two', plan: ['check'], revision: 'fixed' });
   const other = attempt('other', 0, 100, { repositoryId: 'other', missionId: 'px-1' });
   const events: BoardLaneEventEntry[] = [
-    { repositoryId: 'repo', missionId: 'px-1', fromStatus: null, toStatus: 'active', occurredAt: instant(0), trigger: 'start', agent: 'codex', idempotencyKey: 'one' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: null, toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'codex', idempotencyKey: 'one' },
     { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(50), trigger: 'done', agent: 'codex', idempotencyKey: 'two' },
   ];
   const report = verificationReport([first, { ...first, result: 'running', finishedAt: null }, first, next, other], events);
@@ -145,23 +511,57 @@ test('verification scopes activity by repository and source while retaining repa
   assert.equal(verificationStatistics({ repositoryId: 'other', history, operations: [], lifecycle: [] }).repairMs, null);
 });
 
-test('verification reporting discloses samples, configuration and unknown workload equivalence (px-0025)', () => {
+test('verification reporting retains controlled workloads, samples and explicit benefit bounds (TASK-2835)', () => {
+  const base = { coverage: false, pair: 0, command: ['node', '--test', 'same.test.ts'], wallMs: 100, cpuUs: 1000, profiles: [] };
+  const sampled = (pair: number, coverage = false) => ({ ...base, coverage, pair, profiled: true,
+    command: ['node', '--cpu-prof', '--cpu-prof-interval=1000', '--test', 'same.test.ts'], wallMs: 105, cpuUs: 1040,
+    profiles: [{ samples: 100, hotspots: [{ functionName: 'component', url: 'file:///repo/src/component.ts', samples: 20 }] }] });
+  const control = (pair: number, coverage = false) => ({ ...base, coverage, pair, profiled: false });
+  const controlledComparisons = controlledVerificationComparisons({ revision: 'abc', dirty: false, node: 'v24', platform: 'linux', arch: 'x64', tsx: '4',
+    workload: ['same.test.ts'], runs: [control(0), sampled(0), control(1), sampled(1), control(0, true), sampled(0, true), control(1, true), sampled(1, true)] }, 'component');
   const report = verificationReport([
     attempt('a', 0, 10, { gate: 'check', revision: 'before', configuration: 'same' }),
     attempt('b', 20, 25, { gate: 'check', revision: 'after', configuration: 'same',
-      profile: { reference: 'retained/report.json', samples: null } }),
+      profile: { reference: 'retained/report.json', samples: 400, controlledComparisons } }),
   ]);
   assert.equal(report.comparisons[0].beforeN, 1);
   assert.equal(report.comparisons[0].afterN, 1);
   assert.equal(report.comparisons[0].configurationEquivalent, true);
-  assert.equal(report.comparisons[0].workloadEquivalent, 'unknown');
+  assert.equal(report.comparisons[0].workloadEquivalent, 'unobserved');
+  assert.equal(report.controlledComparisons.length, 2);
+  assert.equal(report.controlledComparisons[0].workloadEquivalent, true);
+  assert.equal(report.controlledComparisons[0].samples, 200);
+  assert.equal(report.controlledComparisons[0].component?.contribution, 0.2);
+  assert.equal(report.controlledComparisons[0].optimizationBenefitBound?.maximumSpeedupRatio, 1.25);
   const rendered = renderVerificationStatistics(report).join('\n');
   assert.match(rendered, /retained history/);
   assert.match(rendered, /OS waited-tree CPU 2000 us/);
   assert.match(rendered, /retained\/report.json/);
-  assert.match(rendered, /configuration equivalent true; workload equivalent unknown/);
-  assert.match(rendered, /Contention and optimization benefit: unknown/);
+  assert.match(rendered, /workload equivalence unobserved \(not a controlled comparison\)/);
+  assert.match(rendered, /workload\/configuration\/runtime equivalent true/);
+  assert.match(rendered, /20\.0%\); hypothetical removable-CPU bound 20\.0%, maximum speedup 1\.250x/);
+  assert.match(rendered, /not establish contention or an optimization speedup/);
   assert.deepEqual(renderVerificationStatistics(null), ['Verification measurements: unavailable']);
+});
+
+test('controlled workload fingerprints are stable across retained run order (TASK-2835)', () => {
+  const run = (coverage: boolean, profiled: boolean, pair: number, command: string) => ({
+    coverage, profiled, pair, command: ['node', '--test', command], wallMs: 10, cpuUs: 100,
+    profiles: profiled ? [{ samples: 1, hotspots: [] }] : [],
+  });
+  const runs = [run(false, false, 0, 'z.test.ts'), run(false, false, 1, 'a.test.ts'),
+    run(false, true, 0, 'z.test.ts'), run(false, true, 1, 'a.test.ts'),
+    run(true, false, 0, 'z.test.ts'), run(true, false, 1, 'a.test.ts'),
+    run(true, true, 0, 'z.test.ts'), run(true, true, 1, 'a.test.ts')];
+  const report = { revision: 'abc', dirty: false, node: 'v24', platform: 'linux', arch: 'x64', tsx: '4',
+    workload: ['a.test.ts', 'z.test.ts'], runs };
+
+  const original = controlledVerificationComparisons(report);
+  const reordered = controlledVerificationComparisons({ ...report, runs: [...runs].reverse() });
+
+  assert.deepEqual(original.map(item => item.workloadFingerprint),
+    reordered.map(item => item.workloadFingerprint));
+  assert.ok(original.every(item => item.workloadEquivalent === false));
 });
 
 // task-2347.07 repro uses a distinct repository identity from the task-2347.08
@@ -496,4 +896,49 @@ test('deciders are exclusive and partial telemetry leaves decided share availabl
   const complete = { decisions: [decisions[0]], attempts: [sample,
     classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', mission: 'early', round: 1 })], coverage: 'complete' as const };
   assert.equal(reviewRounds(complete, windows.current).coverage, 'complete');
+});
+
+test('historical analysis labels coverage, distributions and unavailable telemetry (TASK-2834)', () => {
+  const record = (overrides: Partial<StatsRecoveryEvidence>): StatsRecoveryEvidence => ({
+    identity: String(overrides.identity), source: overrides.source ?? 'rebound-repair',
+    kind: overrides.kind ?? 'repair-attempt', observedAt: overrides.observedAt ?? '2026-10-01T10:00:00.000Z',
+    links: overrides.links ?? { repositoryId: 'repo', missionId: 'task-1', revision: 'abc', pullRequest: null },
+    provenance: overrides.provenance ?? 'operational_history/rebound.repair/1',
+    collectionEra: 'historical-reconstruction', classification: 'direct-observation', raw: overrides.raw ?? {},
+  });
+  const evidence = [
+    record({ identity: 'repair-1', raw: { durationMs: 100, model: 'gpt-6.1-sol', stage: 'integration' } }),
+    record({ identity: 'repair-2', observedAt: '2026-10-02T10:00:00Z', raw: { durationMs: 300, model: 'gpt-6.1-sol', stage: 'integration' } }),
+    record({ identity: 'pr-1', source: 'forgejo-pr', kind: 'workflow-telemetry',
+      links: { repositoryId: 'repo', missionId: 'task-1', revision: 'abc', pullRequest: 735 }, raw: {} }),
+    record({ identity: 'review-1', source: 'forgejo-review', kind: 'review-decision', observedAt: '2026-10-01T11:00:00Z',
+      links: { repositoryId: 'repo', missionId: 'task-1', revision: 'abc', pullRequest: 735 }, raw: { state: 'REQUEST_CHANGES' } }),
+  ];
+  const analysis = analyzeStatsRecovery({ rows: [
+    { mission: 'task-1', repo: 'repo', date: '2026-10-01', model: 'gpt-6.1-sol', stage: 'execute', pr_fix_rounds: 2 },
+    { mission: 'task-2', repo: 'repo', date: '2026-10-02', model: 'claude', stage: 'execute' },
+  ], sources: [], changes: [
+    { mission: 'task-1', before: [1], beforeObserved: true, after: 2, byImplementer: { codex: 2 }, returns: [
+      { identity: 'review:1', author: 'codex', at: '2026-10-01T11:00:00Z', origin: { actor: 'agent',
+        stage: 'agent-review', decisionIdentity: 'review:1', revision: 'abc', sender: 'claude', cause: 'changes-requested' } },
+      { identity: 'repair:1', author: 'codex', at: '2026-10-02T11:00:00Z', origin: { actor: 'workflow',
+        stage: 'workflow', decisionIdentity: 'repair:1', revision: null, sender: 'parallix', cause: 'repair' } },
+    ] },
+    { mission: 'task-2', before: [], beforeObserved: false, after: null, byImplementer: {}, returns: [] },
+  ], recovery: { evidence, conflicts: [], duplicateCount: 0,
+    failures: [{ source: 'forgejo-review-comment', detail: 'page unavailable' }], completedSources: ['rebound-repair'] } });
+  assert.equal(analysis.metrics.returnsPerMission.classification, 'reconstructed-fact');
+  assert.deepEqual([analysis.metrics.returnsPerMission.observationCount, analysis.metrics.returnsPerMission.denominator], [1, 2]);
+  assert.deepEqual([analysis.metrics.repairAttemptDuration.median, analysis.metrics.repairAttemptDuration.p90], [200, 280]);
+  assert.equal(analysis.metrics.repairAttemptDuration.uncertainty?.confidence,
+    'sampling uncertainty only; retention bias is not corrected');
+  assert.equal(analysis.metrics.prToReviewTurnaround.median, 3_600_000);
+  assert.ok(analysis.cohorts.some(item => item.dimension === 'model' && item.value === 'gpt-6.1-sol'));
+  assert.deepEqual(analysis.cohorts.filter(item => item.dimension === 'cause').map(item => item.value).sort(),
+    ['changes-requested', 'repair'], 'cause cohorts come from distinct final-owner returns, never approvals');
+  assert.equal(analysis.cohorts.some(item => item.dimension === 'cause' && item.value === 'approved'), false);
+  assert.ok(analysis.unavailable.some(item => item.metric === 'CPU' && item.classification === 'unavailable'));
+  assert.match(analysis.interpretation.missingness.join(' '), /1\/2 return-eligible missions/);
+  assert.match(analysis.interpretation.representativeness, /no representativeness claim or correction multiplier/);
+  assert.doesNotMatch(JSON.stringify(analysis.metrics), /gateAttempts|cpuUs|dag/);
 });

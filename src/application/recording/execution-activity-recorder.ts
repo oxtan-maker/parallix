@@ -1,8 +1,8 @@
-import { authorizeMissionWrite, reportAuthorizedActivity, inheritedMissionWrite, authorizedOperationId } from '../ports/mission-write-authorization.js';
+import { authorizeMissionWrite, reportAuthorizedActivity, inheritedMissionWrite, authorizedOperationGeneration, authorizedOperationId } from '../ports/mission-write-authorization.js';
 import type { ExecutionActivityStore } from '../ports/execution-activity.js';
 import { agentFamily, type AgentFamily } from '../../domain/agents.js';
 import { missionId, type MissionId } from '../../domain/mission.js';
-import type { ExecutionActivity, ExecutionActivityStage, ExecutionActivityState } from '../../domain/execution-activity.js';
+import type { ExecutionActivity, ExecutionActivityActor, ExecutionActivityStage, ExecutionActivityState, ExecutionTimeState } from '../../domain/execution-activity.js';
 export type { ExecutionActivity, ExecutionActivityStage, ExecutionActivityState } from '../../domain/execution-activity.js';
 import type { OperationalHistoryEntry } from '../ports/operation-history.js';
 
@@ -26,6 +26,13 @@ export function executionActivityToEntry(event: ExecutionActivity, sourceId?: st
       repositoryId,
       purpose: event.purpose,
       operationId: event.operationId,
+      operationGeneration: event.operationGeneration,
+      revision: event.revision,
+      attempt: event.attempt,
+      dependencies: event.dependencies,
+      actor: event.actor,
+      model: event.model,
+      timeState: event.timeState,
       phase: event.phase,
       state: event.state,
       summary: event.summary,
@@ -48,26 +55,43 @@ export function parseExecutionActivityEntry(entry: OperationalHistoryEntry): Exe
   } catch {
     return null;
   }
-  const missionId = typeof data.missionId === 'string' ? data.missionId : null;
-  const phase = typeof data.phase === 'string' ? data.phase : null;
-  const state = typeof data.state === 'string' ? data.state : null;
-  if (!missionId || !validOperationId(data.operationId) || !isPhase(phase) || !isState(state)) { return null; }
+  const identity = parsedActivityIdentity(data);
+  if (!identity) { return null; }
   return {
     ...activityPurpose(data.purpose),
-    missionId: missionId as MissionId,
-    operationId: data.operationId,
-    phase,
-    state,
-    summary: typeof data.summary === 'string' ? data.summary : '',
-    agent: typeof data.agent === 'string' ? data.agent as AgentFamily : null,
-    processId: typeof data.processId === 'number' ? data.processId : null,
-    processIdentity: typeof data.processIdentity === 'string' ? data.processIdentity : null,
-    blockedReason: typeof data.blockedReason === 'string' ? data.blockedReason : null,
+    ...identity,
+    operationGeneration: numberOrNull(data.operationGeneration),
+    revision: stringOrNull(data.revision),
+    attempt: numberOrNull(data.attempt),
+    dependencies: stringArrayOrNull(data.dependencies),
+    actor: stringOrUndefined(data.actor) as ExecutionActivityActor | undefined,
+    model: stringOrNull(data.model),
+    timeState: isTimeState(data.timeState) ? data.timeState : undefined,
+    summary: stringOrUndefined(data.summary) ?? '',
+    agent: stringOrNull(data.agent) as AgentFamily | null,
+    processId: numberOrNull(data.processId),
+    processIdentity: stringOrNull(data.processIdentity),
+    blockedReason: stringOrNull(data.blockedReason),
     occurredAt: entry.createdAt,
     // The store's row id is the only ordering that survives two events written
     // inside the same millisecond.
     sequence: entry.id,
   };
+}
+
+function parsedActivityIdentity(data: Record<string, unknown>): Pick<ExecutionActivity, 'missionId' | 'operationId' | 'phase' | 'state'> | null {
+  const mission = stringOrNull(data.missionId);
+  const phase = stringOrNull(data.phase);
+  const state = stringOrNull(data.state);
+  if (!mission || !validOperationId(data.operationId) || !isPhase(phase) || !isState(state)) { return null; }
+  return { missionId: mission as MissionId, operationId: data.operationId, phase, state };
+}
+
+function stringOrNull(value: unknown): string | null { return typeof value === 'string' ? value : null; }
+function stringOrUndefined(value: unknown): string | undefined { return typeof value === 'string' ? value : undefined; }
+function numberOrNull(value: unknown): number | null { return typeof value === 'number' ? value : null; }
+function stringArrayOrNull(value: unknown): string[] | null {
+  return Array.isArray(value) && value.every(item => typeof item === 'string') ? value : null;
 }
 
 function validOperationId(value: unknown): value is string { return typeof value === 'string' && Boolean(value.trim()); }
@@ -77,11 +101,14 @@ function activityPurpose(value: unknown): Pick<ExecutionActivity, 'purpose'> {
 
 function isPhase(value: string | null): value is ExecutionActivityStage {
   return value === 'waiting' || value === 'draft' || value === 'execute' || value === 'review'
-    || value === 'review-response' || value === 'integrate' || value === 'recovery';
+    || value === 'review-response' || value === 'rebase' || value === 'integrate' || value === 'recovery';
 }
 
 function isState(value: string | null): value is ExecutionActivityState {
-  return value === 'running' || value === 'ended' || value === 'blocked';
+  return value === 'running' || value === 'ended' || value === 'blocked' || value === 'interrupted' || value === 'cancelled';
+}
+function isTimeState(value: unknown): value is ExecutionTimeState {
+  return value === 'working' || value === 'waiting' || value === 'held';
 }
 
 /** What a caller must say to open or update a mission's current work. */
@@ -89,9 +116,16 @@ export interface ExecutionActivityIntent {
   readonly purpose?: 'repair';
   readonly missionId: MissionId;
   readonly operationId: string;
+  /** One nested publication source inside the workflow operation. */
+  readonly sourceId?: string;
   readonly phase: ExecutionActivityStage;
   readonly summary: string;
   readonly agent?: AgentFamily | null;
+  readonly attempt?: number;
+  readonly dependencies?: readonly string[] | null;
+  readonly actor?: ExecutionActivityActor;
+  readonly model?: string | null;
+  readonly timeState?: ExecutionTimeState;
 }
 
 /**
@@ -125,6 +159,11 @@ export function executionActivityIntent(input: {
   readonly phase: ExecutionActivityStage;
   readonly summary: string;
   readonly agent?: string | null;
+  readonly sourceId?: string;
+  readonly attempt?: number;
+  readonly actor?: ExecutionActivityActor;
+  readonly model?: string | null;
+  readonly timeState?: ExecutionTimeState;
 }): ExecutionActivityIntent | null {
   let mission: MissionId;
   try {
@@ -135,9 +174,14 @@ export function executionActivityIntent(input: {
   return {
     missionId: mission,
     operationId: input.operationId,
+    sourceId: input.sourceId ?? input.operationId,
     phase: input.phase,
     summary: input.summary,
     agent: parseFamily(input.agent ?? null),
+    ...(input.actor === undefined ? {} : { actor: input.actor }),
+    ...(input.model === undefined ? {} : { model: input.model }),
+    ...(input.timeState === undefined ? {} : { timeState: input.timeState }),
+    ...(input.attempt === undefined ? {} : { attempt: input.attempt }),
   };
 }
 
@@ -161,7 +205,7 @@ export type AgentLaunchPhase = Extract<ExecutionActivityStage, 'review' | 'revie
 /** What the review loop reports back to the execution activity projection. */
 export interface ReviewLoopPublication {
   /** A reviewer or implementer was launched for this mission. */
-  readonly onAgentLaunched: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
+  readonly onAgentLaunched: (_agent: string, _phase: AgentLaunchPhase, _model?: string | null) => Promise<void>;
   /**
    * The loop stopped because it could not continue autonomously. The reason is
    * the only sentence that tells the operator why they are needed, so it is
@@ -200,15 +244,17 @@ export function reviewLoopPublisher(
       await write(publication);
     } catch {}
   };
+  const modelled = (publication: ExecutionActivityIntent | null, model?: string | null) => publication
+    ? { ...publication, model: model ?? null } : null;
   return {
-    onAgentLaunched: (agent, phase) => publish(
-      publicationFor(
+    onAgentLaunched: (agent, phase, model) => publish(
+      modelled(publicationFor(
         phase,
         phase === 'review-response'
           ? `implementer ${agent} answering review findings`
           : `reviewer ${agent} reviewing`,
         agent,
-      ),
+      ), model),
       (publication) => port.running(publication),
     ),
     onAutonomousStop: (reason) => publish(
@@ -229,12 +275,15 @@ export function reviewLoopPublisher(
 export interface NestedWorkPublisher {
   readonly parent: ExecutionActivityIntent;
   /** Nested work is running under the outer operation. */
-  running(_phase: ExecutionActivityStage, _summary: string, _agent?: string | null, _purpose?: 'repair'): Promise<void>;
+  running(_phase: ExecutionActivityStage, _summary: string, _agent?: string | null, _purpose?: 'repair', _model?: string | null): Promise<void>;
   /** Nested work finished; the outer operation is still the mission's current work. */
   resume(): Promise<void>;
 }
 
 export function nestedWorkPublisher(port: ExecutionActivityPort, parent: ExecutionActivityIntent): NestedWorkPublisher {
+  let sequence = 0;
+  let active: ExecutionActivityIntent | null = null;
+  let predecessor = parent.sourceId ?? parent.operationId;
   const publish = async (publication: ExecutionActivityIntent) => {
     try {
       await port.running(publication);
@@ -242,9 +291,19 @@ export function nestedWorkPublisher(port: ExecutionActivityPort, parent: Executi
   };
   return {
     parent,
-    running: (phase, summary, agent, purpose) => publish({ ...parent, phase, summary, agent: parseFamily(agent ?? null),
-      ...(purpose ? { purpose } : {}) }),
-    resume: () => publish(parent),
+    running: async (phase, summary, agent, purpose, model) => {
+      if (active) { try { await port.ended(active); } catch {} }
+      const family = parseFamily(agent ?? null);
+      active = { ...parent, sourceId: `${parent.sourceId ?? parent.operationId}:nested:${++sequence}`, attempt: sequence,
+        dependencies: [predecessor],
+        phase, summary, agent: family, actor: family ?? parent.actor, model: model ?? null, ...(purpose ? { purpose } : {}) };
+      predecessor = active.sourceId!;
+      await publish(active);
+    },
+    resume: async () => {
+      if (active) { try { await port.ended(active); } catch {} active = null; }
+      await publish({ ...parent, dependencies: [predecessor] });
+    },
   };
 }
 
@@ -267,13 +326,14 @@ export function publishedAgentLaunch<T, Options extends Record<string, unknown>>
 ): (_step: string, _options: Options) => Promise<T> {
   return async (step, launchOptions) => {
     const requested = typeof launchOptions.agent === 'string' ? launchOptions.agent : null;
-    const onLaunch = launchOptions.onLaunch as ((_info: { agent: string }) => unknown) | undefined;
-    await nested.running(phase, describe(requested ?? 'agent'), requested, purpose);
+    const onLaunch = launchOptions.onLaunch as ((_info: { agent: string; model?: string | null }) => unknown) | undefined;
+    const requestedModel = typeof launchOptions.model === 'string' ? launchOptions.model : null;
+    await nested.running(phase, describe(requested ?? 'agent'), requested, purpose, requestedModel);
     try {
       return await start(step, {
         ...launchOptions,
-        onLaunch: async (info: { agent: string }) => {
-          await nested.running(phase, describe(info.agent), info.agent, purpose);
+        onLaunch: async (info: { agent: string; model?: string | null }) => {
+          await nested.running(phase, describe(info.agent), info.agent, purpose, info.model ?? requestedModel);
           return onLaunch?.(info);
         },
       });
@@ -294,6 +354,7 @@ export interface ExecutionActivityRecorderOptions {
   readonly now?: () => Date;
   /** Best-effort capture correlation supplied by composition, never another activity store. */
   readonly onPublication?: (_publication: ExecutionActivityIntent) => void;
+  readonly revision?: string | null;
 }
 
 /**
@@ -308,6 +369,7 @@ export class ExecutionActivityRecorder implements ExecutionActivityPort {
   private readonly processIdentity: string | null;
   private readonly now: () => Date;
   private readonly onPublication: ExecutionActivityRecorderOptions['onPublication'];
+  private readonly revision: string | null;
 
   constructor(
     private readonly _activity: ExecutionActivityStore,
@@ -317,6 +379,7 @@ export class ExecutionActivityRecorder implements ExecutionActivityPort {
     this.processIdentity = options.processIdentity ?? null;
     this.now = options.now ?? (() => new Date());
     this.onPublication = options.onPublication;
+    this.revision = options.revision ?? null;
   }
 
   async running(publication: ExecutionActivityIntent): Promise<void> {
@@ -337,13 +400,24 @@ export class ExecutionActivityRecorder implements ExecutionActivityPort {
     blockedReason: string | null,
   ): Promise<void> {
     if (inheritedMissionWrite()) { return; }
-    const sourceId = publication.operationId;
-    publication = { ...publication, operationId: authorizedOperationId() ?? sourceId };
+    const sourceId = publication.sourceId ?? publication.operationId;
+    publication = { ...publication, operationId: authorizedOperationId() ?? publication.operationId };
     await authorizeMissionWrite(publication.missionId);
     const event: ExecutionActivity = {
       ...activityPurpose(publication.purpose),
       missionId: publication.missionId,
       operationId: publication.operationId,
+      operationGeneration: authorizedOperationGeneration(),
+      revision: this.revision,
+      attempt: publication.attempt ?? null,
+      dependencies: publication.dependencies ?? null,
+      // The recorder is invoked by a running Parallix workflow. Nested agent
+      // launches name their concrete family above; an otherwise unnamed
+      // publication is therefore observed Parallix work, not evidence of a
+      // human or external actor.
+      actor: publication.actor ?? publication.agent ?? 'parallix',
+      model: publication.model ?? null,
+      timeState: publication.timeState ?? defaultTimeState(state, publication.phase),
       phase: publication.phase,
       state,
       summary: publication.summary,
@@ -356,6 +430,10 @@ export class ExecutionActivityRecorder implements ExecutionActivityPort {
     if (!await reportAuthorizedActivity(event, sourceId)) { await this._activity.publish(event, sourceId); }
     try { this.onPublication?.(publication); } catch { /* Capture cannot block current-work publication. */ }
   }
+}
+
+function defaultTimeState(state: ExecutionActivityState, phase: ExecutionActivityStage): ExecutionTimeState {
+  return state === 'blocked' || phase === 'waiting' ? 'waiting' : 'working';
 }
 
 /**

@@ -4,6 +4,9 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 import childProcess from 'node:child_process';
 import type { SpawnOptions, ChildProcess } from 'node:child_process';
 import path from 'node:path';
+import fs from 'node:fs';
+import os from 'node:os';
+import type { ProcessTreeCpuObservation } from '../../application/run-history-types.js';
 import { createOutputWatchdog, type NoOutputWatchdog } from './output-watchdog.js';
 import { wrapWithBubblewrap } from './bubblewrap.js';
 import { settleOnExit } from '../config/child-exit.js';
@@ -13,7 +16,7 @@ export const DEFAULT_MAX_TAIL_BYTES = 64 * 1024;
 
 type ChunkType = Buffer | string;
 
-interface SpawnTeeResult {
+export interface SpawnTeeResult {
   failureReason?: import('../../domain/failure-reason.js').FailureReason;
   status: number | null;
   signal: string | null;
@@ -22,6 +25,7 @@ interface SpawnTeeResult {
   error: unknown | null;
   startedAt: string;
   endedAt: string;
+  processTreeCpu?: ProcessTreeCpuObservation | null;
 }
 
 /**
@@ -33,7 +37,14 @@ export interface TeeSink {
   write(_chunk: Buffer | string): unknown;
 }
 
+export interface SupervisedChild extends ChildProcess {
+  terminateTree?: (_signal: NodeJS.Signals) => void;
+}
+
 export interface SpawnTeeOptions {
+  /** Stable run boundary for OS waited-tree CPU; nested runs name their enclosing boundary. */
+  resourceBoundary?: { readonly boundary: string; readonly parent: string | null };
+  onProcessTreeCpu?: (_observation: ProcessTreeCpuObservation) => void;
   /** Private input file, owned and cleaned up by the calling adapter. */
   stdinPath?: string;
   configuration?: ParallixConfiguration;
@@ -49,7 +60,7 @@ export interface SpawnTeeOptions {
    * board must exit on q/Ctrl+C while the action runs on (CP-4 ownership rule).
    */
   unrefChild?: boolean;
-  onSpawn?: (_child: ChildProcess) => void;
+  onSpawn?: (_child: SupervisedChild) => void;
   /**
    * Optional terminal host (TASK-2643). Receives the already-confined launch and
    * returns the command that hosts it, for example a tmux session host script.
@@ -71,6 +82,27 @@ export interface SpawnTeeOptions {
    */
   input?: string | Buffer;
   [key: string]: unknown;
+}
+
+function processTreeMeasurement(launch: { command: string; args: string[] }, boundary: SpawnTeeOptions['resourceBoundary']) {
+  if (!boundary || process.platform === 'win32') { return null; }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-run-cpu-'));
+  const report = path.join(dir, 'usage');
+  const script = "report=$1; shift; TIMEFORMAT='%U %S'; { time \"$@\" 2>&5; } 5>&2 2>\"$report\"";
+  let read = false;
+  return {
+    launch: { command: 'bash', args: ['-c', script, 'px-run-cpu', report, launch.command, ...launch.args] },
+    finish(): ProcessTreeCpuObservation | null {
+      if (read) { return null; }
+      read = true;
+      try {
+        const match = fs.readFileSync(report, 'utf8').trim().replaceAll(',', '.').match(/^(\d+\.\d+) (\d+\.\d+)$/);
+        return match ? { userUs: Math.round(Number(match[1]) * 1e6), systemUs: Math.round(Number(match[2]) * 1e6),
+          provenance: 'bash-time-waited-tree', ...boundary } : null;
+      } catch { return null; }
+      finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }
+    },
+  };
 }
 
 /** Readable presentation a host should give the launch's stdout inside its visible terminal. */
@@ -135,7 +167,8 @@ interface FinishPayload {
 
 function outputDeadlineEnabled(watchdog: NoOutputWatchdog | null) { return Number.isFinite(watchdog?.maxNoOutputMs) && (watchdog?.maxNoOutputMs ?? 0) > 0; }
 
-function superviseOutput(child: ChildProcess, noOutputWatchdog: NoOutputWatchdog | null, hasNoOutputDeadline: boolean, command: string, args: string[], startTime: number) {
+function superviseOutput(child: ChildProcess, noOutputWatchdog: NoOutputWatchdog | null, hasNoOutputDeadline: boolean,
+  forwardSignals: boolean, command: string, args: string[], startTime: number) {
   const watchdog = createOutputWatchdog(noOutputWatchdog, { command, args, pid: child.pid }, startTime);
   let noOutputTimedOut = false;
   let noOutputTimer: ReturnType<typeof setTimeout> | null = null;
@@ -157,9 +190,11 @@ function superviseOutput(child: ChildProcess, noOutputWatchdog: NoOutputWatchdog
   };
   const forwardSigint = () => forward('SIGINT');
   const forwardSigterm = () => forward('SIGTERM');
-  if (hasNoOutputDeadline) {
+  if (forwardSignals) {
     process.once('SIGINT', forwardSigint);
     process.once('SIGTERM', forwardSigterm);
+  }
+  if (hasNoOutputDeadline) {
     noOutputTimer = setTimeout(() => {
       noOutputTimer = null;
       noOutputTimedOut = true;
@@ -181,7 +216,7 @@ function superviseOutput(child: ChildProcess, noOutputWatchdog: NoOutputWatchdog
       watchdog.clear();
       clearDeadlineTimer();
       clearEscalationTimer();
-      if (hasNoOutputDeadline) {
+      if (forwardSignals) {
         process.removeListener('SIGINT', forwardSigint);
         process.removeListener('SIGTERM', forwardSigterm);
       }
@@ -196,10 +231,15 @@ function forwardOutput(chunk: Buffer, stream: 'stdout' | 'stderr', tail: TailBuf
   if (sink && typeof sink.write === 'function') { sink.write(chunk); }
 }
 
-function spawnCapturedChild(launch: { command: string; args: string[] }, spawnOptions: SpawnOptions, env: NodeJS.ProcessEnv, hasNoOutputDeadline: boolean, onSpawn: SpawnTeeOptions['onSpawn'], unrefChild: boolean, inputBytes: Buffer | null): ChildProcess {
+function spawnCapturedChild(launch: { command: string; args: string[] }, spawnOptions: SpawnOptions, env: NodeJS.ProcessEnv, detached: boolean, onSpawn: SpawnTeeOptions['onSpawn'], unrefChild: boolean, inputBytes: Buffer | null): ChildProcess {
   const child = childProcess.spawn(launch.command, launch.args, {
-    ...spawnOptions, env, ...(hasNoOutputDeadline ? { detached: true } : {}), stdio: [inputBytes ? 'pipe' : 'inherit', 'pipe', 'pipe'],
-  });
+    ...spawnOptions, env, ...(detached ? { detached: true } : {}), stdio: [inputBytes ? 'pipe' : 'inherit', 'pipe', 'pipe'],
+  }) as SupervisedChild;
+  if (detached) {
+    child.terminateTree = signal => {
+      try { if (child.pid) { process.kill(-child.pid, signal); } } catch { try { child.kill(signal); } catch {} }
+    };
+  }
   if (inputBytes) {
     // An early child exit can close stdin before the prompt is flushed.
     child.stdin?.on('error', () => { /* reported through the exit status */ });
@@ -220,6 +260,36 @@ function routeStdin(launch: { command: string; args: string[] }, stdinPath?: str
     : launch;
 }
 
+function childEnvironment(spawnOptions: SpawnOptions, resolvedCwd: string,
+  resourceBoundary: SpawnTeeOptions['resourceBoundary']): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    ...(spawnOptions.env || {}),
+    PWD: resolvedCwd,
+    ...(resourceBoundary ? { PARALLIX_RESOURCE_BOUNDARY: resourceBoundary.boundary } : {}),
+  };
+  for (const name of DECISION_CREDENTIAL_ENV) { delete env[name]; }
+  return env;
+}
+
+function measuredLaunch(command: string, args: string[], resolvedCwd: string,
+  configuration: ParallixConfiguration, stdinPath: string | undefined,
+  resourceBoundary: SpawnTeeOptions['resourceBoundary']) {
+  const confined = wrapWithBubblewrap(command, args, resolvedCwd, configuration);
+  const withInput = routeStdin(confined, stdinPath);
+  let cpu: ReturnType<typeof processTreeMeasurement> = null;
+  try { cpu = processTreeMeasurement(withInput, resourceBoundary); }
+  catch { cpu = null; }
+  return { cpu, launch: cpu?.launch ?? withInput };
+}
+
+function hostedLaunch(terminalHost: TerminalHost | undefined, launch: { command: string; args: string[] },
+  inputBytes: Buffer | null, resolvedCwd: string, env: NodeJS.ProcessEnv, hostPresentation: HostPresentation | undefined) {
+  if (!terminalHost) { return null; }
+  return terminalHost.host({ ...launch, ...(inputBytes ? { input: inputBytes } : {}) },
+    { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) });
+}
+
 export function spawnAndTee(command: string, args: string[], options: SpawnTeeOptions = {}): Promise<SpawnTeeResult> {
   const {
     configuration = DEFAULT_CONFIGURATION,
@@ -234,6 +304,8 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     hostPresentation,
     input,
     stdinPath,
+    resourceBoundary,
+    onProcessTreeCpu,
     ...spawnOptions
   } = options;
 
@@ -243,35 +315,30 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     let settled = false;
     const startTime = Date.now();
     const resolvedCwd = path.resolve((spawnOptions.cwd as string) || process.cwd());
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      ...(spawnOptions.env || {}),
-      PWD: resolvedCwd
-    };
-    // Decision-provider keys belong to Parallix alone; no launched child (agent or tool shell) inherits them.
-    for (const name of DECISION_CREDENTIAL_ENV) { delete env[name]; }
+    const env = childEnvironment(spawnOptions as SpawnOptions, resolvedCwd, resourceBoundary);
     // Guard construction errors deliberately reject this launch. An available
     // but broken Bubblewrap guard must never retry the child unsandboxed.
-    const confined = wrapWithBubblewrap(command, args, resolvedCwd, configuration);
-    // Open stdin outside confinement, preserving the already-selected guard
-    // and making input available inside tmux as well as pipe hosting.
-    const withInput = routeStdin(confined, stdinPath);
+    const measured = measuredLaunch(command, args, resolvedCwd, configuration, stdinPath, resourceBoundary);
+    const cpu = measured.cpu;
     const inputBytes = input === undefined ? null : Buffer.from(input);
     let hosted: ReturnType<TerminalHost['host']> | null = null;
     try {
-      hosted = terminalHost ? terminalHost.host({ ...withInput, ...(inputBytes ? { input: inputBytes } : {}) }, { cwd: resolvedCwd, env, ...(hostPresentation ? { presentation: hostPresentation } : {}) }) : null;
+      hosted = hostedLaunch(terminalHost, measured.launch, inputBytes, resolvedCwd, env, hostPresentation);
     } catch (err) {
+      cpu?.finish();
       const now = new Date().toISOString();
       resolve({ status: null, signal: null, stdout: '', stderr: '', error: err, startedAt: now, endedAt: now });
       return;
     }
-    const launch = hosted ?? withInput;
+    const launch = hosted ?? measured.launch;
 
     const hasNoOutputDeadline = outputDeadlineEnabled(noOutputWatchdog);
+    const detached = hasNoOutputDeadline || Boolean(resourceBoundary);
     let child: ChildProcess;
     try {
-      child = spawnCapturedChild(launch, spawnOptions as SpawnOptions, env, hasNoOutputDeadline, onSpawn, unrefChild, hosted ? null : inputBytes);
+      child = spawnCapturedChild(launch, spawnOptions as SpawnOptions, env, detached, onSpawn, unrefChild, hosted ? null : inputBytes);
     } catch (err) {
+      cpu?.finish();
       hosted?.cleanup();
       resolve({
         status: null, signal: null, stdout: '', stderr: '', error: err,
@@ -280,7 +347,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       return;
     }
 
-    const supervisor = superviseOutput(child, noOutputWatchdog, hasNoOutputDeadline, command, args, startTime);
+    const supervisor = superviseOutput(child, noOutputWatchdog, hasNoOutputDeadline, detached, command, args, startTime);
 
     const finish = (payload: FinishPayload): void => {
       if (settled) {return;}
@@ -289,7 +356,10 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
       supervisor.clear();
       payload.startedAt = new Date(startTime).toISOString();
       payload.endedAt = new Date().toISOString();
-      resolve({ ...payload, failureReason: normalizeProviderFailure(payload as SpawnTeeResult) } as SpawnTeeResult);
+      const processTreeCpu = cpu?.finish() ?? null;
+      if (processTreeCpu) { try { onProcessTreeCpu?.(processTreeCpu); } catch {} }
+      const completed = { ...payload, ...(resourceBoundary ? { processTreeCpu } : {}) };
+      resolve({ ...completed, failureReason: normalizeProviderFailure(completed as SpawnTeeResult) } as SpawnTeeResult);
     };
 
     child.stdout?.on('data', (chunk: Buffer) => forwardOutput(chunk, 'stdout', stdoutTail, stdoutSink, supervisor, capture));

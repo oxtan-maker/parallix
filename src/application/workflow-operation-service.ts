@@ -39,6 +39,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     private readonly _observe?: (_operation: WorkflowOperation) => Promise<boolean | void> | boolean | void,
     private readonly _wait: { now(): number; timeoutMs: number } = { now: Date.now, timeoutMs: 24 * 60 * 60 * 1000 },
     private readonly _eligibleAgent: (_agent: string) => Promise<boolean> = async () => false,
+    private readonly _revision: () => string | null = () => null,
   ) {}
 
   canExecute(kind: BoardCommandRequest['kind']): boolean {
@@ -216,7 +217,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
           await beginReviewPreparation(loaded.mission.id, { store: this._missions, lifecycle: new MissionLifecycleService(this._missions) });
         }
         await this._operations.insert(operation);
-        await this._operations.activity.publish(executionActivity(operation, 'running', 'preparing workflow'), operation.id);
+        await this._operations.activity.publish(executionActivity(operation, 'running', 'preparing workflow', operation.owner, this._revision()), operation.id);
         return { status: 'accepted' as const, operation };
   }
 
@@ -246,7 +247,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (!pending || pending.phase !== 'accepted' || pending.owner) { return null; }
       const claimed = { ...pending, ...claimWorkflow(pending, owner, new Date().toISOString()) };
       await this._operations.replace(claimed, pending.generation);
-      await this._operations.activity.publish(executionActivity(claimed, 'running', 'preparing workflow', owner), claimed.id);
+      await this._operations.activity.publish(executionActivity(claimed, 'running', 'preparing workflow', owner, this._revision()), claimed.id);
       return claimed;
     });
     if (!operation) { return; }
@@ -331,7 +332,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
           if (!current || current.generation !== operation.generation || current.phase === 'stopping' || !isOpenWorkflow(current)) { return; }
           const interrupted = { ...current, ...loseWorkflowOwner(current, current.generation, liveness === false ? false : null, new Date().toISOString()) };
           await this._operations.replace(interrupted, current.generation);
-          await this.publish(interrupted, 'blocked', interrupted.reason!);
+          await this.publish(interrupted, interrupted.phase === 'interrupted' ? 'interrupted' : 'blocked', interrupted.reason!);
         });
       }
     }
@@ -368,7 +369,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (!current || current.generation !== stopping.generation || current.phase !== 'stopping') { throw new Error('Stop ownership changed'); }
       const stopped = { ...current, ...settleWorkflowStop(current, new Date().toISOString()) };
       await this._operations.replace(stopped, current.generation);
-      await this.publish(stopped, 'ended', 'workflow stopped; mission retained');
+      await this.publish(stopped, 'cancelled', 'workflow stopped; mission retained');
     });
     return completed({ stopped: true, operationId: stopping.id });
   }
@@ -382,15 +383,36 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     return failure('conflict', reason);
   }
 
-  private async publish(operation: WorkflowOperation, state: 'running' | 'ended' | 'blocked', summary: string): Promise<void> {
-    await this._operations.activity.publish(executionActivity(operation, state, summary), operation.id);
+  private async publish(operation: WorkflowOperation, state: ExecutionActivity['state'], summary: string): Promise<void> {
+    await this._operations.activity.publish(executionActivity(operation, state, summary, operation.owner, this._revision()), operation.id);
   }
 
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
 
-function executionActivity(operation: WorkflowOperation, state: ExecutionActivity['state'], summary: string, publisher = operation.owner): ExecutionActivity {
-  return { missionId: operation.missionId, operationId: operation.id, phase: operation.command === 'active:execute' ? 'execute' : operation.command === 'draft:create' ? 'draft' : operation.command === 'integrate:merge' ? 'integrate' : 'review',
-    state, summary, agent: operation.agent ? agentFamily(operation.agent) : null, processId: publisher?.pid ?? null, processIdentity: publisher?.identity ?? null,
+function executionActivity(operation: WorkflowOperation, state: ExecutionActivity['state'], summary: string,
+  publisher = operation.owner, revision: string | null = null): ExecutionActivity {
+  return { missionId: operation.missionId, operationId: operation.id, operationGeneration: operation.generation,
+    revision,
+    phase: operationPhase(operation.command),
+    state, summary, actor: activityActor(state), model: null,
+    timeState: operationTimeState(state, publisher, summary),
+    agent: operation.agent ? agentFamily(operation.agent) : null, processId: publisher?.pid ?? null, processIdentity: publisher?.identity ?? null,
     blockedReason: state === 'blocked' ? summary : null, occurredAt: new Date().toISOString() };
+}
+
+function operationPhase(command: WorkflowOperation['command']): ExecutionActivity['phase'] {
+  const phases: Record<WorkflowOperation['command'], ExecutionActivity['phase']> = {
+    'active:execute': 'execute', 'draft:create': 'draft', 'rebase:run': 'rebase',
+    'integrate:merge': 'integrate', 'review:submit': 'review',
+  };
+  return phases[command];
+}
+
+function activityActor(state: ExecutionActivity['state']): ExecutionActivity['actor'] {
+  return state === 'blocked' ? 'unattributed' : 'parallix';
+}
+
+function operationTimeState(state: ExecutionActivity['state'], publisher: WorkflowOperation['owner'], summary: string): ExecutionActivity['timeState'] {
+  return state === 'blocked' || !publisher || summary.includes('waiting') ? 'waiting' : 'working';
 }

@@ -1,4 +1,4 @@
-import { projectActivityPublications, ActivityRecorderFixture } from '../../fixtures/execution-activity.js';
+import { ActivityRecorderFixture } from '../../fixtures/execution-activity.js';
 // TASK-2620 AC8: the board keeps showing live work for the whole `px integrate`
 // run, including the repair agent and the nested re-review, with the family
 // that is actually running; a stop reason appears only when automation cannot
@@ -18,6 +18,7 @@ import {
 import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
 import type { ReviewWorkflowContext } from '../../../src/application/ports/review-workflow.js';
 import { missionId } from '../../../src/domain/mission.js';
+import { projectExecutionActivity } from '../../../src/domain/execution-activity.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 
 const SLUG = 'task-2620';
@@ -32,7 +33,7 @@ function recorder() {
     async clear() { appended.length = 0; },
   }, { processId: 4242 });
   /** What the board would show right now. */
-  const board = () => projectActivityPublications(appended.flatMap((entry) => parseExecutionActivityEntry(entry) ?? []), {
+  const board = () => projectExecutionActivity(port.activity.snapshots(), {
     nowMs: Date.now(), ttlMs: 60_000, isProcessAlive: () => true,
   }).get(missionId(SLUG)) ?? null;
   return { port, board, appended };

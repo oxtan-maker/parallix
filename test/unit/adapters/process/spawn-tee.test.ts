@@ -635,3 +635,60 @@ test('failure normalization preserves protocol identity despite rewritten diagno
   }
   assert.equal(normalizeProviderFailure({ status: 0, stdout: JSON.stringify({ type: 'assistant', content: 'quota exceeded' }) }), undefined);
 });
+
+test('Claude rejected rate-limit stream preserves its canonical quota reset (TASK-2838)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const stdout = fs.readFileSync(new URL('../../../fixtures/claude-quota-rejected.jsonl', import.meta.url), 'utf8');
+
+  assert.deepEqual(normalizeProviderFailure({ status: 1, stdout }), {
+    version: 1,
+    code: 'agent-quota',
+    source: 'provider',
+    context: { resetAt: '2026-11-03T20:50:00.000Z' },
+  });
+});
+
+test('Claude API-error quota variants normalize nested reset epochs (TASK-2838)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const assistant = { type: 'assistant', api_error_status: 429, api_error_params: { rate_limit_info: { resetsAt: 1793739000 } } };
+  const result = { type: 'result', is_error: true, api_error: 'usage_limit_reached' };
+
+  assert.deepEqual(normalizeProviderFailure({ status: 1, stdout: JSON.stringify(assistant) }), {
+    version: 1, code: 'agent-quota', source: 'provider',
+    context: { resetAt: '2026-11-03T20:50:00.000Z', httpStatus: 429 },
+  });
+  assert.deepEqual(normalizeProviderFailure({ status: 1, stdout: JSON.stringify(result) }), {
+    version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_reached' },
+  });
+});
+
+test('Claude quota event precedence preserves authoritative and first reset metadata (TASK-2838)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const normalize = (...events: Record<string, unknown>[]) => normalizeProviderFailure({
+    status: 1, stdout: events.map(event => JSON.stringify(event)).join('\n'),
+  });
+  const unknown = { type: 'result', is_error: true, api_error: 'future_error' };
+  const first = { type: 'assistant', api_error_status: 429, api_error_params: { rate_limit_info: { resetsAt: 1793739000 } } };
+  const duplicate = { type: 'result', is_error: true, api_error: 'usage_limit_reached', api_error_params: { rate_limit_info: { resetsAt: 1793742600 } } };
+  const authoritative = { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1793746200 } };
+
+  assert.equal(normalize(unknown, first)?.context?.resetAt, '2026-11-03T20:50:00.000Z', 'quota outranks an unknown structured failure');
+  assert.equal(normalize(first, duplicate)?.context?.resetAt, '2026-11-03T20:50:00.000Z', 'first quota event wins over a later duplicate');
+  assert.equal(normalize(first, authoritative, duplicate)?.context?.resetAt, '2026-11-03T22:50:00.000Z', 'rejected rate-limit reset is authoritative');
+});
+
+test('Claude quota normalization rejects non-failures and unstructured diagnostics (TASK-2838)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const rejected = JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', resetsAt: 1793739000 } });
+  const cases: [string, Parameters<typeof normalizeProviderFailure>[0], string | undefined][] = [
+    ['allowed status', { status: 1, stdout: JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', resetsAt: 1793739000 } }) }, 'process-failed'],
+    ['successful process', { status: 0, stdout: rejected }, undefined],
+    ['quoted human diagnostic', { status: 1, stdout: JSON.stringify({ type: 'result', is_error: true, result: "You've hit your 5-hour limit" }) }, 'unexpected'],
+    ['malformed JSON', { status: 1, stdout: '{"type":' }, 'process-failed'],
+    ['unrelated provider failure', { status: 1, stdout: JSON.stringify({ type: 'error', error: { status: 401 } }) }, 'provider-auth'],
+    ['unknown structured failure', { status: 1, stdout: JSON.stringify({ type: 'result', is_error: true, api_error: 'future_error' }) }, 'unexpected'],
+  ];
+  for (const [name, input, expected] of cases) {
+    assert.equal(normalizeProviderFailure(input)?.code, expected, name);
+  }
+});

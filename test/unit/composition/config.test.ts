@@ -4,13 +4,15 @@ import { resolveConfiguration } from '../../../src/composition/config.js';
 
 // Owns the host-environment parsing contract; adapter suites own what they do with the typed values.
 test('resolves typed slices from an explicit source and freezes them (TASK-2668.05)', () => {
-  const source = { WORKFLOW_AGENT: 'codex', PARALLIX_NO_TUI: '1', CI: '1', FOREIGN_VALUE: 'ignored' };
+  const source = { WORKFLOW_AGENT: 'codex', PARALLIX_NO_TUI: '1', CI: '1',
+    PARALLIX_RESOURCE_BOUNDARY: 'parent-run', FOREIGN_VALUE: 'ignored' };
   const config = resolveConfiguration(source);
 
   assert.equal(config.agents.override, 'codex');
   assert.equal(config.agents.watchdogEnabled, true);
   assert.equal(config.runtime.noTui, true);
   assert.equal(config.runtime.ci, true);
+  assert.equal(config.runtime.resourceBoundary, 'parent-run');
   assert.equal(config.forgejo.url, undefined);
   assert.equal(config.forwardedEnvironment, source);
   for (const slice of [config, config.agents, config.runtime, config.forgejo, config.decision]) {

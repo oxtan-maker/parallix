@@ -11,8 +11,8 @@ This contract defines every production statistic shown by the board FLOW surface
 | Completion | `completedAt` is the first `integration → done` event. A later `done → done` `close` event is `closedAt` administration: it may bound final-state dwell but cannot alter delivery completion, its week, or lifecycle cycle time. |
 | Time | Full timestamps are parsed as instants, preserving their UTC or explicit offset meaning. Reporting calendar days use the local timezone of the machine running Parallix; date-only measurements retain their recorded calendar date. A historical projection includes only events and outcomes at or before its requested instant. |
 | Weekly decision window | FLOW compares missions delivered in the current rolling seven calendar days (`today-6` through `today`, inclusive) with the preceding non-overlapping seven days. Membership is determined by delivery completion, then each selected mission contributes its complete lifecycle and measured agent data. |
-| Missing data | `null` means unavailable; a numeric `0` means an observed zero. Partial data records its rejected/missing-identity count and every derived figure reports the number of observations used or a numerator/denominator coverage. Explicit legacy imports remain marked legacy/estimated. |
-| Shared calculation | Board projection and `px stats cohorts` use the application projection (`metrics.ts`, `metrics-read-adapter.ts`, and `cohorts.ts`). CLI and presentation adapters format or fetch; they do not redefine identity, completion, windows, or aggregation. |
+| Missing data | `null` means unavailable; a numeric `0` means an observed zero. A missing applicable observation on newly collected work is an integrity defect that names the affected mission and source; it is not a successful unknown result. A zero eligible population is separately typed as inapplicable. Partial data records its rejected/missing-identity count and every derived figure reports the number of observations used or a numerator/denominator coverage. Explicit pre-instrumentation imports remain marked legacy/estimated. |
+| Shared calculation | Board FLOW, normal `px stats`, and `px stats cohorts` use application projections. CLI and presentation adapters format or fetch; they do not redefine identity, completion, windows, or aggregation, and synchronous reads do not contact model providers. |
 
 ## Metric catalogue
 
@@ -25,6 +25,9 @@ This contract defines every production statistic shown by the board FLOW surface
 | Throughput / weekly throughput | How many missions were delivered over time? Source: first `integration → done` lifecycle event. | Count delivered missions by completion week; FLOW compares the current and preceding non-overlapping seven-day windows. Class: lifecycle. |
 | Review bounce rate | How often did reviewed missions return to active? Source: lifecycle events. | `review → active` bounce events divided by missions that entered review; repeated bounces count as events and denominator is missions. `pr_fix_rounds` is a separate review-fix metric. Class: lifecycle. |
 | Avg reimplementation rounds / mission | On average, how often was a model's delivered work sent back for reimplementation? Source: reconciled Review decisions, human corrections, approval revocations, lifecycle returns to active and gate repairs that never moved a lane (pre-review and pre-approval gates). | Count each distinct return once whatever its cause or sending stage (gate, reviewer, human, integration, infrastructure, pushback, unknown); duplicate publications and provider/local copies are one return, repeated cycles are separate, and initial implementation, no-return failures and approval-only re-reviews count zero. A model's figure is its returns divided by the completed missions it was attributed in (finisher or author of returned work) that have return evidence, so models are comparable. A trailing `+` marks a lower bound when a return could belong to the model but cannot be attributed. Missions without return evidence are left out of the average and named as `(k/m measured)` instead, because their returns could be any number; a model with none measured shows unavailable. Class: review measurement. |
+| FLOW lifecycle shape / first-pass yield / extra launches | What path did delivered missions take, how many avoided a return or conflict before first delivery, and how many additional agents actually launched? Source: durable workflow operations, rebase/gate/activity history, Review history and retained run identities. | Count distinct observed node and edge identities for missions delivered in the decision window. First pass is disqualified by an observed implementation return, conflict or recovery before first delivery, not by a publication or mechanical re-review. Extra launches are actual launches after the first, never inferred return obligations. Class: lifecycle. |
+| Agent and human send-backs | How often did each reviewing actor send implementation back? Source: durable Review decisions, explicit operator corrections/revocations and deduplicated workflow returns. | The numerator is distinct actor-provenanced returns; the denominator is distinct eligible episodes for the same actor and stage. Agent rounds never stand in for human episodes. An explicit operator revocation supplies a zero-duration observed human decision boundary when no earlier human-review start was recorded; this measures an episode, not hands-on time. Duplicate provider/local publications count once. No eligible episodes is shown as inapplicable only when the numerator is also zero; missing applicable provenance is an integrity defect. Class: review measurement. |
+| Exclusive elapsed ownership | Where did refined-to-first-delivery elapsed time go? Source: durable queue, handoff, run, gate, rebase, review, lead and terminal boundaries with causal dependencies. | Partition elapsed time into non-overlapping step/actor/model rows; working gates/rebases/internals are Parallix work, admission is waiting, and an explicit human handoff is held elapsed time without a CPU claim. Dependency depth resolves nested overlap deterministically. Rows reconcile to the mission interval; true CPU and provider resources remain separate totals. FLOW reports totals, means, p90, `n`, and the largest holder/share for the same delivered cohort. Class: lifecycle. |
 | Agent runtime | How much measured agent execution was used? Source: agent runs in `usage_statistics`. | Sum measured run duration per delivered mission, then aggregate only measured missions. Missing duration is unavailable, not zero. Class: telemetry. |
 | Tokens, cost, tool calls | What measured resources did delivery use? Source: agent runs in `usage_statistics`. | Sum available values per delivered mission, then aggregate only values observed for that metric. Display numerator/denominator coverage. Class: telemetry. |
 | Agent spend by stage | Which resources were recorded for each stage actor? Source: stage measurements. | Weekly and date-range reports group by the agent that performed each stage and its concrete recorded model; amounts whose model is unrecorded or generic (`mixed`, runner family names) appear once as unavailable model attribution instead of a model row, using measurement dates rather than mission completion. Codex shows the highest recorded quota level per stage; the total column adds the stage columns, like dollars and minutes, and no stage shares are shown for quota. Missing or invalid levels show a dash; a recorded zero remains 0%. Unattributed quota levels are not shown. Claude uses dollars and custom runners use minutes even when their provider is OpenAI; their totals and parenthesized stage shares remain additive. Class: telemetry. |
@@ -44,10 +47,36 @@ repair observations do not require a backfill first. Reports have no persisted
 snapshot or scalar fallback. Stored `pr_fix_rounds` values are legacy authored-fix counts, never
 relabelled as all-cause totals; reconstruction outputs come from the same calculation; stage telemetry does not
 establish a review measurement. `px stats backfill`
-previews reconstruction from retained Mission history, including existing rows,
-with old/new counts, coverage and unresolved histories. `--apply` writes the
-same reconstruction idempotently; raw review evidence is preserved. Inspect an
-isolated database copy before applying it to operator state.
+previews recovered evidence from retained Mission, lifecycle, workflow, Git and
+provider history, including old/new counts, coverage, conflicts and unresolved
+sources. It does not restore a CSV or legacy review-state importer. Explicit
+apply writes immutable recovery evidence and its audit only to a consistent
+isolated database copy; the live operator database is refused. Repeating an
+unchanged apply preserves existing evidence without duplicating it.
+
+The JSON backfill report is also the historical analysis export. Every metric
+states its eligible population, observation count, denominator and coverage,
+with supported period, model, stage and cause cohorts. Return distributions are
+reconstructed facts from the shared all-cause counting owner. Recorded
+`rebound.repair` durations are direct observations of individual repair
+attempts, not complete mission repair time. Provider PR-to-review durations are
+elapsed turnaround between recorded timestamps, not execution time. Means are
+estimates of the observed retained cohort only; their intervals describe
+sampling uncertainty and do not correct retention or selection bias.
+
+Historical retention, provider availability and missing attribution can make
+cohort coverage unequal. The export names those gaps and does not claim the
+observed cohort represents unretained work or apply a correction multiplier.
+Cause cohorts come from the same distinct all-cause returns used by the report;
+provider publications and approvals are not causes. Model and stage coverage
+for repair duration uses every repair in that attributed cohort as the
+denominator and only repairs with a recorded duration as observations.
+Pre-measurement CPU, per-gate execution intervals, source intervals, gate DAGs
+and verification attempts remain unavailable. Reconstructed historical
+boundaries are never joined to measured verification-attempt telemetry. The
+recovery collector excludes `verification.attempt` records already owned by the
+measured verification projection and labels retained post-cutoff workflow facts
+as measured workflow rather than historical reconstruction.
 
 ## Bug-labeled mission trend
 
@@ -117,4 +146,5 @@ candidates; missing coverage prevents a trustworthy optimization-benefit or
 contention estimate. See [opt-in profiling](verification-profiling.md) for sample
 semantics and retained experiments.
 
-Legacy CSV is an explicit read-only import/analysis boundary. It cannot silently join a repository-scoped production projection.
+Any legacy CSV analysis remains a separate read-only boundary. Stats recovery
+does not read it or join it to a repository-scoped production projection.

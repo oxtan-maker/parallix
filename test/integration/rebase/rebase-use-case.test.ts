@@ -115,6 +115,104 @@ test('rebase use case completes a clean rebase through mocked ports', async () =
     'the clean path must verify the local base ancestry postcondition');
 });
 
+test('shared rebase owner retains distinct no-op and clean observation cycles (TASK-2835)', async () => {
+  const observations: import('../../../src/application/ports/rebase-workflow.js').RebaseObservationInput[] = [];
+  let revision = 'before';
+  const h = harness({
+    newRebaseObservationId: (() => { let id = 0; return () => `rebase-${++id}`; })(),
+    observeRebase: async value => { observations.push(value); },
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rev-parse') { return { ...OK, stdout: `${revision}\n` }; }
+      if (tail[0] === 'rebase') { revision = observations.at(-1)?.id === 'rebase-2' ? 'after' : revision; }
+      return OK;
+    },
+  });
+  await run(h);
+  await run(h);
+  assert.deepEqual(observations.map(value => [value.id, value.outcome]), [
+    ['rebase-1', 'running'], ['rebase-1', 'no-op'], ['rebase-2', 'running'], ['rebase-2', 'clean'],
+  ]);
+  assert.equal(new Set(observations.map(value => value.id)).size, 2, 'identical revisions do not collapse distinct cycles');
+});
+
+test('shared rebase owner retains conflict then resolved snapshots under one identity (TASK-2835)', async () => {
+  const conflicted = 'missions/task-2332.12/CP-1.md';
+  const observations: import('../../../src/application/ports/rebase-workflow.js').RebaseObservationInput[] = [];
+  const h = harness({
+    newRebaseObservationId: () => 'rebase-conflict-1',
+    observeRebase: async value => { observations.push(value); },
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rev-parse') { return { ...OK, stdout: 'revision\n' }; }
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '', stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+      }
+      return OK;
+    },
+    resolveConflictsForMission: () => ({ ok: true, conflictFiles: [conflicted], missionSpecificFiles: [conflicted], sharedFiles: [] }),
+  });
+  await run(h);
+  assert.deepEqual(observations.map(value => value.outcome), ['running', 'conflict', 'resolved']);
+  assert.ok(observations.every(value => value.id === 'rebase-conflict-1'));
+  assert.deepEqual(observations.at(-1)?.conflicts, [conflicted]);
+  assert.deepEqual(observations.map(value => value.dependencies), [
+    [], ['rebase:rebase-conflict-1:1:running'], ['rebase:rebase-conflict-1:1:conflict'],
+  ]);
+});
+
+test('resume-in-place keeps one observation identity and distinct conflict attempts (TASK-2835 review F9)', async () => {
+  const conflicted = 'missions/task-2332.12/CP-1.md';
+  const observations: import('../../../src/application/ports/rebase-workflow.js').RebaseObservationInput[] = [];
+  let continues = 0;
+  const h = harness({
+    newRebaseObservationId: () => 'rebase-resumed-1',
+    observeRebase: async value => { observations.push(value); },
+    detectRebaseState: () => ({ inProgress: continues === 1, unmergedFiles: continues === 1 ? [conflicted] : [] }),
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rev-parse') { return { ...OK, stdout: 'revision\n' }; }
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        return { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '',
+          stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` };
+      }
+      if (tail[0] === 'rebase' && tail[1] === '--continue') {
+        continues += 1;
+        return continues === 1
+          ? { failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1, stdout: '',
+            stderr: `CONFLICT (content): Merge conflict in ${conflicted}\n` }
+          : OK;
+      }
+      return OK;
+    },
+    resolveConflictsForMission: () => ({ ok: true, conflictFiles: [conflicted], missionSpecificFiles: [conflicted], sharedFiles: [] }),
+  });
+
+  await run(h);
+
+  assert.deepEqual(observations.map(value => [value.id, value.attempt, value.outcome]), [
+    ['rebase-resumed-1', 1, 'running'],
+    ['rebase-resumed-1', 1, 'conflict'],
+    ['rebase-resumed-1', 2, 'conflict'],
+    ['rebase-resumed-1', 2, 'resolved'],
+  ]);
+  assert.deepEqual(h.exitCodes, [0]);
+});
+
+test('shared rebase owner retains a non-conflict failed terminal (TASK-2835)', async () => {
+  const observations: import('../../../src/application/ports/rebase-workflow.js').RebaseObservationInput[] = [];
+  const h = harness({
+    newRebaseObservationId: () => 'rebase-failed-1',
+    observeRebase: async value => { observations.push(value); },
+    git: (args: string[]) => subcommand(args)[0] === 'rebase'
+      ? { status: 128, stdout: '', stderr: 'fatal: invalid upstream', failureReason: { version: 1, code: 'git-behind', source: 'git' } }
+      : { ...OK, stdout: subcommand(args)[0] === 'rev-parse' ? 'revision\n' : '' },
+  });
+  await run(h);
+  assert.deepEqual(observations.map(value => value.outcome), ['running', 'failed']);
+  assert.equal(observations.at(-1)?.revisionAfter, 'revision');
+});
+
 test('rebase use case auto-resolves mission-specific conflicts with --theirs', async () => {
   const conflicted = 'missions/task-2332.12/CP-1.md';
   const gitCalls: string[][] = [];
@@ -231,10 +329,13 @@ test('rebase use case keeps the implementer recorded before rebase rewrites task
   assert.equal(h.agentLaunches[0].options.agent, 'codex');
 });
 
-test('rebase use case exits non-zero when the pinned implementer launcher is unavailable', async () => {
+test('conflict resolution launch failures record terminal failed observations (TASK-2835 review F9)', async () => {
   const shared = 'src/adapters/git/git.ts';
+  const observations: import('../../../src/application/ports/rebase-workflow.js').RebaseObservationInput[] = [];
   const h = sharedConflictHarness(shared, {
     getTaskImplementer: () => 'vibe',
+    newRebaseObservationId: () => 'failed-resolution',
+    observeRebase: async observation => { observations.push(observation); },
     startAgent: async () => {
       throw Object.assign(
         new Error('Pinned agent "vibe" cannot run this step: Agent "vibe" launcher is not available'),
@@ -253,19 +354,26 @@ test('rebase use case exits non-zero when the pinned implementer launcher is una
   assert.match(output, /vibe/);
   assert.match(output, /cannot run conflict resolution/);
   assert.match(output, /git rebase --abort/);
+  assert.deepEqual(observations.map(observation => observation.outcome), ['running', 'conflict', 'failed']);
+  assert.deepEqual(observations.at(-1)?.dependencies, ['rebase:failed-resolution:1:conflict']);
 });
 
 test('rebase use case exits non-zero when the mission has no recorded implementer', async () => {
   const shared = 'src/adapters/git/git.ts';
+  const observations: import('../../../src/application/ports/rebase-workflow.js').RebaseObservationInput[] = [];
   const h = sharedConflictHarness(shared, {
     resolveTaskFile: () => ({ ok: false as const }),
     getTaskImplementer: () => null,
+    newRebaseObservationId: () => 'missing-implementer',
+    observeRebase: async observation => { observations.push(observation); },
   });
   await run(h);
 
   assert.deepEqual(h.exitCodes, [1]);
   assert.equal(h.agentLaunches.length, 0, 'no agent may be launched without a recorded implementer');
   assert.match(h.lines.join('\n'), /no recorded implementer/i);
+  assert.deepEqual(observations.map(observation => observation.outcome), ['running', 'conflict', 'failed']);
+  assert.deepEqual(observations.at(-1)?.dependencies, ['rebase:missing-implementer:1:conflict']);
 });
 
 test('rebase use case passes any configured implementer family through unchanged', async () => {

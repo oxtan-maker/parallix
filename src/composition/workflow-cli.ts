@@ -14,7 +14,7 @@ import type { BoardCommandRequest } from '../application/controller/board-comman
 
 /** Closed CLI commands preserve their existing parser and flags inside the owner. */
 export function ownWorkflowCli(registry: Record<string, Command>, open: () => Promise<ProductionApplicationServices>, operatorReview = false): void {
-  for (const command of ['draft', 'review', 'integrate'] as const) {
+  for (const command of ['draft', 'review', 'rebase', 'integrate'] as const) {
     const original = registry[command];
     registry[command] = async (args: string[], options: Record<string, unknown> = {}) => {
       const reviewRequest = command === 'review' ? parseReviewCliRequest(args) : null;
@@ -63,7 +63,7 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
   };
 }
 
-async function dispatchOwnedCli(command: 'draft' | 'review' | 'integrate', args: string[], slug: string, graph: ProductionApplicationServices,
+async function dispatchOwnedCli(command: 'draft' | 'review' | 'rebase' | 'integrate', args: string[], slug: string, graph: ProductionApplicationServices,
   cancellation: { requested: boolean; stopOwnedWorkflow: boolean }, operatorReview: boolean): Promise<void> {
   const controller = graph.presentationCapabilities?.commandController;
   if (!controller) { throw new Error('Workflow admission is unavailable'); }
@@ -80,9 +80,10 @@ function bypassOwnership(command: string, args: readonly string[]): boolean {
     || command === 'integrate' && args.includes('--recover-landed')
     || command === 'review' && !['enter', 'submit'].includes(reviewOperation(args));
 }
-function workflowKind(command: string): 'draft:create' | 'integrate:merge' | 'review:submit' {
+function workflowKind(command: string): 'draft:create' | 'integrate:merge' | 'rebase:run' | 'review:submit' {
   if (command === 'draft') { return 'draft:create'; }
   if (command === 'integrate') { return 'integrate:merge'; }
+  if (command === 'rebase') { return 'rebase:run'; }
   return 'review:submit';
 }
 

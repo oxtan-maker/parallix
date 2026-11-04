@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as v from '../../../../src/adapters/verification/verification.js';
-import { readVerificationInputs } from '../../../../src/adapters/verification/verification-proof-inputs.js';
+import { readVerificationInputs, verificationObservationContext } from '../../../../src/adapters/verification/verification-proof-inputs.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 function tempDir(prefix = 'verification-') {
@@ -15,6 +15,27 @@ function cleanup(dir: fs.PathLike) { fs.rmSync(dir, { recursive: true, force: tr
 function writeConfig(dir: string, config: unknown) {
   fs.writeFileSync(path.join(dir, 'workflow.config.json'), JSON.stringify(config));
 }
+
+test('verification observation context retains validated controlled profile evidence (TASK-2835)', () => {
+  const root = tempDir(), report = path.join(root, 'report.json');
+  try {
+    writeConfig(root, { gates: [] });
+    const comparison = { experimentId: 'experiment', coverage: false, workloadFingerprint: 'workload',
+      configurationFingerprint: 'configuration', runtimeFingerprint: 'runtime', workloadEquivalent: true,
+      configurationEquivalent: true, runtimeEquivalent: true,
+      before: { label: 'control', n: 2, meanWallMs: 100, meanCpuUs: 1000 },
+      after: { label: 'sampled', n: 2, meanWallMs: 102, meanCpuUs: 1010 }, samples: 240,
+      component: { functionName: 'component', url: 'file:///src/component.ts', selfSamples: 24, contribution: 0.1 },
+      optimizationBenefitBound: { maximumRemovableCpuFraction: 0.1, maximumSpeedupRatio: 1 / 0.9,
+        assumptions: ['explicit'] }, interpretation: 'noise is not speedup' };
+    fs.writeFileSync(report, JSON.stringify({ controlledComparisons: [comparison] }));
+    const context = verificationObservationContext(root, report);
+    assert.equal(context.profile?.samples, 240);
+    assert.deepEqual(context.profile?.controlledComparisons, [comparison]);
+    fs.writeFileSync(report, JSON.stringify({ controlledComparisons: [{ ...comparison, workloadEquivalent: false }] }));
+    assert.deepEqual(verificationObservationContext(root, report).profile, { reference: report, samples: null });
+  } finally { cleanup(root); }
+});
 
 test('isTransientVerificationFailure flags unit-test-budget exhaustion', () => {
   assert.equal(v.isTransientVerificationFailure({ failureReason: { version: 1, code: 'cpu-budget-exceeded' }, stdout: '[unit-test-budget:exceeded] boom', stderr: '' }), true);

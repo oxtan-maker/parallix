@@ -200,6 +200,8 @@ export interface BoardProjection {
 
 export interface BoardMetrics {
   readonly verification?: import('./verification-statistics.js').VerificationStatistics | null;
+  /** Shared typed FLOW/px-stats lifecycle projection; absent only on pre-TASK-2835 cached projections. */
+  readonly flow?: import('./flow-statistics.js').FlowStatistics;
   /** Collection health is separate from metric-level missing-history fallbacks. */
   readonly health: StatisticsHealth;
   /** The exact data set used to derive this metrics projection. */

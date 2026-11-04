@@ -314,27 +314,33 @@ class PhaseGateExecution {
   private readonly resources: PhaseGateResources;
   constructor(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) {
     this.state = phaseExecutionState(phase, opts, gates, log, error);
-    this.resources = new PhaseGateResources(gates, this.state.checkoutPath, opts.resourceLimits ?? {},
+    this.resources = new PhaseGateResources(this.state.maxParallel, this.state.checkoutPath, opts.resourceLimits ?? {},
       () => opts.admission ?? gateAdmission(), this.state.controller.signal);
   }
 
   async startPending(): Promise<void> {
-    while (this.state.failure.failedGate === null && !this.state.controller.signal.aborted && this.state.running.size < this.state.maxParallel) {
-      const index = this.state.pending.findIndex(gate => (gate.after || []).every(dependency => this.state.completed.has(dependency)));
+    while (this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
+      const index = this.state.pending.findIndex(gate => this.resources.launchable(gate)
+        && (gate.after || []).every(dependency => this.state.completed.has(dependency)));
       if (index < 0) { break; }
       const gate = this.state.pending.splice(index, 1)[0];
-      if (this.state.dashboard) { this.state.dashboard.startGate(gate.key); }
-      else { this.state.log(`Repository gate (${this.state.phase}): ${gate.key} started (${this.state.running.size + 1}/${this.state.maxParallel} active).`); }
+      this.state.dashboard?.startGate(gate.key);
+      this.logProgress(gate, this.resources.launch(gate) ? undefined : `waiting for resource "${gate.resource}"`);
       const verification = gate.reuse === 'clean-tree'
         ? await import('../verification/' + 'verification.js') as ReusableVerificationProofPort : null;
       this.state.running.add(this.launchGate(gate, verification));
     }
   }
 
-  /** Tagged gates share their phase's resource slot without changing phase parallelism. */
+  private logProgress(gate: RepositoryGate, status = `started (${this.resources.active}/${this.state.maxParallel} active)`): void {
+    if (!this.state.dashboard) { this.state.log(`Repository gate (${this.state.phase}): ${gate.key} ${status}.`); }
+  }
+
+  /** A tagged gate command holds its own resource slot until its process tree settles. */
   private runAdmitted(gate: RepositoryGate) {
     const { opts, controller } = this.state;
-    const invoke = async (slot?: GateAdmissionRun) => {
+    const invoke = async (slot?: GateAdmissionRun, queued = false) => {
+      if (queued) { this.logProgress(gate); }
       await this.observations.get(gate.key)?.started().catch(() => undefined);
       return this.state.runner(gate.command, [], {
       cwd: path.resolve(this.state.checkoutPath), stdio: 'pipe', forwardOutput: this.state.liveSerial,
@@ -344,8 +350,7 @@ class PhaseGateExecution {
       onOutput: chunk => this.state.dashboard?.append(gate.key, chunk)
       });
     };
-    if (!gate.resource) { return invoke(); }
-    return this.resources.run(gate.resource, invoke);
+    return this.resources.run(gate, invoke);
   }
 
   async launchGate(gate: RepositoryGate, verification: ReusableVerificationProofPort | null): Promise<GateRunOutcome> {
@@ -422,8 +427,8 @@ class PhaseGateExecution {
 
   async execute(): Promise<PhaseGateRunResult> {
     try { return await this.executeGates(); }
-    catch (cause) { this.state.controller.abort(); throw cause; }
-    finally { try { await this.resources.close(); } finally { this.close(); } }
+    catch (cause) { this.state.controller.abort(); await Promise.allSettled(this.state.running); throw cause; }
+    finally { this.close(); }
   }
 
   private async executeGates(): Promise<PhaseGateRunResult> {

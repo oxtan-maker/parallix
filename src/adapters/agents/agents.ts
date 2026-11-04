@@ -99,6 +99,7 @@ async function startAgent(step: string, opts: StartAgentOptions = { prompt: '' }
     updateAgentBlockFn,
     launchAgentFn: opts.launchAgentFn ?? workflowLaunchPort,
     onLaunch: opts.onLaunch,
+    authoritativeCompletion: opts.authoritativeCompletion,
     launchAdmission: opts.launchAdmission,
     onLimitHit: opts.onLimitHit,
     sessionMarkerPort,

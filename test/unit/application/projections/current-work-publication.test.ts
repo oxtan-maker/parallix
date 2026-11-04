@@ -125,6 +125,13 @@ test('a recorded current-work fact round-trips through the operational-history e
   assert.deepEqual(parseExecutionActivityEntry(appended[0]), {
     missionId: completeMissionId('task-2370'),
     operationId: 'active:task-2370',
+    operationGeneration: null,
+    revision: null,
+    attempt: null,
+    dependencies: null,
+    actor: 'claude',
+    model: null,
+    timeState: 'working',
     phase: 'execute',
     state: 'running',
     summary: 'running execute agent',
@@ -310,16 +317,16 @@ test('px review republishes current work with the family that actually launched'
     enter: async (context) => {
       const launched = context.options.onAgentLaunched;
       assert.equal(typeof launched, 'function');
-      if (typeof launched === 'function') { await launched('custom', 'review'); }
+      if (typeof launched === 'function') { await launched('custom', 'review', 'qwen3.8-flash-next-iq3_s'); }
     },
   } satisfies NonNullable<ConstructorParameters<typeof ReviewCommandUseCase>[0]>;
   await new ReviewCommandUseCase(workflow, new ActivityRecorderFixture(repo, { processId: 9 }))
     .execute(['task-2370']);
 
-  assert.deepEqual(published(appended).map((fact) => [fact.phase, fact.agent, fact.state]), [
-    ['review', null, 'running'],
-    ['review', 'custom', 'running'],
-    ['review', null, 'ended'],
+  assert.deepEqual(published(appended).map((fact) => [fact.phase, fact.agent, fact.model, fact.state]), [
+    ['review', null, null, 'running'],
+    ['review', 'custom', 'qwen3.8-flash-next-iq3_s', 'running'],
+    ['review', null, null, 'ended'],
   ]);
 });
 
@@ -636,12 +643,12 @@ describe("Workflow current work follows launches —", () => {
     const ports = strictPorts({
       agentExecution: {
         async prepare() { return { prompt: 'p', agentConfig: {} }; },
-        async launch(request: { onAgentChanged?: (_agent: string) => Promise<void> }) {
-          await request.onAgentChanged?.('claude');
+        async launch(request: { onAgentChanged?: (_agent: string, _model?: string | null) => Promise<void> }) {
+          await request.onAgentChanged?.('claude', 'claude-opus');
           timeline.push(boardState(appended));
           // claude hits its usage limit; the launcher continues with qwen inside
           // the same operation.
-          await request.onAgentChanged?.('qwen');
+          await request.onAgentChanged?.('qwen', 'qwen3.8');
           timeline.push(boardState(appended));
           return { agent: 'qwen', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0, detail: null };
         },
@@ -656,6 +663,8 @@ describe("Workflow current work follows launches —", () => {
     assert.deepEqual(timeline.map((state) => state.agent), ['claude', 'qwen', 'qwen']);
     assert.ok(timeline.every((state) => state.working), 'a recoverable family failover never leaves WORKING');
     assert.ok(timeline.every((state) => state.attention === 'none'), 'a recoverable family failover creates no attention');
+    assert.deepEqual(published(appended).filter(event => event.summary.startsWith('running execute agent'))
+      .map(event => [event.agent, event.model]), [['claude', 'claude-opus'], ['qwen', 'qwen3.8']]);
   });
 
   test('SC7: a delayed current-work publication lands before the next state is read', async () => {
@@ -901,6 +910,10 @@ describe("Board-launched current work —", () => {
     const fact = facts.get(missionId('task-2387'));
     assert.equal(fact?.currentWork, null, 'a blocked run is no longer WORKING');
     assert.match(fact?.blockingReason ?? '', /no eligible agent family/);
+    const handoff = (await repo.findAll()).flatMap(entry => parseExecutionActivityEntry(entry) ?? [])
+      .find(event => event.state === 'blocked');
+    assert.equal(handoff?.actor, 'parallix', 'a blocked workflow is not evidence of human ownership');
+    assert.equal(handoff?.timeState, 'waiting');
   });
 
   // ---------------------------------------------------------------------------

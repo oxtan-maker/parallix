@@ -276,11 +276,11 @@ export class ExecuteMissionService {
       // Awaited, not fire-and-forget: this write is authoritative for what the
       // board shows, so it has to land before the run publishes its next
       // state. A dropped promise here reorders the board behind reality.
-      onAgentChanged: async (agent) => {
+      onAgentChanged: async (agent, model) => {
         onStarted();
         await reportWorkflowProviderStarted(agent);
         await recordImplementerLaunch(request.slug, agent, this._ports.missionTransitions, new MissionLifecycleService(this._ports.missionTransitions));
-        await this.publishWork(request, 'execute', `running execute agent (${agent})`, agent);
+        await this.publishWork(request, 'execute', `running execute agent (${agent})`, agent, model);
       },
     });
     if (!launch.errored) { onStarted(); await reportWorkflowProviderStarted(launch.agent); }
@@ -352,18 +352,21 @@ export class ExecuteMissionService {
   // error. The reader ages an unterminated fact out on its own.
   // -----------------------------------------------------------------------
 
-  private publication(request: ExecuteMissionRequest, phase: ExecutionActivityStage, summary: string, agent: string | null): ExecutionActivityIntent | null {
+  private publication(request: ExecuteMissionRequest, phase: ExecutionActivityStage, summary: string, agent: string | null,
+    model: string | null = null): ExecutionActivityIntent | null {
     return executionActivityIntent({
       slug: request.slug,
       operationId: request.operationId,
       phase,
       summary,
       agent,
+      model,
     });
   }
 
-  private async publishWork(request: ExecuteMissionRequest, phase: ExecutionActivityStage, summary: string, agent: string | null): Promise<void> {
-    const publication = this.publication(request, phase, summary, agent);
+  private async publishWork(request: ExecuteMissionRequest, phase: ExecutionActivityStage, summary: string, agent: string | null,
+    model: string | null = null): Promise<void> {
+    const publication = this.publication(request, phase, summary, agent, model);
     if (publication) { await bestEffort(() => this._currentWork.running(publication)); }
   }
 

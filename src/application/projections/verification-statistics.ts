@@ -1,8 +1,12 @@
 import type { OperationalHistoryEntry, BoardLaneEventEntry } from '../ports/operation-history.js';
-import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../ports/verification-observation.js';
+import type { VerificationMeasurement } from '../ports/verification-observation.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
-import { missionLifecycles } from './metrics-outcomes.js';
-import type { RepositoryId } from '../../domain/repository.js';
+import { flowElapsedOwnership, type FlowElapsedOwnership } from './flow-elapsed-ownership.js';
+import { observedFlowMissions, type ObservedFlowMission } from './flow-mission-facts.js';
+import type { ControlledVerificationComparison } from '../ports/verification-profile.js';
+import type { ProcessTreeCpuObservation, ProviderResourceObservation, RunRecord } from '../run-history-types.js';
+import { observedAttempts, observedRebases, type RebaseMeasurement } from './verification-observation-reader.js';
+export type { RebaseMeasurement } from './verification-observation-reader.js';
 
 type Interval = readonly [number, number];
 export interface VerificationStatisticsInput {
@@ -10,6 +14,7 @@ export interface VerificationStatisticsInput {
   readonly history: readonly OperationalHistoryEntry[];
   readonly operations: readonly WorkflowOperation[];
   readonly lifecycle: readonly BoardLaneEventEntry[];
+  readonly runs?: readonly RunRecord[];
 }
 export interface VerificationCost {
   readonly wallMs: number | null;
@@ -36,13 +41,113 @@ export interface VerificationStatistics {
   readonly repairMs: number | null;
   readonly reReviewMs: number | null;
   readonly criticalPathMs: number | null;
+  readonly dependencyPath: { readonly durationMs: number; readonly nodeIds: readonly string[] } | null;
+  readonly elapsedOwnership: FlowElapsedOwnership | null;
+  readonly agentResources: {
+    readonly cpuUs: number | null;
+    readonly cpuObservations: number;
+    readonly runs: readonly { readonly runId: string; readonly missionId: string; readonly role: string;
+      readonly family: string | null; readonly model: string | null; readonly cpu: ProcessTreeCpuObservation | null;
+      readonly provider: ProviderResourceObservation | null }[];
+  };
+  /** Per-completion raw FLOW facts; review provenance is joined by the shared cohort projection. */
+  readonly flowMissions: readonly ObservedFlowMission[];
+  readonly rebases: readonly RebaseMeasurement[];
   readonly batches: readonly { batchId: string; criticalPathMs: number | null }[];
   readonly ranked: readonly { gate: string; attempts: number; wallMs: number | null; cpuUs: number | null }[];
   readonly completedMissions: number;
   readonly unknowns: readonly string[];
   readonly profileReferences: readonly string[];
   readonly comparisons: readonly { gate: string; before: string; after: string; beforeN: number; afterN: number;
-    configurationEquivalent: boolean | null; workloadEquivalent: 'unknown'; beforeWallMs: number | null; afterWallMs: number | null }[];
+    configurationEquivalent: boolean | null; workloadEquivalent: 'unobserved'; beforeWallMs: number | null; afterWallMs: number | null }[];
+  readonly controlledComparisons: readonly ControlledVerificationComparison[];
+}
+
+type DependencyNode = { readonly id: string; readonly dependencies: readonly string[] | null; readonly durationMs: number };
+
+function observedDagDependencyPath(input: VerificationStatisticsInput,
+  attempts: readonly VerificationMeasurement[]): VerificationStatistics['dependencyPath'] {
+  const nodes: DependencyNode[] = attempts.map(value => ({ id: value.id,
+    dependencies: value.dependencies === undefined ? null : value.dependencies,
+    durationMs: execution(value).reduce((sum, [start, end]) => sum + end - start, 0) }));
+  nodes.push(...observedActivityNodes(input));
+  if (!completeDependencyNodes(nodes)) { return null; }
+  return longestDependencyPath(nodes);
+}
+
+function observedActivityNodes(input: VerificationStatisticsInput): DependencyNode[] {
+  const activities = new Map<string, { dependencies: readonly string[] | null; startedAt: string | null; finishedAt: string | null }>();
+  for (const entry of input.history) {
+    if (entry.eventType !== 'mission.current-work' && entry.eventType !== 'flow.activity') { continue; }
+    try {
+      const value = JSON.parse(entry.eventData) as { repositoryId?: string; observationId?: string;
+        sourceId?: string; dependencies?: readonly string[] | null; state?: string };
+      const observationId = value.observationId ?? value.sourceId;
+      if (value.repositoryId !== input.repositoryId || !observationId) { continue; }
+      const prior = activities.get(observationId) ?? { dependencies: value.dependencies ?? null, startedAt: null, finishedAt: null };
+      activities.set(observationId, { dependencies: value.dependencies ?? prior.dependencies,
+        startedAt: value.state === 'running' ? prior.startedAt ?? entry.createdAt : prior.startedAt,
+        finishedAt: value.state === 'ended' ? entry.createdAt : prior.finishedAt });
+    } catch { /* malformed activity is diagnosed by its owning projection */ }
+  }
+  return [...activities].map(([id, value]) => {
+    const measured = interval(value.startedAt, value.finishedAt);
+    return { id, dependencies: value.dependencies, durationMs: measured.length ? measured[0][1] - measured[0][0] : NaN };
+  });
+}
+
+function completeDependencyNodes(nodes: readonly DependencyNode[]): boolean {
+  if (!nodes.length || nodes.some(node => node.dependencies === null || !Number.isFinite(node.durationMs))) { return false; }
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  return byId.size === nodes.length && !nodes.some(node => node.dependencies!.some(id => !byId.has(id)));
+}
+
+function longestDependencyPath(nodes: readonly DependencyNode[]): VerificationStatistics['dependencyPath'] {
+  const byId = new Map(nodes.map(node => [node.id, node]));
+  const memo = new Map<string, { durationMs: number; nodeIds: readonly string[] }>();
+  const visiting = new Set<string>();
+  const visit = (id: string): { durationMs: number; nodeIds: readonly string[] } | null => {
+    const cached = memo.get(id); if (cached) { return cached; }
+    if (visiting.has(id)) { return null; }
+    const node = byId.get(id); if (!node) { return null; }
+    visiting.add(id);
+    const predecessors = node.dependencies!.map(visit);
+    visiting.delete(id);
+    if (predecessors.some(value => value === null)) { return null; }
+    const prior = (predecessors as { durationMs: number; nodeIds: readonly string[] }[])
+      .sort((a, b) => b.durationMs - a.durationMs || a.nodeIds.join('\0').localeCompare(b.nodeIds.join('\0')))[0];
+    const result = { durationMs: (prior?.durationMs ?? 0) + node.durationMs,
+      nodeIds: [...(prior?.nodeIds ?? []), id] };
+    memo.set(id, result); return result;
+  };
+  const paths = nodes.map(node => visit(node.id));
+  if (paths.some(value => value === null)) { return null; }
+  return (paths as NonNullable<VerificationStatistics['dependencyPath']>[])
+    .sort((a, b) => b.durationMs - a.durationMs || a.nodeIds.join('\0').localeCompare(b.nodeIds.join('\0')))[0] ?? null;
+}
+
+function ownershipDependencyPath(ownership: FlowElapsedOwnership | null, runs: readonly RunRecord[]): VerificationStatistics['dependencyPath'] {
+  if (!ownership || ownership.unexplainedMs !== 0 || ownership.segments.length === 0) { return null; }
+  const byMission = new Map<string, typeof ownership.segments>();
+  for (const segment of ownership.segments) {
+    byMission.set(segment.missionId, [...(byMission.get(segment.missionId) ?? []), segment]);
+  }
+  const paths = [...byMission.entries()].map(([missionId, segments]) => {
+    const inserted = new Set<string>();
+    const nodeIds: string[] = [];
+    for (const segment of segments) {
+      nodeIds.push(segment.id);
+      const start = Date.parse(segment.startedAt), end = Date.parse(segment.finishedAt);
+      for (const run of runs.filter(value => value.missionId === missionId && value.endedAt
+        && Date.parse(value.startedAt) < end && Date.parse(value.endedAt!) > start
+        && (segment.actor === value.family || ['implement', 'agent-review', 'repair', 'recovery'].includes(segment.step)))) {
+        if (!inserted.has(run.runId)) { nodeIds.push(`run:${run.runId}`); inserted.add(run.runId); }
+      }
+    }
+    return { durationMs: segments.reduce((total, segment) => total + segment.durationMs, 0), nodeIds };
+  });
+  return paths.sort((left, right) => right.durationMs - left.durationMs
+    || left.nodeIds.join('\0').localeCompare(right.nodeIds.join('\0')))[0] ?? null;
 }
 
 function interval(start: string | null, end: string | null): Interval[] {
@@ -60,47 +165,13 @@ export function intervalUnionMs(intervals: readonly Interval[]): number {
   return total + (seen ? end - start : 0);
 }
 
-function observedAttempts(input: VerificationStatisticsInput, unknowns: Set<string>): VerificationMeasurement[] {
-  const latest = new Map<string, VerificationMeasurement>();
-  const operations = new Map(input.operations.map(op => [op.id, op]));
-  for (const entry of input.history) {
-    if (entry.eventType !== VERIFICATION_MEASUREMENT_EVENT) {continue;}
-    try {
-      const value = JSON.parse(entry.eventData) as VerificationMeasurement;
-      if (value.repositoryId !== input.repositoryId) {continue;}
-      const operation = value.operationId ? operations.get(value.operationId) : null;
-      if (operation && (operation.repositoryId !== value.repositoryId || operation.missionId !== value.missionId)) {
-        unknowns.add('Attempt workflow identity mismatch excluded'); continue;
-      }
-      if (value.operationId && !operation) {unknowns.add('Workflow join unavailable for some attempts');}
-      if (!validAttempt(value)) { unknowns.add('Malformed attempt observations excluded'); continue; }
-      const prior = latest.get(value.id);
-      if (prior && !sameIdentity(prior, value)) {
-        unknowns.add('Conflicting attempt identity excluded'); latest.delete(value.id); continue;
-      }
-      latest.set(value.id, value);
-    } catch { unknowns.add('Unreadable attempt observation excluded'); }
-  }
-  return [...latest.values()].sort((a, b) => a.requestedAt.localeCompare(b.requestedAt) || a.id.localeCompare(b.id));
-}
-
-function validAttempt(value: VerificationMeasurement): boolean {
-  return [value.id, value.gate, value.batchId, value.command].every(field => typeof field === 'string')
-    && ['running', 'passed', 'failed', 'interrupted', 'reused'].includes(value.result)
-    && Number.isFinite(Date.parse(value.requestedAt));
-}
-function sameIdentity(a: VerificationMeasurement, b: VerificationMeasurement): boolean {
-  return a.repositoryId === b.repositoryId && a.missionId === b.missionId && a.operationId === b.operationId
-    && a.gate === b.gate && a.revision === b.revision;
-}
-
 function execution(attempt: VerificationMeasurement): Interval[] {
   return attempt.result === 'reused' ? [] : interval(attempt.startedAt, attempt.finishedAt);
 }
 
-function cpuCost(attempts: readonly VerificationMeasurement[], unknowns?: Set<string>): { cpuUs: number | null; cpuObservations: number } {
-  const boundaries = new Map(attempts.filter(a => a.cpu && Number.isFinite(a.cpu.userUs) && a.cpu.userUs >= 0
-    && Number.isFinite(a.cpu.systemUs) && a.cpu.systemUs >= 0).map(a => [a.cpu!.boundary, a.cpu!]));
+function observedCpuCost(observations: readonly ProcessTreeCpuObservation[], unknowns?: Set<string>): { cpuUs: number | null; cpuObservations: number } {
+  const boundaries = new Map(observations.filter(cpu => Number.isFinite(cpu.userUs) && cpu.userUs >= 0
+    && Number.isFinite(cpu.systemUs) && cpu.systemUs >= 0).map(cpu => [cpu.boundary, cpu]));
   let total = 0;
   let valid = 0;
   for (const cpu of boundaries.values()) {
@@ -118,6 +189,62 @@ function cpuCost(attempts: readonly VerificationMeasurement[], unknowns?: Set<st
     total += cpu.userUs + cpu.systemUs;
   }
   return { cpuUs: valid ? total : null, cpuObservations: valid };
+}
+
+function cpuCost(attempts: readonly VerificationMeasurement[], unknowns?: Set<string>): { cpuUs: number | null; cpuObservations: number } {
+  return observedCpuCost(attempts.flatMap(attempt => attempt.cpu ? [attempt.cpu] : []), unknowns);
+}
+
+function agentResources(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined, unknowns: Set<string>): VerificationStatistics['agentResources'] {
+  const retained = uniqueAgentRuns(input, missions, unknowns);
+  const runs = retained.map(run => ({ runId: run.runId, missionId: run.missionId, role: run.role, family: run.family,
+    model: run.configuredModel ?? run.resources?.provider?.model ?? null,
+    cpu: run.resources?.localProcessTreeCpu ?? null, provider: run.resources?.provider ?? null }));
+  if (input.runs !== undefined) { diagnoseAgentRuns(retained, unknowns); }
+  const cpu = observedCpuCost(runs.flatMap(run => run.cpu ? [run.cpu] : []), unknowns);
+  return { ...cpu, runs };
+}
+
+function uniqueAgentRuns(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined,
+  unknowns: Set<string>): RunRecord[] {
+  const unique = new Map<string, RunRecord>();
+  for (const run of (input.runs ?? []).filter(value => value.captureKind !== 'coordinator'
+    && value.repositoryId === input.repositoryId && (!missions || missions.has(value.missionId)))) {
+    const prior = unique.get(run.runId);
+    if (prior && JSON.stringify(prior) !== JSON.stringify(run)) {
+      unknowns.add(`Conflicting agent run copies for ${run.missionId} run ${run.runId}`);
+    } else { unique.set(run.runId, run); }
+  }
+  return [...unique.values()];
+}
+
+function diagnoseAgentRuns(runs: readonly RunRecord[], unknowns: Set<string>): void {
+  for (const run of runs) {
+    if (incompleteAgentRunIdentity(run)) {
+      unknowns.add(`Agent run identity incomplete for ${run.missionId} source ${run.sourceId ?? run.runId}; rerun the affected workflow with FLOW collection enabled`);
+    }
+    if (missingAgentCpu(run)) {
+      unknowns.add(`Agent waited-tree CPU missing for ${run.missionId} run ${run.runId}; rerun the affected workflow with FLOW collection enabled`);
+    }
+    if (missingAgentModel(run)) {
+      unknowns.add(`Concrete model identity missing for ${run.missionId} run ${run.runId}; rerun the affected workflow with FLOW collection enabled`);
+    }
+  }
+}
+
+function incompleteAgentRunIdentity(run: RunRecord): boolean {
+  return !run.operationId || run.operationGeneration === null || run.operationGeneration === undefined
+    || !run.sourceId || !run.revision;
+}
+
+function missingAgentCpu(run: RunRecord): boolean {
+  return run.resources !== undefined && run.state === 'exited' && Boolean(run.execution)
+    && run.family !== 'pi' && !run.resources.localProcessTreeCpu;
+}
+
+function missingAgentModel(run: RunRecord): boolean {
+  return run.resources !== undefined && run.state === 'exited' && run.exitCode === 0
+    && !run.configuredModel && !run.resources.provider?.model;
 }
 
 function cost(attempts: readonly VerificationMeasurement[]): VerificationCost {
@@ -151,7 +278,8 @@ function criticalPath(attempts: readonly VerificationMeasurement[]): number | nu
 }
 
 type ActivityEvent = { repositoryId?: string; missionId: string; operationId: string;
-  sourceId?: string; phase: string; state: string; purpose?: 'repair' };
+  operationGeneration?: number | null; sourceId?: string; revision?: string | null; attempt?: number | null;
+  phase: string; state: string; purpose?: 'repair' };
 
 class ActivityCosts {
   readonly sources = new Map<string, { phase: string; start: string }>();
@@ -184,21 +312,33 @@ class ActivityCosts {
 
 function activityCosts(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined,
   unknowns: Set<string>): { repairMs: number | null; reReviewMs: number | null; waiting: Interval[] } {
-  const operations = new Map(input.operations.filter(op => op.repositoryId === input.repositoryId).map(op => [op.id, op]));
   const costs = new ActivityCosts();
+  const publications = new Set<string>();
   for (const entry of input.history) {
     if (entry.eventType !== 'mission.current-work') { continue; }
-    try {
-      const event = JSON.parse(entry.eventData) as ActivityEvent;
-      if (event.repositoryId !== input.repositoryId && !operations.has(event.operationId)) { continue; }
-      if (missions && !missions.has(event.missionId)) { continue; }
-      if (!event.sourceId) { unknowns.add('Historical activity lacks source boundaries'); continue; }
-      costs.accept(event, entry.createdAt);
-    } catch { unknowns.add('Unreadable activity boundaries'); }
+    const event = readActivityEvent(entry.eventData, input.repositoryId, missions, unknowns);
+    if (!event?.sourceId) { continue; }
+    const publication = JSON.stringify([event.operationId, event.operationGeneration, event.sourceId, event.phase, event.state, entry.createdAt]);
+    if (publications.has(publication)) { continue; }
+    publications.add(publication);
+    costs.accept(event, entry.createdAt);
   }
   if (costs.sources.size) { unknowns.add('Open activity intervals excluded'); }
   return { repairMs: costs.repair.length ? intervalUnionMs(costs.repair) : null,
     reReviewMs: costs.review.length ? intervalUnionMs(costs.review) : null, waiting: costs.waiting };
+}
+
+function readActivityEvent(eventData: string, repositoryId: string, missions: ReadonlySet<string> | undefined,
+  unknowns: Set<string>): ActivityEvent | null {
+  let event: ActivityEvent;
+  try { event = JSON.parse(eventData) as ActivityEvent; }
+  catch { unknowns.add('Unreadable activity boundaries'); return null; }
+  if (event.repositoryId !== repositoryId || missions && !missions.has(event.missionId)) { return null; }
+  if (!event.sourceId || !event.operationId || event.operationGeneration === null || event.operationGeneration === undefined
+    || event.state === 'running' && !event.revision) {
+    unknowns.add(`Activity identity incomplete for ${event.missionId || 'unknown mission'} operation ${event.operationId || 'unknown'} source ${event.sourceId ?? 'unknown'}; rerun the affected workflow with FLOW collection enabled`);
+  }
+  return event;
 }
 
 function attemptRecovery(executed: readonly VerificationMeasurement[], unknowns: Set<string>) {
@@ -220,27 +360,34 @@ function attemptRecovery(executed: readonly VerificationMeasurement[], unknowns:
 
 function lifetimeCosts(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined, unknowns: Set<string>) {
   const scoped = input.lifecycle.filter(e => !missions || missions.has(e.missionId));
-  const lifecycles = missionLifecycles(scoped, input.repositoryId as RepositoryId);
-  const lifetimes: Interval[] = [];
+  const missionIds = new Set(scoped.filter(e => e.repositoryId === input.repositoryId).map(e => e.missionId));
+  let endToEndMs = 0;
+  let measuredMissions = 0;
   let completedMissions = 0;
-  for (const [mission, lifecycle] of lifecycles) {
-    if (lifecycle.completedAt) { completedMissions++; }
-    const hasIntake = scoped.some(e => e.repositoryId === input.repositoryId && e.missionId === mission && e.fromStatus === null);
-    if (hasIntake && lifecycle.completedAt) { lifetimes.push(...interval(lifecycle.createdAt, lifecycle.completedAt)); }
-    else { unknowns.add('End-to-end lifetime missing intake or completion'); }
+  for (const mission of missionIds) {
+    const events = scoped.filter(e => e.repositoryId === input.repositoryId && e.missionId === mission)
+      .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
+    const refined = events.find(e => e.toStatus === 'refined');
+    const completed = events.find(e => e.toStatus === 'done'
+      && (!refined || Date.parse(e.occurredAt) >= Date.parse(refined.occurredAt)));
+    if (completed) { completedMissions++; }
+    const measured = interval(refined?.occurredAt ?? null, completed?.occurredAt ?? null);
+    if (measured.length) { measuredMissions++; endToEndMs += measured[0]![1] - measured[0]![0]; }
+    else { unknowns.add(`Refined-to-first-delivery boundary incomplete for ${mission}; rerun the affected fresh workflow with FLOW collection enabled`); }
   }
-  return { endToEndMs: lifetimes.length ? intervalUnionMs(lifetimes) : null, completedMissions };
+  return { endToEndMs: measuredMissions ? endToEndMs : null, completedMissions };
 }
 
 function measurementUnknowns(attempts: readonly VerificationMeasurement[], unknowns: Set<string>): void {
   if (!attempts.length) { unknowns.add('No retained attempts; historical work is unavailable, not zero'); }
-  if (attempts.some(a => !a.operationId)) { unknowns.add('Some attempts have no workflow operation'); }
+  for (const attempt of attempts.filter(a => !a.operationId || a.operationGeneration === null || a.operationGeneration === undefined || !a.sourceId)) {
+    unknowns.add(`Gate identity incomplete for ${attempt.missionId ?? 'unknown mission'} operation ${attempt.operationId ?? 'unknown'} source ${attempt.sourceId ?? 'unknown'}; rerun the affected workflow with FLOW collection enabled`);
+  }
   if (attempts.some(a => !a.revision)) { unknowns.add('Some attempts have no observed revision'); }
   if (attempts.some(a => !a.missionId)) { unknowns.add('Some attempts have no mission identity'); }
   const executed = attempts.filter(a => a.result !== 'reused');
   if (executed.some(a => !a.finishedAt)) { unknowns.add('Unsettled or interrupted attempts have partial timing only'); }
   if (executed.some(a => !a.cpu)) { unknowns.add('OS CPU missing for some attempts; observed CPU is partial'); }
-  unknowns.add('Repair and re-review agent CPU unavailable; gate CPU is not agent CPU');
 }
 
 function revisionComparisons(executed: readonly VerificationMeasurement[]): VerificationStatistics['comparisons'] {
@@ -254,15 +401,28 @@ function revisionComparisons(executed: readonly VerificationMeasurement[]): Veri
     const configurations = [...left, ...right].map(a => a.configuration);
     comparisons.push({ gate, before, after, beforeN: left.length, afterN: right.length,
       configurationEquivalent: configurations.some(c => !c) ? null : new Set(configurations).size === 1,
-      workloadEquivalent: 'unknown', beforeWallMs: cost(left).wallMs, afterWallMs: cost(right).wallMs });
+      workloadEquivalent: 'unobserved', beforeWallMs: cost(left).wallMs, afterWallMs: cost(right).wallMs });
   }
   return comparisons;
+}
+
+function controlledComparisons(attempts: readonly VerificationMeasurement[], unknowns: Set<string>): ControlledVerificationComparison[] {
+  const controlled = new Map<string, ControlledVerificationComparison>();
+  for (const comparison of attempts.flatMap(attempt => attempt.profile?.controlledComparisons ?? [])) {
+    const key = `${comparison.experimentId}:${comparison.coverage}`, prior = controlled.get(key);
+    if (prior && JSON.stringify(prior) !== JSON.stringify(comparison)) {
+      unknowns.add(`Conflicting controlled profile comparison ${comparison.experimentId} coverage=${comparison.coverage}`);
+      controlled.delete(key);
+    } else if (!prior) { controlled.set(key, comparison); }
+  }
+  return [...controlled.values()];
 }
 
 export function verificationStatistics(input: VerificationStatisticsInput,
   missions?: ReadonlySet<string>): VerificationStatistics {
   const unknowns = new Set<string>();
   const attempts = observedAttempts(input, unknowns).filter(a => !missions || a.missionId !== null && missions.has(a.missionId));
+  const rebases = observedRebases(input, unknowns).filter(value => !missions || missions.has(value.missionId));
   const executed = attempts.filter(a => a.result !== 'reused');
   const intervals = executed.flatMap(execution);
   const { reruns, recoveries } = attemptRecovery(executed, unknowns);
@@ -274,13 +434,18 @@ export function verificationStatistics(input: VerificationStatisticsInput,
   const batches = [...new Set(attempts.map(a => a.batchId))].map(batchId => ({ batchId,
     criticalPathMs: criticalPath(attempts.filter(a => a.batchId === batchId)) }));
   const lifecycle = lifetimeCosts(input, missions, unknowns);
+  const ownership = flowElapsedOwnership(input, unknowns, missions);
+  const resources = agentResources(input, missions, unknowns);
+  const scopedRuns = resources.runs.map(row => (input.runs ?? []).find(run => run.runId === row.runId)!).filter(Boolean);
+  const dependencyPath = ownershipDependencyPath(ownership, scopedRuns) ?? observedDagDependencyPath(input, attempts);
   const cpu = cpuCost(executed, unknowns);
   measurementUnknowns(attempts, unknowns);
-  if (batches.length !== 1 || batches.some(b => b.criticalPathMs === null)) {
+  if (!dependencyPath && (batches.length !== 1 || batches.some(b => b.criticalPathMs === null))) {
     unknowns.add('End-to-end critical path unknown; only complete observed gate DAGs are measured');
   }
   const recoveryAttempts = executed.filter(a => execution(a).some(([start, end]) => recoveries.some(([a, b]) => start >= a && end <= b)));
-  const comparisons = revisionComparisons(executed);
+  const comparisons = revisionComparisons(executed), controlled = controlledComparisons(attempts, unknowns);
+  const flowMissions = observedFlowMissions(input, ownership, attempts, rebases);
   return { attempts, attemptCount: executed.length, failureCount: executed.filter(a => a.result === 'failed').length,
     infrastructureFailureCount: executed.filter(a => a.failureReason?.code === 'infrastructure').length,
     reusedProofCount: attempts.length - executed.length, incompleteCount: executed.filter(a => !a.finishedAt).length,
@@ -289,11 +454,11 @@ export function verificationStatistics(input: VerificationStatisticsInput,
     ...cpu, rerunCount: reruns.length, rerun: cost(reruns),
     recovery: { ...cpuCost(recoveryAttempts), wallMs: recoveries.length ? intervalUnionMs(recoveries) : null },
     repairMs: activity.repairMs, reReviewMs: activity.reReviewMs,
-    criticalPathMs: batches.length === 1 ? batches[0].criticalPathMs : null, batches,
-    ranked: [...new Set(executed.map(a => a.gate))].map(gate => {
-      const rows = executed.filter(a => a.gate === gate);
+    criticalPathMs: dependencyPath?.durationMs ?? (batches.length === 1 ? batches[0].criticalPathMs : null),
+    dependencyPath, elapsedOwnership: ownership, agentResources: resources, flowMissions, rebases, batches,
+    ranked: [...new Set(executed.map(a => a.gate))].map(gate => { const rows = executed.filter(a => a.gate === gate);
       const c = cost(rows); return { gate, attempts: rows.length, wallMs: c.wallMs, cpuUs: c.cpuUs };
     }).sort((a, b) => (b.wallMs ?? -1) - (a.wallMs ?? -1)),
-    unknowns: [...unknowns], comparisons,
+    unknowns: [...unknowns], comparisons, controlledComparisons: controlled,
     profileReferences: [...new Set(attempts.flatMap(a => a.profile ? [a.profile.reference] : []))] };
 }

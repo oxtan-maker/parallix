@@ -100,3 +100,52 @@ test('zero CPU, proof reuse and incomplete starts remain distinct (px-0025)', as
   assert.equal(values().at(-1)?.startedAt, null);
   assert.equal(values().at(-1)?.result, 'reused');
 });
+
+test('fresh gate observations retain workflow generation and source joins (TASK-2835)', async () => {
+  const entries: OperationalHistoryEntry[] = [];
+  const history = { append: async (entry: OperationalHistoryEntry) => { entries.push(entry); } } as OperationalHistoryRepository;
+  const operation = { id: 'operation-1', generation: 4, sourceId: 'run-7' };
+  const port = createVerificationObservation(history,
+    () => ({ repositoryId: 'repo', missionId: 'px-1', revision: 'revision' }), undefined,
+    () => operation as never);
+  const observation = await port.begin({ root: '.', mission: 'px-1', batchId: 'batch-2', gate: 'check', command: 'check',
+    phase: 'pre-review', after: [], plan: ['check'] });
+  await observation!.started();
+  await observation!.complete({ result: 'passed', failureReason: null, exitCode: 0, wallMs: 1, cpu: null });
+  const value = JSON.parse(entries.at(-1)!.eventData) as VerificationMeasurement & {
+    operationGeneration?: number; sourceId?: string;
+  };
+  assert.equal(value.operationId, 'operation-1');
+  assert.equal(value.operationGeneration, 4);
+  assert.equal(value.sourceId, 'run-7');
+});
+
+test('durable gate history links configured predecessors and failed cross-batch reruns after restart (TASK-2835)', async () => {
+  const entries: OperationalHistoryEntry[] = [];
+  const history = {
+    append: async (entry: OperationalHistoryEntry) => { entries.push(entry); },
+    findByType: async () => entries,
+    findAll: async () => entries,
+    clear: async () => { entries.length = 0; },
+  } as OperationalHistoryRepository;
+  const identity = () => ({ repositoryId: 'repo', missionId: 'px-1', revision: 'revision' });
+  const operation = () => ({ id: 'operation-1', generation: 2, sourceId: 'run-2' });
+  const first = createVerificationObservation(history, identity, undefined, operation);
+  const failed = await first.begin({ root: '.', mission: 'px-1', batchId: 'batch-1', gate: 'compile', command: 'compile', phase: 'pre-review', after: [] });
+  await failed!.started();
+  await failed!.complete({ result: 'failed', failureReason: { version: 1, code: 'gate-failed' }, exitCode: 1, wallMs: 1, cpu: null });
+  const failedId = (JSON.parse(entries.at(-1)!.eventData) as VerificationMeasurement).id;
+
+  // A new port instance models process restart; only retained history carries the dependency.
+  const resumed = createVerificationObservation(history, identity, undefined, operation);
+  const rerun = await resumed.begin({ root: '.', mission: 'px-1', batchId: 'batch-2', gate: 'compile', command: 'compile', phase: 'pre-review', after: [] });
+  await rerun!.started();
+  await rerun!.complete({ result: 'passed', failureReason: null, exitCode: 0, wallMs: 1, cpu: null });
+  const rerunValue = JSON.parse(entries.at(-1)!.eventData) as VerificationMeasurement;
+  assert.deepEqual(rerunValue.dependencies, [failedId]);
+
+  const packageGate = await resumed.begin({ root: '.', mission: 'px-1', batchId: 'batch-2', gate: 'package', command: 'package', phase: 'pre-review', after: ['compile'] });
+  const packageValue = JSON.parse(entries.at(-1)!.eventData) as VerificationMeasurement;
+  assert.deepEqual(packageValue.dependencies, [rerunValue.id]);
+  await packageGate!.complete({ result: 'reused', failureReason: null, exitCode: 0, wallMs: null, cpu: null });
+});

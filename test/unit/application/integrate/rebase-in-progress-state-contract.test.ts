@@ -34,15 +34,21 @@ test('integration shared conflicts use the fresh shared resolver and resolved ba
     git: args => ({ failureReason: args.at(-1) === 'local-base' && args.includes('rebase') ? { version: 1, code: 'git-conflict' } : undefined, status: args.at(-1) === 'local-base' && args.includes('rebase') ? 1 : 0,
       stdout: '', stderr: args.at(-1) === 'local-base' && args.includes('rebase') ? 'CONFLICT (content): Merge conflict in shared.ts' : '' }) });
   const defaults = stubIntegrateWorkflowPorts();
+  const observedRoots: Array<string | undefined> = [];
   const ports = stubIntegrateWorkflowPorts({
     missionPaths: { ...defaults.missionPaths, missionBranchName: () => 'mission/task-2503', conventionalWorktreePath: () => '/worktree' },
-    rebase: { createRebaseWorkflowPort: options => { h.port.exit = options.exitFn!; return h.port; } },
-    git: { ...defaults.git, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }) },
+    rebase: { createRebaseWorkflowPort: options => {
+      assert.equal(options.rebaseObservationStage, 'integration-rebase');
+      h.port.exit = options.exitFn!; return h.port;
+    } },
+    git: { ...defaults.git, getCurrentBranch: root => { observedRoots.push(root); return 'mission/task-2503'; }, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }) },
   });
   const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
   try {
     await createIntegrationRebase(ports).runIntegrationRebase('task-2503', { baseWorktree: '/base', baseBranch: 'local-base',
       git: args => ({ status: 0, stdout: args.includes('rev-parse') ? 'sha' : '', stderr: '', signal: null }) });
+    assert.ok(observedRoots.length >= 2, 'entry and completion both observe the checkout (TASK-2830)');
+    assert.deepEqual([...new Set(observedRoots)], ['/worktree'], 'every branch check observes the mission worktree');
     assert.equal(h.agentLaunches.length, 1, h.lines.join('\n'));
     assert.equal(h.agentLaunches[0].options.sessionPolicy, 'fresh-ephemeral');
     assert.match(String(h.agentLaunches[0].options.prompt), /Integration intent/);

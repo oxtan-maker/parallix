@@ -4,6 +4,7 @@ import type { StatsMissionFlow } from '../ports/cli-workflows.js';
 import { weeklyDecisionWindows, reportingWindowContains, type ReportingWindow } from '../../domain/decision-window.js';
 import { createRangeWindow } from './statistics-row.js';
 import { statisticsMissionKey, statisticsRowInWindow, type StatisticsRow } from './statistics-service.js';
+import { flowStatistics, type FlowStatistics } from '../projections/flow-statistics.js';
 
 export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
   readonly window: ReportingWindow & { readonly label: string };
@@ -19,6 +20,7 @@ export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow>
   readonly bugTrend: readonly BugTrendPeriod[] | null;
   readonly current: StatsReportWindow<Row>;
   readonly previous?: StatsReportWindow<Row>;
+  readonly flowStatistics?: FlowStatistics;
 }
 
 /** Select lifecycle completions by canonical delivery day, telemetry spend by measurement day. */
@@ -27,9 +29,8 @@ export function selectStatsReport<Row extends StatisticsRow>(
   missionFlow: readonly StatsMissionFlow[] | null,
   request: { readonly mode: 'weekly' | 'range'; readonly today?: string | Date; readonly from?: string; readonly to?: string; readonly timeZone?: string },
 ): StatsReportSelection<Row> {
-  const windows = request.mode === 'weekly'
-    ? weeklyDecisionWindows(request.today ?? new Date(), request.timeZone)
-    : { current: createRangeWindow({ from: request.from, to: request.to, timeZone: request.timeZone }), previous: undefined };
+  const decisionWindows = request.mode === 'weekly' ? weeklyDecisionWindows(request.today ?? new Date(), request.timeZone) : null;
+  const windows = decisionWindows ?? { current: createRangeWindow({ from: request.from, to: request.to, timeZone: request.timeZone }), previous: undefined };
   const select = (window: StatsReportWindow<Row>['window']): StatsReportWindow<Row> => {
     const outcomes = (missionFlow ?? []).filter(outcome => reportingWindowContains(window, outcome.closedAt));
     const completedMissionKeys = new Set(outcomes.map(statisticsMissionKey));
@@ -60,8 +61,19 @@ export function selectStatsReport<Row extends StatisticsRow>(
     };
   };
   const periods = [windows.current, ...(windows.previous ? [windows.previous] : [])];
+  const sharedFlow = decisionWindows && missionFlow !== null && missionFlow.some(outcome => outcome.flowObservation)
+    ? flowStatistics(missionFlow.map(outcome => ({
+    repositoryId: outcome.repo, missionId: outcome.mission, closedAt: outcome.closedAt,
+    diagramNodeIds: outcome.flowObservation?.diagramNodeIds ?? [],
+    diagramEdgeIds: outcome.flowObservation?.diagramEdgeIds ?? [], ownership: outcome.flowObservation?.ownership ?? [],
+    actualAgentLaunches: outcome.flowObservation?.actualAgentLaunches ?? null,
+    agentLaunches: outcome.flowObservation?.agentLaunches ?? [],
+    observedDisqualifiers: outcome.flowObservation?.observedDisqualifiers ?? null,
+    reviewStatistics: outcome.reviewStatistics ?? reviewStatistics(null),
+    })), decisionWindows) : undefined;
   return {
     bugTrend: missionFlow === null ? null : periods.flatMap(window => selectBugTrend(missionFlow, window.start, window.end, window.timeZone) ?? []),
     current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined,
+    ...(sharedFlow ? { flowStatistics: sharedFlow } : {}),
   };
 }

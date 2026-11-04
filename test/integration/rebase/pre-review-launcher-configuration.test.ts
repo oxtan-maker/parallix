@@ -20,6 +20,9 @@ import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import { createRebaseCommand } from '../../../src/interfaces/cli/rebase.js';
 import { rebase } from '../../../src/adapters/cli/commands/rebase.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
+import { initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
+import { bindRebaseObservation } from '../../../src/composition/rebase-observation.js';
+import { configureRebaseObservation } from '../../../src/application/ports/rebase-workflow.js';
 
 /** Disposable repo with a shared-file conflict, a codex-assigned task and a fake implementer that resolves it. */
 function conflictRepo(root: string, extraConfig: Record<string, unknown> = {}) {
@@ -71,7 +74,9 @@ describe("pre-review rebase launcher configuration", () => {
     process.env.TASK_2744_ENV = 'ambient';
     try {
       const { repo, binDir, launches, git } = conflictRepo(root);
-      const configuration = resolveConfiguration({ PATH: `${binDir}:/usr/bin:/bin`, PARALLIX_HOME: path.join(root, 'home'), TASK_2744_ENV: 'composed' });
+      const configuration = resolveConfiguration({ PATH: `${binDir}:/usr/bin:/bin`, PARALLIX_HOME: path.join(root, 'home'), TASK_2744_ENV: 'composed',
+        PARALLIX_WORKFLOW_OPERATION: 'review-operation', PARALLIX_WORKFLOW_GENERATION: '2' });
+      bindRebaseObservation(configuration);
       const logs: string[] = [];
       const options = {
         isForgejoReviewEnabledFn: () => true,
@@ -88,7 +93,25 @@ describe("pre-review rebase launcher configuration", () => {
       assert.equal(git('status', '--porcelain', '--untracked-files=no').stdout.trim(), '');
       assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false);
       assert.equal(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8'), 'resolved\n');
+      const { db } = await initOperatorState({ configuration });
+      const rows = await db.query<{ event_data: string }>(
+        "SELECT event_data FROM operational_history WHERE event_type = 'flow.rebase' ORDER BY id ASC",
+      );
+      assert.deepEqual(rows.map(row => {
+        const value = JSON.parse(row.event_data) as { stage: string; outcome: string; operationId: string; generation: number; sourceId: string };
+        assert.equal(value.operationId, 'review-operation');
+        assert.equal(value.generation, 2);
+        assert.ok(value.sourceId);
+        return [value.stage, value.outcome];
+      }), [
+        ['pre-review-rebase', 'running'], ['pre-review-rebase', 'conflict'], ['pre-review-rebase', 'resolved'],
+      ]);
+      fs.rmSync(repo, { recursive: true, force: true });
+      assert.equal((await db.query<{ count: number }>(
+        "SELECT COUNT(*) AS count FROM operational_history WHERE event_type = 'flow.rebase'",
+      ))[0]?.count, 3, 'durable observations survive worktree cleanup');
     } finally {
+      configureRebaseObservation(null);
       if (prior === undefined) { delete process.env.TASK_2744_ENV; } else { process.env.TASK_2744_ENV = prior; }
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -110,6 +133,7 @@ describe("pre-review rebase launcher configuration", () => {
         worktree: repo, log: () => {}, error: () => {},
         createRebaseWorkflowPortFn: (options: Parameters<typeof createRebaseWorkflowPort>[0]) => {
           assert.strictEqual(options?.configuration, configuration);
+          assert.equal(options.rebaseObservationStage, 'pre-review-rebase');
           const port = createRebaseWorkflowPort(options);
           const status = port.workflowLauncherStatus('codex', repo);
           assert.equal(status.supported, false);

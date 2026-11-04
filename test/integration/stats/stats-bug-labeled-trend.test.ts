@@ -89,6 +89,28 @@ test('partial weeks and unavailable lifecycle history have explicit states', asy
   assert.match(renderRangeStatsReport([], { missionFlow: [{ ...bug, labels: [] }], from: '2026-09-08', to: '2026-09-13' }), /0\.0%/);
 });
 
+test('bound production repositories still join the shared FLOW projection into px stats (TASK-2835 review F1)', async () => {
+  const { withStatisticsDatabase, laneEvent } = await import('../../fixtures/statistics-database.js');
+  const { fixtureMission } = await import('../../fixtures/mission-builders.js');
+  const { SqliteMissionStore } = await import('../../../src/adapters/sqlite/mission-store.js');
+  const { createStatsMissionFlowReader } = await import('../../../src/composition/stats.js');
+  const { resolveCanonicalRepositoryId } = await import('../../../src/adapters/git/repository-identity.js');
+  const { DEFAULT_CONFIGURATION } = await import('../../../src/application/ports/configuration.js');
+  await withStatisticsDatabase(async ({ dir, db, laneEventRepo, usageRepo, historyRepo }) => {
+    const root = process.cwd();
+    const repo = resolveCanonicalRepositoryId(root);
+    const store = new SqliteMissionStore(db);
+    await store.save(fixtureMission('task-flow', { repositoryId: repo, status: 'done', closedAt: '2026-09-08T12:00:00Z' }), null);
+    await laneEventRepo.append(laneEvent({ repositoryId: repo, missionId: 'task-flow', from: null, to: 'refined', at: '2026-09-08T11:59:59Z' }));
+    await laneEventRepo.append(laneEvent({ repositoryId: repo, missionId: 'task-flow', from: 'integration', to: 'done', at: '2026-09-08T12:00:00Z' }));
+    const configuration = { ...DEFAULT_CONFIGURATION, storage: { ...DEFAULT_CONFIGURATION.storage, parallixHome: dir } };
+    const flow = await createStatsMissionFlowReader({ rootDir: root, repositoryId: repo, missionStore: store,
+      laneEventRepo, usageRepo, historyRepo, configuration })();
+    assert.ok(flow?.find(row => row.mission === 'task-flow')?.flowObservation,
+      'normal bound repositories must not disable the shared verification/FLOW reader');
+  });
+});
+
 test('mixed explicit range keeps every completed mission', () => {
   const selection = selectStatsReport([], [
     bug, { ...bug, mission: 'feature', labels: ['user_value'] },

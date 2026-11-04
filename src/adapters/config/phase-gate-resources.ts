@@ -1,59 +1,57 @@
 import type { GateAdmissionPort, GateAdmissionRun } from '../../application/ports/gate-admission.js';
 import type { RepositoryGate } from './repository-gate-schema.js';
 
-interface ResourceRun {
-  readonly remaining: Set<string>;
-  ready?: Promise<GateAdmissionRun>;
-  settled?: Promise<unknown>;
-  release?: () => void;
-}
-
-/** A phase consumes one slot per resource, shared by all of its tagged gates. */
+/**
+ * Per-command named-resource admission coordinated with phase capacity.
+ * Parallel phases admit tagged gates before they claim phase capacity, leaving
+ * room for ready producers. Serial phases preserve declared order by claiming
+ * their only phase slot while admission is pending.
+ */
 export class PhaseGateResources {
-  private readonly resources = new Map<string, ResourceRun>();
+  private readonly executing = new Set<string>();
+  private readonly queued: { key: string; resume: () => void }[] = [];
 
-  constructor(gates: RepositoryGate[], private readonly root: string,
+  constructor(private readonly capacity: number, private readonly root: string,
     private readonly limits: Readonly<Record<string, number>>,
-    private readonly admission: () => GateAdmissionPort, private readonly signal: AbortSignal) {
-    for (const gate of gates) {
-      if (!gate.resource) { continue; }
-      let resource = this.resources.get(gate.resource);
-      if (!resource) {
-        resource = { remaining: new Set() };
-        this.resources.set(gate.resource, resource);
-      }
-      resource.remaining.add(gate.key);
-    }
+    private readonly admission: () => GateAdmissionPort, private readonly signal: AbortSignal) {}
+
+  get active(): number { return this.executing.size; }
+
+  launchable(gate: RepositoryGate): boolean {
+    return this.waitsOutsidePhase(gate) || this.executing.size < this.capacity;
   }
 
-  async run<T>(name: string, invoke: (_slot: GateAdmissionRun) => T | Promise<T>): Promise<T> {
-    const resource = this.resources.get(name)!;
-    if (!resource.ready) {
-      let ready!: (_slot: GateAdmissionRun) => void;
-      let failed!: (_cause: unknown) => void;
-      resource.ready = new Promise<GateAdmissionRun>((resolve, reject) => { ready = resolve; failed = reject; });
-      const released = new Promise<void>(resolve => { resource.release = resolve; });
-      resource.settled = Promise.resolve().then(() => this.admission().runOnResource(this.root, { name, capacity: this.limits[name] }, async slot => {
-        ready(slot);
-        await released;
-      }, this.signal));
-      // Every waiter sees acquisition failure; retain the original promise for cleanup errors.
-      void resource.settled.catch(failed);
-    }
-    const slot = await resource.ready;
-    slot.signal.throwIfAborted();
-    return invoke(slot);
+  launch(gate: RepositoryGate): boolean {
+    if (this.waitsOutsidePhase(gate)) { return false; }
+    this.executing.add(gate.key);
+    return true;
+  }
+
+  async run<T>(gate: RepositoryGate, invoke: (_slot?: GateAdmissionRun, _queued?: boolean) => Promise<T>): Promise<T> {
+    if (!gate.resource) { return invoke(); }
+    return this.admission().runOnResource(this.root, { name: gate.resource, capacity: this.limits[gate.resource] }, async slot => {
+      const queued = !this.executing.has(gate.key);
+      if (queued) { await this.claim(gate.key, slot.signal); }
+      return invoke(slot, queued);
+    }, this.signal);
   }
 
   complete(gate: RepositoryGate): void {
-    if (!gate.resource) { return; }
-    const resource = this.resources.get(gate.resource)!;
-    resource.remaining.delete(gate.key);
-    if (resource.remaining.size === 0) { resource.release?.(); }
+    if (!this.executing.delete(gate.key)) { return; }
+    const next = this.queued.shift();
+    if (next) { this.executing.add(next.key); next.resume(); }
   }
 
-  async close(): Promise<void> {
-    for (const resource of this.resources.values()) { resource.release?.(); }
-    await Promise.all([...this.resources.values()].map(resource => resource.settled));
+  private waitsOutsidePhase(gate: RepositoryGate): boolean { return Boolean(gate.resource) && this.capacity > 1; }
+
+  private claim(key: string, signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.executing.size < this.capacity) { this.executing.add(key); return Promise.resolve(); }
+    return new Promise((resolve, reject) => {
+      const abort = () => { this.queued.splice(this.queued.indexOf(entry), 1); reject(signal.reason); };
+      const entry = { key, resume: () => { signal.removeEventListener('abort', abort); resolve(); } };
+      this.queued.push(entry);
+      signal.addEventListener('abort', abort, { once: true });
+    });
   }
 }

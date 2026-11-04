@@ -1,4 +1,4 @@
-import { createMissionCohortMetadataReader, createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
+import { createHumanReviewEpisodeReader, createMissionCohortMetadataReader, createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
 import { createClassifierStatisticsReader } from './classifier-statistics.js';
 import fs from 'node:fs';
 import type { MissionStore } from '../application/domain-ports.js';
@@ -19,6 +19,7 @@ export interface StatsCompositionOptions extends StatsCohortsOptions {
   readonly dbPath?: string;
   readonly missionStore?: MissionStore;
   readonly readMissionFlow?: StatsReadBinding['readMissionFlow'];
+  readonly verificationStatistics?: import('../application/ports/verification-statistics.js').VerificationStatisticsReadPort;
 }
 
 /** Composition owns the metrics graph; the application receives a bound read. */
@@ -30,19 +31,27 @@ export function createStatsMissionFlowReader(options: StatsCompositionOptions): 
         : await resolveOperatorRepositories(options.configuration);
       const repo = options.repositoryId ?? resolveCanonicalRepositoryId(options.rootDir ?? process.cwd());
       const cohortMetadata = options.cohortMetadata ?? (async () => {
-        if (options.missionStore?.loadByRepository) { return createMissionCohortMetadataReader(options.rootDir ?? process.cwd(), createWorkflowReturnReader(repos.laneEventRepo, repos.historyRepo))(await options.missionStore.loadByRepository(repo)); }
+        if (options.missionStore?.loadByRepository) { return createMissionCohortMetadataReader(options.rootDir ?? process.cwd(),
+          createWorkflowReturnReader(repos.laneEventRepo, repos.historyRepo), createHumanReviewEpisodeReader(repos.laneEventRepo))(
+          await options.missionStore.loadByRepository(repo)); }
         const { initOperatorState } = await import('../adapters/sqlite/adapter-factory.js');
         const { SqliteMissionStore } = await import('../adapters/sqlite/mission-store.js');
         const { db } = await initOperatorState({ configuration: options.configuration });
-        return createMissionCohortMetadataReader(options.rootDir ?? process.cwd(), createWorkflowReturnReader(repos.laneEventRepo, repos.historyRepo))(await new SqliteMissionStore(db).loadByRepository(repo));
+        return createMissionCohortMetadataReader(options.rootDir ?? process.cwd(), createWorkflowReturnReader(repos.laneEventRepo, repos.historyRepo),
+          createHumanReviewEpisodeReader(repos.laneEventRepo))(await new SqliteMissionStore(db).loadByRepository(repo));
       });
       const metadata = await cohortMetadata();
       const reader = new ConcreteMetricsReadAdapter({ ...repos, repositoryId: repositoryId(String(repo)), cohortMetadata: async () => metadata });
       const outcomes = await reader.readOutcomes();
+      const verificationReader = options.verificationStatistics
+        ?? createVerificationStatisticsReader(options.rootDir ?? process.cwd(), options.configuration);
+      const verification = await verificationReader?.read(new Set(outcomes.map(outcome => String(outcome.missionId)))).catch(() => null) ?? null;
       return outcomes.map(outcome => ({
         repo: String(repo), mission: String(outcome.missionId), closedAt: outcome.closedAt,
         labels: outcome.labels, implementer: outcome.implementer,
         reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics,
+        ...(verification?.flowMissions.find(item => item.missionId === outcome.missionId)
+          ? { flowObservation: verification.flowMissions.find(item => item.missionId === outcome.missionId)! } : {}),
       }));
     } catch { return null; }
   };

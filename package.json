@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.480",
+  "version": "1.5.486",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -50,6 +50,7 @@
   ],
   "scripts": {
     "build": "npm run bundle",
+    "exercise:git-contention": "tsx scripts/exercise-git-contention.ts",
     "build:web": "node scripts/run-build-web.mjs",
     "bundle": "tsx scripts/build-canonical-bundle.ts",
     "dev": "tsx src/entry/px.ts",

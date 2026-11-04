@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { gzipSync } from 'node:zlib';
 import { cpuSupervisor, readCpuReport } from '../test/lib/cpu-supervisor.js';
+import { controlledVerificationComparisons } from '../src/application/projections/verification-profile-comparison.js';
 
 const root = process.cwd();
 const output = path.resolve(process.argv[2] ?? 'tmp/verification-profile');
@@ -66,10 +67,12 @@ const comparisons = [false, true].map(coverage => {
   return { coverage, pairs: repetitions, wallOverheadRatio: average(true, 'wallMs') / average(false, 'wallMs'),
     cpuOverheadRatio: average(true, 'cpuUs') / average(false, 'cpuUs') };
 });
-fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ revision, dirty: Boolean(dirty),
+const report = { revision, dirty: Boolean(dirty),
   node: process.version, platform: process.platform, arch: process.arch,
   tsx: JSON.parse(fs.readFileSync('node_modules/tsx/package.json', 'utf8')).version,
   workload, intervalUs: 1000, comparisons, runs,
   limits: 'Samples are V8 isolate observations, not OS CPU. Test workers inherit profiling flags; arbitrary external commands do not. Concurrent isolate sample counts cannot be summed as CPU. wait4 includes waited descendants only. No assertion/fixture or coverage-exclusive attribution is inferred from a hot frame. Paired local runs do not establish universal speedups.',
-}, null, 2) + '\n');
+};
+fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ ...report,
+  controlledComparisons: controlledVerificationComparisons(report) }, null, 2) + '\n');
 console.log(path.join(output, 'report.json'));

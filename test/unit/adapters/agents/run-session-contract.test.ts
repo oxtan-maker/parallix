@@ -46,14 +46,31 @@ test('the pipe host captures durably and reports what is not covered (TASK-2643)
   assert.equal(record(worktree, session.runId).execution, null, 'an open capture is not proof of agent execution');
   session.observeExecution(process.pid);
   assert.equal(record(worktree, session.runId).execution.pid, process.pid, 'the actual launch callback records execution identity');
+  assert.deepEqual(session.teeOptions.resourceBoundary, { boundary: session.runId, parent: null });
+  session.teeOptions.onProcessTreeCpu?.({ userUs: 12_000, systemUs: 3_000, provenance: 'bash-time-waited-tree',
+    boundary: session.runId, parent: null });
   session.teeOptions.capture!.write('stderr', Buffer.from('npm ERR! code E401\n'));
-  session.finish({ status: 1, signal: null, sessionId: null });
+  session.finish({ status: 1, signal: null, sessionId: null, telemetry: { provider: 'openai', model: 'gpt-6.1-sol',
+    inputTokens: 42, toolCalls: 2, usagePercent: 17.5, cost_usd: 0.125 } });
   const finished = record(worktree, session.runId);
   assert.equal(finished.state, 'exited');
   assert.equal(finished.exitCode, 1);
   assert.equal(finished.streams.stderr.bytes, 19);
+  assert.deepEqual(finished.resources.localProcessTreeCpu, { userUs: 12_000, systemUs: 3_000,
+    provenance: 'bash-time-waited-tree', boundary: session.runId, parent: null });
+  assert.deepEqual(finished.resources.provider, { provenance: 'provider-reported', provider: 'openai', model: 'gpt-6.1-sol', values: [
+    { name: 'input', value: 42, unit: 'tokens' }, { name: 'tool-calls', value: 2, unit: 'count' },
+    { name: 'provider-usage', value: 17.5, unit: 'percent' }, { name: 'cost', value: 0.125, unit: 'usd' },
+  ] });
   assert.ok(finished.omissions.some((line: string) => /No codex provider-native transcript/.test(line)));
   assert.ok(finished.omissions.some((line: string) => /reasoning/.test(line)));
+});
+
+test('nested process resources inherit the composition-resolved parent boundary (TASK-2835)', () => {
+  const { deps, input } = setup('pipe');
+  const configuration = resolveConfiguration({ PARALLIX_RESOURCE_BOUNDARY: 'parent-run' });
+  const session = openRunSession(input, { ...deps, configuration })!;
+  assert.deepEqual(session.teeOptions.resourceBoundary, { boundary: session.runId, parent: 'parent-run' });
 });
 
 test('configured tmux falls back to pipe with a stated reason when tmux is missing (TASK-2643)', () => {
@@ -193,13 +210,39 @@ test('automatic headless launches keep attributable pipe capture without probing
 
 test('in-process preparation never records its workflow owner as provider execution (TASK-2769)', async t => {
   const { configureMissionWriteAuthorization } = await import('../../../../src/application/ports/mission-write-authorization.js');
-  configureMissionWriteAuthorization({ operationId: 'workflow-owner', async assert() {} });
+  configureMissionWriteAuthorization({ operationId: 'workflow-owner', generation: 3, async assert() {} });
   t.after(() => configureMissionWriteAuthorization(null));
   const { worktree, deps, input } = setup('pipe');
-  const session = openRunSession({ ...input, family: 'pi' }, deps)!;
+  const session = openRunSession({ ...input, family: 'pi', model: 'model-1' }, deps)!;
   try {
-    assert.equal(record(worktree, session.runId).execution, null, 'SDK preparation and workflow ownership do not confirm a provider invocation');
+    const value = record(worktree, session.runId);
+    assert.equal(value.execution, null, 'SDK preparation and workflow ownership do not confirm a provider invocation');
+    assert.equal(value.operationId, 'workflow-owner');
+    assert.equal(value.operationGeneration, 3);
+    assert.equal(value.sourceId, session.runId);
+    assert.equal(value.configuredModel, 'model-1');
+    assert.deepEqual(value.dependencies, []);
+    assert.equal(value.revision, null);
   } finally { session.finish({ status: 0 }); }
+});
+
+test('restarted and replacement launches retain workflow generation while minting distinct run sources (TASK-2835)', async t => {
+  const { configureMissionWriteAuthorization } = await import('../../../../src/application/ports/mission-write-authorization.js');
+  configureMissionWriteAuthorization({ operationId: 'workflow-restart', generation: 5, async assert() {} });
+  t.after(() => configureMissionWriteAuthorization(null));
+  const { worktree, deps, input } = setup('pipe');
+  let tick = 0;
+  const timed = { ...deps, now: () => new Date(Date.parse('2026-10-05T12:00:00Z') + tick++ * 1000) };
+  const first = openRunSession({ ...input, model: 'model-before' }, timed)!;
+  first.finish({ status: null, signal: 'SIGTERM' });
+  const replacement = openRunSession({ ...input, family: 'claude', attempt: 2, model: 'model-after' }, timed)!;
+  replacement.finish({ status: 0 });
+  const before = record(worktree, first.runId), after = record(worktree, replacement.runId);
+  assert.notEqual(before.sourceId, after.sourceId);
+  assert.deepEqual([before.operationId, before.operationGeneration], ['workflow-restart', 5]);
+  assert.deepEqual([after.operationId, after.operationGeneration], ['workflow-restart', 5]);
+  assert.deepEqual([before.configuredModel, after.configuredModel], ['model-before', 'model-after']);
+  assert.deepEqual([before.state, before.signal, after.state, after.exitCode], ['exited', 'SIGTERM', 'exited', 0]);
 });
 
 test('a refused prepared launch settles its reservation without invoking a provider (TASK-2798)', async () => {
@@ -217,6 +260,23 @@ test('a refused prepared launch settles its reservation without invoking a provi
   }, 'custom', 1), /stale recovery/);
   assert.equal(launches, 0);
   assert.equal(releases, 1);
+});
+
+test('a persisted workflow outcome stops a lingering agent without launching fallback work (TASK-2830)', async () => {
+  const { awaitAgentResult } = await import('../../../../src/adapters/agents/agent-launch-process.js');
+  let completionChecks = 0;
+  let stopCalls = 0;
+  let settle!: (result: { status: number | null; signal: string | null; stdout: string; stderr: string }) => void;
+  const provider = new Promise<Parameters<typeof settle>[0]>(resolve => { settle = resolve; });
+  const outcome = await awaitAgentResult(provider, () => { completionChecks += 1; return true; }, { pid: 42 }, () => {}, async () => {
+    stopCalls += 1;
+    settle({ status: null, signal: 'SIGTERM', stdout: '', stderr: '' });
+  });
+  assert.ok(completionChecks >= 1);
+  assert.equal(stopCalls, 1);
+  assert.equal(outcome.status, 0);
+  assert.equal(outcome.signal, null);
+  assert.equal(outcome.completedAuthoritatively, true);
 });
 
 test('a capture finalized before any spawn stays retrievable and reads stopped without a fabricated exit (px-0027)', async () => {

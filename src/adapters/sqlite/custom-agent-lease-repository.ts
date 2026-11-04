@@ -7,10 +7,16 @@ import { isSameLiveProcess } from '../process/process-liveness.js';
 type LeaseRow = { lease_id: string; capacity: number | null; launcher_pid: number; launcher_start_id: string | null; child_pid: number | null; child_start_id: string | null };
 
 export class SqliteCustomAgentLeaseRepository implements CustomAgentLeaseRepository {
-  constructor(private readonly _db: SqliteDatabaseAdapter, private readonly resource = 'agents') {}
+  constructor(private readonly _db: SqliteDatabaseAdapter, private readonly resource = 'agents',
+    private readonly leaseDb: SqliteDatabaseAdapter = _db) {}
 
   async acquire(repositoryRoot: string, capacity: number, launcher: {pid: number; startId: string | null}): Promise<string | null> {
-    await this._db.beginImmediateTransaction();
+    try {
+      await this._db.beginImmediateTransaction();
+    } catch (error) {
+      if (sqliteBusy(error)) { return null; }
+      throw error;
+    }
     try {
       const rows = await this._db.query<LeaseRow>('SELECT lease_id, capacity, launcher_pid, launcher_start_id, child_pid, child_start_id FROM custom_agent_leases WHERE resource = ?', [this.resource]);
       for (const row of rows) {
@@ -35,17 +41,23 @@ export class SqliteCustomAgentLeaseRepository implements CustomAgentLeaseReposit
       return leaseId;
     } catch (error) {
       await this._db.rollbackTransaction();
+      if (sqliteBusy(error)) { return null; }
       throw error;
     }
   }
 
   bindChild(leaseId: string, child: {pid: number; startId: string | null}): void {
-    this._db.executeSync('UPDATE custom_agent_leases SET child_pid = ?, child_start_id = ? WHERE lease_id = ?', [child.pid, child.startId, leaseId]);
+    this.leaseDb.executeSync('UPDATE custom_agent_leases SET child_pid = ?, child_start_id = ? WHERE lease_id = ?', [child.pid, child.startId, leaseId]);
   }
 
   bindProcessGroup(leaseId: string, child: { pid: number; startId: string }): void {
-    this._db.executeSync('INSERT INTO admission_process_groups (lease_id, pid, start_id) VALUES (?, ?, ?)', [leaseId, child.pid, child.startId]);
+    this.leaseDb.executeSync('INSERT INTO admission_process_groups (lease_id, pid, start_id) VALUES (?, ?, ?)', [leaseId, child.pid, child.startId]);
   }
 
-  release(leaseId: string): void { this._db.executeSync('DELETE FROM custom_agent_leases WHERE lease_id = ?', [leaseId]); }
+  release(leaseId: string): void { this.leaseDb.executeSync('DELETE FROM custom_agent_leases WHERE lease_id = ?', [leaseId]); }
+}
+
+function sqliteBusy(error: unknown): boolean {
+  const detail = error as { errcode?: number; message?: string } | null;
+  return (Number(detail?.errcode) & 0xff) === 5 || /SQLITE_BUSY|database is locked/i.test(detail?.message ?? '');
 }

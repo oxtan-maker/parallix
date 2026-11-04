@@ -1,4 +1,5 @@
 import { integrationRepairContinuation } from './integration-repair-continuation.js';
+import { createBootstrapGitBindings } from './git-admission.js';
 import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
@@ -136,7 +137,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
     }),
     draft: (args, options) => withMissionAndGraph((missionServicesFn, services) => {
       // Create adapter with missionServicesFn injected via withMissionFactories
-      const adapter = createDraftWorkflowAdapter({ missionServicesFn, configuration });
+      const adapter = createDraftWorkflowAdapter({ missionServicesFn, configuration, ensureStandaloneMissionBaselineFn: createBootstrapGitBindings(configuration).ensureStandaloneMissionBaseline });
       const useCase = new DraftCommandUseCase(adapter, services.currentWork);
       const cmd = createDraftCommand(useCase);
       return cmd(args, { ...options, missionServicesFn });

@@ -29,4 +29,11 @@ test('lead SIGINT settles borrowed active work and stops supervision (TASK-2792)
   assert.match(output, /owned work stopped/);
   assert.equal((await fixture.service.operation(original.id))?.phase, 'stopped', output);
   assert.equal(await fixture.service.current(fixture.slugs[0]), null);
+  const activity = await fixture.database.query<{ event_data: string }>(
+    "SELECT event_data FROM operational_history WHERE event_type = 'mission.current-work' ORDER BY id",
+  );
+  const lead = activity.map(row => JSON.parse(row.event_data) as { actor?: string; timeState?: string; state?: string })
+    .filter(row => row.actor === 'lead');
+  assert.deepEqual(lead.map(row => [row.state, row.timeState]), [['running', 'working'], ['ended', 'working']],
+    'lead start and stop preserve explicit responsibility instead of inferring it from agent absence');
 });

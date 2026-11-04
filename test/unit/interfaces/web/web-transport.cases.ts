@@ -23,19 +23,27 @@ import {
 } from '../../../fixtures/board-projection.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
+import { flowStatistics } from '../../../../src/application/projections/flow-statistics.js';
+import { weeklyDecisionWindows } from '../../../../src/domain/decision-window.js';
 import type { AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
 
 test('web FLOW transport carries shared verification wording without recalculation (px-0025)', () => {
   const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
+  const flow = flowStatistics([], weeklyDecisionWindows('2026-11-03', 'UTC'));
   const snapshot = toWebBoardSnapshot(makeProjection({}));
-  const projection = { ...makeProjection({}), metrics: { ...emptyMetrics, verification } };
+  const projection = { ...makeProjection({}), metrics: { ...emptyMetrics, verification, flow } };
   const output = toWebBoardSnapshot(projection);
   assert.ok(snapshot.metrics.verification);
   assert.match(output.metrics.verification!.join('\n'), /historical work is unavailable, not zero/);
+  assert.deepEqual(output.metrics.flow, flow);
   const parsed = validateWebBoardSnapshot(JSON.parse(JSON.stringify(output)));
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.value, output);
   assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, verification: [4] } }).ok, false);
+  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: [] } }).ok, false);
+  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: {
+    ...flow, current: { ...flow.current, firstPassYield: { ...flow.current.firstPassYield, value: '100%' } },
+  } } }).ok, false);
 });
 import type { LiveMissionWork, MissionCard, ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
 import { agentFamily } from '../../../../src/domain/agents.js';

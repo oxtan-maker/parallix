@@ -1,8 +1,8 @@
 ---
 id: TASK-2830
 title: Handle Git lock contention across repository workflows
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-02 12:44'
 updated_date: '2026-11-02 12:46'
 labels:

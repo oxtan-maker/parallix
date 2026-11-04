@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { VerificationMeasurement } from '../../application/ports/verification-observation.js';
+import type { ControlledVerificationComparison } from '../../application/ports/verification-profile.js';
 
 /** Observational metadata only; it cannot certify a tree or a sampled workload. */
 export function verificationObservationContext(root: string, reference?: string): {
@@ -11,8 +12,45 @@ export function verificationObservationContext(root: string, reference?: string)
   let configuration: string | null = null;
   try { configuration = createHash('sha256').update(fs.readFileSync(path.join(root, 'workflow.config.json')))
     .update(process.version).digest('hex'); } catch { /* Unknown configuration equivalence. */ }
-  return { configuration, runtime: process.version,
-    profile: reference && fs.existsSync(reference) ? { reference, samples: null } : null };
+  return { configuration, runtime: process.version, profile: readProfile(reference) };
+}
+
+function readProfile(reference?: string): VerificationMeasurement['profile'] {
+  if (!reference || !fs.existsSync(reference)) { return null; }
+  try {
+    const value = JSON.parse(fs.readFileSync(reference, 'utf8')) as { controlledComparisons?: unknown };
+    const controlledComparisons = Array.isArray(value.controlledComparisons)
+      ? value.controlledComparisons.filter(isControlledComparison) : [];
+    return { reference, samples: controlledComparisons.length
+      ? controlledComparisons.reduce((sum, comparison) => sum + comparison.samples, 0) : null,
+    ...(controlledComparisons.length ? { controlledComparisons } : {}) };
+  } catch { return { reference, samples: null }; }
+}
+
+function isControlledComparison(value: unknown): value is ControlledVerificationComparison {
+  if (!value || typeof value !== 'object') { return false; }
+  const item = value as Partial<ControlledVerificationComparison>;
+  return hasControlledComparisonIdentity(item) && hasEquivalentRuntime(item)
+    && hasControlledSamples(item) && hasControlledMeasurements(item);
+}
+
+function hasControlledComparisonIdentity(item: Partial<ControlledVerificationComparison>): boolean {
+  return typeof item.experimentId === 'string' && typeof item.coverage === 'boolean'
+    && typeof item.workloadFingerprint === 'string' && typeof item.configurationFingerprint === 'string'
+    && typeof item.runtimeFingerprint === 'string';
+}
+
+function hasEquivalentRuntime(item: Partial<ControlledVerificationComparison>): boolean {
+  return item.workloadEquivalent === true && item.configurationEquivalent === true && item.runtimeEquivalent === true;
+}
+
+function hasControlledSamples(item: Partial<ControlledVerificationComparison>): boolean {
+  return typeof item.samples === 'number' && Number.isSafeInteger(item.samples) && item.samples > 0;
+}
+
+function hasControlledMeasurements(item: Partial<ControlledVerificationComparison>): boolean {
+  return Boolean(item.before && item.after && item.component && item.optimizationBenefitBound)
+    && typeof item.interpretation === 'string';
 }
 
 export function verificationDigest(value: string): string {

@@ -874,7 +874,7 @@ test('selectLaunchAndRecord writes Backlog with the launched agent after a succe
     startAgentFn: async (step, opts) => {
       if (opts.onLaunch) {
         assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'codex', invocation: null, startedAtMs: Date.now() });
+      await opts.onLaunch({ agent: 'codex', model: null, invocation: null, startedAtMs: Date.now() });
       }
       return { agent: 'codex', result: { status: 0 } };
     },
@@ -925,7 +925,7 @@ test('selectLaunchAndRecord writes Backlog when startAgent returns successful re
     startAgentFn: async (step, opts) => {
       if (opts.onLaunch) {
         assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
+      await opts.onLaunch({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() });
       }
       return { agent: 'claude', result: { status: 0 } };
     },
@@ -958,7 +958,7 @@ test('selectLaunchAndRecord stops on fenced launch publication without waiting f
         // awaiting the agent result.
         if (opts.onLaunch) {
           assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'codex', invocation: null, startedAtMs: Date.now() });
+      await opts.onLaunch({ agent: 'codex', model: null, invocation: null, startedAtMs: Date.now() });
         }
         return { agent: 'codex', result: await pendingAgentResult };
       },
@@ -991,7 +991,7 @@ test('selectLaunchAndRecord writes Backlog before the launcher resolves its fina
     startAgentFn: async (step, opts) => {
       if (opts.onLaunch) {
         assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
+      await opts.onLaunch({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() });
       }
       transitionCountAtReturn.value = transitions.length;
       const result = await pendingResult;
@@ -1018,7 +1018,7 @@ test("selectLaunchAndRecord retains the active mirror after actual startup when 
   const transitions: string[] = [];
   const result = await selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
     taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
-    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() }); return { agent: 'claude', result: { status: null, error: 'launcher failed after spawn' } }; },
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() }); return { agent: 'claude', result: { status: null, error: 'launcher failed after spawn' } }; },
     transitionTaskFn: (_slug, status) => { transitions.push(status); return true; }, log: () => {} });
   assert.deepEqual(transitions, ['active'], 'a mechanism cannot roll back the execution owner after real work started');
   assert.deepEqual(result.result, { status: null, error: 'launcher failed after spawn' });
@@ -1028,7 +1028,7 @@ test("selectLaunchAndRecord retains the active mirror after actual startup when 
   const transitions: string[] = [];
   const result = await selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
     taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
-    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() }); return { agent: 'claude', result: { status: 19 } }; },
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() }); return { agent: 'claude', result: { status: 19 } }; },
     transitionTaskFn: (_slug, status) => { transitions.push(status); return true; }, log: () => {} });
   assert.deepEqual(transitions, ['active'], 'a mechanism cannot roll back the execution owner after real work started');
   assert.deepEqual(result.result, { status: 19 });
@@ -1038,7 +1038,7 @@ test("selectLaunchAndRecord propagates a post-start failure without a mirror rol
   const transitions: string[] = [];
   await assert.rejects(() => selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
     taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
-    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() }); throw new Error('post-start failure'); },
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() }); throw new Error('post-start failure'); },
     transitionTaskFn: (_slug, status) => { transitions.push(status); return true; }, log: () => {} }), /post-start failure/);
   assert.deepEqual(transitions, ['active']);
 });
@@ -1082,7 +1082,7 @@ test('selectLaunchAndRecord records the fallback agent when startAgent falls bac
     prompt: 'Execute.',
     selectAgentFn: () => 'claude',
     startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) await opts.onLaunch({ agent: 'codex', invocation: null, startedAtMs: Date.now() });
+      if (opts.onLaunch) await opts.onLaunch({ agent: 'codex', model: null, invocation: null, startedAtMs: Date.now() });
       return { agent: 'codex', result: { status: 0 } };
     },
     transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
@@ -1107,7 +1107,7 @@ test('selectLaunchAndRecord collapses stale multi-agent assignees to the launche
     prompt: 'Execute.',
     selectAgentFn: () => 'claude',
     startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
+      if (opts.onLaunch) await opts.onLaunch({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() });
       return { agent: 'claude', result: { status: 0 } };
     },
     transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
@@ -1126,8 +1126,8 @@ test("selectLaunchAndRecord mirrors actual fallback families without intermediat
   const transitions: Array<{ status: string; family: string | null | undefined }> = [];
   const result = await selectLaunchAndRecord({ slug: 'task-test', worktree: '/tmp/project-task-test', agentConfig: {},
     taskResolution: { ok: true, taskFile: '/tmp/task.md' }, prompt: 'Execute.', preselectedAgent: 'claude',
-    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
-      await options.onLaunch?.({ agent: 'codex', invocation: null, startedAtMs: Date.now() }); return { agent: 'codex', result: { status: 0 } }; },
+    startAgentFn: async (_step, options) => { await options.onLaunch?.({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() });
+      await options.onLaunch?.({ agent: 'codex', model: null, invocation: null, startedAtMs: Date.now() }); return { agent: 'codex', result: { status: 0 } }; },
     transitionTaskFn: (_slug, status, options) => { transitions.push({ status, family: options?.implementer }); return true; }, log: () => {} });
   assert.equal(result.agent, 'codex');
   assert.deepEqual(transitions, [{ status: 'active', family: 'claude' }, { status: 'active', family: 'codex' }]);
@@ -1148,7 +1148,7 @@ test('selectLaunchAndRecord skips Backlog write when taskResolution is not ok', 
     prompt: 'Execute.',
     selectAgentFn: () => 'codex',
     startAgentFn: async (step, opts) => {
-      if (opts.onLaunch) await opts.onLaunch({ agent: 'codex', invocation: null, startedAtMs: Date.now() });
+      if (opts.onLaunch) await opts.onLaunch({ agent: 'codex', model: null, invocation: null, startedAtMs: Date.now() });
       return { agent: 'codex', result: { status: 0 } };
     },
     transitionTaskFn: (slug, status, opts) => { transitions.push({ slug, status, opts }); return true; },
@@ -2027,7 +2027,7 @@ test('selectLaunchAndRecord announces the implementer exactly once on the select
     selectAgentFn: () => 'claude',
     startAgentFn: async (_step: string, opts) => {
       assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
+      await opts.onLaunch({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() });
       return { agent: 'claude', result: { status: 0 } };
     },
     transitionTaskFn: async () => true,
@@ -2051,7 +2051,7 @@ test('selectLaunchAndRecord keeps the implementer announcement but drops the Bac
     selectAgentFn: () => 'claude',
     startAgentFn: async (_step, opts) => {
       assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: Date.now() });
+      await opts.onLaunch({ agent: 'claude', model: null, invocation: null, startedAtMs: Date.now() });
       return { agent: 'claude', result: { status: 0 } };
     },
     // Mirror the real transitionTaskLocal: it emits a PASS commit confirmation
@@ -2081,7 +2081,7 @@ test('failed execute runs preserve the Backlog lane after authoritative activati
         prompt: 'Execute.', selectAgentFn: () => 'claude',
         startAgentFn: async (_step, opts) => {
           assert.ok(opts.onLaunch);
-      await opts.onLaunch({ agent: 'claude', invocation: null, startedAtMs: 123 });
+      await opts.onLaunch({ agent: 'claude', model: null, invocation: null, startedAtMs: 123 });
           assert.equal(mirrorLane, authoritativeLane);
           if (failure === 'limit') { throw new Error('usage limit exhausted'); }
           if (failure !== 'exit') { throw new Error('agents exhausted'); }

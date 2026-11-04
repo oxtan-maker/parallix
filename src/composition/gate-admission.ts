@@ -1,3 +1,4 @@
+import { bindGitAdmission } from './git-admission.js';
 import { resolveCanonicalMaxConcurrentGates } from '../adapters/config/product-config.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import { configureGateAdmission } from '../application/ports/gate-admission.js';
@@ -7,10 +8,11 @@ import { SqliteCustomAgentLeaseRepository } from '../adapters/sqlite/custom-agen
 
 export function createGateAdmission(configuration: ParallixConfiguration) {
   return new SharedGateAdmission(async resource => {
-    const { db } = await initCustomAdmissionState(configuration);
-    return new SqliteCustomAgentLeaseRepository(db, resource);
+    const { db, leaseDb } = await initCustomAdmissionState(configuration);
+    return new SqliteCustomAgentLeaseRepository(db, resource, leaseDb);
   }, configuration.runtime.gateOwner !== undefined, resolveCanonicalMaxConcurrentGates);
 }
 export function bindGateAdmission(configuration: ParallixConfiguration): void {
   configureGateAdmission(createGateAdmission(configuration));
+  bindGitAdmission(configuration);
 }

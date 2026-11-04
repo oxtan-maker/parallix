@@ -64,8 +64,8 @@ export const adapterPackageDependencies: Readonly<Record<string, readonly string
   filesystem: ['config', 'git'],
   // mechanism: Forgejo transport resolves task, configuration, filesystem, Git, and verification facts.
   forgejo: ['backlog', 'config', 'filesystem', 'git', 'verification'],
-  // mechanism: Git worktree and merge helpers use configuration and filesystem mechanisms.
-  git: ['config', 'filesystem'],
+  // mechanism: Git helpers use configuration/filesystem facts and shared process admission effects.
+  git: ['config', 'filesystem', 'process'],
   // mechanism: GitHub CLI transport owns no sibling mechanism dependency.
   github: [],
   // mechanism: configuration, filesystem, and SQLite mission persistence.
@@ -340,7 +340,7 @@ function compositionOwnershipViolations(files: readonly string[], root: string):
     // The execute mechanism set is built by a factory rather than a single
     // adapter constructor; detecting that factory keeps the
     // "only the composition root builds the complete graph" rule enforced.
-    const makesCompleteGraph = /createExecuteMissionPorts\s*\(/.test(source) && /new\s+LegacyStatsBackfillAdapter\s*\(/.test(source);
+    const makesCompleteGraph = /createExecuteMissionPorts\s*\(/.test(source) && /new\s+StatsRecoveryAdapter\s*\(/.test(source);
     if (makesCompleteGraph && !file.endsWith(path.join('src', 'composition', 'application-services.ts'))) {
       found.push({
         file: relative,

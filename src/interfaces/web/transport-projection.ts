@@ -156,7 +156,9 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
 
 function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined): WebAttentionItem {
   const kind = item.action?.kind;
-  const boardCommand = !kind || kind === 'manual' ? undefined : ATTENTION_KIND_COMMANDS[kind];
+  if (kind === 'rebase:run') { throw new WebTransportError('unsafe-value', 'rebase:run is not a board action'); }
+  const webKind: WebBoardCommandKind | null = !kind || kind === 'manual' ? null : kind;
+  const boardCommand = webKind === null ? undefined : ATTENTION_KIND_COMMANDS[webKind];
   const availability = boardCommand === undefined
     ? undefined
     : card?.commands.find((command) => command.command === boardCommand);
@@ -166,7 +168,7 @@ function toWebAttentionItem(item: AttentionItem, card: MissionCard | undefined):
     reason: { kind: item.reason.kind, detail: item.reason.kind === 'none' ? null : item.reason.detail },
     action: !item.action ? null : item.action.kind === 'manual'
       ? { kind: item.action.kind, display: item.action.display, state: 'ineligible', reason: item.reason.kind === 'none' ? 'Operator decision required' : item.reason.detail, targetLane: null }
-      : toCommandAction(item.action.kind, item.action.display, availability),
+      : toCommandAction(webKind!, item.action.display, availability),
     dependsOnSources: [...item.dependsOnSources],
   };
 }
@@ -203,6 +205,7 @@ function toSourceFact(fact: SourceFact<string>): WebSourceFact {
 function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
   return {
     verification: renderVerificationStatistics(metrics.verification),
+    ...(metrics.flow === undefined ? {} : { flow: metrics.flow }),
     ...(metrics.decisionWindow === undefined || ['unavailable', 'pre-lifecycle'].includes(metrics.health.state)
       ? {} : { weeklyCompletedMissions: metrics.decisionWindow.current.completedMissions }),
     health: { state: metrics.health.state },

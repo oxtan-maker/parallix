@@ -561,6 +561,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // The test-runner memory boundary reads cgroup accounting files under
     // /proc and /sys/fs/cgroup; it stores nothing (TASK-2722).
     'src/adapters/process/test-memory-cgroup.ts',
+    // Waited-tree CPU accounting uses a private temporary report that is read
+    // once and removed at process settlement; it is not durable state.
+    'src/adapters/process/spawn-tee.ts',
     // Red-green reproduction test tracking — reads mission docs for test markers
     'src/adapters/verification/redgreen.ts',
     // Gate planning reads pipeline configuration and observes worktrees; it

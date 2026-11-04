@@ -1,9 +1,10 @@
+import type { BootstrapGitSpawn as ProductGitSpawn } from '../../application/ports/git-process-context.js';
 import type { ParallixConfiguration, PromptConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { validateRepositoryGates } from './repository-gates.js';
 import { validateTerminalSection } from './terminal-host-config.js';
 import {
@@ -430,17 +431,13 @@ export function hasGitRepository(rootDir: string = process.cwd()): boolean {
   return fs.existsSync(path.join(rootDir, '.git'));
 }
 
-type ProductGitSpawn = (command: string, args: readonly string[], options: SpawnSyncOptionsWithStringEncoding) => {
-  status: number | null; stdout: string; stderr: string;
-};
-
 interface InitializeGitOptions {
   spawnSyncFn?: ProductGitSpawn;
 }
 
 export function initializeGitRepository(rootDir: string = process.cwd(), options: InitializeGitOptions = {}): { ok: true; branch: string; mode: string } | { ok: false; message: string } {
-  const spawnSyncFn = options.spawnSyncFn || spawnSync;
-  const initMain = spawnSyncFn('git', ['init', '-b', 'main'], {
+  const spawnSyncFn: ProductGitSpawn = options.spawnSyncFn || spawnSync;
+  const initMain = spawnSyncFn('git', ['init', '-b', 'main'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: rootDir,
     encoding: 'utf8',
   });
@@ -448,7 +445,7 @@ export function initializeGitRepository(rootDir: string = process.cwd(), options
     return { ok: true, branch: 'main', mode: 'init-main' };
   }
 
-  const initFallback = spawnSyncFn('git', ['init'], {
+  const initFallback = spawnSyncFn('git', ['init'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: rootDir,
     encoding: 'utf8',
   });
@@ -459,7 +456,7 @@ export function initializeGitRepository(rootDir: string = process.cwd(), options
     };
   }
 
-  spawnSyncFn('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], {
+  spawnSyncFn('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: rootDir,
     encoding: 'utf8',
   });
@@ -479,7 +476,7 @@ interface CommitWorkflowOptions {
 }
 
 export function commitWorkflowBaseline(rootDir: string, options: CommitWorkflowOptions = {}): { ok: boolean; committed: boolean; files?: string[]; message?: string; reason?: string } {
-  const spawnSyncFn = options.spawnSyncFn || spawnSync;
+  const spawnSyncFn: ProductGitSpawn = options.spawnSyncFn || spawnSync;
   const existsSyncFn = options.existsSyncFn || fs.existsSync;
   const candidates = ['workflow', 'workflow.config.json'];
   const present = candidates.filter(name => existsSyncFn(path.join(rootDir, name)));
@@ -487,7 +484,7 @@ export function commitWorkflowBaseline(rootDir: string, options: CommitWorkflowO
     return { ok: true, committed: false, reason: 'no-workflow-files' };
   }
 
-  const addResult = spawnSyncFn('git', ['add', '-A', '.'], {
+  const addResult = spawnSyncFn('git', ['add', '-A', '.'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: rootDir,
     encoding: 'utf8',
   });
@@ -525,7 +522,7 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
     return { changed: false, committed: false, skipped: true };
   }
 
-  const statusResult = spawnSyncFn('git', ['status', '--porcelain'], {
+  const statusResult = spawnSyncFn('git', ['status', '--porcelain'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: rootDir,
     encoding: 'utf8',
   });
@@ -564,7 +561,7 @@ export function ensureStandaloneMissionBaseline(rootDir: string = process.cwd(),
     };
   }
 
-  const addResult = spawnSyncFn('git', ['add', '-A', '.'], {
+  const addResult = spawnSyncFn('git', ['add', '-A', '.'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: rootDir,
     encoding: 'utf8',
   });
@@ -842,7 +839,7 @@ export function resolveMaxConcurrentCustom(rootDir: string = process.cwd()): num
 
 /** The first worktree is Git's canonical checkout; mission worktrees are not policy authorities. */
 export function resolveCanonicalRepositoryRoot(rootDir: string = process.cwd()): string {
-  const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8' });
   const first = result.status === 0 ? result.stdout.match(/^worktree (.+)$/m)?.[1] : null;
   return first ? path.resolve(first) : path.resolve(rootDir);
 }

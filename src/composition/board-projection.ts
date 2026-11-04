@@ -1,4 +1,4 @@
-import { createMissionCohortMetadataReader, createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
+import { createHumanReviewEpisodeReader, createMissionCohortMetadataReader, createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
 import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { failedExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
@@ -121,13 +121,13 @@ export function createRepositoryMissionCatalog(
   };
 }
 
-/** The sole production constructor for board reads and mission details. */
-export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
-  let cachedMissions: Promise<readonly Mission[]> | null = null;
+function createCachedMissionReader(deps: BoardProjectionCompositionDeps,
+  loadBoardMissions: () => Promise<readonly Mission[]>) {
+  let cached: Promise<readonly Mission[]> | null = null;
   const missions: MissionReadAdapter = {
     async loadAllMissions() {
-      cachedMissions ??= loadBoardMissions();
-      return cachedMissions;
+      cached ??= loadBoardMissions();
+      return cached;
     },
     async loadMission(id) {
       if (deps.missionStore) {
@@ -143,9 +143,15 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       { source: 'mission-store', status: deps.missionStore ? 'fresh' : 'unavailable', value: deps.repositoryId },
     ],
   };
+  return { missions, reset: () => { cached = null; } };
+}
 
+/** The sole production constructor for board reads and mission details. */
+export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const catalog = createRepositoryMissionCatalog(deps);
   const loadBoardMissions = () => catalog.loadAllMissions();
+  const missionReader = createCachedMissionReader(deps, loadBoardMissions);
+  const missions = missionReader.missions;
   const currentWork = deps.executionActivity ?? (deps.database ? new SqliteExecutionActivityStore(deps.database, deps.repositoryId) : undefined);
   const workflowOperations = deps.database ? new SqliteWorkflowOperationStore(deps.database, deps.repositoryId) : undefined;
   const runningSessions = createRunningSessionScan(deps);
@@ -197,7 +203,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
           gitFn: deps.gitFn ?? null,
           currentBranch: deps.gitFn ? () => '' : undefined,
         });
-        cachedMissions = null;
+        missionReader.reset();
         gateEvidence.beginRead?.();
         changeIdentity.beginRead();
         runningSessions.beginRead();
@@ -215,7 +221,15 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
             deps.historyRepo.findAll(), workflowOperations?.all() ?? [],
             deps.laneEventRepo.findByRepositoryId(deps.repositoryId),
           ]);
-          return { repositoryId: deps.repositoryId, history, operations, lifecycle };
+          terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION,
+            mission => topology?.resolveWorktree(mission) ?? null);
+          const seen = new Set<string>();
+          const runs = [...new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)])]
+            .flatMap(mission => {
+              const retained = terminal!.history(mission);
+              return retained.ok ? retained.runs.flatMap(run => seen.has(run.record.runId) ? [] : (seen.add(run.record.runId), [run.record])) : [];
+            });
+          return { repositoryId: deps.repositoryId, history, operations, lifecycle, runs };
         }),
         laneEventRepo: deps.laneEventRepo,
         usageRepo: deps.usageRepo,
@@ -226,7 +240,9 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
         netEngineeringLines: async () => new Map(
           (await missions.loadAllMissions()).map((mission) => [mission.id, mission.netEngineeringLines]),
         ),
-        cohortMetadata: async () => createMissionCohortMetadataReader(deps.rootDir, createWorkflowReturnReader(deps.laneEventRepo, deps.historyRepo))(await missions.loadAllMissions()),
+        cohortMetadata: async () => createMissionCohortMetadataReader(deps.rootDir,
+          createWorkflowReturnReader(deps.laneEventRepo, deps.historyRepo), createHumanReviewEpisodeReader(deps.laneEventRepo))(
+          await missions.loadAllMissions()),
       }),
     },
   );

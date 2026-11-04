@@ -5,7 +5,7 @@ import { getPrimaryBranch, missionBranchName, inferSlug, resolveWorktree } from 
 import * as fmt from '../../../application/presentation/cli-format.js';
 
 type DiffLaunchResult = Pick<childProcess.SpawnSyncReturns<unknown>, 'status' | 'signal' | 'error'>;
-type DiffSpawn = (command: string, args: readonly string[], options: { cwd: string; stdio: 'inherit' }) => DiffLaunchResult;
+type DiffSpawn = (command: string, args: readonly string[], options: { cwd: string; stdio: 'inherit'; env?: NodeJS.ProcessEnv }) => DiffLaunchResult;
 interface DiffOptions {
   gitFn?: (args: string[]) => { status: number | null; stdout: string };
   spawnSyncFn?: DiffSpawn;
@@ -116,7 +116,7 @@ function launchConfiguredDiff({ worktree, branch, target, getGitConfig, spawnSyn
   const diffTool = getGitConfig('diff.tool');
   if (diffTool) {
     fmt.log.info(`Launching ${fmt.command('git difftool')} for ${fmt.branch(branch)} (tool: ${fmt.bold(diffTool)})...`);
-    const result = spawnSyncFn('git', ['difftool', '-d', '--no-prompt', target], { cwd: worktree, stdio: 'inherit' });
+    const result = spawnSyncFn('git', ['difftool', '-d', '--no-prompt', target], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, cwd: worktree, stdio: 'inherit' });
     handleLaunchResult(result, 'git difftool');
     return;
   }
@@ -124,7 +124,7 @@ function launchConfiguredDiff({ worktree, branch, target, getGitConfig, spawnSyn
   const pagerDiff = getGitConfig('pager.diff');
   if (isSpecializedTool(pagerDiff || '')) {
     fmt.log.info(`Launching ${fmt.command('git diff')} for ${fmt.branch(branch)} (pager: ${fmt.bold(pagerDiff || "")})...`);
-    const result = spawnSyncFn('git', ['diff', target], { cwd: worktree, stdio: 'inherit' });
+    const result = spawnSyncFn('git', ['diff', target], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, cwd: worktree, stdio: 'inherit' });
     handleLaunchResult(result, 'git diff');
     return;
   }
@@ -132,7 +132,7 @@ function launchConfiguredDiff({ worktree, branch, target, getGitConfig, spawnSyn
   const corePager = getGitConfig('core.pager');
   if (isSpecializedTool(corePager || '')) {
     fmt.log.info(`Launching ${fmt.command('git diff')} for ${fmt.branch(branch)} (core.pager: ${fmt.bold(corePager || "")})...`);
-    const result = spawnSyncFn('git', ['diff', target], { cwd: worktree, stdio: 'inherit' });
+    const result = spawnSyncFn('git', ['diff', target], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, cwd: worktree, stdio: 'inherit' });
     handleLaunchResult(result, 'git diff');
     return;
   }

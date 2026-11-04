@@ -2,6 +2,7 @@ import { OperationalHistoryService } from '../application/services/operational-h
 import { SqliteOperationalHistoryRepository } from '../adapters/sqlite/operational-history-repository.js';
 import { MissionIntegrationService } from '../application/mission-integration-service.js';
 import { integrationRepairContinuation } from './integration-repair-continuation.js';
+import { createBootstrapGitBindings } from './git-admission.js';
 import type { DraftAdapterDependencies } from '../adapters/cli/commands/draft-adapter-types.js';
 import type { GitReader } from '../adapters/git/worktree.js';
 import { randomUUID } from 'node:crypto';
@@ -128,6 +129,7 @@ function createBoardDraftService(deps: {
   const exitFn = (code?: number): never => { throw new Error(`draft workflow aborted (exit ${code ?? 0})`); };
   const gitFn = deps.workflowDeps?.gitFn;
   const workflow: DraftWorkflowPort = deps.workflow ?? createDraftWorkflowAdapter({
+    ensureStandaloneMissionBaselineFn: createBootstrapGitBindings(deps.configuration).ensureStandaloneMissionBaseline,
     ...deps.workflowDeps,
     // The board backend is a server: the directory it was started in carries no
     // mission intent. Anchor draft's launch context to the primary checkout so

@@ -4,6 +4,7 @@ export { DEFAULT_FORGEJO_USER, DISPOSITION_PATTERN, cacheKey, deriveRepoFromGitR
 
 // PR operations (21 symbols)
 export { formatPrLookupFailure, getPrStatus, createPr, getPrNumber, getPrAuthor, resolvePrAccess, listOpenPrsForSlug, isApiErrorResult, authenticatedReviewUrl, reviewRemoteUrl, getLatestReview, getLatestReviewForPr, getLatestReviewDecision, getLatestDisposition, getLatestDispositionForPr, getLatestDispositionEvidenceForPr, postComment, REVIEW_OUTCOME_MAP, postReview, dismissApproval, dismissStandingApprovals, getCommentsSync, getComments, closePr } from './forgejo-pr.js';
+export { collectForgejoStatsRecovery } from './forgejo-stats-recovery.js';
 
 // Git ref helpers (14 symbols)
 export { syncPrimaryBaseline, ensureRemoteBaseBranch, pushReviewRef, fetchReviewBranch, resolveTrackingBranchSha, buildCreatePrPushArgs, deleteReviewRef, verifyCommitExists, remoteRefContainsCommit, syncMerged, cLocaleEnv, pushOutput, isMissingRemoteRef, isStaleInfoPushRejection } from './forgejo-git.js';

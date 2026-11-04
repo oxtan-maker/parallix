@@ -1,4 +1,4 @@
-import { authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
+import { authorizedOperationGeneration, authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
 import { processStartIdentity } from '../process/process-liveness.js';
 import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
-import type { RunSource } from '../../application/run-history-types.js';
+import type { ProcessTreeCpuObservation, ProviderResourceObservation, RunSource } from '../../application/run-history-types.js';
+import type { StageTelemetry } from '../../application/stats-recording-use-case.js';
 import { agentRunId, agentRunIdentity } from '../../domain/agent-run.js';
 import type { AgentRunIdentity } from '../../domain/agent-run.js';
 import { loadAdapterConfig } from '../config/product-config.js';
@@ -22,6 +23,7 @@ import { prepareTmuxLaunch, probeTmux, reconcileOrphanSessions, missionSocketPat
 import type { TmuxProbe, SpawnSyncFn } from '../process/tmux-host.js';
 import { CLAUDE_STREAM_PRESENTER_FLAG } from './claude-stream-view.js';
 import { cliInvocation, type CliInvocation } from '../process/cli-invocation.js';
+import { git } from '../git/git.js';
 
 /**
  * One agent launch's run session (TASK-2643): its identity, durable history
@@ -40,6 +42,8 @@ export interface RunSessionInput {
   readonly role: string;
   readonly family: string;
   readonly attempt: number;
+  readonly model?: string | null;
+  readonly dependencies?: readonly string[] | null;
   readonly log: (_line: string) => void;
 }
 
@@ -66,8 +70,11 @@ export interface RunSession {
   readonly identity: AgentRunIdentity;
   observeExecution(_pid: number): void;
   /** Options merged into the launcher's spawn-tee options. */
-  readonly teeOptions: { terminalHost?: TerminalHost; capture?: OutputCapture; stdoutSink?: { write(_chunk: Buffer | string): unknown; isTTY?: boolean } };
-  finish(_result: { status?: number | null; signal?: string | null; sessionId?: string | null } | null | undefined): void;
+  readonly teeOptions: { terminalHost?: TerminalHost; capture?: OutputCapture; stdoutSink?: { write(_chunk: Buffer | string): unknown; isTTY?: boolean };
+    resourceBoundary?: { readonly boundary: string; readonly parent: string | null };
+    onProcessTreeCpu?: (_observation: ProcessTreeCpuObservation) => void };
+  finish(_result: { status?: number | null; signal?: string | null; sessionId?: string | null;
+    processTreeCpu?: ProcessTreeCpuObservation | null; telemetry?: StageTelemetry | null; provider?: string | null; model?: string | null } | null | undefined): void;
 }
 
 /** Thrown when tmux is configured with `whenUnavailable: "fail"` and cannot run. */
@@ -149,13 +156,17 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
   const { inheritedTerminal } = choice;
   const capture = captureRunSession(input, worktree, terminal, runId, choice, now, configuration);
   if (inheritedTerminal) { capture?.addTmuxSession(tmuxSessionName(identity)); }
-  const teeOptions = runTeeOptions(input, terminal, deps, configuration, choice, capture);
+  let localCpu: ProcessTreeCpuObservation | null = null;
+  const teeOptions = runTeeOptions(input, terminal, deps, configuration, choice, capture, observation => {
+    localCpu = localCpu ? { ...localCpu, userUs: localCpu.userUs + observation.userUs,
+      systemUs: localCpu.systemUs + observation.systemUs } : observation;
+  });
   return {
     runId,
     identity,
     observeExecution: pid => { try { if (!choice.useTmux || inheritedTerminal) { capture?.observeExecution(pid, processStartIdentity(pid)); } } catch { /* Observation cannot block launch. */ } },
     teeOptions,
-    finish: result => finishRunCapture(input, worktree, runId, configuration, choice, capture, result),
+    finish: result => finishRunCapture(input, worktree, runId, configuration, choice, capture, result, localCpu),
   };
 }
 
@@ -187,6 +198,10 @@ function captureRunSession(input: RunSessionInput, worktree: string, identity: A
   try {
     capture = openRunCapture({
       worktree, identity, runId,
+      operationGeneration: authorizedOperationGeneration() ?? configuration.runtime.workflowGeneration ?? null,
+      revision: git(['-C', worktree, 'rev-parse', 'HEAD']).stdout.trim() || null,
+      configuredModel: input.model ?? null,
+      dependencies: input.dependencies ?? [],
       terminalHost: useTmux ? 'tmux' : 'pipe',
       hostFallbackReason: fallbackReason,
       tmuxSocketPath: inheritedTerminal ? configuration.terminal.missionSocket! : useTmux ? missionSocketPath(identity, configuration) : null,
@@ -201,7 +216,8 @@ function captureRunSession(input: RunSessionInput, worktree: string, identity: A
   return capture;
 }
 
-function runTeeOptions(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, deps: RunSessionDeps, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null): RunSession['teeOptions'] {
+function runTeeOptions(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, deps: RunSessionDeps, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null,
+  onProcessTreeCpu: (_observation: ProcessTreeCpuObservation) => void): RunSession['teeOptions'] {
   const { useTmux, inheritedTerminal } = choice;
   let spawnIndex = 0;
   const terminalHost: TerminalHost | undefined = useTmux && !inheritedTerminal ? {
@@ -219,10 +235,30 @@ function runTeeOptions(input: RunSessionInput, identity: AgentRunIdentity & { re
   const stdoutSink = sink && IN_PROCESS_FAMILIES.has(input.family)
     ? { isTTY: process.stdout.isTTY, write: (chunk: Buffer | string) => { sink.write('stdout', Buffer.from(chunk)); return process.stdout.write(chunk); } }
     : undefined;
-  return { ...(terminalHost ? { terminalHost } : {}), ...(outputCapture ? { capture: outputCapture } : {}), ...(stdoutSink ? { stdoutSink } : {}) };
+  const resourceBoundary = capture && !IN_PROCESS_FAMILIES.has(input.family)
+    ? { boundary: runIdFor(identity), parent: configuration.runtime.resourceBoundary ?? null } : undefined;
+  return { ...(terminalHost ? { terminalHost } : {}), ...(outputCapture ? { capture: outputCapture } : {}),
+    ...(stdoutSink ? { stdoutSink } : {}), ...(resourceBoundary ? { resourceBoundary, onProcessTreeCpu } : {}) };
 }
 
-function finishRunCapture(input: RunSessionInput, worktree: string, runId: string, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null, result: Parameters<RunSession['finish']>[0]): void {
+function runIdFor(identity: AgentRunIdentity): string { return agentRunId(identity); }
+
+function providerResources(result: Parameters<RunSession['finish']>[0]): ProviderResourceObservation | null {
+  const telemetry = result?.telemetry;
+  if (!telemetry) { return null; }
+  const candidates = [
+    ['input', telemetry.inputTokens, 'tokens'], ['output', telemetry.outputTokens, 'tokens'],
+    ['cached', telemetry.cachedTokens, 'tokens'], ['reasoning', telemetry.thoughtsTokens, 'tokens'],
+    ['context', telemetry.totalTokens, 'tokens'], ['tool-calls', telemetry.toolCalls, 'count'],
+    ['provider-usage', telemetry.usagePercent, 'percent'], ['cost', telemetry.cost_usd, 'usd'],
+  ] as const;
+  const values = candidates.flatMap(([name, value, unit]) => typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? [{ name, value, unit }] : []);
+  return values.length ? { provenance: 'provider-reported', provider: telemetry.provider ?? result?.provider ?? null,
+    model: telemetry.model ?? result?.model ?? null, values } : null;
+}
+
+function finishRunCapture(input: RunSessionInput, worktree: string, runId: string, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null, result: Parameters<RunSession['finish']>[0], localCpu: ProcessTreeCpuObservation | null): void {
   const { useTmux, inheritedTerminal } = choice;
 
   if (!capture) { return; }
@@ -232,7 +268,8 @@ function finishRunCapture(input: RunSessionInput, worktree: string, runId: strin
     if (IN_PROCESS_FAMILIES.has(input.family)) {
       provider.sources[0] = { kind: 'terminal-bytes', path: 'stdout', covers: `text the in-process ${input.family} session rendered`, complete: true };
     }
-    capture.finish({ exitCode: result?.status ?? null, signal: result?.signal ?? null, providerSessionId: sessionId, ...provider });
+    capture.finish({ exitCode: result?.status ?? null, signal: result?.signal ?? null, providerSessionId: sessionId, ...provider,
+      resources: { localProcessTreeCpu: localCpu ?? result?.processTreeCpu ?? null, provider: providerResources(result) } });
   } catch (err) {
     input.log(fmt.status('WARN', `Could not finalize run history ${runId}: ${(err as Error).message}`));
   }

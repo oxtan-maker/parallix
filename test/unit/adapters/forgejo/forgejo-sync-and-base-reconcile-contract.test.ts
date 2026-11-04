@@ -62,6 +62,18 @@ describe("stale push rejection detection", () => {
       assert.strictEqual(isStaleInfoPushRejection(result), expected, `Failed for stderr: ${stderr}`);
     }
   });
+
+  test('generic Git failure identity preserves anchored stale-rejection recovery (TASK-2830 F9)', () => {
+    const result = {
+      failureReason: { version: 1 as const, code: 'git-failed' as const, source: 'git' as const },
+      status: 1,
+      stdout: '',
+      stderr: '! [rejected] mission/task-2830 -> mission/task-2830 (stale info)',
+    };
+
+    assert.strictEqual(isStaleInfoPushRejection(result), true);
+  });
+
 });
 
 // ---- syncMerged retry on stale info (consolidated from test/sync-merged-retry.test.ts, TASK-2622.09) ----

@@ -13,7 +13,7 @@ assert.ok(fs.existsSync(cli), 'Run npm run build first');
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-public-gate-exercise-'));
 const base = path.join(root, 'base');
 const worktree = path.join(root, 'mission');
-const shared = path.join(root, 'leases');
+const operator = path.join(root, 'operator');
 const trace = path.join(root, 'trace');
 const release = path.join(root, 'release');
 const children: { child: ReturnType<typeof spawn>; exit: Promise<number | null> }[] = [];
@@ -36,12 +36,10 @@ function git(args: string[]): void {
   assert.equal(result.status, 0, result.stderr);
 }
 function launch(checkout: string, name: string) {
-  const home = path.join(root, `operator-${name}`);
-  fs.mkdirSync(home);
   let output = '';
   const child = spawn(process.execPath, [cli, 'verify', 'all'], { cwd: checkout, stdio: 'pipe', env: {
-    ...process.env, PARALLIX_HOME: home, FORGEJO_HOME: path.join(home, 'forgejo'),
-    PARALLIX_CUSTOM_ADMISSION_HOME: shared, PARALLIX_CUSTOM_ADMISSION_REPOSITORY: undefined,
+    ...process.env, PARALLIX_HOME: operator, FORGEJO_HOME: path.join(operator, 'forgejo'),
+    PARALLIX_CUSTOM_ADMISSION_HOME: undefined, PARALLIX_CUSTOM_ADMISSION_REPOSITORY: undefined,
     PARALLIX_GATE_OWNER: undefined, PARALLIX_WORKFLOW_OPERATION: undefined, PARALLIX_WORKFLOW_GENERATION: undefined,
     EXERCISE_NAME: name, EXERCISE_TRACE: trace, EXERCISE_RELEASE: release,
   } });
@@ -53,9 +51,9 @@ function launch(checkout: string, name: string) {
 }
 try {
   fs.mkdirSync(base);
-  const policy = { adapters: { gates: { maxConcurrent: 1 } } };
+  const policy = { adapters: { gates: { resources: { test: 1 }, verificationResource: 'test' } } };
   fs.writeFileSync(path.join(base, 'workflow.config.json'), JSON.stringify({ adapters: {
-    gates: { maxConcurrent: policy.adapters.gates.maxConcurrent }, verification: { command: 'node gate.mjs', defaultArea: 'all' },
+    gates: policy.adapters.gates, verification: { command: 'node gate.mjs', defaultArea: 'all' },
   } }));
   fs.writeFileSync(path.join(base, 'gate.mjs'), `import fs from 'node:fs';
 import { setTimeout as pause } from 'node:timers/promises';
@@ -68,15 +66,16 @@ fs.appendFileSync(trace, name + ' end ' + Date.now() + '\\n');
   git(['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture']);
   git(['worktree', 'add', '-qb', 'mission/exercise', worktree]);
   const inherited = JSON.parse(fs.readFileSync(path.join(worktree, 'workflow.config.json'), 'utf8')) as typeof policy;
-  assert.equal(inherited.adapters.gates.maxConcurrent, 1);
+  assert.equal(inherited.adapters.gates.resources.test, 1);
+  assert.equal(inherited.adapters.gates.verificationResource, 'test');
   const first = launch(base, 'a');
   await until(() => fs.existsSync(trace), 'first public gate starts');
   const second = launch(worktree, 'b');
   // Confirm independent non-gate work can run while verification owns its lease.
   const config = spawnSync(process.execPath, [cli, 'config'], { cwd: worktree, encoding: 'utf8',
-    env: { ...process.env, PARALLIX_HOME: path.join(root, 'config-home'), PARALLIX_CUSTOM_ADMISSION_HOME: shared, PARALLIX_GATE_OWNER: undefined } });
+    env: { ...process.env, PARALLIX_HOME: operator, PARALLIX_CUSTOM_ADMISSION_HOME: undefined, PARALLIX_GATE_OWNER: undefined } });
   assert.equal(config.status, 0, config.stderr);
-  assert.match(config.stdout, /"maxConcurrent": 1/);
+  assert.match(config.stdout, /"verificationResource": "test"/);
   await pause(150);
   assert.deepEqual(fs.readFileSync(trace, 'utf8').trim().split('\n').map(row => row.split(' ').slice(0, 2).join(' ')), ['a start']);
   fs.writeFileSync(release, '');
@@ -85,12 +84,20 @@ fs.appendFileSync(trace, name + ' end ' + Date.now() + '\\n');
   assert.equal(await second.exit, 0, second.output());
   const rows = fs.readFileSync(trace, 'utf8').trim().split('\n');
   assert.deepEqual(rows.map(row => row.split(' ').slice(0, 2).join(' ')), ['a start', 'a end', 'b start', 'b end']);
-  const db = new DatabaseSync(path.join(shared, 'custom-admission.db'));
-  try { assert.equal(db.prepare('SELECT COUNT(*) AS count FROM custom_agent_leases').get()!.count, 0); }
-  finally { db.close(); }
-  console.log('Inherited maxConcurrent=1; independent px config completed while gate a held ownership.');
+  const db = new DatabaseSync(path.join(operator, 'parallix.db'));
+  try {
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM custom_agent_leases').get()!.count, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM admission_process_groups').get()!.count, 0);
+    const observations = db.prepare("SELECT event_data FROM operational_history WHERE event_type = 'verification.attempt'").all()
+      .map(row => JSON.parse(String(row.event_data)) as { gate: string; startedAt: string | null; finishedAt: string | null });
+    const terminal = observations.filter(value => value.finishedAt);
+    assert.equal(terminal.length, 2, `expected two terminal verification observations: ${JSON.stringify(observations)}`);
+    assert.ok(terminal.every(value => value.startedAt && value.startedAt <= value.finishedAt!),
+      'each public gate records its start before its terminal observation');
+  } finally { db.close(); }
+  console.log('Inherited test resource capacity=1; independent px config completed while gate a held ownership.');
   console.log(rows.join('\n'));
-  console.log('Both public CLI runs exited 0; remaining leases=0.');
+  console.log('Both public CLI runs exited 0; terminal observations=2; remaining leases=0; process groups=0.');
 } finally {
   fs.writeFileSync(release, '');
   for (const { child } of children) { if (child.exitCode === null) { child.kill('SIGTERM'); } }

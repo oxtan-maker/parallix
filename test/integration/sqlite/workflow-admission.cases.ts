@@ -18,7 +18,8 @@ function bind(database: SqliteDatabaseAdapter) {
   const service = new WorkflowOperationService(operations, new SqliteMissionStore(database),
     { canExecute: () => true, async dispatch<T>() { return completed({} as T); } },
     { identity: () => ({ pid: 123, identity: 'fixture-start' }), async launch() {}, async alive() { return true; }, async stop() { return true; } },
-    repositoryId('parallix'), async () => 'codex', async () => {});
+    repositoryId('parallix'), async () => 'codex', async () => {}, undefined, undefined, undefined, undefined,
+    () => 'revision-fixture');
   return { service, operations };
 }
 const request = (id: string) => ({ operationId: id, requestKey: id, missionId: 'task-atomic-owner', kind: 'active:execute' as const, capabilities: new Set(['active:execute'] as const) });
@@ -51,6 +52,9 @@ export function workflowAdmissionPersistenceCases(): void {
       assert.equal(snapshots.length, 1);
       assert.equal(snapshots[0].operationId, 'admitted-worker');
       assert.equal(snapshots[0].frames.at(-1)?.event.summary, 'preparing workflow');
+      assert.equal(snapshots[0].frames.at(-1)?.event.revision, 'revision-fixture');
+      assert.equal(snapshots[0].frames.at(-1)?.event.actor, 'parallix');
+      assert.equal(snapshots[0].frames.at(-1)?.event.timeState, 'waiting');
     } finally { await fixture.close(); }
   });
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { waitForCustomCapacity } from '../../../../src/adapters/agents/custom-capacity.js';
+import { CUSTOM_CAPACITY_ADMISSION_POLICY, waitForCustomCapacity } from '../../../../src/adapters/agents/custom-capacity.js';
 
 test('capacity admission waits through saturation and returns the acquired lease', async () => {
   const reservation = { bindChild() {}, release() {} };
@@ -36,4 +36,27 @@ test('waiting admission preserves the slot until release and propagates a cancel
   assert.equal(released, 1);
   await assert.rejects(waitForCustomCapacity('/mission', () => {}, async () => null,
     async () => { throw new Error('cancelled'); }), /cancelled/);
+});
+
+test('capacity admission stops on cancellation without probing the pool again (TASK-2830)', async () => {
+  const controller = new AbortController();
+  let probes = 0;
+  await assert.rejects(
+    waitForCustomCapacity('/mission', () => {}, async () => {
+      probes += 1;
+      if (probes === 2) { controller.abort(); }
+      return null;
+    }, async () => {}, controller.signal),
+    /closed after 2 attempts/,
+  );
+  assert.equal(probes, 2, 'no capacity probe is taken after cancellation');
+  assert.equal(CUSTOM_CAPACITY_ADMISSION_POLICY.maxWaitMs, null, 'the launcher watchdog, not an admission timer, bounds this wait');
+});
+
+test('cancellation racing a successful capacity acquisition releases the slot (TASK-2830)', async () => {
+  const controller = new AbortController(); let releases = 0;
+  await assert.rejects(waitForCustomCapacity('/mission', () => {}, async () => {
+    controller.abort(); return { bindChild() {}, release() { releases++; } };
+  }, undefined, controller.signal), error => (error as Error).name === 'AbortError');
+  assert.equal(releases, 1);
 });

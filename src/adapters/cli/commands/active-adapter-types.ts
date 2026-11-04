@@ -39,6 +39,6 @@ export interface LaunchOptions {
   transitionTaskFn?: (..._args: Parameters<typeof transitionTask>) => boolean | Promise<boolean>;
   selectAgentFn?: typeof agents.selectAgent;
   log?: Log; sessionMarkerPort?: SessionMarkerPort | null;
-  onAgentLaunched?: ((_agent: string) => Promise<void>) | null;
+  onAgentLaunched?: ((_agent: string, _model?: string | null) => Promise<void>) | null;
   unrefChild?: boolean; pinnedAgent?: boolean;
 }

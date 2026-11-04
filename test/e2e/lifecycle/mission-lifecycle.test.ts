@@ -255,6 +255,9 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
+  // Git mutation admission uses the real kernel lease and its execution shell.
+  fs.symlinkSync(commandDir('flock'), path.join(binDir, 'flock'));
+  fs.symlinkSync(commandDir('sh'), path.join(binDir, 'sh'));
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
@@ -743,6 +746,9 @@ function setupAdhocRepository({ title }: { title: string }) {
   fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
   fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
   fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
+  // Keep adhoc intake on the same production Git admission path as Backlog.
+  fs.symlinkSync(commandDir('flock'), path.join(binDir, 'flock'));
+  fs.symlinkSync(commandDir('sh'), path.join(binDir, 'sh'));
   const graphifyPath = maybeCommandPath('graphify');
   if (graphifyPath) {
     fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));

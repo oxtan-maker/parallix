@@ -23,7 +23,7 @@ function deriveRepoFromGitRemote(rootDir: string, remoteName: string): string | 
   if (cached !== undefined) { return cached; }
   const remote = remoteName || 'origin';
   try {
-    const result = spawnSync('git', ['-C', rootDir, 'remote', 'get-url', remote], { encoding: 'utf8', timeout: 2000 });
+    const result = spawnSync('git', ['-C', rootDir, 'remote', 'get-url', remote], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', timeout: 2000 });
     if (result.status !== 0) { derivedRepoCache.set(cacheKey(rootDir, remote), null); return null; }
     const url = (result.stdout || '').trim();
     const match = url.match(/[:/]([^/:]+)\/([^/]+?)(\.git)?$/);
@@ -47,7 +47,7 @@ function resolveAuthorizedApproverUser(explicitUser?: string | null, configurati
 
 function listGitWorktrees(rootDir: string = process.cwd()): string[] {
   try {
-    const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', timeout: 2000 });
+    const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', timeout: 2000 });
     if (result.status !== 0) { return []; }
     return (result.stdout || '').split('\n').filter((line) => line.startsWith('worktree ')).map((line) => line.slice('worktree '.length).trim()).filter(Boolean);
   } catch (_) { return []; }

@@ -84,7 +84,7 @@ export interface AgentLaunchRequest {
    * for the board. This is how a `claude` → `qwen` failover stays one mission's
    * current work instead of becoming a lifecycle event or a new run entity.
    */
-  readonly onAgentChanged?: (_agent: string) => Promise<void>;
+  readonly onAgentChanged?: (_agent: string, _model?: string | null) => Promise<void>;
 
 }
 
@@ -218,7 +218,7 @@ export interface AutonomousReviewRequest {
   readonly implementer: string;
   /** Explicit reviewer family; absent means automatic selection. */
   readonly reviewer?: string;
-  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
+  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase, _model?: string | null) => Promise<void>;
   readonly onAutonomousStop?: (_reason: string) => Promise<void>;
 }
 
@@ -235,7 +235,7 @@ export interface ExecuteRepairLaunchPort {
     readonly agent: string;
     readonly prompt: string;
     readonly sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy;
-    readonly onAgentChanged?: (_agent: string) => Promise<void>;
+    readonly onAgentChanged?: (_agent: string, _model?: string | null) => Promise<void>;
   }): ReturnType<import('../rebound-kernel.js').ReboundStartAgent>;
   available(_agent: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
   readHead(_worktree: string): string | null;

@@ -53,6 +53,8 @@ export function createLeadSupervisorPort(
       operationId: `lead-${Date.now()}`,
       phase: action.kind === 'active:execute' ? 'execute' : 'review',
       summary: `lead running ${action.display}`,
+      actor: 'lead',
+      timeState: 'working',
     });
     if (publication) { await currentWork.running(publication); }
     fmt.log.info(`[lead] Started ${action.display}; continuing to supervise the fleet.`);

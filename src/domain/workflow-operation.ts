@@ -2,9 +2,9 @@ import type { MissionId, MissionStatus } from './mission.js';
 import type { RepositoryId } from './repository.js';
 
 /** One admitted command, encompassing preparation, launches and verification. */
-export type WorkflowCommand = 'active:execute' | 'draft:create' | 'review:submit' | 'integrate:merge';
+export type WorkflowCommand = 'active:execute' | 'draft:create' | 'review:submit' | 'rebase:run' | 'integrate:merge';
 export const isWorkflowCommand = (kind: string): kind is WorkflowCommand =>
-  ['active:execute', 'draft:create', 'review:submit', 'integrate:merge'].includes(kind);
+  ['active:execute', 'draft:create', 'review:submit', 'rebase:run', 'integrate:merge'].includes(kind);
 export type WorkflowPhase = 'accepted' | 'executing' | 'stopping' | 'completed' | 'blocked' | 'interrupted' | 'stopped';
 export interface WorkflowOperation {
   /** Version of the checked activation; compensation may only undo that write. */

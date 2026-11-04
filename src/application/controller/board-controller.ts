@@ -127,6 +127,7 @@ export class BoardCommandController implements BoardCommandDispatcher {
       case 'draft:create': return this.dispatchDraft(request);
       case 'checkpoint:record': return this.dispatchCheckpoint(request);
       case 'review:submit': return this.dispatchReviewPreparation(request);
+      case 'rebase:run': return rejected('validation', 'rebase:run requires an owned CLI invocation');
       case 'integrate:merge': return this.dispatchIntegrate(request);
       case 'mission:cancel': return this.dispatchCancel(request);
       default: return unavailableCapability(request.kind, 'unexpected integrated capability');

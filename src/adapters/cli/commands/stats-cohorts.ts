@@ -1,4 +1,4 @@
-import { createMissionCohortMetadataReader, createWorkflowReturnReader } from '../../review/review-statistics-evidence.js';
+import { createHumanReviewEpisodeReader, createMissionCohortMetadataReader, createWorkflowReturnReader } from '../../review/review-statistics-evidence.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../../../application/ports/operation-history.js';
 import type { UsageRepository } from '../../../application/ports/mission-measurements.js';
@@ -214,7 +214,8 @@ export async function statsCohorts(
       const { SqliteMissionStore } = await import('../../sqlite/mission-store.js');
       const { db } = await initOperatorState({ configuration: options.configuration });
       const loaded = await new SqliteMissionStore(db).loadByRepository(repositoryId);
-      return createMissionCohortMetadataReader(rootDir, createWorkflowReturnReader(repositories.laneEventRepo, repositories.historyRepo))(loaded);
+      return createMissionCohortMetadataReader(rootDir, createWorkflowReturnReader(repositories.laneEventRepo, repositories.historyRepo),
+        createHumanReviewEpisodeReader(repositories.laneEventRepo))(loaded);
     });
     const comparison = await buildCohortComparison({
       ...repositories,

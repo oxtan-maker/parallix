@@ -43,6 +43,21 @@ export type RunStreamName = 'stdout' | 'stderr';
 export type RunState = 'running' | 'exited' | 'interrupted';
 export type RunTerminalHost = 'pipe' | 'tmux';
 
+export interface ProcessTreeCpuObservation {
+  readonly userUs: number;
+  readonly systemUs: number;
+  readonly provenance: 'bash-time-waited-tree';
+  readonly boundary: string;
+  readonly parent: string | null;
+}
+
+export interface ProviderResourceObservation {
+  readonly provenance: 'provider-reported';
+  readonly provider: string | null;
+  readonly model: string | null;
+  readonly values: readonly { readonly name: string; readonly value: number; readonly unit: 'tokens' | 'count' | 'percent' | 'usd' }[];
+}
+
 /**
  * Where a piece of history came from. Terminal bytes are what the process
  * wrote; they are not a rendered screen and they do not contain model
@@ -78,7 +93,18 @@ export interface RunRecord {
   readonly captureKind?: 'agent' | 'coordinator';
   /** Existing CurrentWork correlation; never a second activity authority. */
   readonly operationId?: string | null;
+  readonly operationGeneration?: number | null;
+  /** Stable launch source; equal to runId for fresh records. */
+  readonly sourceId?: string;
+  readonly revision?: string | null;
+  readonly configuredModel?: string | null;
+  /** Explicit causal predecessors; [] is an observed root, null/absent is historical unknown. */
+  readonly dependencies?: readonly string[] | null;
   readonly execution?: { readonly pid: number; readonly processIdentity: string | null } | null;
+  readonly resources?: {
+    readonly localProcessTreeCpu: ProcessTreeCpuObservation | null;
+    readonly provider: ProviderResourceObservation | null;
+  };
   readonly role: string;
   readonly family: AgentFamily | null;
   readonly attempt: number | null;

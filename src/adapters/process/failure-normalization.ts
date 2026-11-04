@@ -13,11 +13,71 @@ export function providerEvents(output: string | undefined): Record<string, unkno
 export function normalizeProviderFailure(result: ProcessFacts): FailureReason | undefined {
   const prior = result.failureReason as FailureReason | undefined;
   if (prior && prior.source !== 'process') { return prior; }
-  for (const event of providerEvents(result.stdout)) {
-    if (event.type !== 'error' && event.type !== 'turn.failed' && event.is_error !== true) { continue; }
-    return providerEventFailure(event);
+  const processFailed = result.status !== 0 || Boolean(result.signal) || Boolean(result.error);
+  const failures = collectProviderFailures(providerEvents(result.stdout), processFailed);
+  return preferredProviderFailure(failures) ?? normalizeProcessFailure(result);
+}
+
+interface ProviderFailures {
+  firstQuota?: FailureReason;
+  resetAuthoritativeQuota?: FailureReason;
+  firstGeneric?: FailureReason;
+}
+
+function collectProviderFailures(events: Record<string, unknown>[], processFailed: boolean): ProviderFailures {
+  const failures: ProviderFailures = {};
+  for (const event of events) {
+    collectProviderFailure(failures, event, processFailed);
   }
-  return normalizeProcessFailure(result);
+  return failures;
+}
+
+function collectProviderFailure(failures: ProviderFailures, event: Record<string, unknown>, processFailed: boolean): void {
+  const claudeQuota = processFailed ? claudeQuotaFailure(event) : undefined;
+  failures.firstQuota ??= claudeQuota;
+  if (!failures.resetAuthoritativeQuota && event.type === 'rate_limit_event' && claudeQuota?.context?.resetAt) {
+    failures.resetAuthoritativeQuota = claudeQuota;
+  }
+  if (!failures.firstGeneric && (event.type === 'error' || event.type === 'turn.failed' || event.is_error === true)) {
+    failures.firstGeneric = providerEventFailure(event);
+  }
+}
+
+function preferredProviderFailure(failures: ProviderFailures): FailureReason | undefined {
+  if (failures.resetAuthoritativeQuota) { return failures.resetAuthoritativeQuota; }
+  if (failures.firstQuota && (!failures.firstGeneric || failures.firstGeneric.code === 'unexpected')) {
+    return failures.firstQuota;
+  }
+  return failures.firstGeneric;
+}
+
+function claudeQuotaFailure(event: Record<string, unknown>): FailureReason | undefined {
+  if (event.type === 'rate_limit_event') {
+    const info = record(event.rate_limit_info);
+    if (info?.status !== 'rejected') { return undefined; }
+    const resetAt = resetInstant(info.resetsAt);
+    return failureReason('agent-quota', 'provider', resetAt ? { resetAt } : undefined);
+  }
+  if (event.type !== 'assistant' && event.type !== 'result') { return undefined; }
+  if (event.api_error_status !== 429 && event.api_error !== 'usage_limit_reached') { return undefined; }
+  const info = record(record(event.api_error_params)?.rate_limit_info);
+  const resetAt = resetInstant(info?.resetsAt);
+  return failureReason('agent-quota', 'provider', {
+    ...(resetAt ? { resetAt } : {}),
+    ...(event.api_error_status === 429 ? { httpStatus: 429 } : {}),
+    ...(event.api_error === 'usage_limit_reached' ? { providerCode: event.api_error } : {}),
+  });
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function resetInstant(value: unknown): string | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) { return undefined; }
+  const epochMilliseconds = Math.abs(value) < 100_000_000_000 ? value * 1_000 : value;
+  const instant = new Date(epochMilliseconds);
+  return Number.isNaN(instant.getTime()) ? undefined : instant.toISOString();
 }
 
 function providerEventFailure(event: Record<string, unknown>): FailureReason {

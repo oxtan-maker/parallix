@@ -13,6 +13,7 @@ const agents = mockModule<typeof import('../../../src/adapters/agents/agents.js'
 const stats = mockModule<typeof import('../../../src/adapters/review/review-agent-fallback.js')>('../../../src/adapters/review/review-agent-fallback.js', import.meta.url);
 const config = mockModule<typeof import('../../../src/adapters/config/product-config.js')>('../../../src/adapters/config/product-config.js', import.meta.url);
 await installModuleMocks();
+const { admittedBootstrapGitSpawn } = await import('../../../src/composition/git-admission.js');
 const { createRuntimeOptions } = await import('../../../src/composition/cli-command-registry.js');
 const request: RecoveryRequest = { missionId: 'task-recovery', lane: 'active', diagnostic: 'stuck', attemptedOperation: 'active', instruction: 'Repair safely' };
 for (const mode of ['empty', 'report', 'failure'] as const) {
@@ -112,10 +113,25 @@ for (const race of ['none', 'version', 'operation', 'progress', 'integration'] a
       assert.ok(options.launchAdmission, 'production passes admitted facts to the actual launch seam');
       await options.launchAdmission.assert();
       events.push('spawn');
-      await options.onLaunch?.({ agent: 'custom', invocation: null, startedAtMs: 0 });
+      await options.onLaunch?.({ agent: 'custom', model: null, invocation: null, startedAtMs: 0 });
       return { agent: 'custom' };
     });
     await createRuntimeOptions('/fixture', resolveConfiguration({})).commandFns!.lead!([]);
     assert.deepEqual(events, race === 'none' ? ['spawn', 'running', 'usage', 'ended'] : []);
   });
 }
+
+
+test('CLI startup injects admitted bootstrap without an ambient binding (TASK-2830 F4)', t => {
+  t.after(() => mock.restoreAll());
+  let calls = 0;
+  mock.method(config, 'ensureStandaloneGitRepo', (root: string | undefined, options: Parameters<typeof config.ensureStandaloneGitRepo>[1]) => {
+    calls++;
+    assert.equal(root, '/fixture');
+    assert.equal(options?.spawnSyncFn, admittedBootstrapGitSpawn);
+    return { changed: false, initialized: false };
+  });
+  const runtime = createRuntimeOptions('/fixture', resolveConfiguration({}));
+  assert.deepEqual(runtime.ensureStandaloneGitRepoFn?.('/fixture'), { changed: false, initialized: false });
+  assert.equal(calls, 1);
+});

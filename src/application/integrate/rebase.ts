@@ -43,6 +43,7 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
     let rebaseExitCode: number | null = null;
     const port = rebase.createRebaseWorkflowPort({
       gitFn: git,
+      rebaseObservationStage: 'integration-rebase',
       // Pass the factory, not the resolved services object: `createRebaseWorkflowPort`
       // only installs the rebound hook-failure path when `missionServicesFn` is a
       // function, so the mission's agent-assisted conflict path survives here too.
@@ -58,7 +59,8 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
     // mission branch name is `mission/<slug>` and the primary branch is the
     // resolved target regardless of which worktree is passed.
     port.cwd = () => baseWorktree;
-    port.getCurrentBranch = () => missionPaths.missionBranchName(slug, baseWorktree);
+    // Observe the actual mission checkout, including in the success postcondition.
+    port.getCurrentBranch = root => gitPorts.getCurrentBranch(root);
     port.resolveMissionBaseBranch = () => baseBranch;
     try {
       await runRebaseWorkflow([slug], port);

@@ -1,6 +1,7 @@
 import type { ReviewStateData, ReviewStateWriter, ReviewStatePersistenceResult } from './review-persistence.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { ReboundLaunchOptions } from '../rebound-kernel.js';
+import type { GitContentionPort } from './git-contention.js';
 /** Application-owned ports for the rebase workflow (TASK-2332.12).
  *
  * Every external dependency the rebase policy needs — Git, agents, Forgejo,
@@ -21,6 +22,8 @@ export interface GitCommandResult {
 export type GitRunner = (_args: string[], _options?: Record<string, unknown>) => GitCommandResult;
 
 export interface RebaseStateSnapshot {
+  branch?: string | null;
+  otherOperation?: string | null;
   inProgress: boolean;
   rebaseHead?: string | null;
   unmergedFiles: string[];
@@ -38,6 +41,30 @@ export interface AgentLaunchResult {
   agent: string;
   result: { status?: number | null };
 }
+
+export type RebaseObservationOutcome = 'running' | 'no-op' | 'clean' | 'conflict' | 'resolved' | 'failed';
+export interface RebaseObservationInput {
+  readonly id: string;
+  readonly missionId: string;
+  readonly root: string;
+  readonly stage: 'direct-rebase' | 'pre-review-rebase' | 'integration-rebase';
+  readonly attempt: number;
+  readonly outcome: RebaseObservationOutcome;
+  readonly baseBranch: string;
+  readonly revisionBefore: string | null;
+  readonly revisionAfter: string | null;
+  readonly conflicts: readonly string[];
+  readonly dependencies: readonly string[];
+  readonly occurredAt: string;
+}
+
+export type RebaseObservationPort = (_observation: RebaseObservationInput) => Promise<void>;
+let configuredRebaseObservation: RebaseObservationPort | null = null;
+/** Composition binds the installed durable observation owner once per CLI invocation. */
+export function configureRebaseObservation(port: RebaseObservationPort | null): void {
+  configuredRebaseObservation = port;
+}
+export function rebaseObservation(): RebaseObservationPort | null { return configuredRebaseObservation; }
 
 // --- pre-review rebase result contract (TASK-2377.02) ---------------------
 // The pre-review rebase runs the workflow in-process and reports *typed*
@@ -92,11 +119,21 @@ export type PreReviewRebaseOutcome = { ok: boolean } & Partial<PreReviewRebaseRe
 
 /** Complete external surface of the rebase workflow. */
 export interface RebaseWorkflowPort {
+  /** Durable observation through the existing operational-history owner. */
+  observeRebase?: RebaseObservationPort;
+  newRebaseObservationId?: () => string;
+  rebaseObservationStage?: RebaseObservationInput['stage'];
   resumeReviewAfterRepair?: (_slug: string, _root: string, _implementer: string) => Promise<void>;
   // --- git adapter -------------------------------------------------------
   git: GitRunner;
   detectRebaseState(_root: string): RebaseStateSnapshot;
   getCurrentBranch(_root: string): string;
+  /**
+   * Git lock contention (TASK-2830): structured failure evidence plus waiting
+   * through the shared admission owner. Absent for callers that did not compose
+   * it, which retain the pre-TASK-2830 diagnostic path.
+   */
+  gitContention?: GitContentionPort;
 
   // --- mission filesystem adapter ---------------------------------------
   /** Working directory the command was launched from. */

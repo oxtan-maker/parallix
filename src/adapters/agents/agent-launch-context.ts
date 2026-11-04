@@ -35,7 +35,15 @@ export interface StartAgentOptions {
   exclude?: string[] | Set<string>;
   onLimitHit?: (event: { agent: string; until: string; source?: string }) => unknown;
   launchAdmission?: import('../../application/ports/repair-agent-launch.js').AgentLaunchAdmission;
-  onLaunch?: (event: { agent: string; invocation: AgentInvocation | null | undefined; startedAtMs: number }) => unknown | Promise<unknown>;
+  onLaunch?: (event: { agent: string; model: string | null; invocation: AgentInvocation | null | undefined; startedAtMs: number }) => unknown | Promise<unknown>;
+  /**
+   * A persisted workflow decision can finish an agent's assignment before the
+   * provider process returns (for example, a reviewer that has submitted its
+   * verdict but stalls while composing a final chat response). The workflow
+   * owner supplies the authoritative probe; the launcher only supervises the
+   * child and reports that completion without starting a fallback agent.
+   */
+  authoritativeCompletion?: () => boolean | Promise<boolean>;
   slug?: string | null;
   role?: string | null;
   detectLimitHitFn?: typeof detectLimitHit;
@@ -92,6 +100,7 @@ export type StartAgentLoopDeps = {
   updateAgentBlockFn: AgentBlockWriter;
   launchAgentFn: AgentLauncher | null;
   onLaunch: StartAgentOptions['onLaunch'];
+  authoritativeCompletion?: StartAgentOptions['authoritativeCompletion'];
   launchAdmission?: StartAgentOptions['launchAdmission'];
   onLimitHit: StartAgentOptions['onLimitHit'];
   sessionMarkerPort: SessionMarkerPort | undefined;

@@ -46,6 +46,7 @@ export type Capability =
   | 'workflow:stop'
   | 'draft:create'
   | 'integrate:merge'
+  | 'rebase:run'
   | 'active:execute'
   | 'mission:intake'
   | 'mission:transition'

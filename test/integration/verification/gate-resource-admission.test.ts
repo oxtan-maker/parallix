@@ -7,13 +7,19 @@ import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createReviewPreparationPorts } from '../../../src/adapters/cli/commands/review-preparation.js';
-import { configureGateAdmission } from '../../../src/application/ports/gate-admission.js';
+import { configureGateAdmission, type GateAdmissionPort, type GateAdmissionRun } from '../../../src/application/ports/gate-admission.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+import { configureVerificationObservation, VERIFICATION_MEASUREMENT_EVENT,
+  type VerificationMeasurement } from '../../../src/application/ports/verification-observation.js';
 import { runConfiguredVerification } from '../../../src/adapters/verification/configured-verification.js';
 import { resolveCanonicalGateResources } from '../../../src/adapters/config/product-config.js';
 import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
-import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
+import { clearOperatorStateCache, initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
+import { clearCustomAdmissionStateCache, initCustomAdmissionState } from '../../../src/adapters/sqlite/custom-admission-state.js';
+import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
 import { createGateAdmission } from '../../../src/composition/gate-admission.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
+import { createVerificationObservation } from '../../../src/composition/verification-observation.js';
 
 async function untilGateFile(file: string): Promise<void> {
   while (!fs.existsSync(file)) { await delay(5); }
@@ -33,14 +39,78 @@ async function resourceFixture(t: TestContext, gates: object) {
     await clearCustomAdmissionStateCache();
     fs.rmSync(root, { recursive: true, force: true });
   });
-  const run = (gates: { key: string; command: string; order: number; resource?: string; after?: string[] }[]) => {
+  const run = (gates: { key: string; command: string; order: number; resource?: string; after?: string[] }[], maxParallel = 3) => {
     const result = runPhaseGates('integration', { configuration, admission, signal: controller.signal, slug: 'fixture',
-      checkoutPath: root, gates, maxParallel: 3, log: () => {}, error: () => {} });
+      checkoutPath: root, gates, maxParallel, log: () => {}, error: () => {} });
     runs.push(result);
     return result;
   };
   return { root, admission, configuration, controller, runs, run };
 }
+
+test('default admission stays independent from inherited workflow gate observations (TASK-2840)', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-default-admission-'));
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+    adapters: { gates: { resources: { test: 1 } } },
+  }));
+  const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(root, 'operator') });
+  const { db } = await initOperatorState({ configuration });
+  const history = new SqliteOperationalHistoryRepository(db);
+  configureMissionWriteAuthorization({
+    operationId: 'inherited-operation', generation: 1, inherited: true,
+    async assert(_mission, read) { await read?.('inherited-operation'); },
+  });
+  configureVerificationObservation(createVerificationObservation(history,
+    () => ({ repositoryId: 'repository', missionId: 'fixture', revision: 'revision' })));
+  t.after(async () => {
+    configureVerificationObservation(null);
+    configureMissionWriteAuthorization(null);
+    await clearCustomAdmissionStateCache();
+    await clearOperatorStateCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const result = await runPhaseGates('integration', {
+    configuration, admission: createGateAdmission(configuration), checkoutPath: root, slug: 'fixture', maxParallel: 2,
+    gates: [
+      { key: 'unit', command: 'touch unit-started', order: 0, resource: 'test' },
+      { key: 'integration-ci', command: 'touch integration-started', order: 1, resource: 'test' },
+    ],
+    log: () => {}, error: () => {},
+  });
+  assert.equal(result.ok, true, `default admission must not share an observation transaction: ${result.error}; ${result.failedGate?.stderr}`);
+  assert.equal(fs.existsSync(path.join(root, 'unit-started')), true);
+  assert.equal(fs.existsSync(path.join(root, 'integration-started')), true);
+
+  const observations = (await history.findByType(VERIFICATION_MEASUREMENT_EVENT))
+    .map(entry => JSON.parse(entry.eventData) as VerificationMeasurement);
+  const terminal = observations.filter(value => value.finishedAt);
+  assert.deepEqual(terminal.map(value => value.gate).sort(), ['integration-ci', 'unit']);
+  assert.ok(terminal.every(value => value.startedAt && value.startedAt <= value.finishedAt!),
+    'every launched child has a durable start before its terminal observation');
+
+  const admissionState = await initCustomAdmissionState(configuration);
+  const leaseCount = () => admissionState.db.query<{ count: number }>('SELECT COUNT(*) AS count FROM custom_agent_leases');
+  assert.equal((await leaseCount())[0].count, 0, 'successful commands release default-home leases');
+
+  await db.beginImmediateTransaction();
+  const controller = new AbortController();
+  const waiting = createGateAdmission(configuration).runOnResource(root, { name: 'test', capacity: 1 }, async () => {
+    assert.fail('a cancelled contender must not enter while the operator writer is held');
+  }, controller.signal);
+  const cancelledAt = Date.now();
+  controller.abort();
+  await assert.rejects(waiting, { name: 'AbortError' });
+  assert.ok(Date.now() - cancelledAt < 250, 'default-home writer contention and cancellation stay bounded');
+  await db.rollbackTransaction();
+
+  await assert.rejects(createGateAdmission(configuration).runOnResource(root, { name: 'test', capacity: 1 }, async () => {
+    throw new Error('fixture gate failed');
+  }), /fixture gate failed/);
+  assert.equal((await leaseCount())[0].count, 0, 'cancelled and failed commands release default-home leases');
+  const groups = await admissionState.db.query<{ count: number }>('SELECT COUNT(*) AS count FROM admission_process_groups');
+  assert.equal(groups[0].count, 0, 'completed admission leaves no process-group residue');
+});
 
 test('gate resources exclude holders of one resource and let independent resources overlap (px-0019)', async t => {
   const { root, admission, controller, runs } = await resourceFixture(t, { resources: { test: 1, other: 1 } });
@@ -81,46 +151,99 @@ test('a finished test gate frees its slot for another run while an unrelated gat
   assert.equal((await first).ok, true);
 });
 
-test('one mission shares its test slot across parallel checks and dependencies (TASK-2807)', async t => {
+const recorded = (key: string, body: string) => `echo "start ${key}" >> events; ${body}; echo "end ${key}" >> events`;
+const detached = (body: string) => `(${body}) >/dev/null 2>&1 3>&- 4>&- 5>&- &`;
+
+test('same-phase test gates run one command tree at a time at capacity one (TASK-2840)', async t => {
+  const { root, run } = await resourceFixture(t, { resources: { test: 1, other: 1 } });
+  const testActive = 'for i in $(seq 100); do s=$(grep -c start events 2>/dev/null); e=$(grep -c end events 2>/dev/null); '
+    + '[ "${s:-0}" -gt "${e:-0}" ] && exit 0; sleep 0.01; done; exit 1';
+  const result = await run([
+    { key: 'unit', command: `echo "start unit" >> events; ${detached('sleep 0.05; echo "end unit" >> events')}`, order: 0, resource: 'test' },
+    { key: 'integration-ci', command: recorded('integration-ci', 'sleep 0.02'), order: 1, resource: 'test' },
+    { key: 'independent', command: testActive, order: 2, resource: 'other' },
+  ], 3);
+  const events = fs.readFileSync(path.join(root, 'events'), 'utf8').trim().split('\n');
+  for (let index = 0; index < events.length; index += 2) {
+    assert.equal(events[index + 1], events[index].replace('start', 'end'),
+      `a command and its descendants settle before the next same-resource gate starts: ${events.join(', ')}`);
+  }
+  assert.equal(events.length, 4);
+  assert.equal(result.ok, true, `an independent resource overlaps test gates: ${String(result.error)}`);
+});
+
+test('resource waiters leave phase capacity to producers and reserve nothing across dependencies (TASK-2840)', async t => {
   const { root, run } = await resourceFixture(t, { resources: { test: 1 } });
+  const awaitFile = (file: string) => `for i in $(seq 100); do test -f ${file} && exit 0; sleep 0.01; done; exit 1`;
+  const parallel = await run([
+    { key: 'unit', command: awaitFile('build-done'), order: 0, resource: 'test' },
+    { key: 'integration-ci', command: 'true', order: 1, resource: 'test' },
+    { key: 'build', command: 'touch build-done', order: 2 },
+  ], 2);
+  assert.equal(parallel.ok, true, `ready producer progresses while a gate waits: ${String(parallel.error)}`);
+  const serial = await run([
+    { key: 'unit', command: 'touch serial-unit', order: 0, resource: 'test' },
+    { key: 'build', command: 'test -f serial-unit', order: 1 },
+  ], 1);
+  assert.equal(serial.ok, true, 'serial phases retain declared order');
   const first = run([
-    { key: 'unit', command: 'touch unit-start; while [ ! -f integration-start ]; do sleep 0.01; done', order: 0, resource: 'test' },
-    { key: 'integration', command: 'touch integration-start; while [ ! -f release ]; do sleep 0.01; done', order: 1, resource: 'test' },
-    { key: 'browser', command: 'touch browser-start', order: 2, after: ['unit'], resource: 'test' },
-    { key: 'smoke', command: 'touch smoke-start; while [ ! -f smoke-release ]; do sleep 0.01; done', order: 3 },
+    { key: 'build', command: awaitFile('build-go'), order: 0 },
+    { key: 'unit', command: 'touch first-unit', order: 1, after: ['build'], resource: 'test' },
   ]);
-  // Bound the reproduction before the fixture's hang deadline on the broken scheduler.
-  await delay(150);
-  assert.equal(fs.existsSync(path.join(root, 'integration-start')), true, 'checks within one mission must overlap at capacity one');
-  await untilGateFile(path.join(root, 'browser-start'));
-  await untilGateFile(path.join(root, 'smoke-start'));
-  const second = run([{ key: 'next', command: 'touch next-start', order: 0, resource: 'test' }]);
-  await delay(30);
-  assert.equal(fs.existsSync(path.join(root, 'next-start')), false, 'another mission must wait for every tagged check');
-  fs.writeFileSync(path.join(root, 'release'), '');
-  assert.equal((await second).ok, true, 'another mission proceeds while untagged smoke is still running');
-  fs.writeFileSync(path.join(root, 'smoke-release'), '');
+  assert.equal((await run([{ key: 'unit', command: 'touch second-unit', order: 0, resource: 'test' }])).ok, true);
+  assert.equal(fs.existsSync(path.join(root, 'first-unit')), false, 'unmet dependencies reserve no resource');
+  fs.writeFileSync(path.join(root, 'build-go'), '');
   assert.equal((await first).ok, true);
 });
 
-test('resource gates serialize across runs and cancellation releases the slot (px-0019)', async t => {
-  const { root, run, admission } = await resourceFixture(t, { resources: { test: 1 } });
-  const first = run([{ key: 'a', command: 'touch a-start; while [ ! -f release ]; do sleep 0.01; done; touch a-end', order: 0, resource: 'test' }]);
-  await untilGateFile(path.join(root, 'a-start'));
-  const second = run([{ key: 'b', command: 'test -f a-end && touch b-ran', order: 0, resource: 'test' }]);
-  await delay(30);
-  assert.equal(fs.existsSync(path.join(root, 'b-ran')), false);
-  fs.writeFileSync(path.join(root, 'release'), '');
-  assert.equal((await first).ok, true);
-  assert.equal((await second).ok, true, 'waiter starts only after the holder settled');
+test('cancellation removes an admitted gate queued for phase capacity before child launch (TASK-2840)', async t => {
+  const { root, admission, controller: fixture, runs } = await resourceFixture(t, { resources: { test: 1 } });
   const controller = new AbortController();
-  const cancelled = runPhaseGates('integration', { slug: 'fixture', checkoutPath: root, signal: controller.signal, maxParallel: 1,
-    gates: [{ key: 'c', command: 'touch c-start; sleep 30', order: 0, resource: 'test' }], log: () => {}, error: () => {},
-    admission });
-  await delay(60); controller.abort();
+  const observedAdmission: GateAdmissionPort = {
+    assertIndependent: admission.assertIndependent.bind(admission), run: admission.run.bind(admission),
+    async runOnResource<T>(_checkout: string, _resource: { name: string; capacity: number },
+      action: (run: GateAdmissionRun) => Promise<T>): Promise<T> {
+      await untilGateFile(path.join(root, 'blocker-a'));
+      await untilGateFile(path.join(root, 'blocker-b'));
+      fs.writeFileSync(path.join(root, 'admitted'), '');
+      return action({ signal: controller.signal, environment: {}, bindProcessGroup: () => {} });
+    },
+  };
+  const cancelled = runPhaseGates('integration', {
+    slug: 'fixture', checkoutPath: root, signal: AbortSignal.any([controller.signal, fixture.signal]), maxParallel: 2,
+    gates: [
+      { key: 'queued', command: 'touch queued-ran', order: 0, resource: 'test' },
+      { key: 'blocker-a', command: 'touch blocker-a; sleep 30', order: 1 },
+      { key: 'blocker-b', command: 'touch blocker-b; sleep 30', order: 2 },
+    ], log: () => {}, error: () => {}, admission: observedAdmission,
+  });
+  runs.push(cancelled);
+  await untilGateFile(path.join(root, 'admitted'));
+  controller.abort();
   assert.equal((await cancelled).ok, false);
-  assert.equal((await run([{ key: 'd', command: 'touch d-ran', order: 0, resource: 'test' }])).ok, true);
-  assert.equal(fs.existsSync(path.join(root, 'd-ran')), true);
+  assert.equal(fs.existsSync(path.join(root, 'queued-ran')), false);
+});
+
+test('resource gates serialize across runs; failure and cancellation retain descendants (TASK-2840)', async t => {
+  const { root, run, admission, controller: fixture, runs } = await resourceFixture(t, { resources: { test: 1 } });
+  const failed = run([{ key: 'f', command: `${detached('sleep 0.1')} echo $! > f-child; exit 3`, order: 0, resource: 'test' }]);
+  await untilGateFile(path.join(root, 'f-child'));
+  const afterFailure = run([{ key: 'g', command: '! kill -0 "$(cat f-child)" 2>/dev/null', order: 0, resource: 'test' }]);
+  assert.equal((await failed).ok, false);
+  assert.equal((await afterFailure).ok, true, 'failure holds its slot until descendants settle');
+  const controller = new AbortController();
+  const cancelled = runPhaseGates('integration', { slug: 'fixture', checkoutPath: root,
+    signal: AbortSignal.any([controller.signal, fixture.signal]), maxParallel: 1,
+    gates: [{ key: 'c', command: 'sleep 30 & echo $! > c-child; wait', order: 0, resource: 'test' }], log: () => {}, error: () => {},
+    admission });
+  runs.push(cancelled);
+  await untilGateFile(path.join(root, 'c-child'));
+  const waiting = run([{ key: 'd', command: '! kill -0 "$(cat c-child)" 2>/dev/null && touch d-ran', order: 0, resource: 'test' }]);
+  await delay(30);
+  assert.equal(fs.existsSync(path.join(root, 'd-ran')), false);
+  controller.abort();
+  assert.equal((await cancelled).ok, false);
+  assert.equal((await waiting).ok, true, 'waiting work starts after the cancelled child settles');
 });
 
 test('undeclared or invalid resources fail before any gate child launches (px-0019)', async t => {

@@ -25,12 +25,12 @@ type SetupOptions = SetupAnswerOptions & ReviewBootstrapOptions & { rootDir?: st
 export function parseYesNo(value: string | undefined, defaultValue?: boolean): boolean { if (typeof value !== 'string' || value.trim() === '') {return defaultValue ?? true;} return ['y', 'yes'].includes(value.trim().toLowerCase()) ? true : ['n', 'no'].includes(value.trim().toLowerCase()) ? false : defaultValue ?? true; }
 export function defaultProductName(rootDir?: string): string { return path.basename(rootDir || process.cwd()) || 'Workflow Project'; }
 export function defaultRepoSlug(rootDir?: string, ownerLogin?: string): string { return `${ownerLogin || 'human'}/${path.basename(rootDir || process.cwd()) || 'project'}`; }
-export function detectPrimaryBranchDefault(rootDir?: string, options: { spawnSyncFn?: (command: string, args: readonly (string | undefined)[], options: { encoding: 'utf8' }) => { status: number | null; stdout?: string }; configuredPrimaryBranch?: string | null } = {}): string {
+export function detectPrimaryBranchDefault(rootDir?: string, options: { spawnSyncFn?: (command: string, args: readonly (string | undefined)[], options: { encoding: 'utf8'; env?: NodeJS.ProcessEnv }) => { status: number | null; stdout?: string }; configuredPrimaryBranch?: string | null } = {}): string {
   const spawnSyncFn = options.spawnSyncFn || ((command, args, settings) => spawnSync(command, args as string[], settings)); const configuredPrimaryBranch = options.configuredPrimaryBranch || null;
-  const listed = spawnSyncFn('git', ['-C', rootDir, 'branch', '--list', '--format=%(refname:short)', 'main', 'master'], { encoding: 'utf8' });
+  const listed = spawnSyncFn('git', ['-C', rootDir, 'branch', '--list', '--format=%(refname:short)', 'main', 'master'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8' });
   const branches = listed.status === 0 ? (listed.stdout || '').split('\n').map((value: string) => value.trim()).filter(Boolean) : [];
   if (configuredPrimaryBranch && branches.includes(configuredPrimaryBranch)) {return configuredPrimaryBranch;}
-  const current = spawnSyncFn('git', ['-C', rootDir, 'branch', '--show-current'], { encoding: 'utf8' }); const branch = current.status === 0 ? (current.stdout || '').trim() : '';
+  const current = spawnSyncFn('git', ['-C', rootDir, 'branch', '--show-current'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8' }); const branch = current.status === 0 ? (current.stdout || '').trim() : '';
   return branch === 'main' || branch === 'master' ? branch : branches.includes('main') ? 'main' : branches.includes('master') ? 'master' : configuredPrimaryBranch || 'main';
 }
 

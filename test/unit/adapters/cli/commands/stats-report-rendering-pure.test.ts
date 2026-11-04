@@ -6,6 +6,14 @@ import { reviewStatisticsObservation } from '../../../../fixtures/review-statist
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as sr from '../../../../../src/adapters/cli/commands/stats.js';
+import type { ReviewReturnOrigin } from '../../../../../src/application/services/review-statistics.js';
+
+const fixtureOrigin: ReviewReturnOrigin = {
+  actor: null, stage: 'workflow', decisionIdentity: null, revision: null, sender: null,
+};
+function observedReturn(identity: string, author: string | null, at: string | null) {
+  return { identity, author, at, origin: fixtureOrigin };
+}
 
 function row(overrides: Record<string, unknown> = {}) {
   return {
@@ -144,14 +152,14 @@ test('a same-family model replacement keeps earlier returns with the model that 
   const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' }),
     row({ stage: 'default', model: '', date: '2024-01-25' })];
   const observation = { ...reviewStatisticsObservation('codex', 3, { codex: 3 }), returns: [
-    { identity: 'r1', author: 'codex', at: '2024-01-12T00:00:00Z' }, { identity: 'r2', author: 'codex', at: '2024-01-13T00:00:00Z' }, { identity: 'r3', author: 'codex', at: '2024-01-22T00:00:00Z' }] };
+    observedReturn('r1', 'codex', '2024-01-12T00:00:00Z'), observedReturn('r2', 'codex', '2024-01-13T00:00:00Z'), observedReturn('r3', 'codex', '2024-01-22T00:00:00Z')] };
   const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']), completedMissionOwners: new Map([['acme/app::task-1', 'codex']]),
     reviewObservations: new Map([['acme/app::task-1', observation]]) });
   assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds]), [['gpt-6-astra', 1], ['gpt-6.1-sol', 2]]);
 });
 
 test('same-day model switches leave a return unattributed; a single model owns all of an agent work (TASK-2832)', () => {
-  const observed = (at: string) => ({ ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [{ identity: 'r', author: 'codex', at }] });
+  const observed = (at: string) => ({ ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [observedReturn('r', 'codex', at)] });
   const summarize = (rows: ReturnType<typeof row>[], at: string) => sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
     completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observed(at)]]) });
   const sameDay = summarize([row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-10' })], '2024-01-10T09:00:00Z');
@@ -161,7 +169,7 @@ test('same-day model switches leave a return unattributed; a single model owns a
 });
 
 test('a return no author can claim makes named model cells incomplete, never a measured zero (TASK-2832)', () => {
-  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 0, unknown: 1 }), returns: [{ identity: 'r', author: null, at: null }] };
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 0, unknown: 1 }), returns: [observedReturn('r', null, null)] };
   const out = sr.summarizeAgentWindow([row({ stage: 'active', model: 'gpt-6.1-sol' })], WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
     completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
   assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6.1-sol', 0, true], [null, 1, false]]);
@@ -169,7 +177,7 @@ test('a return no author can claim makes named model cells incomplete, never a m
 
 test('an unattributable return only makes incomplete the models its author could have used (TASK-2832)', () => {
   const rows = [row({ stage: 'active', model: 'gpt-6.1-sol' }), row({ stage: 'default', model: '' })];
-  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 0, claude: 1 }), returns: [{ identity: 'r', author: 'claude', at: null }] };
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 0, claude: 1 }), returns: [observedReturn('r', 'claude', null)] };
   const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
     completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
   assert.deepEqual(out.map(item => [item.model, item.measuredMissions, item.reimplementationRounds, item.incomplete]), [['gpt-6.1-sol', 1, 0, false], [null, 1, 1, false]]);
@@ -177,7 +185,7 @@ test('an unattributable return only makes incomplete the models its author could
 
 test('mixed earlier telemetry voids the single-model shortcut for work returned before the replacement (TASK-2832)', () => {
   const rows = [row({ stage: 'active', model: 'mixed', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-12' })];
-  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [{ identity: 'r', author: 'codex', at: '2024-01-11T09:00:00Z' }] };
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [observedReturn('r', 'codex', '2024-01-11T09:00:00Z')] };
   const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
     completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
   assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6-astra', 0, true], [null, 1, false]]);
@@ -185,8 +193,8 @@ test('mixed earlier telemetry voids the single-model shortcut for work returned 
 
 test('unknown-author uncertainty does not depend on return order (TASK-2832)', () => {
   const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' })];
-  const unknown = { identity: 'u', author: null, at: null }, sol = { identity: 's', author: 'codex', at: '2024-01-12T00:00:00Z' };
-  const run = (returns: { identity: string; author: string | null; at: string | null }[]) => sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
+  const unknown = observedReturn('u', null, null), sol = observedReturn('s', 'codex', '2024-01-12T00:00:00Z');
+  const run = (returns: ReturnType<typeof observedReturn>[]) => sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
     completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', { ...reviewStatisticsObservation('codex', 2, { codex: 1, unknown: 1 }), returns }]]) });
   assert.deepEqual(run([unknown, sol]), run([sol, unknown]));
   assert.equal(run([unknown, sol]).find(item => item.model === 'gpt-6.1-sol')?.incomplete, true);
@@ -203,7 +211,7 @@ test('a mission without return evidence is named as unmeasured, never turned int
 test('newer unknown telemetry between a concrete model and the return prevents a stale attribution (TASK-2832)', () => {
   const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-05' }), row({ stage: 'follow-up', model: 'mixed', date: '2024-01-10' }),
     row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' })];
-  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [{ identity: 'r', author: 'codex', at: '2024-01-15T09:00:00Z' }] };
+  const observation = { ...reviewStatisticsObservation('codex', 1, { codex: 1 }), returns: [observedReturn('r', 'codex', '2024-01-15T09:00:00Z')] };
   const out = sr.summarizeAgentWindow(rows, WIN, { completedMissionKeys: new Set(['acme/app::task-1']),
     completedMissionOwners: new Map([['acme/app::task-1', 'codex']]), reviewObservations: new Map([['acme/app::task-1', observation]]) });
   assert.deepEqual(out.map(item => [item.model, item.reimplementationRounds, item.incomplete]), [['gpt-6-astra', 0, true], [null, 1, false]]);

@@ -13,6 +13,7 @@ import { caseRoot } from '../../fixtures/case-root.js';
 import { cleanupFixtureProcesses, registerFixtureCleanup } from '../../helpers/fixture-cleanup.js';
 import { mkdtempAt } from '../../helpers/temp-dir.js';
 import { recoverRecordedTempRoots } from '../../../src/adapters/verification/temp-root-registry.js';
+import { probeProcessLiveness } from '../../../src/adapters/process/process-liveness.js';
 
 const TEST_ROOT = path.join(import.meta.dirname, '..', '..');
 const REPO_ROOT = path.dirname(TEST_ROOT);
@@ -117,7 +118,18 @@ test('a hard-killed covered runner leaves recoverable scratch instead of untrack
   cleanupFixtureProcesses(checkout.root);
   await closed;
   assert.ok(fs.existsSync(scratch), 'SIGKILL bypasses ordinary runner cleanup');
-  recoverRecordedTempRoots({ legacyCoverageBases: [temporary] });
+  const owner = JSON.parse(fs.readFileSync(path.join(scratch, '.parallix-scratch-owner.json'), 'utf8')) as {
+    children?: { pid: number; startId: string | null }[];
+  };
+  const descendants = owner.children ?? [];
+  const descendantDeadline = Date.now() + 5_000;
+  while (descendants.some(({ pid, startId }) => probeProcessLiveness(pid, startId) !== false)
+    && Date.now() < descendantDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  assert.equal(descendants.some(({ pid, startId }) => probeProcessLiveness(pid, startId) !== false), false,
+    'fixture suite descendants settle before the next-run recovery pass');
+  recoverRecordedTempRoots({ legacyCoverageBases: [temporary], ownerLiveness: probeProcessLiveness });
   assert.equal(fs.existsSync(scratch), false, 'next-run recovery reclaims runner-owned coverage scratch');
 });
 

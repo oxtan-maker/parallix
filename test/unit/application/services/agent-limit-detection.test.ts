@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { detectLimitHit, formatBlockUntil, ceilToNextHour, endOfCurrentUtcMonth } from '../../../../src/application/services/agent-limit.js';
 import { failureReason, type FailureReason } from '../../../../src/domain/failure-reason.js';
+import { normalizeProviderFailure } from '../../../../src/adapters/process/failure-normalization.js';
 
 const now = new Date('2026-05-01T11:15:00Z');
 const diagnostic = 'Forgejo forbidden; quota exhausted; authentication failed; rate limit reached';
@@ -31,6 +33,16 @@ for (const agent of ['claude', 'codex', 'custom', 'qwen', 'mistral', 'vibe', 'un
 test('successful launches do not persist quota blocks from quoted evidence', () => {
   assert.equal(detectLimitHit({ agent: 'claude', status: 0, failureReason: failureReason('agent-quota', 'provider'), now }), null);
   assert.equal(detectLimitHit({ agent: '', status: 1, failureReason: failureReason('agent-quota', 'provider'), now }), null);
+});
+
+test('normalized Claude rate-limit stream drives reset-aware block detection (TASK-2838)', () => {
+  const stdout = fs.readFileSync(new URL('../../../fixtures/claude-quota-rejected.jsonl', import.meta.url), 'utf8');
+  const normalized = normalizeProviderFailure({ status: 1, stdout });
+  const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: normalized, now: new Date('2026-11-03T18:00:00Z') });
+
+  assert.equal(hit?.source, 'structured');
+  assert.equal(hit?.reason, 'typed: agent-quota');
+  assert.equal(hit?.until, formatBlockUntil(ceilToNextHour(new Date('2026-11-03T20:50:00.000Z'))));
 });
 
 test('model entitlement and transient rate limit reroute without family blocks', () => {

@@ -11,6 +11,7 @@ export type ExecutionActivityStage =
   | 'waiting'
   | 'review'
   | 'review-response'
+  | 'rebase'
   | 'integrate'
   /**
    * A fleet recovery supervisor is working this mission: the supervision
@@ -27,13 +28,25 @@ export type ExecutionActivityStage =
  *  - `blocked` — the operation could not continue autonomously (for example
  *    every eligible agent family is unavailable) and needs an operator.
  */
-export type ExecutionActivityState = 'running' | 'ended' | 'blocked';
+export type ExecutionActivityState = 'running' | 'ended' | 'blocked' | 'interrupted' | 'cancelled';
+export type ExecutionActivityActor = 'parallix' | 'lead' | 'human' | 'external' | 'unattributed' | AgentFamily;
+export type ExecutionTimeState = 'working' | 'waiting' | 'held';
 
 export interface ExecutionActivity {
   readonly purpose?: 'repair';
   readonly missionId: MissionId;
   /** Correlates the events of one operation. Not a durable run identity. */
   readonly operationId: string;
+  readonly operationGeneration?: number | null;
+  readonly revision?: string | null;
+  readonly attempt?: number | null;
+  readonly dependencies?: readonly string[] | null;
+  /** Actual responsibility at this boundary; never inferred from lane or absence. */
+  readonly actor?: ExecutionActivityActor;
+  /** Configured/concrete model when the launching boundary supplies it. */
+  readonly model?: string | null;
+  /** Wall-time semantics kept separate from true work/resource totals. */
+  readonly timeState?: ExecutionTimeState;
   readonly phase: ExecutionActivityStage;
   readonly state: ExecutionActivityState;
   /** One operator-facing line describing what is happening. */
@@ -129,7 +142,7 @@ export function advanceExecutionActivity(
   if (state.closedSources.includes(sourceId)) { return state; }
   const index = state.frames.findIndex(frame => frame.sourceId === sourceId);
   if (event.state === 'blocked' && index < 0 && state.frames.length) { return state; }
-  return event.state === 'ended' ? closeActivityFrame(state, event, sourceId, index)
+  return ['ended', 'interrupted', 'cancelled'].includes(event.state) ? closeActivityFrame(state, event, sourceId, index)
     : updateActivityFrame(state, event, sourceId, index);
 }
 
@@ -186,7 +199,7 @@ export function projectExecutionActivity(
 function observeActivity(snapshot: ExecutionActivitySnapshot, options: ActivityObservation): ObservedExecutionFacts {
   const event = snapshot.frames.at(-1)?.event ?? snapshot.terminal;
   const blocker = snapshot.retainedBlocker;
-  if (!event || event.state === 'ended') {
+  if (!event || ['ended', 'interrupted', 'cancelled'].includes(event.state)) {
     return { operationId: snapshot.operationId, currentWork: null, blockingReason: blocker?.blockedReason ?? null };
   }
   if (event.state === 'blocked') {

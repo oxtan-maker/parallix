@@ -125,7 +125,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'workflow-admission-owner', family: 'launch',
     fileLocation: 'src/application/workflow-operation-service.ts',
-    line: 94, anchor: 'async admit(request: BoardCommandRequest)',
+    line: 95, anchor: 'async admit(request: BoardCommandRequest)',
     reads: ['WorkflowOperation', 'Mission'],
     requirement: 'One durable command identity spans admission, exclusive fenced ownership, recovery, phases and outcomes; provider launches remain attributed evidence beneath it.',
     perLaunchIdentity: 'none', perWorkflowIdentity: 'durable-command',
@@ -159,7 +159,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'launch-session-resume',
     family: 'launch',
     fileLocation: 'src/adapters/agents/agent-launch-preparation.ts',
-    line: 129,
+    line: 130,
     anchor: 'await launchSessionMarkerPort.shouldResume(',
     reads: ['SessionMarker', 'Mission'],
     requirement:

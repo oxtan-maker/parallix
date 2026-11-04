@@ -5,12 +5,14 @@ import * as fmt from "../../application/presentation/cli-format.js";
 import { DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS, DRAFT_NO_OUTPUT_INITIAL_DELAY_MS } from "./launcher-selection.js";
 import { withSandboxProfile } from "../process/bubblewrap.js";
 import { openRunSession } from "./run-session.js";
+import type { SupervisedChild } from '../process/spawn-tee.js';
 import type { PreparedLaunch, StartAgentLoopDeps } from './agent-launch-context.js';
 import { sessionMissionId } from './agent-launch-authority.js';
 
 
 // A watchdog tick is only news once the agent's output has been silent this long.
 export const QUIET_STREAM_REPORT_MS = 15_000;
+const AUTHORITATIVE_COMPLETION_POLL_MS = 100;
 
 
 export function formatElapsed(elapsedMs: number) {
@@ -28,7 +30,7 @@ export function formatElapsed(elapsedMs: number) {
  * Bubblewrap-wrapped agent dies with its wrapper (--die-with-parent), so
  * signalling the direct child covers both wrapped and unwrapped launches.
  */
-export async function stopLaunchedChild(child: { pid?: number } | null): Promise<void> {
+export async function stopLaunchedChild(child: ({ pid?: number } & Pick<SupervisedChild, 'terminateTree'>) | null): Promise<void> {
   const pid = child?.pid;
   if (typeof pid !== 'number') { return; }
   const isAlive = (): boolean => {
@@ -36,13 +38,46 @@ export async function stopLaunchedChild(child: { pid?: number } | null): Promise
     catch (err) { return (err as NodeJS.ErrnoException).code === 'EPERM'; }
   };
   if (!isAlive()) { return; }
-  try { process.kill(pid, 'SIGTERM'); } catch { return; }
+  try { child?.terminateTree ? child.terminateTree('SIGTERM') : process.kill(pid, 'SIGTERM'); } catch { return; }
   for (let attempt = 0; attempt < 40 && isAlive(); attempt += 1) {
     await new Promise((resolve) => { setTimeout(resolve, 50); });
   }
   if (isAlive()) {
-    try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    try { child?.terminateTree ? child.terminateTree('SIGKILL') : process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
   }
+}
+
+export async function awaitAgentResult(
+  resultPromise: Promise<AgentProcessResult>,
+  authoritativeCompletion: StartAgentLoopDeps['authoritativeCompletion'],
+  child: { pid?: number } | null,
+  log: StartAgentLoopDeps['log'],
+  stopChild: typeof stopLaunchedChild = stopLaunchedChild,
+): Promise<AgentProcessResult> {
+  if (!authoritativeCompletion || typeof child?.pid !== 'number') { return await resultPromise; }
+  let polling = true;
+  const completion = (async () => {
+    while (polling) {
+      try {
+        if (await authoritativeCompletion()) { return true; }
+      } catch {
+        // Persistence may be momentarily busy while the verdict transaction
+        // commits. A failed observation is not evidence of completion.
+      }
+      await new Promise(resolve => { setTimeout(resolve, AUTHORITATIVE_COMPLETION_POLL_MS); });
+    }
+    return false;
+  })();
+  const observed = await Promise.race([
+    resultPromise.then(result => ({ kind: 'provider' as const, result })),
+    completion.then(done => ({ kind: 'workflow' as const, done })),
+  ]);
+  polling = false;
+  if (observed.kind === 'provider' || !observed.done) { return observed.kind === 'provider' ? observed.result : await resultPromise; }
+  log(fmt.status('INFO', 'The workflow recorded the agent assignment outcome; stopping the provider session after authoritative completion.'));
+  await stopChild(child);
+  const stopped = await resultPromise;
+  return { ...stopped, status: 0, signal: null, error: null, failureReason: undefined, completedAuthoritatively: true };
 }
 
 
@@ -52,12 +87,12 @@ async function authorizeLaunch(slug: string | null, admission: StartAgentLoopDep
 }
 
 /** Run the launcher, announce the invocation, and await the result. */
-export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'launchAdmission'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
+export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'authoritativeCompletion' | 'launchAdmission'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation: AgentInvocation | null | undefined;
   let result: AgentProcessResult | undefined;
-  let launchedChild: { pid?: number } | null = null;
+  let launchedChild: SupervisedChild | null = null;
   // The lifecycle persistence deadline (TASK-2582 SC8) is measured from
   // destination-work start to successful persistence. Destination work starts
   // when the agent's child process actually spawns, so the clock begins at the
@@ -70,7 +105,8 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
   // onLaunch.
   let startedAtMs = monotonicNowMs();
   // Durable run history and the optional tmux terminal host (TASK-2643).
-  const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt, log: (line) => log(line) }, { configuration: deps.configuration });
+  const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt,
+    model, log: (line) => log(line) }, { configuration: deps.configuration });
   try {
     await authorizeLaunch(slug, deps.launchAdmission);
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
@@ -87,7 +123,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
       sessionMarkerPort: launchSessionMarkerPort,
       teeOptions: {
         ...runSession?.teeOptions,
-        onSpawn: (child: {pid?: number}) => {
+        onSpawn: (child: SupervisedChild) => {
           // The child is spawned now: destination work has started, so the
           // lifecycle persistence deadline starts here (not pre-spawn).
           startedAtMs = monotonicNowMs();
@@ -155,7 +191,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
 
     if (deps.onLaunch) {
       try {
-        await deps.onLaunch({ agent: chosen, invocation, startedAtMs });
+        await deps.onLaunch({ agent: chosen, model: prepared.model, invocation, startedAtMs });
       } catch (err) {
         // A rejecting launch callback (a refused authoritative boundary, a
         // failed current-work publication) must not leave the already-spawned
@@ -165,7 +201,9 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
       }
     }
 
-    result = resultPromise ? await resultPromise : launchResult.result!;
+    result = resultPromise
+      ? await awaitAgentResult(resultPromise, deps.authoritativeCompletion, launchedChild, log)
+      : launchResult.result!;
   } finally {
     customReservation?.release();
     runSession?.finish(result);

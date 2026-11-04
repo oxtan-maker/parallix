@@ -1,11 +1,13 @@
 import { reviewStatistics } from './services/review-statistics.js';
 import type { ApplicationOutcome, Cancellation, Capability } from './contracts.js';
 import { failure, rejected } from './contracts.js';
-import type { ProgressPort, StatsBackfillPort, StatsProjection } from './ports.js';
+import type { ProgressPort, StatsBackfillPort, StatsProjection, StatsRecoveryTarget } from './ports.js';
 
 export interface StatsBackfillRequest {
   readonly operationId: string;
   readonly apply: boolean;
+  /** Recovery writes only to a consistent copy of operator state. */
+  readonly isolatedCopy?: StatsRecoveryTarget;
   readonly capabilities: ReadonlySet<Capability>;
   readonly cancellation?: Cancellation;
 }
@@ -16,14 +18,16 @@ export class StatsBackfillService {
   async execute(request: StatsBackfillRequest): Promise<ApplicationOutcome<StatsProjection>> {
     if (!request.operationId) {return rejected('validation', 'operationId is required');}
     if (request.apply && !request.capabilities.has('stats:apply')) {return rejected('capability', 'stats:apply capability is required');}
+    if (request.apply && !request.isolatedCopy?.databasePath) {return rejected('validation', 'stats recovery apply requires an isolated consistent database copy');}
+    const target = request.isolatedCopy && { databasePath: request.isolatedCopy.databasePath, materialize: request.apply };
     if (request.cancellation?.requested) {return failure('cancelled', 'cancelled before reading projection');}
     this.emit(request.operationId, 1, 'read', 'reading stats projection');
     try {
-      const projection = await this._port.readProjection();
+      const projection = await this._port.readProjection(target);
       if (!request.apply) {return { status: 'completed', value: projection, durableEvidence: [] };}
       if (request.cancellation?.requested) {return failure('cancelled', 'cancelled before applying rows');}
       this.emit(request.operationId, 2, 'apply', 'applying stats rows');
-      const evidence = await this._port.applyRows(projection.rows);
+      const evidence = await this._port.applyProjection(projection, target);
       return { status: 'completed', value: projection, durableEvidence: evidence };
     } catch (error) {
       return failure('unavailable', error instanceof Error ? error.message : 'stats dependency unavailable');
@@ -64,7 +68,7 @@ export function reconstructReviewMeasurements(missions: readonly import('../doma
     changes.push({ mission: mission.id,
       before: rollups.map(storedCount),
       beforeObserved: rollups.some(row => storedCount(row) !== null),
-      after: info.total, byImplementer: info.byImplementer });
+      after: info.total, byImplementer: info.byImplementer, returns: info.returns });
   }
   const knownIds = new Set(missions.map(mission => String(mission.id)));
   for (const row of existing) {

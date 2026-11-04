@@ -9,7 +9,7 @@ const MainWorktreeDetector = {
 };
 
 function getGitPath(cwd: string, args: string[]) {
-  const result = spawnSync('git', ['-C', cwd, ...args], {
+  const result = spawnSync('git', ['-C', cwd, ...args], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
     // A busy host (parallel test workers, other jobs) can push a cold git
@@ -84,7 +84,7 @@ function cacheMainWorktree(commonDir: string, value: string | null) {
 }
 
 function listWorktreeLines(cwd: string, warn: (_message: string) => void): string[] | null {
-  const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
+  const result = spawnSync('git', ['-C', cwd, 'worktree', 'list', '--porcelain'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 });
   if (result.status === 0) { return result.stdout.split('\n'); }
   warn(worktreeLookupWarning(`git exited with status ${result.status}`));
   return null;

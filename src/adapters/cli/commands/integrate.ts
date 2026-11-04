@@ -57,7 +57,7 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
     },
     git: {
       git: args => git.git(args),
-      getCurrentBranch: () => git.getCurrentBranch(),
+      getCurrentBranch: root => git.getCurrentBranch(root),
       detectRebaseState: rootDir => git.detectRebaseState(rootDir),
     },
     backlog: {

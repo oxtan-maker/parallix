@@ -79,9 +79,12 @@ export interface DecisionConfiguration {
 }
 
 export interface RuntimeConfiguration {
+  readonly gitAdmissionMarkers?: Readonly<Record<string, string>>;
   readonly gateOwner?: string;
   readonly workflowOperation?: string;
   readonly workflowGeneration?: number | null;
+  /** Enclosing supervised process-tree boundary, resolved once by composition. */
+  readonly resourceBoundary?: string;
   readonly gitIdentity: { readonly authorName: string; readonly authorEmail: string; readonly committerName: string; readonly committerEmail: string };
   readonly ci: boolean;
   readonly noTui: boolean;

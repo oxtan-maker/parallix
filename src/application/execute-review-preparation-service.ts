@@ -32,7 +32,7 @@ export interface ExecuteReviewPreparationRequest {
   readonly continueIntegrationRepair?: () => Promise<boolean | null>;
   readonly beginReviewPreparation?: () => Promise<void>;
   readonly prepareImplementationRepair?: (_diagnostic: string, _reason?: ReboundReason) => Promise<void>;
-  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase) => Promise<void>;
+  readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase, _model?: string | null) => Promise<void>;
   readonly onAutonomousStop?: (_reason: string) => Promise<void>;
   readonly onImplementerLaunched?: (_agent: string) => Promise<void>;
 }
@@ -195,7 +195,7 @@ export class ExecuteReviewPreparationService {
         slug: request.slug, worktree: request.worktree, agent: request.agent,
         prompt: typeof options.prompt === 'function' ? options.prompt(request.agent) : String(options.prompt ?? ''),
         sessionPolicy: options.sessionPolicy,
-        onAgentChanged: async agent => { await request.onImplementerLaunched?.(agent); await request.onAgentLaunched?.(agent, 'review-response'); },
+        onAgentChanged: async (agent, model) => { await request.onImplementerLaunched?.(agent); await request.onAgentLaunched?.(agent, 'review-response', model); },
       }),
       applyAgentFallback: async ({ launchResult, original }) => {
         const actual = launchResult?.agent || original;

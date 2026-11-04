@@ -36,7 +36,9 @@ export function createLeadOperatorJudgment(services: ProductionApplicationServic
     },
     record: async event => {
       if (!services.mission) { throw new Error('Operator judgment history unavailable.'); }
-      await services.mission.operationalHistory.append('lead.operator-judgment', JSON.stringify(event));
+      await services.mission.operationalHistory.append('lead.operator-judgment', JSON.stringify({
+        ...event, repositoryId: services.mission.repositoryId,
+      }));
       fmt.log.info(`[lead] operator judgment ${event.action}: ${event.summary}; evidence ${event.evidenceRefs.join(', ')}; consultations ${event.invocations}`);
     },
   });

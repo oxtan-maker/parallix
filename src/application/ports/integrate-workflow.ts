@@ -66,7 +66,7 @@ export interface IntegrateFileSystemPort {
 
 export interface IntegrateGitPort {
   git: IntegrateGitRunner;
-  getCurrentBranch(): string;
+  getCurrentBranch(_rootDir?: string): string;
   detectRebaseState(_rootDir: string): { inProgress: boolean; rebaseHead?: string | null; unmergedFiles: string[] };
 }
 
@@ -158,7 +158,8 @@ export interface IntegrateReviewPort {
 }
 
 export interface IntegrateRebasePort {
-  createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: IntegrationMissionServicesFactory; exitFn: (_code: number) => void }): RebaseWorkflowPort;
+  createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: IntegrationMissionServicesFactory;
+    rebaseObservationStage?: 'integration-rebase'; exitFn: (_code: number) => void }): RebaseWorkflowPort;
 }
 
 export interface IntegrationGateRunResult {

@@ -27,6 +27,7 @@ import { resolveConfiguredCredentialRedactor } from '../application/recovery-evi
 import type { createProductionApplicationServices } from './application-services.js';
 import { createMissionStore } from './mission-persistence.js';
 import { startWorkflowRecovery } from './workflow-recovery.js';
+import { git } from '../adapters/git/git.js';
 
 /** Admission owns a dedicated connection, never the HTTP graph's shared handle. */
 export async function composeWorkflowOperations(root: string, configuration: ParallixConfiguration, dispatcher: BoardCommandDispatcher,
@@ -73,7 +74,10 @@ export async function composeWorkflowOperations(root: string, configuration: Par
     }, observe === false ? undefined : observer!({
       history: mission => observedTerminal().history(mission),
       page: (mission, request) => observedTerminal().page(mission, request),
-    }, observe, undefined, undefined, operations.activity), undefined, eligible);
+    }, observe, undefined, undefined, operations.activity), undefined, eligible, () => {
+      const head = git(['-C', root, 'rev-parse', 'HEAD']);
+      return head.status === 0 ? head.stdout.trim() : null;
+    });
   const failureEvidence = async (operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord) => {
     const history = (await loadTerminal()).history(operation.missionId);
     let gates: ReturnType<typeof listRecoveryEvidence> = [];
@@ -182,7 +186,7 @@ async function executeWorkflowCommand(id: string, operation: import('../applicat
   try {
     const controller = graph.presentationCapabilities?.commandController;
     if (!controller) { throw new Error('Workflow authority is unavailable'); }
-    configureMissionWriteAuthorization({ operationId: id, start: current, providerStarted: agent => service.providerStarted(id, current.generation, agent), activity: (event, sourceId) => service.activity(id, current.generation, event, sourceId), assert: async (mission, read) => {
+    configureMissionWriteAuthorization({ operationId: id, generation: current.generation, start: current, providerStarted: agent => service.providerStarted(id, current.generation, agent), activity: (event, sourceId) => service.activity(id, current.generation, event, sourceId), assert: async (mission, read) => {
       if (mission !== operation.missionId) { throw new Error('Workflow cannot mutate another mission'); }
       if (read) {
         const owner = await read(id);

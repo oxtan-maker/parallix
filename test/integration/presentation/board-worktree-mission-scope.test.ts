@@ -91,61 +91,75 @@ function writeCatalog(root: string, statuses: readonly string[]): void {
   writeTask(root, 'archive/tasks', 'task-2438-archived', 'active');
 }
 
-test('task-2438 board reads persisted repository missions from every worktree', async () => {
+function projectedLanes(projection: Awaited<ReturnType<ReturnType<typeof board>['builder']['build']>>): Map<string, string> {
+  return new Map(
+    projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.lane])),
+  );
+}
+
+function expectedLanes(): Map<string, string> {
+  return new Map([
+    ['task-2438-backlog', 'backlog'],
+    ['task-2438-active', 'active'],
+    ['task-2438-review', 'review'],
+    ['task-2438-integration', 'integration'],
+    ['task-2438-sibling', 'active'],
+    ['task-2438-archived', 'active'],
+    ['task-2438-done', 'done'],
+  ]);
+}
+
+test('task-2438 board reads persisted repository missions from the primary worktree', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2438-'));
-  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2438-'));
   try {
     writeCatalog(root, ['refined', 'review', 'ready-for-integration']);
-    writeCatalog(secondRoot, ['backlog', 'refined', 'active']);
-    writeTask(secondRoot, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
     // Legacy checkpoint files must never replace or supply recorded evidence.
     const checkpoint = path.join(root, 'missions/task-2438-active/CP-1.md');
     fs.mkdirSync(path.dirname(checkpoint), { recursive: true });
     fs.writeFileSync(checkpoint, '# CP-1: stale file evidence\n');
     const firstBoard = board(root);
     const projection = await firstBoard.builder.build();
-    const secondProjection = await board(secondRoot).builder.build();
     // Metrics must use the board's supplied repository identity and history,
     // even when the worktree has no Git metadata or operator database.
-    for (const result of [projection, secondProjection]) {
-      assert.deepEqual(result.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
-      assert.equal(result.metrics.verification?.executionMs, 0);
-      assert.equal(result.metrics.verification?.cpuUs, null);
-    }
-    const lanes = new Map(
-      projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.lane])),
-    );
-    const secondLanes = new Map(
-      secondProjection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.lane])),
-    );
+    assert.deepEqual(projection.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
+    assert.equal(projection.metrics.verification?.executionMs, 0);
+    assert.equal(projection.metrics.verification?.cpuUs, null);
+    const lanes = projectedLanes(projection);
 
-    assert.deepEqual(lanes, new Map([
-      ['task-2438-backlog', 'backlog'],
-      ['task-2438-active', 'active'],
-      ['task-2438-review', 'review'],
-      ['task-2438-integration', 'integration'],
-      ['task-2438-sibling', 'active'],
-      ['task-2438-archived', 'active'],
-      ['task-2438-done', 'done'],
-    ]));
-    assert.deepEqual(secondLanes, lanes);
+    assert.deepEqual(lanes, expectedLanes());
     assert.equal(lanes.has(missionId('task-2438-done')), true);
     const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
-    const secondTitles = new Map(secondProjection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
     // Saved planning fields are authoritative even when a worktree has stale intake.
     assert.equal(titles.get(missionId('task-2438-active')), 'Recorded active title');
-    assert.equal(secondTitles.get(missionId('task-2438-active')), 'Recorded active title');
     assert.equal(titles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
-    assert.equal(secondTitles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
     assert.equal(titles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
-    assert.equal(secondTitles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
     assert.equal((await firstBoard.missionQuery.detail(missionId('task-2438-backlog')))?.id, missionId('task-2438-backlog'));
     const active = await firstBoard.missionQuery.detail(missionId('task-2438-active'));
     assert.deepEqual(active?.checkpoints, []);
     assert.equal(requestedRepository.value, repository);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(secondRoot, { recursive: true, force: true });
+  }
+});
+
+test('task-2438 board reads persisted repository missions from a sibling worktree', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2438-'));
+  try {
+    writeCatalog(root, ['backlog', 'refined', 'active']);
+    writeTask(root, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
+    const projection = await board(root).builder.build();
+
+    assert.deepEqual(projection.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
+    assert.equal(projection.metrics.verification?.executionMs, 0);
+    assert.equal(projection.metrics.verification?.cpuUs, null);
+    assert.deepEqual(projectedLanes(projection), expectedLanes());
+    const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
+    assert.equal(titles.get(missionId('task-2438-active')), 'Recorded active title');
+    assert.equal(titles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
+    assert.equal(titles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
+    assert.equal(requestedRepository.value, repository);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

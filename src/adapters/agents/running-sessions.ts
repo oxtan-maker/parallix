@@ -112,7 +112,7 @@ function parseProcessTable(output: string): readonly ProcessEntry[] {
 
 /** Map every mission worktree path to its mission id. Returns null on failure. */
 function defaultListWorktrees(rootDir: string): ReadonlyMap<string, MissionId> | null {
-  const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
+  const result = spawnSync('git', ['-C', rootDir, 'worktree', 'list', '--porcelain'], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8' });
   if (result.error || result.status !== 0 || typeof result.stdout !== 'string') { return null; }
   const worktrees = new Map<string, MissionId>();
   let path: string | null = null;

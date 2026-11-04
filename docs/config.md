@@ -552,12 +552,15 @@ limit, so a mission worktree cannot raise it locally. This is separate from
 For finer control, declare named shared capacities with
 `adapters.gates.resources` (for example `{ "test": 1 }`; values are positive
 integers) and assign individual gates to one with `"resource": "test"`. Each
-phase run takes one slot per resource and shares it across its tagged gates;
-`parallel` still controls how many checks run together within that phase. The
-slot remains reserved across dependencies until every gate assigned to that
-resource has completed and its process trees have settled. Other runs can then
-take the slot while unrelated stages of the first run continue. Gates without
-a `resource` do not acquire a resource slot. Set
+tagged gate command takes its own slot before child launch and keeps it until
+that command and its waited descendants settle. The slot is then available to
+another command even while unrelated gates in the first phase continue.
+`parallel` still controls how many admitted checks run together within that
+phase. In a parallel phase, waiting for a resource does not consume phase
+capacity, so ready producers can progress. A serial phase instead holds its
+single phase slot while waiting, preserving declared order. A gate with unmet
+dependencies has not acquired its resource yet. Gates without a `resource` do
+not acquire a resource slot. Set
 `adapters.gates.verificationResource` to a declared resource
 to put the shift-left verification between active and review under the same
 capacity: the configured verification command (`px verify`, pre-review) and
@@ -568,8 +571,10 @@ integer, fails validation and the phase fails before any gate command starts. As
 with `maxConcurrent`, the canonical checkout owns every limit it declares; a
 mission worktree can only add resources the canonical checkout does not declare yet.
 
-Admission state normally lives in the operator home selected by `PARALLIX_HOME`;
-processes using different operator homes can share lease-only state through
+Admission state normally lives in the operator database selected by
+`PARALLIX_HOME`; lease admission uses its own connection and transaction owner,
+independent from workflow and operational-history writes. Processes using
+different operator homes can share lease-only state through
 `PARALLIX_CUSTOM_ADMISSION_HOME`. Parallix self-development shares one `test` resource slot across its unit,
 integration, workflow and browser test gates instead of serializing whole runs;
 quality-gate, agent-smoke, implementation work and agent capacity remain independent.

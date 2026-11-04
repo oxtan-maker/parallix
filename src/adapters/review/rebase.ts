@@ -153,7 +153,7 @@ export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRe
     publicationAttempted: false, pushGate: null, credentialFailure: null, conflictClassification: null,
   };
 
-  const port = createPort({ ...rebaseWorkflowOptions, missionIdentityServices: options.missionIdentityServices, gitFn });
+  const port = createPort({ ...rebaseWorkflowOptions, rebaseObservationStage: 'pre-review-rebase', missionIdentityServices: options.missionIdentityServices, gitFn });
   if (options.missionIdentityServices) { port.missionServices = options.missionIdentityServices; }
 
   observePreReviewRebase(port, observed, worktree, forgejoEnabledFn);

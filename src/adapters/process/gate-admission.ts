@@ -1,12 +1,23 @@
 import { setTimeout as pause } from 'node:timers/promises';
 import type { GateAdmissionPort, GateAdmissionRun } from '../../application/ports/gate-admission.js';
 import type { CustomAgentLeaseRepository } from '../../application/ports/custom-agent-admission.js';
+import { waitForAdmission, type AdmissionWaitPolicy } from './admission-wait.js';
 import { isSameLiveProcess, processIdentity } from './process-liveness.js';
 import { gateDescendants, isLiveProcessGroup } from './process-group-liveness.js';
 
 type GateLeases = CustomAgentLeaseRepository & {
   bindProcessGroup(_lease: string, _identity: { pid: number; startId: string }): void;
 };
+
+/**
+ * A gate slot is held until the run's whole process group settles, so the queue
+ * length is bounded by concurrent runs, not by a lock that can go stale. The
+ * lease repository reaps dead owners, so the wait carries no admission-side
+ * bound; the caller's signal and SIGINT/SIGTERM own cancellation.
+ */
+export function gateAdmissionPolicy(partition: string): AdmissionWaitPolicy {
+  return { resource: `verification:${partition}`, initialDelayMs: 25, maxDelayMs: 25, maxWaitMs: null, progressEveryMs: null };
+}
 
 export class SharedGateAdmission implements GateAdmissionPort {
   constructor(private readonly leases: (_resource: string) => Promise<GateLeases>, private readonly nested: boolean, private readonly maxConcurrent: (_root: string) => number) {}
@@ -40,11 +51,17 @@ export class SharedGateAdmission implements GateAdmissionPort {
       const owner = processIdentity(process.pid);
       if (!owner) { throw new Error('Cannot establish verification owner identity'); }
       leases = await this.leases(partition);
-      while (!lease) {
+      controller.signal.throwIfAborted();
+      const admitted = await waitForAdmission<string>(
+        () => leases!.acquire(root, capacity, owner),
+        gateAdmissionPolicy(partition),
+        { signal: controller.signal },
+      );
+      if (!admitted.value) {
         controller.signal.throwIfAborted();
-        lease = await leases.acquire(root, capacity, owner);
-        if (!lease) { await pause(25, undefined, { signal: controller.signal }); }
+        throw new Error(`Verification admission closed for ${partition} after ${admitted.attempts} attempts`);
       }
+      lease = admitted.value;
       controller.signal.throwIfAborted();
       return await action({
         signal: controller.signal,

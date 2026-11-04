@@ -47,6 +47,10 @@ export interface OpenRunCaptureInput {
   readonly identity: Pick<RunRecord, 'missionId' | 'repositoryId' | 'role' | 'family' | 'attempt'>;
   readonly captureKind?: 'agent' | 'coordinator';
   readonly runId: string;
+  readonly operationGeneration?: number | null;
+  readonly revision?: string | null;
+  readonly configuredModel?: string | null;
+  readonly dependencies?: readonly string[] | null;
   readonly terminalHost: RunTerminalHost;
   readonly hostFallbackReason?: string | null;
   readonly tmuxSocketPath?: string | null;
@@ -64,6 +68,7 @@ export interface FinishRunInput {
   readonly providerSessionId?: string | null;
   readonly sources?: readonly RunSource[];
   readonly omissions?: readonly string[];
+  readonly resources?: RunRecord['resources'];
 }
 
 export interface RunCapture {
@@ -309,7 +314,13 @@ export function openRunCapture(input: OpenRunCaptureInput): RunCapture {
   const record = (patch: Partial<RunRecord>): RunRecord => ({
     ...captureIdentity(input),
     operationId: correlation(),
+    operationGeneration: input.operationGeneration ?? null,
+    sourceId: input.runId,
+    revision: input.revision ?? null,
+    configuredModel: input.configuredModel ?? null,
+    dependencies: input.dependencies ?? null,
     execution,
+    resources: { localProcessTreeCpu: null, provider: null },
     terminalHost,
     tmux: tmuxSocketPath ? { socketPath: tmuxSocketPath, sessions: [...sessions] } : null,
     state: 'running',
@@ -366,6 +377,7 @@ export function openRunCapture(input: OpenRunCaptureInput): RunCapture {
         providerSessionId: result.providerSessionId ?? null,
         sources: [...(result.sources ?? [])],
         omissions: [...(result.omissions ?? [])],
+        resources: result.resources ?? { localProcessTreeCpu: null, provider: null },
       });
       writeAtomic(recordPath, JSON.stringify(finished, null, 2));
       return finished;

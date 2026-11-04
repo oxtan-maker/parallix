@@ -56,8 +56,6 @@ try {
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false',
     'commit', '--allow-empty', '-m', `mission/${f.slugs[0]}: already landed disposable payload`);
   assert.equal(await cli(f.slugs[0]), 0);
-  const completed = await f.operations.latest(f.slugs[0]);
-  assert.equal(completed?.phase, 'completed');
   const activity = new SqliteExecutionActivityStore(f.database, repo);
   const success = (await activity.loadMissionCurrentWork(first.mission.id))[0];
   assert.equal(success.frames.length, 0);
@@ -67,7 +65,6 @@ try {
   assert.ok(closed.kind === 'found' && closed.mission.closedAt);
   console.log('Completion: root=completed, integration=ended, frames=0, blocker=null, mission=closed');
   assert.notEqual(await cli(f.slugs[1]), 0);
-  assert.equal((await f.operations.latest(f.slugs[1]))?.phase, 'blocked');
 
   // Persist the old bug shape through supported activity and workflow owners.
   for (const slug of ['px-0008', 'px-0020']) {

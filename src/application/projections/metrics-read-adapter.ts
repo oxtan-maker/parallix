@@ -17,6 +17,7 @@ import { buildMetrics } from './metrics.js';
 import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { utcHourBucket } from '../services/statistics-service.js';
 import { weeklyDecisionWindows } from '../../domain/decision-window.js';
+import { flowStatistics, type FlowMissionFacts } from './flow-statistics.js';
 
 /** Delivery belongs to the recorded final review implementer, never an attempt. */
 export interface MissionCohortMetadata {
@@ -136,7 +137,8 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     const transitionRows = this.entriesToTransitions(entries);
     const outcomeRows = usageRecordsToOutcomes(usageRecords, this.repositoryId, entries);
     const transitions = transitionRows.transitions;
-    const outcomes = this.withCanonicalCohortMetadata(outcomeRows.outcomes, await this.cohortMetadata());
+    const metadata = await this.cohortMetadata();
+    const outcomes = this.withCanonicalCohortMetadata(outcomeRows.outcomes, metadata);
     const scopedUsageRecords = usageRecords.filter((record) => record.repo === this.repositoryId);
 
     // Derive instants from transition timestamps
@@ -185,7 +187,17 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       window: decisionWindows.current,
     });
     const verification = await this.verification?.read().catch(() => null);
-    return { ...metrics, health, provenance, cohorts, ...(verification === undefined ? {} : { verification }) };
+    const flow = verification ? flowStatistics(outcomes.map(outcome => {
+      const observed = verification.flowMissions.find(item => item.missionId === outcome.missionId);
+      return { repositoryId: String(this.repositoryId), missionId: String(outcome.missionId), closedAt: outcome.closedAt,
+        diagramNodeIds: observed?.diagramNodeIds ?? [], diagramEdgeIds: observed?.diagramEdgeIds ?? [],
+        ownership: observed?.ownership ?? [], actualAgentLaunches: observed?.actualAgentLaunches ?? null,
+        agentLaunches: observed?.agentLaunches ?? [],
+        observedDisqualifiers: observed?.observedDisqualifiers ?? null,
+        reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics ?? reviewStatistics(null) } satisfies FlowMissionFacts;
+    }), decisionWindows) : undefined;
+    return { ...metrics, health, provenance, cohorts, ...(flow ? { flow } : {}),
+      ...(verification === undefined ? {} : { verification }) };
   }
 
   // -----------------------------------------------------------------------

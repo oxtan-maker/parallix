@@ -88,7 +88,7 @@ function numstatRowLines(row: string): number {
 
 export function computeNEL(range: string, options: { cwd?: string; maxBuffer?: number } = {}): number {
   const limitBytes = options.maxBuffer ?? NEL_DIFF_MAX_BUFFER;
-  const result = spawnSync('git', ['diff', '--numstat', '-w', range], {
+  const result = spawnSync('git', ['diff', '--numstat', '-w', range], { env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' },
     cwd: options.cwd || process.cwd(),
     encoding: 'utf8',
     maxBuffer: limitBytes,

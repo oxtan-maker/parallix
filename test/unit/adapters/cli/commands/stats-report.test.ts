@@ -6,6 +6,7 @@ import * as statsReport from '../../../../../src/adapters/cli/commands/stats-rep
 // module's named exports, so this must be the default import.
 import stats from '../../../../../src/adapters/cli/commands/stats.js';
 import { StatsRow } from '../../../../../src/application/services/statistics-row.js';
+import { reviewStatisticsObservation } from '../../../../fixtures/review-statistics.js';
 
 interface TestRow extends StatsRow { repo: string; mission: string; date: string; completedForTest?: string; }
 
@@ -26,6 +27,22 @@ function renderWeeklyStatsReport(rows: readonly TestRow[], options = {}) {
 function renderRangeStatsReport(rows: readonly TestRow[], options = {}) {
   return statsReport.renderRangeStatsReport(rows, { ...options, missionFlow: missionFlow(rows) });
 }
+
+test('px stats formats the shared typed FLOW projection without recalculating metrics (TASK-2835)', () => {
+  const reviewStatistics = reviewStatisticsObservation('codex', 0);
+  const report = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', missionFlow: [{
+    repo: 'repo', mission: 'task-flow', closedAt: '2026-11-03T12:00:00Z', labels: ['ai_sdlc'],
+    implementer: 'codex', reviewStatistics, flowObservation: {
+      diagramNodeIds: ['implement', 'review'], diagramEdgeIds: ['implement->review'],
+      actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], ownership: [
+        { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 25 },
+      ],
+    },
+  }] });
+  assert.match(report, /shared FLOW lifecycle/);
+  assert.match(report, /2\/1\s+100\.0% \(1\/1, coverage 100%\)\s+0 \(mean 0\.0, n=1\)/);
+  assert.match(report, /implement\/codex\/gpt-6\.1-sol\/working: total 25ms, mean 25\.0ms, p90 25ms, n=1/);
+});
 
 test('formatStatsTable returns formatted table with bold headers', () => {
   const result = statsReport.formatStatsTable(['A', 'B'], [['1', '2']]);

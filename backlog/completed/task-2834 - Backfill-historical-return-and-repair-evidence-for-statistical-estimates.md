@@ -1,8 +1,8 @@
 ---
 id: TASK-2834
 title: Backfill historical return and repair evidence for statistical estimates
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-03 10:56'
 updated_date: '2026-11-03 12:11'
 labels:

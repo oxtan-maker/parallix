@@ -1,9 +1,9 @@
-import _cp from 'child_process';
+import { git } from '../git/git.js';
 import { eligibleAgentsForStep } from '../agents/agents.js';
 import { apiRequest, normalizeBaseUrl, parseRepoSlug, unique } from './setup-review-auth.js';
 import type { ApiRequestFn, EnsureResult } from './setup-review-types.js';
 
-const { spawnSync } = _cp;
+
 
 /**
  * The Forgejo login Parallix itself acts as (TASK-2620): it dismisses a stale
@@ -15,7 +15,7 @@ export const CLASSIFIER_FORGEJO_USER = 'jev';
 
 export function suggestedForgejoUsers(): string[] { return unique([...eligibleAgentsForStep('active'), ...eligibleAgentsForStep('review'), PARALLIX_FORGEJO_USER, CLASSIFIER_FORGEJO_USER]); }
 export function readConfiguredReviewRemote(rootDir?: string, remoteName?: string): string | null {
-  const result = spawnSync('git', ['-C', rootDir || process.cwd(), 'remote', 'get-url', remoteName || 'review'], { encoding: 'utf8' });
+  const result = git(['-C', rootDir || process.cwd(), 'remote', 'get-url', remoteName || 'review'], { encoding: 'utf8' });
   return result.status === 0 ? (result.stdout || '').trim() || null : null;
 }
 
@@ -63,7 +63,7 @@ export function ensureForgejoUser(baseUrl: string, user: string, ownerLogin: str
 
 export function ensureReviewRemote(rootDir: string, remoteName: string, remoteUrl: string): EnsureResult {
   const current = readConfiguredReviewRemote(rootDir, remoteName);
-  const result = spawnSync('git', current ? ['-C', rootDir, 'remote', 'set-url', remoteName, remoteUrl] : ['-C', rootDir, 'remote', 'add', remoteName, remoteUrl], { encoding: 'utf8' });
+  const result = git(current ? ['-C', rootDir, 'remote', 'set-url', remoteName, remoteUrl] : ['-C', rootDir, 'remote', 'add', remoteName, remoteUrl], { encoding: 'utf8' });
   if (result.status !== 0) {return { ok: false, error: (result.stderr || result.stdout || `git remote ${current ? 'set-url' : 'add'} failed`).trim() };}
   return { ok: true, created: !current, updated: Boolean(current && current !== remoteUrl) };
 }

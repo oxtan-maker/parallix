@@ -13,10 +13,10 @@ export class ActiveLaunchRecorder {
   get launchTransitionFailed(): boolean { return this._launchTransitionFailed; }
   get rebaseDeferred(): boolean { return this._rebaseDeferred; }
   get launchedAgent(): string | null { return this._launchedAgent; }
-  async record({ agent }: { agent: string }): Promise<void> {
+  async record({ agent, model }: { agent: string; model?: string | null }): Promise<void> {
     const { slug, worktree, preselected, taskResolution, onAgentLaunched, transitionTaskFn, log } = this.bindings;
     this._launchedAgent = agent;
-    await onAgentLaunched?.(agent);
+    await onAgentLaunched?.(agent, model ?? null);
     if (!taskResolution?.ok) { return; }
     const fallback = agent !== preselected ? ` (selected ${fmt.agent(preselected)}; fallback)` : '';
     log(fmt.status('INFO', `Implementer: ${fmt.agent(agent)}${fallback}`));

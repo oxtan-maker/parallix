@@ -14,6 +14,7 @@ import { agentFamily } from '../../../../src/domain/agents.js';
 import type { SessionMarkerPort } from '../../../../src/application/domain-ports.js';
 import type { AgentLauncherInput } from '../../../../src/adapters/agents/agent-process-types.js';
 import type { StartAgentOptions } from '../../../../src/adapters/agents/agent-launch-context.js';
+import { normalizeProviderFailure } from '../../../../src/adapters/process/failure-normalization.js';
 
 // Regression provenance: TASK-1036.
 
@@ -210,11 +211,12 @@ test('startAgent act-on-review fallback selects vibe when implementer hits limit
 });
 
 for (const pinned of [false, true]) {
-  test(`observed Claude limit persists its reason before ${pinned ? 'pinned refusal' : 'eligible review fallback'} (px-0026)`, async () => {
-    const { detectLimitHit } = await import('../../../../src/application/services/agent-limit.js');
+  test(`normalized Claude limit persists its reason before ${pinned ? 'pinned refusal' : 'eligible review fallback'} (TASK-2838)`, async () => {
+    const { detectLimitHit, formatBlockUntil, ceilToNextHour } = await import('../../../../src/application/services/agent-limit.js');
     const { resolveBlockContext } = await import('../../../../src/adapters/agents/agent-block-selection.js');
     const blocks = new Map<string, { until: string; reason?: string }>();
     const launched: string[] = [];
+    const claudeStdout = fs.readFileSync(new URL('../../../fixtures/claude-quota-rejected.jsonl', import.meta.url), 'utf8');
     const options: StartAgentOptions = {
       configuration: resolveConfiguration(environment), prompt: 'Review', agent: 'claude', pinnedAgent: pinned,
       isAgentBlockedFn: (family: string) => blocks.has(family),
@@ -227,7 +229,7 @@ for (const pinned of [false, true]) {
       },
       detectLimitHitFn: (input) => {
         assert.ok(input, 'launch outcome supplies detector input');
-        return detectLimitHit({ ...input, now: new Date('2026-11-02T08:00:00Z') });
+        return detectLimitHit({ ...input, now: new Date('2026-11-03T18:00:00Z') });
       },
       updateAgentBlockFn: (family: string, until: string, options?: { reason?: string }) => {
         blocks.set(family, { until, reason: options?.reason }); return { reason: options?.reason };
@@ -236,9 +238,10 @@ for (const pinned of [false, true]) {
         const family = input.env!.FORGEJO_USER!;
         launched.push(family);
         return { invocation: { command: family, args: [] }, result: {
-          failureReason: family === 'claude' ? { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-11-02T10:50:00+01:00' } } : undefined,
+          failureReason: family === 'claude' ? normalizeProviderFailure({ status: 1, stdout: claudeStdout }) : undefined,
           status: family === 'claude' ? 1 : 0,
-          stderr: family === 'claude' ? 'You’ve hit your 5-hour limit · resets 10:50am (Europe/Stockholm)' : '',
+          stdout: family === 'claude' ? claudeStdout : '',
+          stderr: '',
         } };
       },
     };
@@ -251,6 +254,6 @@ for (const pinned of [false, true]) {
     }
     assert.equal(blocks.size, 1);
     assert.match(blocks.get('claude')!.reason!, /^typed: agent-quota/);
-    assert.match(blocks.get('claude')!.until, /^2026-11-02 \d{2}$/);
+    assert.equal(blocks.get('claude')!.until, formatBlockUntil(ceilToNextHour(new Date('2026-11-03T20:50:00.000Z'))));
   });
 }

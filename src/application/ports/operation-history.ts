@@ -44,6 +44,9 @@ export interface BoardLaneEventEntry {
   readonly idempotencyKey: string;
 }
 
+/** Read-only lifecycle history shape consumed by application projections. */
+export type LifecycleHistoryEntry = BoardLaneEventEntry;
+
 export interface BoardLaneEventRepository {
   append(_entry: BoardLaneEventEntry): Promise<boolean>;
   findByMissionId(_missionId: string): Promise<readonly BoardLaneEventEntry[]>;
