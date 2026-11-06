@@ -89,6 +89,9 @@ function toCardActions(card: MissionCard): WebCommandAction[] {
   }
   return [...card.commands.map((command) => {
     const kind = BOARD_COMMAND_KINDS[command.command];
+    if (command.command === 'review' && command.enabled && card.reviewRecovery?.action === 'acknowledge-and-resume') {
+      return toCommandAction('review:submit', `px review ${card.id}`, { ...command, label: 'Resume review' });
+    }
     return toCommandAction(kind, `px ${command.command} ${card.id}`, command);
   }), editing];
 }
@@ -129,6 +132,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     reviewApproved: card.reviewApproved,
     reviewRound: card.reviewRound,
     reviewPhase: card.reviewPhase,
+    reviewRecovery: card.reviewRecovery ?? null,
     reviewDisposition: card.reviewDisposition,
     reviewHistory: card.reviewHistory.map((round) => ({
       number: round.number,

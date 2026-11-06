@@ -22,17 +22,31 @@ test('review status prints orphan recovery and distinguishes uncertain, live and
     const lines: string[] = [];
     await showReviewStatus('task-orphan', { log: line => lines.push(line), resolveWorktreeFn: () => '/fixture',
       readReviewStateFn: async () => ({ round: 3, phase: 'reviewing' } as ReviewState),
-      readReviewLiveness: async () => ({ workflow: liveness === 'live' ? true : liveness === 'unconfirmed' ? null : false,
-        coordinator: false, execution: false, reviewer: false }) });
-    if (liveness === 'orphaned') { assert.match(lines.join('\n'), /orphaned.*px stop task-orphan.*px review task-orphan/s); }
+      readReviewLiveness: async () => ({ workflow: null, liveness: { workflow: liveness === 'live' ? true : liveness === 'unconfirmed' ? null : false,
+        coordinator: false, execution: false, reviewer: false } }) });
+    if (liveness === 'orphaned') {
+      assert.match(lines.join('\n'), /orphaned.*px review task-orphan/s);
+      assert.doesNotMatch(lines.join('\n'), /px stop/);
+    }
     else { assert.doesNotMatch(lines.join('\n'), /orphaned/); }
     if (liveness === 'unconfirmed') { assert.match(lines.join('\n'), /unconfirmed/); }
   }
   const completed: string[] = [];
   await showReviewStatus('task-orphan', { log: line => completed.push(line), resolveWorktreeFn: () => '/fixture',
     readReviewStateFn: async () => ({ round: 3, phase: 'approved' } as ReviewState),
-    readReviewLiveness: async () => ({ workflow: false, coordinator: false, execution: false, reviewer: false }) });
+    readReviewLiveness: async () => ({ workflow: null, liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } }) });
   assert.doesNotMatch(completed.join('\n'), /orphaned|unconfirmed/);
+});
+
+test('review status does not treat a live REQUEST_CHANGES disposition as a human stop (TASK-2839)', async () => {
+  const lines: string[] = [];
+  await showReviewStatus('task-fixing', { log: line => lines.push(line), resolveWorktreeFn: () => '/fixture',
+    readReviewStateFn: async () => ({ round: 1, phase: 'fixing', disposition: 'REQUEST_CHANGES', metadata: {} } as ReviewState),
+    readReviewLiveness: async () => ({ workflow: { id: 'review-op', phase: 'executing', reason: null },
+      liveness: { workflow: true, coordinator: true, execution: true, reviewer: false } }) });
+  const output = lines.join('\n');
+  assert.match(output, /Disposition: REQUEST_CHANGES/);
+  assert.doesNotMatch(output, /Review stopped for human review|Review recovery|px stop/);
 });
 
 /** Bound loop mechanisms whose held controller fence declines the run. */

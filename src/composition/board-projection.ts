@@ -72,6 +72,8 @@ export interface BoardProjectionCompositionDeps {
   readonly detectRunningSessions?: () => readonly import('../adapters/agents/running-sessions.js').RunningMissionSession[] | null;
   /** Provider observation boundary; defaults to the repository's retained execution evidence. */
   readonly providerExecution?: ProviderExecutionReader;
+  /** Authoritative workflow ownership and liveness facts for Review recovery. */
+  readonly reviewExecution?: import('../application/projections/review-liveness.js').ReviewLivenessReader;
   /** Verification evidence boundary; defaults to proofs, failure evidence and validation history. */
   readonly gateEvidence?: GateEvidenceReader;
 }
@@ -192,6 +194,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     new ConcreteOperationLogReadAdapter({ historyRepo: deps.historyRepo }),
     {
       workflowOperations,
+      reviewExecution: deps.reviewExecution,
       providerExecution: deps.providerExecution ?? { observe: (scope, currentOperationId) => {
         terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION, mission => topology?.resolveWorktree(mission) ?? null);
         const result = terminal.execution?.(scope.missionId, currentOperationId);

@@ -139,6 +139,12 @@ export interface MissionCard {
    */
   readonly reviewRound: number | null;
   readonly reviewPhase: ReviewPhase | null;
+  /** The Review's recorded human-only stop reason (e.g. MAX_ATTEMPTS), null when none applies. */
+  readonly reviewHumanStop?: string | null;
+  /** Observed owner and execution liveness of an unsettled round; absent when not observed. */
+  readonly reviewLiveness?: import('./review-liveness.js').ReviewLiveness | null;
+  /** The one recovery decision for an orphaned or human-stopped Review; absent when not observed. */
+  readonly reviewRecovery?: import('../review-recovery.js').ReviewRecovery | null;
   readonly pendingApprovalRetention?: boolean;
   readonly reviewDisposition: ReviewDisposition | null;
   /** An approved local self-review still needs a formal provider approval. */
@@ -357,16 +363,28 @@ function cardCheckpoint(mission: Mission, checkpoint: ReturnType<typeof latestEv
     nextActionText: checkpoint?.nextActionText ?? null,
   };
 }
+
+function reviewedRevisionIsApproved(facts: MissionOperationalFacts, reviewedSubject: ReviewedRevision | null): boolean {
+  return facts.reviewApproval !== null
+    && reviewedSubject !== null
+    && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject);
+}
+
+function cardReviewRound(mission: Mission, currentRound: ReturnType<typeof currentReviewRound> | null) {
+  return {
+    reviewRound: currentRound?.number ?? null,
+    reviewPhase: currentRound?.phase ?? null,
+    reviewHumanStop: currentRound?.phase !== 'approved' ? mission.review?.intervention?.reason ?? null : null,
+    reviewDisposition: currentRound?.disposition ?? null,
+  };
+}
+
 function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSubject: ReviewedRevision | null, reviewedChange: ReviewedRevision['change'] | null, currentRound: ReturnType<typeof currentReviewRound> | null) {
   return {
     pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,
-    reviewApproved: facts.reviewApproval !== null
-      && reviewedSubject !== null
-      && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject),
-    reviewRound: currentRound?.number ?? null,
-    reviewPhase: currentRound?.phase ?? null,
+    reviewApproved: reviewedRevisionIsApproved(facts, reviewedSubject),
+    ...cardReviewRound(mission, currentRound),
     pendingApprovalRetention: Boolean(pendingIntegrationApproval(mission)),
-    reviewDisposition: currentRound?.disposition ?? null,
     approvalOwed: reviewApprovalOwed(mission.review),
     approvalCoverage: facts.approvalCoverage ?? null,
     reviewHistory: projectReviewHistory(mission.review),

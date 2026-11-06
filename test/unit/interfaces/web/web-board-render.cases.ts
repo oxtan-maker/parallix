@@ -107,6 +107,19 @@ function populated(): WebBoardSnapshot {
   });
 }
 
+test('settled review recovery renders explicit guidance, evidence and Resume review control (TASK-2839)', () => {
+  const recovery = { action: 'acknowledge-and-resume' as const, humanStop: 'MAX_ATTEMPTS',
+    guidance: 'Owned review work settled; acknowledge the stop and resume.',
+    evidence: ['Review stopped for human review: MAX_ATTEMPTS', 'no open workflow operation'] };
+  const card = makeCard({ lane: 'review', status: 'review', reviewRound: 5, reviewPhase: 'reviewing', reviewRecovery: recovery,
+    commands: [{ command: 'review', enabled: true, reason: null }] });
+  const html = render(snapshotOf({ stages: makeProjection({ review: [card] }).stages }));
+  assert.match(html, /Review recovery · acknowledge-and-resume/);
+  assert.match(html, /Owned review work settled; acknowledge the stop and resume\./);
+  assert.match(html, /Review stopped for human review: MAX_ATTEMPTS/);
+  assert.match(html, /Resume review/);
+});
+
 // ---------------------------------------------------------------------------
 // Populated rendering (SC1)
 // ---------------------------------------------------------------------------

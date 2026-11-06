@@ -167,6 +167,8 @@ export interface WebMissionCard {
   readonly reviewApproved: boolean;
   readonly reviewRound: number | null;
   readonly reviewPhase: string | null;
+  /** The application-owned recovery decision; null when recovery is not applicable. */
+  readonly reviewRecovery: import('../../application/review-recovery.js').ReviewRecovery | null;
   readonly reviewDisposition: string | null;
   readonly reviewHistory: readonly WebReviewRoundSummary[];
   readonly blockingReason: string | null;

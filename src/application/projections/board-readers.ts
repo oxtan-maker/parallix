@@ -1,5 +1,6 @@
 import { repairContractFailure } from '../repair-checkpoint-service.js';
-import { projectWorkflowBoard, projectWorkflowCard } from './workflow-board.js';
+import { projectReviewRecoveryBoard, projectReviewRecoveryCard, projectWorkflowBoard, projectWorkflowCard } from './workflow-board.js';
+import type { ReviewLivenessReader } from './review-liveness.js';
 import type { WorkflowOperationStore } from '../ports/workflow-operation.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { GateState } from './gate-observation.js';
@@ -33,6 +34,14 @@ import type { ExecutionActivityReadPort } from '../../application/ports/executio
 
 export type { ProcessLivenessProbe } from '../../domain/execution-activity.js';
 export type { ExecutionActivityReadPort } from '../ports/execution-activity.js';
+
+function missionRunningSession(
+  sessions: readonly RunningAgentSession[] | null,
+  missionId: MissionId,
+): RunningAgentSession | null | undefined {
+  if (sessions === null) { return undefined; }
+  return sessions.find(session => session.missionId === missionId) ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // Read adapters — each adapter reads from one authority
@@ -107,6 +116,8 @@ export type { MetricsReadAdapter } from './metrics-read-adapter.js';
 export interface BoardProjectionOptions {
   readonly providerExecution?: ProviderExecutionReader;
   readonly workflowOperations?: Pick<WorkflowOperationStore, 'latestByMission' | 'latest'>;
+  /** Workflow ownership and liveness probes behind the review recovery decision. */
+  readonly reviewExecution?: ReviewLivenessReader;
   /** Creates the ephemeral shared read snapshot immediately before each build. */
   prepareReads?: () => void;
   /** Time-based metrics. Prefer MetricsReadAdapter for production use. */
@@ -249,7 +260,7 @@ export class BoardProjectionBuilder {
       metrics,
       sourceFacts,
     ), deliveries);
-    return this.observeExecution(board, operations);
+    return projectReviewRecoveryBoard(this.observeExecution(board, operations), this._options?.reviewExecution);
   }
 
   /**
@@ -286,9 +297,7 @@ export class BoardProjectionBuilder {
       isProcessAlive: this._options?.isProcessAlive,
     }).get(mission.id) ?? NO_CURRENT_WORK;
 
-    const liveSession = runningSessions === null
-      ? undefined
-      : (runningSessions ?? []).find((session) => session.missionId === mission.id) ?? null;
+    const liveSession = missionRunningSession(runningSessions, mission.id);
 
     const card = this.composeCard(
       mission,
@@ -297,7 +306,7 @@ export class BoardProjectionBuilder {
       work,
       liveSession,
     );
-    return this.observeCardExecution(card, owner);
+    return projectReviewRecoveryCard(this.observeCardExecution(card, owner), this._options?.reviewExecution);
   }
 
   private observeCardExecution(card: MissionCard, owner: WorkflowOperation | null): MissionCard {

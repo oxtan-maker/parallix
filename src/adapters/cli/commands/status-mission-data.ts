@@ -126,6 +126,8 @@ function reviewFields({ recorded, card }: StatusSources) {
   return {
     reviewPhase: card?.reviewPhase,
     reviewRound: card?.reviewRound,
+    reviewLiveness: card?.reviewLiveness,
+    reviewRecovery: card?.reviewRecovery,
     reviewDisposition: card?.reviewDisposition,
     approvalOwed: card?.approvalOwed,
     approvalCoverage: card?.approvalCoverage ?? null,

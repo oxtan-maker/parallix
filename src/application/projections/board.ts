@@ -296,6 +296,15 @@ function attentionCommand(card: MissionCard): 'active' | 'integrate' | 'review' 
   return 'active';
 }
 
+function reviewAttentionAction(card: MissionCard): AttentionAction | null {
+  if (card.reviewRecovery?.action === 'acknowledge-and-resume') {
+    return { kind: 'review:submit', display: `px review ${card.id}` };
+  }
+  return card.commands.some(action => action.command === 'review' && action.enabled)
+    ? { kind: 'review:submit', display: `px review ${card.id}` }
+    : null;
+}
+
 /**
  * The typed command an attention item resolves to.
  *
@@ -309,9 +318,7 @@ export function attentionAction(card: MissionCard, reason: AttentionReason): Att
   // Diagnostics explain why attention is needed; the lane owns its recovery.
   if (card.lane === 'review' && card.reviewPhase !== 'fixing'
     && !card.pendingApprovalRetention && !humanOnlyBlocker) {
-    return card.commands.some(action => action.command === 'review' && action.enabled)
-      ? { kind: 'review:submit', display: `px review ${card.id}` }
-      : null;
+    return reviewAttentionAction(card);
   }
   if (humanOnlyBlocker || (reason.kind === 'blocking'
     && !card.commands.some(action => action.command === 'active' && action.enabled))) {

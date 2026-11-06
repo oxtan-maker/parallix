@@ -1,8 +1,8 @@
 ---
 id: TASK-2839
 title: Consolidate orphaned review recovery across web and CLI
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-04 06:10'
 labels:
   - bug

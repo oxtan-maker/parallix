@@ -37,11 +37,17 @@ and can record their verdict. Use `px stop <slug>` to terminate review explicitl
 it fences writes and confirms attributed work has stopped before allowing a
 replacement.
 
-If an unfinished review loses all its running work, `px review <slug> --status`
-and `px status <slug>` report an orphaned round and name the recovery sequence:
-`px stop <slug>`, then `px review <slug>`. An unconfirmed probe is reported as
-unconfirmed, not as proof that work has ended. Status commands only inspect;
-they do not stop or restart review.
+Review recovery separates two operator decisions. Stopping workflow execution
+settles owned processes and effects; acknowledging a Review contract stop such
+as `MAX_ATTEMPTS` permits a new review attempt window. `px status <slug>`,
+`px review <slug> --status` and the board show one shared recovery action from
+the recorded workflow operation, Review intervention and liveness probes. Live
+work requires Stop and settlement confirmation. Once no workflow operation is
+open and every probe confirms absence, an orphaned or human-stopped round can
+resume with `px review <slug>` or the board's **Resume review** action; another
+`px stop` is neither required nor useful. An unknown probe or pending stop
+refuses acknowledgment rather than treating uncertainty as proof of shutdown.
+Status commands only inspect; they do not stop or restart review.
 
 A verdict rejected by the ownership fence remains rejected. Its decision,
 findings and comment are retained at the evidence location printed by

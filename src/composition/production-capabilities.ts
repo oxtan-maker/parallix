@@ -53,6 +53,7 @@ import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.
 import { composeTuiCapabilities } from './board-projection.js';
 import { reviewLoopBindings } from './review-persistence.js';
 import { agentFamily } from '../domain/agents.js';
+import { createReviewLivenessReader } from './review-liveness.js';
 
 export interface ProductionBoardRepositories {
   readonly agentBlocklist: AgentBlocklistRepository;
@@ -274,6 +275,8 @@ export function composeProductionCapabilities(
   }
   // Single dispatcher instance shared by CLI and TUI (TASK-2332.05)
   const controller = new BoardCommandController(executePorts, progress, missionServices, currentWork, missionStore);
+  const reviewExecution = createReviewLivenessReader({ operatorState: { db: database },
+    mission: missionStore ? { repositoryId: owningRepositoryId } : null }, rootDir, overrides.configuration);
   const tui = composeTuiCapabilities({
     configuration: overrides.configuration,
     rootDir,
@@ -286,6 +289,7 @@ export function composeProductionCapabilities(
     usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir),
     sessionMarkers: repositories.sessionMarkers ?? null,
+    reviewExecution,
   }, executePorts, currentWork, controller, missionServices);
   return {
     tui,

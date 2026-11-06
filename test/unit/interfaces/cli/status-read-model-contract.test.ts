@@ -20,14 +20,68 @@ import { type CheckpointData } from '../../../../src/domain/checkpoint.js';
 test('mission status renders concrete orphan recovery and preserves uncertain liveness (TASK-2826)', () => {
   for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
     const lines: string[] = [];
+    const recovery = liveness === 'orphaned'
+      ? { action: 'acknowledge-and-resume' as const, humanStop: null, evidence: ['no open workflow operation', 'no live workflow, coordinator, execution or reviewer'], guidance: 'Review round is orphaned and owned work has settled, so no further stop is required. Resume with px review task-orphan.' }
+      : liveness === 'unconfirmed'
+        ? { action: 'refuse-unconfirmed' as const, humanStop: null, evidence: ['workflow liveness unknown'], guidance: 'Absence of owned work is unconfirmed; do not acknowledge or resume the Review yet.' }
+        : null;
     const result = statusResult({ slug: 'task-orphan', missionData: { backlogStatus: 'review', reviewHistory: [],
-      reviewRound: 3, reviewPhase: 'reviewing', reviewLiveness: liveness } });
+      reviewRound: 3, reviewPhase: 'reviewing', reviewLiveness: liveness, reviewRecovery: recovery } });
     renderStatus(result, line => lines.push(line));
-    if (liveness === 'orphaned') { assert.match(lines.join('\n'), /orphaned.*px stop task-orphan.*px review task-orphan/s); }
+    if (liveness === 'orphaned') {
+      assert.match(lines.join('\n'), /orphaned.*px review task-orphan/s);
+      assert.doesNotMatch(lines.join('\n'), /px stop/);
+    }
     else { assert.doesNotMatch(lines.join('\n'), /orphaned/); }
     if (liveness === 'unconfirmed') { assert.match(lines.join('\n'), /unconfirmed/); }
     assert.equal(JSON.parse(statusJson(result)).review?.liveness, liveness);
   }
+});
+
+test('settled MAX_ATTEMPTS review guides acknowledgment and never asks for another stop (TASK-2839)', async () => {
+  // TASK-2830 shape: round 10 still reviewing, MAX_ATTEMPTS human stop, a browser stop already settled.
+  const id = missionId('task-2830');
+  const repo = repositoryId('parallix');
+  const subject = { change: { kind: 'local-branch' as const, sourceBranch: 'mission/task-2830', targetBranch: 'main' }, revision: changeRevision('revision-ten') };
+  const review = { rounds: [{ number: 10, subject, reviewer: agentFamily('codex'), implementer: agentFamily('claude'), startedAt: '2026-11-03T08:00:00.000Z',
+    decision: null, response: null, phase: 'reviewing', disposition: null, reviewerRetryCount: 0, implementerRetryCount: 0 }],
+  intervention: { reason: 'MAX_ATTEMPTS', requestedAt: '2026-11-03T09:00:00.000Z', requestedBy: 'workflow' }, stageLaunches: [], reviewEvents: [] } as unknown as Review;
+  const mission = fixtureMission('task-2830', { status: 'review', checkpoints: [] });
+  const stopped = { id: 'op-browser-stop', repositoryId: repo, missionId: id, requestKey: 'stop', command: 'review:submit', generation: 1, phase: 'stopped',
+    providerStarted: true, agent: 'codex', reviewer: null, originalStatus: 'review', previousAssignee: null, owner: null,
+    createdAt: '2026-11-03T09:00:00.000Z', updatedAt: '2026-11-03T09:05:00.000Z', reason: null } as const;
+  const settled = { workflow: null, liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } };
+  const builder = new BoardProjectionBuilder(
+    { async loadAllMissions() { return [mission]; }, async loadMission() { return mission; }, getSourceFacts: () => [] },
+    { async loadReviews(ids) { return new Map(ids.map(each => [each, { review, approval: null }])); } },
+    { async observeGate() { return 'passed'; } },
+    { async loadAgentAvailability() { return []; }, async loadAssignedAgent() { return null; }, async loadRunningSessions() { return []; } },
+    { async loadRepositoryId() { return repo; }, async loadHeadCommit() { return 'abc123'; } },
+    { async loadOperationLog() { return []; } },
+    { workflowOperations: { async latest() { return stopped; }, async latestByMission() { return [stopped]; } },
+      reviewExecution: async () => settled } as ConstructorParameters<typeof BoardProjectionBuilder>[6],
+  );
+  const data = await createStatusBoardAdapter({ buildProjectionFn: async () => builder }).getMissionData('task-2830', '/nonexistent-task-2839');
+  const result = statusResult({ slug: 'task-2830', missionData: data });
+  const lines: string[] = [];
+  renderStatus(result, line => lines.push(line));
+  assert.match(lines.join('\n'), /acknowledge-and-resume.*MAX_ATTEMPTS.*px review task-2830/s);
+  assert.doesNotMatch(lines.join('\n'), /px stop/);
+  const json = JSON.parse(statusJson(result)).review;
+  assert.equal(json?.recovery?.action, 'acknowledge-and-resume');
+  assert.doesNotMatch(JSON.stringify(json), /px stop/);
+
+  const attention = (await builder.build()).attentionQueue.find(item => item.missionId === id);
+  assert.deepEqual(attention?.action, { kind: 'review:submit', display: 'px review task-2830' });
+  assert.doesNotMatch(JSON.stringify(attention?.reason), /px stop/);
+
+  const { showReviewStatus } = await import('../../../../src/adapters/review/review-commands.js');
+  const reviewStatus: string[] = [];
+  await showReviewStatus('task-2830', { log: line => reviewStatus.push(line), resolveWorktreeFn: () => '/nonexistent-task-2839',
+    readReviewStateFn: async () => ({ round: 10, phase: 'reviewing', disposition: 'MAX_ATTEMPTS', metadata: { humanEscalationReason: 'MAX_ATTEMPTS' } }) as never,
+    readReviewLiveness: async () => settled as never });
+  assert.match(reviewStatus.join('\n'), /acknowledge-and-resume.*px review task-2830/s);
+  assert.doesNotMatch(reviewStatus.join('\n'), /px stop/);
 });
 
 describe("focused Mission status reads only the selected Mission", () => {

@@ -13,7 +13,6 @@ import type { BoardProjectionBuilder } from '../application/projections/board-re
 import type { ProductionApplicationServices } from './application-services.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import { createReviewLivenessReader } from './review-liveness.js';
-import { reviewRoundLiveness } from '../application/projections/review-liveness.js';
 
 interface StatusBoardServices {
   presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
@@ -31,19 +30,14 @@ export async function createStatusReadBoard(
     import('./board-projection.js'), import('../adapters/agents/known-agent-families.js'),
     import('../adapters/sqlite/session-marker-repository.js'),
   ]);
+  const reviewExecution = createReviewLivenessReader(services, rootDir, configuration);
   const { builder } = composeBoardProjection({
     configuration, rootDir, missionStore: mission.store, database: db, repositoryId: mission.repositoryId,
     blocklistRepo: repositories.agentBlocklist, historyRepo: repositories.operationalHistory,
     laneEventRepo: repositories.boardLaneEvents, usageRepo: repositories.usage,
-    knownAgentFamilies: resolveKnownAgentFamilies(rootDir), sessionMarkers: new SqliteSessionMarkerRepository(db, mission.repositoryId),
+    knownAgentFamilies: resolveKnownAgentFamilies(rootDir), sessionMarkers: new SqliteSessionMarkerRepository(db, mission.repositoryId), reviewExecution,
   });
-  const board = createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } });
-  const liveness = createReviewLivenessReader(services, rootDir, configuration);
-  return { ...board, async getMissionData(slug, root) {
-    const data = await board.getMissionData(slug, root);
-    return data ? { ...data, reviewLiveness: reviewRoundLiveness(data.reviewPhase,
-      data.reviewPhase === 'reviewing' || data.reviewPhase === 'fixing' ? await liveness(slug) : undefined) } : null;
-  } };
+  return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } });
 }
 
 /** Build the StatusBoardPort `px status` reads a Mission through. */

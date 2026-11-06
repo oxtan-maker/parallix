@@ -2,7 +2,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import type { StatusResult } from '../../application/status-command-use-case.js';
 import type { StatusMissionData, StatusPrInfo } from '../../application/ports/cli-workflows.js';
 import { describeCoordinatorEvidence, describeMissionWork } from '../../application/projections/mission-activity.js';
-import { describeReviewLiveness, reviewRoundLiveness } from '../../application/projections/review-liveness.js';
+import { describeReviewRecovery } from '../../application/review-recovery.js';
 import { staleApprovalSentence } from '../../domain/approval-coverage.js';
 import { integrationRepairSummary } from '../../application/integration-repair-review.js';
 
@@ -113,7 +113,8 @@ function statusReviewJson(result: StatusResult) {
       ? {
         round: md.reviewRound ?? 1,
         phase: md.reviewPhase,
-        liveness: md.reviewLiveness ?? reviewRoundLiveness(md.reviewPhase),
+        liveness: md.reviewLiveness ?? null,
+        recovery: md.reviewRecovery ?? null,
         disposition: md.reviewDisposition ?? null,
         approvalOwed: md.approvalOwed ?? false,
         approvalCoverage: md.approvalCoverage ?? null,
@@ -274,9 +275,8 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   logReviewLiveness(slug, missionData, log);
 }
 
-function logReviewLiveness(slug: string, data: StatusMissionData, log: (_msg: string) => void): void {
-  const diagnostic = describeReviewLiveness(slug, data.reviewLiveness ?? reviewRoundLiveness(data.reviewPhase));
-  if (diagnostic) { log(diagnostic); }
+function logReviewLiveness(_slug: string, data: StatusMissionData, log: (_msg: string) => void): void {
+  if (data.reviewRecovery) { log(describeReviewRecovery(data.reviewRecovery)); }
 }
 
 function logCloseoutStatus(missionData: StatusMissionData, log: (_msg: string) => void): void {

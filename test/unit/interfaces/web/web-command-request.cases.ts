@@ -63,7 +63,7 @@ test('web command request: rejects every unknown top-level key, including the fo
 });
 
 test('web command request: rejects each kind that is not card-advertised, and any unknown kind', () => {
-  for (const kind of ['nel:record', 'mission:intake', 'checkpoint:record', 'approve:review', 'review:act-on-findings', 'board:nuke', '']) {
+  for (const kind of ['nel:record', 'mission:intake', 'checkpoint:record', 'approve:review', 'review:act-on-findings', 'review:resume', 'board:nuke', '']) {
     const result = validateWebCommandRequest(identityRequest(kind));
     assert.ok(!result.ok, `${kind} must be rejected as an unsupported kind`);
     assert.ok(problems(result).some(problem => problem.includes('kind')), `${kind} rejection must name the kind`);

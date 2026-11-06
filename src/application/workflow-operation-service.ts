@@ -13,8 +13,11 @@ import { ExecutionStartService, ExecutionStartRefusal } from './execution-start-
 import { MissionLifecycleService } from './mission-lifecycle-service.js';
 import { beginReviewPreparation } from './review-submission-service.js';
 import { MissionIntakeService } from './mission-intake-service.js';
-import type { MissionLabel } from '../domain/mission.js';
+import type { Mission, MissionLabel } from '../domain/mission.js';
 import type { WorkflowOperationStore, WorkflowProcessPort, WorkflowOperationRecord as WorkflowOperation } from './ports/workflow-operation.js';
+import { currentReviewRound } from '../domain/review.js';
+import { decideReviewRecovery, reviewRecoveryApplies } from './review-recovery.js';
+import type { ReviewLivenessReader } from './projections/review-liveness.js';
 
 export interface WorkflowAcceptance {
   readonly status: 'accepted';
@@ -24,6 +27,12 @@ export type WorkflowAdmission = WorkflowAcceptance | ApplicationOutcome<unknown>
 export { isWorkflowCommand } from '../domain/workflow-operation.js';
 type DraftInput = { title: string; labels: readonly MissionLabel[]; status: string };
 interface AdmissionPreparation { readonly agent: string | null; readonly draft: DraftInput | null; }
+
+function isBrowserReviewSubmission(request: BoardCommandRequest): boolean {
+  return request.kind === 'review:submit'
+    && !request.operatorInvocation
+    && request.missionStatusAtRequest !== undefined;
+}
 
 /** Admission and execution share policy; no transaction spans external work. */
 export class WorkflowOperationService implements BoardCommandDispatcher {
@@ -40,10 +49,12 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     private readonly _wait: { now(): number; timeoutMs: number } = { now: Date.now, timeoutMs: 24 * 60 * 60 * 1000 },
     private readonly _eligibleAgent: (_agent: string) => Promise<boolean> = async () => false,
     private readonly _revision: () => string | null = () => null,
+    private readonly _reviewExecution?: ReviewLivenessReader,
   ) {}
 
   canExecute(kind: BoardCommandRequest['kind']): boolean {
-    return kind === 'workflow:stop' || this._dispatcher.canExecute(kind);
+    if (kind === 'workflow:stop') { return true; }
+    return this._dispatcher.canExecute(kind);
   }
 
   async dispatch<T>(request: BoardCommandRequest): Promise<BoardCommandResult<T>> {
@@ -101,6 +112,9 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     try {
       const existing = await this._operations.readOnly(() => this.existingAdmission(request, key));
       if (existing) { return existing; }
+      const preparedRequest = await this.operatorReviewRequest(request);
+      if ('status' in preparedRequest) { return preparedRequest; }
+      request = preparedRequest;
       const prepared = await this.prepareAdmission(request);
       if ('status' in prepared) { return prepared; }
       accepted = await this._operations.transaction(async () => {
@@ -128,6 +142,38 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       try { await this._processes.launch(accepted.operation.id); } catch { /* persisted intent survives */ }
     }
     return accepted;
+  }
+
+  /** Browser authentication is established by the web host before this typed action reaches admission. */
+  private async operatorReviewRequest(request: BoardCommandRequest): Promise<BoardCommandRequest | ApplicationOutcome<unknown>> {
+    if (!isBrowserReviewSubmission(request)) { return request; }
+    const loaded = await this._operations.readOnly(() => this._missions.load(missionId(request.missionId)));
+    if (loaded.kind === 'unavailable') { return failure('unavailable', loaded.reason); }
+    if (loaded.kind !== 'found' || loaded.mission.repositoryId !== this._repository) {
+      return failure('unavailable', 'Mission authority could not find this mission');
+    }
+    return this.recoveredOperatorReviewRequest(request, loaded.mission);
+  }
+
+  private async recoveredOperatorReviewRequest(request: BoardCommandRequest, mission: Mission): Promise<BoardCommandRequest | ApplicationOutcome<unknown>> {
+    const phase = mission.review ? currentReviewRound(mission.review).phase : null;
+    const humanStop = mission.review?.intervention?.reason ?? null;
+    if (!reviewRecoveryApplies(phase, humanStop)) { return request; }
+    const observation = await this._reviewExecution?.(request.missionId);
+    const recovery = decideReviewRecovery(request.missionId, {
+      phase,
+      humanStop,
+      workflow: observation?.workflow,
+      liveness: observation?.liveness,
+    });
+    if (recovery?.action !== 'acknowledge-and-resume') {
+      return failure('conflict', recovery?.guidance ?? 'Review recovery is not awaiting operator acknowledgment');
+    }
+    return {
+      ...request,
+      operatorInvocation: true,
+      invocation: { command: 'review', args: [request.missionId], interactive: false },
+    };
   }
 
   private admissionRequestRefusal(request: BoardCommandRequest, key: string): ApplicationOutcome<unknown> | null {

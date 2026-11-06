@@ -17,6 +17,16 @@ export function checkCommandAction(object: unknown, path: string, problems: stri
   if (object.targetLane !== null) { checkEnum(object, 'targetLane', LANES, path, problems); }
 }
 
+function checkReviewRecovery(object: unknown, path: string, problems: string[]): void {
+  if (object === null) { return; }
+  if (!isPlainObject(object)) { problems.push(`${path} must be an object or null`); return; }
+  checkKeys(object, ['action', 'humanStop', 'evidence', 'guidance'], ['action', 'humanStop', 'evidence', 'guidance'], path, problems);
+  checkEnum(object, 'action', ['stop-and-confirm', 'acknowledge-and-resume', 'refuse-unconfirmed'], path, problems);
+  checkNullableString(object, 'humanStop', path, problems);
+  checkStringArray(object, 'evidence', path, problems);
+  checkString(object, 'guidance', path, problems);
+}
+
 function checkWork(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   const { kind } = object;
@@ -121,7 +131,7 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'currentCheckpoint', 'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
+      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
@@ -148,6 +158,9 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkNullableFiniteNumber(object, 'reviewRound', path, problems);
   checkNullableString(object, 'reviewPhase', path, problems);
   checkNullableString(object, 'reviewDisposition', path, problems);
+  if (Object.prototype.hasOwnProperty.call(object, 'reviewRecovery')) {
+    checkReviewRecovery(object.reviewRecovery, `${path}.reviewRecovery`, problems);
+  }
   if (Array.isArray(object.reviewHistory)) {
     object.reviewHistory.forEach((round, index) => checkReviewRound(round, `${path}.reviewHistory[${index}]`, problems));
   } else {

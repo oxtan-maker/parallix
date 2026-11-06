@@ -7,6 +7,16 @@ import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../d
 import type { ReviewRoundEntryPort, StartReviewRound } from './ports/review-round.js';
 import { DEFAULT_MAX_ATTEMPTS, runReviewLoop } from './review-loop/review-loop.js';
 
+/**
+ * The attempt limit a review entry runs with. A continuation without an
+ * explicit limit grants one fresh autonomous window after the persisted round;
+ * an explicit limit never falls below the round already reached.
+ */
+export function reviewRoundLimit(persistedRound: number | null, requested: number | null): number {
+  if (requested !== null) { return Math.max(requested, persistedRound ?? 1); }
+  return persistedRound ? Math.max(persistedRound + DEFAULT_MAX_ATTEMPTS - 1, DEFAULT_MAX_ATTEMPTS) : DEFAULT_MAX_ATTEMPTS;
+}
+
 /** Infer first review preparation or continuation from the authoritative Review. */
 export class ReviewRoundUseCase {
   constructor(private readonly _entry: ReviewRoundEntryPort, private readonly _runLoop: typeof runReviewLoop = runReviewLoop) {}
@@ -30,8 +40,7 @@ export class ReviewRoundUseCase {
         await this._entry.invalidateResolvedBlocker(request.slug);
       }
     }
-    const resumedLimit = persisted ? persisted.round + DEFAULT_MAX_ATTEMPTS - 1 : DEFAULT_MAX_ATTEMPTS;
-    const maxAttempts = request.rawMaxAttempts === null ? Math.max(resumedLimit, DEFAULT_MAX_ATTEMPTS) : Math.max(parsed, persisted?.round ?? 1);
+    const maxAttempts = reviewRoundLimit(persisted?.round ?? null, request.rawMaxAttempts === null ? null : parsed);
     const round = { ...request, maxAttempts, isContinue: Boolean(persisted) };
     await this._runLoop(round, await this._entry.mechanisms(round));
   }

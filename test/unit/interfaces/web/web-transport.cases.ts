@@ -368,6 +368,26 @@ test('attention action keeps the server-owned display text and state', () => {
   assert.deepStrictEqual(item.dependsOnSources, ['task-markdown']);
 });
 
+test('settled human stop relabels the existing review action as resume (TASK-2839)', () => {
+  const base = reviewLaneCard();
+  const recovery = { action: 'acknowledge-and-resume' as const, humanStop: 'MAX_ATTEMPTS',
+    evidence: ['no open workflow operation', 'no live workflow, coordinator, execution or reviewer'],
+    guidance: 'Review stopped for human review (MAX_ATTEMPTS) and owned work has settled, so no further stop is required.' };
+  const card = { ...base, reviewRecovery: recovery };
+  const snapshot = toWebBoardSnapshot(projectionWith({
+    stages: makeProjection({ review: [card] }).stages,
+    attentionQueue: [makeAttentionItem(card, { kind: 'review-lane', detail: recovery.guidance }, 1)],
+  }));
+  const wire = snapshot.stages.flatMap(stage => stage.cards).find(each => each.id === card.id)!;
+  assert.deepEqual(wire.reviewRecovery, recovery);
+  const resume = wire.actions.find(action => action.kind === 'review:submit' && action.state === 'enabled');
+  assert.equal(resume?.state, 'enabled');
+  assert.equal(resume?.label, 'Resume review');
+  assert.equal(snapshot.attentionQueue[0].action?.kind, 'review:submit');
+  assert.doesNotMatch(JSON.stringify({ wire, attention: snapshot.attentionQueue[0] }), /px stop/);
+  assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
+});
+
 // ---------------------------------------------------------------------------
 // SC5 — command results and progress: versioned, validated, safe
 // ---------------------------------------------------------------------------

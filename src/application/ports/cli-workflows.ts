@@ -89,6 +89,8 @@ export interface StatusMissionData {
   /** Current review round. */
   readonly reviewRound?: number | null;
   readonly reviewLiveness?: import('../projections/review-liveness.js').ReviewLiveness | null;
+  /** Application-owned recovery decision rendered consistently by status surfaces. */
+  readonly reviewRecovery?: import('../review-recovery.js').ReviewRecovery | null;
   /** Current review disposition. */
   readonly reviewDisposition?: string | null;
   /** A local self-review awaits an external formal approval. */

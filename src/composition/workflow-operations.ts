@@ -28,6 +28,7 @@ import type { createProductionApplicationServices } from './application-services
 import { createMissionStore } from './mission-persistence.js';
 import { startWorkflowRecovery } from './workflow-recovery.js';
 import { git } from '../adapters/git/git.js';
+import { createReviewLivenessReader } from './review-liveness.js';
 
 /** Admission owns a dedicated connection, never the HTTP graph's shared handle. */
 export async function composeWorkflowOperations(root: string, configuration: ParallixConfiguration, dispatcher: BoardCommandDispatcher,
@@ -77,7 +78,7 @@ export async function composeWorkflowOperations(root: string, configuration: Par
     }, observe, undefined, undefined, operations.activity), undefined, eligible, () => {
       const head = git(['-C', root, 'rev-parse', 'HEAD']);
       return head.status === 0 ? head.stdout.trim() : null;
-    });
+    }, createReviewLivenessReader({ operatorState: { db }, mission: { repositoryId: repository } }, root, configuration));
   const failureEvidence = async (operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord) => {
     const history = (await loadTerminal()).history(operation.missionId);
     let gates: ReturnType<typeof listRecoveryEvidence> = [];

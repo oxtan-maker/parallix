@@ -93,6 +93,26 @@ test("starting a known mission without Review still stops at rejected review pre
   assert.deepEqual(fake.writes, []);
 });
 
+test('a MAX_ATTEMPTS stop resumes through one attempt window that only an operator entry can open (TASK-2839)', async () => {
+  const { reviewRoundLimit } = await import('../../../src/application/review-round-use-case.js');
+  const { DEFAULT_MAX_ATTEMPTS } = await import('../../../src/application/review-loop/review-loop.js');
+  assert.equal(reviewRoundLimit(10, null), 10 + DEFAULT_MAX_ATTEMPTS - 1, 'a fresh autonomous window after the stopped round');
+  assert.equal(reviewRoundLimit(null, null), DEFAULT_MAX_ATTEMPTS);
+  assert.equal(reviewRoundLimit(1, null), DEFAULT_MAX_ATTEMPTS);
+  assert.equal(reviewRoundLimit(10, 3), 10, 'an explicit limit never falls below the reached round');
+  assert.equal(reviewRoundLimit(2, 9), 9);
+  const stopped = () => new ReviewState('task-2637', { round: 10, phase: 'reviewing', disposition: 'MAX_ATTEMPTS', metadata: { humanEscalationReason: 'MAX_ATTEMPTS' } });
+  const operator = fixture(10, false, {}, true);
+  await operator.useCase.enter({ ...base, rawMaxAttempts: null });
+  assert.deepEqual(operator.calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
+  assert.equal(operator.requests[0].maxAttempts, reviewRoundLimit(10, null));
+  const automatic = fixture(10, true, { state: stopped() });
+  await automatic.useCase.enter({ ...base, rawMaxAttempts: null });
+  assert.deepEqual(automatic.calls, ['bind mechanisms'], 'no acknowledgment or intervention clear without the operator port');
+  assert.match(automatic.fake.errors.join('\n'), /Review entry blocked for task-2637: MAX_ATTEMPTS/);
+  assert.deepEqual(automatic.fake.writes, [], 'the retained stop and round limit stay unchanged');
+});
+
 test('direct operator acknowledgment precedes continuation readiness and dry-run preserves retained stops (TASK-2759)', async () => {
   const direct = fixture(2, false, {}, true);
   await direct.useCase.enter({ ...base, rawMaxAttempts: null });

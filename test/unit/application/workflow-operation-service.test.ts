@@ -17,13 +17,15 @@ import type { MissionTransitionStore } from '../../../src/application/domain-por
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 import { completed, failure } from '../../../src/application/contracts.js';
-import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
 import { repositoryId } from '../../../src/domain/repository.js';
+import { requestReviewIntervention } from '../../../src/domain/review.js';
 
 function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }, preparation: {
   select?: ConstructorParameters<typeof WorkflowOperationService>[5];
   draft?: ConstructorParameters<typeof WorkflowOperationService>[7];
   eligible?: (_agent: string) => Promise<boolean>;
+  reviewExecution?: ConstructorParameters<typeof WorkflowOperationService>[12];
 } = {}) {
   const rows = new Map<string, WorkflowOperation>();
   let tail: Promise<unknown> = Promise.resolve();
@@ -70,7 +72,8 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   const publish = activity.publish;
   activity.publish = async (event, source) => { publications.push(event.summary); await publish(event, source); };
   const service = new WorkflowOperationService(operations, store, { canExecute: () => true, async dispatch<T>() { return completed({} as T); } }, processes,
-    repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true));
+    repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true), undefined,
+    preparation.reviewExecution ?? (async () => ({ workflow: null, liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })));
   return { service, store, operations, activity, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
 }
 function request(id = 'request-one', mission = 'task-one'): BoardCommandRequest {
@@ -321,6 +324,61 @@ test('review continuation is admitted from integration without moving the missio
   assert.deepEqual(f.events, ['integration:review']);
 });
 
+test('browser review resumes through the same operator continuation as px review when sensible (TASK-2839)', async () => {
+  const executed: BoardCommandRequest[] = [];
+  const admitted: unknown[] = [];
+  for (const shape of ['cli', 'browser'] as const) {
+    const f = fixture();
+    const review = requestReviewIntervention(pendingReview('task-one'), {
+      requestedAt: '2026-11-04T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
+    });
+    f.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
+    // `px review task-one` from a direct operator, exactly as the owned CLI admits it.
+    const cli: BoardCommandRequest = { operationId: shape, requestKey: shape, missionId: 'task-one', kind: 'review:submit',
+      capabilities: new Set(['review:submit']), operatorInvocation: true, invocation: { command: 'review', args: ['task-one'], interactive: false } };
+    const browser: BoardCommandRequest = { operationId: shape, requestKey: shape, missionId: 'task-one', kind: 'review:submit',
+      missionStatusAtRequest: 'review', capabilities: new Set(['review:submit']) };
+    const result = await f.service.admit(shape === 'cli' ? cli : browser);
+    assert.equal(result.status, 'accepted', `${shape}: ${JSON.stringify(result)}`);
+    const operation = await f.service.operation(shape);
+    admitted.push({ command: operation?.command, operatorInvocation: operation?.operatorInvocation, invocation: { ...operation?.invocation, interactive: false } });
+    await f.service.run(shape, async run => { executed.push(run); return completed({}); });
+  }
+  assert.deepEqual(admitted[1], admitted[0]);
+  assert.deepEqual(admitted[0], { command: 'review:submit', operatorInvocation: true, invocation: { command: 'review', args: ['task-one'], interactive: false } });
+  assert.deepEqual(executed.map(run => [run.kind, run.operatorInvocation]), [['review:submit', true], ['review:submit', true]]);
+});
+
+test('browser review resumes only for an acknowledge-and-resume decision (TASK-2839)', async () => {
+  const review = requestReviewIntervention(pendingReview('task-one'), {
+    requestedAt: '2026-11-04T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
+  });
+  const request: BoardCommandRequest = { operationId: 'resume', requestKey: 'resume', missionId: 'task-one', kind: 'review:submit',
+    missionStatusAtRequest: 'review', capabilities: new Set(['review:submit']) };
+
+  const missingCapability = fixture();
+  missingCapability.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
+  const capabilityRefusal = await missingCapability.service.admit({ ...request, capabilities: new Set() });
+  assert.equal(capabilityRefusal.status, 'rejected');
+  assert.equal(capabilityRefusal.error?.kind, 'capability');
+
+  const unconfirmed = fixture(false, undefined, { reviewExecution: async () => ({ workflow: null,
+    liveness: { workflow: false, coordinator: null, execution: false, reviewer: false } }) });
+  unconfirmed.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
+  const recoveryRefusal = await unconfirmed.service.admit(request);
+  assert.equal(recoveryRefusal.status, 'failed');
+  assert.equal(recoveryRefusal.error?.kind, 'conflict');
+  assert.match(recoveryRefusal.error?.message ?? '', /unconfirmed|unknown/i);
+  assert.deepEqual(unconfirmed.launches, []);
+
+  const healthy = fixture(false, undefined, { reviewExecution: async () => ({ workflow: null,
+    liveness: { workflow: false, coordinator: true, execution: false, reviewer: false } }) });
+  healthy.missions.set('task-one', fixtureMission('task-one', { status: 'review', review: pendingReview('task-one') }));
+  const healthyRefusal = await healthy.service.admit(request);
+  assert.equal(healthyRefusal.status, 'failed');
+  assert.deepEqual(healthy.launches, []);
+});
+
 test('CLI review retains eligibility outside integration continuation (TASK-2750)', async () => {
   const cases = [
     { status: 'backlog', args: ['--submit'] },
@@ -425,6 +483,11 @@ test('stop refuses unconfirmed replacement and fences delayed writes after a set
     assert.match(pending.error!.message, /rerun px stop task-one/);
     assert.equal((await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' })).status, 'failed');
     f.setStopped(true); assert.equal((await f.service.stop('task-one')).status, 'completed');
+    const retainedMission = f.missions.get('task-one');
+    const retainedOperation = await f.service.operation('request-one');
+    assert.deepEqual(await f.service.stop('task-one'), completed({ stopped: true }), 'a repeated stop is a completed no-op');
+    assert.strictEqual(f.missions.get('task-one'), retainedMission, 'the retained Review and its history are untouched');
+    assert.deepEqual(await f.service.operation('request-one'), retainedOperation, 'settled workflow history is unchanged');
     const replacement = await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' });
     assert.equal(replacement.status, 'accepted');
     await assert.rejects(() => f.service.assertOwner('request-one', 1), /fenced|stopped/);

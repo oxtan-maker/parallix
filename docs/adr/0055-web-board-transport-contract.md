@@ -88,14 +88,19 @@ validated shape in this contract.
   environment, argv, a path, a version, or a "current" status. Validation is
   fail-closed: unknown keys, unknown kinds and mistyped fields are rejected.
 - Execution actions are `active:execute`, `draft:create`, `integrate:merge`,
-  and `review:submit`. NEL is captured by review preparation through the checked
+  and `review:submit`. When the shared recovery decision confirms that a
+  stopped or orphaned Review is safe to resume, the host treats that existing
+  review action as the same operator continuation used by the direct CLI.
+  Otherwise it remains an ordinary review submission or is refused with the
+  recovery decision's guidance. NEL is captured by review preparation through the checked
   Mission service; the board exposes no measurement mutation. The
   remaining board command kinds (`mission:intake`, `checkpoint:record`,
   `approve:review`, `review:act-on-findings`) are not card-advertised and are
   rejected as unsupported. Whether the action is currently enabled for that
   mission is decided by shared application eligibility checks, not by the
   client; unavailable or stale requests are rejected before admission.
-  `workflow:stop` requests termination of owned execution.
+  `workflow:stop` requests termination of owned execution and returns completion
+  only after the application stop owner confirms settlement.
 - `missionStatusAtRequest` is required and is the status the browser rendered
   on the card — the observed precondition the controller's authoritative
   stale guard compares against the status it reads immediately before
@@ -142,6 +147,9 @@ validated shape in this contract.
 - New wire fields are additive within a transport version; changing an
   existing encoding, or adding a new projection version the converter does
   not know, requires a new transport version and an ADR-level note.
+- The additive card `reviewRecovery` fact carries the application-owned action,
+  evidence and guidance; the browser renders it and does not derive a
+  stop-or-resume sequence.
 - The v1 wire snapshot deliberately omits the flow-metric series, cohorts,
   bottleneck narrative, and card review history/PR/labels. They are
   in-process TUI features with no special-value requirements; add them when

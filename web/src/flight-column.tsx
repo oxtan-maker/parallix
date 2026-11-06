@@ -229,6 +229,15 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
             <span style={{ color: C.faint }}>recorded guidance ({card.checkpoint}):</span> {card.nextActionText}
           </p>
         )}
+        {card.reviewRecovery !== null && (
+          <details data-review-recovery style={{ color: C.amber, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, lineHeight: 1.4 }}>
+            <summary style={{ cursor: 'pointer' }}>{`Review recovery · ${card.reviewRecovery.action}`}</summary>
+            <p style={{ margin: `${SPACE.sm}px 0 0` }}>{card.reviewRecovery.guidance}</p>
+            <ul style={{ margin: `${SPACE.sm}px 0 0`, paddingLeft: SPACE.xl }}>
+              {card.reviewRecovery.evidence.map((evidence) => <li key={evidence}>{evidence}</li>)}
+            </ul>
+          </details>
+        )}
         {card.flags.length > 0 && (
           <p style={{ color: C.amber, fontSize: TYPE.micro, margin: `${SPACE.md}px 0 0`, letterSpacing: TRACK.tight }}>▲ {card.flags.join(' · ')}</p>
         )}

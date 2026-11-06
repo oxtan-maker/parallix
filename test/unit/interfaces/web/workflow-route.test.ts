@@ -3,9 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { FastifyReply } from 'fastify';
 import { admitWebWorkflow } from '../../../../src/interfaces/web/workflow-route.js';
-import type { BoardCommandDispatcher, BoardCommandRequest } from '../../../../src/application/controller/board-command.js';
+import type { BoardCommandDispatcher, BoardCommandRequest, BoardCommandResult } from '../../../../src/application/controller/board-command.js';
 import type { WebCommandRequest } from '../../../../src/interfaces/web/transport.js';
-import { failure, rejected } from '../../../../src/application/contracts.js';
+import { completed, failure, rejected } from '../../../../src/application/contracts.js';
 
 test("workflow admission carries review identity and its stale-status guard without a measurement payload (TASK-2822)", async () => {
   let received: BoardCommandRequest | undefined;
@@ -19,6 +19,43 @@ test("workflow admission carries review identity and its stale-status guard with
   assert.equal(received?.payload, undefined);
   assert.equal(received?.missionStatusAtRequest, 'active');
   assert.equal(received?.requestKey, 'delivery');
+  assert.equal(received?.operatorInvocation, undefined, 'plain browser review cannot acknowledge a human-only stop');
+});
+
+test('web Stop run answers only after settlement and preserves pending-stop guidance (TASK-2839)', async () => {
+  let settle!: (value: BoardCommandResult<{ stopped: boolean }>) => void;
+  const pending = new Promise<BoardCommandResult<{ stopped: boolean }>>(resolve => { settle = resolve; });
+  let status = 0;
+  const bodies: unknown[] = [];
+  const reply = { code(value: number) { status = value; return this; }, type() { return this; }, send(value: unknown) { bodies.push(value); } } as unknown as FastifyReply;
+  const dispatcher: BoardCommandDispatcher = { canExecute: () => true, dispatch: <T>() => pending as Promise<BoardCommandResult<T>> };
+  const request = admitWebWorkflow(reply, dispatcher, { kind: 'workflow:stop', missionId: 'task-test', missionStatusAtRequest: 'review' }, () => {});
+  await Promise.resolve();
+  assert.equal(bodies.length, 0, 'the route has not reported completion before settlement confirmation');
+  settle(completed({ stopped: true }));
+  await request;
+  assert.equal(status, 200);
+  assert.equal((bodies[0] as { status: string }).status, 'completed');
+
+  const guidance = 'Inspect px history task-test list; verify the current process start identity, then rerun px stop task-test.';
+  const conflict: BoardCommandDispatcher = { canExecute: () => true, dispatch: async () => failure('conflict', guidance) };
+  await admitWebWorkflow(reply, conflict, { kind: 'workflow:stop', missionId: 'task-test', missionStatusAtRequest: 'review' }, () => {});
+  assert.equal(status, 409);
+  assert.match(JSON.stringify(bodies.at(-1)), /px history task-test list/);
+  assert.match(JSON.stringify(bodies.at(-1)), /process start identity/);
+});
+
+test('authenticated web review carries ordinary review capability and no minted operator authority (TASK-2839)', async () => {
+  let received: BoardCommandRequest | undefined;
+  const reply = { code() { return this; }, type() { return this; }, send() {} } as unknown as FastifyReply;
+  const dispatcher: BoardCommandDispatcher = { canExecute: () => true, dispatch: async () => failure('execution', 'unused'),
+    admit: async request => { received = request; return failure('conflict', 'fixture'); } };
+  await admitWebWorkflow(reply, dispatcher, { kind: 'review:submit', missionId: 'task-test', missionStatusAtRequest: 'review',
+    requestKey: 'resume-once' }, () => {});
+  assert.equal(received?.kind, 'review:submit');
+  assert.deepEqual([...received!.capabilities], ['review:submit']);
+  assert.equal(received?.operatorInvocation, undefined, 'the transport cannot mint generic operator authority');
+  assert.equal(received?.invocation, undefined, 'the transport cannot supply CLI argv');
 });
 
 test('activation contract refusals are validation responses rather than unavailable (TASK-2750 F8)', async () => {

@@ -1,5 +1,5 @@
 import type { ReviewStateReader } from './review-state.js';
-import { reviewRoundLiveness, describeReviewLiveness } from '../../application/projections/review-liveness.js';
+import { decideReviewRecovery, describeReviewRecovery } from '../../application/review-recovery.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { rebaseImplementer } from '../../application/rebase-identity.js';
 import { reviewPushIdentity } from '../../domain/review-command-policy.js';
@@ -189,6 +189,11 @@ async function resolvePushReviewIdentity(slug: string, rootDir: string, provider
 // Command: showReviewStatus
 // ============================================================================
 
+function statusHumanStop(state: { readonly metadata?: { readonly humanEscalationReason?: unknown } }): string | null {
+  return typeof state.metadata?.humanEscalationReason === 'string'
+    ? state.metadata.humanEscalationReason : null;
+}
+
 export async function showReviewStatus(
   slug: string,
   options: {
@@ -217,9 +222,12 @@ export async function showReviewStatus(
   log(`  Reviewer:    ${fmt.agent(state.reviewer ?? '')}`);
   log(`  Implementer: ${fmt.agent(state.implementer ?? '')}`);
   log(`  Started at:  ${state.startedAt}`);
-  const liveness = reviewRoundLiveness(state.phase, await options.readReviewLiveness?.(slug));
-  const diagnostic = describeReviewLiveness(slug, liveness);
-  if (diagnostic) { log(diagnostic); }
+  const observation = await options.readReviewLiveness?.(slug);
+  const humanStop = statusHumanStop(state);
+  const recovery = decideReviewRecovery(slug, {
+    phase: state.phase, humanStop, workflow: observation?.workflow, liveness: observation?.liveness,
+  });
+  if (recovery) { log(describeReviewRecovery(recovery)); }
   if (state.disposition) {
     log(`  Disposition: ${state.disposition}`);
   }

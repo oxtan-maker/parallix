@@ -19,6 +19,8 @@ import { missionId, missionLabels, type Mission } from '../../../src/domain/miss
 import { changeRevision, type Review } from '../../../src/domain/review.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { reviewRoundLiveness } from '../../../src/application/projections/review-liveness.js';
+import { projectReviewRecoveryCard } from '../../../src/application/projections/workflow-board.js';
+import { makeCard } from '../../fixtures/board-projection.js';
 
 test('unfinished review is orphaned only when every attributed liveness source confirms absence (TASK-2826)', () => {
   const absent = { workflow: false, coordinator: false, execution: false, reviewer: false } as const;
@@ -29,6 +31,54 @@ test('unfinished review is orphaned only when every attributed liveness source c
   }
   assert.equal(reviewRoundLiveness('approved', absent), null);
   assert.equal(reviewRoundLiveness('pending-approval', absent), null);
+});
+
+test('review recovery maps settlement, intervention and liveness facts to exactly one action (TASK-2839)', async () => {
+  const { decideReviewRecovery, describeReviewRecovery } = await import('../../../src/application/review-recovery.js');
+  const absent = { workflow: false, coordinator: false, execution: false, reviewer: false } as const;
+  const stopped = { phase: 'reviewing', humanStop: 'MAX_ATTEMPTS' } as const;
+  const settled = decideReviewRecovery('task-2830', { ...stopped, workflow: null, liveness: absent });
+  assert.equal(settled?.action, 'acknowledge-and-resume');
+  assert.equal(settled?.humanStop, 'MAX_ATTEMPTS');
+  assert.match(describeReviewRecovery(settled!), /MAX_ATTEMPTS.*px review task-2830/);
+  assert.doesNotMatch(describeReviewRecovery(settled!), /px stop/);
+  assert.equal(decideReviewRecovery('task-2830', { phase: 'fixing', humanStop: null, workflow: null, liveness: absent })?.action, 'acknowledge-and-resume');
+  const running = decideReviewRecovery('task-2830', { ...stopped, workflow: { id: 'op-1', phase: 'executing', reason: null }, liveness: { ...absent, workflow: true } });
+  assert.equal(running?.action, 'stop-and-confirm');
+  assert.match(running!.guidance, /px stop task-2830/);
+  assert.equal(decideReviewRecovery('task-2830', { ...stopped, workflow: { id: 'op-1', phase: 'stopping', reason: null }, liveness: absent })?.action, 'stop-and-confirm');
+  for (const probe of Object.keys(absent)) {
+    const live = decideReviewRecovery('task-2830', { ...stopped, workflow: null, liveness: { ...absent, [probe]: true } });
+    assert.equal(live?.action, 'stop-and-confirm', probe);
+    assert.doesNotMatch(live!.guidance, /Stop it with px stop/, 'px stop cannot settle work no workflow operation owns');
+    const unknown = decideReviewRecovery('task-2830', { ...stopped, workflow: null, liveness: { ...absent, [probe]: null } });
+    assert.equal(unknown?.action, 'refuse-unconfirmed', probe);
+    assert.ok(unknown?.evidence.includes(`${probe} liveness unknown`));
+  }
+  assert.equal(decideReviewRecovery('task-2830', { ...stopped, workflow: null })?.action, 'refuse-unconfirmed', 'unobserved probes never confirm absence');
+  const pending = decideReviewRecovery('task-2830', { ...stopped, workflow: { id: 'op-1', phase: 'stopping', reason: 'Stop is pending: termination is unconfirmed. Inspect px history task-2830 list.' }, liveness: absent });
+  assert.equal(pending?.action, 'refuse-unconfirmed');
+  assert.ok(pending?.evidence.some(line => line.includes('termination is unconfirmed')), 'the retained stop evidence travels with the refusal');
+  assert.equal(decideReviewRecovery('task-2830', { phase: 'reviewing', humanStop: null, workflow: { id: 'op-1', phase: 'executing', reason: null }, liveness: { ...absent, workflow: true } }), null, 'a live round needs no recovery');
+  assert.equal(decideReviewRecovery('task-2830', { phase: 'approved', humanStop: 'MAX_ATTEMPTS', workflow: null, liveness: absent }), null);
+  assert.equal(decideReviewRecovery('task-2830', { phase: 'awaiting-review', humanStop: null, workflow: null, liveness: absent }), null);
+});
+
+test('board recovery probes only stopped or potentially orphaned review rounds (TASK-2839)', async () => {
+  let reads = 0;
+  const read = async () => {
+    reads++;
+    return { workflow: null, liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } } as const;
+  };
+  const active = makeCard({ reviewPhase: 'fixing', reviewHumanStop: null,
+    currentWork: { operationId: 'review-op', agent: agentFamily('codex'), summary: 'fixing findings', phase: 'review',
+      updatedAt: '2026-11-04T10:00:00.000Z', freshness: 'live' } });
+  assert.equal((await projectReviewRecoveryCard(active, read)).reviewRecovery, undefined);
+  assert.equal(reads, 0, 'published live work avoids per-refresh process and history probes');
+
+  const stopped = { ...active, currentWork: null, reviewHumanStop: 'MAX_ATTEMPTS' };
+  assert.equal((await projectReviewRecoveryCard(stopped, read)).reviewRecovery?.action, 'acknowledge-and-resume');
+  assert.equal(reads, 1);
 });
 
 test('read-only review status processes never count as live review coordinators (TASK-2826)', () => {

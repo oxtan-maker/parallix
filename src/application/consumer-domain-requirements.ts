@@ -125,7 +125,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
   {
     id: 'workflow-admission-owner', family: 'launch',
     fileLocation: 'src/application/workflow-operation-service.ts',
-    line: 95, anchor: 'async admit(request: BoardCommandRequest)',
+    line: 106, anchor: 'async admit(request: BoardCommandRequest)',
     reads: ['WorkflowOperation', 'Mission'],
     requirement: 'One durable command identity spans admission, exclusive fenced ownership, recovery, phases and outcomes; provider launches remain attributed evidence beneath it.',
     perLaunchIdentity: 'none', perWorkflowIdentity: 'durable-command',
@@ -333,7 +333,7 @@ export const CONSUMER_DOMAIN_REQUIREMENTS: readonly ConsumerRequirement[] = [
     id: 'ui-board-card',
     family: 'ui-board',
     fileLocation: 'src/application/projections/mission-board.ts',
-    line: 259,
+    line: 265,
     anchor: 'function projectMissionCard',
     reads: ['Mission', 'CheckpointData', 'Review'],
     requirement:
