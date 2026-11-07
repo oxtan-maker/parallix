@@ -13,11 +13,40 @@ import { agentFamily } from '../../domain/agents.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.js';
 import type { AgentAvailabilityRow } from './agent-status.js';
-import { buildMetrics } from './metrics.js';
+import { buildMetrics, closedLaneDwellMinutes } from './metrics.js';
 import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { utcHourBucket } from '../services/statistics-service.js';
 import { weeklyDecisionWindows } from '../../domain/decision-window.js';
-import { flowStatistics, type FlowMissionFacts } from './flow-statistics.js';
+import { FLOW_DWELL_STATES, flowStatistics, type FlowMissionFacts } from './flow-statistics.js';
+import type { VerificationStatistics } from './verification-statistics.js';
+
+const EMPTY_FLOW_OBSERVATION: VerificationStatistics['flowMissions'][number] = {
+  missionId: '', diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null, gateRuns: [], rebaseRuns: [],
+  rebaseExpected: { preReview: false, integration: false },
+  lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
+  agentLaunchesLowerBound: false,
+};
+
+function flowMissionFact(outcome: MissionOutcome, observed: VerificationStatistics['flowMissions'][number] | undefined,
+  dwell: ReturnType<typeof closedLaneDwellMinutes>, metadata: ReadonlyMap<MissionId, MissionCohortMetadata>,
+  repositoryId: RepositoryId): FlowMissionFacts {
+  const observation = observed ?? EMPTY_FLOW_OBSERVATION;
+  return { repositoryId: String(repositoryId), missionId: String(outcome.missionId), closedAt: outcome.closedAt,
+    implementer: outcome.implementer === null ? null : String(outcome.implementer),
+    diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
+    ownership: observation.ownership, window: observation.window,
+    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseExpected: observation.rebaseExpected,
+    collectionDefects: observation.collectionDefects,
+    lead: observation.lead,
+    laneDwellMs: Object.fromEntries(FLOW_DWELL_STATES.flatMap(state => {
+      const minutes = dwell.get(state)?.get(outcome.missionId);
+      return minutes === undefined ? [] : [[state, minutes * 60_000]];
+    })),
+    actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
+    agentLaunches: observation.agentLaunches,
+    observedDisqualifiers: observation.observedDisqualifiers,
+    reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics ?? reviewStatistics(null) };
+}
 
 /** Delivery belongs to the recorded final review implementer, never an attempt. */
 export interface MissionCohortMetadata {
@@ -186,17 +215,16 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       netEngineeringLines: await this.netEngineeringLines(),
       window: decisionWindows.current,
     });
-    const verification = await this.verification?.read().catch(() => null);
-    const flow = verification ? flowStatistics(outcomes.map(outcome => {
-      const observed = verification.flowMissions.find(item => item.missionId === outcome.missionId);
-      return { repositoryId: String(this.repositoryId), missionId: String(outcome.missionId), closedAt: outcome.closedAt,
-        diagramNodeIds: observed?.diagramNodeIds ?? [], diagramEdgeIds: observed?.diagramEdgeIds ?? [],
-        ownership: observed?.ownership ?? [], actualAgentLaunches: observed?.actualAgentLaunches ?? null,
-        agentLaunches: observed?.agentLaunches ?? [],
-        observedDisqualifiers: observed?.observedDisqualifiers ?? null,
-        reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics ?? reviewStatistics(null) } satisfies FlowMissionFacts;
-    }), decisionWindows) : undefined;
+    let flowUnavailable: string | undefined;
+    const verification = await this.verification?.read().catch((error: unknown) => {
+      flowUnavailable = `FLOW observations could not be read: ${error instanceof Error ? error.message : String(error)}`;
+      return null;
+    });
+    const dwell = closedLaneDwellMinutes(transitions);
+    const flow = verification ? flowStatistics(outcomes.map(outcome => flowMissionFact(outcome,
+      verification.flowMissions.find(item => item.missionId === outcome.missionId), dwell, metadata, this.repositoryId)), decisionWindows) : undefined;
     return { ...metrics, health, provenance, cohorts, ...(flow ? { flow } : {}),
+      ...(flowUnavailable === undefined ? {} : { flowUnavailable }),
       ...(verification === undefined ? {} : { verification }) };
   }
 
@@ -314,7 +342,9 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     }
 
     // Query operational history for entry timestamps
-    const historyEntries = await this.historyRepo.findAll();
+    const historyEntries = this.historyRepo.findEarliestForMissions
+      ? await this.historyRepo.findEarliestForMissions(missionsWithoutTransitions, this.repositoryId)
+      : await this.historyRepo.findAll();
     const entries = new Map<MissionId, string>();
 
     const wanted = new Set(missionsWithoutTransitions);

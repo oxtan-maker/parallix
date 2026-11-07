@@ -43,6 +43,20 @@ test('reviewer presentation distinguishes initial selection from continued and l
   }
 });
 
+test('explicit reviewer keeps its historical precedence when review resumes (TASK-2837)', () => {
+  const persisted = { reviewer: 'claude', round: 2, phase: 'reviewing' as const };
+  const supported = select({
+    implementer: 'codex', preferredReviewer: 'qwen', isContinue: true, persisted, dryRun: false,
+  }, routing(['codex', 'claude', 'qwen'], () => true, () => { throw new Error('the explicit reviewer needs no nomination'); }));
+  assert.deepEqual(supported.selected, { reviewer: 'qwen', reviewerSource: 'explicit' });
+
+  const unavailable = select({
+    implementer: 'codex', preferredReviewer: 'qwen', isContinue: true, persisted, dryRun: false,
+  }, routing(['codex', 'claude', 'qwen'], agent => agent !== 'qwen', () => { throw new Error('the persisted reviewer is the continuation fallback'); }));
+  assert.deepEqual(unavailable.selected, { reviewer: 'claude', reviewerSource: 'persisted-continue-fallback' });
+  assert.ok(unavailable.logs.some(line => line.includes('falling back to persisted reviewer "claude"')), unavailable.logs.join(' | '));
+});
+
 // Regression provenance: TASK-1079.
 describe("review blocked fallback", { concurrency: false }, () => {
   // Original bug: a blocked auto-derived reviewer crashed the loop with
@@ -65,10 +79,11 @@ describe("review blocked fallback", { concurrency: false }, () => {
     assert.ok(logs.some(l => l.includes('Selected reviewer: claude (auto-derived-fallback)')), `Expected selected-reviewer=claude after multi-hop fallback; got: ${logs.join(' | ')}`);
   });
 
-  test('reviewer selection still rejects with a clear error when the explicit reviewer is blocked and no fallback path exists', () => {
-    const { selected, errors } = select({ implementer: 'custom', reviewer: 'codex', dryRun: false }, routing(['claude', 'gemini', 'custom', 'codex'], agent => agent !== 'codex', () => 'claude'));
-    assert.equal(selected, null, 'an explicit blocked reviewer stops the loop');
-    assert.ok(errors.some(e => e.includes('Unsupported reviewer: "codex"') && e.includes('launcher is not available')), `Expected launcher-unavailable error; got: ${errors.join(' | ')}`);
+  test('explicit preferred reviewer falls back when its launcher is unavailable (TASK-2837)', () => {
+    const { selected, logs, errors } = select({ implementer: 'custom', preferredReviewer: 'codex', dryRun: false }, routing(['claude', 'gemini', 'custom', 'codex'], agent => agent !== 'codex', excluded => excluded.has('claude') ? 'gemini' : 'claude'));
+    assert.deepEqual(selected, { reviewer: 'claude', reviewerSource: 'explicit-fallback' });
+    assert.equal(errors.length, 0, errors.join(' | '));
+    assert.ok(logs.some(line => line.includes('trying fallback "claude"')), logs.join(' | '));
   });
 });
 
@@ -127,16 +142,21 @@ describe("review fallback", { concurrency: false }, () => {
     assert.equal(selected?.reviewerSource, 'persisted-fallback');
   });
 
-  test('CP-1: explicit blocked reviewer fails fast without fallback (unchanged behavior)', () => {
-    const { selected, errors } = select({ implementer: 'custom', reviewer: 'codex', dryRun: false }, routing(['claude', 'vibe', 'custom', 'codex'], agent => agent !== 'codex', () => 'claude'));
-    assert.equal(selected, null, 'Expected the explicit blocked reviewer to stop selection');
-    assert.ok(errors.some(e => e.includes('Unsupported reviewer: "codex"')), `Expected unsupported-reviewer error; got: ${errors.join(' | ')}`);
+  test('CP-1: explicit preferred reviewer is attempted first and then bounded to remaining families (TASK-2837)', () => {
+    const nominations: ReadonlySet<string>[] = [];
+    const { selected, errors } = select({ implementer: 'custom', preferredReviewer: 'codex', dryRun: false }, routing(['claude', 'vibe', 'custom', 'codex'], agent => agent !== 'codex', excluded => {
+      nominations.push(new Set(excluded));
+      return !excluded.has('claude') ? 'claude' : 'vibe';
+    }));
+    assert.deepEqual(selected, { reviewer: 'claude', reviewerSource: 'explicit-fallback' });
+    assert.equal(errors.length, 0, errors.join(' | '));
+    assert.deepEqual([...nominations[0]].sort(), ['codex', 'custom']);
   });
 
   test('CP-1: a dry run validates an explicit reviewer by eligibility only', () => {
-    const { selected } = select({ implementer: 'custom', reviewer: 'codex' }, routing(['claude', 'custom', 'codex'], () => false, () => 'claude'));
+    const { selected } = select({ implementer: 'custom', preferredReviewer: 'codex' }, routing(['claude', 'custom', 'codex'], () => false, () => 'claude'));
     assert.equal(selected?.reviewer, 'codex', 'a dry run launches nothing, so an eligible explicit reviewer is accepted');
-    const blocked = select({ implementer: 'custom', reviewer: 'codex' }, routing(['claude', 'custom'], () => true, () => 'claude'));
+    const blocked = select({ implementer: 'custom', preferredReviewer: 'codex' }, routing(['claude', 'custom'], () => true, () => 'claude'));
     assert.equal(blocked.selected, null, 'an ineligible explicit reviewer is still rejected in a dry run');
     assert.ok(blocked.errors.some(e => e.includes('Unsupported reviewer: "codex" (blocked or unsupported)')), blocked.errors.join(' | '));
   });

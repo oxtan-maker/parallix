@@ -4,7 +4,7 @@ import { checkExecution } from './transport-execution.js';
  * metrics, evidence) and accumulate its problems.
  */
 
-import { LANES, GATES, ACTION_STATES, CERTAINTIES, ATTENTION_REASONS, COMMAND_KINDS, isPlainObject, checkKeys, checkString, checkNullableString, checkBoolean, checkFiniteNumber, checkNullableFiniteNumber, checkEnum, checkStringArray, checkOptString, checkOptionalNullableNumber, checkDuration } from './transport-validation-primitives.js';
+import { LANES, GATES, ACTION_STATES, CERTAINTIES, ATTENTION_REASONS, COMMAND_KINDS, isPlainObject, checkKeys, checkString, checkNullableString, checkBoolean, checkFiniteNumber, checkNullableFiniteNumber, checkEnum, checkStringArray, checkOptString, checkDuration } from './transport-validation-primitives.js';
 
 export function checkCommandAction(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
@@ -241,8 +241,6 @@ export function checkSourceFact(object: unknown, path: string, problems: string[
   checkOptString(object, 'value', path, problems);
 }
 
-type MetricSeriesKey = 'cumulativeFlowByState' | 'weeklyCumulativeFlow' | 'medianCycleTimeByState';
-
 function checkMetricWindow(window: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(window)) { problems.push(`${path} must be an object`); return; }
   checkKeys(window, ['startDate', 'endDate', 'label'], ['startDate', 'endDate', 'label'], path, problems);
@@ -251,60 +249,116 @@ function checkMetricWindow(window: unknown, path: string, problems: string[]): v
   checkString(window, 'label', path, problems);
 }
 
-function checkMetricPoint(key: MetricSeriesKey, point: unknown, path: string, problems: string[]): void {
-  if (!isPlainObject(point)) { problems.push(`${path} must be an object`); return; }
-  if (key === 'cumulativeFlowByState' || key === 'weeklyCumulativeFlow') {
-    checkKeys(point, ['at', 'counts', 'observationCount'], ['at', 'counts'], path, problems);
-    checkString(point, 'at', path, problems);
-    if (!isPlainObject(point.counts)) { problems.push(`${path}.counts must be an object`); }
-  } else {
-    checkKeys(point, ['lane', 'value', 'observationCount'], ['lane', 'value'], path, problems);
-    checkString(point, 'lane', path, problems);
-    checkNullableFiniteNumber(point, 'value', path, problems);
-  }
-  checkOptionalNullableNumber(point, 'observationCount', path, problems);
-}
-
-function checkMetricSeries(key: MetricSeriesKey, series: unknown, path: string, problems: string[]): void {
-  if (!isPlainObject(series)) { problems.push(`${path} must be an object`); return; }
-  const keys = key === 'weeklyCumulativeFlow' ? ['series', 'missingHistoryFallback', 'window'] : ['series', 'missingHistoryFallback'];
-  checkKeys(series, keys, keys, path, problems);
-  if (key === 'weeklyCumulativeFlow') { checkMetricWindow(series.window, `${path}.window`, problems); }
-  checkString(series, 'missingHistoryFallback', path, problems);
-  if (!Array.isArray(series.series)) { problems.push(`${path}.series must be an array`); return; }
-  series.series.forEach((point, index) => checkMetricPoint(key, point, `${path}.series[${index}]`, problems));
-}
-
 function checkFlowRate(value: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(value, ['numerator', 'denominator', 'coverage', 'state', 'value'],
-    ['numerator', 'denominator', 'coverage', 'state', 'value'], path, problems);
+  checkKeys(value, ['numerator', 'denominator', 'observed', 'population', 'coverage', 'state', 'value'],
+    ['numerator', 'denominator', 'observed', 'population', 'coverage', 'state', 'value'], path, problems);
   checkNullableFiniteNumber(value, 'numerator', path, problems);
   checkNullableFiniteNumber(value, 'denominator', path, problems);
+  checkFiniteNumber(value, 'population', path, problems);
+  checkFiniteNumber(value, 'observed', path, problems);
   checkFiniteNumber(value, 'coverage', path, problems);
   checkEnum(value, 'state', ['measured', 'no-eligible-population', 'missing-observation'], path, problems);
   checkNullableFiniteNumber(value, 'value', path, problems);
 }
 
+const FLOW_LANES = ['refine-agent', 'implement-agent', 'parallix', 'review-agent', 'lead', 'human', 'external', 'main'];
+const FLOW_NODES = ['refine', 'implement', 'pre-review-rebase', 'pre-review-resolve', 'declared-gates', 'agent-review',
+  'human-review', 'integration-rebase', 'integration-resolve', 'integration-gates', 'landed', 'lead'];
+const FLOW_EDGE_KINDS = ['flow', 'clean', 'gate-failed', 'agent-findings', 'human-changes', 'rebase-conflict',
+  'rebase-repeat', 'rebase-failed', 'workflow-return', 'lead-escalation'];
+
+function checkObjects(value: unknown, path: string, problems: string[], check: (item: Record<string, unknown>, itemPath: string) => void): void {
+  if (!Array.isArray(value)) { problems.push(`${path} must be an array`); return; }
+  value.forEach((item, index) => {
+    if (!isPlainObject(item)) { problems.push(`${path}[${index}] must be an object`); } else { check(item, `${path}[${index}]`); }
+  });
+}
+
+function checkFlowGraph(value: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(value, ['nodes', 'edges'], ['nodes', 'edges'], path, problems);
+  checkObjects(value.nodes, `${path}.nodes`, problems, (node, nodePath) => {
+    const keys = ['id', 'lane', 'count', 'rework', 'observedMissions', 'population'];
+    checkKeys(node, keys, keys, nodePath, problems);
+    checkEnum(node, 'id', FLOW_NODES, nodePath, problems); checkEnum(node, 'lane', FLOW_LANES, nodePath, problems);
+    for (const key of ['count', 'observedMissions', 'population']) { checkFiniteNumber(node, key, nodePath, problems); }
+    checkNullableFiniteNumber(node, 'rework', nodePath, problems);
+  });
+  checkObjects(value.edges, `${path}.edges`, problems, (edge, edgePath) => {
+    const keys = ['id', 'from', 'to', 'kind', 'count', 'share', 'percentage'];
+    checkKeys(edge, keys, keys, edgePath, problems);
+    checkString(edge, 'id', edgePath, problems);
+    if (edge.from !== null) { checkEnum(edge, 'from', FLOW_NODES, edgePath, problems); }
+    checkEnum(edge, 'to', FLOW_NODES, edgePath, problems); checkEnum(edge, 'kind', FLOW_EDGE_KINDS, edgePath, problems);
+    checkFiniteNumber(edge, 'count', edgePath, problems); checkNullableFiniteNumber(edge, 'share', edgePath, problems);
+    checkNullableFiniteNumber(edge, 'percentage', edgePath, problems);
+  });
+}
+
+function checkFlowTime(value: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
+  const keys = ['rows', 'largestHolder', 'measuredMissions', 'table', 'totals', 'unobservedMs', 'lanes', 'largestLane'];
+  checkKeys(value, keys, keys, path, problems);
+  if (!Array.isArray(value.rows)) { problems.push(`${path}.rows must be an array`); }
+  checkFiniteNumber(value, 'measuredMissions', path, problems);
+  checkFiniteNumber(value, 'unobservedMs', path, problems);
+  if (!isPlainObject(value.totals)) { problems.push(`${path}.totals must be an object`); } else {
+    const totalKeys = ['waitingMs', 'workingMs', 'heldMs', 'totalMs'];
+    checkKeys(value.totals, totalKeys, totalKeys, `${path}.totals`, problems);
+    for (const key of totalKeys) { checkFiniteNumber(value.totals, key, `${path}.totals`, problems); }
+  }
+  if (value.largestLane !== null) { checkEnum(value, 'largestLane', FLOW_LANES, path, problems); }
+  checkObjects(value.table, `${path}.table`, problems, (row, rowPath) => {
+    const rowKeys = ['id', 'step', 'actor', 'lane', 'waitingMs', 'workingMs', 'heldMs', 'totalMs', 'share', 'order'];
+    checkKeys(row, rowKeys, rowKeys, rowPath, problems);
+    for (const key of ['id', 'step', 'actor']) { checkString(row, key, rowPath, problems); }
+    checkEnum(row, 'lane', FLOW_LANES, rowPath, problems);
+    for (const key of ['waitingMs', 'workingMs', 'heldMs', 'totalMs', 'share', 'order']) { checkFiniteNumber(row, key, rowPath, problems); }
+  });
+  checkObjects(value.lanes, `${path}.lanes`, problems, (lane, lanePath) => {
+    const laneKeys = ['lane', 'families', 'waitingMs', 'workingMs', 'heldMs', 'totalMs', 'share'];
+    checkKeys(lane, laneKeys, laneKeys, lanePath, problems);
+    checkEnum(lane, 'lane', FLOW_LANES, lanePath, problems); checkStringArray(lane, 'families', lanePath, problems);
+    for (const key of ['waitingMs', 'workingMs', 'heldMs', 'totalMs', 'share']) { checkFiniteNumber(lane, key, lanePath, problems); }
+  });
+}
+
 function checkFlowWindow(value: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(value, ['label', 'startDate', 'endDate', 'completedMissions', 'diagram', 'firstPassYield',
-    'extraAgentLaunches', 'sendBacks', 'returns', 'episodes', 'time', 'defects'],
-  ['label', 'startDate', 'endDate', 'completedMissions', 'diagram', 'firstPassYield',
-    'extraAgentLaunches', 'sendBacks', 'returns', 'episodes', 'time', 'defects'], path, problems);
+  const keys = ['label', 'startDate', 'endDate', 'completedMissions', 'throughputChange', 'observation', 'diagram', 'graph',
+    'cycleTime', 'firstPassYield', 'extraAgentLaunches', 'sendBacks', 'returns', 'episodes', 'time', 'stateDwell', 'defects'];
+  checkKeys(value, keys, keys, path, problems);
   checkString(value, 'label', path, problems); checkString(value, 'startDate', path, problems);
   checkString(value, 'endDate', path, problems); checkFiniteNumber(value, 'completedMissions', path, problems);
+  checkNullableFiniteNumber(value, 'throughputChange', path, problems);
+  if (!isPlainObject(value.observation)) { problems.push(`${path}.observation must be an object`); } else {
+    checkKeys(value.observation, ['complete', 'partial', 'unobserved'], ['complete', 'partial', 'unobserved'], `${path}.observation`, problems);
+    for (const key of ['complete', 'partial', 'unobserved']) { checkFiniteNumber(value.observation, key, `${path}.observation`, problems); }
+  }
   if (!isPlainObject(value.diagram)) { problems.push(`${path}.diagram must be an object`); } else {
     checkKeys(value.diagram, ['nodeCount', 'edgeCount'], ['nodeCount', 'edgeCount'], `${path}.diagram`, problems);
     checkFiniteNumber(value.diagram, 'nodeCount', `${path}.diagram`, problems);
     checkFiniteNumber(value.diagram, 'edgeCount', `${path}.diagram`, problems);
   }
+  checkFlowGraph(value.graph, `${path}.graph`, problems);
+  if (value.cycleTime !== null) {
+    if (!isPlainObject(value.cycleTime)) { problems.push(`${path}.cycleTime must be an object or null`); } else {
+      checkKeys(value.cycleTime, ['meanMs', 'p90Ms', 'n'], ['meanMs', 'p90Ms', 'n'], `${path}.cycleTime`, problems);
+      for (const key of ['meanMs', 'p90Ms', 'n']) { checkFiniteNumber(value.cycleTime, key, `${path}.cycleTime`, problems); }
+    }
+  }
   checkFlowRate(value.firstPassYield, `${path}.firstPassYield`, problems);
   if (!isPlainObject(value.extraAgentLaunches)) { problems.push(`${path}.extraAgentLaunches must be an object`); } else {
-    checkKeys(value.extraAgentLaunches, ['total', 'meanPerMission', 'n'], ['total', 'meanPerMission', 'n'], `${path}.extraAgentLaunches`, problems);
+    checkKeys(value.extraAgentLaunches, ['total', 'meanPerMission', 'n', 'lowerBound', 'reworkJobs', 'reworkMeanPerMission', 'reworkN'],
+      ['total', 'meanPerMission', 'n', 'lowerBound', 'reworkJobs', 'reworkMeanPerMission', 'reworkN'], `${path}.extraAgentLaunches`, problems);
     checkNullableFiniteNumber(value.extraAgentLaunches, 'total', `${path}.extraAgentLaunches`, problems);
     checkNullableFiniteNumber(value.extraAgentLaunches, 'meanPerMission', `${path}.extraAgentLaunches`, problems);
     checkFiniteNumber(value.extraAgentLaunches, 'n', `${path}.extraAgentLaunches`, problems);
+    checkBoolean(value.extraAgentLaunches, 'lowerBound', `${path}.extraAgentLaunches`, problems);
+    checkNullableFiniteNumber(value.extraAgentLaunches, 'reworkJobs', `${path}.extraAgentLaunches`, problems);
+    checkNullableFiniteNumber(value.extraAgentLaunches, 'reworkMeanPerMission', `${path}.extraAgentLaunches`, problems);
+    checkFiniteNumber(value.extraAgentLaunches, 'reworkN', `${path}.extraAgentLaunches`, problems);
   }
   if (!isPlainObject(value.sendBacks)) { problems.push(`${path}.sendBacks must be an object`); } else {
     checkKeys(value.sendBacks, ['agent', 'human'], ['agent', 'human'], `${path}.sendBacks`, problems);
@@ -314,35 +368,41 @@ function checkFlowWindow(value: unknown, path: string, problems: string[]): void
   for (const key of ['returns', 'episodes', 'defects'] as const) {
     if (!Array.isArray(value[key])) { problems.push(`${path}.${key} must be an array`); }
   }
-  if (!isPlainObject(value.time)) { problems.push(`${path}.time must be an object`); } else {
-    checkKeys(value.time, ['rows', 'largestHolder', 'measuredMissions'], ['rows', 'largestHolder', 'measuredMissions'], `${path}.time`, problems);
-    if (!Array.isArray(value.time.rows)) { problems.push(`${path}.time.rows must be an array`); }
-    checkFiniteNumber(value.time, 'measuredMissions', `${path}.time`, problems);
-  }
+  checkFlowTime(value.time, `${path}.time`, problems);
+  checkObjects(value.stateDwell, `${path}.stateDwell`, problems, (state, statePath) => {
+    checkKeys(state, ['state', 'medianMs', 'p90Ms', 'n'], ['state', 'medianMs', 'p90Ms', 'n'], statePath, problems);
+    checkEnum(state, 'state', ['backlog', 'refined', 'active', 'review', 'integration'], statePath, problems);
+    for (const key of ['medianMs', 'p90Ms', 'n']) { checkFiniteNumber(state, key, statePath, problems); }
+  });
 }
 
-function checkFlow(value: unknown, path: string, problems: string[]): void {
-  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(value, ['current', 'previous'], ['current', 'previous'], path, problems);
+function checkFlowCohort(value: Record<string, unknown>, path: string, problems: string[]): void {
   checkFlowWindow(value.current, `${path}.current`, problems);
   checkFlowWindow(value.previous, `${path}.previous`, problems);
 }
 
+function checkFlow(value: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(value, ['current', 'previous', 'families'], ['current', 'previous', 'families'], path, problems);
+  checkFlowCohort(value, path, problems);
+  checkObjects(value.families, `${path}.families`, problems, (family, familyPath) => {
+    checkKeys(family, ['family', 'current', 'previous'], ['family', 'current', 'previous'], familyPath, problems);
+    checkString(family, 'family', familyPath, problems);
+    checkFlowCohort(family, familyPath, problems);
+  });
+}
+
 export function checkMetrics(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
-  checkKeys(object, ['verification', 'flow', 'weeklyCompletedMissions', 'health', 'provenance', 'flowWindow', 'cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState', 'bottleneck'], ['health', 'provenance', 'cumulativeFlowByState', 'medianCycleTimeByState', 'bottleneck'], path, problems);
+  checkKeys(object, ['verification', 'flow', 'flowUnavailable', 'weeklyCompletedMissions', 'health', 'provenance', 'flowWindow', 'bottleneck'], ['health', 'provenance', 'bottleneck'], path, problems);
   if (object.verification !== undefined && (!Array.isArray(object.verification)
     || !object.verification.every((line: unknown) => typeof line === 'string'))) { problems.push(`${path}.verification must be a string array`); }
   if (object.flow !== undefined) { checkFlow(object.flow, `${path}.flow`, problems); }
+  if (object.flowUnavailable !== undefined) { checkString(object, 'flowUnavailable', path, problems); }
   if (!isPlainObject(object.health)) { problems.push(`${path}.health must be an object`); } else { checkKeys(object.health, ['state'], ['state'], `${path}.health`, problems); checkString(object.health, 'state', `${path}.health`, problems); }
   if (!isPlainObject(object.provenance)) { problems.push(`${path}.provenance must be an object`); } else { checkKeys(object.provenance, ['sampleSize', 'newestEventTimestamp'], ['sampleSize', 'newestEventTimestamp'], `${path}.provenance`, problems); checkFiniteNumber(object.provenance, 'sampleSize', `${path}.provenance`, problems); checkNullableString(object.provenance, 'newestEventTimestamp', `${path}.provenance`, problems); }
   if (object.weeklyCompletedMissions !== undefined) { checkFiniteNumber(object, 'weeklyCompletedMissions', path, problems); }
   if (object.flowWindow !== undefined) { checkMetricWindow(object.flowWindow, `${path}.flowWindow`, problems); }
-  for (const key of ['cumulativeFlowByState', 'weeklyCumulativeFlow', 'medianCycleTimeByState'] as MetricSeriesKey[]) {
-    const series = object[key]; const seriesPath = `${path}.${key}`;
-    if (key === 'weeklyCumulativeFlow' && series === undefined) { continue; }
-    checkMetricSeries(key, series, seriesPath, problems);
-  }
   if (!isPlainObject(object.bottleneck)) { problems.push(`${path}.bottleneck must be an object`); } else { checkKeys(object.bottleneck, ['sentence'], ['sentence'], `${path}.bottleneck`, problems); checkString(object.bottleneck, 'sentence', `${path}.bottleneck`, problems); }
 }
 

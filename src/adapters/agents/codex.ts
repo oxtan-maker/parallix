@@ -1,4 +1,4 @@
-import { recognizedFailureReason } from '../../domain/failure-reason.js';
+import { failureReason, recognizedFailureReason, type FailureReason } from '../../domain/failure-reason.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
@@ -7,6 +7,8 @@ import path from 'node:path';
 import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
 import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
 import { extractCodexTelemetry } from './codex-telemetry.js';
+
+type CodexRolloutTelemetry = NonNullable<ReturnType<typeof extractCodexTelemetry>>;
 import { codexHomeRoot, originatingCodexStateRoot } from '../config/state-homes.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import type { MissionId } from '../../domain/mission.js';
@@ -175,6 +177,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
           result.telemetry = telemetry;
           if (telemetry.model) {result.model = telemetry.model;}
           if (telemetry.provider) {result.provider = telemetry.provider;}
+          result.failureReason = rolloutFailureReason(result, telemetry) ?? result.failureReason;
         }
       } catch (_) {
         // Telemetry is best-effort; never let it break the launch result.
@@ -208,6 +211,24 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
   return { invocation, resultPromise };
 }
 
+
+/**
+ * Codex records why a turn stopped in its own rollout, not in a stream Parallix parses.
+ * Translate its usage-limit identity into the canonical capacity fact; the reset is the
+ * provider-advertised `rate_limits.primary.resets_at`. A provider-typed reason already
+ * on the result wins, and every other identity keeps the fail-closed process reason.
+ */
+function rolloutFailureReason(result: AgentProcessResult, telemetry: CodexRolloutTelemetry): FailureReason | null {
+  const processFailed = !((result.status === 0 || result.status === undefined) && !result.signal && !result.error);
+  const prior = result.failureReason as FailureReason | undefined;
+  if (!processFailed || (prior && prior.source !== 'process')) { return null; }
+  if (telemetry.terminalError?.codexErrorInfo !== 'usage_limit_exceeded') { return null; }
+  const resetAt = telemetry.rateLimitResetsAt === null ? null : new Date(telemetry.rateLimitResetsAt * 1000);
+  return failureReason('agent-quota', 'provider', {
+    providerCode: 'usage_limit_exceeded',
+    ...(resetAt && Number.isFinite(resetAt.getTime()) ? { resetAt: resetAt.toISOString() } : {}),
+  });
+}
 
 function codexStateRoot(worktree: string) {
   return path.join(codexHomeRoot(worktree), '.codex');
@@ -272,9 +293,12 @@ function ensureCodexHome(worktree: string, configuration: ParallixConfiguration 
 // processes the turn, so a non-zero-usage token_count event there is
 // trustworthy evidence the run produced real work, independent of the
 // final exit code. Mirrors isSpuriousOpencodeExit() in opencode.ts.
+// Token usage is not completion: a turn the rollout records as ended by a
+// terminal error (e.g. a usage limit after millions of tokens) failed.
 function isSpuriousCodexExit(result: AgentProcessResult) {
   if (!result || result.status !== 1 || result.signal || result.error) {return false;}
-  const t = result.telemetry;
+  const t = result.telemetry as (AgentProcessResult['telemetry'] & Partial<Pick<CodexRolloutTelemetry, 'terminalError'>>) | null | undefined;
+  if (t?.terminalError) {return false;}
   return Boolean(t && ((t.totalTokens || 0) > 0 || (t.inputTokens || 0) > 0 || (t.outputTokens || 0) > 0));
 }
 

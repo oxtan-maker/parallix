@@ -277,8 +277,8 @@ active block with an unreadable expiry stays blocked. An explicit entry in the
 operator-local `agents.local.json` blocklist takes precedence over a runtime
 block, so `{ "blocked": false }` makes a runtime-blocked family selectable.
 The web board and agent picker show the active block reason and remaining time.
-Recognized Claude 5-hour limits use the reported reset rounded up to the next
-hour. A successful launcher presence check does not clear a usage block.
+Recognized Claude 5-hour limits and Codex usage limits use the reported reset
+rounded up to the next hour. A successful launcher presence check does not clear a usage block.
 
 `adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
 across local custom-agent processes that share `PARALLIX_HOME`; its default is

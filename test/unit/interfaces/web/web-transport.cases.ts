@@ -44,6 +44,9 @@ test('web FLOW transport carries shared verification wording without recalculati
   assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: {
     ...flow, current: { ...flow.current, firstPassYield: { ...flow.current.firstPassYield, value: '100%' } },
   } } }).ok, false);
+  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: {
+    ...flow, current: { ...flow.current, time: { ...flow.current.time, unobservedMs: 'unknown' } },
+  } } }).ok, false);
 });
 import type { LiveMissionWork, MissionCard, ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
 import { agentFamily } from '../../../../src/domain/agents.js';

@@ -10,12 +10,16 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import * as codexModule from '../../../src/adapters/agents/codex.js';
+import { clearOperatorStateCache, initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
+import { SqliteBlocklistRepository } from '../../../src/adapters/sqlite/blocklist-repository.js';
+import { AgentBlockService } from '../../../src/application/services/agent-block-service.js';
 const selectAgentModule = mockModule<typeof import('../../../src/adapters/agents/agents.js')>('../../../src/adapters/agents/agents.js', import.meta.url);
 const detectLimitHitModule = mockModule<typeof import('../../../src/application/services/agent-limit.js')>('../../../src/application/services/agent-limit.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { selectAgent } = selectAgentModule;
-const { detectLimitHit } = detectLimitHitModule;
+const { detectLimitHit, formatBlockUntil, ceilToNextHour } = detectLimitHitModule;
 const originalPath = process.env.PATH;
 const originalCodexHome = process.env.CODEX_HOME;
 
@@ -767,197 +771,55 @@ test('shouldPersistLaunchFailureBlock returns false for endpoint unreachable', (
 
 // New non-blocking patterns for task-1412: timeout, sandbox, connectivity,
 // prompt rejection, argument errors, and resource exhaustion.
-
-// (d) Timeout errors
-test('shouldPersistLaunchFailureBlock returns false for timeout', () => {
-  const result = { status: 1, stderr: 'Error: timeout waiting for response\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for timed out', () => {
-  const result = { status: 1, stderr: 'Request timed out: server did not respond in time\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for deadline exceeded', () => {
-  const result = { status: 1, stderr: 'Error: deadline exceeded\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for request timed out', () => {
-  const result = { status: 1, stderr: 'HTTP request timed out after 30s\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-// (e) Sandbox / permission-denial errors (non-auth)
-test('shouldPersistLaunchFailureBlock returns false for sandbox violation', () => {
-  const result = { status: 1, stderr: 'Error: sandbox violation — access to host network denied\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for sandbox denied', () => {
-  const result = { status: 1, stderr: 'Sandbox denied: container policy blocked execution\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for tool call denied', () => {
-  const result = { status: 1, stderr: 'Tool call denied: file_write not permitted in sandbox\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for action denied', () => {
-  const result = { status: 1, stderr: 'Action denied: network_request blocked by policy\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for approval denied', () => {
-  const result = { status: 1, stderr: 'Approval denied: user did not approve the proposed action\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-// (f) Provider connectivity errors
-test('shouldPersistLaunchFailureBlock returns false for EPIPE', () => {
-  const result = { status: 1, stderr: 'Error: EPIPE — broken pipe connecting to API\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for ETIMEDOUT', () => {
-  const result = { status: 1, stderr: 'Error: ETIMEDOUT connecting to provider\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for ENETUNREACH', () => {
-  const result = { status: 1, stderr: 'Error: ENETUNREACH — network unreachable\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for ENOTFOUND', () => {
-  const result = { status: 1, stderr: 'Error: ENOTFOUND api.mistral.ai\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for EAI_AGAIN', () => {
-  const result = { status: 1, stderr: 'Error: EAI_AGAIN: DNS resolution failed\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for socket hang up', () => {
-  const result = { status: 1, stderr: 'Error: socket hang up\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for fetch failed', () => {
-  const result = { status: 1, stderr: 'TypeError: fetch failed\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for service unavailable', () => {
-  const result = { status: 1, stderr: 'Error: service unavailable\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for gateway timeout', () => {
-  const result = { status: 1, stderr: 'Error: gateway timeout (504)\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for overloaded', () => {
-  const result = { status: 1, stderr: 'Error: service overloaded\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for temporarily unavailable', () => {
-  const result = { status: 1, stderr: 'Error: temporarily unavailable\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for please try again', () => {
-  const result = { status: 1, stderr: 'Error: please try again later\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for retry after', () => {
-  const result = { status: 1, stderr: 'Error: retry after 60 seconds\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-// (g) Prompt rejection errors
-test('shouldPersistLaunchFailureBlock returns false for prompt rejected', () => {
-  const result = { status: 1, stderr: 'Error: prompt rejected by content policy\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for prompt blocked', () => {
-  const result = { status: 1, stderr: 'Error: prompt blocked\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for content policy', () => {
-  const result = { status: 1, stderr: 'Error: content policy violation\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for content filter', () => {
-  const result = { status: 1, stderr: 'Error: content filter triggered\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for safety filter', () => {
-  const result = { status: 1, stderr: 'Error: safety filter blocked the request\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-// (h) Invocation argument errors
-test('shouldPersistLaunchFailureBlock returns false for invalid argument', () => {
-  const result = { status: 1, stderr: 'Error: invalid argument: --workspace\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for invalid option', () => {
-  const result = { status: 1, stderr: 'Error: invalid option: --yolo\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for invalid parameter', () => {
-  const result = { status: 1, stderr: 'Error: invalid parameter: model="gpt-99"\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for missing required', () => {
-  const result = { status: 1, stderr: 'Error: missing required argument: --prompt\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for argument error', () => {
-  const result = { status: 1, stderr: 'Error: argument error — expected integer\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-// (i) Resource exhaustion errors
-test('shouldPersistLaunchFailureBlock returns false for out of memory', () => {
-  const result = { status: 1, stderr: 'Error: out of memory\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for OOM', () => {
-  const result = { status: 1, stderr: 'Killed: OOM killer invoked\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for memory limit', () => {
-  const result = { status: 1, stderr: 'Error: memory limit exceeded (2GB cap)\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('codex', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for context window exceeded', () => {
-  const result = { status: 1, stderr: 'Error: context window exceeded (max 128K tokens)\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
-
-test('shouldPersistLaunchFailureBlock returns false for token limit exceeded', () => {
-  const result = { status: 1, stderr: 'Error: token limit exceeded\n', stdout: '' };
-  assert.equal(shouldPersistLaunchFailureBlock('mistral', result), false);
-});
+for (const [label, agent, stderr] of [
+  // (d) Timeout errors
+  ['timeout', 'codex', 'Error: timeout waiting for response\n'],
+  ['timed out', 'mistral', 'Request timed out: server did not respond in time\n'],
+  ['deadline exceeded', 'codex', 'Error: deadline exceeded\n'],
+  ['request timed out', 'mistral', 'HTTP request timed out after 30s\n'],
+  // (e) Sandbox / permission-denial errors (non-auth)
+  ['sandbox violation', 'codex', 'Error: sandbox violation — access to host network denied\n'],
+  ['sandbox denied', 'codex', 'Sandbox denied: container policy blocked execution\n'],
+  ['tool call denied', 'codex', 'Tool call denied: file_write not permitted in sandbox\n'],
+  ['action denied', 'codex', 'Action denied: network_request blocked by policy\n'],
+  ['approval denied', 'codex', 'Approval denied: user did not approve the proposed action\n'],
+  // (f) Provider connectivity errors
+  ['EPIPE', 'mistral', 'Error: EPIPE — broken pipe connecting to API\n'],
+  ['ETIMEDOUT', 'mistral', 'Error: ETIMEDOUT connecting to provider\n'],
+  ['ENETUNREACH', 'mistral', 'Error: ENETUNREACH — network unreachable\n'],
+  ['ENOTFOUND', 'mistral', 'Error: ENOTFOUND api.mistral.ai\n'],
+  ['EAI_AGAIN', 'mistral', 'Error: EAI_AGAIN: DNS resolution failed\n'],
+  ['socket hang up', 'codex', 'Error: socket hang up\n'],
+  ['fetch failed', 'mistral', 'TypeError: fetch failed\n'],
+  ['service unavailable', 'mistral', 'Error: service unavailable\n'],
+  ['gateway timeout', 'mistral', 'Error: gateway timeout (504)\n'],
+  ['overloaded', 'codex', 'Error: service overloaded\n'],
+  ['temporarily unavailable', 'mistral', 'Error: temporarily unavailable\n'],
+  ['please try again', 'mistral', 'Error: please try again later\n'],
+  ['retry after', 'mistral', 'Error: retry after 60 seconds\n'],
+  // (g) Prompt rejection errors
+  ['prompt rejected', 'codex', 'Error: prompt rejected by content policy\n'],
+  ['prompt blocked', 'codex', 'Error: prompt blocked\n'],
+  ['content policy', 'mistral', 'Error: content policy violation\n'],
+  ['content filter', 'mistral', 'Error: content filter triggered\n'],
+  ['safety filter', 'codex', 'Error: safety filter blocked the request\n'],
+  // (h) Invocation argument errors
+  ['invalid argument', 'codex', 'Error: invalid argument: --workspace\n'],
+  ['invalid option', 'codex', 'Error: invalid option: --yolo\n'],
+  ['invalid parameter', 'mistral', 'Error: invalid parameter: model="gpt-99"\n'],
+  ['missing required', 'codex', 'Error: missing required argument: --prompt\n'],
+  ['argument error', 'codex', 'Error: argument error — expected integer\n'],
+  // (i) Resource exhaustion errors
+  ['out of memory', 'codex', 'Error: out of memory\n'],
+  ['OOM', 'codex', 'Killed: OOM killer invoked\n'],
+  ['memory limit', 'codex', 'Error: memory limit exceeded (2GB cap)\n'],
+  ['context window exceeded', 'mistral', 'Error: context window exceeded (max 128K tokens)\n'],
+  ['token limit exceeded', 'mistral', 'Error: token limit exceeded\n'],
+] as const) {
+  test(`shouldPersistLaunchFailureBlock returns false for ${label}`, () => {
+    assert.equal(shouldPersistLaunchFailureBlock(agent, { status: 1, stderr, stdout: '' }), false);
+  });
+}
 
 // (j) detectLimitHit guard for status === undefined
 
@@ -988,4 +850,44 @@ test('detectLimitHit fires for structured quota with status 1 (explicit failure)
   });
   assert.ok(result !== null, 'detectLimitHit must fire when status is 1');
   assert.equal(result.source, 'fallback');
+});
+
+// TASK-2841: the Codex launcher's own rollout identity drives the production chain —
+// default detector, checked AgentBlock writer and runtime-block reselection — so one
+// operation blocks codex at its advertised reset and the next family runs.
+test('codex usage-limit rollout writes one checked AgentBlock at the advertised reset and launches the next family', async (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2841-codex-quota-'));
+  fs.writeFileSync(path.join(home, 'agents.local.json'), '{"blocklist":{}}\n');
+  t.after(async () => { codexModule.__setSpawnAndTeeForTest(null); await clearOperatorStateCache(); fs.rmSync(home, { recursive: true, force: true }); });
+  const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: home });
+  const resetsAt = Math.floor(Date.now() / 1000) + 4 * 3600 + 17 * 60;
+  codexModule.__setSpawnAndTeeForTest(async () => {
+    const sessions = path.join(codexModule.codexHomeRoot(home), '.codex', 'sessions', '2026', '11', '04');
+    fs.mkdirSync(sessions, { recursive: true });
+    fs.writeFileSync(path.join(sessions, 'rollout-2841.jsonl'), [
+      { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: 4004977 } }, rate_limits: { primary: { used_percent: 100, window_minutes: 10080, resets_at: resetsAt } } } },
+      { type: 'event_msg', payload: { type: 'task_complete', error: { message: 'usage limit', codex_error_info: 'usage_limit_exceeded' } } },
+    ].map(event => JSON.stringify(event)).join('\n'));
+    return { status: 1, signal: null, stdout: '', stderr: 'ERROR: usage limit\n', error: null, failureReason: { version: 1, code: 'process-failed', source: 'process', context: { exitCode: 1 } } };
+  });
+  const selections: { picked: string; exclude: string[] }[] = [];
+  const result = await startAgent('active', { configuration, prompt: 'Execute.', worktree: home, log: () => {}, assertAgentSupportedFn: () => {},
+    selectAgentFn: (_step, opts = {}) => {
+      const exclude = [...(opts.exclude ?? [])].sort();
+      const picked = ['codex', 'claude'].find(agent => !exclude.includes(agent)) ?? 'none';
+      selections.push({ picked, exclude });
+      return picked;
+    },
+    launchAgentFn: (input) => selections.at(-1)?.picked === 'codex'
+      ? codexModule.startCodexDraftAgent({ ...input, configuration })
+      : { invocation: { command: 'claude', args: [] }, resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }) },
+  });
+
+  assert.equal(result.agent, 'claude');
+  assert.deepEqual(selections.map(selection => selection.picked), ['codex', 'claude'], 'no second codex attempt');
+  assert.ok(selections[1].exclude.includes('codex'), 'reselection reads the persisted block');
+  const { db } = await initOperatorState({ configuration });
+  const states = await new AgentBlockService(new SqliteBlocklistRepository(db)).queryAll(['codex', 'claude', 'qwen', 'vibe', 'opencode']);
+  assert.deepEqual(states.filter(state => state.blocked).map(state => [state.agent, state.until, state.reason]),
+    [['codex', formatBlockUntil(ceilToNextHour(new Date(resetsAt * 1000))), 'typed: agent-quota']]);
 });

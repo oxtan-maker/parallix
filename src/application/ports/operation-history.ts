@@ -17,8 +17,25 @@ export interface OperationLogSummary {
   readonly rawData: string | null;
 }
 
+/** Minimal rebound-repair identity used by statistics; retained transcripts stay behind the adapter. */
+export interface ReboundRepairHistoryEntry {
+  readonly missionId: string;
+  readonly occurrenceId: string;
+  readonly reasonKind: string;
+  readonly area: string | null;
+  readonly agent: string;
+  readonly durationMs?: number | null;
+  readonly occurredAt: string;
+}
+
 export interface OperationalHistoryRepository {
   findAll(): Promise<readonly OperationalHistoryEntry[]>;
+  /** Selected analytical event families without loading unrelated retained payloads. */
+  findByTypes?(_types: readonly string[]): Promise<readonly OperationalHistoryEntry[]>;
+  /** Minimal first observation for legacy Missions with no lane-transition history. */
+  findEarliestForMissions?(_missionIds: readonly string[], _repositoryId: string): Promise<readonly OperationalHistoryEntry[]>;
+  /** Minimal rebound identities for all Missions, without loading retained repair transcripts. */
+  findReboundRepairs?(): Promise<readonly ReboundRepairHistoryEntry[]>;
   /**
    * The newest `limit` entries in ascending id order, reduced to what the board
    * log shows: the JSON payload's `message` and `agent`, or the raw text when

@@ -80,8 +80,8 @@ test('eligibleAgentsForStep returns all current launchers when act-on-review ste
 });
 
 test('startAgent review fallback selects configured vibe when claude hits limit (TASK-1036 transcript)', async () => {
-  // Current behavior: pinned reviewer=claude, implementer=codex, claude limit-hit,
-  // fallback selects vibe from explicit review eligibility.
+  // Preferred reviewer=claude, implementer=codex, claude limit-hit; fallback
+  // selects vibe from explicit review eligibility.
   const tmpRoot = registeredMkdtemp('task-1036-review-fallback-');
   try {
     const order = ['claude', 'vibe'];
@@ -145,6 +145,50 @@ test('startAgent review fallback selects configured vibe when claude hits limit 
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }
 });
+
+const preferredReviewerFailureCases = [
+  ['typed quota', { status: 1, failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-11-04T08:00:00Z' } } }, true],
+  ['provider unavailable', { status: 1, failureReason: { version: 1, code: 'provider-unavailable', source: 'provider' } }, true],
+  ['provider entitlement', { status: 1, failureReason: { version: 1, code: 'provider-entitlement', source: 'provider' } }, false],
+  ['missing launcher', { status: null, error: Object.assign(new Error('missing launcher'), { code: 'ENOENT' }) }, false],
+  ['liveness timeout', { status: null, error: Object.assign(new Error('no output'), { code: 'NO_OUTPUT_TIMEOUT' }) }, false],
+  ['unambiguous nonzero exit without artifacts', { status: 2, stdout: '', stderr: 'controlled failure' }, false],
+] as const;
+
+for (const [cause, failedResult, writesBlock] of preferredReviewerFailureCases) {
+  test(`preferred reviewer falls back after ${cause} (TASK-2837)`, async () => {
+    const launched: string[] = [];
+    const blocked: string[] = [];
+    const result = await startAgent('review', {
+      configuration: resolveConfiguration(environment),
+      prompt: 'Review',
+      agent: 'claude',
+      preferredAgent: true,
+      exclude: ['codex'],
+      isAgentBlockedFn: family => blocked.includes(family),
+      assertAgentSupportedFn: () => {},
+      resolveAgentModelFn: () => null,
+      updateAgentBlockFn: family => { blocked.push(family); return { reason: cause }; },
+      selectAgentFn: (_step, options) => {
+        const excluded = new Set(options?.exclude);
+        assert.equal(blocked.includes('claude'), writesBlock, 'checked provider block is written before reselection only for positive evidence');
+        assert.ok(excluded.has('claude'), 'failed preferred family is bounded out of the retry');
+        assert.ok(excluded.has('codex'), 'implementer stays excluded');
+        return 'vibe';
+      },
+      launchAgentFn: input => {
+        const family = input.env!.FORGEJO_USER!;
+        launched.push(family);
+        return { invocation: { command: family, args: [] }, result: family === 'claude' ? failedResult : { status: 0, stdout: '', stderr: '' } };
+      },
+      log: () => {},
+    });
+
+    assert.equal(result.agent, 'vibe');
+    assert.deepEqual(launched, ['claude', 'vibe']);
+    assert.deepEqual(blocked, writesBlock ? ['claude'] : []);
+  });
+}
 
 test('startAgent act-on-review fallback selects vibe when implementer hits limit and act-on-review step is missing (TASK-1036)', async () => {
   const tmpRoot = registeredMkdtemp('task-1036-act-on-review-fallback-');

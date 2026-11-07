@@ -154,6 +154,57 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
   assert.deepEqual(blockCalls, [], 'codex must not be blocklisted for a spurious exit-1 with valid telemetry');
 });
 
+// TASK-2841: a Codex turn that ended with a terminal error is not a completed run,
+// however many rollout tokens it consumed (TASK-2834 spent 4004977 before its usage
+// limit). With the limit-hit detector stubbed out the gate alone must reroute; only the
+// typed usage-limit identity reaches the second block-persistence site.
+test('codex exit 1 whose rollout turn ended with a terminal error reroutes despite token usage', async (t) => {
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  t.after(() => {
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+  });
+  for (const [identity, expectedBlocks] of [['usage_limit_exceeded', ['codex']], ['server_overloaded', []]] as const) {
+    const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2841-codex-terminal-'));
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+    const codexScript = `
+      if (process.argv.includes('--help')) { process.exit(0); }
+      const fs = require('fs');
+      const path = require('path');
+      const dir = path.join(process.env.CODEX_HOME, 'sessions', '2026', '11', '04');
+      fs.mkdirSync(dir, { recursive: true });
+      const lines = [
+        { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 3990000, output_tokens: 14977, total_tokens: 4004977 } }, rate_limits: { primary: { used_percent: 100, window_minutes: 10080, resets_at: 1793804950 } } } },
+        { type: 'event_msg', payload: { type: 'task_complete', last_agent_message: null, error: { message: 'turn failed', codex_error_info: '${identity}' } } }
+      ];
+      fs.writeFileSync(path.join(dir, 'rollout-2841.jsonl'), lines.map(line => JSON.stringify(line)).join('\\n') + '\\n');
+      process.exit(1);
+    `;
+    const blockCalls: string[] = [];
+    const launched: string[] = [];
+    const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
+      configuration: launchConfiguration(),
+      prompt: 'Execute.',
+      worktree,
+      assertAgentSupportedFn: () => {},
+      isAgentBlockedFn: () => false,
+      selectAgentFn: (step, opts) => {
+        const next = [...(opts?.exclude ?? [])].includes('codex') ? 'vibe' : 'codex';
+        launched.push(next);
+        return next;
+      },
+      detectLimitHitFn: () => null,
+      updateAgentBlockFn: (agent) => { blockCalls.push(agent); return { reason: null }; },
+      log: () => {}
+    })));
+
+    assert.equal(result.agent, 'vibe', `${identity}: a terminal-error turn must reroute instead of returning the failed codex launch`);
+    assert.deepEqual(launched, ['codex', 'vibe'], identity);
+    assert.deepEqual(blockCalls, expectedBlocks, identity);
+  }
+});
+
 test('mistral exit 1 with real session telemetry is misclassified as a launch failure', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1416-mistral-wt-'));
   let blockCalls: { agent: string; until: string; }[] = [];

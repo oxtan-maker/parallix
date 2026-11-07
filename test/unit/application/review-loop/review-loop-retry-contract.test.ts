@@ -354,3 +354,129 @@ test('an already spent round budget still reports the missing artifact cause and
   assert.deepEqual(fake.stops, ['REBOUNDS_PER_ROUND_EXHAUSTED']);
   assert.match(fake.errors.join(' | '), /Incomplete reviewer artifact.*output-token-limit.*px review task-2827-spent/);
 });
+
+describe('preferred reviewer runtime fallback authority', () => {
+  test('actual fallback reviewer owns persistence, artifacts, telemetry, presentation and continuation', async () => {
+    const artifacts: string[] = [];
+    const telemetry: Array<{ reviewer?: string; stateReviewer?: string }> = [];
+    let providerPolls = 0;
+    const fake = fakeReviewLoopPorts({
+      slug: 'task-2837-actual-reviewer',
+      routing: { eligibleFamilies: () => ['codex', 'vibe', 'custom'], nominate: () => 'codex' },
+      agents: {
+        launch: async () => ({ agent: 'vibe', result: { status: 0 } }),
+        recordStage: async (_role, state, identity) => { telemetry.push({ reviewer: identity.reviewer, stateReviewer: state.reviewer }); },
+      },
+      provider: { pollReview: async () => { providerPolls++; return POLL_TIMEOUT; } },
+      artifacts: {
+        consumeReviewer: async reviewer => {
+          artifacts.push(reviewer);
+          return { consumed: true, ok: true as const, reviewState: 'APPROVED' };
+        },
+      },
+    });
+
+    await runReviewLoop({ slug: 'task-2837-actual-reviewer', implementer: 'custom', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    assert.equal(fake.current()?.reviewer, 'vibe');
+    assert.deepEqual(artifacts, ['vibe']);
+    assert.deepEqual(telemetry, [{ reviewer: 'vibe', stateReviewer: 'vibe' }]);
+    assert.equal(providerPolls, 0);
+    assert.ok(fake.logs.some(line => line.includes('reviewer fell back from codex to vibe')), fake.logs.join(' | '));
+    assert.ok(!fake.mirrors.some(effect => effect.startsWith('assign:')), 'reviewer fallback never changes the Backlog assignee');
+
+    await runReviewLoop({ slug: 'task-2837-actual-reviewer', implementer: 'custom', reviewer: 'codex', isContinue: true, maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    assert.equal(fake.launches.length, 1, 'continuation retains the decided round instead of launching either family again');
+    assert.equal(fake.current()?.reviewer, 'vibe');
+  });
+
+  test('incomplete artifact recovery never relaunches the blocked preferred family', async () => {
+    const fake = fakeReviewLoopPorts({
+      slug: 'task-2837-blocked-recovery',
+      routing: { eligibleFamilies: () => ['codex', 'vibe', 'custom'], nominate: () => 'codex' },
+      agents: { launch: async launch => ({ agent: launch.agent === 'codex' ? 'vibe' : launch.agent, result: { status: 0 } }) },
+      artifacts: { consumeReviewer: async () => ({ consumed: false }) },
+    });
+
+    await runReviewLoop({ slug: 'task-2837-blocked-recovery', implementer: 'custom', reviewer: 'codex', maxAttempts: 1, reboundsPerRound: 1, skipReviewPreparation: true }, fake.ports);
+    assert.deepEqual(fake.launches.filter(launch => launch.role === 'reviewer').map(launch => launch.agent), ['codex', 'vibe']);
+    assert.equal(fake.current()?.reviewer, 'vibe');
+  });
+
+  test('verdict recorded before process exit is retained without duplicate consumption or decision', async () => {
+    const slug = 'task-2837-verdict-before-exit';
+    const local = new ReviewState(slug, { reviewer: 'codex', implementer: 'custom', round: 1, phase: 'reviewing' });
+    let authoritative = new ReviewState(slug, { ...local });
+    let artifactConsumes = 0;
+    let providerPolls = 0;
+    let approvalWrites = 0;
+    const fallbackPersists: Array<{ phase: string; reviewer?: string }> = [];
+    const fake = fakeReviewLoopPorts({
+      slug,
+      state: local,
+      stateport: {
+        read: async () => authoritative,
+        openRound: async next => { authoritative = new ReviewState(slug, { ...next }); return true; },
+        persist: async next => {
+          fallbackPersists.push({ phase: next.phase, reviewer: next.reviewer });
+          authoritative = new ReviewState(slug, { ...next });
+        },
+        recordApproval: async () => { approvalWrites++; },
+      },
+      routing: { eligibleFamilies: () => ['codex', 'vibe', 'custom'], nominate: () => 'codex' },
+      agents: {
+        launch: async () => {
+          authoritative = new ReviewState(slug, { ...authoritative, reviewer: 'vibe', phase: 'approved', disposition: 'APPROVED' });
+          return { agent: 'vibe', result: { status: 1 } };
+        },
+      },
+      provider: { pollReview: async () => { providerPolls++; return POLL_TIMEOUT; } },
+      artifacts: { consumeReviewer: async () => { artifactConsumes++; return { consumed: false }; } },
+    });
+
+    await runReviewLoop({ slug, implementer: 'custom', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    assert.equal(authoritative.phase, 'approved');
+    assert.equal(authoritative.reviewer, 'vibe');
+    assert.deepEqual(fallbackPersists.at(-1), { phase: 'approved', reviewer: 'vibe' }, 'fallback identity merges into the decided round without stale state');
+    assert.equal(artifactConsumes, 0, 'the accepted verdict is not consumed a second time');
+    assert.equal(providerPolls, 0, 'the accepted verdict cannot produce a duplicate provider decision');
+    assert.equal(approvalWrites, 0, 'the already-recorded approval is not written twice');
+    assert.ok(!fake.mirrors.some(effect => effect.startsWith('assign:')));
+  });
+
+  test('request-changes recorded before process exit cannot restore the preferred reviewer', async () => {
+    const slug = 'task-2837-request-changes-before-exit';
+    const local = new ReviewState(slug, { reviewer: 'codex', implementer: 'custom', round: 1, phase: 'reviewing' });
+    let authoritative = new ReviewState(slug, { ...local });
+    const persistedReviewers: Array<string | undefined> = [];
+    const fake = fakeReviewLoopPorts({
+      slug,
+      state: local,
+      stateport: {
+        read: async () => authoritative,
+        openRound: async next => { authoritative = new ReviewState(slug, { ...next }); return true; },
+        persist: async next => {
+          persistedReviewers.push(next.reviewer);
+          authoritative = new ReviewState(slug, { ...next });
+        },
+      },
+      routing: { eligibleFamilies: () => ['codex', 'vibe', 'custom'], nominate: () => 'codex' },
+      agents: {
+        launch: async launch => {
+          if (launch.role === 'implementer') { return { agent: 'custom', result: { status: 0 } }; }
+          authoritative = new ReviewState(slug, { ...authoritative, phase: 'fixing', disposition: 'REQUEST_CHANGES' });
+          return { agent: 'vibe', result: { status: 1 } };
+        },
+      },
+      artifacts: {
+        consumeReviewer: async () => ({ consumed: false }),
+        consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE' }),
+      },
+      preReview: { head: () => null },
+    });
+
+    await runReviewLoop({ slug, implementer: 'custom', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    assert.equal(authoritative.reviewer, 'vibe');
+    assert.ok(persistedReviewers.length > 1, 'the implementer phase performs later bookkeeping writes');
+    assert.ok(persistedReviewers.slice(1).every(reviewer => reviewer === 'vibe'), JSON.stringify(persistedReviewers));
+  });
+});

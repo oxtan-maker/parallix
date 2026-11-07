@@ -36,6 +36,7 @@ import { declaredGates } from '../../domain/mission-gates.js';
 import { completedCriteria, successCriteria } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../../domain/net-engineering-lines.js';
+import { defectProvenance } from '../../domain/defect-provenance.js';
 
 /** Typed records returned by the relational Mission schema. */
 export interface MissionRecord {
@@ -65,6 +66,13 @@ export interface MissionBriefOutOfScopeRecord { readonly mission_id: string; rea
 export interface MissionDeclaredGateRecord { readonly mission_id: string; readonly position: number; readonly command: string; }
 export interface MissionSuccessCriterionRecord { readonly mission_id: string; readonly position: number; readonly criterion: string; readonly criterion_id?: string | null; readonly completed?: number; }
 export interface MissionDependencyRecord { readonly mission_id: string; readonly position: number; readonly depends_on_mission_id: string; }
+export interface MissionDefectProvenanceRecord {
+  readonly mission_id: string;
+  readonly root_cause_summary: string;
+  readonly investigation_evidence: string;
+  readonly attribution_disposition: string;
+  readonly originating_mission_id: string | null;
+}
 
 export interface MissionCheckpointRecord {
   readonly mission_id: string;
@@ -203,6 +211,7 @@ export interface MissionAggregateRecords {
   readonly declaredGates: readonly MissionDeclaredGateRecord[];
   readonly successCriteria?: readonly MissionSuccessCriterionRecord[];
   readonly dependencies?: readonly MissionDependencyRecord[];
+  readonly defectProvenance?: MissionDefectProvenanceRecord | null;
   readonly checkpoints: readonly MissionCheckpointRecord[];
   readonly goalChecks: readonly MissionGoalCheckRecord[];
   readonly review: MissionReviewRecord | null;
@@ -660,6 +669,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     ),
     predictedNelBucket: predictedNelBucketFrom(row.predicted_nel_bucket),
     reproductionTest: row.reproduction_test ?? null,
+    defectProvenance: defectProvenanceFrom(records),
     review: reviewFrom(records),
     ...(row.review_preparation_pending === 1 ? { reviewPreparationPending: true as const } : {}),
     netEngineeringLines: row.net_engineering_lines,
@@ -670,4 +680,17 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
     ? { ...common, status: missionStatus, closedAt: null }
     : { ...common, status: 'done', closedAt };
   return { mission, version: missionVersion(row.version) };
+}
+
+function defectProvenanceFrom(records: MissionAggregateRecords) {
+  const row = records.defectProvenance;
+  if (!row) { return null; }
+  const attribution = row.attribution_disposition === 'originating-mission'
+    ? { kind: 'originating-mission' as const, missionId: missionId(row.originating_mission_id ?? '') }
+    : { kind: row.attribution_disposition } as { kind: 'external' | 'pre-mission' | 'unresolved' };
+  return defectProvenance({
+    rootCauseSummary: row.root_cause_summary,
+    investigationEvidence: row.investigation_evidence,
+    attribution,
+  }, missionId(row.mission_id));
 }

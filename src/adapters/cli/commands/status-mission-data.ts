@@ -50,7 +50,8 @@ function authoringFields({ recorded, brief }: StatusSources) {
     description: recorded?.mission.description ?? null,
     declaredGates: [...(recorded?.mission.declaredGates ?? [])],
     predictedNelBucket: recorded?.mission.predictedNelBucket ?? null,
-    reproductionTest: recorded?.mission.reproductionTest ?? null
+    reproductionTest: recorded?.mission.reproductionTest ?? null,
+    defectProvenance: recorded?.mission.defectProvenance ?? null
   };
 }
 

@@ -93,7 +93,8 @@ function statusPlanJson(result: StatusResult) {
     dependencies: md?.dependencies ?? [],
     checkpoints: md?.checkpoints ?? [],
     predictedNelBucket: md?.predictedNelBucket ?? null,
-    reproductionTest: md?.reproductionTest ?? null
+    reproductionTest: md?.reproductionTest ?? null,
+    defectProvenance: md?.defectProvenance ?? null
   };
 }
 
@@ -216,6 +217,17 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
   log(gates.length > 0 ? `Declared gates: ${gates.join('; ')}` : 'Declared gates: none');
   if (missionData.predictedNelBucket) { log(`Predicted NEL bucket: ${missionData.predictedNelBucket}`); }
   if (missionData.reproductionTest) { log(`Reproduction test: ${missionData.reproductionTest}`); }
+  logDefectProvenance(missionData, log);
+}
+
+function logDefectProvenance(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  const provenance = missionData.defectProvenance;
+  if (!provenance) { return; }
+  log('Defect provenance:');
+  log(`  Root cause: ${provenance.rootCauseSummary}`);
+  log(`  Investigation evidence: ${provenance.investigationEvidence}`);
+  const origin = provenance.attribution.kind === 'originating-mission' ? ` (${provenance.attribution.missionId})` : '';
+  log(`  Attribution: ${provenance.attribution.kind}${origin}`);
 }
 
 function logCheckpointPlan(missionData: StatusMissionData, log: (_msg: string) => void): void {

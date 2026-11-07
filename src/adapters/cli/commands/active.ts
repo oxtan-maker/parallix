@@ -38,7 +38,7 @@ async function runActive(args: string[], options: ActiveOptions, cancellation: {
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
   if (!slug) {
-    errorFn('Usage: px active [<slug>] [--implementer <family>] [--reviewer <family>]');
+    errorFn('Usage: px active [<slug>] [--implementer <family>] [--reviewer <preferred-family>] (eligible runtime fallback applies)');
     exitFn(1);
     return;
   }
@@ -79,8 +79,8 @@ async function runActive(args: string[], options: ActiveOptions, cancellation: {
   }
   const preselectedImplementer = flagValue(args, '--implementer', 'implementer');
   if (args.includes('--implementer') && !preselectedImplementer) { return; }
-  // The explicit reviewer is handed to automatic review selection unchanged; an
-  // unavailable or blocked family is refused there, never replaced.
+  // The explicit reviewer is the first family attempted by automatic review;
+  // bounded runtime fallback remains within the configured eligible pool.
   const requestedReviewer = flagValue(args, '--reviewer', 'reviewer');
   if (args.includes('--reviewer') && !requestedReviewer) { return; }
 

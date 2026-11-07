@@ -23,6 +23,28 @@ export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow>
   readonly flowStatistics?: FlowStatistics;
 }
 
+const EMPTY_FLOW_OBSERVATION: NonNullable<StatsMissionFlow['flowObservation']> = {
+  diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null, gateRuns: [], rebaseRuns: [],
+  lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
+  agentLaunchesLowerBound: false,
+};
+
+function sharedFlowFact(outcome: StatsMissionFlow) {
+  const observation = outcome.flowObservation ?? EMPTY_FLOW_OBSERVATION;
+  return {
+    repositoryId: outcome.repo, missionId: outcome.mission, closedAt: outcome.closedAt,
+    implementer: outcome.implementer ?? null, laneDwellMs: null,
+    diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
+    ownership: observation.ownership, window: observation.window,
+    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, lead: observation.lead,
+    collectionDefects: observation.collectionDefects,
+    actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
+    agentLaunches: observation.agentLaunches,
+    observedDisqualifiers: observation.observedDisqualifiers,
+    reviewStatistics: outcome.reviewStatistics ?? reviewStatistics(null),
+  };
+}
+
 /** Select lifecycle completions by canonical delivery day, telemetry spend by measurement day. */
 export function selectStatsReport<Row extends StatisticsRow>(
   rows: readonly Row[],
@@ -62,15 +84,7 @@ export function selectStatsReport<Row extends StatisticsRow>(
   };
   const periods = [windows.current, ...(windows.previous ? [windows.previous] : [])];
   const sharedFlow = decisionWindows && missionFlow !== null && missionFlow.some(outcome => outcome.flowObservation)
-    ? flowStatistics(missionFlow.map(outcome => ({
-    repositoryId: outcome.repo, missionId: outcome.mission, closedAt: outcome.closedAt,
-    diagramNodeIds: outcome.flowObservation?.diagramNodeIds ?? [],
-    diagramEdgeIds: outcome.flowObservation?.diagramEdgeIds ?? [], ownership: outcome.flowObservation?.ownership ?? [],
-    actualAgentLaunches: outcome.flowObservation?.actualAgentLaunches ?? null,
-    agentLaunches: outcome.flowObservation?.agentLaunches ?? [],
-    observedDisqualifiers: outcome.flowObservation?.observedDisqualifiers ?? null,
-    reviewStatistics: outcome.reviewStatistics ?? reviewStatistics(null),
-    })), decisionWindows) : undefined;
+    ? flowStatistics(missionFlow.map(sharedFlowFact), decisionWindows) : undefined;
   return {
     bugTrend: missionFlow === null ? null : periods.flatMap(window => selectBugTrend(missionFlow, window.start, window.end, window.timeZone) ?? []),
     current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined,

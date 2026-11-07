@@ -8,6 +8,7 @@ import './web-agent-menu.cases.js';
 import './web-checkpoint-interaction.cases.js';
 import './web-board-refresh-coordination.cases.js';
 import './web-board-render.cases.js';
+import './web-flow-view.cases.js';
 import './web-client-snapshot.cases.js';
 import './web-command-request.cases.js';
 import './web-mission-history.cases.js';

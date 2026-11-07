@@ -37,15 +37,27 @@ interface DetectLimitHitOptions {
 export function detectLimitHit({ agent, status, signal, error, now = new Date(), failureReason }: DetectLimitHitOptions = {} as DetectLimitHitOptions): DetectedLimitHit | null {
   if (!agent || processDidNotFail(status, signal, error)) { return null; }
   const typed = recognizedFailureReason(failureReason);
-  if (typed?.code === 'provider-entitlement') { return { reroute: true, kind: 'entitlement', reason: 'typed: provider-entitlement' }; }
-  if (typed?.code === 'provider-rate-limit') { return { reroute: true, reason: 'typed: provider-rate-limit' }; }
-  if (typed?.code === 'agent-quota') { return quotaLimit(agent, now, typed); }
-  if ((!typed || typed.code === 'process-terminated') && signal && signal !== 'SIGTERM') {
-    return { until: formatBlockUntil(ceilToNextHour(new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60000))), source: 'sigint', reason: `signal: ${signal}` };
-  }
-  return null;
+  return typedLimitHit(agent, now, typed) ?? terminationLimit(now, signal, typed);
 }
 export { formatBlockUntil, ceilToNextHour, endOfCurrentUtcMonth, DEFAULT_FALLBACK_HOURS, SIGINT_SHORT_BLOCK_MINUTES };
+
+function typedLimitHit(agent: string, now: Date, typed: ReturnType<typeof recognizedFailureReason>): DetectedLimitHit | null {
+  if (typed?.code === 'provider-entitlement') { return { reroute: true, kind: 'entitlement', reason: 'typed: provider-entitlement' }; }
+  if (typed?.code === 'provider-rate-limit') { return { reroute: true, reason: 'typed: provider-rate-limit' }; }
+  if (typed?.code === 'provider-unavailable') { return availabilityLimit(now); }
+  if (typed?.code === 'agent-quota') { return quotaLimit(agent, now, typed); }
+  return null;
+}
+
+function terminationLimit(now: Date, signal: string | null | undefined, typed: ReturnType<typeof recognizedFailureReason>): DetectedLimitHit | null {
+  if ((typed && typed.code !== 'process-terminated') || !signal || signal === 'SIGTERM') { return null; }
+  return { until: formatBlockUntil(ceilToNextHour(new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60000))), source: 'sigint', reason: `signal: ${signal}` };
+}
+
+function availabilityLimit(now: Date): DetectedLimitHit {
+  const target = new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 3600000);
+  return { until: formatBlockUntil(ceilToNextHour(target)), source: 'structured', reason: 'typed: provider-unavailable' };
+}
 
 function quotaLimit(agent: string, now: Date, typed: NonNullable<ReturnType<typeof recognizedFailureReason>>): DetectedLimitHit {
     const resetAt = typed.context?.resetAt;

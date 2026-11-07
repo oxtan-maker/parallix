@@ -58,6 +58,11 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
   }
 
   async findByMissionId(missionId: string): Promise<readonly BoardLaneEventEntry[]> {
+    return collapseHistoricalDuplicateTransitions(await this.findPersistedByMissionId(missionId));
+  }
+
+  /** Exact persisted history for write-path replay and recovery decisions. */
+  async findPersistedByMissionId(missionId: string): Promise<readonly BoardLaneEventEntry[]> {
     const rows = await this.db.query<{
       id: unknown;
       repository_id: unknown;
@@ -96,7 +101,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
        ORDER BY occurred_at ASC;`,
     );
 
-    return rows.map((row) => rowToEntry(row)).sort(compareEntries);
+    return collapseHistoricalDuplicateTransitions(rows.map((row) => rowToEntry(row)).sort(compareEntries));
   }
 
   async findByRepositoryId(repositoryId: string): Promise<readonly BoardLaneEventEntry[]> {
@@ -118,7 +123,7 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
       [repositoryId],
     );
 
-    return rows.map((row) => rowToEntry(row)).sort(compareEntries);
+    return collapseHistoricalDuplicateTransitions(rows.map((row) => rowToEntry(row)).sort(compareEntries));
   }
 
   async clear(): Promise<void> {
@@ -147,4 +152,54 @@ function compareEntries(left: BoardLaneEventEntry, right: BoardLaneEventEntry): 
   const b = parseInstantMs(right.occurredAt);
   return (Number.isFinite(a) ? a : Infinity) - (Number.isFinite(b) ? b : Infinity)
     || (left.id ?? 0) - (right.id ?? 0);
+}
+
+const HISTORICAL_PAIR_WINDOW_MS = 5_000;
+
+function transitionSignature(entry: BoardLaneEventEntry): string {
+  return JSON.stringify([
+    entry.repositoryId, entry.missionId, entry.fromStatus, entry.toStatus, entry.trigger,
+  ]);
+}
+
+function isHistoricalPair(
+  entries: readonly BoardLaneEventEntry[],
+  earlierIndex: number,
+  laterIndex: number,
+): boolean {
+  const left = entries[earlierIndex]!;
+  const right = entries[laterIndex]!;
+  const leftAt = parseInstantMs(left.occurredAt);
+  const rightAt = parseInstantMs(right.occurredAt);
+  const fieldsMatch = left.repositoryId === right.repositoryId
+    && left.missionId === right.missionId
+    && left.fromStatus === right.fromStatus
+    && left.toStatus === right.toStatus
+    && left.trigger === right.trigger
+    && Number.isFinite(leftAt)
+    && Number.isFinite(rightAt)
+    && Math.abs(leftAt - rightAt) <= HISTORICAL_PAIR_WINDOW_MS;
+  if (!fieldsMatch || right.fromStatus === null) { return fieldsMatch; }
+  return !entries.slice(earlierIndex + 1, laterIndex).some((between) =>
+    between.repositoryId === right.repositoryId
+    && between.missionId === right.missionId
+    && between.toStatus === right.fromStatus);
+}
+
+/** Collapse duplicate lifecycle facts on reads only; persisted rows stay untouched. */
+function collapseHistoricalDuplicateTransitions(entries: readonly BoardLaneEventEntry[]): BoardLaneEventEntry[] {
+  const earlierByTransition = new Map<string, number[]>();
+  const removed = new Set<number>();
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]!;
+    const signature = transitionSignature(entry);
+    const candidates = earlierByTransition.get(signature) ?? [];
+    if (candidates.findLast((candidate) => isHistoricalPair(entries, candidate, index)) !== undefined) {
+      removed.add(index);
+      continue;
+    }
+    candidates.push(index);
+    earlierByTransition.set(signature, candidates);
+  }
+  return entries.filter((_entry, index) => !removed.has(index));
 }

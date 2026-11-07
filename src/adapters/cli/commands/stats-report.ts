@@ -69,7 +69,7 @@ function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>): str
       [[`${flow.diagram.nodeCount}/${flow.diagram.edgeCount}`, renderRate(flow.firstPassYield),
         flow.extraAgentLaunches.total === null ? `unavailable (n=${flow.extraAgentLaunches.n})`
           : flow.completedMissions === 0 ? 'n/a (no completed missions)'
-            : `${flow.extraAgentLaunches.total} (mean ${flow.extraAgentLaunches.meanPerMission!.toFixed(1)}, n=${flow.extraAgentLaunches.n})`,
+            : `${flow.extraAgentLaunches.lowerBound ? 'at least ' : ''}${flow.extraAgentLaunches.total} (mean ${flow.extraAgentLaunches.meanPerMission!.toFixed(1)}, n=${flow.extraAgentLaunches.n})`,
         renderRate(flow.sendBacks.agent), renderRate(flow.sendBacks.human), largest
           ? `${largest.step}/${largest.actor}${largest.model ? `/${largest.model}` : ''}/${largest.state} ${largest.totalMs}ms (${(largest.share * 100).toFixed(1)}%)`
           : 'n/a (no elapsed observations)']]),

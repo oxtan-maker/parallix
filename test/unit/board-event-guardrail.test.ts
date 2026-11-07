@@ -70,6 +70,8 @@ const RECOVERY_LANE_READER_MODULES = [
   'src/adapters/review/stats-recovery-collector.ts',
   'src/adapters/sqlite/isolated-operator-copy.ts',
 ] as const;
+/** Reads canonical completion to select the provenance cohort; it never appends. */
+const DEFECT_PROVENANCE_BACKFILL_MODULE = 'src/adapters/sqlite/defect-provenance-backfill.ts';
 
 const CONTRACT_MODULES = new Set([
   // Read-only verification cost projection and its lane-history wiring.
@@ -93,6 +95,7 @@ const CONTRACT_MODULES = new Set([
   PRODUCTION_CAPABILITIES_MODULE,
   LEGACY_ADHOC_MIGRATION_MODULE,
   ...RECOVERY_LANE_READER_MODULES,
+  DEFECT_PROVENANCE_BACKFILL_MODULE,
 ]);
 
 function sourceFiles(): string[] {

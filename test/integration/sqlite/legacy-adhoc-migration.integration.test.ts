@@ -181,6 +181,18 @@ describe('SQLite legacy adhoc id migration', () => {
     try {
       await seedLegacyMission(database, 'parallix-adhoc-0004', 'repo-parallix', 0);
       await seedLegacyMission(database, 'parallix-adhoc-0005', 'repo-parallix', 0, { dependsOn: 'task-other' });
+      await database.execute(
+        'INSERT INTO mission_defect_provenance '
+          + '(mission_id, root_cause_summary, investigation_evidence, attribution_disposition, originating_mission_id) '
+          + 'VALUES (?, ?, ?, ?, ?)',
+        [
+          'parallix-adhoc-0004',
+          'Legacy implementation introduced the defect',
+          'Retained Mission state and repository history identify the originating Mission',
+          'originating-mission',
+          'parallix-adhoc-0005',
+        ],
+      );
 
       const before = await database.query<{ counter: number }>(
         'SELECT counter FROM adhoc_mission_counters WHERE repository_id = ?',
@@ -219,6 +231,7 @@ describe('SQLite legacy adhoc id migration', () => {
         'board_lane_events',
         'session_markers',
         'execution_activity',
+        'mission_defect_provenance',
       ] as const) {
         assert.equal(await childCount(database, table, 'parallix-adhoc-0004'), 0, `${table} still references old id`);
         assert.equal(await childCount(database, table, 'px-0001'), 1, `${table} lost the migrated row`);
@@ -234,6 +247,19 @@ describe('SQLite legacy adhoc id migration', () => {
         'SELECT mission_id, depends_on_mission_id FROM mission_dependencies',
       );
       assert.ok(deps.some((row) => row.mission_id === 'px-0002' && row.depends_on_mission_id === 'task-other'));
+
+      // Defect provenance has two Mission references: the aggregate owner and
+      // the attributed origin. Both must follow their independently migrated
+      // legacy Missions.
+      const provenance = await database.query<{
+        mission_id: string;
+        originating_mission_id: string;
+      }>(
+        'SELECT mission_id, originating_mission_id FROM mission_defect_provenance',
+      );
+      assert.equal(provenance.length, 1);
+      assert.equal(provenance[0].mission_id, 'px-0001');
+      assert.equal(provenance[0].originating_mission_id, 'px-0002');
 
       // `mission_checkpoints.checkpoint_mission_id` is a denormalised reference
       // to the checkpoint's own mission; `mission-serialization.ts` rejects an

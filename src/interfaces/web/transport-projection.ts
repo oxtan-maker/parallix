@@ -210,6 +210,7 @@ function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
   return {
     verification: renderVerificationStatistics(metrics.verification),
     ...(metrics.flow === undefined ? {} : { flow: metrics.flow }),
+    ...(metrics.flowUnavailable === undefined ? {} : { flowUnavailable: metrics.flowUnavailable }),
     ...(metrics.decisionWindow === undefined || ['unavailable', 'pre-lifecycle'].includes(metrics.health.state)
       ? {} : { weeklyCompletedMissions: metrics.decisionWindow.current.completedMissions }),
     health: { state: metrics.health.state },
@@ -219,13 +220,6 @@ function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
       endDate: metrics.decisionWindow.current.endDate,
       label: metrics.decisionWindow.current.label,
     } }),
-    cumulativeFlowByState: { ...metrics.cumulativeFlowByState, series: metrics.cumulativeFlowByState.series.map(point => ({ ...point, counts: { ...point.counts } })) },
-    ...(metrics.weeklyCumulativeFlow === undefined ? {} : { weeklyCumulativeFlow: {
-      missingHistoryFallback: metrics.weeklyCumulativeFlow.missingHistoryFallback,
-      window: { ...metrics.weeklyCumulativeFlow.window },
-      series: metrics.weeklyCumulativeFlow.series.map(point => ({ ...point, counts: { ...point.counts } })),
-    } }),
-    medianCycleTimeByState: { ...metrics.medianCycleTimeByState, series: metrics.medianCycleTimeByState.series.map(point => ({ ...point })) },
     bottleneck: { sentence: metrics.bottleneck.sentence },
   };
 }

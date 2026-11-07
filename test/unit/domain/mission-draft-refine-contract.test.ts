@@ -140,6 +140,30 @@ test('the draft prompt marks as required exactly the parts refine refuses withou
   assert.ok(!optional.has('px scope set') && optional.has('px depends add'));
   assert.match(prompt, /never end your turn while a `px` command is still running/);
   assert.doesNotMatch(prompt, /record a concrete, non-generic goal, rationale, scope, out-of-scope/);
+  assert.match(prompt, /inspect repository history/);
+  assert.match(prompt, /run or read the defect reproduction/);
+  assert.match(prompt, /introducing and fixing diffs/);
+  assert.match(prompt, /retained Mission evidence/);
+  assert.match(prompt, /never invent a causal Mission/);
+});
+
+test('bug refinement requires both reproduction and provenance while non-bug refinement is unchanged', () => {
+  const complete = {
+    ...fixtureMission('task-bug-contract', {
+      status: 'backlog', labels: missionLabels(['ai_sdlc', 'bug']),
+      brief: { goal: 'Fix', why: 'Defect', scope: 'Boundary', outOfScope: [] },
+      successCriteria: ['Fixed'], checkpoints: [{ missionId: missionId('task-bug-contract'), name: 'CP-1', goalCheck: [], nextActionText: '' }],
+      declaredGates: ['npm test'], predictedNelBucket: 'Small',
+    }),
+    closedAt: null,
+  };
+  assert.throws(() => decideMission({ ...complete, reproductionTest: 'test/repro.test.ts' }, { type: 'refine' }), /px provenance set/);
+  assert.throws(() => decideMission({ ...complete, defectProvenance: { rootCauseSummary: 'Cause', investigationEvidence: 'Evidence', attribution: { kind: 'unresolved' } } }, { type: 'refine' }), /px repro set/);
+  const fullyRecorded = { ...complete, reproductionTest: 'test/repro.test.ts', defectProvenance: { rootCauseSummary: 'Cause', investigationEvidence: 'Evidence', attribution: { kind: 'unresolved' as const } } };
+  assert.equal(decideMission(fullyRecorded, { type: 'refine' }).status, 'refined');
+  assert.equal(decideMission({ ...complete, labels: missionLabels(['ai_sdlc']) }, { type: 'refine' }).status, 'refined');
+  const legacyRefinedBug = { ...complete, status: 'refined' as const, reproductionTest: 'test/repro.test.ts' };
+  assert.equal(decideMission(legacyRefinedBug, { type: 'activate', agent: agentFamily('codex') }).status, 'active');
 });
 
 // --- pre-draft hook ------------------------------------------------------------------

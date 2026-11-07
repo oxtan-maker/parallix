@@ -124,6 +124,37 @@ test('an independent gate failure shortly after a reviewer return is its own ret
   assert.deepEqual(returns.map(item => item.source).sort(), ['judgment', 'repair']);
 });
 
+test('rebound repair reader indexes minimal history once and deduplicates retry attempts (TASK-2836)', async () => {
+  const { createReboundRepairReader } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
+  let reads = 0;
+  const reader = createReboundRepairReader({ findReboundRepairs: async () => {
+    reads += 1;
+    return [
+      { missionId: 'task-a', occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z' },
+      { missionId: 'task-a', occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', occurredAt: '2026-10-01T10:01:00Z' },
+      { missionId: 'task-b', occurrenceId: 'other', reasonKind: 'gate-failure', area: null, agent: 'claude', occurredAt: '2026-10-01T11:00:00Z' },
+    ];
+  } });
+  assert.deepEqual(await reader('task-a'), [
+    { occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z' },
+  ]);
+  assert.equal((await reader('task-b')).length, 1);
+  assert.equal(reads, 1);
+});
+
+test('a repair is claimed by the rebound active when its attempt started, not when it completed (TASK-2836)', async () => {
+  const { createReboundRepairReader, workflowReturnsFromHistory } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
+  const reader = createReboundRepairReader({ findReboundRepairs: async () => [{ missionId: 'task-a', occurrenceId: 'repair',
+    reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: 120_000, occurredAt: '2026-10-01T10:11:00Z' }] });
+  const repairs = await reader('task-a');
+  assert.equal(repairs[0]?.occurredAt, '2026-10-01T10:09:00.000Z');
+  const returns = workflowReturnsFromHistory([
+    { fromStatus: 'review', toStatus: 'active', trigger: 'rebound-to-active', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z', idempotencyKey: 'rebound' },
+    { fromStatus: 'active', toStatus: 'review', trigger: 'submit', agent: 'codex', occurredAt: '2026-10-01T10:10:00Z', idempotencyKey: 'submit' },
+  ], repairs);
+  assert.deepEqual(returns.map(item => item.identity), ['lane:rebound']);
+});
+
 test('durable integration handoffs expose clean and returned human review episodes (TASK-2835 review F5)', async () => {
   const { createHumanReviewEpisodeReader } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
   const lane = [

@@ -81,6 +81,25 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   // the round, so re-read before any identity or telemetry write.
   if (await stopIfControllerSuperseded(context, 'reviewer-launch fallback')) { return 'stop'; }
   round.reviewerLaunch = launch;
+  const authoritative = await ports.state.read();
+  if (persistedReviewerOutcome(context.state, authoritative)) {
+    const actual = launch?.agent;
+    if (actual && actual !== identities.reviewer) {
+      context.emit({ kind: 'agent-fallback', role: 'reviewer', original: identities.reviewer, fallback: actual });
+      identities.reviewer = actual;
+      // Keep the controller snapshot aligned as well as the freshly-read
+      // authoritative state. A request-changes verdict continues into the
+      // implementer phase, whose later bookkeeping persists `context.state`;
+      // leaving the preferred family here would overwrite the actual reviewer.
+      context.state.reviewer = actual;
+      if (authoritative) {
+        authoritative.reviewer = actual;
+        await ports.state.persist(authoritative);
+      }
+    }
+    await ports.agents.recordStage('reviewer', authoritative ?? context.state, identities, launch);
+    return null;
+  }
   await adoptLaunchedAgent(context, 'reviewer', identities.reviewer, launch);
   await ports.agents.recordStage('reviewer', context.state, identities, launch);
   return null;
@@ -187,8 +206,9 @@ async function stopForArtifactRecovery(context: LoopContext, round: ReviewRound,
 }
 
 function persistedReviewerOutcome(state: LoopContext['state'], persisted: Awaited<ReturnType<LoopContext['ports']['state']['read']>>): string | null {
-  if (state.phase === 'reviewing' && persisted?.phase === 'approved' && persisted.disposition === 'APPROVED') { return 'APPROVED'; }
-  if (state.phase === 'reviewing' && persisted?.phase === 'fixing' && persisted.disposition === 'REQUEST_CHANGES') { return 'REQUEST_CHANGES'; }
+  if (!persisted || persisted.round !== state.round) { return null; }
+  if (persisted.phase === 'approved' && persisted.disposition === 'APPROVED') { return 'APPROVED'; }
+  if (persisted.phase === 'fixing' && persisted.disposition === 'REQUEST_CHANGES') { return 'REQUEST_CHANGES'; }
   return null;
 }
 
@@ -267,6 +287,19 @@ async function applyReviewerOutcome(context: LoopContext, round: ReviewRound, re
     state.transitionTo('fixing');
     state.disposition = reviewState as string;
     return null;
+  }
+  const authoritative = await ports.state.read();
+  if (persistedReviewerOutcome(state, authoritative) === 'APPROVED') {
+    state.phase = 'approved';
+    state.disposition = 'APPROVED';
+    if (authoritative?.reviewer) {
+      state.reviewer = authoritative.reviewer;
+      context.identities.reviewer = authoritative.reviewer;
+    }
+    context.emit({ kind: 'review-verdict', disposition: state.disposition, findings: [], verbose: context.verbose, round: state.round });
+    context.emit({ kind: 'reviewer-approved' });
+    await ports.task.mirrorApproved();
+    return 'stop';
   }
   state.transitionTo('approved');
   state.disposition = reviewState;

@@ -1,9 +1,7 @@
 #!/usr/bin/env node
 import { createBootstrapGitBindings } from './git-admission.js';
 import { missionCommandTarget } from './mission-command-context.js';
-import { bindGateAdmission } from './gate-admission.js';
-import { bindVerificationObservation } from './verification-observation.js';
-import { bindRebaseObservation } from './rebase-observation.js';
+import { bindWorkflowObservability } from './workflow-observability.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,9 +64,7 @@ interface RunOptions {
 }
 
 async function runtimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorInvocation = false, command = ''): Promise<Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'>> {
-  bindGateAdmission(configuration);
-  bindVerificationObservation(configuration);
-  bindRebaseObservation(configuration);
+  bindWorkflowObservability(configuration);
   const base = {
     runtime: configuration.runtime,
     ensureStandaloneGitRepoFn: createBootstrapGitBindings(configuration).ensureStandaloneGitRepo,

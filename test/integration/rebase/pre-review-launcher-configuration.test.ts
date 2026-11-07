@@ -21,7 +21,7 @@ import { createRebaseCommand } from '../../../src/interfaces/cli/rebase.js';
 import { rebase } from '../../../src/adapters/cli/commands/rebase.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
-import { bindRebaseObservation } from '../../../src/composition/rebase-observation.js';
+import { bindWorkflowObservability } from '../../../src/composition/workflow-observability.js';
 import { configureRebaseObservation } from '../../../src/application/ports/rebase-workflow.js';
 
 /** Disposable repo with a shared-file conflict, a codex-assigned task and a fake implementer that resolves it. */
@@ -76,7 +76,7 @@ describe("pre-review rebase launcher configuration", () => {
       const { repo, binDir, launches, git } = conflictRepo(root);
       const configuration = resolveConfiguration({ PATH: `${binDir}:/usr/bin:/bin`, PARALLIX_HOME: path.join(root, 'home'), TASK_2744_ENV: 'composed',
         PARALLIX_WORKFLOW_OPERATION: 'review-operation', PARALLIX_WORKFLOW_GENERATION: '2' });
-      bindRebaseObservation(configuration);
+      bindWorkflowObservability(configuration);
       const logs: string[] = [];
       const options = {
         isForgejoReviewEnabledFn: () => true,
@@ -273,14 +273,27 @@ describe("pre-review rebase launcher configuration", () => {
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 
-  test('integration rebase port discovers the implementer through the composed configuration (TASK-2709)', () => {
+  test('integration rebase port discovers the implementer and persists through shared workflow observability (TASK-2709, TASK-2836)', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-launcher-cfg-int-'));
     try {
       fs.writeFileSync(path.join(root, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-      const configuration = resolveConfiguration({ PATH: `${root}:${process.env.PATH}` });
+      const configuration = resolveConfiguration({ PATH: `${root}:${process.env.PATH}`, PARALLIX_HOME: path.join(root, 'home'),
+        PARALLIX_WORKFLOW_OPERATION: 'integration-operation', PARALLIX_WORKFLOW_GENERATION: '3' });
+      bindWorkflowObservability(configuration);
       const port = createIntegratePorts(configuration).rebase.createRebaseWorkflowPort({ gitFn: (() => ({ status: 0, stdout: '', stderr: '' })), exitFn: () => {} });
       assert.equal(port.workflowLauncherStatus('codex').supported, true, JSON.stringify(port.workflowLauncherStatus('codex')));
+      assert.ok(port.observeRebase);
+      await port.observeRebase({ id: 'integration-rebase', missionId: 'task-lcfg-iso', root, stage: 'integration-rebase', attempt: 1,
+        outcome: 'no-op', baseBranch: 'main', revisionBefore: 'revision', revisionAfter: 'revision', conflicts: [], dependencies: [],
+        occurredAt: '2026-11-06T10:00:00.000Z' });
+      const { db } = await initOperatorState({ configuration });
+      const rows = await db.query<{ event_data: string }>("SELECT event_data FROM operational_history WHERE event_type = 'flow.rebase'");
+      assert.deepEqual(rows.map(row => {
+        const value = JSON.parse(row.event_data) as { stage: string; outcome: string; operationId: string; generation: number };
+        return [value.stage, value.outcome, value.operationId, value.generation];
+      }), [['integration-rebase', 'no-op', 'integration-operation', 3]]);
     } finally {
+      configureRebaseObservation(null);
       fs.rmSync(root, { recursive: true, force: true });
     }
   });

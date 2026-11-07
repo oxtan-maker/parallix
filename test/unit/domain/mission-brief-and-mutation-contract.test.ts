@@ -4,6 +4,10 @@ import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-bu
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import './mission-authoring.cases.js';
 import './mission-edit.cases.js';
+import { defectProvenanceCases } from './defect-provenance.cases.js';
+defectProvenanceCases();
+import { defectProvenanceAuthoringCases } from './defect-provenance-authoring.cases.js';
+defectProvenanceAuthoringCases();
 // Mission brief and typed mutation contract: checkpoint documents, prompt authority and parity, typed
 // Mission mutations, dependencies as a domain value, and Backlog materialization.
 //

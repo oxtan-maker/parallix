@@ -42,6 +42,7 @@ The required parts and their existing single-concept commands are listed below. 
 | Verification gates | `px gate add --command <command>`, one call each. Handoff runs every gate with `bash -c` and blocks on a non-zero exit, so a gate is one exact runnable repository command and nothing else (for example `./scripts/verify-local.sh all`): no prose, no `#` comment, no expected outcome. `px gate add` refuses such a gate, and handoff also refuses a gate whose script does not exist in the finished tree; an expected outcome belongs in a success criterion | required, at least one |
 | Predicted NEL bucket | `px nel set --predicted <Small\|Medium\|Large>` | required |
 | Reproduction test | `px repro set --test <path>` | required for a `bug` mission only |
+| Defect provenance | `px provenance set --root-cause <text> --evidence <text> <--originating-mission slug\|--external\|--pre-mission\|--unresolved>` | required for a `bug` mission only |
 | Dependencies | `px depends add --on <slug>`, one call each | optional; nothing enforces it |
 
 Existing single-concept commands remain available for focused edits. Record a reproduction test with px repro set --test <path> for a bug mission; add optional dependencies with px depends add --on <slug>. Neither changes lifecycle state. Run any command with --help for exact flags.
@@ -69,7 +70,9 @@ Bug-labeled missions (regression-test-first / "lock the bug"):
 - this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
 - make the **first planned checkpoint** (--checkpoint CP-1 in the batch) the authoring of a failing reproduction test that locks the bug before any fix is written. Describe in that checkpoint: the test file location (under `test/`), the reproduction scenario, and the assertion that fails at the mission's parent commit (red) and will pass once the fix lands (green).
 - record the reproduction test's path with `px repro set --test <path>` (for example, `px repro set --test test/task-1354-repro.test.ts`); the table above makes it required for a bug mission. `px status {{slug}}` reports it back for the reviewer to check against the diff.
-- do not author the fix during draft — the reproduction test and its recorded path are the only bug-specific drafting outputs.
+- investigate why the defect exists before refinement: inspect repository history, run or read the defect reproduction, inspect the relevant introducing and fixing diffs, and read retained Mission evidence with `px status` and `px history`.
+- record the evidence-backed root cause with `px provenance set`. Attribute it to an existing same-repository originating Mission when the evidence supports one. Otherwise choose exactly one honest non-Mission disposition: `--external`, `--pre-mission`, or `--unresolved`; never invent a causal Mission.
+- do not author the fix during draft — the reproduction test, its recorded path, and the causal investigation are the only bug-specific drafting outputs.
 
 Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If it does, run `graphify query "{{slug}} mission scope and dependencies"` to understand the codebase context before filling in the mission contract. Parallix updates existing Graphify graphs after successful squash integration on the receiving base worktree; review, edits and checkpoints do not trigger updates.
 

@@ -7,6 +7,7 @@ import type { Review } from './review.js';
 import type { MissionBrief } from './mission-brief.js';
 import type { NelBucketLabel } from './net-engineering-lines.js';
 import { toCanonicalUtcInstant } from './instant.js';
+import type { DefectProvenance } from './defect-provenance.js';
 
 export type MissionId = string & { readonly __brand: 'MissionId' };
 export type MissionSlug = MissionId;
@@ -139,6 +140,8 @@ export interface MissionData {
    * write one. Null for a mission with no reproduction test.
    */
   readonly reproductionTest?: string | null;
+  /** Causal investigation recorded for a bug-labelled Mission. */
+  readonly defectProvenance?: DefectProvenance | null;
   readonly review: Review | null;
   /** Early preparation still owes verified submission, including after a restart. */
   readonly reviewPreparationPending?: true;
@@ -228,6 +231,7 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     dependencies: [],
     predictedNelBucket: null,
     reproductionTest: null,
+    defectProvenance: null,
     review: null,
     netEngineeringLines: null,
     status: 'backlog',

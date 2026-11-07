@@ -18,7 +18,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-
 import { summarizeCompletedMissionWindow } from '../../../../src/application/services/statistics-service.js';
 import { ConcreteMetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
 import type { MetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
@@ -44,15 +43,14 @@ import { reconcileRecoveryEvidence, recoveryConflictIdentity, recoveryIdentity, 
   type StatsRecoveryEvidence } from '../../../../src/application/stats-recovery-evidence.js';
 import { analyzeStatsRecovery } from '../../../../src/application/stats-recovery-analysis.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
+import { flowElapsedOwnership } from '../../../../src/application/projections/flow-elapsed-ownership.js';
 import { flowStatistics, type FlowMissionFacts } from '../../../../src/application/projections/flow-statistics.js';
 import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../../../../src/application/ports/verification-observation.js';
 import { renderVerificationStatistics } from '../../../../src/application/presentation/verification-statistics.js';
 import { controlledVerificationComparisons } from '../../../../src/application/projections/verification-profile-comparison.js';
 import type { RunRecord } from '../../../../src/application/run-history-types.js';
 import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
-
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
-
 test('historical recovery identities normalize offsets and retain conflicts (TASK-2834)', () => {
   const identity = recoveryIdentity('forgejo-review', ['repo', 735, 42]);
   const evidence = (raw: Readonly<Record<string, unknown>>): StatsRecoveryEvidence => ({ identity,
@@ -73,7 +71,6 @@ test('historical recovery identities normalize offsets and retain conflicts (TAS
     recoveryConflictIdentity({ ...conflict, retained: conflict.conflicting, conflicting: conflict.retained,
       fields: ['provenance', 'raw'] }), 'conflict identity is independent of collection and field order');
 });
-
 function workflowOperation(overrides: Partial<WorkflowOperation> = {}): WorkflowOperation {
   return { id: 'op', repositoryId: repositoryId('repo'), missionId: fixtureMissionId('px-1'), requestKey: 'request',
     command: 'active:execute', generation: 1, phase: 'completed', providerStarted: true,
@@ -81,7 +78,6 @@ function workflowOperation(overrides: Partial<WorkflowOperation> = {}): Workflow
     previousAssignee: agentFamily('codex'), owner: null, createdAt: instant(0), updatedAt: instant(40), reason: null,
     ...overrides };
 }
-
 test('shared FLOW projection keeps completion windows, actor rates and typed time populations (TASK-2835)', () => {
   const windows = weeklyDecisionWindows('2026-11-03', 'UTC');
   const fact = (mission: string, closedAt: string, launches: number, human = false): FlowMissionFacts => {
@@ -91,8 +87,14 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
       sendBacks: { agent: { numerator: 0, eligibleEpisodes: 1, coverage: 1,
         rate: { state: 'measured' as const, value: 0 } }, human: { numerator: 1, eligibleEpisodes: 1, coverage: 1,
         rate: { state: 'measured' as const, value: 1 } } } } : observed;
-    return { repositoryId: 'repo', missionId: mission, closedAt,
+    return { repositoryId: 'repo', missionId: mission, closedAt, implementer: 'codex',
       diagramNodeIds: [`${mission}:implement`, `${mission}:review`], diagramEdgeIds: [`${mission}:implement->review`],
+      window: { startedAt: new Date(Date.parse(closedAt) - 30).toISOString(), finishedAt: closedAt },
+      gateRuns: [{ id: `${mission}:declared`, phase: 'handoff', result: human ? 'failed' : 'passed' },
+        { id: `${mission}:integration`, phase: 'integration', result: 'passed' }],
+      rebaseRuns: [{ id: `${mission}:pre`, stage: 'pre-review-rebase', outcomes: human ? ['conflict', 'resolved'] : ['clean'] }, { id: `${mission}:integration`, stage: 'integration-rebase', outcomes: ['clean'] }],
+      lead: { queued: human ? 1 : 0, recoveries: human ? 1 : 0, escalations: 0 },
+      laneDwellMs: { active: human ? 30 : 10 },
       actualAgentLaunches: launches, observedDisqualifiers: human ? ['human-return'] : [], reviewStatistics,
       agentLaunches: [{ runId: `${mission}:run`, startedAt: '2026-11-01T00:00:00Z', family: 'codex', model: 'gpt-6.1-sol' }],
       ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 10 },
@@ -104,10 +106,11 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
     fact('task-previous', '2026-10-25T12:00:00Z', 2),
   ], windows);
   assert.deepEqual(result.current.diagram, { nodeCount: 4, edgeCount: 2 });
-  assert.deepEqual(result.current.firstPassYield, { numerator: 1, denominator: 2, coverage: 1,
+  assert.deepEqual(result.current.firstPassYield, { numerator: 1, denominator: 2, observed: 2, population: 2, coverage: 1,
     state: 'measured', value: 0.5 });
-  assert.deepEqual(result.current.extraAgentLaunches, { total: 2, meanPerMission: 1, n: 2 });
-  assert.deepEqual(result.current.sendBacks.human, { numerator: 1, denominator: 1, coverage: 1,
+  assert.deepEqual(result.current.extraAgentLaunches, { total: 2, meanPerMission: 1, n: 2,
+    lowerBound: false, reworkJobs: 1, reworkMeanPerMission: 0.5, reworkN: 2 });
+  assert.deepEqual(result.current.sendBacks.human, { numerator: 1, denominator: 1, observed: 2, population: 2, coverage: 1,
     state: 'measured', value: 1 });
   assert.equal(result.current.returns[0]?.responsibleModel, 'gpt-6.1-sol');
   assert.deepEqual(result.current.time.rows.map(row => [row.step, row.state, row.totalMs, row.meanMs, row.p90Ms, row.n]), [
@@ -116,10 +119,41 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
   assert.equal(result.current.time.rows.find(row => row.step === 'implement')?.model, 'gpt-6.1-sol');
   assert.deepEqual(result.current.time.largestHolder, { step: 'human-review', actor: 'human', model: null, state: 'held',
     totalMs: 40, share: 2 / 3 });
+  assert.equal(result.current.graph.nodes.find(node => node.id === 'pre-review-rebase')?.count, 2);
+  assert.equal(result.current.graph.edges.find(edge => edge.kind === 'rebase-conflict')?.count, 1);
+  assert.deepEqual(result.current.stateDwell.find(row => row.state === 'active'), { state: 'active', medianMs: 20, p90Ms: 30, n: 2 });
+  assert.deepEqual(result.families.map(cohort => [cohort.family, cohort.current.completedMissions]), [['codex', 2]]);
   assert.equal(result.previous.completedMissions, 1);
   assert.equal(result.current.defects.length, 0);
 });
-
+test('gate shares keep one run population while return arrows reconcile to rework (TASK-2836 F10)', () => {
+  const windows = weeklyDecisionWindows('2026-11-03', 'UTC');
+  const fact = (mission: string, observed: boolean): FlowMissionFacts => ({ repositoryId: 'repo', missionId: mission,
+    closedAt: '2026-11-03T12:00:00Z', implementer: 'codex', laneDwellMs: null, diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null,
+    gateRuns: observed ? [{ id: 'passed', phase: 'handoff', result: 'passed' }, { id: 'failed', phase: 'handoff', result: 'failed' }] : [],
+    rebaseRuns: [], lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
+    reviewStatistics: reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [1, ...(observed ? [2] : [])].map(sequence => ({
+      identity: `repair:${mission}:${sequence}`, author: 'codex', at: '2026-11-03T11:00:00Z', source: 'repair' })) }) });
+  const graph = flowStatistics([fact('observed', true), fact('unobserved', false)], windows).current.graph, pass = graph.edges.find(edge => edge.id === 'declared-gates->agent-review:flow')!,
+    failed = graph.edges.find(edge => edge.id === 'declared-gates->implement:gate-failed')!;
+  assert.deepEqual([pass.share, failed.share, pass.share! + failed.share!], [0.5, 0.5, 1]);
+  assert.deepEqual([pass.percentage, failed.percentage, failed.count], [50, 50, 3], 'gate percentages use settled runs; the arrow retains every typed return');
+  assert.deepEqual([graph.nodes.find(node => node.id === 'implement')?.rework, graph.edges.find(edge => edge.id === 'unrecorded->implement:workflow-return')?.count], [3, 0]);
+  assert.equal(graph.edges.filter(edge => edge.to === 'implement' && edge.kind !== 'flow').reduce((sum, edge) => sum + edge.count, 0), graph.nodes.find(node => node.id === 'implement')?.rework, 'every typed return is drawn exactly once into implementation');
+  const unobserved = flowStatistics([fact('unobserved-only', false)], windows).current.graph,
+    unobservedGateReturn = unobserved.edges.find(edge => edge.id === 'declared-gates->implement:gate-failed')!;
+  assert.deepEqual([unobservedGateReturn.count, unobservedGateReturn.share, unobserved.edges.find(edge => edge.id === 'unrecorded->implement:workflow-return')?.count], [1, null, 0], 'typed returns remain visible without a settled-run denominator');
+  const unevenRuns = [...Array.from({ length: 91 }, (_, id) => ({ id: `pass-${id}`, phase: 'handoff', result: 'passed' as const })),
+    ...Array.from({ length: 4 }, (_, id) => ({ id: `fail-${id}`, phase: 'handoff', result: 'failed' as const })),
+    { id: 'running', phase: 'handoff', result: 'running' as const }];
+  const uneven = flowStatistics([{ ...fact('uneven', true), gateRuns: unevenRuns }], windows).current.graph.edges
+    .filter(edge => edge.from === 'declared-gates');
+  assert.deepEqual(uneven.map(edge => [edge.share, edge.percentage]), [[91 / 95, 96], [4 / 95, 4]], 'only terminal siblings divide the displayed 100%');
+  const resolving = flowStatistics([{ ...fact('resolve', false), rebaseRuns:
+    [{ id: 'repeat', stage: 'pre-review-rebase', outcomes: ['conflict', 'conflict', 'resolved'] },
+      { id: 'failed', stage: 'pre-review-rebase', outcomes: ['conflict', 'failed'] }] }], windows).current.graph.edges.filter(edge => edge.from === 'pre-review-resolve');
+  assert.deepEqual(resolving.map(edge => [edge.count, edge.percentage]), [[1, 34], [1, 33], [1, 33]], 'Resolve siblings divide one displayed 100%');
+});
 test('live Review observations survive absent telemetry and ignore archived scalar counts (TASK-2818)', async () => {
   const { StatsCommandUseCase } = await import('../../../../src/application/stats-command-use-case.js');
   const rows = [{ repo: 'r', mission: 'task-stale', stage: 'default', date: '2026-06-23', implementer: 'codex', model: 'gpt-6.1-sol',
@@ -135,7 +169,6 @@ test('live Review observations survive absent telemetry and ignore archived scal
   assert.match(report, /qwen3\.8-flash-next-iq3_s\s+1\s+2\b/);
   assert.doesNotMatch(report, /coverage/);
 });
-
 const instant = (ms: number) => new Date(Date.UTC(2026, 10, 2) + ms).toISOString();
 function attempt(id: string, start: number, end: number, extra: Partial<VerificationMeasurement> = {}): VerificationMeasurement {
   return { id, repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1,
@@ -150,7 +183,6 @@ function verificationReport(attempts: readonly VerificationMeasurement[], lifecy
   return verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle,
     history: attempts.map(a => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(a), createdAt: a.finishedAt ?? a.requestedAt })) });
 }
-
 test('fully observed repair chain reports a measured cross-batch dependency path (TASK-2835)', () => {
   const first = attempt('failed-gate', 0, 10, { batchId: 'pre-review-1', plan: ['check'], gate: 'check',
     result: 'failed', exitCode: 1, failureReason: { version: 1, code: 'gate-failed' },
@@ -220,6 +252,25 @@ test('exclusive elapsed ownership reconciles overlap from observed ownership rat
   assert.deepEqual(report.elapsedOwnership?.terminalStates, { blocked: 1, interrupted: 0, cancelled: 0 });
   assert.equal(report.executionMs, 10, 'exclusive elapsed ownership does not replace true gate work');
   assert.equal(history.some(entry => entry.eventType === 'flow.elapsed-segment'), false, 'production facts drive ownership');
+});
+
+test('FLOW ownership indexes each historical payload once across Mission windows (TASK-2836)', () => {
+  let reads = 0;
+  const history = ['px-1', 'px-2'].map((mission, index) => ({
+    eventType: 'mission.current-work', createdAt: instant(index * 100),
+    get eventData() { reads++; return JSON.stringify({ repositoryId: 'repo', missionId: mission,
+      operationId: `op-${mission}`, operationGeneration: 1, sourceId: `source-${mission}`, revision: 'rev',
+      phase: 'execute', state: 'running', actor: 'codex', model: null, timeState: 'working' }); },
+  }));
+  const lifecycle = ['px-1', 'px-2'].flatMap((mission, index) => [
+    { repositoryId: 'repo', missionId: mission, fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(index * 100), trigger: 'refine', agent: 'codex', idempotencyKey: `${mission}:refined` },
+    { repositoryId: 'repo', missionId: mission, fromStatus: 'integration', toStatus: 'done', occurredAt: instant(index * 100 + 50), trigger: 'land', agent: 'codex', idempotencyKey: `${mission}:done` },
+  ]);
+
+  const result = flowElapsedOwnership({ repositoryId: 'repo', history, lifecycle }, new Set());
+
+  assert.equal(result?.windows.length, 2);
+  assert.equal(reads, history.length, 'history payloads are parsed once, not once per Mission and ownership source');
 });
 
 test('nested causal ownership replaces only its parent interval and reconciles exactly (TASK-2835)', () => {
@@ -323,6 +374,9 @@ test('ownership retains lead handoffs and bounded partial terminal states (TASK-
     { eventType: 'lead.operator-judgment', createdAt: instant(30), eventData: JSON.stringify({
       repositoryId: 'repo', missionId: 'px-1', action: 'escalate', summary: 'operator required', evidenceRefs: ['progress:blocked'], invocations: 1,
     }) },
+    { eventType: 'lead.operator-judgment', createdAt: instant(31), eventData: JSON.stringify({
+      missionId: 'px-1', action: 'escalate', summary: 'operator required again', evidenceRefs: ['progress:blocked'], invocations: 2,
+    }) },
   ] });
   assert.equal(report.elapsedOwnership?.unexplainedMs, 5, 'lane state alone does not fabricate a human-held owner');
   assert.deepEqual(report.elapsedOwnership?.terminalStates, { blocked: 1, interrupted: 1, cancelled: 1 });
@@ -331,6 +385,7 @@ test('ownership retains lead handoffs and bounded partial terminal states (TASK-
     { step: 'recovery', actor: 'human', model: null, state: 'held', durationMs: 10 },
     { step: 'lead-escalation', actor: 'human', model: null, state: 'held', durationMs: 10 },
   ]);
+  assert.equal(report.flowMissions[0]?.lead.escalations, 1, 'legacy repeats for one evidence incident count once');
 });
 
 test('dependency path scopes mission ownership and never sums concurrent cohort windows (TASK-2835 review F2/F3)', () => {

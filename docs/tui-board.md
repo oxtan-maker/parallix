@@ -191,6 +191,18 @@ The current-flow section answers a different question: WIP, lane age,
 bottleneck, and agent availability describe the state now and are not forced
 into the completed-mission window.
 
+In `px web`, use **Board** and **Flow** in the header to switch between current
+operations and the completed-mission view. Flow keeps one cohort visible at a
+time: **All agents** or a concrete recorded implementer family, paired with the
+current or previous decision window. **Mission order** preserves the observed
+step sequence; **Longest first** reorders only the elapsed-time rows. The cards,
+actor graph, return paths, timing rows, totals and state cards all come from the
+same selected projection. Missing observations remain named collection gaps,
+and elapsed time without a recorded owner is shown as not observed rather than
+assigned to an actor or replaced with zero. Wide graph and timing regions scroll
+locally on narrow screens so their labels and return loops keep their desktop
+geometry.
+
 ## Where each fact comes from
 
 The board reads what the lifecycle already recorded. It never queries the review

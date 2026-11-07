@@ -21,6 +21,7 @@ import { CreateMissionDialog } from './create-mission-dialog.js';
 import { DoneRail } from './done-rail.js';
 import { FlightColumn } from './flight-column.js';
 import { FlowPanel } from './flow-panel.js';
+import type { BoardView } from './top-bar.js';
 import { IntakeColumn } from './intake-column.js';
 import { OperationLog } from './operation-log.js';
 import { TopBar } from './top-bar.js';
@@ -81,7 +82,7 @@ function setDragPreview(event: DragEvent<HTMLElement>, card: WebMissionCard) {
 
 function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void>) {
   const [editRequest, setEditRequest] = useState<{ id: string; control: HTMLButtonElement } | null>(null);
-  const [flowOpen, setFlowOpen] = useState(false);
+  const [view, setView] = useState<BoardView>('board');
   const [pendingCommands, setPendingCommands] = useState<PendingCommands>(new Map());
   const [outcomes, setOutcomes] = useState<ReadonlyMap<string, string>>(new Map());
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -173,7 +174,7 @@ function useBoardModel(snapshot: WebBoardSnapshot, onRefresh: () => Promise<void
     const card = (event.target as HTMLElement).closest<HTMLElement>('[data-board-card]');
     if (card !== null) { terminalOpener.current = card; setSelectedId(card.dataset.boardCard ?? null); setTerminalMission(card.dataset.boardCard ?? null); }
   };
-  return { root, moveSelection, selectTerminal, pressedAction, publishOutcome, flowOpen, setFlowOpen, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal };
+  return { root, moveSelection, selectTerminal, pressedAction, publishOutcome, view, setView, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal };
 }
 
 function BoardCancellation({ cancelPrompt, setCancelPrompt, snapshot, outcomes, pendingRef, publishOutcome, dispatch }: Pick<ReturnType<typeof useBoardModel>, 'cancelPrompt' | 'setCancelPrompt' | 'outcomes' | 'pendingRef' | 'publishOutcome' | 'dispatch'> & { snapshot: WebBoardSnapshot }) {
@@ -219,7 +220,7 @@ cancelPrompt !== null && (
 }
 
 export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
-  const { root, moveSelection, selectTerminal, pressedAction, publishOutcome, flowOpen, setFlowOpen, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal } = useBoardModel(snapshot, onRefresh);
+  const { root, moveSelection, selectTerminal, pressedAction, publishOutcome, view, setView, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal } = useBoardModel(snapshot, onRefresh);
   const [doneDisclosure, setDoneDisclosure] = useState({ rail: false, history: false });
   const onDoneDisclosure = (level: 'rail' | 'history', open: boolean) => {
     setDoneDisclosure(current => current[level] === open ? current : { ...current, [level]: open });
@@ -254,8 +255,8 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
         event.preventDefault(); event.stopPropagation();
         publishOutcome(pressed.missionId, 'Action was not sent: the control changed during the press. Select the refreshed action to try again.');
       }}>
-      <TopBar snapshot={snapshot} flowOpen={flowOpen} onFlowToggle={() => setFlowOpen((open) => !open)} onCreate={setCreateFrom} />
-      {flowOpen && <FlowPanel metrics={snapshot.metrics} />}
+      {view === 'flow' ? <FlowPanel snapshot={snapshot} onNavigate={setView} /> : <>
+      <TopBar snapshot={snapshot} onNavigate={setView} onCreate={setCreateFrom} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <AttentionRail reasonCards={[...intake.flatMap(stage => stage.cards), ...flight.flatMap(stage => stage.cards)]} snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control, agent) => {
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);
@@ -307,6 +308,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
       {terminalMission !== null && <MissionHistory missionId={terminalMission} onClose={closeTerminal} />}
       {[...outcomes.entries()].filter(([missionId]) => !visibleIds.has(missionId)).map(([missionId, outcome]) => <p key={missionId} data-command-fallback={missionId} role="status" aria-live="polite" style={{ margin: `0 ${SPACE.xl}px ${SPACE.lg}px`, color: MODAL.muted, overflowWrap: 'anywhere' }}>{missionId}: {outcome}</p>)}
       <OperationLog snapshot={snapshot} />
+      </>}
     </div>
     </AgentFamilies.Provider>
     </VisibleCommandOutcomes.Provider>

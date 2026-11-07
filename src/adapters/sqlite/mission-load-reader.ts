@@ -16,6 +16,7 @@ import {
   type MissionDeclaredGateRecord,
   type MissionSuccessCriterionRecord,
   type MissionDependencyRecord,
+  type MissionDefectProvenanceRecord,
   type MissionRecord,
   type MissionReviewEventRecord,
   type MissionReviewFindingRecord,
@@ -41,7 +42,7 @@ export async function readMissionAggregates(db: SqliteDatabaseAdapter, scope: Mi
   if (missionRows.length === 0) { return []; }
 
   const [authoring, review] = await Promise.all([readAuthoringRows(db, scope, params), readReviewRows(db, scope, params)]);
-  const { labels, briefs, briefOutOfScope, gateRows, criterionRows, dependencyRows, checkpoints, goalChecks, reviews, reviewRounds, findings, resolutions, externalRefs, stageLaunches, reviewEvents } = { ...authoring, ...review };
+  const { labels, briefs, briefOutOfScope, gateRows, criterionRows, dependencyRows, provenanceRows, checkpoints, goalChecks, reviews, reviewRounds, findings, resolutions, externalRefs, stageLaunches, reviewEvents } = { ...authoring, ...review };
 
   const byMission = <T extends { readonly mission_id: string }>(rows: readonly T[]) => {
     const grouped = new Map<string, T[]>();
@@ -57,6 +58,7 @@ export async function readMissionAggregates(db: SqliteDatabaseAdapter, scope: Mi
   const gatesOf = byMission(gateRows);
   const criteriaOf = byMission(criterionRows);
   const dependenciesOf = byMission(dependencyRows);
+  const provenanceOf = byMission(provenanceRows);
   const checkpointsOf = byMission(checkpoints);
   const goalChecksOf = byMission(goalChecks);
   const reviewsOf = byMission(reviews);
@@ -78,6 +80,7 @@ export async function readMissionAggregates(db: SqliteDatabaseAdapter, scope: Mi
       declaredGates: gatesOf(mission.id),
       successCriteria: criteriaOf(mission.id),
       dependencies: dependenciesOf(mission.id),
+      defectProvenance: provenanceOf(mission.id)[0] ?? null,
       checkpoints: checkpointsOf(mission.id),
       goalChecks: goalChecksOf(mission.id),
       review: reviewsOf(mission.id)[0] ?? null,
@@ -92,7 +95,7 @@ export async function readMissionAggregates(db: SqliteDatabaseAdapter, scope: Mi
 interface MissionQueryScope { readonly missions: string; readonly children: string; readonly params: readonly string[] }
 
 async function readAuthoringRows(db: SqliteDatabaseAdapter, scope: MissionQueryScope, params: readonly string[]) {
-  const [labels, briefs, briefOutOfScope, gateRows, criterionRows, dependencyRows, checkpoints, goalChecks] = await Promise.all([
+  const [labels, briefs, briefOutOfScope, gateRows, criterionRows, dependencyRows, provenanceRows, checkpoints, goalChecks] = await Promise.all([
     db.query<MissionLabelRecord>(
       `SELECT mission_id, position, label FROM mission_labels WHERE ${scope.children} ORDER BY mission_id, position`,
       params,
@@ -102,6 +105,11 @@ async function readAuthoringRows(db: SqliteDatabaseAdapter, scope: MissionQueryS
     db.query<MissionDeclaredGateRecord>(`SELECT mission_id, position, command FROM mission_declared_gates WHERE ${scope.children} ORDER BY mission_id, position`, params),
     db.query<MissionSuccessCriterionRecord>(`SELECT mission_id, position, criterion, criterion_id, completed FROM mission_success_criteria WHERE ${scope.children} ORDER BY mission_id, position`, params),
     db.query<MissionDependencyRecord>(`SELECT mission_id, position, depends_on_mission_id FROM mission_dependencies WHERE ${scope.children} ORDER BY mission_id, position`, params),
+    db.query<MissionDefectProvenanceRecord>(
+      `SELECT mission_id, root_cause_summary, investigation_evidence, attribution_disposition, originating_mission_id
+         FROM mission_defect_provenance WHERE ${scope.children}`,
+      params,
+    ),
     db.query<MissionCheckpointRecord>(
       `SELECT mission_id, position, checkpoint_mission_id, name, raw_filename,
                   first_line, next_action_text, repair_json, recording_json
@@ -115,7 +123,7 @@ async function readAuthoringRows(db: SqliteDatabaseAdapter, scope: MissionQueryS
       params,
     )
   ]);
-  return { labels, briefs, briefOutOfScope, gateRows, criterionRows, dependencyRows, checkpoints, goalChecks };
+  return { labels, briefs, briefOutOfScope, gateRows, criterionRows, dependencyRows, provenanceRows, checkpoints, goalChecks };
 }
 
 async function readReviewRows(db: SqliteDatabaseAdapter, scope: MissionQueryScope, params: readonly string[]) {

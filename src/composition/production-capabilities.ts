@@ -209,7 +209,7 @@ function createBoardReviewPreparationWorkflow(
         invalidateResolvedBlocker: async () => undefined,
         invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
-        mechanisms: () => createReviewLoopPorts(slug, {}, { integrationRepair: integrationRepairContinuation(missionServices, configuration), configuration, pinnedReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
+        mechanisms: () => createReviewLoopPorts(slug, {}, { integrationRepair: integrationRepairContinuation(missionServices, configuration), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };

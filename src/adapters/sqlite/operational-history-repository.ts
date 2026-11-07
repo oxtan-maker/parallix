@@ -1,7 +1,8 @@
 import { authorizedOperationId } from '../../application/ports/mission-write-authorization.js';
 import { authorizeSqliteMissionWrite } from './workflow-write-guard.js';
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type { OperationLogSummary, OperationalHistoryEntry, OperationalHistoryRepository } from '../../application/ports/operation-history.js';
+import type { OperationLogSummary, OperationalHistoryEntry, OperationalHistoryRepository,
+  ReboundRepairHistoryEntry } from '../../application/ports/operation-history.js';
 
 /**
  * SQLite-backed operational history repository.
@@ -32,6 +33,49 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
       eventData: String(row.event_data),
       createdAt: String(row.created_at),
     }));
+  }
+
+  async findByTypes(types: readonly string[]): Promise<readonly OperationalHistoryEntry[]> {
+    if (types.length === 0) { return []; }
+    const rows = await this.db.query<{ id: unknown; event_type: unknown; event_data: unknown; created_at: unknown }>(
+      `SELECT id, event_type, event_data, created_at FROM operational_history
+       WHERE event_type IN (${types.map(() => '?').join(',')}) ORDER BY id ASC`, types);
+    return rows.map(row => ({ id: Number(row.id), eventType: String(row.event_type),
+      eventData: String(row.event_data), createdAt: String(row.created_at) }));
+  }
+
+  async findEarliestForMissions(missionIds: readonly string[], repositoryId: string): Promise<readonly OperationalHistoryEntry[]> {
+    if (missionIds.length === 0) { return []; }
+    const rows = await this.db.query<{ mission_id: unknown; created_at: unknown }>(
+      `SELECT json_extract(event_data, '$.missionId') AS mission_id, MIN(created_at) AS created_at
+       FROM operational_history
+       WHERE json_valid(event_data)
+         AND json_extract(event_data, '$.repositoryId') = ?
+         AND json_extract(event_data, '$.missionId') IN (${missionIds.map(() => '?').join(',')})
+       GROUP BY json_extract(event_data, '$.missionId')`, [repositoryId, ...missionIds]);
+    return rows.map((row, index) => ({ id: index, eventType: 'mission.first-observation',
+      eventData: JSON.stringify({ repositoryId, missionId: String(row.mission_id) }), createdAt: String(row.created_at) }));
+  }
+
+  async findReboundRepairs(): Promise<readonly ReboundRepairHistoryEntry[]> {
+    const rows = await this.db.query<{ mission_id: unknown; occurrence_id: unknown; reason_kind: unknown;
+      area: unknown; agent: unknown; duration_ms: unknown; created_at: unknown }>(
+      `SELECT json_extract(event_data, '$.missionId') AS mission_id,
+              json_extract(event_data, '$.occurrenceId') AS occurrence_id,
+              json_extract(event_data, '$.reasonKind') AS reason_kind,
+              json_extract(event_data, '$.area') AS area,
+              json_extract(event_data, '$.agent') AS agent,
+              json_extract(event_data, '$.durationMs') AS duration_ms,
+              created_at
+       FROM operational_history
+       WHERE event_type = 'rebound.repair' AND json_valid(event_data)
+         AND json_extract(event_data, '$.missionId') IS NOT NULL
+         AND json_extract(event_data, '$.occurrenceId') IS NOT NULL
+       ORDER BY created_at`);
+    return rows.map(row => ({ missionId: String(row.mission_id), occurrenceId: String(row.occurrence_id),
+      reasonKind: String(row.reason_kind ?? ''), area: typeof row.area === 'string' ? row.area : null,
+      agent: String(row.agent ?? ''), durationMs: typeof row.duration_ms === 'number' && Number.isFinite(row.duration_ms)
+        ? Math.max(0, row.duration_ms) : null, occurredAt: String(row.created_at) }));
   }
 
   async findRecentLogEntries(limit: number): Promise<readonly OperationLogSummary[]> {

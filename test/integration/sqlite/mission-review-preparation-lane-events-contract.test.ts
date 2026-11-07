@@ -247,3 +247,63 @@ test("a duplicate review preparation key on a distinct approve transition stays 
     await fixture.close();
   }
 });
+
+test("a replay still recognizes the later key from a collapsed historical pair (TASK-2842.2)", async () => {
+  const fixture = await openFixture('task-2842-collapsed-replay');
+  const laterKey = `round-open:${fixture.slug}:round-1`;
+  try {
+    await fixture.database.execute(
+      `INSERT INTO board_lane_events
+        (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?);`,
+      [
+        'parallix', fixture.slug, 'active', 'review', 'submit-for-review', reviewer, HANDOFF_1_AT,
+        `handoff-${fixture.slug}`,
+        'parallix', fixture.slug, 'active', 'review', 'submit-for-review', reviewer, HANDOFF_1_AT,
+        laterKey,
+      ],
+    );
+
+    const replayed = await fixture.lifecycle.transition({
+      operationId: `round-open-${fixture.slug}`,
+      missionId: missionId(fixture.slug),
+      expectedVersion: await currentVersion(fixture),
+      capabilities: new Set(['mission:transition' as const]),
+      command: {
+        type: 'submit-for-review',
+        gatesPassed: true,
+        review: startReview(
+          { change: pullRequest, revision: changeRevision('rev-collapsed-replay') },
+          reviewer,
+          implementer,
+          HANDOFF_1_AT,
+          reviewerEligibility,
+        ),
+        reviewerEligibility,
+      },
+      actor: reviewer,
+      occurredAt: HANDOFF_1_AT,
+      idempotencyKey: laterKey,
+    });
+
+    assert.equal(
+      replayed.status,
+      'completed',
+      `the exact persisted key must survive analytical collapse, got ${replayed.status}: ${replayed.error?.message ?? ''}`,
+    );
+    assert.equal(replayed.value?.laneChanged, false, 'the replay saves only the aggregate');
+    assert.equal(replayed.value?.to, 'review', 'the replay lands the mission in review');
+
+    const rows = await fixture.database.query<{ idempotency_key: string }>(
+      'SELECT idempotency_key FROM board_lane_events WHERE mission_id = ? ORDER BY id',
+      [fixture.slug],
+    );
+    assert.deepEqual(
+      rows.map((row) => row.idempotency_key),
+      [`handoff-${fixture.slug}`, laterKey],
+      'the read-only collapse never rewrites either persisted row',
+    );
+  } finally {
+    await fixture.close();
+  }
+});

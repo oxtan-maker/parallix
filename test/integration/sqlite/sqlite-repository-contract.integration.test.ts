@@ -400,6 +400,22 @@ describe("SQLite repository contract", () => {
     }
   });
 
+  it('operational-history: rebound statistics omit transcripts and malformed identities (TASK-2836)', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      const repo = new SqliteOperationalHistoryRepository(db);
+      await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ missionId: 'task-a', occurrenceId: 'repair-1',
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', transcript: 'x'.repeat(100_000) }), createdAt: '2026-10-01T10:00:00Z' });
+      await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ missionId: 'task-a', occurrenceId: 'repair-2',
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: 120_000 }), createdAt: '2026-10-01T10:02:00Z' });
+      await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ missionId: 'task-a' }), createdAt: '2026-10-01T10:01:00Z' });
+      assert.deepEqual(await repo.findReboundRepairs(), [{ missionId: 'task-a', occurrenceId: 'repair-1',
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: null, occurredAt: '2026-10-01T10:00:00Z' },
+      { missionId: 'task-a', occurrenceId: 'repair-2', reasonKind: 'gate-failure', area: 'unit', agent: 'codex',
+        durationMs: 120_000, occurredAt: '2026-10-01T10:02:00Z' }]);
+    } finally { await db.close(); cleanupTempDir(dir); }
+  });
+
   it('operational-history: bounded summaries retain producer identity without carrying payloads (TASK-2719)', async () => {
     const { db, dir } = await createDbWithSchema();
     try {

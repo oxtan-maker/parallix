@@ -64,7 +64,7 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export interface ReviewLoopBindings {
   readonly integrationRepair?: ReviewLoopPorts['integrationRepair'];
   readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
-  readonly pinnedReviewer?: string;
+  readonly preferredReviewer?: string;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
@@ -216,14 +216,11 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
   };
   return {
     async launch({ role, agent, exclude, prompt, recovery }) {
-      if (role === 'reviewer' && bindings.pinnedReviewer && agent !== bindings.pinnedReviewer) {
-        throw new Error(`Selected reviewer ${bindings.pinnedReviewer} cannot launch; refresh and retry that family explicitly`);
-      }
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', {
         configuration: reviewerLaunchConfiguration(bindings.configuration, role, prompt),
         agent,
-        pinnedAgent: role === 'reviewer' && bindings.pinnedReviewer !== undefined,
+        preferredAgent: role === 'reviewer' && bindings.preferredReviewer !== undefined,
         prompt: async (actual: string) => [prompt ? await rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
         worktree, slug, role, exclude: exclude.filter((family): family is string => family !== undefined),
         ...(role === 'reviewer' && prompt ? { authoritativeCompletion: async () => {

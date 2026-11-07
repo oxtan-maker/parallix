@@ -19,6 +19,17 @@ export class SqliteMissionValueWriter {
   }
 
   private async insertAuthoring(mission: Mission): Promise<void> {
+    if (mission.defectProvenance) {
+      const provenance = mission.defectProvenance;
+      await this.db.execute(
+        `INSERT INTO mission_defect_provenance
+           (mission_id, root_cause_summary, investigation_evidence, attribution_disposition, originating_mission_id)
+         VALUES (?, ?, ?, ?, ?)`,
+        [mission.id, provenance.rootCauseSummary, provenance.investigationEvidence,
+          provenance.attribution.kind,
+          provenance.attribution.kind === 'originating-mission' ? provenance.attribution.missionId : null],
+      );
+    }
     if (mission.brief) {
       const brief = mission.brief;
       await this.db.execute(

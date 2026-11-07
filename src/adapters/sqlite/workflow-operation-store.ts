@@ -4,6 +4,16 @@ import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { isWorkflowCommand } from '../../domain/workflow-operation.js';
 import { SqliteExecutionActivityStore } from './execution-activity-store.js';
 
+export interface WorkflowOperationHistoryRead {
+  readonly operations: readonly WorkflowOperation[];
+  readonly unreadableRowCount: number;
+}
+
+export function workflowOperationCollectionDefects(unreadableRowCount: number): readonly string[] {
+  return unreadableRowCount === 0 ? []
+    : [`${unreadableRowCount} unreadable workflow operation ${unreadableRowCount === 1 ? 'row' : 'rows'} excluded from FLOW statistics`];
+}
+
 /** A dedicated connection prevents unrelated services joining admission transactions. */
 export class SqliteWorkflowOperationStore implements WorkflowOperationStore {
   private tail: Promise<unknown> = Promise.resolve();
@@ -38,7 +48,7 @@ export class SqliteWorkflowOperationStore implements WorkflowOperationStore {
     return this.read("phase IN ('accepted','executing','stopping')", []);
   }
   /** Historical operations retain their original repository and mission joins. */
-  all(): Promise<readonly WorkflowOperation[]> { return this.read('1 = 1 ORDER BY rowid', []); }
+  async all(): Promise<readonly WorkflowOperation[]> { return (await this.readHistorical()).operations; }
   async latest(mission: string): Promise<WorkflowOperation | null> {
     return (await this.read('mission_id = ? ORDER BY rowid DESC LIMIT 1', [mission]))[0] ?? null;
   }
@@ -68,12 +78,25 @@ export class SqliteWorkflowOperationStore implements WorkflowOperationStore {
     const rows = await this._db.query<{ record_json: string }>(`SELECT record_json FROM workflow_operations WHERE repository_id = ? AND ${where}`, [this._repository, ...parameters]);
     return rows.map(row => readOperation(row.record_json, this._repository));
   }
+  /** Analytics retain the readable measured subset and disclose every excluded row. */
+  async readHistorical(): Promise<WorkflowOperationHistoryRead> {
+    const rows = await this._db.query<{ record_json: string }>(
+      'SELECT record_json FROM workflow_operations WHERE repository_id = ? ORDER BY rowid', [this._repository]);
+    const operations: WorkflowOperation[] = [];
+    let unreadableRowCount = 0;
+    for (const row of rows) {
+      try { operations.push(readOperation(row.record_json, this._repository)); }
+      catch { unreadableRowCount++; }
+    }
+    return { operations, unreadableRowCount };
+  }
 }
 
 /** Storage identity is checked; unavailable optional progress remains an observation gap. */
 function readOperation(json: string, repository: RepositoryId): WorkflowOperation {
-  const raw = JSON.parse(json) as WorkflowOperation;
+  const parsed = JSON.parse(json) as StoredWorkflowOperation;
   const phases = ['accepted', 'executing', 'stopping', 'completed', 'blocked', 'interrupted', 'stopped'];
+  const raw = normalizeSettledLegacyOperation(parsed);
   if (!raw || raw.repositoryId !== repository || !validIdentityFields(raw)
     || !Number.isSafeInteger(raw.generation) || raw.generation < 0 || !phases.includes(raw.phase) || !isWorkflowCommand(raw.command)) {
     throw new Error('Invalid stored workflow identity or lifecycle');
@@ -82,6 +105,18 @@ function readOperation(json: string, repository: RepositoryId): WorkflowOperatio
     throw new Error('Invalid stored workflow owner identity');
   }
   return raw;
+}
+
+type StoredWorkflowOperation = Omit<WorkflowOperation, 'command'> & { readonly command: string };
+
+function normalizeSettledLegacyOperation(parsed: StoredWorkflowOperation): WorkflowOperation {
+  // 0042 established this exact semantic successor, but an older executable
+  // could still publish a settled handoff after that one-time migration ran.
+  // Keep rolling-upgrade history readable without accepting a retired command
+  // as live workflow ownership or weakening validation for any other value.
+  return parsed?.command === 'handoff:record' && ['completed', 'blocked', 'interrupted', 'stopped'].includes(parsed.phase)
+    ? { ...parsed, command: 'review:submit' }
+    : parsed as WorkflowOperation;
 }
 
 function validIdentityFields(operation: WorkflowOperation): boolean {

@@ -364,3 +364,35 @@ test('persisted closed integration blockers disappear on repeatable board and we
     assert.deepEqual(await durable(), before, 'reads preserve lifecycle, workflow, activity and audit rows');
   } finally { await subject.dispose(); }
 });
+
+test('settled handoffs written after the execution cutover remain readable as review history (TASK-2836)', async () => {
+  const subject = await fixture();
+  try {
+    const repo = repositoryId('parallix');
+    const workflows = new SqliteWorkflowOperationStore(subject.db, repo);
+    const legacy = {
+      id: 'legacy-handoff', repositoryId: repo, missionId: 'px-0008', requestKey: 'review', generation: 1,
+      command: 'handoff:record', phase: 'completed', owner: null, providerStarted: true,
+      agent: 'codex', reviewer: 'claude', originalStatus: 'review', previousAssignee: null,
+      createdAt: '2026-10-25T10:00:00Z', updatedAt: '2026-10-25T11:00:00Z', reason: null,
+    };
+    await subject.db.execute('INSERT INTO workflow_operations VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [legacy.id, repo, legacy.missionId, legacy.requestKey, legacy.generation, legacy.phase, JSON.stringify(legacy)]);
+
+    const [legacyHistory] = await workflows.all();
+    assert.equal(legacyHistory?.command, 'review:submit', '0042 successor semantics keep settled history usable by FLOW');
+    assert.equal(legacyHistory?.missionId, legacy.missionId);
+
+    const unsafe = { ...legacy, id: 'open-legacy-handoff', missionId: 'px-0016', requestKey: 'open', phase: 'accepted' };
+    await subject.db.execute('INSERT INTO workflow_operations VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [unsafe.id, repo, unsafe.missionId, unsafe.requestKey, unsafe.generation, unsafe.phase, JSON.stringify(unsafe)]);
+    const historical = await workflows.readHistorical();
+    assert.deepEqual(historical.operations.map(operation => operation.id), [legacy.id],
+      'analytics retain the measured historical subset when a row is unreadable');
+    assert.equal(historical.unreadableRowCount, 1, 'analytics disclose every excluded workflow row');
+    assert.deepEqual((await workflows.all()).map(operation => operation.id), [legacy.id],
+      'the compatibility list read retains only the measured subset');
+    await assert.rejects(() => workflows.current(unsafe.missionId), /Invalid stored workflow identity or lifecycle/,
+      'a retired command must never become live workflow ownership');
+  } finally { await subject.dispose(); }
+});

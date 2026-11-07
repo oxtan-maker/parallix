@@ -1,8 +1,5 @@
 import './web-board-card-facts.cases.js';
 import './web-refinement-render.cases.js';
-import type { BoardLane } from '../../../../src/application/projections/mission-board.js';
-const laneCounts = (values: Partial<Record<BoardLane, number>>) => ({ backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 0, ...values });
-
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 /**
  * Focused component tests for the read-only browser board (TASK-2434).
@@ -24,7 +21,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { Board, EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX } from '../../../../web/src/board.js';
 import { CheckpointDetail } from '../../../../web/src/checkpoint-detail.js';
 import { CheckpointPips } from '../../../../web/src/checkpoint-pips.js';
-import { FlowPanel } from '../../../../web/src/flow-panel.js';
 import './web-operation-log-render.cases.js';
 import { Shell } from '../../../../web/src/shell.js';
 import { durationText, isSpinning } from '../../../../web/src/format.js';
@@ -47,9 +43,6 @@ const browserSources = fs.readdirSync(webSrc)
 
 const render = (snapshot: WebBoardSnapshot): string =>
   renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
-
-const renderFlow = (metrics: WebBoardSnapshot['metrics']): string =>
-  renderToStaticMarkup(React.createElement(FlowPanel, { metrics }));
 
 const snapshotOf = (overrides: Partial<BoardProjection>): WebBoardSnapshot =>
   toWebBoardSnapshot({ ...makeProjection(), ...overrides });
@@ -330,101 +323,6 @@ test('the operation log renders the server entry rather than a reconstructed one
   assert.match(html, /CP-2 committed/);
 });
 
-test('FLOW keeps the reference two-panel layout when projected history is unavailable', () => {
-  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: emptyMetrics }).metrics);
-  assert.match(html, /CUMULATIVE FLOW/);
-  assert.match(html, /MEDIAN TIME IN STATE/);
-  assert.doesNotMatch(html, /READ/);
-  assert.doesNotMatch(html, /weekly throughput/);
-});
-
-test('FLOW renders populated projected values with whole-number display formatting', () => {
-  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
-    ...emptyMetrics,
-    health: { state: 'healthy' },
-    provenance: { ...emptyMetrics.provenance, sampleSize: 4 },
-    cumulativeFlowByState: { series: [{ at: '2026-08-30', counts: laneCounts({ active: 2, review: 1 }), observationCount: 3 }], missingHistoryFallback: 'skip' } satisfies typeof emptyMetrics.cumulativeFlowByState,
-    medianCycleTimeByState: { series: [{ lane: 'active', value: 42.5, observationCount: 2.5 }, { lane: 'review', value: 0.4, observationCount: 1 }], missingHistoryFallback: 'null' } as typeof emptyMetrics.medianCycleTimeByState,
-  } }).metrics);
-  assert.match(html, /Cumulative flow chart/);
-  assert.match(html, /active/);
-  assert.match(html, /43m \(n=3\)/);
-  assert.match(html, /0m \(n=1\)/);
-  assert.match(html, /cycle time/);
-  assert.match(html, /43m/);
-  assert.doesNotMatch(html, /42\.5m/);
-  assert.match(html, /refined → done, median/);
-});
-
-test('FLOW charts the server-owned weekly series and never the historical stock beside it', () => {
-  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
-    ...emptyMetrics,
-    // The all-history series still carries every pre-window completion...
-    cumulativeFlowByState: { series: [
-      { at: '2026-08-23T23:59:59.000Z', counts: laneCounts({ done: 99 }), observationCount: 99 },
-    ], missingHistoryFallback: 'estimate' } satisfies typeof emptyMetrics.cumulativeFlowByState,
-    // ...and FLOW charts the weekly series the projection published instead.
-    weeklyCumulativeFlow: { series: [
-      { at: '2026-08-24T23:59:59.999Z', counts: laneCounts({ active: 2 }), observationCount: 2 },
-      { at: '2026-08-30T23:59:59.999Z', counts: laneCounts({ active: 2 }), observationCount: 2 },
-    ], missingHistoryFallback: 'estimate', window: { startDate: '2026-08-24', endDate: '2026-08-30', label: '2026-08-24 → 2026-08-30' } } satisfies NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
-  } }).metrics);
-  assert.match(html, /2026-08-24 → 2026-08-30/);
-  assert.match(html, / active<\/span>/);
-  assert.doesNotMatch(html, />99<\//);
-});
-
-test('the web transport carries the weekly cumulative-flow series and its window unchanged', () => {
-  const weekly = {
-    series: [
-      { at: '2026-08-25T23:59:59.999Z', counts: { backlog: 0, refined: 0, active: 1, review: 0, integration: 0, done: 0 }, observationCount: 1 },
-      { at: '2026-08-26T23:59:59.999Z', counts: { backlog: 0, refined: 0, active: 0, review: 0, integration: 0, done: 1 }, observationCount: 1 },
-    ],
-    missingHistoryFallback: 'estimate',
-    window: { startDate: '2026-08-25', endDate: '2026-08-26', label: '2026-08-25 → 2026-08-26' },
-  } satisfies NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>;
-  const snapshot = toWebBoardSnapshot({ ...makeProjection(), metrics: { ...emptyMetrics, weeklyCumulativeFlow: weekly } });
-  assert.deepEqual(snapshot.metrics.weeklyCumulativeFlow, JSON.parse(JSON.stringify(weekly)));
-  assert.deepEqual(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
-});
-
-test('a snapshot without a weekly series is still a valid transport payload', () => {
-  const snapshot = toWebBoardSnapshot({ ...makeProjection(), metrics: emptyMetrics });
-  assert.equal(snapshot.metrics.weeklyCumulativeFlow, undefined);
-  assert.deepEqual(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
-});
-
-test('FLOW draws every published weekly point without rebasing or inferring lane movement', () => {
-  const points = [0, 1, 2, 3, 4, 5, 6].map((offset) => ({
-    at: `2026-08-2${5 + offset > 9 ? 5 + offset - 10 : 5 + offset}T23:59:59.999Z`,
-    counts: { backlog: 0, refined: 0, active: offset < 4 ? 1 : 0, review: 0, integration: 0, done: offset < 4 ? 0 : 1 },
-    observationCount: 1,
-  }));
-  const html = renderFlow(toWebBoardSnapshot({ ...makeProjection(), metrics: {
-    ...emptyMetrics,
-    weeklyCumulativeFlow: { series: points, missingHistoryFallback: 'estimate', window: { startDate: '2026-08-25', endDate: '2026-08-31', label: '2026-08-25 → 2026-08-31' } } satisfies NonNullable<typeof emptyMetrics.weeklyCumulativeFlow>,
-  } }).metrics);
-  // One polygon per lane; every one plots all seven published points (7 up + 7 down).
-  const polygons = [...html.matchAll(/points="([^"]+)"/g)].map((match) => match[1]!.split(' '));
-  assert.equal(polygons.length, 6);
-  assert.ok(polygons.every((polygon) => polygon.length === 14), 'every lane band must plot all seven published points');
-  // The `done` band (topmost stacked layer) has zero thickness on the four days
-  // the projection published `done: 0`, and thickness only where it published a
-  // completion — the browser adds no accumulation of its own.
-  const doneBand = polygons[5]!;
-  const thickness = [0, 1, 2, 3, 4, 5, 6].map((index) =>
-    Number(doneBand[13 - index]!.split(',')[1]) - Number(doneBand[index]!.split(',')[1]));
-  assert.deepEqual(thickness.slice(0, 4), [0, 0, 0, 0]);
-  assert.ok(thickness.slice(4).every((height) => height > 0), 'in-window completions must raise the done band');
-});
-
-test('the browser never filters, rebases, or infers the weekly flow it renders', () => {
-  const flowPanel = browserSources.find((source) => source.name === 'flow-panel.tsx')!.text;
-  assert.doesNotMatch(flowPanel, /cumulativeFlowByState\.series\.filter/);
-  assert.doesNotMatch(flowPanel, /startDate|endDate/, 'the browser must not re-derive the reporting window');
-  assert.match(flowPanel, /metrics\.weeklyCumulativeFlow \?\? metrics\.cumulativeFlowByState/);
-});
-
 // ---------------------------------------------------------------------------
 // Empty, unavailable and unknown values (SC2)
 // ---------------------------------------------------------------------------
@@ -486,10 +384,11 @@ test('board, card, lane and modal surfaces consume one design token authority (T
     assert.ok(text, `${name} is not a browser source`);
     return text;
   };
-  for (const name of ['board.tsx', 'flight-column.tsx', 'lane-header.tsx', 'intake-column.tsx', 'done-rail.tsx', 'attention-rail.tsx', 'top-bar.tsx', 'action-button.tsx', 'checkpoint-pips.tsx', 'flow-panel.tsx', 'operation-log.tsx']) {
+  for (const name of ['board.tsx', 'flight-column.tsx', 'lane-header.tsx', 'intake-column.tsx', 'done-rail.tsx', 'attention-rail.tsx', 'top-bar.tsx', 'action-button.tsx', 'checkpoint-pips.tsx', 'operation-log.tsx',
+    'flow-panel.tsx', 'flow-graph.tsx', 'flow-time-table.tsx', 'flow-format.ts']) {
     const text = sourceOf(name);
     assert.match(text, /from '\.\/palette\.js'/, `${name} does not import the design authority`);
-    assert.match(text, /\b(SPACE|RADIUS|TYPE)\b/, `${name} does not consume a shared spacing, radius or type scale`);
+    assert.match(text, /\b(SPACE|RADIUS|TYPE|TRACK|DISPLAY|FLOW|FLOW_TYPE)\b/, `${name} does not consume a shared design scale`);
   }
   for (const name of ['checkpoint-detail.tsx', 'mission-history.tsx', 'cancel-confirmation.tsx', 'create-mission-dialog.tsx']) {
     assert.match(sourceOf(name), /\bMODAL\./, `${name} does not consume the semantic modal surfaces`);
@@ -626,7 +525,7 @@ test('agent-block durations use human-sized units', () => {
 
 test('each card renders projected action availability without inventing a runnable fallback', () => {
   const html = render(populated());
-  const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('aria-controls="flow-metrics"') && !button.includes('aria-haspopup="dialog"'));
+  const buttons: string[] = Array.from(html.match(/<button[^>]*>/g) ?? []).filter((button) => !button.includes('data-view-nav=') && !button.includes('aria-haspopup="dialog"'));
   assert.ok(buttons.length > 0, 'the fixture renders at least one action');
   for (const button of buttons) {
     assert.match(button, /aria-disabled="(?:true|false)"/, `action states availability: ${button}`);
@@ -854,10 +753,17 @@ test('production browser code reads snapshots and mission history while keeping 
 });
 
 test('production browser code contains no mock mission data or invented metric', () => {
+  const referenceVocabularyOwners: Readonly<Record<string, readonly string[]>> = {
+    'flow-panel.tsx': ['missions/wk', 'throughput', 'cycle time'],
+    'flow-graph.tsx': ['median'],
+    'flow-time-table.tsx': ['median'],
+    'top-bar.tsx': ['missions/wk', 'throughput'],
+    'palette.ts': ['throughput'],
+  };
   for (const file of browserSources) {
     assert.ok(!/task-\d/.test(file.text), `${file.name} must not embed a mission id`);
-    if (file.name === 'flow-panel.tsx' || file.name === 'top-bar.tsx') { continue; }
     for (const invented of ['missions/wk', 'median', 'throughput', 'bottleneck', 'cycle time']) {
+      if (referenceVocabularyOwners[file.name]?.includes(invented)) { continue; }
       assert.ok(!file.text.toLowerCase().includes(invented.toLowerCase()), `${file.name} must not invent ${invented}`);
     }
   }
@@ -866,6 +772,8 @@ test('production browser code contains no mock mission data or invented metric',
 const layoutLaneLines = new Set([
   "const INTAKE_LANES: readonly string[] = ['refined', 'backlog'];",
   "const SHIPPED_LANE = 'done';",
+  "case 'refine->implement:flow': return { points: [[191, r.y + r.h], [191, i.y]], label: [203, r.y + r.h + 17], suffix: 'refined' };",
+  "const refined = flow.stateDwell.find(state => state.state === 'refined');",
 ]);
 
 function laneRuleLines(text: string): string[] {
@@ -899,7 +807,7 @@ test('lane boundary scanner distinguishes review work from lane rules (TASK-2686
 test('production browser code maps no lane to a lifecycle rule or command', () => {
   for (const file of browserSources) {
     assert.deepEqual(laneRuleLines(file.text), [], `${file.name} maps a lane outside the layout buckets`);
-    assert.ok(!/'px /.test(file.text), `${file.name} must not embed a px command string`);
+    assert.ok(!/'px (?!lead')/.test(file.text), `${file.name} must not embed a px command string`);
   }
 });
 

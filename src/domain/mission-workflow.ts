@@ -96,6 +96,12 @@ export interface MissionTransition {
  * has one, and demanding it would fail missions whose contract is otherwise
  * complete.
  */
+function requiresDefectProvenance(mission: OpenMission, command: MissionCommand): boolean {
+  return command.type === 'refine'
+    && mission.labels.includes('bug' as MissionLabel)
+    && !mission.defectProvenance;
+}
+
 function requireDraftedContract(mission: OpenMission, command: MissionCommand): void {
   const brief = mission.brief ?? null;
   const missing: string[] = [];
@@ -118,6 +124,9 @@ function requireDraftedContract(mission: OpenMission, command: MissionCommand): 
   }
   if (mission.labels.includes('bug' as MissionLabel) && !mission.reproductionTest) {
     missing.push('a reproduction test for this bug mission (`px repro set`)');
+  }
+  if (requiresDefectProvenance(mission, command)) {
+    missing.push('defect provenance for this bug mission (`px provenance set`)');
   }
   if (missing.length > 0) {
     throw new MissionRuleViolation(

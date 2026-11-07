@@ -1,8 +1,8 @@
 ---
 id: TASK-2841
 title: Restore Codex usage limit reroute through its own rollout quota identity
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-11-04 11:55'
 labels:
   - bug

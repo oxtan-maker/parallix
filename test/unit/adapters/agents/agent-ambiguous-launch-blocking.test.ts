@@ -42,7 +42,7 @@ const agentsModule = mockModule<typeof import('../../../../src/adapters/agents/a
 await installModuleMocks();
 const { startAgent } = agentsModule;
 
-test('task-2536: ambiguous launch does not write a global block and leaves the family selectable', async () => {
+test('ambiguous preferred reviewer failure falls back in-run without a global block (TASK-2837)', async () => {
   const tmpRoot = registeredMkdtemp('task-2536-ambiguous-');
   try {
     const blockCalls: string[] = [];
@@ -64,14 +64,18 @@ test('task-2536: ambiguous launch does not write a global block and leaves the f
 
     const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (_step, opts = {}) => {
       const exclude = opts.exclude instanceof Set ? opts.exclude : new Set();
-      // First pick codex (empty exclude); the retry excludes codex and returns claude.
-      return exclude.has('codex') ? 'claude' : 'codex';
+      assert.ok(exclude.has('codex'), 'the failed preferred reviewer is bounded out of this run');
+      assert.ok(exclude.has('custom'), 'the implementer remains excluded from fallback');
+      return 'claude';
     };
 
     let launches = 0;
     const result = await startAgent('review', {
       prompt: 'repro',
       worktree: tmpRoot,
+      agent: 'codex',
+      preferredAgent: true,
+      exclude: ['custom'],
       isAgentBlockedFn: (agent: string) => blockCalls.includes(agent),
       // Site-1 (genuine-quota) seam only: the narrowed ambiguous branch (task-2536)
       // does not consult the injected function — it relies on the module-level

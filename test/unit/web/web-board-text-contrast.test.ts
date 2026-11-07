@@ -7,7 +7,7 @@ import { Window } from 'happy-dom';
 import { FlightColumn } from '../../../web/src/flight-column.js';
 import { AttentionRail } from '../../../web/src/attention-rail.js';
 import { DoneRail } from '../../../web/src/done-rail.js';
-import { C, DANGER, TYPE } from '../../../web/src/palette.js';
+import { C, DANGER, FLOW, TYPE } from '../../../web/src/palette.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { makeCard, makeFullCard, makeProjection, makeAttentionItem } from '../../fixtures/board-projection.js';
@@ -41,6 +41,24 @@ test('informational palette passes every board surface including gradient and da
   const css = readFileSync(new URL('../../../web/src/style.css', import.meta.url), 'utf8');
   for (const token of ['faint', 'dim', 'stroke'] as const) {
     assert.ok(css.includes(`--${token}: ${C[token]};`), `CSS mirror for ${token}`);
+  }
+});
+
+test('Mission Flow text and actor accents clear their rendered surface floors (TASK-2836)', () => {
+  const darkSurfaces = [FLOW.page, FLOW.surface, FLOW.band, FLOW.node, FLOW.landedNode];
+  for (const color of [FLOW.bright, FLOW.text, FLOW.control, FLOW.muted, FLOW.label, FLOW.flowLabel,
+    FLOW.refineText, FLOW.amberText, FLOW.cyanText, FLOW.purpleText, FLOW.redText, FLOW.blueText, FLOW.leadText]) {
+    for (const surface of darkSurfaces) {
+      const ratio = contrast(rgb(color), rgb(surface));
+      assert.ok(ratio >= 4.5, `${color} on ${surface}: ${ratio.toFixed(2)}:1`);
+    }
+  }
+  assert.ok(contrast(rgb(FLOW.pillText), rgb(FLOW.pill)) >= 4.5, 'selected Flow navigation text');
+  for (const accent of [FLOW.refine, FLOW.flow, FLOW.amber, FLOW.cyan, FLOW.purple, FLOW.red, FLOW.rebase, FLOW.blue, FLOW.lead]) {
+    for (const surface of [FLOW.node, FLOW.surface]) {
+      const ratio = contrast(rgb(accent), rgb(surface));
+      assert.ok(ratio >= 3, `${accent} on ${surface}: ${ratio.toFixed(2)}:1`);
+    }
   }
 });
 

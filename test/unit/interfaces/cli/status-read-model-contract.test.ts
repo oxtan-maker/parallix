@@ -644,6 +644,25 @@ test('status projects stored classification and distinguishes unset from unknown
   }
 });
 
+test('text and JSON status expose every recorded defect provenance field', async () => {
+  const defectProvenance = {
+    rootCauseSummary: 'Retry ownership was inverted', investigationEvidence: 'test/retry.test.ts and commit abc',
+    attribution: { kind: 'originating-mission' as const, missionId: missionId('px-0001') },
+  };
+  const mission = fixtureMission('px-0002', { checkpoints: [], defectProvenance });
+  const board = createStatusBoardAdapter({
+    buildProjectionFn: async () => ({ async buildMissionCard() { return null; } } as any),
+    loadMissionFn: async () => ({ mission, version: 3 }),
+  });
+  const missionData = await board.getMissionData(mission.id, '/repo');
+  const result = statusResult({ slug: mission.id, missionData });
+  assert.deepEqual(JSON.parse(statusJson(result)).defectProvenance, defectProvenance);
+  const lines: string[] = []; renderStatus(result, line => lines.push(line));
+  assert.ok(lines.includes('  Root cause: Retry ownership was inverted'));
+  assert.ok(lines.includes('  Investigation evidence: test/retry.test.ts and commit abc'));
+  assert.ok(lines.includes('  Attribution: originating-mission (px-0001)'));
+});
+
 test('status retains stored closeout timestamp when projection is unavailable (TASK-2782)', async () => {
   const closedAt = '2026-10-19T09:15:00.000Z';
   const mission = fixtureMission('task-closed', { status: 'done', closedAt, checkpoints: [] });

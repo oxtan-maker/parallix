@@ -2,7 +2,7 @@ import type { OperationalHistoryEntry, BoardLaneEventEntry } from '../ports/oper
 import type { VerificationMeasurement } from '../ports/verification-observation.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import { flowElapsedOwnership, type FlowElapsedOwnership } from './flow-elapsed-ownership.js';
-import { observedFlowMissions, type ObservedFlowMission } from './flow-mission-facts.js';
+import { firstRebaseCollection, observedFlowMissions, type ObservedFlowMission } from './flow-mission-facts.js';
 import type { ControlledVerificationComparison } from '../ports/verification-profile.js';
 import type { ProcessTreeCpuObservation, ProviderResourceObservation, RunRecord } from '../run-history-types.js';
 import { observedAttempts, observedRebases, type RebaseMeasurement } from './verification-observation-reader.js';
@@ -15,6 +15,8 @@ export interface VerificationStatisticsInput {
   readonly operations: readonly WorkflowOperation[];
   readonly lifecycle: readonly BoardLaneEventEntry[];
   readonly runs?: readonly RunRecord[];
+  /** Storage rows excluded from the readable measured subset, already named by the owning adapter. */
+  readonly collectionDefects?: readonly string[];
 }
 export interface VerificationCost {
   readonly wallMs: number | null;
@@ -420,9 +422,10 @@ function controlledComparisons(attempts: readonly VerificationMeasurement[], unk
 
 export function verificationStatistics(input: VerificationStatisticsInput,
   missions?: ReadonlySet<string>): VerificationStatistics {
-  const unknowns = new Set<string>();
+  const unknowns = new Set<string>(input.collectionDefects ?? []);
   const attempts = observedAttempts(input, unknowns).filter(a => !missions || a.missionId !== null && missions.has(a.missionId));
-  const rebases = observedRebases(input, unknowns).filter(value => !missions || missions.has(value.missionId));
+  const allRebases = observedRebases(input, unknowns);
+  const rebases = allRebases.filter(value => !missions || missions.has(value.missionId));
   const executed = attempts.filter(a => a.result !== 'reused');
   const intervals = executed.flatMap(execution);
   const { reruns, recoveries } = attemptRecovery(executed, unknowns);
@@ -445,7 +448,7 @@ export function verificationStatistics(input: VerificationStatisticsInput,
   }
   const recoveryAttempts = executed.filter(a => execution(a).some(([start, end]) => recoveries.some(([a, b]) => start >= a && end <= b)));
   const comparisons = revisionComparisons(executed), controlled = controlledComparisons(attempts, unknowns);
-  const flowMissions = observedFlowMissions(input, ownership, attempts, rebases);
+  const flowMissions = observedFlowMissions(input, ownership, attempts, rebases, firstRebaseCollection(allRebases));
   return { attempts, attemptCount: executed.length, failureCount: executed.filter(a => a.result === 'failed').length,
     infrastructureFailureCount: executed.filter(a => a.failureReason?.code === 'infrastructure').length,
     reusedProofCount: attempts.length - executed.length, incompleteCount: executed.filter(a => !a.finishedAt).length,

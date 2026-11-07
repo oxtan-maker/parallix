@@ -17,10 +17,13 @@ import { completedCriteria, successCriteria, replaceSuccessCriteria, criterionCo
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
 import { toCanonicalUtcInstant } from '../../domain/instant.js';
+import { defectProvenance, DefectProvenanceViolation } from '../../domain/defect-provenance.js';
 
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { migrateLegacyAdhocIds as migrateLegacyAdhocIdsInStore } from './legacy-adhoc-migration.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
+import { SqliteDefectProvenanceBackfill } from './defect-provenance-backfill.js';
+import type { DefectProvenanceBackfillRequest } from '../../application/ports/defect-provenance-backfill.js';
 
 export class MissionStaleWriteError extends Error {
   readonly disposition = 'stale-write' as const;
@@ -157,7 +160,7 @@ export class SqliteMissionStore implements MissionStore {
   }
 
   async findTransitions(missionId: MissionId) {
-    return this.eventRepo.findByMissionId(missionId);
+    return this.eventRepo.findPersistedByMissionId(missionId);
   }
 
   async findMissionByIdempotencyKey(repositoryId: RepositoryId, key: string): Promise<MissionId | null> {
@@ -170,6 +173,14 @@ export class SqliteMissionStore implements MissionStore {
 
   async migrateLegacyAdhocIds(): Promise<MigrateLegacyAdhocIdsResult> {
     return migrateLegacyAdhocIdsInStore(this.db);
+  }
+
+  async previewDefectProvenanceBackfill(request: DefectProvenanceBackfillRequest) {
+    return this.enqueue(() => new SqliteDefectProvenanceBackfill(this.db).preview(request));
+  }
+
+  async applyDefectProvenanceBackfill(request: DefectProvenanceBackfillRequest) {
+    return this.enqueue(() => new SqliteDefectProvenanceBackfill(this.db).apply(request));
   }
 
   private async loadAggregate(id: MissionId): Promise<MissionLoadResult> {
@@ -312,6 +323,7 @@ export class SqliteMissionStore implements MissionStore {
     // service may save an aggregate, so reject an invalid brief or gate list
     // before any relational row can make a Mission unloadable on restart.
     mission = normalizeStoredMission(mission);
+    await this.validateDefectAttribution(mission);
     // New/changed closure instants must be canonical. Historical values that
     // migration deliberately preserved may survive an unrelated aggregate edit.
     let closedAt: string | null = mission.closedAt ?? null;
@@ -394,6 +406,23 @@ export class SqliteMissionStore implements MissionStore {
     return rows.length === 0 ? null : missionVersion(rows[0].version);
   }
 
+  private async validateDefectAttribution(mission: Mission): Promise<void> {
+    const attribution = mission.defectProvenance?.attribution;
+    if (attribution?.kind !== 'originating-mission') { return; }
+    const rows = await this.db.query<{ repository_id: string }>(
+      'SELECT repository_id FROM missions WHERE id = ?',
+      [attribution.missionId],
+    );
+    if (rows.length === 0) {
+      throw new DefectProvenanceViolation(`Originating Mission ${attribution.missionId} does not exist`);
+    }
+    if (rows[0]!.repository_id !== mission.repositoryId) {
+      throw new DefectProvenanceViolation(
+        `Originating Mission ${attribution.missionId} belongs to a different repository`,
+      );
+    }
+  }
+
   /**
    * Clear the value collections a write is about to rewrite.
    *
@@ -410,6 +439,7 @@ export class SqliteMissionStore implements MissionStore {
     await this.db.execute('DELETE FROM mission_declared_gates WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_success_criteria WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_dependencies WHERE mission_id = ?', [id]);
+    await this.db.execute('DELETE FROM mission_defect_provenance WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_checkpoints WHERE mission_id = ?', [id]);
     await this.db.execute('DELETE FROM mission_labels WHERE mission_id = ?', [id]);
     if (!mission.review) {
@@ -441,6 +471,9 @@ function normalizeStoredMission(mission: Mission): Mission {
   }
   if (mission.dependencies && mission.dependencies.length > 0) {
     mission = { ...mission, dependencies: missionDependencies(mission.dependencies, mission.id) };
+  }
+  if (mission.defectProvenance) {
+    mission = { ...mission, defectProvenance: defectProvenance(mission.defectProvenance, mission.id) };
   }
   return mission;
 }

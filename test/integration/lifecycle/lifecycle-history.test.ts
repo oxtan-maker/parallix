@@ -29,6 +29,7 @@ import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapt
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../../src/domain/mission.js';
+import type { MissionTransition } from '../../../src/domain/mission-workflow.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import {
   applyReviewerCommand,
@@ -37,6 +38,14 @@ import {
   startReview,
 } from '../../../src/domain/review.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
+import {
+  deriveLaneIntervals,
+  medianCycleTimeByStateSeries,
+} from '../../../src/application/projections/metrics.js';
+import {
+  createHumanReviewEpisodeReader,
+  workflowReturnsFromHistory,
+} from '../../../src/adapters/review/review-statistics-evidence.js';
 import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
 import {
   fixedClock,
@@ -445,6 +454,140 @@ describe("defect E: legacy lifecycle-entry fallback stays inside its repository"
       const review = metrics.medianAgeByLane.series.find((entry) => entry.lane === 'review');
       assert.equal(review?.value, null, 'an unattributable legacy row is unavailable, not a guess');
       assert.equal(review?.observationCount, 0);
+    });
+  });
+});
+
+describe('historical double-collected lane transitions', () => {
+  it('collapses a handoff and round-open pair into one lifecycle move and human handoff (TASK-2842.1)', async () => {
+    await withStatisticsDatabase(async ({ laneEventRepo }) => {
+      const mission = missionId('task-2842-duplicate-approval');
+      const approvedAt = '2026-08-08T03:00:00.000Z';
+      const completedAt = '2026-08-08T04:00:00.000Z';
+      const approval = laneEvent({
+        repositoryId: REPO,
+        missionId: mission,
+        from: 'review',
+        to: 'integration',
+        trigger: 'approve',
+        at: approvedAt,
+      });
+
+      await laneEventRepo.append({ ...approval, idempotencyKey: `handoff-${mission}` });
+      await laneEventRepo.append({ ...approval, idempotencyKey: `round-open:${mission}:round-1` });
+      await laneEventRepo.append({
+        ...laneEvent({
+          repositoryId: REPO,
+          missionId: mission,
+          from: 'integration',
+          to: 'done',
+          trigger: 'integrate',
+          at: completedAt,
+        }),
+        idempotencyKey: `integrate-${mission}`,
+      });
+
+      const history = await laneEventRepo.findByMissionId(mission);
+      const approvals = history.filter((entry) => entry.trigger === 'approve');
+      assert.equal(approvals.length, 1, 'the historical pair is one lifecycle move');
+
+      const episodes = await createHumanReviewEpisodeReader(laneEventRepo)(mission);
+      assert.equal(episodes?.length, 1, 'the historical pair is one human handoff episode');
+      assert.ok(episodes?.every((episode) => episode.startedAt !== episode.endedAt),
+        'the duplicate must not create a zero-length human handoff interval');
+
+      const intervals = deriveLaneIntervals(history.map((entry) => ({
+        missionId: mission,
+        from: entry.fromStatus as MissionStatus | null,
+        to: entry.toStatus as MissionStatus,
+        trigger: entry.trigger as MissionTransition['trigger'],
+        actor: agentFamily(entry.agent),
+        occurredAt: entry.occurredAt,
+      })));
+      assert.ok(intervals.every((interval) => interval.enteredAt !== interval.exitedAt),
+        'the duplicate must not create a zero-length lane dwell interval');
+    });
+  });
+
+  it('gives board FLOW and px stats the same collapsed transition return and dwell facts', async () => {
+    await withStatisticsDatabase(async ({ laneEventRepo }) => {
+      const mission = missionId('task-2842-shared-read');
+      const moves = [
+        laneEvent({ repositoryId: REPO, missionId: mission, from: null, to: 'active', trigger: 'activate', at: '2026-08-08T09:00:00.000Z' }),
+        laneEvent({ repositoryId: REPO, missionId: mission, from: 'active', to: 'review', trigger: 'submit-for-review', at: '2026-08-08T10:00:00.000Z' }),
+        { ...laneEvent({ repositoryId: REPO, missionId: mission, from: 'review', to: 'active', trigger: 'request-changes', at: '2026-08-08T11:00:00.000Z' }), idempotencyKey: `handoff-${mission}` },
+        { ...laneEvent({ repositoryId: REPO, missionId: mission, from: 'review', to: 'active', trigger: 'request-changes', at: '2026-08-08T11:00:02.000Z' }), idempotencyKey: `active-review:${mission}:2026-08-08T11:00:02.000Z` },
+        laneEvent({ repositoryId: REPO, missionId: mission, from: 'active', to: 'review', trigger: 'submit-for-review', at: '2026-08-08T12:00:00.000Z' }),
+        laneEvent({ repositoryId: REPO, missionId: mission, from: 'review', to: 'integration', trigger: 'approve', at: '2026-08-08T13:00:00.000Z' }),
+        laneEvent({ repositoryId: REPO, missionId: mission, from: 'integration', to: 'done', trigger: 'integrate', at: '2026-08-08T14:00:00.000Z' }),
+      ];
+      for (const move of moves) { await laneEventRepo.append(move); }
+
+      const boardHistory = (await laneEventRepo.findByRepositoryId(REPO)).filter((entry) => entry.missionId === mission);
+      const statsHistory = await laneEventRepo.findByMissionId(mission);
+      assert.equal(boardHistory.length, 6);
+      assert.equal(statsHistory.length, 6);
+      assert.equal(workflowReturnsFromHistory(boardHistory).length, 1);
+      assert.equal(workflowReturnsFromHistory(statsHistory).length, 1);
+
+      const transitions = (history: readonly (typeof boardHistory)[number][]) => history.map((entry) => ({
+        missionId: mission,
+        from: entry.fromStatus as MissionStatus | null,
+        to: entry.toStatus as MissionStatus,
+        trigger: entry.trigger as MissionTransition['trigger'],
+        actor: agentFamily(entry.agent),
+        occurredAt: entry.occurredAt,
+      }));
+      assert.deepEqual(deriveLaneIntervals(transitions(boardHistory)), deriveLaneIntervals(transitions(statsHistory)));
+      assert.deepEqual(
+        medianCycleTimeByStateSeries(transitions(boardHistory)),
+        medianCycleTimeByStateSeries(transitions(statsHistory)),
+      );
+    });
+  });
+
+  it('collapses every historical key shape while preserving distinct transitions and genuine re-entry', async () => {
+    await withStatisticsDatabase(async ({ laneEventRepo }) => {
+      const keyIndependent = missionId('task-2842-key-independent');
+      await laneEventRepo.append({
+        ...laneEvent({ repositoryId: REPO, missionId: keyIndependent, from: 'review', to: 'active', trigger: 'request-changes', at: '2026-08-08T10:00:00.000Z' }),
+        idempotencyKey: `request-changes:${keyIndependent}:2026-08-08T10:00:00.000Z`,
+      });
+      await laneEventRepo.append({
+        ...laneEvent({ repositoryId: REPO, missionId: keyIndependent, from: 'review', to: 'active', trigger: 'request-changes', at: '2026-08-08T10:00:02.000Z' }),
+        idempotencyKey: `${keyIndependent}:request-changes:2026-08-08T10:00:02.000Z`,
+      });
+      assert.equal((await laneEventRepo.findByMissionId(keyIndependent)).length, 1,
+        'matching lifecycle state collapses independently of key shape');
+
+      const cases = [
+        { mission: missionId('task-2842-different-trigger'), second: { trigger: 'rebound-to-active', at: '2026-08-08T11:00:01.000Z', from: 'review', to: 'active' } },
+        { mission: missionId('task-2842-different-lanes'), second: { trigger: 'request-changes', at: '2026-08-08T11:00:01.000Z', from: 'integration', to: 'active' } },
+        { mission: missionId('task-2842-outside-window'), second: { trigger: 'request-changes', at: '2026-08-08T11:00:05.001Z', from: 'review', to: 'active' } },
+      ] as const;
+      for (const { mission, second } of cases) {
+        await laneEventRepo.append({
+          ...laneEvent({ repositoryId: REPO, missionId: mission, from: 'review', to: 'active', trigger: 'request-changes', at: '2026-08-08T11:00:00.000Z' }),
+          idempotencyKey: `handoff-${mission}`,
+        });
+        await laneEventRepo.append({
+          ...laneEvent({ repositoryId: REPO, missionId: mission, ...second }),
+          idempotencyKey: `round-open:${mission}:round-1`,
+        });
+        assert.equal((await laneEventRepo.findByMissionId(mission)).length, 2, `${mission} must stay distinct`);
+      }
+
+      const reentered = missionId('task-2842-genuine-reentry');
+      const reentryMoves = [
+        laneEvent({ repositoryId: REPO, missionId: reentered, from: 'active', to: 'review', trigger: 'submit-for-review', at: '2026-08-08T12:00:00.000Z' }),
+        laneEvent({ repositoryId: REPO, missionId: reentered, from: 'review', to: 'active', trigger: 'request-changes', at: '2026-08-08T12:00:01.000Z' }),
+        laneEvent({ repositoryId: REPO, missionId: reentered, from: 'active', to: 'review', trigger: 'submit-for-review', at: '2026-08-08T12:00:02.000Z' }),
+      ];
+      for (const [index, move] of reentryMoves.entries()) {
+        await laneEventRepo.append({ ...move, idempotencyKey: `unrelated-historical-shape-${index}` });
+      }
+      assert.equal((await laneEventRepo.findByMissionId(reentered)).length, 3,
+        'returning to the from lane proves the later matching move is distinct');
     });
   });
 });

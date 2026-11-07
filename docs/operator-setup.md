@@ -278,6 +278,45 @@ handles. Missing workflow statistics display as `n/a`. If dirty paths prevent
 noise squashing, the message names a bounded set of paths and explains that the
 trailing backlog commits remain separate; untracked-only state uses debug output.
 
+### Recording defect provenance
+
+A Mission with the exact `bug` label cannot be refined until it has both a
+reproduction test and a causal investigation. Inspect the reproduction, relevant
+Git history and diffs, and retained Mission evidence before recording a concise
+root cause. Use `px provenance set --help` for the current command shape. Choose
+an originating Mission only when the evidence supports that relationship and the
+Mission exists in the same repository; otherwise record the honest external,
+pre-Mission, or unresolved-after-investigation disposition. `px status <slug>`
+and its JSON form show the complete stored provenance.
+
+For historical data, prepare a JSON array whose entries contain `missionId` and
+`provenance`; each provenance object has `rootCauseSummary`,
+`investigationEvidence`, and one `attribution` object. Preview it before applying:
+
+```json
+[
+  {
+    "missionId": "task-1234",
+    "provenance": {
+      "rootCauseSummary": "A stale cache key reused another repository's result.",
+      "investigationEvidence": "The reproduction and revision-pinned diff isolate the cache lookup.",
+      "attribution": { "kind": "unresolved" }
+    }
+  }
+]
+```
+
+```sh
+px provenance backfill preview --input provenance.json
+px provenance backfill apply --input provenance.json
+```
+
+The cohort comes from authoritative Mission labels and canonical completion,
+not Backlog files. Preview is read-only. Apply is transactional, reports one row
+per target, and preserves existing provenance by default; inspect `px provenance
+--help` before deliberately replacing previously recorded investigations. Back
+up the operator database before a historical apply.
+
 ## Correcting an unfounded review approval
 
 An operator may withdraw the current approval when they determine that it was
@@ -476,8 +515,17 @@ cannot start or resume a review workflow under inherited authority. It returns
 to the parent workflow, which owns review preparation and reviewer launch. This prevents a
 nested review from leaving a stop behind for the parent's later review preparation.
 
-A retained reviewer-launch failure stops automatic review entry before another
-reviewer is launched. The diagnostic names the cause and operator continuation.
+`px active --reviewer <family>` makes that family the preferred first reviewer,
+not an exclusive pin. If it cannot complete because its launcher or provider is
+unavailable, its quota or entitlement prevents review, it stalls, or it exits
+without usable review output, automatic review tries the next configured eligible
+independent family. Positive provider availability or quota evidence blocks the
+failed family before reselection; ambiguous failures affect only that run. The
+actual fallback family is recorded as reviewer for artifacts and continuation.
+For manual control, restrict the configured review eligibility to the intended
+family, or stop the workflow and resume it later with
+`px review --reviewer <family>`. Mutating implementer and repair ownership remains
+pinned.
 Reviewer-output retries retain independent verdict authority and require only
 reviewer output; they create no implementer repair checkpoint. Gate and hook
 failures still return to the implementer and rerun the failing prerequisite

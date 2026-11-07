@@ -13,7 +13,7 @@ export const REVIEW_OPTIONS = {
   '--message-file': { value: 'path', purpose: 'Read the explicit provider review summary from a file.' },
   '--close': { value: null, purpose: 'Close the mission PR without merging.' },
   '--implementer': { value: 'agent', purpose: 'Override the implementer for this review.' },
-  '--reviewer': { value: 'agent', purpose: 'Override the independently selected reviewer.' },
+  '--reviewer': { value: 'agent', purpose: 'Prefer this reviewer first, including when resuming review.' },
   '--focus': { value: 'focus', purpose: 'Choose the reviewer prompt focus.' },
   '--max-attempts': { value: 'n', purpose: 'Bound the round count for this invocation.' },
   '--poll-timeout-seconds': { value: 'seconds', purpose: 'Bound provider polling for this invocation.' },

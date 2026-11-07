@@ -24,6 +24,8 @@ import { type Command } from '../interfaces/cli/runtime.js';
 
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 import type { CliCommandContext } from './cli-service-scope.js';
+import { createDefectProvenanceCommand } from '../interfaces/cli/defect-provenance-write.js';
+import { readDefectProvenanceBackfillEntries } from '../adapters/cli/commands/defect-provenance-input.js';
 
 export function createAuthoringCommands(context: CliCommandContext): Record<string, Command> {
   const { rootDir, scope } = context;
@@ -45,6 +47,12 @@ export function createAuthoringCommands(context: CliCommandContext): Record<stri
     ...createBriefWriteCommands(rootDir, context.configuration),
     ...createReviewVerbCommands(rootDir, context.configuration),
     repro: (args) => withGraph(services => createReproCommand(missionWrites(services))(args)),
+    provenance: (args) => withGraph(services => {
+      const mission = missionWrites(services);
+      return createDefectProvenanceCommand({ ...mission,
+        defectProvenanceBackfill: services.mission!.defectProvenanceBackfill,
+        readBackfillEntries: readDefectProvenanceBackfillEntries })(args);
+    }),
     scope: (args) => withGraph(services => createScopeCommand(missionWrites(services))(args)),
     gate: (args) => withGraph(services => createGateCommand(missionWrites(services), (command) => {
       const result = validateDeclaredGates([command], rootDir, { checkFiles: false });

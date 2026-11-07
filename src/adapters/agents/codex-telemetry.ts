@@ -11,13 +11,19 @@
 //   {"type":"turn_context","payload":{"model","effort",...}}
 //   {"type":"response_item","payload":{"type":"function_call"|"custom_tool_call",...}}
 //   {"type":"event_msg","payload":{"type":"token_count","info":{...},"rate_limits":{...}}}
+//   {"type":"event_msg","payload":{"type":"task_complete","error":{"codex_error_info",...}|null}}
 
 import fs from 'node:fs';
 import path from 'node:path';
 
 type CodexUsage = { input_tokens?: number; output_tokens?: number; cached_input_tokens?: number; reasoning_output_tokens?: number; total_tokens?: number };
-type CodexPayload = { id?: string; model_provider?: string; model?: string; effort?: string; type?: string; info?: { total_token_usage?: CodexUsage; model_context_window?: number }; rate_limits?: { primary?: { used_percent?: unknown } } };
-type CodexState = { sessionId: string | null; provider: string | null; model: string | null; effort: string | null; toolCalls: number; lastUsage: CodexUsage | null; contextWindow: number; usagePercent: number | null };
+type CodexPayload = { id?: string; model_provider?: string; model?: string; effort?: string; type?: string; info?: { total_token_usage?: CodexUsage; model_context_window?: number }; rate_limits?: { primary?: { used_percent?: unknown; resets_at?: unknown } | null } | null; error?: unknown };
+/**
+ * How the newest turn ended: `codex_error_info` names Codex's machine identity for a
+ * failed turn; an error without a string identity is still a failed turn.
+ */
+type CodexTerminalError = { codexErrorInfo: string | null };
+type CodexState = { sessionId: string | null; provider: string | null; model: string | null; effort: string | null; toolCalls: number; lastUsage: CodexUsage | null; contextWindow: number; usagePercent: number | null; rateLimitResetsAt: number | null; terminalError: CodexTerminalError | null };
 
 function codexSessionsDir(codexHome: string) {
   return path.join(codexHome, '.codex', 'sessions');
@@ -32,13 +38,13 @@ function codexContextWindow(state: CodexState) { return state.contextWindow || 0
 function parseCodexRollout(content: string) {
   if (!content) {return null;}
 
-  const state: CodexState = { sessionId: null, provider: null, model: null, effort: null, toolCalls: 0, lastUsage: null, contextWindow: 0, usagePercent: null };
+  const state: CodexState = { sessionId: null, provider: null, model: null, effort: null, toolCalls: 0, lastUsage: null, contextWindow: 0, usagePercent: null, rateLimitResetsAt: null, terminalError: null };
 
   for (const line of String(content).split('\n')) {
     applyCodexRolloutEvent(line, state);
   }
 
-  if (!state.lastUsage && !state.model && !state.sessionId) {return null;}
+  if (!hasCodexSignal(state)) {return null;}
 
   const usage = state.lastUsage || {};
   return {
@@ -54,13 +60,29 @@ function parseCodexRollout(content: string) {
     contextWindow: codexContextWindow(state),
     toolCalls: state.toolCalls,
     usagePercent: state.usagePercent,
+    rateLimitResetsAt: state.rateLimitResetsAt,
+    terminalError: state.terminalError,
   };
+}
+
+function hasCodexSignal(state: CodexState) {
+  return Boolean(state.lastUsage || state.model || state.sessionId || state.terminalError);
 }
 
 function applyCodexUsage(payload: CodexPayload, state: CodexState) {
     state.lastUsage = payload.info?.total_token_usage || state.lastUsage;
     state.contextWindow = payload.info?.model_context_window || state.contextWindow;
     state.usagePercent = typeof payload.rate_limits?.primary?.used_percent === 'number' ? payload.rate_limits.primary.used_percent : state.usagePercent;
+    // Epoch seconds advertised by the provider in the newest snapshot; utilisation alone never
+    // implies a reset instant, and an earlier snapshot's reset is stale once the newest omits it.
+    const resetsAt = payload.rate_limits?.primary?.resets_at;
+    state.rateLimitResetsAt = typeof resetsAt === 'number' && Number.isFinite(resetsAt) && resetsAt > 0 ? resetsAt : null;
+}
+
+function codexTerminalError(error: unknown): CodexTerminalError | null {
+  if (error === null || error === undefined) { return null; }
+  const identity = typeof error === 'object' ? (error as { codex_error_info?: unknown }).codex_error_info : undefined;
+  return { codexErrorInfo: typeof identity === 'string' ? identity : null };
 }
 
 function applyCodexRolloutEvent(line: string, state: CodexState): void {
@@ -77,9 +99,15 @@ function applyCodexRolloutEvent(line: string, state: CodexState): void {
     state.effort = payload.effort || state.effort;
   } else if (event.type === 'response_item') {
     state.toolCalls += Number(payload.type === 'function_call' || payload.type === 'custom_tool_call');
-  } else if (event.type === 'event_msg' && payload.type === 'token_count') {
-    applyCodexUsage(payload, state);
+  } else if (event.type === 'event_msg') {
+    applyCodexEventMessage(payload, state);
   }
+}
+
+function applyCodexEventMessage(payload: CodexPayload, state: CodexState): void {
+  if (payload.type === 'token_count') { applyCodexUsage(payload, state); }
+  // The newest turn's outcome wins: a later turn without an error supersedes an earlier failure.
+  if (payload.type === 'task_complete') { state.terminalError = codexTerminalError(payload.error); }
 }
 
 /**
@@ -152,6 +180,8 @@ function extractCodexTelemetry(codexHome: string, { sinceMs = 0 }: { sinceMs?: n
     effort: aggregate.newest.effort,
     contextWindow: aggregate.newest.contextWindow,
     usagePercent: aggregate.newest.usagePercent,
+    rateLimitResetsAt: aggregate.newest.rateLimitResetsAt,
+    terminalError: aggregate.newest.terminalError,
     rolloutPath: aggregate.newestPath,
     rolloutCount: files.length,
     ...aggregate.totals,
@@ -174,6 +204,7 @@ function codexTelemetryAggregate() {
   };
 }
 
+export type { CodexTerminalError };
 export {
   codexSessionsDir,
   parseCodexRollout,

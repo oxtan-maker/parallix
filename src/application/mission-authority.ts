@@ -36,6 +36,7 @@ export const MISSION_FIELD_AUTHORITY = {
   dependencies: localSource,
   predictedNelBucket: localSource,
   reproductionTest: localSource,
+  defectProvenance: localSource,
   review: targetSource,
   reviewPreparationPending: targetSource,
   netEngineeringLines: targetSource,

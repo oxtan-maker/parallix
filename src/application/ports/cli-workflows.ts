@@ -137,6 +137,8 @@ export interface StatusMissionData {
   readonly predictedNelBucket?: string | null;
   /** The bug mission's declared red-to-green reproduction test, when one is recorded. */
   readonly reproductionTest?: string | null;
+  /** Recorded causal investigation for a bug Mission. */
+  readonly defectProvenance?: import('../../domain/defect-provenance.js').DefectProvenance | null;
   /** Goal Check rows of the latest recorded checkpoint. */
   readonly goalCheck?: readonly StatusGoalCheckRow[];
   /** Next action recorded with the latest checkpoint. */
@@ -304,7 +306,7 @@ export interface StatsMissionFlow {
   readonly implementer?: string | null;
   readonly reviewStatistics?: ReviewStatistics;
   readonly flowObservation?: Omit<import('../projections/flow-statistics.js').FlowMissionFacts,
-    'repositoryId' | 'missionId' | 'closedAt' | 'reviewStatistics'>;
+    'repositoryId' | 'missionId' | 'closedAt' | 'reviewStatistics' | 'implementer' | 'laneDwellMs'>;
 }
 
 /** Source material for an adhoc draft intake. */

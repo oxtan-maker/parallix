@@ -225,6 +225,18 @@ describe("lifecycle event stream gaps", () => {
     assert.equal(active.kind, 'found');
     const found = active as { mission: import('../../../src/domain/mission.js').Mission; version: MissionVersion };
     await fixture.store.save({ ...found.mission, status: 'refined', closedAt: null }, found.version);
+    // The direct store save bypasses lifecycle event recording, so mirror the
+    // genuine re-entry that distinguishes the second activation analytically.
+    assert.equal(await fixture.events.append({
+      repositoryId: REPOSITORY,
+      missionId: MISSION,
+      fromStatus: 'active',
+      toStatus: 'refined',
+      trigger: 'refine',
+      agent: 'custom',
+      occurredAt: '2026-08-08T01:00:00.500Z',
+      idempotencyKey: `${MISSION}:refine:2026-08-08T01:00:00.500Z`,
+    }), true);
 
     const second = await lifecycle.activate({
       operationId: 'op-activate-2',
@@ -235,10 +247,10 @@ describe("lifecycle event stream gaps", () => {
     });
     assert.equal(second.status, 'completed', JSON.stringify(second));
 
-    const keys = (await fixture.events.findByMissionId(MISSION)).map((row) => row.idempotencyKey);
+    const keys = (await fixture.events.findByMissionId(MISSION))
+      .filter((row) => row.trigger === 'activate')
+      .map((row) => row.idempotencyKey);
     assert.deepEqual(keys, [
-      `${MISSION}:intake:2026-08-08T00:00:00.000Z`,
-      `${MISSION}:refine:2026-08-08T00:30:00.000Z`,
       `${MISSION}:activate:2026-08-08T01:00:00.100Z`,
       `${MISSION}:activate:2026-08-08T01:00:00.900Z`,
     ]);

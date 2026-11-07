@@ -4,13 +4,49 @@
  * number here is the server's; the bar computes no rate and no average.
  */
 import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
-import { C, DISPLAY, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
+import { C, DISPLAY, FLOW, FLOW_TYPE, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import { familyAccent, sessionsText } from './format.js';
 
-export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
+export type BoardView = 'board' | 'flow';
+
+/**
+ * Board and Flow navigation. The Flow page draws the reference's large pills;
+ * the board keeps its compact control height so its header geometry is the
+ * one it already had.
+ */
+export function ViewNav({ view, onNavigate, compact = false }: { view: BoardView; onNavigate: (view: BoardView) => void; compact?: boolean }) {
+  return (
+    <nav aria-label="Views" style={{ display: 'flex', gap: compact ? SPACE.sm : 7, flexShrink: 0 }}>
+      {(['board', 'flow'] as const).map((target) => {
+        const current = view === target;
+        return (
+          <button
+            key={target}
+            type="button"
+            data-view-nav={target}
+            aria-current={current ? 'page' : undefined}
+            onClick={() => { if (!current) { onNavigate(target); } }}
+            style={compact ? {
+              background: current ? C.controlOn : 'none', border: `1px solid ${current ? C.chartLane : C.cardEdge}`,
+              borderRadius: RADIUS.pill, color: current ? C.text : C.dim, fontFamily: 'inherit', fontSize: TYPE.micro,
+              letterSpacing: TRACK.normal, padding: `${SPACE.sm}px ${SPACE.lg}px`, cursor: 'pointer', whiteSpace: 'nowrap',
+            } : {
+              background: current ? FLOW.pill : 'transparent', border: `1px solid ${current ? FLOW.pill : FLOW.controlEdge}`,
+              borderRadius: 20, color: current ? FLOW.pillText : FLOW.control, fontFamily: 'inherit', fontSize: FLOW_TYPE.body,
+              fontWeight: current ? 700 : 400, height: 40, padding: '0 15px', cursor: current ? 'default' : 'pointer', whiteSpace: 'nowrap',
+            }}
+          >
+            {target === 'board' ? 'Board' : 'Flow'}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+export function TopBar({ snapshot, onNavigate, onCreate }: {
   snapshot: WebBoardSnapshot;
-  flowOpen: boolean;
-  onFlowToggle: () => void;
+  onNavigate: (view: BoardView) => void;
   onCreate: (opener: HTMLButtonElement) => void;
 }) {
   const wip = snapshot.inFlightWip;
@@ -52,19 +88,7 @@ export function TopBar({ snapshot, flowOpen, onFlowToggle, onCreate }: {
       >
         + Create new mission
       </button>
-      <button
-        type="button"
-        aria-expanded={flowOpen}
-        aria-controls="flow-metrics"
-        onClick={onFlowToggle}
-        style={{
-          background: flowOpen ? C.controlOn : 'none', border: `1px solid ${flowOpen ? C.chartLane : C.cardEdge}`,
-          borderRadius: RADIUS.pill, color: flowOpen ? C.text : C.dim, fontFamily: 'inherit', fontSize: TYPE.micro,
-          letterSpacing: TRACK.normal, padding: `${SPACE.sm}px ${SPACE.lg}px`, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap',
-        }}
-      >
-        ▤ FLOW
-      </button>
+      <ViewNav view="board" onNavigate={onNavigate} compact />
       <section
         aria-label="Agent availability"
         style={{ display: 'flex', alignItems: 'center', gap: SPACE.xl, flexShrink: 1, minWidth: 0, overflowX: 'auto' }}

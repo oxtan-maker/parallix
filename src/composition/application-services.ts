@@ -122,6 +122,7 @@ export interface MissionApplicationServices {
   readonly integration: MissionIntegrationService;
   readonly checkpoints: MissionCheckpointService;
   readonly brief: MissionBriefService;
+  readonly defectProvenanceBackfill: import('../application/defect-provenance-backfill-service.js').DefectProvenanceBackfillService;
   readonly assignment: MissionAssignmentService;
   readonly nel: MissionNelService;
 }

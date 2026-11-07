@@ -1,4 +1,4 @@
-import { failureReason, type FailureReason } from '../../domain/failure-reason.js';
+import { failureReason, type FailureReason, type FailureReasonCode } from '../../domain/failure-reason.js';
 
 import { normalizeProcessFailure, type ProcessFacts } from '../../domain/failure-reason.js';
 export { normalizeProcessFailure } from '../../domain/failure-reason.js';
@@ -45,7 +45,13 @@ function collectProviderFailure(failures: ProviderFailures, event: Record<string
 
 function preferredProviderFailure(failures: ProviderFailures): FailureReason | undefined {
   if (failures.resetAuthoritativeQuota) { return failures.resetAuthoritativeQuota; }
-  if (failures.firstQuota && (!failures.firstGeneric || failures.firstGeneric.code === 'unexpected')) {
+  const quotaReset = failures.firstQuota?.context?.resetAt;
+  const genericReset = failures.firstGeneric?.context?.resetAt;
+  if (failures.firstQuota && (
+    !failures.firstGeneric
+    || failures.firstGeneric.code === 'unexpected'
+    || (quotaReset && failures.firstGeneric.code === 'agent-quota' && !genericReset)
+  )) {
     return failures.firstQuota;
   }
   return failures.firstGeneric;
@@ -54,19 +60,25 @@ function preferredProviderFailure(failures: ProviderFailures): FailureReason | u
 function claudeQuotaFailure(event: Record<string, unknown>): FailureReason | undefined {
   if (event.type === 'rate_limit_event') {
     const info = record(event.rate_limit_info);
+    const status = event.api_error_status;
+    const code = event.api_error;
     if (info?.status !== 'rejected') { return undefined; }
     const resetAt = resetInstant(info.resetsAt);
-    return failureReason('agent-quota', 'provider', resetAt ? { resetAt } : undefined);
+    return failureReason('agent-quota', 'provider', claudeQuotaContext(status, code, resetAt));
   }
   if (event.type !== 'assistant' && event.type !== 'result') { return undefined; }
   if (event.api_error_status !== 429 && event.api_error !== 'usage_limit_reached') { return undefined; }
-  const info = record(record(event.api_error_params)?.rate_limit_info);
+  const info = record(record(event.api_error_params)?.rate_limit_info) ?? record(event.rate_limit_info);
   const resetAt = resetInstant(info?.resetsAt);
-  return failureReason('agent-quota', 'provider', {
+  return failureReason('agent-quota', 'provider', claudeQuotaContext(event.api_error_status, event.api_error, resetAt));
+}
+
+function claudeQuotaContext(status: unknown, code: unknown, resetAt: string | undefined): FailureReason['context'] {
+  return {
     ...(resetAt ? { resetAt } : {}),
-    ...(event.api_error_status === 429 ? { httpStatus: 429 } : {}),
-    ...(event.api_error === 'usage_limit_reached' ? { providerCode: event.api_error } : {}),
-  });
+    ...(status === 429 ? { httpStatus: 429 } : {}),
+    ...(code === 'usage_limit_reached' ? { providerCode: code } : {}),
+  };
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -74,26 +86,47 @@ function record(value: unknown): Record<string, unknown> | undefined {
 }
 
 function resetInstant(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    const instant = new Date(value);
+    return Number.isNaN(instant.getTime()) ? undefined : instant.toISOString();
+  }
   if (typeof value !== 'number' || !Number.isFinite(value)) { return undefined; }
   const epochMilliseconds = Math.abs(value) < 100_000_000_000 ? value * 1_000 : value;
   const instant = new Date(epochMilliseconds);
   return Number.isNaN(instant.getTime()) ? undefined : instant.toISOString();
 }
 
-function providerEventFailure(event: Record<string, unknown>): FailureReason {
-    const details = event.error && typeof event.error === 'object' ? event.error as Record<string, unknown> : event;
-    const status = details.status ?? details.statusCode;
-    const code = details.code ?? details.type;
-    const context = providerContext(details, status, code);
-    if (status === 429 || ['insufficient_quota', 'rate_limit_exceeded', 'resource_exhausted'].includes(String(code))) { return failureReason('agent-quota', 'provider', context); }
-    if (status === 401 || code === 'authentication_error') { return failureReason('provider-auth', 'provider', context); }
-    if (status === 403) { return failureReason('provider-entitlement', 'provider', context); }
-    if (typeof status === 'number' && status >= 500 && status <= 599) { return failureReason('provider-unavailable', 'provider', context); }
-    if (code === 'session_not_found') { return failureReason('provider-session-missing', 'provider', context); }
-    if (['invalid_model', 'invalid_argument', 'unsupported_option'].includes(String(code))) { return failureReason('provider-config', 'provider', context); }
-    return failureReason('unexpected', 'provider', context);
+function providerEventFailure(event: Record<string, unknown>): FailureReason | undefined {
+  const details = providerFailureDetails(event);
+  if (!isProviderFailureEvent(event, details)) { return undefined; }
+  const status = details.status ?? details.statusCode ?? details.api_error_status;
+  const code = details.code ?? details.api_error ?? details.type;
+  return failureReason(providerFailureCode(status, code), 'provider', providerContext(details, status, code));
+}
+
+function providerFailureDetails(event: Record<string, unknown>): Record<string, unknown> {
+  return event.error && typeof event.error === 'object' ? event.error as Record<string, unknown> : event;
+}
+
+function isProviderFailureEvent(event: Record<string, unknown>, details: Record<string, unknown>): boolean {
+  const hasStructuredApiFailure = typeof details.api_error_status === 'number' && typeof details.api_error === 'string';
+  return event.type === 'error' || event.type === 'turn.failed' || event.is_error === true || hasStructuredApiFailure;
+}
+
+function providerFailureCode(status: unknown, code: unknown): FailureReasonCode {
+  if (status === 429 || ['insufficient_quota', 'rate_limit_exceeded', 'resource_exhausted'].includes(String(code))) { return 'agent-quota'; }
+  if (status === 401 || code === 'authentication_error') { return 'provider-auth'; }
+  if (status === 403) { return 'provider-entitlement'; }
+  if (typeof status === 'number' && status >= 500 && status <= 599) { return 'provider-unavailable'; }
+  if (code === 'session_not_found') { return 'provider-session-missing'; }
+  if (['invalid_model', 'invalid_argument', 'unsupported_option'].includes(String(code))) { return 'provider-config'; }
+  return 'unexpected';
 }
 
 function providerContext(details: Record<string, unknown>, status: unknown, code: unknown): FailureReason['context'] {
-  return { ...(typeof details.resetAt === 'string' ? { resetAt: details.resetAt } : {}), ...(typeof details.retryAfterSeconds === 'number' ? { retryAfterSeconds: details.retryAfterSeconds } : {}), ...(typeof status === 'number' ? { httpStatus: status } : {}), ...(typeof code === 'string' ? { providerCode: code } : {}) };
+  const rateLimitInfo = details.rate_limit_info && typeof details.rate_limit_info === 'object'
+    ? details.rate_limit_info as Record<string, unknown>
+    : undefined;
+  const resetAt = details.resetAt ?? rateLimitInfo?.resetsAt;
+  return { ...(typeof resetAt === 'string' ? { resetAt } : {}), ...(typeof details.retryAfterSeconds === 'number' ? { retryAfterSeconds: details.retryAfterSeconds } : {}), ...(typeof status === 'number' ? { httpStatus: status } : {}), ...(typeof code === 'string' ? { providerCode: code } : {}) };
 }

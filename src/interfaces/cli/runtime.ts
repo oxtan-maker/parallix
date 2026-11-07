@@ -32,6 +32,7 @@ export const KNOWN_COMMANDS: string[] = [
   'lead',
   'goal',
   'repro',
+  'provenance',
   'scope',
   'gate',
   'criterion',
@@ -277,7 +278,7 @@ Usage: px <command> [args]
 
 ${fmt.bold('Core Commands:')}
   draft [<slug>] [--agent <family>]  Mission setup automation; use --agent to select the draft implementer family.
-  active [<slug>] [--implementer <family>] [--reviewer <family>]  Run preflight and launch the execute agent; --implementer selects its family, --reviewer requires that family for automatic review (refused, never replaced, if blocked or unavailable; omitted = automatic selection).
+  active [<slug>] [--implementer <family>] [--reviewer <family>]  Run preflight and launch the execute agent; --implementer selects its family, while --reviewer is the preferred first reviewer and may fall back to the next configured eligible independent family at runtime (omitted = automatic selection). Restrict review eligibility or stop and resume with px review --reviewer <family> for manual control.
   review [options]  From the mission worktree, create or resume review and retained repair from Mission state; --status inspects without running review.
   integrate [<slug>] [--dry-run] [--no-integration-gates] [--real-agent codex --real-agent-model gpt-5.6-luna]  Land a reviewed mission into the local integration checkout on main. --no-integration-gates skips integration-time staging/e2e gates; the paired real-agent flags override the Codex integration-gate runner.
 
@@ -297,6 +298,7 @@ ${fmt.bold('Advanced Commands:')}
   depends add|remove --on <slug>       Record or drop one Mission-to-Mission dependency; nothing enforces it.
   nel set --predicted <bucket>        Record the draft's predicted NEL bucket (Small|Medium|Large).
   repro set --test <path> | repro clear  Record the bug mission's red-to-green reproduction test.
+  provenance set ... | provenance backfill <preview|apply> --input <json-file>  Record or backfill causal investigations.
   classification set --value <type>    Record ai_sdlc, user_value, or unknown on the Mission.
   checkpoint plan|unplan|record --name <CP-N> ...  Plan, drop an unevidenced checkpoint, or record Goal Check evidence.
         Reads: check [--json] reports read-only evidence readiness and blockers; history lists versions; round replays review-start state; read shows latest evidence.

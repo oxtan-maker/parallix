@@ -8,6 +8,8 @@ export interface FlowOwnershipRow {
   readonly model: string | null;
   readonly state: FlowTimeState;
   readonly durationMs: number;
+  /** Per-mission rows only: when the row's first slice began, measured from the mission's refined boundary. */
+  readonly firstOffsetMs?: number;
 }
 export interface FlowElapsedOwnership {
   readonly totalMs: number;
@@ -16,6 +18,8 @@ export interface FlowElapsedOwnership {
   /** Exclusive raw slices in causal/runtime order; their durations reconcile exactly to totalMs. */
   readonly segments: readonly FlowOwnershipSegment[];
   readonly terminalStates: Readonly<Record<'blocked' | 'interrupted' | 'cancelled', number>>;
+  /** Each measured mission interval (refined to first delivery), including missions no observation explains. */
+  readonly windows: readonly { readonly missionId: string; readonly startedAt: string; readonly finishedAt: string }[];
 }
 
 export interface FlowOwnershipSegment extends FlowOwnershipRow {
@@ -33,6 +37,8 @@ type Activity = { repositoryId?: string; missionId?: string; operationId?: strin
 type MissionWindow = { readonly missionId: string; readonly start: number; readonly end: number;
   readonly laneEvents: readonly LifecycleHistoryEntry[] };
 type TimedActivity = { readonly at: number; readonly value: Activity };
+type IndexedHistoryEntry = { readonly entry: OperationalHistoryEntry; readonly value: Record<string, unknown> };
+type HistoryIndex = ReadonlyMap<string, ReadonlyMap<string, readonly IndexedHistoryEntry[]>>;
 
 /**
  * Reconcile refined-to-first-delivery wall time from existing durable owners.
@@ -48,21 +54,23 @@ export function flowElapsedOwnership(input: {
 }, defects: Set<string>, missions?: ReadonlySet<string>): FlowElapsedOwnership | null {
   const windows = missionWindows(input, defects, missions);
   if (!windows.length) { return null; }
+  const history = indexHistory(input.history);
   const segments = windows.flatMap(window => [
-    ...activitySegments(input, window, defects),
-    ...gateSegments(input, window),
-    ...rebaseSegments(input, window),
-    ...leadHandoffSegments(input, window),
-    ...operationFinalizationSegments(input, window),
-    ...operationHandoffSegments(input, window),
+    ...activitySegments(input.repositoryId, history, window, defects),
+    ...gateSegments(input.repositoryId, history, window),
+    ...rebaseSegments(input.repositoryId, history, window),
+    ...leadHandoffSegments(input.repositoryId, history, window),
+    ...operationFinalizationSegments(input.repositoryId, history, window),
+    ...operationHandoffSegments(input.repositoryId, history, window),
   ]);
   const terminalStates = { blocked: 0, interrupted: 0, cancelled: 0 };
-  for (const entry of input.history) {
-    if (entry.eventType !== 'mission.current-work') { continue; }
-    const value = json<Activity>(entry.eventData);
-    if (value?.repositoryId === input.repositoryId && value.missionId && windows.some(window => window.missionId === value.missionId)
-      && value.state && value.state in terminalStates) {
-      terminalStates[value.state as keyof typeof terminalStates]++;
+  for (const window of windows) {
+    for (const { value } of indexed(history, 'mission.current-work', window.missionId)) {
+      const activity = value as Activity;
+      if (activity.repositoryId === input.repositoryId
+        && activity.state && activity.state in terminalStates) {
+        terminalStates[activity.state as keyof typeof terminalStates]++;
+      }
     }
   }
   const rows: FlowOwnershipRow[] = [];
@@ -84,7 +92,9 @@ export function flowElapsedOwnership(input: {
     }
   }
   const totalMs = windows.reduce((sum, window) => sum + window.end - window.start, 0);
-  return { totalMs, unexplainedMs: Math.max(0, totalMs - explained), rows, segments: exclusive, terminalStates };
+  return { totalMs, unexplainedMs: Math.max(0, totalMs - explained), rows, segments: exclusive, terminalStates,
+    windows: windows.map(window => ({ missionId: window.missionId, startedAt: new Date(window.start).toISOString(),
+      finishedAt: new Date(window.end).toISOString() })) };
 }
 
 function missionWindows(input: { repositoryId: string; lifecycle: readonly LifecycleHistoryEntry[] }, defects: Set<string>,
@@ -116,9 +126,9 @@ function compareLaneEvents(left: LifecycleHistoryEntry, right: LifecycleHistoryE
     || left.idempotencyKey.localeCompare(right.idempotencyKey);
 }
 
-function activitySegments(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow,
+function activitySegments(repositoryId: string, history: HistoryIndex, window: MissionWindow,
   defects: Set<string>): Segment[] {
-  const events = observedActivities(input, window);
+  const events = observedActivities(repositoryId, history, window);
   const depths = dependencyDepths(events.map(event => event.value));
   const bySource = activitiesBySource(events, window, defects);
   const segments: Segment[] = [];
@@ -131,12 +141,10 @@ function activitySegments(input: { repositoryId: string; history: readonly Opera
   return segments;
 }
 
-function observedActivities(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow): TimedActivity[] {
-  return input.history.flatMap(entry => {
-    if (entry.eventType !== 'mission.current-work') { return []; }
-    const value = json<Activity>(entry.eventData);
-    return value?.missionId === window.missionId && value.repositoryId === input.repositoryId
-      ? [{ at: Date.parse(entry.createdAt), value }] : [];
+function observedActivities(repositoryId: string, history: HistoryIndex, window: MissionWindow): TimedActivity[] {
+  return indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value }) => {
+    const activity = value as Activity;
+    return activity.repositoryId === repositoryId ? [{ at: Date.parse(entry.createdAt), value: activity }] : [];
   }).filter(event => Number.isFinite(event.at)).sort((a, b) => a.at - b.at);
 }
 
@@ -197,12 +205,11 @@ function dependencyDepths(events: readonly Activity[]): Map<string, number> {
   return memo;
 }
 
-function gateSegments(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow): Segment[] {
+function gateSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
   const latest = new Map<string, VerificationMeasurement>();
-  for (const entry of input.history) {
-    if (entry.eventType !== VERIFICATION_MEASUREMENT_EVENT) { continue; }
-    const value = json<VerificationMeasurement>(entry.eventData);
-    if (value?.repositoryId === input.repositoryId && value.missionId === window.missionId) { latest.set(value.id, value); }
+  for (const { value } of indexed(history, VERIFICATION_MEASUREMENT_EVENT, window.missionId)) {
+    const measurement = value as unknown as VerificationMeasurement;
+    if (measurement.repositoryId === repositoryId) { latest.set(measurement.id, measurement); }
   }
   return [...latest.values()].flatMap(value => {
     const result: Segment[] = [];
@@ -216,13 +223,12 @@ function gateSegments(input: { repositoryId: string; history: readonly Operation
   });
 }
 
-function rebaseSegments(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow): Segment[] {
+function rebaseSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
   const started = new Map<string, { at: string; stage: string; attempt: number }>();
   const segments: Segment[] = [];
-  for (const entry of input.history) {
-    if (entry.eventType !== 'flow.rebase') { continue; }
-    const value = json<{ id?: string; repositoryId?: string; missionId?: string; stage?: string; attempt?: number; outcome?: string }>(entry.eventData);
-    if (!value?.id || value.repositoryId !== input.repositoryId || value.missionId !== window.missionId) { continue; }
+  for (const { entry, value: raw } of indexed(history, 'flow.rebase', window.missionId)) {
+    const value = raw as { id?: string; repositoryId?: string; missionId?: string; stage?: string; attempt?: number; outcome?: string };
+    if (!value.id || value.repositoryId !== repositoryId) { continue; }
     if (value.outcome === 'running') {
       started.set(value.id, { at: entry.createdAt, stage: value.stage ?? 'rebase', attempt: value.attempt ?? 1 });
       continue;
@@ -240,21 +246,21 @@ function rebaseSegments(input: { repositoryId: string; history: readonly Operati
   return segments;
 }
 
-function leadHandoffSegments(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow): Segment[] {
-  const running = input.history.flatMap(entry => {
-    if (entry.eventType !== 'mission.current-work') { return []; }
-    const value = json<Activity>(entry.eventData);
-    return value?.repositoryId === input.repositoryId && value.missionId === window.missionId && value.state === 'running'
-      ? [Date.parse(entry.createdAt)] : [];
+function leadHandoffSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
+  const running = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value }) => {
+    const activity = value as Activity;
+    return activity.repositoryId === repositoryId && activity.state === 'running' ? [Date.parse(entry.createdAt)] : [];
   }).filter(Number.isFinite).sort((a, b) => a - b);
-  return input.history.flatMap(entry => {
-    if (entry.eventType !== 'lead.operator-judgment') { return []; }
-    const value = json<{ repositoryId?: string; missionId?: string; action?: string }>(entry.eventData);
+  return indexed(history, 'lead.operator-judgment', window.missionId).flatMap(({ entry, value: raw }) => {
+    const value = raw as { repositoryId?: string; missionId?: string; action?: string; summary?: string; evidenceRefs?: string[] };
     const start = Date.parse(entry.createdAt);
-    if (value?.repositoryId !== input.repositoryId || value.missionId !== window.missionId
+    // Rows written before repository attribution was added are still scoped by
+    // the mission index. A conflicting explicit repository never crosses over.
+    if ((value.repositoryId !== undefined && value.repositoryId !== repositoryId)
       || value.action !== 'escalate' || !Number.isFinite(start)) { return []; }
     const end = Math.min(window.end, running.find(at => at > start) ?? window.end);
-    return end > start ? [{ id: `lead-escalation:${entry.id ?? entry.createdAt}`, missionId: window.missionId,
+    const incident = value.evidenceRefs?.slice().sort().join('|') || value.summary || String(entry.id ?? entry.createdAt);
+    return end > start ? [{ id: `lead-escalation:${window.missionId}:${incident}`, missionId: window.missionId,
       start: Math.max(window.start, start), end, priority: 15, ...row('lead-escalation', 'human', null, 'held') }] : [];
   });
 }
@@ -265,12 +271,10 @@ function leadHandoffSegments(input: { repositoryId: string; history: readonly Op
  * the first process recorded that it ended and the next process had not yet
  * started; it is never promoted to human or lead ownership.
  */
-function operationHandoffSegments(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow): Segment[] {
-  const events = input.history.flatMap(entry => {
-    if (entry.eventType !== 'mission.current-work') { return []; }
-    const value = json<Activity & { summary?: string }>(entry.eventData);
-    return value?.repositoryId === input.repositoryId && value.missionId === window.missionId
-      ? [{ at: Date.parse(entry.createdAt), value }] : [];
+function operationHandoffSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
+  const events = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value: raw }) => {
+    const value = raw as Activity & { summary?: string };
+    return value.repositoryId === repositoryId ? [{ at: Date.parse(entry.createdAt), value }] : [];
   }).filter(event => Number.isFinite(event.at)).sort((a, b) => a.at - b.at);
   return events.flatMap((event, index) => {
     if (event.value.state !== 'ended' || event.value.summary !== 'workflow completed' || !event.value.operationId) { return []; }
@@ -285,12 +289,10 @@ function operationHandoffSegments(input: { repositoryId: string; history: readon
 }
 
 /** A terminal workflow publication explicitly owns finalization after its last nested activity ended. */
-function operationFinalizationSegments(input: { repositoryId: string; history: readonly OperationalHistoryEntry[] }, window: MissionWindow): Segment[] {
-  const events = input.history.flatMap(entry => {
-    if (entry.eventType !== 'mission.current-work') { return []; }
-    const value = json<Activity & { summary?: string }>(entry.eventData);
-    return value?.repositoryId === input.repositoryId && value.missionId === window.missionId
-      ? [{ at: Date.parse(entry.createdAt), value }] : [];
+function operationFinalizationSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
+  const events = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value: raw }) => {
+    const value = raw as Activity & { summary?: string };
+    return value.repositoryId === repositoryId ? [{ at: Date.parse(entry.createdAt), value }] : [];
   }).filter(event => Number.isFinite(event.at)).sort((a, b) => a.at - b.at);
   return events.flatMap((event, index) => {
     if (event.value.state !== 'ended' || event.value.summary !== 'workflow completed'
@@ -346,6 +348,21 @@ function appendSegment(segments: FlowOwnershipSegment[], winner: Segment, start:
     state: winner.state, durationMs: end - start });
 }
 
-function json<T>(value: string): T | null {
-  try { return JSON.parse(value) as T; } catch { return null; }
+function indexHistory(entries: readonly OperationalHistoryEntry[]): HistoryIndex {
+  const byType = new Map<string, Map<string, IndexedHistoryEntry[]>>();
+  for (const entry of entries) {
+    let value: Record<string, unknown>;
+    try { value = JSON.parse(entry.eventData) as Record<string, unknown>; } catch { continue; }
+    if (!value || typeof value !== 'object' || typeof value.missionId !== 'string') { continue; }
+    const byMission = byType.get(entry.eventType) ?? new Map<string, IndexedHistoryEntry[]>();
+    const mission = byMission.get(value.missionId) ?? [];
+    mission.push({ entry, value });
+    byMission.set(value.missionId, mission);
+    byType.set(entry.eventType, byMission);
+  }
+  return byType;
+}
+
+function indexed(history: HistoryIndex, eventType: string, missionId: string): readonly IndexedHistoryEntry[] {
+  return history.get(eventType)?.get(missionId) ?? [];
 }

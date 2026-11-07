@@ -172,6 +172,7 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
     dependencies: [fixtureMissionId('task-2521.01'), fixtureMissionId('task-2521.03')],
     predictedNelBucket: 'Medium',
     reproductionTest: 'test/task-2294-repro.test.ts',
+    defectProvenance: { rootCauseSummary: 'A persistence boundary dropped checked Mission state.', investigationEvidence: 'The focused reproduction and retained diff identify the missing aggregate field.', attribution: { kind: 'unresolved' } },
     review: completeReview(),
     netEngineeringLines: 321,
     closedAt: null,
@@ -508,9 +509,8 @@ describe('SQLite Mission aggregate integration', () => {
         checkpoints: [],
         review: null,
         netEngineeringLines: null,
-        // Canonical UTC ISO-8601 instant (TASK-2688): the store persists this
-        // fixed-width spelling, so the round-tripped value keeps millisecond
-        // precision and lexical order equals temporal order.
+        defectProvenance: null,
+        // Canonical UTC ISO-8601 keeps millisecond precision and lexical order (TASK-2688).
         closedAt: '2026-07-29T11:00:00.000Z',
       });
       await store.save(closed, null);

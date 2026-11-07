@@ -9,6 +9,7 @@ import { initCommittedRepository } from '../../test/fixtures/git-repository.ts';
 const cli = process.argv[2];
 const dirtyHandoffRepair = process.argv.includes('--dirty-handoff-repair');
 const integrationRebound = process.argv.includes('--integration-rebound');
+const preferredReviewerFallback = process.argv.includes('--preferred-reviewer-fallback');
 assert.ok(cli && path.isAbsolute(cli), 'supply the public px executable');
 const repository = path.resolve(import.meta.dirname, '../..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'px-unit-policy-rehearsal-'));
@@ -17,6 +18,7 @@ const slug = 'task-unit-rehearsal';
 const worktree = root + '-' + slug;
 const countFile = path.join(scratch, 'unit-runs.jsonl');
 const agent = path.join(scratch, 'opencode');
+const claudeAgent = path.join(scratch, 'claude');
 const env = { ...process.env, PARALLIX_HOME: path.join(scratch, 'home'),
   PRIMARY_WORKTREE: root, PARALLIX_EXECUTION_ROOT: '', PARALLIX_NO_BUBBLEWRAP: '1',
   OPENCODE_BIN: agent, FORGEJO_USER: 'custom', REHEARSAL_CLI: cli,
@@ -25,6 +27,8 @@ const env = { ...process.env, PARALLIX_HOME: path.join(scratch, 'home'),
 if (dirtyHandoffRepair) env.REHEARSAL_DIRTY_HANDOFF_REPAIR = '1';
 if (integrationRebound) env.REHEARSAL_INTEGRATION_REBOUND = '1';
 for (const key of ['NODE_OPTIONS', 'NODE_V8_COVERAGE', 'PI_BIN', 'CLAUDE_BIN', 'CODEX_BIN', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_OPERATION_CAPTURE', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET']) delete env[key];
+if (preferredReviewerFallback) env.CLAUDE_BIN = claudeAgent;
+if (preferredReviewerFallback) env.PATH = scratch + path.delimiter + env.PATH;
 const run = (cwd, args) => {
   const result = spawnSync(cli, args, { cwd, env, encoding: 'utf8', timeout: 120000, maxBuffer: 20 * 1024 * 1024 });
   fs.appendFileSync(path.join(scratch, 'cli.log'), 'px ' + args.join(' ') + '\n' + result.stdout + result.stderr + '\n');
@@ -54,6 +58,16 @@ exec '${realGit}' "$@"
   }
 
   fs.writeFileSync(agent, '#!' + process.execPath + '\n' + fs.readFileSync(path.join(import.meta.dirname, 'rehearsal-agent.cjs'), 'utf8'), { mode: 0o755 });
+  if (preferredReviewerFallback) {
+    fs.writeFileSync(claudeAgent, `#!${process.execPath}
+const fs = require('node:fs');
+const path = require('node:path');
+if (process.argv.includes('--help') || process.argv.includes('--version')) { console.log('Claude Code 2.1.317'); process.exit(0); }
+fs.appendFileSync(path.join(process.env.REHEARSAL_STATE, 'preferred-reviewer-launches'), 'claude\\n');
+console.log(JSON.stringify({ type: 'rate_limit_event', api_error_status: 429, api_error: 'usage_limit_reached', rate_limit_info: { status: 'rejected', resetsAt: '2099-01-01T00:00:00.000Z' }, diagnostic: 'controlled disposable failure' }));
+process.exit(1);
+`, { mode: 0o755 });
+  }
   const probe = [
     "const fs = require('node:fs'); const cp = require('node:child_process');",
     "const covered = process.env.PARALLIX_TEST_COVERAGE === '1';",
@@ -64,7 +78,7 @@ exec '${realGit}' "$@"
     "if(covered) { fs.mkdirSync('coverage',{recursive:true}); fs.writeFileSync('coverage/.lcov-unit.info','TN:\\nSF:src/value.js\\nDA:1,1\\nLF:1\\nLH:1\\nend_of_record\\n'); }",
   ].join('\n');
   initCommittedRepository(root, {
-    'config/agents.json': JSON.stringify({ steps: Object.fromEntries(['draft', 'active', 'review', 'integrate'].map(step => [step, { eligible: ['custom'] }])) }),
+    'config/agents.json': JSON.stringify({ steps: Object.fromEntries(['draft', 'active', 'review', 'integrate'].map(step => [step, { eligible: preferredReviewerFallback && step === 'review' ? ['claude', 'custom'] : ['custom'] }])) }),
     '.gitignore': 'node_modules\ncoverage\n',
     ['backlog/tasks/' + slug + ' - Unit-rehearsal.md']: '---\nid: TASK-UNIT-REHEARSAL\ntitle: Unit rehearsal\nstatus: backlog\nassignee: []\nlabels: [ai_sdlc]\ndependencies: []\n---\n\nDisposable verification rehearsal.\n',
     'src/value.js': 'export const value = 0;\n',
@@ -73,7 +87,7 @@ exec '${realGit}' "$@"
     'unit-probe.cjs': probe,
     'integration-probe.cjs': "const fs=require('node:fs'); if(fs.readFileSync('src/value.js','utf8').includes('value = 2')) { console.error('Integration requires repaired value 3'); process.exit(1); } fs.copyFileSync('coverage/.lcov-unit.info','coverage/.lcov-integration-ci.info');\n",
     'package.json': JSON.stringify({ type: 'module', version: '1.0.0', scripts: { build: 'node -e ""', test: 'node unit-probe.cjs' } }),
-    'scripts/verify-local.sh': fs.readFileSync(path.join(repository, 'scripts/verify-local.sh'), 'utf8'),
+    'scripts/verify-local.sh': preferredReviewerFallback ? '#!/bin/sh\nexit 0\n' : fs.readFileSync(path.join(repository, 'scripts/verify-local.sh'), 'utf8'),
     'workflow.config.json': JSON.stringify({ adapters: {
       terminal: { host: 'pipe' },
       tasks: { provider: 'backlog-md', storage: 'backlog' },
@@ -98,10 +112,18 @@ exec '${realGit}' "$@"
 
   fs.symlinkSync(path.join(repository, 'node_modules'), path.join(root, 'node_modules'));
   fs.symlinkSync(path.join(repository, 'node_modules'), path.join(worktree, 'node_modules'));
-  run(worktree, ['active', slug, '--implementer', 'custom']);
+  run(worktree, ['active', slug, '--implementer', 'custom', ...(preferredReviewerFallback ? ['--reviewer', 'claude'] : [])]);
   const approved = JSON.parse(run(worktree, ['status', slug, '--json']));
   assert.equal(approved.missionStatus, 'integration');
-  if (dirtyHandoffRepair) {
+  if (preferredReviewerFallback) {
+    const log = fs.readFileSync(path.join(scratch, 'cli.log'), 'utf8');
+    assert.equal(fs.readFileSync(path.join(scratch, 'preferred-reviewer-launches'), 'utf8'), 'claude\n');
+    assert.match(log, /reviewer fell back from claude to custom/i);
+    assert.doesNotMatch(log, /Incomplete reviewer artifact|REVIEWER_ARTIFACT_RETRY_EXHAUSTED/);
+    assert.ok(approved.review?.history?.length > 0, 'status includes durable review history');
+    assert.ok(approved.review.history.every(round => round.reviewer === 'custom'), JSON.stringify(approved.review.history));
+    console.log(JSON.stringify({ lifecycle: 'public-review-preferred-runtime-fallback', invocation: 'px active task-unit-rehearsal --implementer custom --reviewer claude', preferredLaunches: 1, actualReviewer: 'custom', incompleteArtifactRetries: 0, operatorState: env.PARALLIX_HOME, disposableRepository: root }, null, 2));
+  } else if (dirtyHandoffRepair) {
     const observed = fs.readFileSync(path.join(scratch, 'before-rebase'), 'utf8');
     assert.equal(observed, 'workflow(' + slug + '): auto-commit mission artifacts before handoff\nuntracked repair output\n');
     assert.equal(fs.readFileSync(path.join(worktree, 'src/value.js'), 'utf8'), 'export const value = 2;\n');

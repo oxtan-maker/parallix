@@ -6,7 +6,6 @@ import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-type
 import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
 import { extractOpencodeTelemetryFromExport } from './opencode-telemetry.js';
 import { captureOpencodeExport } from './opencode-export.js';
-import { detectLimitHit } from '../../application/services/agent-limit.js';
 import { spawnSync } from 'node:child_process';
 import { resolveOpencodeCommand } from './opencode-command.js';
 import type { SessionMarkerPort } from '../../application/domain-ports.js';
@@ -195,16 +194,9 @@ function shouldRetryOpencodeFailure(result: AgentProcessResult) {
   if (result.error && (processErrorCode(result.error) === 'ENOENT' || processErrorCode(result.error) === 'EACCES')) {return false;}
   if (result.signal) {return false;}
   if (!(typeof result.status === 'number' && result.status !== 0)) {return false;}
-  if (detectLimitHit({
-    agent: 'custom',
-    failureReason: result.failureReason,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    status: result.status,
-    signal: result.signal,
-    error: result.error,
-  })) {return false;}
-  if (isHardOpencodeFailure(result)) {return false;}
+  // OpenCode owns one bounded same-family retry for typed transient backend
+  // unavailability. If that retry also fails, startAgent receives the final
+  // result and applies the checked provider block before family reselection.
   return isTransientOpencodeFailure(result);
 }
 

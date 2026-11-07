@@ -131,6 +131,7 @@ const MISSION_ID_TABLES = [
   'execution_activity',
   'mission_review_events',
   'mission_review_stage_launches',
+  'mission_defect_provenance',
 ] as const;
 
 /**
@@ -182,6 +183,15 @@ async function reassignMission(
   if (liveTables.has('mission_checkpoints')) {
     await db.execute(
       'UPDATE mission_checkpoints SET checkpoint_mission_id = ? WHERE checkpoint_mission_id = ?',
+      [to, from],
+    );
+  }
+  // Defect provenance can independently point at another Mission as the
+  // attributed origin. Its owner `mission_id` moved in the generic loop above;
+  // move this second foreign key whenever that originating Mission is renamed.
+  if (liveTables.has('mission_defect_provenance')) {
+    await db.execute(
+      'UPDATE mission_defect_provenance SET originating_mission_id = ? WHERE originating_mission_id = ?',
       [to, from],
     );
   }

@@ -209,7 +209,7 @@ it('reads mixed offsets in instant order with stable equivalent-instant ties (TA
     const spellings = ['2026-10-09T08:00:00Z', '2026-10-09T09:00:00+02:00', '2026-10-09T07:00:00.000Z'];
     for (const [index, raw] of spellings.entries()) {
       await database.execute(`INSERT INTO board_lane_events (repository_id, mission_id, to_status, trigger, agent, occurred_at, idempotency_key)
-        VALUES ('repo', 'task-order', 'active', 'activate', 'codex', ?, ?)`, [raw, `order-${index}`]);
+        VALUES ('repo', 'task-order', 'active', ?, 'codex', ?, ?)`, [`activate-${index}`, raw, `order-${index}`]);
     }
     const repository = new SqliteBoardLaneEventRepository(database);
     for (const entries of [await repository.findAll(), await repository.findByMissionId('task-order'), await repository.findByRepositoryId('repo')]) {

@@ -258,7 +258,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   // round; resume those instead of selecting a new reviewer.
   if (prepared.reviewPreparationRan) { persisted = await ports.state.read(); }
   const selected = selectReviewer({
-    reviewer: request.reviewer, implementer, isContinue: start.isContinue, persisted, maxAttempts,
+    preferredReviewer: request.reviewer, implementer, isContinue: start.isContinue, persisted, maxAttempts,
     dryRun: start.dryRun, providerEnabled: Boolean(ports.provider), slug,
   }, ports.routing, out);
   if (!selected) {

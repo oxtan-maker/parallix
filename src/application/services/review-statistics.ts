@@ -136,7 +136,7 @@ function mergeReviewEpisodes(observed: readonly ReviewEpisode[], retained: reado
     // The Review record is the terminal decision of a durable handoff, not a
     // second eligible episode. Decisions outside retained handoffs stay distinct.
     return Number.isFinite(decisionAt) && Number.isFinite(startedAt) && Number.isFinite(endedAt)
-      && startedAt <= decisionAt && decisionAt <= endedAt;
+      && startedAt <= decisionAt && decisionAt <= endedAt + JUDGMENT_SKEW_MS;
   }));
   return deduplicateEpisodes([...uncovered, ...retained]);
 }
@@ -431,7 +431,12 @@ function reconcileEvent(review: Review, event: ReviewEventRecord, put: PutReturn
   // A provider note is often published on the repair round. Its retained
   // provider identity links it back to the approval correction it publishes.
   const linked = linkedCorrectionRound(review, event);
-  const round = linked ?? review.rounds.find(round => round.number === event.roundNumber);
+  const nearbyOperatorRevocation = event.eventType === 'human_note' ? review.rounds.find(round => {
+    const revocation = round.decision?.kind === 'approved' ? round.decision.revocation : undefined;
+    return revocation?.cause?.kind === 'operator'
+      && Math.abs(Date.parse(revocation.revokedAt) - Date.parse(event.createdAt)) <= JUDGMENT_SKEW_MS;
+  }) : undefined;
+  const round = linked ?? nearbyOperatorRevocation ?? review.rounds.find(round => round.number === event.roundNumber);
   // A correction on a round whose approval an operator or non-gate rebound revoked is that revocation.
   const identity = correctionIdentity(round, event);
   const actor = event.eventType === 'human_note' ? 'human' as const : 'agent' as const;

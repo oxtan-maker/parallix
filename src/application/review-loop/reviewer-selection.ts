@@ -12,7 +12,7 @@ import type { ReviewLoopOutput } from '../ports/review-round.js';
 import type { LauncherStatus, ReviewerRoutingPort, ReviewLoopState } from '../ports/review-round.js';
 
 export interface ReviewerSelectionRequest {
-  readonly reviewer?: string;
+  readonly preferredReviewer?: string;
   readonly implementer: string;
   readonly isContinue: boolean;
   readonly persisted: Pick<ReviewLoopState, 'reviewer' | 'round' | 'phase'> | null;
@@ -164,20 +164,22 @@ function routeRunnableReviewer(selection: Selection, context: Context, persisted
       context.emit({ kind: 'agent-selection', outcome: 'skipped-blocked', fields: { agent: selection.reviewer, step: 'review' } });
     }
     triedReviewers.add(selection.reviewer!);
-    if (selection.source === 'explicit') {
+    if (selection.source === 'explicit' && persistedContinueReviewer) {
       if (fallbackToPersistedContinueReviewer(selection, persistedContinueReviewer, context)) {
         reviewerStatus = context.routing.launcherStatus(selection.reviewer!);
         continue;
       }
-      reportUnsupportedReviewer(selection, context, reviewerStatus.detail);
-      return false;
     }
     const candidate = nextReviewerCandidate(new Set([...triedReviewers, context.implementer]), context);
     if (!candidate.fallback) { return exhaustedReviewerRoute(selection, context, reviewerStatus); }
     context.emit({ kind: 'reviewer-fallback-routing', reviewer: selection.reviewer, eligible: context.agents.includes(selection.reviewer!), fallback: candidate.fallback });
     selection.reviewer = candidate.fallback;
     reviewerStatus = candidate.status!;
-    selection.source = selection.source === 'persisted' ? 'persisted-fallback' : 'auto-derived-fallback';
+    selection.source = selection.source === 'persisted'
+      ? 'persisted-fallback'
+      : selection.source === 'explicit'
+        ? 'explicit-fallback'
+        : 'auto-derived-fallback';
   }
   return true;
 }
@@ -193,20 +195,31 @@ export function selectReviewer(
   output: { emit: ReviewLoopOutput['emit'] },
 ): ReviewerSelection | null {
   const context: Context = { ...request, routing, agents: routing.eligibleFamilies(), emit: event => output.emit(event) };
-  const selection: Selection = { reviewer: request.reviewer, source: 'explicit' };
-  const persistedContinueReviewer = request.isContinue && request.persisted?.reviewer ? request.persisted.reviewer : null;
+  const selection = initialSelection(request);
+  const persistedContinueReviewer = continuedReviewer(request);
 
   const selectErr = deriveInitialReviewer(selection, context);
   if (!selection.reviewer && !fallbackForUnnamedReviewer(selection, context, selectErr)) { return null; }
 
-  const willLaunchRounds = request.maxAttempts >= (request.persisted?.round || 1);
+  const round = request.persisted?.round || 1;
+  const willLaunchRounds = request.maxAttempts >= round;
   const resumesInFixingPhase = request.persisted?.phase === 'fixing' && !request.dryRun;
 
   const routed = routeSelectedReviewer(selection, context, persistedContinueReviewer, willLaunchRounds, resumesInFixingPhase);
   if (!routed) { return null; }
 
-  context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source, round: request.persisted?.round || 1, isContinue: request.isContinue });
+  context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source, round, isContinue: request.isContinue });
   return { reviewer: selection.reviewer!, reviewerSource: selection.source };
+}
+
+function initialSelection(request: ReviewerSelectionRequest): Selection {
+  const decidedActualReviewer = request.isContinue && request.persisted?.phase === 'approved';
+  return { reviewer: decidedActualReviewer ? undefined : request.preferredReviewer, source: 'explicit' };
+}
+
+function continuedReviewer(request: ReviewerSelectionRequest): string | null {
+  if (!request.isContinue) { return null; }
+  return request.persisted?.reviewer ?? null;
 }
 
 function routeSelectedReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null, willLaunchRounds: boolean, resumesInFixingPhase: boolean): boolean {

@@ -651,14 +651,15 @@ test('Claude rejected rate-limit stream preserves its canonical quota reset (TAS
 test('Claude API-error quota variants normalize nested reset epochs (TASK-2838)', async () => {
   const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
   const assistant = { type: 'assistant', api_error_status: 429, api_error_params: { rate_limit_info: { resetsAt: 1793739000 } } };
-  const result = { type: 'result', is_error: true, api_error: 'usage_limit_reached' };
+  const result = { type: 'result', is_error: true, api_error_status: 429, api_error: 'usage_limit_reached', api_error_params: { rate_limit_info: { resetsAt: 1893456000 } } };
 
   assert.deepEqual(normalizeProviderFailure({ status: 1, stdout: JSON.stringify(assistant) }), {
     version: 1, code: 'agent-quota', source: 'provider',
     context: { resetAt: '2026-11-03T20:50:00.000Z', httpStatus: 429 },
   });
   assert.deepEqual(normalizeProviderFailure({ status: 1, stdout: JSON.stringify(result) }), {
-    version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_reached' },
+    version: 1, code: 'agent-quota', source: 'provider',
+    context: { resetAt: '2030-01-01T00:00:00.000Z', httpStatus: 429, providerCode: 'usage_limit_reached' },
   });
 });
 
@@ -690,5 +691,59 @@ test('Claude quota normalization rejects non-failures and unstructured diagnosti
   ];
   for (const [name, input, expected] of cases) {
     assert.equal(normalizeProviderFailure(input)?.code, expected, name);
+  }
+});
+
+test('spawnAndTee normalizes retained Claude quota events without using diagnostic wording (TASK-2837)', async () => {
+  const retainedEvents: [Record<string, unknown>, string][] = [
+    [{
+      type: 'rate_limit_event', api_error_status: 429, api_error: 'usage_limit_reached',
+      rate_limit_info: { status: 'rejected', resetsAt: '2026-11-04T08:00:00.000Z' },
+    }, '2026-11-04T08:00:00.000Z'],
+    [{
+      type: 'assistant', message: { content: [] }, api_error_status: 429, api_error: 'usage_limit_reached',
+      api_error_params: { rate_limit_info: { resetsAt: 1893456000 } },
+    }, '2030-01-01T00:00:00.000Z'],
+    [{
+      type: 'result', subtype: 'error_during_execution', is_error: true,
+      api_error_status: 429, api_error: 'usage_limit_reached',
+      api_error_params: { rate_limit_info: { resetsAt: 1893456000 } },
+    }, '2030-01-01T00:00:00.000Z'],
+  ];
+
+  for (const [event, resetAt] of retainedEvents) {
+    for (const diagnostic of ['Claude usage limit reached', 'arbitrary rewritten diagnostic']) {
+      const result = await withMockSpawn({
+        stdoutChunks: [JSON.stringify({ ...event, diagnostic }) + '\n'],
+        status: 1,
+      }, async () => spawnAndTee('claude', [], { stdoutSink: noopSink(), stderrSink: noopSink() }));
+      assert.deepEqual(result.failureReason, {
+        version: 1,
+        code: 'agent-quota',
+        source: 'provider',
+        context: { resetAt, httpStatus: 429, providerCode: 'usage_limit_reached' },
+      });
+    }
+  }
+});
+
+test('unrecognized structured quota drift keeps generic process classification (TASK-2837)', async () => {
+  const events = [
+    { type: 'rate_limit_event', quota_error: 'future_usage_limit_shape', rate_limit_info: { resetsAt: '2026-11-04T08:00:00.000Z' } },
+    { type: 'rate_limit_event', api_error_status: 429 },
+    { type: 'rate_limit_event', api_error: 'usage_limit_reached' },
+  ];
+  for (const event of events) {
+    const result = await withMockSpawn({
+      stdoutChunks: [JSON.stringify(event) + '\n'],
+      status: 1,
+    }, async () => spawnAndTee('claude', [], { stdoutSink: noopSink(), stderrSink: noopSink() }));
+
+    assert.deepEqual(result.failureReason, {
+      version: 1,
+      code: 'process-failed',
+      source: 'process',
+      context: { exitCode: 1 },
+    });
   }
 });

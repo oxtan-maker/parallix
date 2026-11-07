@@ -184,6 +184,30 @@ export function deriveLaneIntervals(
 }
 
 /**
+ * Each mission's summed closed dwell per lane, in minutes. Open intervals (the
+ * lane a mission still occupies) are excluded. The median dwell series and the
+ * FLOW state cards share this one per-mission observation.
+ */
+export function closedLaneDwellMinutes(
+  transitions: readonly MissionTransition[],
+  missions?: ReadonlySet<MissionId>,
+): ReadonlyMap<BoardLane, ReadonlyMap<MissionId, number>> {
+  const byLane = new Map<BoardLane, Map<MissionId, number>>();
+  for (const interval of deriveLaneIntervals(transitionsOf(transitions, missions))) {
+    if (interval.exitedAt === null) {
+      continue;
+    }
+    const minutes = (Date.parse(interval.exitedAt) - Date.parse(interval.enteredAt)) / 60_000;
+    if (Number.isFinite(minutes) && minutes >= 0) {
+      const byMission = byLane.get(interval.state) ?? new Map<MissionId, number>();
+      byMission.set(interval.missionId, (byMission.get(interval.missionId) ?? 0) + minutes);
+      byLane.set(interval.state, byMission);
+    }
+  }
+  return byLane;
+}
+
+/**
  * Median cycle time per lane, computed from closed lane intervals only.
  *
  * Dwell time is attributed to the state the mission *occupied* during the
@@ -201,21 +225,7 @@ export function medianCycleTimeByStateSeries(
   transitions: readonly MissionTransition[],
   missions?: ReadonlySet<MissionId>,
 ): LaneMetricSeries {
-  const intervals = deriveLaneIntervals(transitionsOf(transitions, missions));
-  const byLane = new Map<BoardLane, Map<MissionId, number>>();
-
-  for (const interval of intervals) {
-    // Closed intervals only — open intervals (current lane) excluded from dwell
-    if (interval.exitedAt === null) {
-      continue;
-    }
-    const minutes = (Date.parse(interval.exitedAt) - Date.parse(interval.enteredAt)) / 60_000;
-    if (Number.isFinite(minutes) && minutes >= 0) {
-      const byMission = byLane.get(interval.state) ?? new Map<MissionId, number>();
-      byMission.set(interval.missionId, (byMission.get(interval.missionId) ?? 0) + minutes);
-      byLane.set(interval.state, byMission);
-    }
-  }
+  const byLane = closedLaneDwellMinutes(transitions, missions);
 
   return {
     series: BOARD_LANES.map((lane) => {

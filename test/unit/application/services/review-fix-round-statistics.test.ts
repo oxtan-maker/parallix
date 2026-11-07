@@ -229,6 +229,21 @@ test('human provider publication and its approval revocation are one correction'
   assert.equal(result.total, 1);
 });
 
+test('a near-simultaneous operator note and approval revocation are one return and one episode (TASK-2836)', () => {
+  const revokedAt = '2026-10-01T00:02:00Z';
+  const result = reviewStatistics(review([round(1, { decision: { ...approval, revocation: {
+    revokedAt, revokedBy: 'human', reason: 'operator requested changes', cause: { kind: 'operator' },
+  } } }), round(2, { decision: null })], [event(1, { eventType: 'human_note', roundNumber: 2,
+    createdAt: '2026-10-01T00:02:03Z', disposition: 'REQUEST_CHANGES' })]), {
+    equivalentSubmissions: {}, reviewEpisodes: [{ identity: 'human-handoff', actor: 'human', stage: 'human-review',
+      startedAt: '2026-10-01T00:01:00Z', endedAt: revokedAt, revision: null, sender: 'human' }],
+  });
+  assert.deepEqual(result.returns.map(item => item.identity), [`revoke:${revokedAt}`]);
+  assert.equal(result.episodes.filter(item => item.actor === 'human').length, 1);
+  assert.deepEqual(result.sendBacks.human, { numerator: 1, eligibleEpisodes: 1, coverage: 1,
+    rate: { state: 'measured', value: 1 } });
+});
+
 test('operator revocation supplies the matching human review episode (TASK-2835)', () => {
   const revokedAt = '2026-10-01T00:02:00Z';
   const result = reviewStatistics(review([round(1, { decision: { ...approval, revocation: {

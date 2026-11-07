@@ -34,6 +34,7 @@ test('px stats formats the shared typed FLOW projection without recalculating me
     repo: 'repo', mission: 'task-flow', closedAt: '2026-11-03T12:00:00Z', labels: ['ai_sdlc'],
     implementer: 'codex', reviewStatistics, flowObservation: {
       diagramNodeIds: ['implement', 'review'], diagramEdgeIds: ['implement->review'],
+      window: null, gateRuns: [], rebaseRuns: [], lead: { queued: 0, recoveries: 0, escalations: 0 },
       actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], ownership: [
         { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 25 },
       ],

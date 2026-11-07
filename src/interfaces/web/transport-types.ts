@@ -224,25 +224,27 @@ export interface WebSourceFact {
   readonly value?: string;
 }
 
+/** The typed FLOW projection carried unchanged on the wire; browsers format and lay it out, never recalculate it. */
+export type WebFlowStatistics = import('../../application/projections/flow-statistics.js').FlowStatistics;
+export type WebFlowWindow = import('../../application/projections/flow-statistics.js').FlowWindowStatistics;
+export type WebFlowLane = import('../../application/projections/flow-statistics.js').FlowLaneId;
+export type WebFlowNodeId = import('../../application/projections/flow-statistics.js').FlowNodeId;
+export type WebFlowEdge = import('../../application/projections/flow-statistics.js').FlowGraphEdge;
+export type WebFlowNode = import('../../application/projections/flow-statistics.js').FlowGraphNode;
+export type WebFlowTimeRow = import('../../application/projections/flow-statistics.js').FlowTimeTableRow;
+
 export interface WebBoardMetrics {
   readonly verification?: readonly string[];
   /** Typed shared FLOW statistics; browser consumers format but never recalculate these values. */
-  readonly flow?: import('../../application/projections/flow-statistics.js').FlowStatistics;
+  readonly flow?: WebFlowStatistics;
+  /** Why FLOW is absent: its observation read failed. Shown as a failure, never replaced by values. */
+  readonly flowUnavailable?: string;
   /** Deliveries in the server-selected local reporting week; absent when unavailable. */
   readonly weeklyCompletedMissions?: number;
   readonly health: { readonly state: string };
   readonly provenance: { readonly sampleSize: number; readonly newestEventTimestamp: string | null };
   /** The rolling week that FLOW uses, shared with the board's decision metrics. */
   readonly flowWindow?: { readonly startDate: string; readonly endDate: string; readonly label: string };
-  readonly cumulativeFlowByState: { readonly series: readonly { readonly at: string; readonly counts: Readonly<Record<string, number>>; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
-  /**
-   * The server-owned cumulative flow of the current reporting week, with the
-   * window it was computed for. FLOW renders these points as published: the
-   * browser never filters, rebases, or infers a lane transition. Optional
-   * because a projection cached before TASK-2459 carries none.
-   */
-  readonly weeklyCumulativeFlow?: { readonly series: readonly { readonly at: string; readonly counts: Readonly<Record<string, number>>; readonly observationCount?: number }[]; readonly missingHistoryFallback: string; readonly window: { readonly startDate: string; readonly endDate: string; readonly label: string } };
-  readonly medianCycleTimeByState: { readonly series: readonly { readonly lane: string; readonly value: number | null; readonly observationCount?: number }[]; readonly missingHistoryFallback: string };
   readonly bottleneck: { readonly sentence: string };
 }
 

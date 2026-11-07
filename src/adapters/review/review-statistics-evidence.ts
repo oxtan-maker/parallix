@@ -7,6 +7,7 @@ import type { Review, ReviewRound } from '../../domain/review.js';
 import { normalizeImplementer } from '../../application/services/statistics-row.js';
 import type { ReviewEpisode, ReviewStatisticsEvidence, WorkflowReturn } from '../../application/services/review-statistics.js';
 import type { StatsRecoveryEvidence } from '../../application/stats-recovery-evidence.js';
+import type { OperationalHistoryRepository } from '../../application/ports/operation-history.js';
 import { GitMissionPatchComparison } from './mission-patch-comparison.js';
 
 /** The lane-move facts a return needs; read-only, never a lane write. */
@@ -88,16 +89,36 @@ export function workflowReturnsFromHistory(entries: readonly LaneMove[], repairs
 
 /** One reader of retained workflow history for every consumer; lane moves and rebound repairs are read-only. */
 export function createWorkflowReturnReader(lane: { findByMissionId(_missionId: string): Promise<readonly LaneMove[]> },
-  history?: { findByTypeForMission?(_type: string, _missionId: string): Promise<readonly { eventData: string; createdAt: string }[]> }) {
+  history?: { findByTypeForMission?(_type: string, _missionId: string): Promise<readonly { eventData: string; createdAt: string }[]> },
+  reboundRepairs?: (_missionId: string) => Promise<readonly ReboundRepairMove[]>) {
   return async (missionId: string): Promise<WorkflowReturn[] | undefined> => {
     const [repairs, recovered, moves] = await Promise.all([
-      readReboundRepairs(history, missionId),
+      reboundRepairs?.(missionId) ?? readReboundRepairs(history, missionId),
       readRecoveredWorkflowReturns(history, missionId),
       lane.findByMissionId(missionId),
     ]);
     // A Mission with no retained workflow history has no return evidence; that is unknown, not zero.
     return moves.length === 0 && repairs.length === 0 && recovered.length === 0 ? undefined
       : [...workflowReturnsFromHistory(moves, repairs), ...recovered];
+  };
+}
+
+/** Index the application-owned minimal rebound history once for a statistics read session. */
+export function createReboundRepairReader(history: Pick<OperationalHistoryRepository, 'findReboundRepairs'>) {
+  let cached: Promise<ReadonlyMap<string, readonly ReboundRepairMove[]>> | null = null;
+  return async (missionId: string): Promise<readonly ReboundRepairMove[]> => {
+    cached ??= (history.findReboundRepairs?.() ?? Promise.resolve([])).then(rows => {
+      const first = new Map<string, Map<string, ReboundRepairMove>>();
+      for (const row of rows) {
+        const mission = row.missionId, occurrenceId = row.occurrenceId;
+        const occurrences = first.get(mission) ?? new Map<string, ReboundRepairMove>();
+        if (!occurrences.has(occurrenceId)) { occurrences.set(occurrenceId, { occurrenceId, reasonKind: row.reasonKind,
+          area: row.area, agent: row.agent, occurredAt: attemptStartedAt(row.occurredAt, row.durationMs ?? null) }); }
+        first.set(mission, occurrences);
+      }
+      return new Map([...first].map(([mission, occurrences]) => [mission, [...occurrences.values()]]));
+    });
+    return (await cached).get(missionId) ?? [];
   };
 }
 
@@ -121,8 +142,15 @@ function parseReboundRepair(entry: { eventData: string; createdAt: string }): Re
     const occurrenceId = String(data.occurrenceId ?? '');
     if (!occurrenceId) { return undefined; }
     return { occurrenceId, reasonKind: String(data.reasonKind ?? ''), area: typeof data.area === 'string' ? data.area : null,
-      agent: String(data.agent ?? ''), occurredAt: entry.createdAt };
+      agent: String(data.agent ?? ''), occurredAt: attemptStartedAt(entry.createdAt,
+        typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) ? data.durationMs : null) };
   } catch { return undefined; }
+}
+
+function attemptStartedAt(completedAt: string, durationMs: number | null): string {
+  const completed = Date.parse(completedAt);
+  return durationMs !== null && Number.isFinite(completed)
+    ? new Date(completed - Math.max(0, durationMs)).toISOString() : completedAt;
 }
 
 async function readRecoveredWorkflowReturns(history: WorkflowHistoryReader, missionId: string): Promise<WorkflowReturn[]> {

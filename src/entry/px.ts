@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 
 import { cliInvocation, pinChildCli } from '../composition/child-cli.js';
-import { bindGateAdmission } from '../composition/gate-admission.js';
-import { bindVerificationObservation } from '../composition/verification-observation.js';
 import { resolveProcessConfiguration } from '../composition/config.js';
+import { bindWorkflowObservability } from '../composition/workflow-observability.js';
 
-bindGateAdmission(resolveProcessConfiguration());
-bindVerificationObservation(resolveProcessConfiguration());
+const configuration = resolveProcessConfiguration();
+bindWorkflowObservability(configuration);
 
 // Load only the composition needed by this process role. Independent workers
 // must not initialize the interactive CLI and its presentation dependencies.
@@ -17,14 +16,14 @@ if (process.argv[2] === '--terminal-transcript-writer') {
     .catch(error => { console.error(error); process.exitCode = 1; });
 } else if (process.argv[2] === '--workflow-recover') {
   const { runWorkflowRecovery } = await import('../composition/workflow-recovery.js');
-  runWorkflowRecovery(process.argv[3], resolveProcessConfiguration())
+  runWorkflowRecovery(process.argv[3], configuration)
     .then(() => process.exit(0), error => { console.error(error); process.exit(1); });
 } else if (process.argv[2] === '--workflow-observe') {
   const { runWorkflowObservation } = await import('../composition/workflow-observation.js');
-  void runWorkflowObservation(process.argv[3], resolveProcessConfiguration());
+  void runWorkflowObservation(process.argv[3], configuration);
 } else if (process.argv[2] === '--workflow-worker' || process.argv[2] === '--workflow-execute') {
   const { runWorkflowWorker } = await import('../composition/workflow-operations.js');
-  runWorkflowWorker(process.argv[3], process.argv[4], resolveProcessConfiguration(), process.argv[2] === '--workflow-execute')
+  runWorkflowWorker(process.argv[3], process.argv[4], configuration, process.argv[2] === '--workflow-execute')
     .then(code => process.exit(code), error => { console.error(error); process.exit(1); });
 } else if (process.argv[2] === '--pi-session-worker') {
   const { runPiWorker } = await import('../composition/pi-worker.js');
@@ -34,7 +33,6 @@ if (process.argv[2] === '--terminal-transcript-writer') {
   runClaudeStreamPresenter();
 } else {
   const { run } = await import('../composition/create-cli.js');
-  const configuration = resolveProcessConfiguration();
   const childEnvironment = { ...configuration.forwardedEnvironment };
   pinChildCli(process.argv[1], { configuration, env: childEnvironment });
 

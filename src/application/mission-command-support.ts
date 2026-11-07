@@ -18,6 +18,7 @@ import type {
 import { isStaleWrite } from './domain-ports.js';
 import type { Mission, MissionId } from '../domain/mission.js';
 import { MissionRuleViolation } from '../domain/mission.js';
+import { DefectProvenanceViolation } from '../domain/defect-provenance.js';
 
 /** Fields every Mission command request carries. */
 export interface MissionCommandRequest {
@@ -98,8 +99,8 @@ export function writeFailure<T>(
   if (isStaleWrite(error)) {
     return failure('conflict', describe(error, 'stale mission write refused'), durableEvidence);
   }
-  if (error instanceof MissionRuleViolation) {
-    return failure('validation', error.message, durableEvidence, error.failureReason);
+  if (error instanceof MissionRuleViolation || error instanceof DefectProvenanceViolation) {
+    return failure('validation', error.message, durableEvidence, error instanceof MissionRuleViolation ? error.failureReason : undefined);
   }
   return failure('execution', describe(error, 'mission write failed'), durableEvidence);
 }

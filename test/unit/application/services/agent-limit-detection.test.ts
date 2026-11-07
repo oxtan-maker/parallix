@@ -22,7 +22,7 @@ for (const agent of ['claude', 'codex', 'custom', 'qwen', 'mistral', 'vibe', 'un
     for (const status of [0, 1, null, undefined]) {
       assert.equal(detectLimitHit({ agent, status, stderr: diagnostic, now }), null);
     }
-    for (const code of ['infrastructure', 'state-machine', 'provider-auth', 'provider-unavailable', 'resource-exhausted', 'process-failed', 'unexpected'] as const) {
+    for (const code of ['infrastructure', 'state-machine', 'provider-auth', 'resource-exhausted', 'process-failed', 'unexpected'] as const) {
       assert.equal(detectLimitHit({ agent, status: 1, stderr: diagnostic, failureReason: failureReason(code, 'provider'), now }), null);
     }
     assert.equal(detectLimitHit({ agent, status: 1, stderr: diagnostic, failureReason: { version: 99, code: 'agent-quota' }, now }), null);
@@ -55,6 +55,13 @@ test('model entitlement and transient rate limit reroute without family blocks',
   assert.equal(rate?.until, undefined);
 });
 
+test('typed provider unavailability creates a bounded checked block (TASK-2837)', () => {
+  const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: failureReason('provider-unavailable', 'provider'), now });
+  assert.equal(hit?.until, formatBlockUntil(new Date('2026-05-01T13:00:00Z')));
+  assert.equal(hit?.source, 'structured');
+  assert.equal(hit?.reason, 'typed: provider-unavailable');
+});
+
 test('structured retry-after and fallback resets remain bounded and round upwards', () => {
   for (const context of ([{ retryAfterSeconds: 1800 }, { resetAt: '2026-05-01T11:45:00Z' }] as NonNullable<FailureReason['context']>[])) {
     assert.equal(detectLimitHit({ agent: 'claude', status: 1, now, failureReason: failureReason('agent-quota', 'provider', context) })?.until,
@@ -69,6 +76,23 @@ test('structured retry-after and fallback resets remain bounded and round upward
     assert.equal(hit?.until, formatBlockUntil(endOfCurrentUtcMonth(now)));
     assert.equal(hit?.source, 'month-end');
   }
+});
+
+test('retained Claude quota reset blocks the family until the structured reset (TASK-2837)', () => {
+  const failure = normalizeProviderFailure({
+    status: 1,
+    stdout: JSON.stringify({
+      type: 'rate_limit_event',
+      api_error_status: 429,
+      api_error: 'usage_limit_reached',
+      rate_limit_info: { status: 'rejected', resetsAt: '2026-05-01T15:35:00Z' },
+      diagnostic: 'wording is not classification evidence',
+    }),
+  });
+
+  const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: failure, now });
+  assert.equal(hit?.until, formatBlockUntil(new Date('2026-05-01T16:00:00Z')));
+  assert.equal(hit?.source, 'structured');
 });
 
 test('process termination stays independent of transcript keywords and SIGTERM stays local (TASK-2729)', () => {

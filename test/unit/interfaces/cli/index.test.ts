@@ -271,6 +271,9 @@ test('printUsage documents draft and active implementer-selection syntax', () =>
   assert.match(all, /--agent to select the draft implementer family/);
   assert.match(all, /active \[<slug>\] \[--implementer <family>\]/);
   assert.match(all, /--implementer selects its family/);
+  assert.match(all, /--reviewer is the preferred first reviewer/);
+  assert.match(all, /fall back to the next configured eligible independent family/);
+  assert.match(all, /manual control/);
 });
 
 test('printUsage documents every KNOWN_COMMANDS entry', () => {

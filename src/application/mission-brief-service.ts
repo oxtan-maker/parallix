@@ -25,6 +25,7 @@ import type { CheckpointData } from '../domain/checkpoint.js';
 import type { MissionId } from '../domain/mission.js';
 import { MISSION_CLASSIFICATIONS, classificationLabels, type MissionClassification } from '../domain/mission-authoring.js';
 import { MissionAuthoringService, type AuthorMissionRequest } from './mission-authoring-service.js';
+import { defectProvenance, type DefectProvenance } from '../domain/defect-provenance.js';
 export { MISSION_CLASSIFICATIONS, type MissionClassification } from '../domain/mission-authoring.js';
 
 
@@ -74,6 +75,13 @@ export interface SetReproductionTestRequest extends MissionCommandRequest {
 }
 export interface MissionReproductionTestResult {
   readonly reproductionTest: string | null;
+  readonly version: MissionVersion;
+}
+export interface SetDefectProvenanceRequest extends MissionCommandRequest {
+  readonly provenance: DefectProvenance;
+}
+export interface MissionDefectProvenanceResult {
+  readonly defectProvenance: DefectProvenance;
   readonly version: MissionVersion;
 }
 export interface MissionBriefResult {
@@ -237,6 +245,27 @@ export class MissionBriefService {
     try {
       const version = await this._store.save({ ...loaded.mission, reproductionTest: testPath }, loaded.version);
       return completed({ reproductionTest: testPath, version }, [storeEvidence(request.missionId, 'reproduction-test', testPath ? `reproduction test recorded: ${testPath}` : 'reproduction test cleared')]);
+    } catch (error) { return writeFailure(error); }
+  }
+
+  /** Record or replace the causal investigation for a bug-labelled Mission. */
+  async setDefectProvenance(request: SetDefectProvenanceRequest): Promise<ApplicationOutcome<MissionDefectProvenanceResult>> {
+    const guard = missingCapability<MissionDefectProvenanceResult>(request, 'mission:context'); if (guard) { return guard; }
+    const loaded = await loadForCommand<MissionDefectProvenanceResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
+    let provenance: DefectProvenance;
+    try { provenance = defectProvenance(request.provenance, request.missionId); }
+    catch (error) { return failure('validation', error instanceof Error ? error.message : 'invalid defect provenance'); }
+    if (provenance.attribution.kind === 'originating-mission') {
+      const origin = await this._store.load(provenance.attribution.missionId);
+      if (origin.kind === 'unavailable') { return failure('unavailable', origin.reason); }
+      if (origin.kind !== 'found') { return failure('validation', `Originating Mission ${provenance.attribution.missionId} does not exist`); }
+      if (origin.mission.repositoryId !== loaded.mission.repositoryId) {
+        return failure('validation', `Originating Mission ${provenance.attribution.missionId} belongs to a different repository`);
+      }
+    }
+    try {
+      const version = await this._store.save({ ...loaded.mission, defectProvenance: provenance }, loaded.version);
+      return completed({ defectProvenance: provenance, version }, [storeEvidence(request.missionId, 'defect-provenance', `defect provenance recorded: ${provenance.attribution.kind}`)]);
     } catch (error) { return writeFailure(error); }
   }
 

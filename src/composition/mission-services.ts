@@ -12,6 +12,7 @@ import { resolveWorktree } from '../adapters/git/worktree.js';
 import fs from 'node:fs';
 import type { MissionApplicationServices } from './application-services.js';
 import { bindRecoveryPorts } from './recovery-ports.js';
+import { DefectProvenanceBackfillService } from '../application/defect-provenance-backfill-service.js';
 
 export interface MissionApplicationServiceOverrides {
   readonly configuration?: ParallixConfiguration;
@@ -54,6 +55,7 @@ export async function createMissionApplicationServices(
     integration: new MissionIntegrationService(store),
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     brief: new MissionBriefService(store, new SqliteOperationalHistoryRepository(db)),
+    defectProvenanceBackfill: new DefectProvenanceBackfillService(store, repoId),
     assignment: new MissionAssignmentService(store),
     nel: new MissionNelService(store),
   };

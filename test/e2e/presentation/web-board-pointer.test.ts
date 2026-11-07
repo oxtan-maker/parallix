@@ -7,6 +7,7 @@ import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import type { Locator, Page } from 'playwright-core';
 import type { HistoryOperation, HistoryOverview, HistoryPage } from '../../../src/interfaces/web/history-transport-types.js';
 import { compactPointerSnapshot, pointerBoard, pointerSnapshot } from '../../fixtures/web-pointer-board.js';
+import { flowReferenceProjection } from '../../fixtures/flow-reference.js';
 
 async function clickAt(control: Locator) {
   await control.scrollIntoViewIfNeeded();
@@ -38,6 +39,49 @@ test('pending current-work commands wait for the response before the next coordi
     await waitForCommands(page);
     assert.deepEqual(requests.map((request) => (request as { kind: string }).kind), ['review:submit', 'integrate:merge']);
   } finally { fixture.release(); await fixture.close(); }
+});
+
+test('Mission Flow controls keep one cohort and remain keyboard-operable (TASK-2836)', { timeout: 3_500 }, async context => {
+  const fixture = await pointerBoard();
+  context.after(fixture.close);
+  const { page } = fixture;
+  try {
+    await page.setViewportSize({ width: 1288, height: 900 });
+    await fixture.render(toWebBoardSnapshot(flowReferenceProjection()));
+    const flowNav = page.getByRole('button', { name: 'Flow', exact: true });
+    await flowNav.focus();
+    await page.keyboard.press('Enter');
+    await page.locator('[data-flow-view]').waitFor();
+    assert.equal(await page.locator('[data-flow-region="graph"]').count(), 1);
+    assert.match(await page.getByRole('region', { name: 'Mission flow' }).innerText(), /24 missions landed/);
+
+    const claude = page.getByRole('button', { name: 'claude', exact: true });
+    await claude.focus();
+    await page.keyboard.press('Space');
+    assert.equal(await claude.getAttribute('aria-pressed'), 'true');
+    assert.match(await page.getByRole('region', { name: 'Mission flow' }).innerText(), /8 missions landed/);
+    assert.equal(await page.locator('[data-flow-region="graph"]').count(), 1, 'filter replaces rather than stacks a cohort');
+
+    const compare = page.getByRole('button', { name: 'Compare: previous week' });
+    await compare.click();
+    assert.equal(await compare.getAttribute('aria-pressed'), 'true');
+    assert.match(await page.getByRole('region', { name: 'Mission flow' }).innerText(), /7 missions landed/);
+
+    const rows = page.locator('[data-flow-time-row]');
+    assert.equal(await rows.first().getAttribute('data-flow-time-row'), 'workflow-admission:Agent B');
+    const longest = page.getByRole('button', { name: 'Longest first' });
+    await longest.focus();
+    await page.keyboard.press('Enter');
+    assert.equal(await longest.getAttribute('aria-pressed'), 'true');
+    assert.equal(await rows.first().getAttribute('data-flow-time-row'), 'human-review:human');
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), 'Longest first');
+
+    const board = page.getByRole('button', { name: 'Board', exact: true });
+    await board.focus();
+    await page.keyboard.press('Enter');
+    await page.locator('[data-flow-view]').waitFor({ state: 'detached' });
+    assert.ok(await page.locator('[data-board-card]').count() > 0, 'the unaffected Board view remains mounted from the same snapshot');
+  } finally { await fixture.close(); }
 });
 
 async function clickCommand(control: Locator) {

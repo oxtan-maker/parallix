@@ -74,6 +74,11 @@ export interface StartAgentOptions {
    */
   pinnedAgent?: boolean;
   /**
+   * Attempt the explicit `agent` first, then retain the normal bounded fallback
+   * path. Review uses this contract; it never grants mutating ownership.
+   */
+  preferredAgent?: boolean;
+  /**
    * Task-2513 explicit consent: allow a mutating launch to run unsandboxed when
    * Bubblewrap is unavailable and the family exposes no native sandbox. Explicit
    * by contract — defaults false, never implied by a fallback or default setting.

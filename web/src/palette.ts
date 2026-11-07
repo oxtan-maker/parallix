@@ -200,3 +200,65 @@ export const DANGER = {
   controlEdge: '#a83c3c',
   controlText: '#f0a0a0',
 } as const;
+
+/**
+ * The Mission flow surface, transcribed from the Mission flow reference
+ * (TASK-2836). Flow is its own page with a flatter, darker treatment than the
+ * board, so it names its surfaces here instead of re-picking board tokens.
+ * Each accent is an actor: amber implementation, cyan Parallix, purple agent
+ * review, red the human, blue landed work, blue-grey rebases and magenta the
+ * px lead (the approved adaptation, which the reference predates). Hues carry
+ * the actor, never success. The one green, `rise`, is the reference's
+ * throughput-increase mark; it is not the board's reserved action green.
+ */
+export const FLOW = {
+  header: '#0a0c0f',
+  page: '#0d0f12',
+  surface: '#13161a',
+  surfaceEdge: '#16191e',
+  band: '#171a1f',
+  laneRule: '#1b1f25',
+  node: '#1d2128',
+  nodeEdge: '#23272f',
+  landedNode: '#13202e',
+  pressed: '#23272e',
+  controlEdge: '#1e2228',
+  pill: '#e6e8eb',
+  pillText: '#0a0c0f',
+  bright: '#f2f4f6',
+  text: '#e6e8eb',
+  control: '#a7aeb8',
+  muted: '#8f96a0',
+  label: '#88909a',
+  /** Earliest-lane accent; lifted minimally from the reference to clear 3:1 on node surfaces. */
+  refine: '#646c78',
+  refineText: '#a5abb5',
+  flow: '#6b727c',
+  flowLabel: '#c9ced5',
+  amber: '#e0b341',
+  amberText: '#e8c46a',
+  cyan: '#4fb3c8',
+  cyanText: '#7fd3e6',
+  purple: '#b58ae0',
+  purpleText: '#c9a8ea',
+  red: '#f2775f',
+  redStripe: '#8a4536',
+  redText: '#f59a87',
+  rebase: '#8fa8cc',
+  blue: '#4f8fd6',
+  blueText: '#a7c4e4',
+  rise: '#6fcf97',
+  lead: '#e58fc0',
+  leadText: '#eeaed3',
+} as const;
+
+/** Mission flow type: the monospace body face at the reference's sizes (the 7px-advance meta step). */
+export const FLOW_TYPE = {
+  wordmark: 15,
+  title: 20,
+  figure: 22,
+  heading: 13,
+  body: 12,
+  meta: 11.67,
+  micro: 10,
+} as const;

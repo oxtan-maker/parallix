@@ -20,6 +20,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
+import { detectLimitHit, formatBlockUntil, ceilToNextHour } from '../../../../src/application/services/agent-limit.js';
 const codexModule = mockModule<typeof import('../../../../src/adapters/agents/codex.js')>('../../../../src/adapters/agents/codex.js', import.meta.url);
 await installModuleMocks();
 
@@ -537,4 +538,66 @@ test('large repair prompts use retained stdin without exceeding argv limits and 
     codexModule.__setSpawnAndTeeForTest(null);
     fs.rmSync(worktree, { recursive: true, force: true });
   }
+});
+
+describe('Codex rollout quota identity', () => {
+  // TASK-2841: the Codex launcher supplies its own typed quota identity from the rollout.
+  // Retained TASK-2834 run execute-codex-a1-mw1yv2xc: Codex 0.166 records the terminal
+  // usage-limit identity and the advertised reset in the rollout it writes, not in stdout.
+  const quotaStopped = new Date('2026-11-04T10:30:45.289Z');
+  const retainedTokenCount = { type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 3990000, output_tokens: 14977, total_tokens: 4004977 } }, rate_limits: { limit_id: 'codex', primary: { used_percent: 100.0, window_minutes: 10080, resets_at: 1793804950 }, secondary: null } } };
+  const usageLimitComplete = { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-2834', last_agent_message: null, error: { message: 'You’ve hit your usage limit. Try again at 4:09 PM.', codex_error_info: 'usage_limit_exceeded' } } };
+  const processFailed = { version: 1, code: 'process-failed', source: 'process', context: { exitCode: 1 } } as const;
+
+  async function launchWritingRollout(events: unknown[]) {
+    const worktree = registeredMkdtemp('task-2841-codex-');
+    const operatorHome = registeredMkdtemp('task-2841-operator-');
+    codexModule.__setSpawnAndTeeForTest(async () => {
+      const sessions = path.join(codexHomeRoot(worktree), '.codex', 'sessions', '2026', '11', '04');
+      fs.mkdirSync(sessions, { recursive: true });
+      fs.writeFileSync(path.join(sessions, 'rollout-2834.jsonl'), events.map(event => JSON.stringify(event)).join('\n') + '\n');
+      return { status: 1, signal: null, stdout: '', stderr: 'ERROR: usage limit\n', error: null, failureReason: processFailed };
+    });
+    try {
+      return await codexModule.startCodexDraftAgent({ configuration: resolveConfiguration({ HOME: operatorHome }), prompt: 'Execute.', worktree }).resultPromise;
+    } finally {
+      codexModule.__setSpawnAndTeeForTest(null);
+      fs.rmSync(worktree, { recursive: true, force: true });
+      fs.rmSync(operatorHome, { recursive: true, force: true });
+    }
+  }
+  const { codexHomeRoot } = codexModule;
+  const blockAt = (result: { failureReason?: unknown; status?: number | null }) => detectLimitHit({ agent: 'codex', status: result.status, failureReason: result.failureReason, now: quotaStopped });
+
+  test('retained TASK-2834 usage-limit rollout yields a provider agent-quota reason that blocks until the advertised reset', async () => {
+    const result = await launchWritingRollout([
+      { type: 'session_meta', payload: { id: 'sess-2834', model_provider: 'openai' } }, retainedTokenCount, usageLimitComplete,
+    ]);
+    assert.deepEqual(result.failureReason, { version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_exceeded', resetAt: '2026-11-04T15:09:10.000Z' } });
+    assert.deepEqual(blockAt(result), { until: formatBlockUntil(ceilToNextHour(new Date(1793804950 * 1000))), source: 'structured', reason: 'typed: agent-quota' });
+  });
+
+  test('usage-limit rollout without a parseable primary reset keeps the one hour fallback block', async () => {
+    const fallback = formatBlockUntil(ceilToNextHour(new Date(quotaStopped.getTime() + 3600000)));
+    for (const primary of [undefined, null, { used_percent: 100 }, { used_percent: 100, resets_at: '4:09 PM' }, { used_percent: 100, resets_at: Number.NaN }]) {
+      const tokenCount = { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, ...(primary === undefined ? {} : { rate_limits: { primary } }) } };
+      // The newest token_count is the rate-limit snapshot: an earlier advertised reset is stale once it is gone.
+      for (const earlier of [[], [retainedTokenCount]]) {
+        const result = await launchWritingRollout([...earlier, tokenCount, usageLimitComplete]);
+        const label = JSON.stringify({ primary, afterEarlierReset: earlier.length > 0 });
+        assert.deepEqual(result.failureReason, { version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_exceeded' } }, label);
+        assert.deepEqual(blockAt(result), { until: fallback, source: 'fallback', reason: 'typed: agent-quota' }, label);
+      }
+    }
+  });
+
+  test('unknown or malformed rollout terminal errors keep the fail-closed process-failed reason', async () => {
+    for (const error of [{ codex_error_info: 'server_overloaded' }, { codex_error_info: 42 }, { message: 'usage limit' }, 'usage_limit_exceeded']) {
+      const result = await launchWritingRollout([retainedTokenCount, { type: 'event_msg', payload: { type: 'task_complete', error } }]);
+      assert.deepEqual(result.failureReason, processFailed, JSON.stringify(error));
+      assert.equal(blockAt(result), null);
+    }
+    const recovered = await launchWritingRollout([retainedTokenCount, usageLimitComplete, { type: 'event_msg', payload: { type: 'task_complete', error: null } }]);
+    assert.deepEqual(recovered.failureReason, processFailed, 'a later successful turn supersedes the earlier terminal error');
+  });
 });
