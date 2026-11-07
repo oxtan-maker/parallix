@@ -1,8 +1,7 @@
 /** Gate outcomes are ordered; a plan or validated skip never claims execution. */
 export function integrationGateDisposition(facts: {
-  dryRun: boolean; skippedAll: boolean; skipped?: boolean; required: boolean; ok: boolean; cancelled?: boolean;
-}): 'plan' | 'validated' | 'mandatory-missing' | 'unconfigured' | 'passed' | 'cancelled' | 'recover' {
-  if (facts.dryRun) { return 'plan'; }
+  skippedAll: boolean; skipped?: boolean; required: boolean; ok: boolean; cancelled?: boolean;
+}): 'validated' | 'mandatory-missing' | 'unconfigured' | 'passed' | 'cancelled' | 'recover' {
   if (facts.skippedAll) { return 'validated'; }
   if (facts.skipped) { return facts.required ? 'mandatory-missing' : 'unconfigured'; }
   if (facts.ok) { return 'passed'; }
@@ -16,7 +15,7 @@ export function integrationRepairRoute(route: string, reReviewAvailable: boolean
 }
 
 export function integrationRepairMustReactivate(route: string, status: string): boolean {
-  return route !== 'fixed' && status === 'integration';
+  return route !== 'fixed' && route !== 'human-only' && status === 'integration';
 }
 
 export function repairedRevisionReviewEligible(invalidated: boolean, reviewDebt: boolean): boolean { return invalidated || reviewDebt; }

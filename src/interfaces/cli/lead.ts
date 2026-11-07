@@ -122,8 +122,8 @@ async function runDryRun(
  * (`--budget`, 2 by default); a failure that survives them is escalated with
  * what was observed.
  *
- * An item that asks for integration is left on the board: the supervisor never
- * integrates anything.
+ * An item that asks for integration is left on the board for human landing.
+ * Lead may execute its public non-landing dry-run when idle capacity permits.
  *
  * Without `--once` the run keeps watching, polling every `--poll` seconds,
  * until the operator stops it; `--once` takes a single pass and exits.

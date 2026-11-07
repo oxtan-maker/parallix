@@ -98,9 +98,13 @@ export interface SupervisorPort {
   readonly liveness: (_missionId: string) => Promise<MissionLiveness>;
   /** Run the command the attention item advertises, through its existing use case. */
   readonly runAction: (_missionId: string, _action: AttentionAction, _observation?: AttentionObservation, _signal?: AbortSignal) => Promise<void>;
+  /** Read-only admission facts for opportunistic integration pre-validation. */
+  readonly observeIntegrationPrevalidation?: (_missionId: string) => Promise<IntegrationPrevalidationObservation>;
+  /** Execute only the public non-landing integrate dry-run action. */
+  readonly runIntegrationDryRun?: (_missionId: string, _signal?: AbortSignal) => Promise<void>;
   /**
-   * Claim the mission for recovery across local supervisor runs. Returns the
-   * release, or null when another run holds it.
+   * Claim the mission for exclusive supervised work across local lead runs.
+   * Returns the release, or null when another run holds it.
    */
   readonly claimRecovery: (_missionId: string) => Promise<(() => Promise<void>) | null>;
   /** Run a fresh agent context in the mission worktree; returns what it reported. */
@@ -114,6 +118,20 @@ export interface SupervisorPort {
    * process alive while it runs.
    */
   readonly wait: (_milliseconds: number) => Poll;
+}
+
+export interface IntegrationPrevalidationObservation {
+  readonly currentSuccessfulRun: boolean;
+  /** Whole-machine utilization in [0, 1], or null when it cannot be measured. */
+  readonly cpuUtilization: number | null;
+}
+
+export function integrationPrevalidationDecision(observation: IntegrationPrevalidationObservation):
+  'already-validated' | 'cpu-unavailable' | 'cpu-busy' | 'run' {
+  if (observation.currentSuccessfulRun) { return 'already-validated'; }
+  if (observation.cpuUtilization === null || !Number.isFinite(observation.cpuUtilization)
+    || observation.cpuUtilization < 0 || observation.cpuUtilization > 1) { return 'cpu-unavailable'; }
+  return observation.cpuUtilization < 0.30 ? 'run' : 'cpu-busy';
 }
 
 /** What the execution activity projection says about one mission right now. */

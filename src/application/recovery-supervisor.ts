@@ -27,7 +27,7 @@ import type { OperatorJudgmentResult } from './operator-judgment.js';
  * Per attention item, per pass:
  *
  *  1. an item the human owns — anything that resolves to `px integrate` — is
- *     left alone. The supervisor never integrates anything;
+ *     left for landing; idle capacity may run its non-landing dry-run first;
  *  2. the action the item advertises is run, once per distinct state;
  *  3. when that does not clear the item, a fresh recovery agent runs in the
  *     mission worktree, under a budget counted per failure;
@@ -41,6 +41,8 @@ import type { OperatorJudgmentResult } from './operator-judgment.js';
 
 export * from './recovery-contract.js';
 import { attentionDetail, failureFingerprint, recoveryInstruction, isLeadLane, HUMAN_ONLY_ACTIONS, ACTION_ATTEMPTS, RECOVERY_BUDGET, DEFAULT_POLL_MS, BOARD_READ_ATTEMPTS, type AttentionObservation, type SupervisorPort, type SupervisionOutcome, type MissionSupervision, type RecoveryRequest } from './recovery-contract.js';
+import { prevalidateIntegration } from './integration-prevalidation.js';
+import { assertSupervisionRunning, interruptiblePause, supervisionStopped } from './recovery-supervision-interruption.js';
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -93,6 +95,18 @@ function report(run: MissionRun): MissionSupervision {
     summary: run.outcome ? run.summary : `${run.missionId} is still on the board's attention queue.`,
   };
 }
+
+async function settleHumanAction(port: SupervisorPort, run: MissionRun,
+  observed: AttentionObservation, action: NonNullable<AttentionObservation['action']>,
+  signal?: AbortSignal): Promise<PassResult> {
+  const step = await prevalidateIntegration(port, run.missionId, observed.lane, signal);
+  if (step) { run.steps.push(step); }
+  return settle(
+    run,
+    'human',
+    `${run.missionId} is waiting for you: ${action.display}. The supervisor never integrates.`,
+  );
+}
 /**
  * One pass over one attention item: press its action, or recover the mission.
  *
@@ -115,13 +129,10 @@ async function superviseItem(
   if (!action) { return settle(run, 'human', `${run.missionId} requires operator attention: ${attentionDetail(observed.reason)}`); }
   run.steps.push(`${attentionDetail(observed.reason)} — board offers ${action.display}`);
 
-  // 1. The board is asking the human to land this. The supervisor never does.
+  // 1. The board is asking the human to land this. Lead may pre-validate the
+  // candidate, but it never dispatches the advertised landing action.
   if (HUMAN_ONLY_ACTIONS.has(action.kind)) {
-    return settle(
-      run,
-      'human',
-      `${run.missionId} is waiting for you: ${action.display}. The supervisor never integrates.`,
-    );
+    return settleHumanAction(port, run, observed, action, signal);
   }
 
   // 2. Press what the board advertises — the same command the operator would,
@@ -182,6 +193,7 @@ async function superviseItem(
   //    an item that is gone is the only proof that it cleared.
   return 'acted';
 }
+
 /** Press the board's advertised lifecycle command once, after a fresh liveness check. */
 async function pressAdvertisedAction(
   port: SupervisorPort,
@@ -477,18 +489,4 @@ async function wakeFleet(
   } finally {
     poll.cancel();
   }
-}
-/** Wake a polling caller promptly without retaining a signal listener. */
-async function interruptiblePause(wait: Promise<unknown>, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) { return; }
-  let wake: () => void = () => {};
-  const interrupted = new Promise<void>(resolve => { wake = resolve; });
-  signal?.addEventListener('abort', wake, { once: true });
-  try { await Promise.race([wait, interrupted]); }
-  finally { signal?.removeEventListener('abort', wake); }
-}
-
-function supervisionStopped(signal?: AbortSignal): boolean { return signal?.aborted === true; }
-function assertSupervisionRunning(signal?: AbortSignal): void {
-  if (supervisionStopped(signal)) { throw new Error('Supervision interrupted'); }
 }

@@ -39,6 +39,7 @@
     "unit/adapters/cli/commands/stats-report.test.ts",
     "unit/adapters/filesystem/mission-utils-graphify.test.ts",
     "unit/adapters/github/github-pr.test.ts",
+    "unit/adapters/process/machine-cpu-utilization.test.ts",
     "unit/adapters/review/review-artifact-dispatcher.test.ts",
     "unit/adapters/review/review-static-evidence.test.ts",
     "unit/adapters/sonarqube-s2871-sorts.test.ts",

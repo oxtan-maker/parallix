@@ -71,6 +71,7 @@ interface Scenario {
   /** Route the injected routing seam returns for a red gate. */
   route: 'fixed' | 'exhausted' | 'mainline' | 'limit-reached' | 'stranded';
   repairs?: number;
+  dryRun?: boolean;
 }
 
 async function runIntegrate(scenario: Scenario) {
@@ -86,6 +87,9 @@ async function runIntegrate(scenario: Scenario) {
   if (scenario.repairs) {
     await services.store.save({ ...services.store.mission(), checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', rawFilename: undefined,
       firstLine: '', goalCheck: [{ criterion: 'repair', evidence: 'recorded' }], nextActionText: 'review' }] });
+    if (scenario.dryRun) {
+      await services.store.save({ ...services.store.mission(), status: 'integration', rawStatus: 'integration', closedAt: null } as Mission);
+    }
   }
   const launches: string[] = [];
   const seamLaunches: string[] = [];
@@ -185,7 +189,7 @@ async function runIntegrate(scenario: Scenario) {
 
   let error: Error | undefined;
   try {
-    await integrate.default([SLUG], {
+    await integrate.default([SLUG, ...(scenario.dryRun ? ['--dry-run'] : [])], {
       missionServicesFn: async () => services,
       startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } }; },
       transitionTaskFn: async () => { launches.push('transitioned'); return true; },
@@ -255,5 +259,15 @@ test('TASK-2620: after repair and re-approval integration stops in the integrati
   assert.equal(result.reviews, 1);
   assert.equal(result.mission.status, 'integration', 'the re-approved mission waits for a human to integrate');
   assert.ok(result.mission.review!.rounds[0].decision?.kind === 'approved' && result.mission.review!.rounds[0].decision.revocation);
+  assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
+});
+
+test('PX-0031: dry-run repair re-verifies and re-reviews a changed candidate without landing', async () => {
+  const result = await runIntegrate({ route: 'fixed', repairs: 1, dryRun: true });
+  assert.equal(result.exitCode, 0, result.logs.join('\n'));
+  assert.equal(result.captured.length, 1, 'the failed dry-run enters retained integration repair');
+  assert.equal(result.gateRuns, 1, 'the repair verifier owns the full-plan rerun before review');
+  assert.equal(result.reviews, 1, 'a changed repair receives fresh independent review');
+  assert.equal(result.mission.status, 'integration', 'the repaired candidate returns to the human integration lane');
   assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
 });

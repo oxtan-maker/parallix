@@ -30,6 +30,17 @@ async function completeRepairReview({ request, ports, configured, checkout, rout
   throw abortWith(landing, `The approval for ${slug}'s superseded revision could not be retracted. Aborting before merge.`);
 }
 
+async function stopNonContinuingRepair({ request, ports, route }: GateRepairCompletion): Promise<void> {
+  const { slug, seams } = request;
+  if (route.route === 'retained') {
+    await seams.transitionTaskFn(slug, 'ready-for-integration');
+    throw new IntegrationStopsForHuman(`Original approval retained for ${slug}; review the PR and run px integrate ${slug} to land.`);
+  }
+  if (route.route === 'human-only') {
+    throw abortWith(ports.landing, `Integration gate repair for ${slug} requires human action: ${route.diagnostic ?? 'the failure is classified as human-only'}. The failed gate evidence was retained and no repair agent was launched.`);
+  }
+}
+
 export async function completeGateRepairRoute(completion: GateRepairCompletion): Promise<string> {
   const { request, ports, configured, route, reactivateMission } = completion;
   const { slug, missionServices, seams } = request;
@@ -39,10 +50,7 @@ export async function completeGateRepairRoute(completion: GateRepairCompletion):
   // `transitionToImplementer`; retain the same fail-closed outcome for
   // exhausted transient retries and injected routing boundaries that did
   // not launch a repair.
-  if (route.route === 'retained') {
-    await seams.transitionTaskFn(slug, 'ready-for-integration');
-    throw new IntegrationStopsForHuman(`Original approval retained for ${slug}; review the PR and run px integrate ${slug} to land.`);
-  }
+  await stopNonContinuingRepair(completion);
   const repairRoute = integrationRepairRoute(route.route, Boolean(seams.reReviewFn));
   if (repairRoute !== 'resume' && missionServices?.store) {
     const failedMission = await missionServices.store.load(missionId(slug));

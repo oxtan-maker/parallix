@@ -18,7 +18,7 @@ import { abortWith } from './support.js';
 
 interface RepairExecution {
   slug: string; services: IntegrationMissionServices; ports: IntegrateWorkflowPorts;
-  verification: Pick<GateStepRequest, 'realAgent' | 'realAgentModel'>;
+  verification: Pick<GateStepRequest, 'realAgent' | 'realAgentModel'> & { dryRun?: boolean };
   pending: ReviewRound; worktree: string; evidence: IntegrationApprovalEvidencePort; revision: string; baseline: string;
 }
 
@@ -76,7 +76,12 @@ async function resolveRepairExecution(slug: string, services: IntegrationMission
   const baseWorktree = ports.missionPaths.resolveBaseWorktree(slug, { rootDir: worktree });
   const rebase = createIntegrationRebase(ports);
   const target = { baseWorktree, baseBranch: base, git: ports.git.git };
-  if (rebase.predictIntegrationRebase(slug, target).needed) {
+  const prediction = rebase.predictIntegrationRebase(slug, target);
+  if (prediction.needed && verification.dryRun) {
+    const conflict = prediction.wouldConflict ? ' and would conflict' : '';
+    throw abortWith(ports.landing, `Integration repair requires a rebase onto ${base}${conflict}; dry-run did not mutate the mission branch. Run px integrate ${slug} to resume repair and rebase before verification.`);
+  }
+  if (prediction.needed) {
     await rebase.runIntegrationRebase(slug, { ...target, missionServicesFn: async () => services });
   }
   const tree = ports.gates.captureFinalIntegrationTree(worktree);
@@ -108,7 +113,8 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
   const gates = ports.gates.loadPhaseGates(worktree, 'preIntegration');
   if (!gates.length) { throw abortWith(ports.landing, 'No integration evidence can establish approval retention.'); }
   const passed = await verifyRestartedRepair({ slug, services, worktree, revision, gates, head: () => committedRepairHead(execution),
-    run: () => ports.gates.runPhaseGates('integration', { slug, checkoutPath: worktree, gates, ...execution.verification }) });
+    run: () => ports.gates.runPhaseGates('integration', { slug, checkoutPath: worktree, gates,
+      realAgent: execution.verification.realAgent, realAgentModel: execution.verification.realAgentModel }) });
   if (committedRepairHead(execution) !== revision) { throw abortWith(ports.landing, 'Integration repair changed during verification.'); }
   await services.operationalHistory?.recordIntegrationValidation({ missionId: slug, sha: revision,
     hooks: gates.map(g => g.key), baseline, ...(!passed ? { failed: true } : {}) });

@@ -221,6 +221,14 @@ before recovery continues. Human attention is required for an unresolved product
 decision or conflict with the locked mission or gates that the investigation
 cannot resolve from the recorded authority and repository evidence.
 
+`px integrate <slug> --dry-run` uses this same retained repair authority when a
+configured integration gate fails. The retained record carries the exact failed
+command and bounded diagnostics; repair must rerun that check and the complete
+configured integration plan. A changed candidate invalidates the earlier
+approval and resumes independent review. Infrastructure, state-machine and
+unresolved product-decision classifications remain human-only and launch no
+repair agent.
+
 ## Claude credentials across missions
 
 A `claude` login stores an OAuth access token that expires after about eight
@@ -504,6 +512,18 @@ Other repair review routes retain their configured classification policy. All
 approvals still require the configured integration gates and provider protections. Retained and newly reviewed approvals stop in the integration lane;
 a human reads the PR and runs `px integrate <slug>` to land. Status shows the
 retention assessment and validation citation alongside the original judgment.
+While the mission waits there, `px lead` may pre-validate it by invoking only
+`px integrate <slug> --dry-run` when no current successful integration run
+covers the candidate and measured machine CPU is below 30%. The dry-run records
+the same gate execution receipt as a live integration gate pass and records
+reusable exact-tree verification evidence when integration coverage is configured,
+but performs no landing action. A repairable failure enters retained repair and,
+after green re-verification and any required fresh review, returns to the
+integration lane for the human decision. A mission claim and liveness recheck
+immediately before dispatch prevent overlapping supervisor work. Lead
+declines at exactly 30%, above it, when CPU is unavailable, or when current
+evidence already covers the candidate; the human integration decision remains
+pending in every case.
 If no original approval round is recorded, retention stays blocked; run
 `px review <slug>` to establish a fresh review before integration.
 Historical mechanical-restoration provenance remains readable independently of

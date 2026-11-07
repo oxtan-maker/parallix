@@ -839,21 +839,16 @@ describe("Integration gate rebound —", () => {
     assert.match(prompt, /review-identity-placeholder/, "the gate output survives into the review preparation");
   });
 
-  // ── Routing: the four operator-facing outcomes ──────────────────────────────
-
   interface Harness {
     launches: number;
     transitions: string[];
     messages: string[];
-    /** Mission worktree owned by the case; the rebound retains recovery evidence under it. */
     root: string;
   }
-
   const harnessRoots: string[] = [];
   afterEach(() => {
     for (const root of harnessRoots.splice(0)) { fs.rmSync(root, { recursive: true, force: true }); }
   });
-
   function routeArgs(over: Partial<IntegrationGateRouteOptions> & { rerunOk?: boolean }, harness: Harness): IntegrationGateRouteOptions {
     const { rerunOk = true, ...rest } = over;
     return {
@@ -880,13 +875,11 @@ describe("Integration gate rebound —", () => {
       ...rest,
     } as IntegrationGateRouteOptions;
   }
-
   function harness(): Harness {
     const root = mkdtemp('parallix-rebound-route-');
     harnessRoots.push(root);
     return { launches: 0, transitions: [], messages: [], root };
   }
-
   test('TASK-2492: a mission regression inside budget re-runs the gates and reports fixed', async () => {
     const h = harness();
     const route = await routeIntegrationGateFailure(routeArgs({ rerunOk: true }, h));
@@ -894,7 +887,6 @@ describe("Integration gate rebound —", () => {
     assert.equal(h.launches, 1, 'exactly one implementer relaunch');
     assert.deepEqual(h.transitions, [SLUG], 'the task is transitioned back to the implementer exactly once');
   });
-
   test('TASK-2663: a CPU-budget failure echoing a passing forbidden title reaches the implementer repair instead of human-only', async () => {
     const h = harness();
     const route = await routeIntegrationGateFailure(routeArgs({
@@ -912,7 +904,6 @@ describe("Integration gate rebound —", () => {
     assert.equal(h.launches, 1, 'the injected startAgent launched one implementer repair');
     assert.doesNotMatch(h.messages.join('\n'), /Human intervention required/);
   });
-
   test('TASK-2492: a bounce whose re-run stays red reports exhausted after the per-invocation budget', async () => {
     const h = harness();
     const route = await routeIntegrationGateFailure(routeArgs({ rerunOk: false }, h));
@@ -921,7 +912,16 @@ describe("Integration gate rebound —", () => {
     assert.match(h.messages.join('\n'), /bounded budget/i);
     assert.match(h.messages.join('\n'), /px review .*/, 'the exhaustion names its human continuation');
   });
-
+  test('PX-0031: a human-only integration failure retains diagnostics and launches no repair agent', async () => {
+    const h = harness();
+    const route = await routeIntegrationGateFailure(routeArgs({
+      failedGate: failedGate({ failureReason: { version: 1, code: 'state-machine' }, stdout: '', stderr: 'transition not allowed for this mission' }),
+    }, h));
+    assert.ok(route.route === 'human-only');
+    assert.deepEqual([route.rebounds, h.launches, h.transitions.length], [0, 0, 0]);
+    assert.match('diagnostic' in route ? route.diagnostic : '', /transition not allowed/);
+    assert.match(h.messages.join('\n'), /No repair agent was launched/);
+  });
   test('TASK-2492: a repair left uncommitted fails the re-run instead of being reported as fixed', async () => {
     const h = harness();
     const route = await routeIntegrationGateFailure(routeArgs({

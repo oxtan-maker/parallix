@@ -14,6 +14,12 @@ const worktrees = mockModule<typeof import('../../../src/adapters/git/worktree.j
   '../../../src/adapters/git/worktree.js', import.meta.url);
 const gitModule = mockModule<typeof import('../../../src/adapters/git/git.js')>(
   '../../../src/adapters/git/git.js', import.meta.url);
+const integrationEvidence = mockModule<typeof import('../../../src/adapters/verification/integration-verification-proof.js')>(
+  '../../../src/adapters/verification/integration-verification-proof.js', import.meta.url);
+const machineCpu = mockModule<typeof import('../../../src/adapters/process/machine-cpu-utilization.js')>(
+  '../../../src/adapters/process/machine-cpu-utilization.js', import.meta.url);
+const repositoryGates = mockModule<typeof import('../../../src/adapters/config/repository-gates.js')>(
+  '../../../src/adapters/config/repository-gates.js', import.meta.url);
 await installModuleMocks();
 const { createLeadSupervisorPort } = await import('../../../src/composition/lead-supervisor.js');
 type Context = Parameters<typeof createLeadSupervisorPort>[2];
@@ -92,6 +98,33 @@ test('lead refuses liveness when the activity authority is unavailable (TASK-282
   } as Context);
   await assert.rejects(() => port.liveness('task-unreadable'), /operator database is unavailable/);
   assert.equal(cardReads, 0, 'missing authority cannot become a successful idle observation');
+});
+
+test('lead observes current integration evidence and invokes only public integrate dry-run below threshold (PX-0031)', async t => {
+  t.after(() => mock.restoreAll());
+  mock.method(worktrees, 'resolveWorktree', () => '/target');
+  let current = false;
+  let cpuReads = 0;
+  const gates = [{ key: 'unit', command: 'npm test', order: 0 }];
+  mock.method(repositoryGates, 'loadPhaseGates', () => gates);
+  mock.method(integrationEvidence, 'readIntegrationGateRun', () => current ? {
+    current: true, status: 'passed', attempt: null, startedAt: '2026-11-06T00:00:00Z', finishedAt: '2026-11-06T00:00:01Z',
+    revision: 'a'.repeat(40), gates, outcomes: [{ key: 'unit', command: 'npm test', exitCode: 0 }],
+  } : null);
+  mock.method(machineCpu, 'observeMachineCpuUtilization', async () => { cpuReads++; return 0.29; });
+  const invocations: unknown[] = [];
+  const services = { presentationCapabilities: { boardProjection: {} } } as unknown as ProductionApplicationServices;
+  const port = createLeadSupervisorPort(services, new Set(), {
+    rootDir: '/lead', active: async () => {}, registry: {}, configuration: resolveConfiguration({}),
+    runPublicCli: async (args, options) => { invocations.push({ args, cwd: options?.baseCwd, operatorInvocation: options?.operatorInvocation }); return 0; },
+    scope: {} as Context['scope'], launchRecovery: async () => '',
+  });
+  assert.deepEqual(await port.observeIntegrationPrevalidation!('task-ready'), { currentSuccessfulRun: false, cpuUtilization: 0.29 });
+  await port.runIntegrationDryRun!('task-ready');
+  assert.deepEqual(invocations, [{ args: ['integrate', 'task-ready', '--dry-run'], cwd: '/target', operatorInvocation: false }]);
+  current = true;
+  assert.deepEqual(await port.observeIntegrationPrevalidation!('task-ready'), { currentSuccessfulRun: true, cpuUtilization: null });
+  assert.equal(cpuReads, 1, 'current successful evidence bypasses CPU measurement and dry-run admission');
 });
 for (const diagnostic of ['blocking', 'gate-failed', 'stale-work'] as const) {
   test(`board ${diagnostic} review recovery forwards public review without deciding (TASK-2814)`, async t => {

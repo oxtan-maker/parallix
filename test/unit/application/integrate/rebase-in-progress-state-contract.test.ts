@@ -210,6 +210,49 @@ describe("integration rebase state", async () => {
     assert.equal(store.mission().review!.rounds[0].decision?.revision, 'approved-A');
   });
 
+  test('dry-run predicts a pending repair rebase without mutating the mission branch (PX-0031)', async () => {
+    let rebased = false, gateRuns = 0;
+    const output: string[] = [];
+    const previousLogger = setLogger({ log: line => { output.push(String(line)); }, error: line => { output.push(String(line)); } });
+    const open = pendingReview(SLUG, '2026-10-25T08:00:00Z');
+    const round = open.rounds[0];
+    const review = applyReviewerCommand(open,
+      { type: 'approve', revision: changeRevision('approved-A'), decidedAt: '2026-10-25T09:00:00Z', comment: null, source: { kind: 'local' } });
+    const active = decideMission(fixtureMission(SLUG, { status: 'integration', review, assignee: round.implementer }), {
+      type: 'rebound-to-active', agent: round.implementer, occurredAt: '2026-10-25T10:00:00Z', cause: { kind: 'integration-gate-failure', gate: 'unit' },
+    });
+    const store = inMemoryTransitionStore(active);
+    const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store) });
+    onRebase = () => { rebased = true; };
+    const defaults = stubIntegrateWorkflowPorts();
+    const ports = stubIntegrateWorkflowPorts({
+      process: { cwd: () => MISSION_WORKTREE },
+      landing: { createAbort: () => Object.assign(new Error('Integration aborted'), { name: 'IntegrationAbort' }) },
+      missionPaths: { ...defaults.missionPaths, resolveWorktree: () => MISSION_WORKTREE, resolveMissionBaseBranch: () => 'main',
+        resolveBaseWorktree: () => BASE_WORKTREE, missionBranchName: () => `mission/${SLUG}`, conventionalWorktreePath: () => MISSION_WORKTREE },
+      rebase: { createRebaseWorkflowPort: options => { options.exitFn(0); return rebaseWorkflowFixture(); } },
+      git: { ...defaults.git, git: args => {
+        if (args.includes('rev-parse')) { return { status: 0, stdout: args.at(-1) === 'main' ? 'new-base' : 'repair-head', stderr: '' }; }
+        if (args.includes('merge-base')) { return { status: 0, stdout: 'old-base', stderr: '' }; }
+        return { status: 0, stdout: '', stderr: '' };
+      } },
+      gates: { ...defaults.gates, approvalEvidence: () => ({ now: () => '2026-10-25T12:00:00Z',
+        samePatch: async () => false, validation: async () => null, reconcileHumanFeedback: async () => true }),
+        captureFinalIntegrationTree: () => ({ ok: true, commit: 'repair-head' }),
+        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { gateRuns++; return { ok: true }; } },
+    });
+    const seams = { ...integrationBounceSeams(), routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
+
+    try {
+      await assert.rejects(resumePendingIntegrationRepair(SLUG, services, ports, seams,
+        { realAgent: null, realAgentModel: null, dryRun: true }), { name: 'IntegrationAbort' });
+      assert.match(output.join('\n'), /requires a rebase onto main.*dry-run did not mutate/);
+      assert.equal(rebased, false, 'dry-run never invokes the mutating shared rebase owner');
+      assert.equal(gateRuns, 0, 'stale-base repair evidence is not verified before the required rebase');
+      assert.equal(store.mission().status, 'active', 'the pending repair remains available to a later landing integration');
+    } finally { setLogger(previousLogger); }
+  });
+
   test('integration rebase checks completion from rebase metadata, never a patch dump (TASK-2828.2)', async () => {
     mock.method(console, 'log', () => true);
     mock.method(console, 'error', () => true);

@@ -4,8 +4,7 @@ import assert from 'node:assert/strict';
 import { integrationGateDisposition, integrationRepairRoute, integrationRepairMustReactivate, repairedRevisionReviewEligible, repairCanResumeIntegration } from '../../../src/domain/integration-gate-policy.js';
 
 test('integration gate precedence and repaired-revision routing are pure (TASK-2668.07)', () => {
-  const facts = { dryRun: false, skippedAll: false, skipped: false, required: true, ok: false, cancelled: false } satisfies Partial<NonNullable<Parameters<typeof integrationGateDisposition>[0]>>;
-  assert.equal(integrationGateDisposition({ ...facts, dryRun: true, skippedAll: true }), 'plan');
+  const facts = { skippedAll: false, skipped: false, required: true, ok: false, cancelled: false } satisfies Partial<NonNullable<Parameters<typeof integrationGateDisposition>[0]>>;
   assert.equal(integrationGateDisposition({ ...facts, skippedAll: true, skipped: true }), 'validated');
   assert.equal(integrationGateDisposition({ ...facts, skipped: true, ok: true }), 'mandatory-missing');
   assert.equal(integrationGateDisposition({ ...facts, skipped: true, required: false }), 'unconfigured');

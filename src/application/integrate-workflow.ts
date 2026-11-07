@@ -254,7 +254,6 @@ class IntegrateWorkflow {
   }
 
   private async tryResumeIntegration(slug: string, request: IntegrateRequest, missionServices: IntegrationMissionServices, seams: IntegrateSeams): Promise<0 | null> {
-    const { dryRun } = request;
     // TASK-2517 CP-3: a landed-but-stranded mission short-circuits the whole run —
     // no rebase, no gates, no publish — and closes directly.
     if (request.recoverLanded) {
@@ -276,12 +275,10 @@ class IntegrateWorkflow {
       fmt.log.info(`Mission ${slug} already integrated as ${landed.slice(0, 12)}; no integration gates or merge rerun.`);
       return 0;
     }
-    if (!dryRun) {
-      await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, seams, request);
-      const repair = await missionServices.store.load(missionId(slug));
-      if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
-        return reviewBeforeIntegration(slug, this.dependencies.ports.process.cwd(), this.dependencies.ports.landing, seams.reReviewFn);
-      }
+    await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, seams, request);
+    const repair = await missionServices.store.load(missionId(slug));
+    if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
+      return reviewBeforeIntegration(slug, this.dependencies.ports.process.cwd(), this.dependencies.ports.landing, seams.reReviewFn);
     }
     return null;
   }

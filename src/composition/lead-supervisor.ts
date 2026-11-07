@@ -22,6 +22,7 @@ import { git } from '../adapters/git/git.js';
 
 import { type Command } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
+import { createLeadIntegrationPrevalidation } from './lead-integration-prevalidation.js';
 import { statusMissionTitle } from './status-board.js';
 
 import type { CliServiceScope } from './cli-service-scope.js';
@@ -130,6 +131,7 @@ export function createLeadSupervisorPort(
           { baseCwd: missionWorktree, log: fmt.log.plain, error: fmt.log.plainError, operatorInvocation: false });
       });
     },
+    ...createLeadIntegrationPrevalidation(context.configuration, run),
     claimRecovery: async (mission) => claimRecoveryLock(mission),
     wait: pollingPause,
     // A fresh agent context in the existing mission worktree. It is not the

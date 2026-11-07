@@ -49,8 +49,8 @@ import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.j
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 
-async function integrate(slug: string, worktree: string): Promise<number> {
-  return await run(['integrate', slug], {
+async function integrate(slug: string, worktree: string, args: string[] = []): Promise<number> {
+  return await run(['integrate', slug, ...args], {
     baseCwd: worktree,
     log: () => '',
     error: () => '',
@@ -146,7 +146,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   void SqliteDatabaseAdapter;
 });
 
-test('persisted integration repair restarts through CLI review and stops before gates or landing (TASK-2819)', async (t) => {
+test('persisted integration repair resumes through dry-run review and stops before gates or landing (TASK-2819, PX-0031)', async (t) => {
   const fixture = await openRepairFixture({ slug: 'task-2819', gateCommand: 'touch gate-ran.txt' });
   t.after(() => fixture.close());
   t.after(() => { setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null); });
@@ -193,7 +193,7 @@ test('persisted integration repair restarts through CLI review and stops before 
       return { status: 0, stdout: '', stderr: '', telemetry: { provider: 'fixture', cost_usd: 0.02 } };
     })(),
   }));
-  const code = await integrate(fixture.slug, fixture.worktree);
+  const code = await integrate(fixture.slug, fixture.worktree, ['--dry-run']);
   assert.equal(code, 0, output.join('\n'));
   const restarted = await fixture.load();
   assert.equal(reviews, 1);
@@ -201,7 +201,7 @@ test('persisted integration repair restarts through CLI review and stops before 
   assert.equal(reviewStatus(restarted.review!), 'approved');
   const decidedRevision = String(restarted.review!.rounds.at(-1)!.decision?.revision);
   fixture.git(fixture.worktree, ['merge-base', '--is-ancestor', repairedRevision, decidedRevision]);
-  assert.equal(fs.existsSync(path.join(fixture.worktree, 'gate-ran.txt')), false, 'restart stops before integration gates');
+  assert.equal(fs.existsSync(path.join(fixture.worktree, 'gate-ran.txt')), false, 'already-certified restart stops before a redundant integration gate run');
   assert.equal(fixture.git(fixture.repo, ['rev-parse', 'main']), baseHead, 'restart never lands the repair');
   assert.equal(fixture.git(fixture.worktree, ['status', '--porcelain']), '');
   assert.match(output.join('\n'), /re-reviewed and approved; stopping before integration/);

@@ -141,7 +141,7 @@ function beginIntegrationRun(root: string, gates: readonly Gate[], configuration
 }
 
 function finishIntegrationRun(pending: Pending, outcomes: readonly Outcome[], disposition: 'passed' | 'failed' | 'cancelled',
-  configuration?: ParallixConfiguration): void {
+  configuration?: ParallixConfiguration): boolean {
   const run: RunMeta = { ...pending.run, finishedAt: new Date().toISOString() };
   try {
     const current = pending.identity && pending.coverage
@@ -156,7 +156,7 @@ function finishIntegrationRun(pending: Pending, outcomes: readonly Outcome[], di
         status: 'passed', plan: pending.plan, checks: pending.coverage.checks,
         outcomes: outcomes.map(({ key, command, exitCode }) => ({ key, command, exitCode })), run };
       writeJson(pending.file, evidence, { mode: 0o600 });
-      return;
+      return true;
     }
     // A run that is not reusable success evidence still settles: its per-gate
     // outcomes are what the board reports, and an unsettled record is what it
@@ -165,7 +165,8 @@ function finishIntegrationRun(pending: Pending, outcomes: readonly Outcome[], di
       status: disposition, run, revision: pending.revision,
       gates: pending.gates.map(({ key, command }) => ({ key, command })),
       outcomes: outcomes.map(({ key, command, exitCode }) => ({ key, command, exitCode })) } satisfies RunRecord, { mode: 0o600 });
-  } catch { /* Evidence is optional; verification executes on a cache miss. */ }
+    return false;
+  } catch { return false; }
 }
 
 /** The executor's integration run observation for this checkout, if any. */

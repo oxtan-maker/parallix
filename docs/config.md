@@ -183,10 +183,14 @@ verification command and maps **every** check it performs to required
 The repository owner is responsible for complete, accurate coverage: gate names
 or arbitrary integration commands alone prove no relationship to `all`.
 Every configured integration gate must pass, with all named coverage gates
-present, against unchanged clean inputs. A successful partial run or dry run
-cannot establish this evidence. Review, handoff and `px verify all` report the
-integration evidence location and both the validated and covered revisions when
-reusing it.
+present, against unchanged clean inputs. A successful complete
+`px integrate <slug> --dry-run` can establish reusable evidence when
+`integrationCoverage` is configured. Without that optional mapping, the same
+complete green execution remains successful and visible as gate-run evidence,
+but cannot prove verification-command coverage or be reused by `px verify`.
+A partial, failed, cancelled or malformed run cannot establish success. Review,
+handoff and `px verify all` report the integration evidence location and both
+the validated and covered revisions when reusing it.
 
 Integration-backed reuse requires the same checkout, branch, resolved command,
 configuration, tracked substantive inputs and runtime/npm toolchain. A different
@@ -627,9 +631,14 @@ submitted. The Mission has already entered review. This operator-owned key and
 the `PARALLIX_PHASE=handoff` gate context retain their configured meaning.
 `preReview` gates run when a review is submitted with the `approve` outcome —
 that is, before the `review` → integration transition, not before the review
-itself. `preIntegration` gates run before the integration merge. Configuring
-one phase does not require configuring the others; unconfigured phases remain
-gated-off.
+itself. `preIntegration` gates run before the integration merge. They also
+execute for `px integrate <slug> --dry-run` against the finalized mission
+checkout, using the same runner and evidence identity while stopping before
+every landing effect. A repairable red gate enters the retained integration
+repair route and must rerun both the failed check and this complete configured
+plan; existing human-only classifications stop with their evidence and launch
+no agent. Configuring one phase does not require configuring the
+others; unconfigured phases remain gated-off.
 
 `requirePreIntegration` opts the repository into a fail-closed integration
 merge. It defaults to `false`, so an unconfigured repository completes the
@@ -637,7 +646,9 @@ integration path with no lifecycle gate. Set `"requirePreIntegration": true`
 to make an empty or missing `preIntegration` list abort the merge instead of
 proceeding — the equivalent of the historical mandatory-gate invariant. It is
 repository configuration, not hardcoded product policy: one repository can
-fail closed while another selects no gate at all.
+fail closed while another selects no gate at all. The same requirement applies
+to integration dry-runs, so a missing mandatory plan cannot be reported as a
+successful pre-validation.
 
 ## Workflow safeguards
 

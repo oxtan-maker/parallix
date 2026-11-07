@@ -164,10 +164,16 @@ export interface IntegrateRebasePort {
 
 export interface IntegrationGateRunResult {
   readonly ok: boolean;
+  readonly phase?: 'handoff' | 'review' | 'integration';
+  readonly gates?: readonly IntegrationGateDefinition[];
+  readonly executed?: number;
   readonly skipped?: boolean;
+  readonly dryRun?: boolean;
   readonly cancelled?: boolean;
   readonly error?: string | null;
   readonly failedGate?: IntegrationFailedGate | null;
+  readonly outcomes?: readonly IntegrationFailedGate[];
+  readonly proofReusable?: boolean;
 }
 
 export interface IntegrationGateRoute {
@@ -179,6 +185,8 @@ export interface IntegrationGateRoute {
   readonly repairedRevision?: string;
   /** The retraction outcome, named on the `revision-changed` route (TASK-2528). */
   readonly invalidation?: { readonly ok: boolean; readonly dismissed: readonly string[]; readonly errors: readonly string[] };
+  /** Actionable retained diagnostic when existing policy reserves the failure for a human. */
+  readonly diagnostic?: string;
 }
 
 export interface IntegrationGateFailureRequest {

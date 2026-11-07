@@ -7,7 +7,7 @@ import type { ParallixConfiguration } from './configuration.js';
 export interface IntegrationVerificationEvidencePort {
   start(_root: string, _gates: readonly { key: string; command: string }[]): {
     complete(_outcomes: readonly { key: string; command: string; exitCode: number | null }[],
-      _disposition: 'passed' | 'failed' | 'cancelled'): void;
+      _disposition: 'passed' | 'failed' | 'cancelled'): boolean;
   } | null;
 }
 

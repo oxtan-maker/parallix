@@ -56,6 +56,7 @@ export const INTEGRATION_GATE_REBOUND_EVENT = 'integration.gate-rebound';
 export type IntegrationGateRoute =
   | { route: 'fixed' | 'retained' | 'blocked'; rebounds: number }
   | { route: 'revision-changed'; rebounds: number; approvedRevision: string; repairedRevision: string; invalidation: ApprovalInvalidation }
+  | { route: 'human-only'; rebounds: number; diagnostic: string }
   | { route: 'exhausted'; rebounds: number; diagnostic: string }
   | { route: 'limit-reached'; rebounds: number }
   | { route: 'stranded'; detail: string };
@@ -309,6 +310,10 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   const rebounds = outcome.attempts;
   if (outcome.outcome === 'fixed') {
     return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, log, error });
+  }
+  if (outcome.outcome === 'human-only') {
+    error(fmt.status('FAIL', `Integration gate ${failedGate.key} requires human action for ${slug}: ${outcome.diagnostic}. No repair agent was launched.`));
+    return { route: 'human-only', rebounds, diagnostic: outcome.diagnostic };
   }
   await withdrawChangedExhaustedRepair(opts, failedGate, approvedRevision, captureFinalTreeFn, invalidateApprovalFn);
   error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${slug} again for a fresh repair budget, or px review ${slug} once the gate is fixed.`));

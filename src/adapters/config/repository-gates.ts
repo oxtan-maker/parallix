@@ -129,6 +129,8 @@ export interface PhaseGateRunResult {
   failedGate: GateRunOutcome | null;
   /** Complete captured output for every gate that ran. */
   outcomes?: GateRunOutcome[];
+  /** Whether the complete phase minted reusable integration proof. */
+  proofReusable?: boolean;
   error: string | null;
 }
 
@@ -188,8 +190,7 @@ export function buildGateEnv(phase: GatePhase, slug: string, checkoutPath: strin
  * declared order; the first non-zero exit aborts and is reported. An empty
  * gate list (unconfigured phase) is a successful no-op and never invokes the
  * command runner.
- */
-/**
+ *
  * @param {GatePhase} phase
  * @param {{slug: string, checkoutPath: string, gates?: RepositoryGate[], commandRunner?: GateCommandRunner, log?: Function, error?: Function}} opts
  */
@@ -239,7 +240,6 @@ export async function runPhaseGates(phase: GatePhase, opts: PhaseGateOptions): P
       cancelled: cause instanceof Error && cause.name === 'AbortError', failedGate: null, error: String(cause) };
   }
 }
-
 /** Rejects undeclared resource references before any gate child can launch. */
 function resolveGateResourceLimits(checkoutPath: string, gates: RepositoryGate[]): Readonly<Record<string, number>> {
   if (!gates.some(gate => gate.resource)) { return {}; }
@@ -259,7 +259,6 @@ function phaseDashboard(phase: GatePhase, opts: PhaseGateOptions, gates: Reposit
 }
 
 function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: RepositoryGate[], log: GateLog, error: GateLog) {
-
   const { slug, checkoutPath } = opts;
 
   // Execute through `bash -c`, the same shell mechanism the review preparation declared
@@ -447,10 +446,11 @@ class PhaseGateExecution {
     }
     this.reportDashboard();
     if (this.state.cancellation.operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; }
+    let proofReusable = false;
     if (this.state.coverage) {
       // The executor reports how the phase settled, so a failed or cancelled run
       // is observable evidence too instead of an absent result.
-      this.state.coverage.complete(this.state.outcomes,
+      proofReusable = this.state.coverage.complete(this.state.outcomes,
         this.state.cancellation.operatorCancelled ? 'cancelled'
           : this.state.failure.failedGate !== null ? 'failed'
             : this.state.controller.signal.aborted ? 'cancelled' : 'passed');
@@ -465,6 +465,7 @@ class PhaseGateExecution {
       cancelled: this.state.cancellation.operatorCancelled,
       failedGate: this.state.failure.failedGate,
       outcomes: this.state.outcomes,
+      proofReusable,
       error: this.state.failure.errorText,
     };
 

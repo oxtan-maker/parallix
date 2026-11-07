@@ -25,7 +25,7 @@ import {
   validationSkipApplies,
   type ValidatedCommitDiff,
 } from './validation-marker.js';
-import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import type { IntegrateGatesPort, IntegrateWorkflowPorts, IntegrationGateRunResult } from '../ports/integrate-workflow.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
 
@@ -222,7 +222,10 @@ class IntegrationGateStep {
     // TASK-2625/TASK-2646: skip the high-level hooks this mission already ran
     // green on a tree that differs from the finalized one at most in backlog
     // bookkeeping. Every other case runs the full configured set.
-    const gatesToRun = await this.resolveSkippableGates({
+    // A dry-run exists to pre-validate the complete configured plan and mint
+    // reusable exact-tree proof. Historical hook markers are landing-time
+    // optimizations and cannot substitute for that complete execution receipt.
+    const gatesToRun = dryRun ? { gates: configured, skippedAll: false } : await this.resolveSkippableGates({
       configured,
       slug,
       checkout,
@@ -239,9 +242,9 @@ class IntegrationGateStep {
       gates: gatesToRun.gates,
       log: fmt.log.plain,
       error: fmt.log.fail,
-      // Plan-only dry run executes nothing; self-development agent selection
-      // reaches the gate environment via buildGateEnv (F4 / TASK-2269).
-      dryRun,
+      // Integration dry-runs execute the same phase runner as landing runs.
+      // The workflow still owns the non-landing boundary after this step.
+      dryRun: false,
       realAgent,
       realAgentModel,
     });
@@ -257,11 +260,7 @@ class IntegrationGateStep {
     const execution = await this.executeGatePlan({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration });
     const { gatesToRun, requirePreIntegration, result } = execution;
 
-    const disposition = integrationGateDisposition({ dryRun, skippedAll: gatesToRun.skippedAll, skipped: result.skipped, required: requirePreIntegration, ok: result.ok, cancelled: result.cancelled });
-    if (disposition === 'plan') {
-      fmt.log.info(`Integration gate plan resolved for ${slug}: ${gatesToRun.gates.length} gate(s) configured; nothing executed.`);
-      return 'no gate ran';
-    }
+    const disposition = integrationGateDisposition({ skippedAll: gatesToRun.skippedAll, skipped: result.skipped, required: requirePreIntegration, ok: result.ok, cancelled: result.cancelled });
 
     // TASK-2625: every configured hook was already validated green, so nothing
     // ran. This is a deliberate skip, not the "none configured" case, so it
@@ -284,6 +283,13 @@ class IntegrationGateStep {
       return 'no pre-integration gate configured';
     }
     if (disposition === 'passed') {
+      if (dryRun && !this.completeDryRunReceipt(gatesToRun.gates, result)) {
+        await this.recordUnsuccessfulGateRun(slug, missionServices, execution);
+        throw abortWith(this.dependencies.landing, `Integration dry-run gates produced incomplete or malformed execution evidence for ${slug}.`);
+      }
+      if (dryRun && result.proofReusable !== true) {
+        fmt.log.warn(`Integration dry-run gates passed for ${slug}, but reusable verification proof is unavailable for this configuration or input identity.`);
+      }
       fmt.log.pass('All integration gates passed.');
       return `${gatesToRun.gates.length} integration gate(s) passed`;
     }
@@ -293,6 +299,14 @@ class IntegrationGateStep {
     }
 
     return this.repairGateFailure({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, execution);
+  }
+
+  /** A green dry-run must carry a complete execution receipt for the exact selected plan. */
+  private completeDryRunReceipt(gates: readonly { key: string; command: string }[], result: IntegrationGateRunResult): boolean {
+    if (result.phase !== 'integration' || result.dryRun || result.skipped || result.cancelled
+      || result.executed !== gates.length || !Array.isArray(result.outcomes) || result.outcomes.length !== gates.length) { return false; }
+    return gates.every(gate => result.outcomes!.some(outcome => outcome.key === gate.key
+      && outcome.command === gate.command && outcome.exitCode === 0));
   }
 
   private async recordUnsuccessfulGateRun(slug: string, missionServices: IntegrationMissionServices,

@@ -157,9 +157,11 @@ const detached = (body: string) => `(${body}) >/dev/null 2>&1 3>&- 4>&- 5>&- &`;
 test('same-phase test gates run one command tree at a time at capacity one (TASK-2840)', async t => {
   const { root, run } = await resourceFixture(t, { resources: { test: 1, other: 1 } });
   const testActive = 'for i in $(seq 100); do s=$(grep -c start events 2>/dev/null); e=$(grep -c end events 2>/dev/null); '
-    + '[ "${s:-0}" -gt "${e:-0}" ] && exit 0; sleep 0.01; done; exit 1';
+    + '[ "${s:-0}" -gt "${e:-0}" ] && { touch independent-overlap; exit 0; }; sleep 0.01; done; exit 1';
+  const finishAfterOverlap = 'for i in $(seq 100); do test -f independent-overlap '
+    + '&& { echo "end unit" >> events; exit 0; }; sleep 0.01; done; exit 1';
   const result = await run([
-    { key: 'unit', command: `echo "start unit" >> events; ${detached('sleep 0.05; echo "end unit" >> events')}`, order: 0, resource: 'test' },
+    { key: 'unit', command: `echo "start unit" >> events; ${detached(finishAfterOverlap)}`, order: 0, resource: 'test' },
     { key: 'integration-ci', command: recorded('integration-ci', 'sleep 0.02'), order: 1, resource: 'test' },
     { key: 'independent', command: testActive, order: 2, resource: 'other' },
   ], 3);
