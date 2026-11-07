@@ -19,6 +19,7 @@ import { createReviewLoopPorts } from '../review/review-loop.js';
 import { runReviewLoop } from '../../application/review-loop/review-loop.js';
 import * as repairReviewPreparation from "../cli/commands/repair-review-preparation.js";
 import type { MissionTransitionStore, SessionMarkerPort } from '../../application/domain-ports.js';
+import { missionId } from '../../domain/mission.js';
 import type {
   AgentExecutionPort,
   AgentLaunchOutcome,
@@ -140,6 +141,7 @@ export class MissionWorkspaceAdapter implements MissionWorkspacePort {
 export class AgentExecutionAdapter implements AgentExecutionPort {
   constructor(
     private readonly _runtime: ExecuteMissionRuntime,
+    private readonly _missionStore: MissionTransitionStore,
     private readonly _operatorBlocklist: OperatorBlocklistOverlay | null = null,
     private readonly _sessionMarkerPort: SessionMarkerPort | null = null,
     private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION,
@@ -168,11 +170,14 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
       ? renderLaunchContext(persisted)
       : this._runtime.buildCheckpointContext(request.slug);
     const agentConfig = this.readAgentConfig();
+    const loaded = await this._missionStore.load(missionId(request.slug));
+    if (loaded.kind === 'unavailable') { throw new Error(`Cannot resolve Mission prompt authority: ${loaded.reason}`); }
+    const dbOwnedNoMirror = loaded.kind === 'found' && Boolean(loaded.mission.waveParentId);
     return {
       agentConfig,
       // `startAgent` checks the selected launcher's health after the Mission
       // transition; do not block the active lifecycle on a CLI probe here.
-      prompt: this._runtime.buildExecutePrompt(request.slug, launchContext, { rootDir: request.worktree }),
+      prompt: this._runtime.buildExecutePrompt(request.slug, launchContext, { rootDir: request.worktree, dbOwnedNoMirror }),
     };
   }
 
@@ -320,6 +325,7 @@ export function createExecuteMissionPorts(
     workspace: new MissionWorkspaceAdapter(rootDir, resolved),
     agentExecution: new AgentExecutionAdapter(
       resolved,
+      options.missionTransitionStore,
       options.operatorBlocklist ?? null,
       options.sessionMarkerPort ?? null,
       options.configuration,

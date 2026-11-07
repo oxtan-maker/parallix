@@ -16,7 +16,8 @@ function statusGoalCheckRow(row: GoalCheckRow) {
 type RecordedMission = { readonly mission: Mission; readonly version: number } | null;
 type StatusSources = { recorded: RecordedMission; card: MissionCard | null; latest: ReturnType<typeof latestEvidencedCheckpoint>; brief: Mission['brief']; legacyTask: ReturnType<typeof readLegacyTaskContent> | null; legacyMission: ReturnType<typeof readLegacyMissionContent>; legacyReview: ReturnType<typeof readLegacyReviewSnapshot> };
 
-export function projectStatusMissionData(recorded: RecordedMission, card: MissionCard | null, slug: string, rootDir: string): StatusMissionData {
+export function projectStatusMissionData(recorded: RecordedMission, card: MissionCard | null, slug: string, rootDir: string,
+  waveChildren: readonly Mission[] = []): StatusMissionData {
 
   // The brief, the declared gates and the write version come from the
   // Mission store, not the board card: the card is a board view, while
@@ -36,8 +37,20 @@ export function projectStatusMissionData(recorded: RecordedMission, card: Missio
     ...checkpointFields(sources),
     ...identityFields(sources),
     ...lifecycleFields(sources),
+    ...waveFields(recorded, waveChildren),
     ...legacyFields(sources),
     ...reviewFields(sources),
+  };
+}
+
+function waveFields(recorded: RecordedMission, children: readonly Mission[]) {
+  const mission = recorded?.mission;
+  return {
+    wave: mission?.wave ? { role: 'parent' as const, children: mission.wave.children.map(id => {
+      const child = children.find(entry => entry.id === id);
+      return { id, dependencies: [...(child?.dependencies ?? [])] };
+    }) } : mission?.waveParentId ? { role: 'child' as const, parentId: mission.waveParentId } : null,
+    largeMissionRiskException: mission?.largeMissionRiskException ?? null,
   };
 }
 

@@ -125,6 +125,7 @@ export interface MissionApplicationServices {
   readonly defectProvenanceBackfill: import('../application/defect-provenance-backfill-service.js').DefectProvenanceBackfillService;
   readonly assignment: MissionAssignmentService;
   readonly nel: MissionNelService;
+  readonly wave: import('../application/mission-wave-service.js').MissionWaveService;
 }
 
 export interface ProductionApplicationServices {

@@ -295,6 +295,8 @@ ${fmt.bold('Advanced Commands:')}
   gate add|remove --command <cmd>     Declare or drop one verification gate.
   criterion add|remove --text <t>     Record or drop one success criterion.
   mission author|mark-complete       Author a complete draft or mark criteria complete; see px mission --help.
+  split --child <title> ...          Split an authored Large Mission; see px split --help.
+  risk-exception --reason <text>     Operator approval to keep one Large Mission whole.
   depends add|remove --on <slug>       Record or drop one Mission-to-Mission dependency; nothing enforces it.
   nel set --predicted <bucket>        Record the draft's predicted NEL bucket (Small|Medium|Large).
   repro set --test <path> | repro clear  Record the bug mission's red-to-green reproduction test.

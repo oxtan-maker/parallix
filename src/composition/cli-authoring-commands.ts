@@ -4,6 +4,7 @@ import { createBriefWriteCommands } from './cli-brief-writes.js';
 import { validateDeclaredGates } from "../adapters/cli/commands/review-preparation.js";
 
 import { createRevokeReviewCommand } from '../interfaces/cli/revoke-review.js';
+import { createRiskExceptionCommand, createSplitCommand } from '../interfaces/cli/mission-wave-command.js';
 import { RevokeReviewDecisionUseCase } from '../application/revoke-review-decision-use-case.js';
 import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
 import { dismissProviderApproval } from '../adapters/review/review-adapter.js';
@@ -63,6 +64,11 @@ export function createAuthoringCommands(context: CliCommandContext): Record<stri
       const result = validateDeclaredGates([command], rootDir, { checkFiles: false });
       return result.ok ? null : result.error;
     })(args)),
+    split: (args) => withGraph(services => createSplitCommand(missionWrites(services), (command) => {
+      const result = validateDeclaredGates([command], rootDir, { checkFiles: false });
+      return result.ok ? null : result.error;
+    })(args)),
+    'risk-exception': (args) => withGraph(services => createRiskExceptionCommand(missionWrites(services), context.operatorInvocation ?? false)(args)),
     depends: (args) => withGraph(services => createDependsCommand(missionWrites(services))(args)),
     nel: (args) => withGraph(services => createNelCommand(missionWrites(services))(args)),
     assign: (args) => withGraph(services => createAssignCommand(missionWrites(services), false)(args)),

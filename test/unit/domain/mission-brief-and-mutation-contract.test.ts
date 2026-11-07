@@ -361,7 +361,9 @@ describe('Prompt authority', () => {
   test('no runtime prompt tells an agent to read or write a workflow file for Mission state', () => {
     for (const { name, source } of runtimePrompts()) {
       assert.doesNotMatch(source, /px context/, `${name} must not name the retired context command`);
-      assert.doesNotMatch(source.replaceAll('px mission mark-complete', 'criterion completion').replaceAll('px mission author', 'typed authoring').replaceAll('px mission --help', 'typed mission help'), /px mission /, `${name} must not name retired generic Mission mutation verbs`);
+      assert.doesNotMatch(source.replaceAll('px mission mark-complete', 'criterion completion')
+        .replaceAll('px mission author', 'typed authoring')
+        .replaceAll('px mission --help', 'typed mission help'), /px mission /, `${name} must not name retired generic Mission mutation verbs`);
       // Naming a workflow file even to deny it authority keeps it in the agent's
       // head as a place Mission state might live. The prompts must not mention
       // one at all.

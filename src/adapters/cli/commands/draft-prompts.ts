@@ -23,21 +23,41 @@ function resolveClassificationInstructions(taskPath: string) {
   const intake = synthetic ? 'This task was synthesized by the harness. ' : 'Backlog task labels may describe the task. ';
   return intake + 'classify this Mission before finishing the draft, including tasks synthesized by the harness. Set exactly one of ai_sdlc or user_value with --classification <ai_sdlc|user_value> in px mission author (or px classification set for a focused edit). Use ai_sdlc for workflow, prompt, or agent-fix work; use user_value for everything else. Unknown is an intake placeholder, never a completed draft classification. Mission state is authoritative; do not add a separate frontmatter field for mission type.';
 }
-function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = null }: { rootDir?: string; worktree?: string | null } = {}) {
+function withoutBacklogMirrorInstructions(template: string, slug: string) {
+  return template
+    .split('\n')
+    .flatMap((line) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('Backlog task:') || /preserve `\{\{taskPath\}\}`/.test(line)) { return []; }
+      if (trimmed.startsWith('The harness has already created the mission branch')) {
+        return [`The harness has already created the mission branch, worktree, and mission record. This DB-owned Mission has no Backlog task file. Turn its recorded intent into a complete mission contract with the commands below.`];
+      }
+      if (trimmed.startsWith('- this section applies only when the backlog task at')) {
+        return [`- this section applies only when \`px status ${slug}\` reports a \`bug\` label. If it does not, ignore this section entirely.`];
+      }
+      return [line];
+    })
+    .join('\n');
+}
+function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = null, dbOwnedNoMirror = false }: { rootDir?: string; worktree?: string | null; dbOwnedNoMirror?: boolean } = {}) {
   const promptRoot = worktree || rootDir;
   const overridePath = resolvePromptOverride(promptRoot);
   const template = assembleStagePrompt('draft', { overridePath });
   const year = getMissionYear(slug, promptRoot) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(promptRoot, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);
-  const taskPath = resolveTaskPath(slug, promptRoot);
-  return template
+  const taskPath = dbOwnedNoMirror ? '' : resolveTaskPath(slug, promptRoot);
+  const body = dbOwnedNoMirror ? withoutBacklogMirrorInstructions(template, slug) : template;
+  const classificationInstructions = dbOwnedNoMirror
+    ? 'Classify this DB-owned Mission before finishing the draft. Set exactly one of ai_sdlc or user_value with --classification <ai_sdlc|user_value> in px mission author. Mission state is authoritative; do not add a separate frontmatter field for mission type.'
+    : resolveClassificationInstructions(taskPath);
+  return body
     .replaceAll('{{slug}}', slug)
     .replaceAll('{{year}}', year)
     .replaceAll('{{missionPath}}', missionPath)
     .replaceAll('{{missionDir}}', missionDir)
     .replaceAll('{{taskPath}}', taskPath)
-    .replaceAll('{{classificationInstructions}}', resolveClassificationInstructions(taskPath))
+    .replaceAll('{{classificationInstructions}}', classificationInstructions)
     .replaceAll('{{verifyCmd}}', resolveVerifyCmd(promptRoot));
 }
 function fallbackDraftCommitMessage(slug: string) {

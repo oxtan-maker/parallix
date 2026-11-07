@@ -76,6 +76,12 @@ export interface MissionStore {
   previewDefectProvenanceBackfill?(_request: import('./ports/defect-provenance-backfill.js').DefectProvenanceBackfillRequest): Promise<import('./ports/defect-provenance-backfill.js').DefectProvenanceBackfillReport>;
   /** Apply the planned cohort atomically; a validation failure writes nothing. */
   applyDefectProvenanceBackfill?(_request: import('./ports/defect-provenance-backfill.js').DefectProvenanceBackfillRequest): Promise<import('./ports/defect-provenance-backfill.js').DefectProvenanceBackfillReport>;
+  /** Atomically replace one backlog parent and insert every deterministic wave child. */
+  saveWave?(
+    _parent: Mission,
+    _expectedVersion: MissionVersion,
+    _children: readonly Mission[],
+  ): Promise<{ readonly parentVersion: MissionVersion; readonly childVersions: readonly MissionVersion[] }>;
 }
 
 /**

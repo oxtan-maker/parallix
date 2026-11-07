@@ -8,6 +8,8 @@ export interface RebaseContext {
   rebaseAttempt?: number;
   rebaseObservationPredecessor?: string;
   rebaseTerminalObserved?: boolean;
+  /** Base tip resolved immediately before the current fresh `git rebase`. */
+  rebaseTargetRevision?: string;
   readonly args: string[];
   readonly port: RebaseWorkflowPort;
   readonly gitFn: GitRunner;

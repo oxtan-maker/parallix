@@ -126,6 +126,16 @@ export interface MissionData {
    * only: no lifecycle, activation or scheduling rule consumes them.
    */
   readonly dependencies?: readonly MissionId[];
+  /** A converted Mission is a planning container, never an executable delivery Mission. */
+  readonly wave?: { readonly children: readonly MissionId[] } | null;
+  /** The converted parent that assigned this independently deliverable child its identity. */
+  readonly waveParentId?: MissionId | null;
+  /** Operator authorization for accepting one Large Mission instead of a safer wave. */
+  readonly largeMissionRiskException?: {
+    readonly rationale: string;
+    readonly approvedBy: string;
+    readonly approvedAt: string;
+  } | null;
   /**
    * The draft's size prediction, compared at review preparation with the measured NEL
    * bucket for the calibration ADR 0047 describes. Null until predicted.
@@ -229,6 +239,9 @@ export function intakeMission(intake: MissionIntake): OpenMission {
     successCriteria: [],
     completedSuccessCriteria: [],
     dependencies: [],
+    wave: null,
+    waveParentId: null,
+    largeMissionRiskException: null,
     predictedNelBucket: null,
     reproductionTest: null,
     defectProvenance: null,

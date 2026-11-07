@@ -270,6 +270,52 @@ test('rebase use case launches an agent for shared-file conflicts', async () => 
   assert.match(h.lines.join('\n'), /completed conflict resolution/);
 });
 
+test('base advancement during conflict resolution rebases again without another agent attempt (PX-0030)', async () => {
+  const shared = 'src/adapters/git/git.ts';
+  let baseRevision = 'base-1';
+  let rebaseRuns = 0;
+  let paused = false;
+  let ancestryChecks = 0;
+  const h = harness({
+    detectRebaseState: () => ({ inProgress: paused, unmergedFiles: paused ? [shared] : [] }),
+    git: (args: string[]) => {
+      const tail = subcommand(args);
+      if (tail[0] === 'rev-parse' && tail[1] === 'main') { return { ...OK, stdout: `${baseRevision}\n` }; }
+      if (tail[0] === 'rev-parse' && tail[1] === 'HEAD') { return { ...OK, stdout: 'mission-head\n' }; }
+      if (tail[0] === 'merge-base' && tail[1] === '--is-ancestor' && tail[2] === 'main') {
+        ancestryChecks += 1;
+        return ancestryChecks === 1 ? { ...OK, status: 1 } : OK;
+      }
+      if (tail[0] === 'merge-base' && tail[1] === '--is-ancestor' && tail[2] === 'base-1' && tail[3] === 'base-2') { return OK; }
+      if (tail[0] === 'rebase' && tail[1] === 'main') {
+        rebaseRuns += 1;
+        if (rebaseRuns === 1) {
+          paused = true;
+          return { ...OK, failureReason: { version: 1, code: 'git-conflict', source: 'git' }, status: 1,
+            stderr: `CONFLICT (content): Merge conflict in ${shared}\n` };
+        }
+      }
+      return OK;
+    },
+    resolveConflictsForMission: () => ({ ok: true, conflictFiles: [shared], missionSpecificFiles: [], sharedFiles: [shared] }),
+  });
+  const launch = h.port.startAgent;
+  h.port.startAgent = async (step, options) => {
+    const result = await launch(step, options);
+    paused = false;
+    baseRevision = 'base-2';
+    return result;
+  };
+
+  await run(h);
+
+  assert.deepEqual(h.exitCodes, [0]);
+  assert.equal(rebaseRuns, 2, 'the advanced base gets a fresh mechanical rebase');
+  assert.equal(h.agentLaunches.length, 1, 'the base race does not spend another agent-repair attempt');
+  assert.match(h.lines.join('\n'), /advanced during the rebase.*same review round/);
+  assert.doesNotMatch(h.lines.join('\n'), /Rebase postcondition failed/);
+});
+
 /** Harness variant whose shared-file conflict forces the agent-assisted path. */
 function sharedConflictHarness(shared: string, overrides: Partial<RebaseWorkflowPort> = {}): Harness {
   return harness({

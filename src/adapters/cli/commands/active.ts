@@ -191,8 +191,8 @@ function resolveExecuteTaskPath(slug: string, rootDir: string) {
   return path.join(rootDir, 'backlog', 'tasks', `<${slug}>.md`);
 }
 
-function buildExecutePrompt(slug: string, checkpointContext: string, options: { rootDir?: string } = {}) {
-  const { rootDir = process.cwd() } = options;
+function buildExecutePrompt(slug: string, checkpointContext: string, options: { rootDir?: string; dbOwnedNoMirror?: boolean } = {}) {
+  const { rootDir = process.cwd(), dbOwnedNoMirror = false } = options;
   const promptConfiguration = resolvePromptConfiguration(rootDir);
   const template = assembleStagePrompt('execute', promptConfiguration);
   const year = getMissionYear(slug, rootDir) || String(new Date().getFullYear());
@@ -200,16 +200,17 @@ function buildExecutePrompt(slug: string, checkpointContext: string, options: { 
   const missionDir = path.dirname(missionPath);
   const taskPath = resolveExecuteTaskPath(slug, rootDir);
 
-  // Backlog task instructions are adhoc-inapplicable (task-2468, F5): a
-  // DB-owned adhoc mission has no Backlog backing in an adhoc-only repository,
-  // so the shared execute prompt must not carry the `Backlog task:` header, the
+  // Backlog task instructions are inapplicable to DB-owned missions without a
+  // mirror (task-2468 F5 and PX-0030 F6): neither an adhoc mission nor a wave
+  // child has Backlog backing, so the shared execute prompt must not carry the
+  // `Backlog task:` header, the
   // "Backlog task presence" preflight bullet, or the preserve/lifecycle-
   // metadata instructions that reference a file that does not exist. Strip
-  // those Backlog-task lines only for a DB-owned adhoc identity; Backlog-backed
+  // those Backlog-task lines only for a DB-owned taskless mission; Backlog-backed
   // (`task-<N>`) missions keep them even when the task file is not yet on disk.
-  const adhocNoTaskFile = isDbAdhocIdentity(slug);
+  const dbOwnedNoTaskFile = isDbAdhocIdentity(slug) || dbOwnedNoMirror;
   let body = template;
-  if (adhocNoTaskFile) {
+  if (dbOwnedNoTaskFile) {
     body = body
       .split('\n')
       .filter((line) => {

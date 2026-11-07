@@ -606,6 +606,9 @@ repair agent. A clean worktree creates no commit. Conflicts or Git status,
 staging or commit failures stop review preparation; resolve the reported Git error in that
 worktree before retrying. Verification proof must still match the committed
 candidate, and checkpoint evidence and completed criteria remain required.
+If the local base advances while a conflict agent is completing the rebase,
+review preparation rebases again in the same review round; that mechanical retry
+does not spend another agent-repair attempt.
 
 From the mission worktree, run `px review` to enter review. It creates the first
 Review prepares a known Mission or resumes its recorded round,

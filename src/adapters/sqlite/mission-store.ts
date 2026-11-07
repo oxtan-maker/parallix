@@ -8,7 +8,6 @@ import type {
   MigrateLegacyAdhocIdsResult,
   MissionVersion,
 } from '../../application/domain-ports.js';
-import { missionVersion } from '../../application/domain-ports.js';
 import { DuplicateLaneEventError, type LaneTransitionEvent } from '../../domain/board-event.js';
 import { missionTitle, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionBrief } from '../../domain/mission-brief.js';
@@ -16,30 +15,16 @@ import { declaredGates } from '../../domain/mission-gates.js';
 import { completedCriteria, successCriteria, replaceSuccessCriteria, criterionContract, identifyGoalCheckRows } from '../../domain/mission-success-criteria.js';
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { KnownRepository, RepositoryId } from '../../domain/repository.js';
-import { toCanonicalUtcInstant } from '../../domain/instant.js';
 import { defectProvenance, DefectProvenanceViolation } from '../../domain/defect-provenance.js';
 
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { migrateLegacyAdhocIds as migrateLegacyAdhocIdsInStore } from './legacy-adhoc-migration.js';
 import { SqliteBoardLaneEventRepository } from './board-lane-event-repository.js';
 import { SqliteDefectProvenanceBackfill } from './defect-provenance-backfill.js';
+import { SqliteMissionCanceller } from './mission-canceller.js';
 import type { DefectProvenanceBackfillRequest } from '../../application/ports/defect-provenance-backfill.js';
-
-export class MissionStaleWriteError extends Error {
-  readonly disposition = 'stale-write' as const;
-
-  constructor(
-    readonly missionId: MissionId,
-    readonly expectedVersion: MissionVersion | null,
-    readonly actualVersion: MissionVersion | null,
-  ) {
-    super(
-      `Stale write: mission ${missionId} expected version ` +
-      `${expectedVersion ?? 'missing'}, found ${actualVersion ?? 'missing'}`,
-    );
-    this.name = 'MissionStaleWriteError';
-  }
-}
+import { writeMissionRoot } from './mission-root-writer.js';
+export { MissionStaleWriteError } from './mission-root-writer.js';
 
 export interface KnownRepositoryObservation {
   readonly repository: KnownRepository;
@@ -159,6 +144,14 @@ export class SqliteMissionStore implements MissionStore {
     return this.enqueue(() => this.saveAggregateWithTransition(mission, expectedVersion, event));
   }
 
+  async saveWave(
+    parent: Mission,
+    expectedVersion: MissionVersion,
+    children: readonly Mission[],
+  ): Promise<{ readonly parentVersion: MissionVersion; readonly childVersions: readonly MissionVersion[] }> {
+    return this.enqueue(() => this.saveWaveAggregate(parent, expectedVersion, children));
+  }
+
   async findTransitions(missionId: MissionId) {
     return this.eventRepo.findPersistedByMissionId(missionId);
   }
@@ -188,41 +181,8 @@ export class SqliteMissionStore implements MissionStore {
     return loaded ?? { kind: 'missing' };
   }
 
-  /**
-   * Delete one mission's lifecycle rows in a single transaction.
-   *
-   * Every statement filters on the one id. The `missions` row cascades
-   * `mission_labels`, `mission_checkpoints`, `mission_checkpoint_goal_checks`,
-   * `mission_reviews`, `mission_review_rounds`, `mission_review_findings`,
-   * `mission_review_resolutions`, `mission_review_stage_launches`,
-   * `mission_review_events` and `mission_external_task_refs`; the tables deleted explicitly
-   * below carry no foreign key and are deleted explicitly. `usage_statistics`
-   * is deliberately absent: a cancelled mission still cost what it cost.
-   */
   private async cancelAggregate(id: MissionId): Promise<void> {
-    const pragma = await this.db.query<{ foreign_keys: number }>('PRAGMA foreign_keys');
-    if (pragma[0]?.foreign_keys !== 1) {
-      throw new Error(`Refusing to cancel ${id}: PRAGMA foreign_keys is not enabled on this connection`);
-    }
-    await this.db.beginWriteTransaction();
-    try {
-      const current = await this.db.query<{ status: string }>('SELECT status FROM missions WHERE id = ?', [id]);
-      if (current[0]?.status === 'done') {
-        throw new Error(`Refusing to cancel ${id}: integrated Mission closeout must finish through px integrate --recover-landed`);
-      }
-      await this.db.execute('DELETE FROM execution_activity WHERE mission_id = ?', [id]);
-      await this.db.execute('DELETE FROM session_markers WHERE mission_id = ?', [id]);
-      await this.db.execute('DELETE FROM board_lane_events WHERE mission_id = ?', [id]);
-      await this.db.execute('DELETE FROM missions WHERE id = ?', [id]);
-      const violations = await this.db.query('PRAGMA foreign_key_check');
-      if (violations.length > 0) {
-        throw new Error(`Refusing to commit cancel of ${id}: ${violations.length} foreign-key violation(s)`);
-      }
-      await this.db.commitTransaction();
-    } catch (error) {
-      await this.db.rollbackTransaction();
-      throw error;
-    }
+    await new SqliteMissionCanceller(this.db).cancel(id);
   }
 
   private async saveAggregate(
@@ -266,6 +226,24 @@ export class SqliteMissionStore implements MissionStore {
       }
       await this.db.commitTransaction();
       return version;
+    } catch (error) {
+      await this.db.rollbackTransaction();
+      throw error;
+    }
+  }
+
+  private async saveWaveAggregate(
+    parent: Mission,
+    expectedVersion: MissionVersion,
+    children: readonly Mission[],
+  ): Promise<{ readonly parentVersion: MissionVersion; readonly childVersions: readonly MissionVersion[] }> {
+    await this.db.beginWriteTransaction();
+    try {
+      const parentVersion = await this.persistAggregate(parent, expectedVersion);
+      const childVersions: MissionVersion[] = [];
+      for (const child of children) { childVersions.push(await this.persistAggregate(child, null)); }
+      await this.db.commitTransaction();
+      return { parentVersion, childVersions };
     } catch (error) {
       await this.db.rollbackTransaction();
       throw error;
@@ -324,70 +302,8 @@ export class SqliteMissionStore implements MissionStore {
     // before any relational row can make a Mission unloadable on restart.
     mission = normalizeStoredMission(mission);
     await this.validateDefectAttribution(mission);
-    // New/changed closure instants must be canonical. Historical values that
-    // migration deliberately preserved may survive an unrelated aggregate edit.
-    let closedAt: string | null = mission.closedAt ?? null;
-    if (closedAt !== null) {
-      try {
-        closedAt = toCanonicalUtcInstant(closedAt);
-      } catch (error) {
-        const existing = expectedVersion === null ? [] : await this.db.query<{ closed_at: string | null }>(
-          'SELECT closed_at FROM missions WHERE id = ? AND version = ?',
-          [mission.id, expectedVersion],
-        );
-        if (existing.length !== 1 || existing[0]!.closed_at !== closedAt) { throw error; }
-      }
-    }
-    const params = [
-      mission.repositoryId,
-      mission.title,
-      mission.status,
-      mission.rawStatus ?? null,
-      mission.assignee,
-      mission.netEngineeringLines,
-      Number(mission.reviewPreparationPending === true),
-      mission.reproductionTest ?? null,
-      mission.predictedNelBucket ?? null,
-      mission.description ?? null,
-      closedAt,
-    ] as const;
-
-    let nextVersion: MissionVersion;
-    if (expectedVersion === null) {
-      try {
-        await this.db.execute(
-          `INSERT INTO missions
-             (id, repository_id, title, status, raw_status, assignee,
-              net_engineering_lines, review_preparation_pending, reproduction_test, predicted_nel_bucket, description, closed_at, version)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-          [mission.id, ...params],
-        );
-      } catch (error) {
-        const actual = await this.currentVersion(mission.id);
-        if (actual !== null) {
-          throw new MissionStaleWriteError(mission.id, null, actual);
-        }
-        throw error;
-      }
-      nextVersion = missionVersion(1);
-    } else {
-      const changed = await this.db.execute(
-        `UPDATE missions SET
-           repository_id = ?, title = ?, status = ?, raw_status = ?, assignee = ?,
-           net_engineering_lines = ?, review_preparation_pending = ?, reproduction_test = ?, predicted_nel_bucket = ?, description = ?, closed_at = ?, version = version + 1
-         WHERE id = ? AND version = ?`,
-        [...params, mission.id, expectedVersion],
-      );
-      if (changed !== 1) {
-        throw new MissionStaleWriteError(
-          mission.id,
-          expectedVersion,
-          await this.currentVersion(mission.id),
-        );
-      }
-      nextVersion = missionVersion(expectedVersion + 1);
-      await this.clearAggregateValues(mission);
-    }
+    const nextVersion = await writeMissionRoot(this.db, mission, expectedVersion);
+    if (expectedVersion !== null) { await this.clearAggregateValues(mission); }
 
     mission = alignStoredCriteria(mission);
     await this.db.execute('UPDATE missions SET next_success_criterion_id = ? WHERE id = ?', [mission.nextSuccessCriterionId!, mission.id]);
@@ -396,14 +312,6 @@ export class SqliteMissionStore implements MissionStore {
     await checkpointHistory.captureRounds(mission);
     await this.valueWriter.insert(mission);
     return nextVersion;
-  }
-
-  private async currentVersion(id: MissionId): Promise<MissionVersion | null> {
-    const rows = await this.db.query<{ version: number }>(
-      'SELECT version FROM missions WHERE id = ?',
-      [id],
-    );
-    return rows.length === 0 ? null : missionVersion(rows[0].version);
   }
 
   private async validateDefectAttribution(mission: Mission): Promise<void> {

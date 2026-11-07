@@ -17,8 +17,24 @@ export function startRebaseRound(ctx: RebaseContext, resumeInPlace: boolean,
     return { failureReason: failureReason('git-conflict', 'git'), status: 1, stdout: '', stderr: existingRebase.unmergedFiles
       .map(file => `CONFLICT (content): Merge conflict in ${file}`).join('\n') };
   }
+  const base = ctx.gitFn(['-C', ctx.executionRoot, 'rev-parse', ctx.baseBranch]);
+  ctx.rebaseTargetRevision = base.status === 0 ? base.stdout.trim() || undefined : undefined;
   fmt.log.info(`Rebasing ${fmt.branch(ctx.branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
   return ctx.gitFn(['-C', ctx.executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', ctx.baseBranch]);
+}
+
+export function rebaseBaseFreshness(ctx: RebaseContext):
+  | { kind: 'current' | 'invalid' }
+  | { kind: 'advanced'; from: string; to: string } {
+  const ancestry = ctx.gitFn(['-C', ctx.executionRoot, 'merge-base', '--is-ancestor', ctx.baseBranch, 'HEAD']);
+  if (ancestry.status === 0) { return { kind: 'current' }; }
+  const from = ctx.rebaseTargetRevision;
+  if (!from) { return { kind: 'invalid' }; }
+  const current = ctx.gitFn(['-C', ctx.executionRoot, 'rev-parse', ctx.baseBranch]);
+  const to = current.status === 0 ? current.stdout.trim() : '';
+  if (!to || to === from) { return { kind: 'invalid' }; }
+  const advanced = ctx.gitFn(['-C', ctx.executionRoot, 'merge-base', '--is-ancestor', from, to]);
+  return advanced.status === 0 ? { kind: 'advanced', from, to } : { kind: 'invalid' };
 }
 
 /**

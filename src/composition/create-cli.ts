@@ -89,7 +89,7 @@ async function runtimeOptions(rootDir: string, configuration: ParallixConfigurat
   }
   if (!command && !shouldLaunchDefaultUi({ runtime: configuration.runtime })) { return { ...base, commandFns: {} }; }
   const { createRuntimeOptions } = await import('./cli-command-registry.js');
-  return createRuntimeOptions(rootDir, configuration, operatorInvocation && command === 'review');
+  return createRuntimeOptions(rootDir, configuration, operatorInvocation && command === 'review', operatorInvocation);
 }
 
 export function parseArgs(argv: string[], baseCwd = process.cwd()): ParsedArgs {

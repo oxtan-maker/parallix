@@ -11,12 +11,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { openMigratedMissionStore, type MigratedMissionStore } from '../../fixtures/mission-sqlite-store.js';
 
-import { missionId, type Mission } from '../../../src/domain/mission.js';
+import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { changeRevision, type Review } from '../../../src/domain/review.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import type { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
+import { approveLargeMissionRiskException, convertMissionToWave, type MissionWaveChildContract } from '../../../src/domain/mission-wave.js';
 
 const MISSION_ID = missionId('task-9002');
 
@@ -57,6 +58,24 @@ function missionWith(review: Review, title = 'aggregate read during write'): Mis
     netEngineeringLines: 0,
     closedAt: null,
     review});
+}
+
+function waveParent(slug: string): Mission {
+  return typedMissionFixture(slug, {
+    repositoryId: repositoryId('repo-parallix'), status: 'backlog', rawStatus: 'backlog',
+    labels: missionLabels(['ai_sdlc']), checkpoints: [], review: null,
+    brief: { goal: 'Split safely', why: 'Keep delivery bounded', scope: 'Wave only', outOfScope: [] },
+    successCriteria: ['Wave is delivered'], declaredGates: ['npm test'], predictedNelBucket: 'Large',
+  });
+}
+
+function waveChild(title: string, dependsOn: readonly number[] = []): MissionWaveChildContract {
+  return {
+    title, dependsOn,
+    brief: { goal: `Deliver ${title}`, why: 'Independent value', scope: title, outOfScope: [] },
+    criteria: [`${title} passes`], checkpoints: [{ name: 'CP-1', description: `Implement ${title}` }],
+    gates: ['npm test'], predictedNelBucket: 'Medium', classification: 'ai_sdlc',
+  };
 }
 
 // Only the immutable empty schema is shared; every case owns its copied file,
@@ -215,6 +234,70 @@ test('a save that drops the Review still clears the review tables', async () => 
     assert.equal(rows.length, 0);
     const rounds = await db.query('SELECT mission_id FROM mission_review_rounds WHERE mission_id = ?', [MISSION_ID]);
     assert.equal(rounds.length, 0);
+  } finally {
+    await close();
+  }
+});
+
+test('wave aggregates and Large risk exceptions round trip through real SQLite rows (PX-0030-F4)', async () => {
+  const { store, close } = await openStore();
+  try {
+    const original = waveParent('task-9003');
+    const version = await store.save(original, null);
+    const wave = convertMissionToWave(original, [waveChild('foundation'), waveChild('consumer', [1])]);
+    await store.saveWave(wave.parent, version, wave.children);
+
+    const parent = await store.load(original.id);
+    const first = await store.load(missionId('task-9003.01'));
+    const second = await store.load(missionId('task-9003.02'));
+    assert.equal(parent.kind, 'found');
+    assert.deepEqual(parent.kind === 'found' && parent.mission.wave?.children, ['task-9003.01', 'task-9003.02']);
+    assert.equal(first.kind, 'found');
+    assert.equal(first.kind === 'found' && first.mission.waveParentId, 'task-9003');
+    assert.deepEqual(second.kind === 'found' && second.mission.dependencies, ['task-9003.01']);
+
+    const risk = approveLargeMissionRiskException(waveParent('task-9004'), {
+      rationale: 'One transaction is safer', approvedBy: 'operator', approvedAt: '2026-11-04T10:00:00Z',
+    });
+    await store.save(risk, null);
+    const loadedRisk = await store.load(risk.id);
+    assert.equal(loadedRisk.kind, 'found');
+    assert.deepEqual(loadedRisk.kind === 'found' && loadedRisk.mission.largeMissionRiskException, {
+      rationale: 'One transaction is safer', approvedBy: 'operator', approvedAt: '2026-11-04T10:00:00.000Z',
+    });
+  } finally {
+    await close();
+  }
+});
+
+test('a failed child insert rolls back the parent and every prospective child (PX-0030-F4)', async () => {
+  const { db, store, close } = await openStore();
+  try {
+    const original = waveParent('task-9005');
+    const version = await store.save(original, null);
+    const wave = convertMissionToWave(original, [waveChild('first'), waveChild('second')]);
+    const failingDb = new Proxy(db, {
+      get(target, property, receiver) {
+        const value = Reflect.get(target, property, receiver);
+        if (typeof value !== 'function') { return value; }
+        if (property === 'execute') {
+          return (sql: string, params?: unknown[]) => {
+            if (/INSERT INTO missions\b/i.test(sql) && params?.[0] === 'task-9005.02') {
+              throw new Error('forced child insert failure');
+            }
+            return value.call(target, sql, params);
+          };
+        }
+        return value.bind(target);
+      },
+    }) as SqliteDatabaseAdapter;
+
+    await assert.rejects(new SqliteMissionStore(failingDb).saveWave(wave.parent, version, wave.children), /forced child insert failure/);
+    const parent = await store.load(original.id);
+    assert.equal(parent.kind, 'found');
+    assert.equal(parent.kind === 'found' && parent.mission.wave, null);
+    assert.equal((await store.load(missionId('task-9005.01'))).kind, 'missing');
+    assert.equal((await store.load(missionId('task-9005.02'))).kind, 'missing');
   } finally {
     await close();
   }

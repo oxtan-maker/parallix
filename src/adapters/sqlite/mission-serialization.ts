@@ -37,6 +37,7 @@ import { completedCriteria, successCriteria } from '../../domain/mission-success
 import { missionDependencies } from '../../domain/mission-dependencies.js';
 import type { NelBucketLabel } from '../../domain/net-engineering-lines.js';
 import { defectProvenance } from '../../domain/defect-provenance.js';
+import { toCanonicalUtcInstant } from '../../domain/instant.js';
 
 /** Typed records returned by the relational Mission schema. */
 export interface MissionRecord {
@@ -54,6 +55,11 @@ export interface MissionRecord {
   readonly closed_at: string | null;
   readonly version: number;
   readonly next_success_criterion_id?: number;
+  readonly wave_parent_id?: string | null;
+  readonly wave_children_json?: string | null;
+  readonly large_risk_rationale?: string | null;
+  readonly large_risk_approved_by?: string | null;
+  readonly large_risk_approved_at?: string | null;
 }
 
 export interface MissionLabelRecord {
@@ -636,6 +642,29 @@ function criterionIdentityFrom(records: MissionAggregateRecords) {
     nextSuccessCriterionId: records.mission.next_success_criterion_id ?? 1 };
 }
 
+function waveFields(row: MissionRecord) {
+  let children: Mission['wave'] = null;
+  if (row.wave_children_json !== null && row.wave_children_json !== undefined) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(row.wave_children_json); } catch { throw new Error('Persisted Mission wave children are invalid JSON'); }
+    if (!Array.isArray(parsed) || parsed.length < 2 || parsed.length > 99) {
+      throw new Error('Persisted Mission wave children are invalid');
+    }
+    children = { children: parsed.map(value => missionId(String(value))) };
+  }
+  const riskValues = [row.large_risk_rationale, row.large_risk_approved_by, row.large_risk_approved_at];
+  const hasRisk = riskValues.some(value => value !== null && value !== undefined);
+  if (hasRisk && riskValues.some(value => !value)) { throw new Error('Persisted Large-mission risk exception is incomplete'); }
+  return {
+    wave: children,
+    waveParentId: row.wave_parent_id ? missionId(row.wave_parent_id) : null,
+    largeMissionRiskException: hasRisk ? {
+      rationale: row.large_risk_rationale!, approvedBy: row.large_risk_approved_by!,
+      approvedAt: toCanonicalUtcInstant(row.large_risk_approved_at!),
+    } : null,
+  };
+}
+
 /** Reconstruct and validate domain values from the normalized relational rows. */
 export function hydrateMission(records: MissionAggregateRecords): HydratedMission {
   const row = records.mission;
@@ -667,6 +696,7 @@ export function hydrateMission(records: MissionAggregateRecords): HydratedMissio
       (records.dependencies ?? []).map(({ depends_on_mission_id }) => depends_on_mission_id),
       missionId(records.mission.id),
     ),
+    ...waveFields(row),
     predictedNelBucket: predictedNelBucketFrom(row.predicted_nel_bucket),
     reproductionTest: row.reproduction_test ?? null,
     defectProvenance: defectProvenanceFrom(records),

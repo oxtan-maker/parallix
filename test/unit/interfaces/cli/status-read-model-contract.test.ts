@@ -84,6 +84,32 @@ test('settled MAX_ATTEMPTS review guides acknowledgment and never asks for anoth
   assert.doesNotMatch(reviewStatus.join('\n'), /px stop/);
 });
 
+test('status identifies non-executable wave parents, ordered dependencies, and Large exception readiness (PX-0030)', () => {
+  const waveLines: string[] = [];
+  const wave = statusResult({ slug: 'task-3000', missionData: { backlogStatus: 'backlog', reviewHistory: [],
+    predictedNelBucket: 'Large', wave: { role: 'parent', children: [
+      { id: 'task-3000.01', dependencies: [] }, { id: 'task-3000.02', dependencies: ['task-3000.01'] },
+    ] } } });
+  renderStatus(wave, line => waveLines.push(line));
+  assert.match(waveLines.join('\n'), /Mission wave: non-executable parent/);
+  assert.match(waveLines.join('\n'), /task-3000\.01 \(no prerequisites; draft with: px draft task-3000\.01\).*task-3000\.02 \(depends on: task-3000\.01; draft with: px draft task-3000\.02\)/s);
+  assert.deepEqual(JSON.parse(statusJson(wave)).wave.children[1].dependencies, ['task-3000.01']);
+
+  const blockedLines: string[] = [];
+  renderStatus(statusResult({ slug: 'task-3001', missionData: { backlogStatus: 'backlog', reviewHistory: [], predictedNelBucket: 'Large' } }),
+    line => blockedLines.push(line));
+  assert.match(blockedLines.join('\n'), /Large-mission readiness: BLOCKED/);
+  for (const missionStatus of ['active', 'review', 'integration', 'done']) {
+    const inFlightLines: string[] = [];
+    renderStatus(statusResult({ slug: 'task-3001', missionData: { missionStatus, backlogStatus: missionStatus, reviewHistory: [], predictedNelBucket: 'Large' } }),
+      line => inFlightLines.push(line));
+    assert.doesNotMatch(inFlightLines.join('\n'), /Large-mission readiness: BLOCKED/, `${missionStatus} is past draft readiness`);
+  }
+  const approved = statusResult({ slug: 'task-3002', missionData: { backlogStatus: 'backlog', reviewHistory: [], predictedNelBucket: 'Large',
+    largeMissionRiskException: { rationale: 'single atomic boundary', approvedBy: 'operator', approvedAt: '2026-11-04T09:00:00.000Z' } } });
+  assert.equal(JSON.parse(statusJson(approved)).largeMissionRiskException.approvedBy, 'operator');
+});
+
 describe("focused Mission status reads only the selected Mission", () => {
   // TASK-2402: `px status <slug>` must answer from a focused mission read rather
   // than building the whole board. These tests observe the read boundary itself —

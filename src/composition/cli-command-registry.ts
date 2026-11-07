@@ -92,7 +92,7 @@ function createConfiguredCommands(context: CliCommandContext, commands: {
   };
 }
 
-function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Record<string, Command> {
+function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false, operatorInvocation = false): Record<string, Command> {
   const scope = createCliServiceScope(rootDir, configuration);
   const { withGraph, openServices } = scope;
   const active = createActiveCommand((request, options) => activeWorkflow([...request.args], options));
@@ -104,9 +104,9 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
     return setupWizard([...request.args], options);
   });
   const verify = createVerifyCommand((request, options) => verifyWorkflow([...request.args], options));
-  const context: CliCommandContext = { rootDir, configuration, packageDir, scope, active, operatorReview, commands: () => registry };
+  const context: CliCommandContext = { rootDir, configuration, packageDir, scope, active, operatorReview, operatorInvocation, commands: () => registry };
   const configuredCommands = createConfiguredCommands(context, { config, diff, resolveConflict, setup, verify });
-  const registry: Record<string, Command> = Object.fromEntries(["active", "recover", "config", "goal", "repro", "provenance", "classification", "scope", "gate", "criterion", "mission", "depends", "nel", "checkpoint", "assign", "verdict", "resolve", "revoke-review", "revoke", "unassign", "diff", "history", "attach", "draft", "integrate", "cancel", "import-legacy", "migrate-legacy-adhoc-ids", "audit-legacy", "verify-env", "rebase", "resolve-conflict", "review", "setup", "setup-review", "stats", "github-publish-status", "status", "verify", "web", "ui"].map(name => [name, configuredCommands[name]]));
+  const registry: Record<string, Command> = Object.fromEntries(["active", "recover", "config", "goal", "repro", "provenance", "classification", "scope", "gate", "criterion", "mission", "split", "risk-exception", "depends", "nel", "checkpoint", "assign", "verdict", "resolve", "revoke-review", "revoke", "unassign", "diff", "history", "attach", "draft", "integrate", "cancel", "import-legacy", "migrate-legacy-adhoc-ids", "audit-legacy", "verify-env", "rebase", "resolve-conflict", "review", "setup", "setup-review", "stats", "github-publish-status", "status", "verify", "web", "ui"].map(name => [name, configuredCommands[name]]));
   registry.lead = (args: string[], options: Record<string, unknown> = {}) => withGraph(async services => {
     // Fleet supervision is unused by short CLI commands and autonomous review.
     const [{ createLeadSupervisorPort, leadRecoveryWorkspace }, { createLeadCommand }, { FRESH_SESSION_MARKER_PORT }] = await (leadComposition ??= loadLeadComposition());
@@ -203,9 +203,9 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
 
 /** Mission write services, or a clear error when the operator DB is unavailable. */
 
-export function createRuntimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorReview = false): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'> {
+export function createRuntimeOptions(rootDir: string, configuration: ParallixConfiguration, operatorReview = false, operatorInvocation = false): Pick<MainOptions, 'commandFns' | 'ensureStandaloneGitRepoFn' | 'loadAliasesFn' | 'product' | 'runtime'> {
   return {
-    commandFns: Object.fromEntries(Object.entries(createCommandRegistry(rootDir, configuration, operatorReview)).map(([name, command]) => [name, (args: string[], options: Record<string, unknown> = {}) => command(args, { ...options, configuration })])),
+    commandFns: Object.fromEntries(Object.entries(createCommandRegistry(rootDir, configuration, operatorReview, operatorInvocation)).map(([name, command]) => [name, (args: string[], options: Record<string, unknown> = {}) => command(args, { ...options, configuration })])),
     runtime: configuration.runtime,
     ensureStandaloneGitRepoFn: createBootstrapGitBindings(configuration).ensureStandaloneGitRepo,
     loadAliasesFn: options => deriveAliases(loadStateMap(options)),

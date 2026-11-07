@@ -72,6 +72,8 @@ const RECOVERY_LANE_READER_MODULES = [
 ] as const;
 /** Reads canonical completion to select the provenance cohort; it never appends. */
 const DEFECT_PROVENANCE_BACKFILL_MODULE = 'src/adapters/sqlite/defect-provenance-backfill.ts';
+/** Cancellation removes retained lane history; it never appends an event. */
+const MISSION_CANCELLER_MODULE = 'src/adapters/sqlite/mission-canceller.ts';
 
 const CONTRACT_MODULES = new Set([
   // Read-only verification cost projection and its lane-history wiring.
@@ -96,6 +98,7 @@ const CONTRACT_MODULES = new Set([
   LEGACY_ADHOC_MIGRATION_MODULE,
   ...RECOVERY_LANE_READER_MODULES,
   DEFECT_PROVENANCE_BACKFILL_MODULE,
+  MISSION_CANCELLER_MODULE,
 ]);
 
 function sourceFiles(): string[] {
@@ -168,6 +171,27 @@ test('SC5: the designated writer appends the event inside saveWithTransition', (
     appendIndex > transitionStart,
     'the append call must live inside saveAggregateWithTransition',
   );
+});
+
+test('SC5: mission cancellation deletes lane history without append authority', () => {
+  const content = codeOnly(read(MISSION_CANCELLER_MODULE));
+
+  assert.ok(
+    content.includes('DELETE FROM board_lane_events WHERE mission_id = ?'),
+    'mission cancellation must remove only the selected Mission lane history',
+  );
+  for (const forbidden of [
+    'INSERT INTO board_lane_events',
+    'BoardLaneEventRepository',
+    'BoardLaneEventEntry',
+    'BoardEventRecorder',
+    'recordLaneTransitionSafely',
+  ]) {
+    assert.ok(
+      !content.includes(forbidden),
+      `${MISSION_CANCELLER_MODULE} must not receive lane-event append authority through ${forbidden}`,
+    );
+  }
 });
 
 test('SC5: historical recovery receives read-only lane-event capability (TASK-2834)', () => {

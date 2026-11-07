@@ -92,15 +92,15 @@ export function allocateAdhocDraftTarget(draftTarget: Pick<DraftTarget, "synthet
  */
 export async function isDbOwnedMission(slug: string, mainRepo: string, merged: DraftAdapterDependencies): Promise<boolean> {
   try {
-    // Restrict to a DB-owned adhoc identity: a web/board-created `px-<NNNN>`
-    // with no Backlog task file. A Backlog-backed `task-<NNNN>` mission already
-    // in the store (imported or previously drafted) must keep its Backlog
-    // validation, so a bare `store.load` 'found' result is not enough.
-    if (!isDbAdhocIdentity(slug)) { return false; }
     if (typeof merged.missionServicesFn !== 'function') { return false; }
     const services = await merged.missionServicesFn(mainRepo);
     const loaded = await services.store.load(missionId(slug));
-    return loaded.kind === 'found';
+    // A web-created px-NNNN mission and a persisted wave child are both born in
+    // the operator store without a Backlog mirror. Imported task-NNNN missions
+    // remain on the Backlog path unless their aggregate explicitly names a wave
+    // parent, so mere presence in the store never bypasses task-file validation.
+    return loaded.kind === 'found' && (isDbAdhocIdentity(slug)
+      || (loaded.mission.waveParentId !== null && loaded.mission.waveParentId !== undefined));
   } catch {
     return false;
   }
@@ -156,6 +156,11 @@ export async function recordDraftRefinement(ctx: DraftWorkflowContext): Promise<
   try {
     if (typeof ctx.missionServicesFn !== 'function') { throw new Error('draft command requires injected mission services'); }
     const services = await draftMissionServices(ctx);
+    const recorded = await services.store.load(missionId(ctx.slug));
+    // Conversion is the successful completion state for a Large draft. The
+    // parent deliberately stays in backlog as a non-executable planning
+    // container; refining it would make the normal activation path ambiguous.
+    if (recorded.kind === 'found' && recorded.mission.wave) { return { ok: true }; }
     const result = await services.lifecycle.transition({
       operationId: `draft-refine-${ctx.slug}`,
       missionId: missionId(ctx.slug), capabilities: new Set(['mission:transition']),

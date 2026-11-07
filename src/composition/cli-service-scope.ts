@@ -45,5 +45,6 @@ export type CliServiceScope = ReturnType<typeof createCliServiceScope>;
 
 export interface CliCommandContext {
   operatorReview?: boolean;
+  operatorInvocation?: boolean;
   rootDir: string; configuration: ParallixConfiguration; packageDir: string; scope: CliServiceScope; active: Command; commands(): Record<string, Command>;
 }

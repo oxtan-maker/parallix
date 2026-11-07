@@ -131,6 +131,14 @@ export interface StatusMissionData {
   readonly completedSuccessCriteria?: readonly number[];
   /** Missions this one depends on; recorded for readers, enforced by nothing. */
   readonly dependencies?: readonly string[];
+  /** Wave role and ordered child dependency readback, when this Mission belongs to a wave. */
+  readonly wave?: {
+    readonly role: 'parent' | 'child';
+    readonly parentId?: string;
+    readonly children?: readonly { readonly id: string; readonly dependencies: readonly string[] }[];
+  } | null;
+  /** Explicit operator decision allowing one Large Mission to remain whole. */
+  readonly largeMissionRiskException?: { readonly rationale: string; readonly approvedBy: string; readonly approvedAt: string } | null;
   /** Every checkpoint in execution order, planned or evidenced, with its recorded Goal Check rows (empty while planned). */
   readonly checkpoints?: readonly StatusCheckpoint[];
   /** The draft's predicted NEL bucket, when recorded. */

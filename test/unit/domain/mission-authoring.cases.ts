@@ -4,17 +4,19 @@ import assert from 'node:assert/strict';
 import { MissionBriefService } from '../../../src/application/mission-brief-service.js';
 import { missionVersion, MissionStaleVersion, type MissionStore } from '../../../src/application/domain-ports.js';
 import type { MissionAuthoringFields } from '../../../src/domain/mission-authoring.js';
-import { missionLabels } from '../../../src/domain/mission.js';
+import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { createMissionCommand, createGoalCommand } from '../../../src/interfaces/cli/mission-writes.js';
+import { createRiskExceptionCommand, createSplitCommand } from '../../../src/interfaces/cli/mission-wave-command.js';
+import type { MissionWaveService } from '../../../src/application/mission-wave-service.js';
 
 const fields: MissionAuthoringFields = {
   brief: { goal: 'Goal', why: 'Why', scope: 'Scope', outOfScope: ['Excluded'] },
   criteria: ['first', 'second'], checkpoints: [{ name: 'CP-2', description: 'second slice' }, { name: 'CP-1', description: 'first slice' }],
   gates: ['npm test'], predictedNelBucket: 'Small', classification: 'ai_sdlc',
 };
-function fixture() {
-  let mission = fixtureMission('task-author', { status: 'backlog', checkpoints: [], labels: missionLabels(['bug', 'user_value']), successCriteria: ['first'], completedSuccessCriteria: [0] });
+function fixture(overrides: Partial<Mission> = {}) {
+  let mission = fixtureMission('task-author', { status: 'backlog', checkpoints: [], labels: missionLabels(['bug', 'user_value']), successCriteria: ['first'], completedSuccessCriteria: [0], ...overrides });
   let version = 1;
   let writes = 0;
   let race = false;
@@ -30,6 +32,23 @@ function fixture() {
   return { brief, request, current: () => mission, writes: () => writes,
     lock: () => { mission = { ...mission, status: 'active', closedAt: null }; }, race: () => { race = true; } };
 }
+
+test('wave children reject Large re-estimation through authoring and focused NEL writes (PX-0030-F5)', async () => {
+  const f = fixture({ waveParentId: missionId('task-3000') });
+  const before = f.current();
+
+  const authored = await f.brief.author({ ...f.request, predictedNelBucket: 'Large' });
+  assert.equal(authored.error?.kind, 'validation');
+  assert.match(authored.error?.message ?? '', /split the child again.*operator.*fold it back into the parent/i);
+
+  const focused = await f.brief.setPredictedNelBucket({
+    operationId: 'nel', missionId: before.id, capabilities: new Set(['mission:context']), bucket: 'Large',
+  });
+  assert.equal(focused.error?.kind, 'validation');
+  assert.match(focused.error?.message ?? '', /split the child again.*operator.*fold it back into the parent/i);
+  assert.deepEqual(f.current(), before);
+  assert.equal(f.writes(), 0);
+});
 
 test('full authoring batch saves once, orders plans and preserves unrelated state (TASK-2731)', async () => {
   const f = fixture(); const before = f.current();
@@ -79,6 +98,28 @@ test('public typed author command dispatches one batch and retains single goal b
   await createGoalCommand(services)(['set', '--goal', 'Adjusted', '--why', 'Why']);
   assert.equal(f.current().brief?.goal, 'Adjusted'); assert.equal(f.writes(), 2);
   assert.deepEqual(f.current().successCriteria, fields.criteria);
+});
+
+test('dedicated split and risk commands leave normal authoring and NEL writes unchanged (PX-0030-H16)', async () => {
+  const requests: unknown[] = [];
+  const wave = {
+    async convert(request: unknown) { requests.push(request); return { status: 'completed', durableEvidence: [], value: { parent: {}, children: [], version: 2 } }; },
+    async approveRiskException(request: unknown) { requests.push(request); return { status: 'completed', durableEvidence: [], value: { mission: {}, version: 2 } }; },
+  };
+  const services = { wave: wave as unknown as MissionWaveService, resolveSlug: () => 'task-3000' };
+  const first = ['--child', 'Foundation', '--child-goal', 'g', '--child-why', 'w', '--child-scope', 's', '--child-criterion', 'done',
+    '--child-checkpoint', 'CP-1', '--child-checkpoint-text', 'build', '--child-gate', 'npm test', '--child-predicted', 'Medium', '--child-classification', 'ai_sdlc'];
+  const second = ['--child', 'Consumer', '--child-goal', 'g2', '--child-why', 'w2', '--child-scope', 's2', '--child-criterion', 'done2',
+    '--child-checkpoint', 'CP-1', '--child-checkpoint-text', 'build2', '--child-gate', 'npm test', '--child-predicted', 'Small',
+    '--child-classification', 'user_value', '--child-depends-on', '1'];
+  const split = createSplitCommand(services, gate => gate === 'bad' ? 'invalid gate' : null);
+  await split([...first, ...second]);
+  await createRiskExceptionCommand(services, true)(['--reason', 'one atomic boundary is safer', '--operator', 'maintainer']);
+  assert.deepEqual((requests[0] as { children: { title: string; dependsOn?: number[] }[] }).children.map(entry => [entry.title, entry.dependsOn]),
+    [['Foundation', []], ['Consumer', [1]]]);
+  assert.equal((requests[1] as { approvedBy: string }).approvedBy, 'maintainer');
+  await assert.rejects(createRiskExceptionCommand(services)(['--reason', 'x', '--operator', 'agent']), /direct operator/);
+  await assert.rejects(split(first), /at least two --child groups/);
 });
 
 

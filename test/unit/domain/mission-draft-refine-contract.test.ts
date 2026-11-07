@@ -27,6 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDraftWorkflowAdapter, DRAFT_CONTRACT_REPAIR_ATTEMPTS } from '../../../src/adapters/cli/commands/draft-stats.js';
+import { recordDraftRefinement } from '../../../src/adapters/cli/commands/draft-workflow-support.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { normalizeDraftClassification, buildRestartPrompt } from '../../../src/adapters/cli/commands/draft-prompts.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
@@ -111,6 +112,21 @@ test('an infrastructure failure at refine is not sent to the agent and keeps the
   assert.ok(record.logs.some((line) => /operator-local database is reachable/.test(line)));
 });
 
+test('a validated wave completes drafting without refining its non-executable parent (PX-0030)', async () => {
+  let transitions = 0;
+  const ctx: DraftWorkflowContext = {
+    ...draftContext(async () => { transitions++; throw new Error('must not refine wave parent'); }, async () => false),
+    missionServicesFn: async () => draftMissionServicesFixture({
+      store: { async load() { return { kind: 'found' as const, mission: fixtureMission('task-x', {
+        status: 'backlog', wave: { children: [missionId('task-x.01'), missionId('task-x.02')] },
+      }), version: missionVersion(2) }; } },
+      lifecycle: { async transition() { transitions++; throw new Error('must not refine wave parent'); } },
+    }),
+  };
+  assert.deepEqual(await recordDraftRefinement(ctx), { ok: true });
+  assert.equal(transitions, 0);
+});
+
 // --- the draft prompt states exactly what refine enforces ------------------------------
 
 test('the draft prompt marks as required exactly the parts refine refuses without', () => {
@@ -139,6 +155,12 @@ test('the draft prompt marks as required exactly the parts refine refuses withou
   assert.deepEqual([...required].sort(), [...enforced].sort());
   assert.ok(!optional.has('px scope set') && optional.has('px depends add'));
   assert.match(prompt, /never end your turn while a `px` command is still running/);
+  assert.match(prompt, /if the predicted bucket is Large.*record the parent normally.*use `px split`/s);
+  assert.match(prompt, /Small or Medium predicted NEL bucket.*Large child must be split again/);
+  assert.match(prompt, /wave child must remain Small or Medium.*split the child again.*operator.*fold it back into the parent/is);
+  assert.match(prompt, /production-safe integration boundaries/);
+  assert.match(prompt, /child with no prerequisite stays dependency-free/);
+  assert.match(prompt, /Agent self-approval is not an escape hatch/);
   assert.doesNotMatch(prompt, /record a concrete, non-generic goal, rationale, scope, out-of-scope/);
   assert.match(prompt, /inspect repository history/);
   assert.match(prompt, /run or read the defect reproduction/);

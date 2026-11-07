@@ -7,6 +7,7 @@ import { MissionAssignmentService } from '../application/mission-assignment-serv
 import { MissionNelService } from "../application/mission-nel-service.js";
 import { MissionIntakeService } from '../application/mission-intake-service.js';
 import { MissionIntegrationService } from '../application/mission-integration-service.js';
+import { MissionWaveService } from '../application/mission-wave-service.js';
 import { resolveWorktree } from '../adapters/git/worktree.js';
 
 import fs from 'node:fs';
@@ -58,5 +59,6 @@ export async function createMissionApplicationServices(
     defectProvenanceBackfill: new DefectProvenanceBackfillService(store, repoId),
     assignment: new MissionAssignmentService(store),
     nel: new MissionNelService(store),
+    wave: new MissionWaveService(store),
   };
 }

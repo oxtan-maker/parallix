@@ -23,7 +23,7 @@ import type {
 // bounce itself is the rebound kernel's (TASK-2377.05).
 import { classifyHookFailure } from './hook-failure-workflow.js';
 export { classifyHookFailure };
-import { autoResolveMissionConflicts, handleNonConflictRebaseFailure, startRebaseRound, type ContinueOutcome } from './rebase-continuation.js';
+import { autoResolveMissionConflicts, handleNonConflictRebaseFailure, rebaseBaseFreshness, startRebaseRound, type ContinueOutcome } from './rebase-continuation.js';
 import { buildCurrentRebasePrompt } from './rebase-prompt.js';
 export { buildRebasePrompt } from './rebase-prompt.js';
 import { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
@@ -76,15 +76,8 @@ async function performPush(ctx: RebaseContext): Promise<boolean> {
   return true;
 }
 
-/**
- * Postcondition shared by every success path: the resolved *local* base must be
- * an ancestor of the mission HEAD. Reporting a successful rebase without this
- * guarantee is a silent false success (architecture migration). Returns false
- * after emitting diagnostics and calling exit(1); callers must return at once.
- */
-function verifyBaseAncestry(ctx: RebaseContext): boolean {
+function reportFailedBaseAncestry(ctx: RebaseContext): void {
   const { gitFn, executionRoot, baseBranch, port } = ctx;
-  if (gitFn(['-C', executionRoot, 'merge-base', '--is-ancestor', baseBranch, 'HEAD']).status === 0) { return true; }
   const headSha = (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || '(unknown)';
   const output = [
     'Rebase postcondition failed: the local base branch is not an ancestor of the mission HEAD.',
@@ -96,7 +89,6 @@ function verifyBaseAncestry(ctx: RebaseContext): boolean {
   port.onFailure?.({ kind: 'other', operation: 'rebase', output, failureReason: failureReason('git-behind', 'git', { operation: 'rebase-postcondition' }) });
   fmt.log.fail(output);
   port.exit(1);
-  return false;
 }
 
 /** The one success tail: verify ancestry, announce, push, then name what is next. */
@@ -114,7 +106,20 @@ async function finishRebase(ctx: RebaseContext, message: string): Promise<void> 
     ctx.port.exit(1);
     return;
   }
-  if (!verifyBaseAncestry(ctx)) { await observeRebase(ctx, 'failed', currentRevision(ctx)); return; }
+  const freshness = rebaseBaseFreshness(ctx);
+  if (freshness.kind !== 'current') {
+    if (freshness.kind === 'advanced') {
+      fmt.log.warn(`Local ${fmt.branch(ctx.baseBranch)} advanced during the rebase (${freshness.from.slice(0, 12)} -> ${freshness.to.slice(0, 12)}). Rebasing again in the same review round.`);
+      ctx.rebaseAttempt = (ctx.rebaseAttempt ?? 1) + 1;
+      ctx.rebaseConflicts = undefined;
+      await observeRebase(ctx, 'running', currentRevision(ctx));
+      await runRebaseWorkflow(ctx.args, ctx.port, { context: ctx });
+      return;
+    }
+    reportFailedBaseAncestry(ctx);
+    await observeRebase(ctx, 'failed', currentRevision(ctx));
+    return;
+  }
   const after = (ctx.gitFn(['-C', ctx.executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null;
   await observeRebase(ctx, completedRebaseOutcome(ctx, after), after);
   // The branch just moved: record, at this moment, an approval it no longer

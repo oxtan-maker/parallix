@@ -190,6 +190,24 @@ retaining earlier versions for replay. Review rounds preserve their starting
 evidence and success criteria, including stable criterion identities. Recording refuses evidence that handoff would
 refuse: a row citing no resolvable reference, or a final planned checkpoint that leaves a success criterion uncovered.
 
+### UC-15A — Split an oversized draft into deliverable missions
+
+As a drafting agent, I want a Large estimate to become an ordered set of
+independently deliverable child Missions, so that implementation and review do
+not inherit one oversized contract.
+
+**Confidence:** Confirmed for draft readiness and recorded planning. Wave
+conversion assigns deterministic child identities, validates every complete
+child contract and its acyclic prerequisite graph, and commits the parent and
+all children atomically. The parent remains a visible, non-executable planning
+container; `px status` reports each child, its recorded prerequisites, and the
+`px draft <child-id>` entry point. Each child must estimate as Small or Medium;
+a still-Large contract must be split again before conversion.
+Dependencies communicate the plan but do not schedule execution. If splitting
+would be less safe, only a direct operator decision can record the rationale for
+keeping the Large Mission whole. Exact split and exception flags remain owned by
+`px split --help` and `px risk-exception --help`.
+
 ### UC-16 — Answer a review without losing the thread
 
 As a reviewer I want to record a verdict with named findings, and as an

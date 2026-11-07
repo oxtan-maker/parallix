@@ -1,4 +1,4 @@
-import { missionLabels } from '../../../src/domain/mission.js';
+import { missionId, missionLabels } from '../../../src/domain/mission.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
 
@@ -801,6 +801,44 @@ describe('Draft preflight', () => {
     assert.ok(calls.some(([c, slug]) => c === 'intake' && slug === 'px-0004'), 'intake materializes the mission under px-0004');
     assert.ok(calls.some(([c, slug, status]) => c === 'transition' && slug === 'px-0004' && status === 'backlog'), 'the mission reaches backlog without a Backlog mirror');
     assert.ok(logs.some(l => /px-0004/.test(l)), 'the draft names the px-0004 identity');
+  });
+
+  test('runDraftCommand drafts a persisted wave child with no Backlog task file (PX-0030-F2)', async () => {
+    const errors: string[] = [];
+    let exitCode: number | undefined | null = null;
+    let branch = '';
+    const childId = 'task-3000.01';
+    const missionServicesFn: NonNullable<NonNullable<Parameters<typeof runDraftCommand>[1]>['missionServicesFn']> = async () =>
+      draftMissionServicesFixture({
+        repositoryId: fixtureRepositoryId('test-repository'),
+        store: { load: async id => ({ kind: 'found' as const, mission: fixtureMission(id, {
+          status: 'backlog', title: 'wave child', waveParentId: missionId('task-3000'), labels: missionLabels(['ai_sdlc']),
+          brief: { goal: 'deliver child', why: 'independent value', scope: 'child', outOfScope: [] },
+          successCriteria: ['child passes'], declaredGates: ['npm test'], predictedNelBucket: 'Medium',
+        }), version: fixtureVersion(1) }) },
+        intake: { async execute(request) { return { status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId) }, durableEvidence: [] }; } },
+        lifecycle: { transition: async request => ({ status: 'completed' as const, value: { version: fixtureVersion(2), mission: fixtureMission(request.missionId, { status: 'refined' }), previousAssignee: null, from: 'backlog', to: 'refined', laneChanged: true }, durableEvidence: [] }) },
+      });
+
+    await runDraftCommand([childId], { configuration: resolveConfiguration(process.env),
+      inferSlugFn: value => value ?? null, resolveMainRepoFn: () => '/tmp/main-repo', ensureRepoExistsFn: () => true,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }), ensureDraftRepoConfigCommittedFn: () => true,
+      detectLaunchBaseBranchFn: () => null, conventionalWorktreePathFn: () => `/tmp/main-repo/mission-${childId}`,
+      ensureMissionBranchFn: (_repo, value) => { branch = value; }, ensureWorktreeFn: () => {}, ensureGraphifyWorkspaceFn: () => {},
+      ensureMissionFileFn: () => '/tmp/MISSION.md',
+      resolveTaskFileFn: () => ({ matches: [], ok: false as const, reason: 'missing' as const }),
+      bootstrapBacklogTaskFn: () => { throw new Error('a wave child must not create a Backlog mirror'); },
+      readAgentConfigOrExitFn: () => ({ steps: { draft: { eligible: ['codex'], selection: 'first' } } }),
+      selectAgentFn: () => 'codex', startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
+      recordDraftImplementerFn: () => {}, recordDraftStatsFn: () => {},
+      normalizeDraftClassificationFn: () => ({ ok: true as const, classification: 'ai_sdlc' }),
+      validateDraftClassificationFn: () => ({ ok: true as const, classification: 'ai_sdlc' }),
+      transitionTaskFn: () => true, missionServicesFn,
+      exitFn: code => { exitCode = code; }, logFn: () => {}, errorFn: message => errors.push(message),
+    });
+
+    assert.equal(exitCode, null, `the persisted wave child must enter draft without a Backlog mirror: ${errors.join(' | ')}`);
+    assert.match(branch, /mission\/task-3000\.01/);
   });
 
   // TASK-2706 negative: a Backlog-backed `task-NNNN` mission already in the

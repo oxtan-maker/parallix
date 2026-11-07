@@ -29,6 +29,15 @@ export function classificationLabels(mission: Mission, classification: string) {
   return [...mission.labels.filter(label => !MISSION_CLASSIFICATIONS.includes(String(label) as MissionClassification)), missionLabel(value)];
 }
 
+/** Keep a wave child independently deliverable after either authoring write path. */
+export function predictedNelBucketForMission(mission: Mission, bucket: NelBucketLabel): NelBucketLabel {
+  if (!['Small', 'Medium', 'Large'].includes(bucket)) { throw new Error('predicted NEL bucket must be Small, Medium or Large'); }
+  if (mission.waveParentId && bucket === 'Large') {
+    throw new Error(`Wave child ${mission.id} cannot be estimated Large; split the child again or ask the operator to fold it back into the parent ${mission.waveParentId}`);
+  }
+  return bucket;
+}
+
 /** A complete draft replaces planning facts, preserving all unrelated state. */
 export function authorMission(mission: Mission, fields: MissionAuthoringFields): Mission {
   if (!['backlog', 'refined'].includes(mission.status) || mission.closedAt !== null
@@ -41,9 +50,9 @@ export function authorMission(mission: Mission, fields: MissionAuthoringFields):
   if (!brief.scope || criteria.length === 0 || gates.length === 0 || fields.checkpoints.length === 0) {
     throw new Error('Mission authoring requires scope, criteria, checkpoint plans and gates');
   }
-  if (!['Small', 'Medium', 'Large'].includes(fields.predictedNelBucket)) { throw new Error('predicted NEL bucket must be Small, Medium or Large'); }
+  const predictedNelBucket = predictedNelBucketForMission(mission, fields.predictedNelBucket);
   const checkpoints = fields.checkpoints.reduce((planned, checkpoint) => planCheckpoint(planned, { ...checkpoint, missionId: mission.id }), [] as Mission['checkpoints'][number][]);
   return { ...replaceSuccessCriteria(mission, criteria), brief,
-    checkpoints, declaredGates: gates, predictedNelBucket: fields.predictedNelBucket,
+    checkpoints, declaredGates: gates, predictedNelBucket,
     labels: classificationLabels(mission, fields.classification) };
 }

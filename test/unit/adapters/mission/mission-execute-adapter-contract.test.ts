@@ -179,6 +179,21 @@ describe('Execute Mission adapters', () => {
     assert.match(plan.prompt, /Declared gates: \.\/scripts\/verify-local\.sh all/);
   });
 
+  test('agent execution adapter identifies a persisted wave child as having no Backlog mirror (PX-0030-F6)', async () => {
+    const child = fixtureMission('task-3000.01', { waveParentId: missionId('task-3000') });
+    const childStore: MissionTransitionStore = {
+      ...transitionStore,
+      async load() { return { kind: 'found' as const, mission: child, version: missionVersion(1) }; },
+    };
+    let promptOptions: { rootDir?: string; dbOwnedNoMirror?: boolean } | undefined;
+    const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: childStore }, runtimeStub({
+      buildExecutePrompt(_slug, _context, options) { promptOptions = options; return 'execute prompt'; },
+    }));
+
+    await ports.agentExecution.prepare({ slug: 'task-3000.01', worktree: '/worktree' });
+    assert.deepEqual(promptOptions, { rootDir: '/worktree', dbOwnedNoMirror: true });
+  });
+
   test('agent execution adapter falls back to the checkpoint context when no brief is recorded', async () => {
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
       async resolveExecutionContext() { return null; },
@@ -411,7 +426,7 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(outcome.value, { agent: 'codex' });
     assert.deepEqual(calls, [
-      'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt',
+      'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt',
       'launch-record:codex', 'load', 'safety',
       'model', 'telemetry', 'stats:codex',
       'load', 'load', 'load', 'synchronize',
@@ -575,7 +590,7 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.error.kind, 'execution');
     assert.equal(outcome.error.message, 'Execute agent (codex) exited with status 23.');
     assert.deepEqual(calls, [
-      'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'prompt', 'launch-record:codex', 'load',
+      'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt', 'launch-record:codex', 'load',
     ]);
   });
 

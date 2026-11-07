@@ -141,7 +141,10 @@ export function createStatusBoardAdapter(options: {
           .catch(() => null);
 
         if (!card && !recorded) { return null; }
-        return projectStatusMissionData(recorded, card, slug, rootDir);
+        const waveChildren = recorded?.mission.wave && options.loadMissionFn
+          ? (await Promise.all(recorded.mission.wave.children.map(id => options.loadMissionFn!(id)))).flatMap(entry => entry ? [entry.mission] : [])
+          : [];
+        return projectStatusMissionData(recorded, card, slug, rootDir, waveChildren);
       } catch { /* projection unavailable */ }
       return null;
     },

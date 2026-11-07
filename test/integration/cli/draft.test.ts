@@ -165,6 +165,20 @@ test('buildDraftPrompt uses absolute worktree paths and emits no docs/agent-prom
   assert.doesNotMatch(prompt, /\{\{[^}]+\}\}/);
 });
 
+test('buildDraftPrompt omits Backlog mirror instructions for a persisted wave child (PX-0030-F6)', () => {
+  const prompt = buildDraftPrompt('task-3000.01', {
+    rootDir: '/tmp/testproj-task-3000.01',
+    worktree: '/tmp/testproj-task-3000.01',
+    dbOwnedNoMirror: true,
+  });
+
+  assert.doesNotMatch(prompt, /Backlog task:/);
+  assert.doesNotMatch(prompt, /<task-3000\.01>\.md/);
+  assert.doesNotMatch(prompt, /preserve `[^`]*task-3000\.01[^`]*`/);
+  assert.match(prompt, /DB-owned Mission has no Backlog task file/);
+  assert.match(prompt, /px status task-3000\.01/);
+});
+
 test('buildDraftPrompt requires agents to classify synthetic tasks (TASK-2731)', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-synth-prompt-'));
   try {

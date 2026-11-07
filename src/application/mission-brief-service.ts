@@ -23,7 +23,7 @@ import type { NelBucketLabel } from '../domain/net-engineering-lines.js';
 import type { OperationalHistoryRepository } from './ports/operation-history.js';
 import type { CheckpointData } from '../domain/checkpoint.js';
 import type { MissionId } from '../domain/mission.js';
-import { MISSION_CLASSIFICATIONS, classificationLabels, type MissionClassification } from '../domain/mission-authoring.js';
+import { MISSION_CLASSIFICATIONS, classificationLabels, predictedNelBucketForMission, type MissionClassification } from '../domain/mission-authoring.js';
 import { MissionAuthoringService, type AuthorMissionRequest } from './mission-authoring-service.js';
 import { defectProvenance, type DefectProvenance } from '../domain/defect-provenance.js';
 export { MISSION_CLASSIFICATIONS, type MissionClassification } from '../domain/mission-authoring.js';
@@ -217,10 +217,11 @@ export class MissionBriefService {
   async setPredictedNelBucket(request: SetPredictedNelBucketRequest): Promise<ApplicationOutcome<MissionPredictedNelBucketResult>> {
     const guard = missingCapability<MissionPredictedNelBucketResult>(request, 'mission:context'); if (guard) { return guard; }
     const loaded = await loadForCommand<MissionPredictedNelBucketResult>(this._store, request); if (!isLoaded(loaded)) { return loaded; }
-    const { bucket } = request;
-    if (bucket !== 'Small' && bucket !== 'Medium' && bucket !== 'Large') {
-      return failure('validation', 'predicted NEL bucket must be Small, Medium or Large');
+    let bucket: NelBucketLabel;
+    try {
+      bucket = predictedNelBucketForMission(loaded.mission, request.bucket);
     }
+    catch (error) { return failure('validation', error instanceof Error ? error.message : 'invalid predicted NEL bucket'); }
     try {
       const version = await this._store.save({ ...loaded.mission, predictedNelBucket: bucket }, loaded.version);
       return completed({ predictedNelBucket: bucket, version }, [storeEvidence(request.missionId, 'predicted-nel-bucket', `predicted NEL bucket: ${bucket}`)]);

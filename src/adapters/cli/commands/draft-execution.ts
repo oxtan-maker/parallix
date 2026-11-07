@@ -95,7 +95,7 @@ export async function draftLaunchAgent(environment: DraftWorkflowEnvironment, ct
 
   const agentConfig = readAgentConfigOrExitFn(undefined, { configuration: merged.configuration });
   const agent = ctx.agent || selectAgentFn('draft', { config: agentConfig, configuration: merged.configuration });
-  const prompt = buildDraftPrompt(ctx.slug, { rootDir: ctx.mainRepo, worktree: ctx.targetWorktree || '' });
+  const prompt = buildDraftPrompt(ctx.slug, { rootDir: ctx.mainRepo, worktree: ctx.targetWorktree || '', dbOwnedNoMirror: ctx.dbOwned });
   logFn('');
   logFn(fmt.bold(`Running ${fmt.agent(agent)} to write the mission contract...`));
   const { agent: actualAgent, result } = await startDraftAgentFn({

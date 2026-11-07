@@ -103,6 +103,20 @@ function requiresDefectProvenance(mission: OpenMission, command: MissionCommand)
 }
 
 function requireDraftedContract(mission: OpenMission, command: MissionCommand): void {
+  const missing = missingCoreContractParts(mission);
+  if (command.type === 'refine' && mission.predictedNelBucket === 'Large' && !mission.largeMissionRiskException) {
+    missing.push('a valid Mission wave or an operator-approved Large-mission risk exception (`px split` or `px risk-exception`)');
+  }
+  missing.push(...missingBugContractParts(mission, command));
+  if (missing.length > 0) {
+    throw new MissionRuleViolation(
+      `Cannot ${command.type} ${mission.id}: its mission contract is incomplete. `
+      + `Missing ${missing.join('; ')}. Record what is missing, then read it back with \`px status ${mission.id}\`.`, failureReason('mission-contract-incomplete', 'lifecycle'),
+    );
+  }
+}
+
+function missingCoreContractParts(mission: OpenMission): string[] {
   const brief = mission.brief ?? null;
   const missing: string[] = [];
   if (!brief) {
@@ -122,18 +136,18 @@ function requireDraftedContract(mission: OpenMission, command: MissionCommand): 
   if (!mission.predictedNelBucket) {
     missing.push('a predicted NEL bucket (`px nel set`)');
   }
+  return missing;
+}
+
+function missingBugContractParts(mission: OpenMission, command: MissionCommand): string[] {
+  const missing: string[] = [];
   if (mission.labels.includes('bug' as MissionLabel) && !mission.reproductionTest) {
     missing.push('a reproduction test for this bug mission (`px repro set`)');
   }
   if (requiresDefectProvenance(mission, command)) {
     missing.push('defect provenance for this bug mission (`px provenance set`)');
   }
-  if (missing.length > 0) {
-    throw new MissionRuleViolation(
-      `Cannot ${command.type} ${mission.id}: its mission contract is incomplete. `
-      + `Missing ${missing.join('; ')}. Record what is missing, then read it back with \`px status ${mission.id}\`.`, failureReason('mission-contract-incomplete', 'lifecycle'),
-    );
-  }
+  return missing;
 }
 
 function requireStatus(
@@ -376,6 +390,7 @@ function beginReviewPreparation(mission: Mission, command: Extract<MissionComman
 }
 
 export function decideMission(mission: Mission, command: MissionCommand): Mission {
+  requireExecutableMission(mission, command);
   switch (command.type) {
     case 'begin-review-preparation': return beginReviewPreparation(mission, command);
     case 'refine': return refineMission(mission, command);
@@ -423,6 +438,12 @@ export function decideMission(mission: Mission, command: MissionCommand): Missio
     case 'integrate':
       requireStatus(mission, ['integration'], command);
       return { ...mission, status: 'done', closedAt: null };
+  }
+}
+
+function requireExecutableMission(mission: Mission, command: MissionCommand): void {
+  if (mission.wave && (command.type === 'refine' || command.type === 'activate')) {
+    throw new MissionRuleViolation(`Cannot ${command.type} ${mission.id}: Mission wave parents are non-executable; draft or activate a child Mission`);
   }
 }
 

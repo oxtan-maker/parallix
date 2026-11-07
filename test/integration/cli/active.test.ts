@@ -179,6 +179,18 @@ test('buildExecutePrompt reserves Backlog lifecycle transitions for Parallix', (
   assert.match(prompt, /do not run .*`px active`.*`px review`.*`px integrate`/);
 });
 
+test('buildExecutePrompt omits Backlog mirror instructions for a persisted wave child (PX-0030-F6)', () => {
+  const prompt = buildExecutePrompt('task-3000.01', 'CP-1 pending', {
+    rootDir: '/tmp/testproj-task-3000.01',
+    dbOwnedNoMirror: true,
+  });
+
+  assert.doesNotMatch(prompt, /Backlog task:/);
+  assert.doesNotMatch(prompt, /<task-3000\.01>\.md/);
+  assert.doesNotMatch(prompt, /preserve `[^`]*task-3000\.01[^`]*`/);
+  assert.doesNotMatch(prompt, /do not change the Backlog task's status/i);
+});
+
 test('buildCheckpointContext returns fallback text when no checkpoints exist', () => {
   const context = buildCheckpointContext('task-nonexistent-9999');
   assert.match(context, /CP-1|no checkpoint/i);

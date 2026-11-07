@@ -88,13 +88,21 @@ function statusContractJson(result: StatusResult) {
 
 function statusPlanJson(result: StatusResult) {
   const md = result.missionData;
+  if (!md) {
+    return {
+      completedSuccessCriteria: [], dependencies: [], wave: null, largeMissionRiskException: null,
+      checkpoints: [], predictedNelBucket: null, reproductionTest: null, defectProvenance: null
+    };
+  }
   return {
-    completedSuccessCriteria: md?.completedSuccessCriteria ?? [],
-    dependencies: md?.dependencies ?? [],
-    checkpoints: md?.checkpoints ?? [],
-    predictedNelBucket: md?.predictedNelBucket ?? null,
-    reproductionTest: md?.reproductionTest ?? null,
-    defectProvenance: md?.defectProvenance ?? null
+    completedSuccessCriteria: md.completedSuccessCriteria ?? [],
+    dependencies: md.dependencies ?? [],
+    wave: md.wave ?? null,
+    largeMissionRiskException: md.largeMissionRiskException ?? null,
+    checkpoints: md.checkpoints ?? [],
+    predictedNelBucket: md.predictedNelBucket ?? null,
+    reproductionTest: md.reproductionTest ?? null,
+    defectProvenance: md.defectProvenance ?? null
   };
 }
 
@@ -191,7 +199,17 @@ function logDescription(description: string | null | undefined, log: (_msg: stri
  * The recorded brief and declared gates, so an agent never opens a mission
  * document to learn what the mission is for or what verifies it.
  */
-function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) => void): void {
+function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) => void, slug: string): void {
+  logBrief(missionData, log);
+  logCriteria(missionData, log);
+  logDependenciesAndWave(missionData, log, slug);
+  logCheckpointPlan(missionData, log);
+  logGatesAndLargeReadiness(missionData, log);
+  if (missionData.reproductionTest) { log(`Reproduction test: ${missionData.reproductionTest}`); }
+  logDefectProvenance(missionData, log);
+}
+
+function logBrief(missionData: StatusMissionData, log: (_msg: string) => void): void {
   const brief = missionData.brief;
   if (brief) {
     log(`Goal: ${brief.goal}`);
@@ -202,6 +220,9 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
     log('Brief: none recorded');
     logDescription(missionData.description, log);
   }
+}
+
+function logCriteria(missionData: StatusMissionData, log: (_msg: string) => void): void {
   const criteria = missionData.successCriteria ?? [];
   if (criteria.length > 0) {
     log('Success criteria:');
@@ -210,14 +231,33 @@ function logBriefAndGates(missionData: StatusMissionData, log: (_msg: string) =>
   } else {
     log('Success criteria: none');
   }
+}
+
+function logDependenciesAndWave(missionData: StatusMissionData, log: (_msg: string) => void, slug: string): void {
   const dependencies = missionData.dependencies ?? [];
   log(dependencies.length > 0 ? `Depends on: ${dependencies.join(', ')}` : 'Depends on: nothing recorded');
-  logCheckpointPlan(missionData, log);
+  if (missionData.wave?.role === 'parent') {
+    log('Mission wave: non-executable parent');
+    for (const child of missionData.wave.children ?? []) {
+      const prerequisites = child.dependencies.length ? `depends on: ${child.dependencies.join(', ')}` : 'no prerequisites';
+      log(`  - ${child.id} (${prerequisites}; draft with: px draft ${child.id})`);
+    }
+  } else if (missionData.wave?.role === 'child') {
+    log(`Mission wave child of: ${missionData.wave.parentId}; draft entry: px draft ${slug}`);
+  }
+}
+
+function logGatesAndLargeReadiness(missionData: StatusMissionData, log: (_msg: string) => void): void {
   const gates = missionData.declaredGates ?? [];
   log(gates.length > 0 ? `Declared gates: ${gates.join('; ')}` : 'Declared gates: none');
   if (missionData.predictedNelBucket) { log(`Predicted NEL bucket: ${missionData.predictedNelBucket}`); }
-  if (missionData.reproductionTest) { log(`Reproduction test: ${missionData.reproductionTest}`); }
-  logDefectProvenance(missionData, log);
+  if (missionData.largeMissionRiskException) {
+    const decision = missionData.largeMissionRiskException;
+    log(`Large-mission risk exception: approved by ${decision.approvedBy} at ${decision.approvedAt}; ${decision.rationale}`);
+  } else if (missionData.predictedNelBucket === 'Large' && missionData.wave?.role !== 'parent'
+    && ['backlog', 'refined'].includes(missionData.missionStatus ?? missionData.backlogStatus)) {
+    log('Large-mission readiness: BLOCKED — convert to a Mission wave or record an operator-approved risk exception');
+  }
 }
 
 function logDefectProvenance(missionData: StatusMissionData, log: (_msg: string) => void): void {
@@ -272,7 +312,7 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log(`Coordinator evidence: ${describeCoordinatorEvidence(missionData.activity.coordinator)}`);
   }
   logProviderObservation(missionData, log);
-  logBriefAndGates(missionData, log);
+  logBriefAndGates(missionData, log, slug);
   if (missionData.version !== null && missionData.version !== undefined) {
     log(`Version: ${missionData.version} (diagnostic only; writes resolve it automatically, or pass --expected-version to pin it)`);
   }

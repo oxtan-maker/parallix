@@ -64,6 +64,10 @@ Drafting requirements:
 - preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
 - do not edit the backlog `assignee` field; the workflow records ownership itself
 - predict the size of the change as a net engineering lines (NEL) bucket — Small (0–80), Medium (81–235) or Large (235+)
+- a Mission-wave child must remain Small or Medium. If new evidence makes the child Large, stop: split the child again, or ask the operator to fold it back into the parent before redefining the wave. Do not record Large on a wave child.
+- if the predicted bucket is Large, first record the parent normally, then run `px split --help` and use `px split` to define at least two child contracts. Every child needs its own goal and reason, scope and out-of-scope boundaries, success criteria, checkpoint plan, runnable gates, Small or Medium predicted NEL bucket and classification; a Large child must be split again before conversion. Choose production-safe integration boundaries: each child must be independently useful, verifiable and safe to integrate, not a partial layer that leaves the primary branch broken.
+- record only prerequisite relationships that are actually necessary. A child with no prerequisite stays dependency-free; dependent children use repeatable one-based `--child-depends-on <position>` flags, and the complete graph must be acyclic. Do not add a chain merely to impose a preferred order.
+- if decomposition would be less safe than one Large delivery, do not approve the exception yourself. Explain the concrete coupling or atomicity reason to the operator and stop so they can decide whether to run `px risk-exception --help`. Agent self-approval is not an escape hatch.
 - Plan a brief check where the implementer exercises the changed behavior through the running application’s public interface and records the observed result, using existing tools without adding E2E tests unless explicitly asked for in the intent.
 
 Bug-labeled missions (regression-test-first / "lock the bug"):

@@ -856,7 +856,7 @@ test("composed review, review preparation, active and runtime fallback obey the 
   const config = () => ({ steps: { review: policy, active: policy } });
   const write = () => fs.writeFileSync(path.join(root, 'config/agents.json'), JSON.stringify(config()));
   const runtime = { ...createDefaultExecuteMissionRuntime(), readAgentConfig: config };
-  const active = new AgentExecutionAdapter(runtime, null, null, configuration);
+  const active = new AgentExecutionAdapter(runtime, null as never, null, null, configuration);
   const reviewPreparation = new ReviewSubmissionService(createReviewPreparationPorts(configuration));
   const review = () => selectReviewer({ implementer: 'vibe', isContinue: false, persisted: null,
     maxAttempts: 1, dryRun: false, providerEnabled: false, slug: 'selection-fixture' },

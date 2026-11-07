@@ -169,7 +169,7 @@ function completeMission(overrides: Partial<Mission> = {}): Mission {
     successCriterionIds: (overrides.successCriteria ?? ['The aggregate survives a restart', 'Stale writes are rejected']).map((_, index) => `sc-${index + 1}`),
     nextSuccessCriterionId: (overrides.successCriteria?.length ?? 2) + 1,
     completedSuccessCriteria: [1],
-    dependencies: [fixtureMissionId('task-2521.01'), fixtureMissionId('task-2521.03')],
+    dependencies: [fixtureMissionId('task-2521.01'), fixtureMissionId('task-2521.03')], wave: null, waveParentId: null, largeMissionRiskException: null,
     predictedNelBucket: 'Medium',
     reproductionTest: 'test/task-2294-repro.test.ts',
     defectProvenance: { rootCauseSummary: 'A persistence boundary dropped checked Mission state.', investigationEvidence: 'The focused reproduction and retained diff identify the missing aggregate field.', attribution: { kind: 'unresolved' } },
@@ -268,7 +268,7 @@ describe('SQLite Mission aggregate integration', () => {
           'reproduction_test',
           'predicted_nel_bucket',
           'description',
-          'next_success_criterion_id', 'review_preparation_pending',
+          'next_success_criterion_id', 'review_preparation_pending', 'wave_parent_id', 'wave_children_json', 'large_risk_rationale', 'large_risk_approved_by', 'large_risk_approved_at',
         ],
       );
       assert.ok(!columns.some(({ name }) => ['labels', 'checkpoints', 'review'].includes(name)));

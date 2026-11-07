@@ -14,20 +14,21 @@
  * never takes the flag at all.
  */
 
-import { AUTHOR_HELP, parseMissionAuthoring } from './mission-authoring.js';
-import * as fmt from '../../application/presentation/cli-format.js';
 import type { MissionCheckpointService } from '../../application/mission-checkpoint-service.js';
 import type { MissionBriefService } from '../../application/mission-brief-service.js';
 import type { MissionAssignmentService } from '../../application/mission-assignment-service.js';
+import type { MissionWaveService } from '../../application/mission-wave-service.js';
 import { missionId } from '../../domain/mission.js';
 import { agentFamily } from '../../domain/agents.js';
-import { missionVersion } from '../../application/domain-ports.js';
 import type { GoalCheckRow } from '../../domain/checkpoint.js';
+import { fail, flag, flags, helped, output, request, required, requireOperator, unwrap } from './mission-write-support.js';
+export { createMissionCommand, MISSION_HELP } from './mission-command.js';
 
 export interface MissionWriteServices {
   readonly brief: MissionBriefService;
   readonly checkpoints: MissionCheckpointService;
   readonly assignment: MissionAssignmentService;
+  readonly wave: MissionWaveService;
   /**
    * Resolves `--slug`, or infers it from the branch/worktree when omitted.
    * Injected so this interface module never reaches into an adapter.
@@ -35,78 +36,6 @@ export interface MissionWriteServices {
   readonly resolveSlug: (_explicit?: string) => string | null;
 }
 
-/** Last value for a flag, or null. */
-function flag(args: readonly string[], name: string): string | null {
-  const index = args.lastIndexOf(name);
-  return index < 0 ? null : args[index + 1] ?? null;
-}
-
-/** Every value for a repeatable flag, in the order given. */
-function flags(args: readonly string[], name: string): string[] {
-  const values: string[] = [];
-  for (const [index, arg] of args.entries()) {
-    if (arg === name) {
-      const value = args[index + 1];
-      if (value === undefined || value.startsWith('--')) { fail(`${name} needs a value`); }
-      values.push(value);
-    }
-  }
-  return values;
-}
-
-function fail(message: string): never { throw new Error(message); }
-function requireOperator(direct: boolean): void {
-  if (!direct) { fail('Checkpoint correction requires a direct operator invocation'); }
-}
-
-function required(args: readonly string[], name: string): string {
-  const value = flag(args, name);
-  if (value === null || value.startsWith('--')) { fail(`${name} <value> is required`); }
-  return value;
-}
-
-function output(value: unknown): void { fmt.log.plain(JSON.stringify(value, null, 2)); }
-
-/**
- * Shared request preamble: slug resolution plus the mandatory version. Each
- * command grants only the capability its service checks, so a checkpoint write
- * cannot pass as a brief write or the reverse.
- */
-function request(
-  args: readonly string[],
-  operation: string,
-  resolveSlug: (_explicit?: string) => string | null,
-  capability: 'mission:context' | 'checkpoint:record' | 'checkpoint:correct' = 'mission:context',
-) {
-  const slug = resolveSlug(flag(args, '--slug') ?? undefined);
-  if (!slug) { fail('no mission slug: run inside the mission worktree or pass --slug <slug>'); }
-  // `--expected-version` is optional. When omitted, `expectedVersion` is left
-  // undefined so `loadForCommand` skips its pre-check and the command writes
-  // against the revision it just loaded; the store's compare-and-swap save then
-  // refuses a competing write, so a stale write still changes nothing. Supplying
-  // the flag keeps the earlier explicit guard and validation. A present flag
-  // with no value is a malformed pin and is refused, never an automatic write.
-  const expectedVersion = (() => {
-    if (!args.includes('--expected-version')) { return undefined; }
-    const raw = flag(args, '--expected-version');
-    const parsed = Number(raw);
-    if (!Number.isSafeInteger(parsed) || parsed < 1) { fail('--expected-version must be a positive integer'); }
-    return missionVersion(parsed);
-  })();
-  return {
-    operationId: `px-${operation}-${slug}`,
-    missionId: missionId(slug),
-    expectedVersion,
-    capabilities: new Set([capability]),
-  };
-}
-
-
-/** Fail on the application outcome rather than letting a failure read as success. */
-function unwrap<T>(outcome: { status: string; error?: { message?: string }; value?: T }, what: string): T {
-  if (outcome.status !== 'completed') { fail(outcome.error?.message ?? `${what} failed`); }
-  return outcome.value as T;
-}
 
 export const GOAL_HELP = `
 Usage: px goal set [--slug <slug>] --goal <text> --why <text>
@@ -143,14 +72,6 @@ Mission to be done, specific enough to check. Checkpoint Goal Check rows and
 review verify against these; read them back with \`px status\`.
 `.trimStart();
 
-export const MISSION_HELP = `
-Usage:${AUTHOR_HELP}
-  px mission mark-complete [--slug <slug>] (--criterion <n> | --all)
-
-Mark one success criterion, by the index \`px status\` lists it with, or every
-criterion complete. Review preparation requires every criterion complete and evidenced by
-a verifiable Goal Check row in the final checkpoint.
-`.trimStart();
 
 export const DEPENDS_HELP = `
 Usage:
@@ -253,10 +174,6 @@ Usage:
 Set or clear the Mission's assignee.
 `.trimStart();
 
-function helped(args: readonly string[], help: string): boolean {
-  if (args.includes('--help') || args.includes('-h')) { fmt.log.plain(help); return true; }
-  return false;
-}
 
 /** `px goal set` */
 export function createGoalCommand(services: Pick<MissionWriteServices, 'resolveSlug'> & { brief: Pick<MissionBriefService, 'update'> }) {
@@ -317,27 +234,6 @@ export function createCriterionCommand(services: MissionWriteServices) {
     // A duplicate `add` is rejected by the domain, as for gates.
     const criteria = action === 'add' ? [...current, text] : current.filter((entry) => entry !== text);
     output(unwrap(await services.brief.setSuccessCriteria({ ...req, criteria }), `criterion ${action}`));
-  };
-}
-
-/** `px mission mark-complete (--criterion <n> | --all)` */
-export function createMissionCommand(services: Pick<MissionWriteServices, 'resolveSlug'> & { brief: Pick<MissionBriefService, 'author' | 'markSuccessCriteriaComplete'> }, validateGate: (_command: string) => string | null = () => null) {
-  return async (args: string[] = []): Promise<void> => {
-    if (helped(args, MISSION_HELP)) { return; }
-    if (args[0] === 'author') {
-      const fields = parseMissionAuthoring(args, validateGate);
-      const req = request(args, 'mission-author', services.resolveSlug);
-      output(unwrap(await services.brief.author({ ...req, ...fields }), 'mission author'));
-      return;
-    }
-    if (args[0] !== 'mark-complete') { fail(MISSION_HELP); }
-    const index = flag(args, '--criterion');
-    const all = args.includes('--all');
-    if (all === (index !== null)) { fail('give exactly one of --criterion <n> or --all'); }
-    const criterion = all ? 'all' : Number(index);
-    if (criterion !== 'all' && !/^\d+$/.test(index ?? '')) { fail(`--criterion must be a criterion number, got: ${index}`); }
-    const req = request(args, 'mission-mark-complete', services.resolveSlug);
-    output(unwrap(await services.brief.markSuccessCriteriaComplete({ ...req, criterion }), 'mark-complete'));
   };
 }
 
