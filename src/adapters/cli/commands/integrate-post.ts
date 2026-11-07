@@ -4,6 +4,8 @@ import type { StatsRow } from '../../../application/services/statistics-row.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import { DEFAULT_CONFIGURATION } from '../../../application/ports/configuration.js';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { git } from '../../git/git.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveForgejoUser, resolveForgejoHome, isForgejoPath } from '../../forgejo/forgejo.js';
@@ -34,6 +36,8 @@ import { bookkeepingCommitMessage } from '../../../domain/approval-coverage.js';
 import { historyRepositoryRoot, preserveWorktreeRunHistory } from '../../filesystem/run-history-store.js';
 import { missionRepositoryKey } from '../../filesystem/mission-repository-key.js';
 import { createMissionTerminalResources } from './mission-terminal-resources.js';
+import { retireCheckoutCache } from '../../verification/checkout-cache.js';
+import { diskBackedTempBase } from '../../process/bulk-storage.js';
 
 export { classifyHookFailure };
 
@@ -404,7 +408,8 @@ export function cleanupMissionWorktree(
     existsSync = fs.existsSync,
     retireTerminal = (mission: string, root: string) => retireMissionResources(mission, root, configuration),
     preserveHistory = (mission: string, worktree: string, root: string) => preserveWorktreeRunHistory(worktree, historyRepositoryRoot(root), { repositoryKey: missionRepositoryKey(historyRepositoryRoot(root)), missionId: mission }),
-  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: typeof git, removeDir?: (target: string) => void, existsSync?: typeof fs.existsSync, retireTerminal?: (_slug: string, _root: string) => void, preserveHistory?: (_slug: string, _worktree: string, _root: string) => unknown} = {}
+    cacheBases,
+  }: {configuration?: ParallixConfiguration, rootDir?: string, gitRunner?: typeof git, removeDir?: (target: string) => void, existsSync?: typeof fs.existsSync, retireTerminal?: (_slug: string, _root: string) => void, preserveHistory?: (_slug: string, _worktree: string, _root: string) => unknown, cacheBases?: readonly string[]} = {}
 ) {
   const retire = () => {
     try { retireTerminal(slug, rootDir); }
@@ -418,6 +423,7 @@ export function cleanupMissionWorktree(
   };
   const branch = missionBranchName(slug, rootDir);
   const worktreePath = `${conventionalWorktreePath(slug, rootDir)}`;
+  const checkoutCacheBases = cacheBases ?? resolveCheckoutCacheBases(worktreePath, configuration);
   const currentBranch = gitRunner(['-C', rootDir, 'branch', '--show-current']).stdout.trim();
   if (currentBranch === branch) {
     return false;
@@ -436,12 +442,8 @@ export function cleanupMissionWorktree(
   const isRegistered = worktreeList.split('\n').some((line: string) => line.trim() === `worktree ${worktreePath}`);
 
   preserveExistingHistory(worktreePath, existsSync, preserve);
-  if (!removeRegisteredWorktree(rootDir, worktreePath, isRegistered, gitRunner, existsSync)) { return false; }
-
-  if (existsSync(worktreePath)) {
-    removeDir(worktreePath);
-  }
-  if (existsSync(worktreePath)) { return false; }
+  if (existsSync(worktreePath)) { retireCheckoutCaches(worktreePath, checkoutCacheBases); }
+  if (!removeMissionWorktree(rootDir, worktreePath, isRegistered, gitRunner, existsSync, removeDir)) { return false; }
   retire();
 
   // Prune stale prunable worktrees — e.g. leftover registrations at near-match
@@ -455,6 +457,23 @@ export function cleanupMissionWorktree(
     return false;
   }
 
+  return !existsSync(worktreePath);
+}
+
+function resolveCheckoutCacheBases(worktreePath: string, configuration?: ParallixConfiguration): string[] {
+  const bases = [os.tmpdir()];
+  try { const terminal = (configuration ?? DEFAULT_CONFIGURATION).terminal; bases.push(diskBackedTempBase(terminal.runtimeDir, [path.join(worktreePath, 'tmp'), ...(terminal.transcriptDir ? [terminal.transcriptDir] : [])])); }
+  catch (_) { /* The ordinary temporary cache remains independently reclaimable. */ }
+  return [...new Set(bases)];
+}
+
+function retireCheckoutCaches(worktreePath: string, bases: readonly string[]): void {
+  for (const base of bases) { if (!retireCheckoutCache(worktreePath, base)) { fmt.log.warn(`Checkout cache cleanup warning: ${base} could not be safely retired; preserving it for recovery.`); } }
+}
+
+function removeMissionWorktree(rootDir: string, worktreePath: string, isRegistered: boolean, gitRunner: typeof git, existsSync: typeof fs.existsSync, removeDir: (target: string) => void): boolean {
+  if (!removeRegisteredWorktree(rootDir, worktreePath, isRegistered, gitRunner, existsSync)) { return false; }
+  if (existsSync(worktreePath)) { removeDir(worktreePath); }
   return !existsSync(worktreePath);
 }
 

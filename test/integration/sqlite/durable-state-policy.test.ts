@@ -17,6 +17,7 @@ const DIRECT_JSON_EXCEPTIONS = new Map([
   ['src/adapters/verification/temp-root-registry.ts:temporary', 'coverage-manifest'],
   ['src/adapters/verification/temp-root-registry.ts:path.join(manifestDir, OWNER_FILE)', 'coverage-manifest'],
   ['src/adapters/verification/temp-root-registry.ts:path.join(manifestDir, RUNNER_ROOTS_FILE)', 'coverage-manifest'],
+  ['src/adapters/verification/checkout-cache.ts:temporary', 'checkout-cache-owner'],
   ['src/adapters/review/setup-review-config.ts:configPath', 'workflow-config'],
   ['src/adapters/agents/qwen.ts:targetSettings', 'qwen-settings'],
   ['src/adapters/backlog/legacy-mission-import.ts:archiveFile', 'legacy-task-body-archive'],

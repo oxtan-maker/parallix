@@ -111,6 +111,22 @@ and unrelated directories survive; there is no blanket temporary-directory
 sweep. Test bootstraps register their own private disk-backed transcript roots
 for cleanup instead of writing into the operator's shared fallback.
 
+The test runner also keeps one stable temporary root per checkout. Its tsx and
+Node compile caches stay warm between invocations, while different checkouts do
+not share cache state. A durable owner record ties that root to the repository,
+the linked checkout and the creating process. Normal mission closeout retires
+the matching cache through the same worktree-cleanup boundary; active checkout
+caches remain available.
+
+After an interrupted closeout, the existing recovery pass considers only
+marked checkout-cache roots with the exact managed name and location. It
+removes one only when the directory is owned by the current user, neither the
+root nor its ownership record is a symlink, the repository still confirms that
+the linked checkout was retired, and the recorded PID plus process-start
+identity is dead. Missing or conflicting proof leaves the cache untouched and
+reports it as unresolved. Recovery does not age-delete unmarked cache-shaped
+directories or scan unrelated temporary data.
+
 ## What is not contained
 
 The boundary belongs to the runner. Invoking Node's test runner directly

@@ -573,6 +573,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // does not own an ADR 0053 durable-state concept.
     'src/adapters/cli/commands/integrate-gates.ts',
     'src/adapters/cli/commands/integrate-gate-plan.ts',
+    // Checkout cache ownership is temporary recovery metadata. It is removed
+    // with the checkout cache and owns no ADR 0053 durable-state concept.
+    'src/adapters/verification/checkout-cache.ts',
     // Review command surface — reads mission documents, checkpoints, ADRs and
     // operator-named input files. Its Review state is the SQLite aggregate;
     // none of these reads are of a database-owned concept (TASK-2322.12).

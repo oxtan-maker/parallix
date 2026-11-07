@@ -1585,6 +1585,13 @@ export const MACHINE_WRITTEN_PATH_INVENTORY: readonly MachineWrittenPathInventor
     persistencePolicy: 'PID-scoped scratch manifests, runner start identity and registered roots for SIGKILL orphan recovery; documented direct-write exception. These files grant conservative temporary-data cleanup authority, never durable workflow authority.',
   },
   {
+    id: 'checkout-cache-owner',
+    pathPattern: '<tmp>/px-tmp-<checkout-hash>/.parallix-checkout-cache.json',
+    writer: 'src/adapters/verification/checkout-cache.ts#writeOwner',
+    classification: 'cache-scratch-data',
+    persistencePolicy: 'Atomic ownership metadata for fail-closed checkout-cache retirement and orphan recovery; documented direct-write exception. Missing or invalid identity preserves the cache for unresolved-root reporting.',
+  },
+  {
     id: 'forgejo-token',
     pathPattern: '<FORGEJO_HOME>/tokens/<user>',
     writer: 'lib/tools/setup-review.ts#writeToken',

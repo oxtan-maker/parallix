@@ -38,6 +38,7 @@ import type { Mission, MissionId, MissionStatus } from '../../../../../src/domai
 import { missionId } from '../../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../../src/domain/repository.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
+import { checkoutCacheRoot, ensureCheckoutCache } from '../../../../../src/adapters/verification/checkout-cache.js';
 import { resolvePostIntegrateCommand, resolvePreCommitCommand, buildPostIntegrateHookEnv, runPostIntegrateHook, runPreCommitHook } from '../../../../../src/adapters/process/post-integrate-hook.js';
 
 // ---- task-2551 recovery post-integrate hook (consolidated from test/task-2551-recovery-post-integrate-hook.test.ts, TASK-2622.09) ----
@@ -631,6 +632,20 @@ describe("interrupted landed integration", () => {
       retireTerminal: () => { throw new Error('tmux set-option failed'); },
     }), true, 'terminal retirement must not block landed closeout');
   });
+
+  test('cleanupMissionWorktree idempotently retires only its matching checkout cache (TASK-2843)', () => {
+    const fixture = registeredMkdtemp('task-2843-cleanup-'), rootDir = path.join(fixture, 'repo'), cacheBase = path.join(fixture, 'cache'), coveredBase = path.join(fixture, 'covered'), legacyBase = path.join(fixture, 'legacy');
+    const worktree = conventionalWorktreePath('task-2843', rootDir); for (const directory of [rootDir, worktree, cacheBase, coveredBase, legacyBase]) { fs.mkdirSync(directory); }
+    const cache = ensureCheckoutCache(worktree, cacheBase), covered = ensureCheckoutCache(worktree, coveredBase), control = ensureCheckoutCache(rootDir, cacheBase), legacy = checkoutCacheRoot(worktree, legacyBase); fs.mkdirSync(legacy); let branchExists = true;
+    const gitRunner: NonNullable<Parameters<typeof cleanupMissionWorktree>[1]>['gitRunner'] = args => {
+      if (args.slice(-2).join(' ') === 'branch --show-current') return { signal: null, status: 0, stdout: 'main\n', stderr: '' }; if (args.includes('show-ref')) return { signal: null, status: branchExists ? 0 : 1, stdout: '', stderr: '' };
+      if (args.slice(-2).join(' ') === 'list --porcelain') return { signal: null, status: 0, stdout: `worktree ${worktree}\n`, stderr: '' }; if (args.includes('-D')) branchExists = false; return { signal: null, status: 0, stdout: '', stderr: '' };
+    };
+    try { const options = { rootDir, cacheBases: [cacheBase, coveredBase, legacyBase], gitRunner, retireTerminal: () => {}, preserveHistory: () => {}, removeDir: (target: string) => fs.rmSync(target, { recursive: true, force: true }) };
+      assert.equal(cleanupMissionWorktree('task-2843', options), true);
+      assert.equal(fs.existsSync(cache), false, 'the matching checkout cache is retired'); assert.equal(fs.existsSync(covered), false, 'the covered-run cache is also retired'); assert.equal(fs.existsSync(control), true, 'another active checkout cache is preserved'); assert.equal(fs.existsSync(legacy), true, 'an uncertain legacy cache is preserved without blocking closeout');
+      assert.equal(cleanupMissionWorktree('task-2843', options), true, 'normal retirement is idempotent');
+    } finally { fs.rmSync(fixture, { recursive: true, force: true }); } });
 
   test('px status reports the authoritative done lifecycle', async () => {
     const lines: string[] = [];

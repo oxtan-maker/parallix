@@ -3,8 +3,8 @@ id: TASK-2843
 title: >-
   Complete TASK-2615 checkout-cache lifecycle without losing warm-cache
   performance
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-06 13:58'
 updated_date: '2026-11-06 14:01'
 labels:

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { CHECKOUT_CACHE_OWNER_FILE, checkoutCacheIdentity, checkoutCacheRoot, readCheckoutCacheOwner } from './checkout-cache.js';
 
 type Manifest = { pid: number; roots: string[] } | string[];
 
@@ -219,6 +220,70 @@ function recoverLegacyCoverageScratch(bases: readonly string[], protectedSet: Se
   }
 }
 
+/** Exact checkout-cache roots directly below an already-declared temporary base. */
+function checkoutCacheRoots(bases: readonly string[]): string[] {
+  return [...new Set(bases.map(base => path.resolve(base)))].flatMap(base => {
+    try { return fs.readdirSync(base).filter(name => /^px-tmp-[a-f0-9]{12}$/.test(name))
+      .map(name => path.join(base, name))
+      .filter(root => fs.existsSync(path.join(root, CHECKOUT_CACHE_OWNER_FILE))); }
+    catch { return []; }
+  });
+}
+
+function currentOwnedDirectory(directory: string): boolean {
+  try { return ownedDirectory(directory) && fs.realpathSync(directory) === path.resolve(directory); }
+  catch { return false; }
+}
+
+function matchesCheckoutCacheIdentity(root: string, owner: NonNullable<ReturnType<typeof readCheckoutCacheOwner>>): boolean {
+  return owner.cacheRoot === path.resolve(root)
+    && checkoutCacheRoot(owner.checkoutPath, path.dirname(root)) === path.resolve(root);
+}
+
+function activeCheckoutVerdict(owner: NonNullable<ReturnType<typeof readCheckoutCacheOwner>>): 'keep' | string {
+  const current = checkoutCacheIdentity(owner.checkoutPath);
+  return current.checkoutPath === owner.checkoutPath
+    && current.checkoutGitDir === owner.checkoutGitDir
+    && current.repositoryGitDir === owner.repositoryGitDir
+    ? 'keep' : 'active checkout identity no longer matches its durable record';
+}
+
+function livenessVerdict(alive: boolean | null): 'reclaim' | 'keep' | string {
+  return alive === false ? 'reclaim' : alive === true ? 'keep' : 'owner absence cannot be confirmed';
+}
+
+/** `reclaim`, `keep`, or the fail-closed reason the cache remains unresolved. */
+function abandonedCheckoutCacheVerdict(root: string, liveness: OwnerLiveness): 'reclaim' | 'keep' | string {
+  if (!currentOwnedDirectory(root)) { return 'checkout cache is not a non-symlink directory owned by this user'; }
+  const owner = readCheckoutCacheOwner(root);
+  if (owner === null) { return 'no durable checkout-cache ownership record'; }
+  if (!matchesCheckoutCacheIdentity(root, owner)) {
+    return 'checkout-cache path does not match its durable checkout identity';
+  }
+  if (owner.checkoutGitDir === null || owner.repositoryGitDir === null
+    || owner.checkoutGitDir === owner.repositoryGitDir) {
+    return 'durable linked-checkout identity is incomplete';
+  }
+  if (fs.existsSync(owner.checkoutPath)) {
+    return activeCheckoutVerdict(owner);
+  }
+  if (!currentOwnedDirectory(owner.repositoryGitDir)) { return 'repository identity cannot be confirmed'; }
+  if (fs.existsSync(owner.checkoutGitDir)) { return 'checkout retirement cannot be confirmed'; }
+  return livenessVerdict(liveness(owner.owner.pid, owner.owner.startId));
+}
+
+function recoverAbandonedCheckoutCaches(bases: readonly string[], liveness: OwnerLiveness, report: TempRootRecoveryReport): void {
+  for (const root of checkoutCacheRoots(bases)) {
+    try {
+      const verdict = abandonedCheckoutCacheVerdict(root, liveness);
+      if (verdict === 'reclaim') { fs.rmSync(root, { recursive: true, force: true }); report.reclaimed.push(root); }
+      else if (verdict !== 'keep') { report.unresolved.push({ root, reason: verdict }); }
+    } catch (_) {
+      report.unresolved.push({ root, reason: 'checkout-cache identity inspection raced or failed' });
+    }
+  }
+}
+
 /** Find covered worker manifests on the same disk as their scratch roots. */
 function recoverDiskManifests(bases: readonly string[], manifestDir: string, alive: (_pid: number) => boolean, ownerLiveness: OwnerLiveness, report: TempRootRecoveryReport): void {
   const manifests = new Set(legacyScratchRoots(bases).map(root => path.join(path.dirname(root), 'manifests')));
@@ -258,6 +323,7 @@ function recoverRecordedTempRoots({
     if (legacyCoverageBases.length > 0) {
       recoverDiskManifests(legacyCoverageBases, manifestDir, alive, ownerLiveness, report);
       recoverLegacyCoverageScratch(legacyCoverageBases, entries.length ? protectedRoots(manifestDir, alive, ownerLiveness) : new Set(), ownerLiveness, nowMs, report);
+      recoverAbandonedCheckoutCaches(legacyCoverageBases, ownerLiveness, report);
     }
   } catch (_) {
     // Recovery is best effort and must never prevent verification from starting.

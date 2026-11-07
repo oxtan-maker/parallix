@@ -19,6 +19,7 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import type { MissionStatus } from '../../../src/domain/mission.js';
 import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from '../../fixtures/mission-builders.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { checkoutTestTmpdir } from '../../lib/test-tmpdir.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -39,6 +40,7 @@ const { MissionLifecycleService } = await import('../../../src/application/missi
 const { recoverMissionCommand } = await import('../../../src/interfaces/cli/recover.js');
 const { recoverMissionLifecycle } = await import('../../../src/application/mission-lifecycle-recovery.js');
 const { missionId } = await import('../../../src/domain/mission.js');
+const { cleanupMissionWorktree } = await import('../../../src/adapters/cli/commands/integrate-post.js');
 
 // ---- task-2595 squash landing commit message (consolidated from test/task-2595-squash-landing-commit-message.test.ts, TASK-2622.09) ----
 describe("squash landing commit message", () => {
@@ -661,4 +663,69 @@ describe("already-merged detection", () => {
       fs.rmSync(rootDir, { recursive: true, force: true });
     }
   });
+});
+
+test('retiring disposable mission worktrees reclaims their stable checkout caches (TASK-2843)', () => {
+  const fixture = registeredMkdtemp('task-2843-checkout-cache-');
+  const root = path.join(fixture, 'repo');
+  const cacheBase = path.join(fixture, 'cache');
+  const runGit = (args: string[], cwd = root) => {
+    const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`);
+    return String(result.stdout);
+  };
+  const gitRunner: NonNullable<Parameters<typeof cleanupMissionWorktree>[1]>['gitRunner'] = args => {
+    const result = spawnSync('git', args, { encoding: 'utf8' });
+    return { signal: result.signal, status: result.status ?? 1, stdout: String(result.stdout), stderr: String(result.stderr) };
+  };
+
+  fs.mkdirSync(root);
+  fs.mkdirSync(cacheBase);
+  runGit(['init', '-q', '-b', 'main']);
+  runGit(['config', 'user.email', 'test@parallix.test']);
+  runGit(['config', 'user.name', 'Test']);
+  fs.writeFileSync(path.join(root, 'README.md'), 'base\n');
+  runGit(['add', '.']);
+  runGit(['commit', '-qm', 'base']);
+
+  const activeCache = checkoutTestTmpdir(root, cacheBase);
+  fs.writeFileSync(path.join(activeCache, 'active-control'), 'keep');
+  const retiredCaches: string[] = [];
+  const worktrees: string[] = [];
+  try {
+    for (const slug of ['task-2843-a', 'task-2843-b']) {
+      const branch = `mission/${slug}`;
+      const worktree = `${root}-${slug}`;
+      runGit(['branch', branch]);
+      runGit(['worktree', 'add', '-q', worktree, branch]);
+      worktrees.push(worktree);
+
+      const cache = checkoutTestTmpdir(worktree, cacheBase);
+      retiredCaches.push(cache);
+      fs.writeFileSync(path.join(cache, 'warm-entry'), slug);
+      assert.equal(checkoutTestTmpdir(`${worktree}${path.sep}`, cacheBase), cache,
+        'an active checkout reuses one stable cache instead of starting cold');
+      assert.equal(fs.readFileSync(path.join(cache, 'warm-entry'), 'utf8'), slug);
+      assert.notEqual(cache, activeCache, 'distinct active checkouts remain isolated');
+
+      assert.equal(cleanupMissionWorktree(slug, {
+        rootDir: root,
+        gitRunner,
+        cacheBases: [cacheBase],
+        retireTerminal: () => {},
+        preserveHistory: () => {},
+      }), true, 'the production mission-worktree cleanup boundary retires the checkout');
+      assert.equal(fs.existsSync(worktree), false, 'the disposable worktree is removed');
+      assert.equal(fs.existsSync(cache), false, 'its checkout-specific cache is reclaimed with it');
+    }
+
+    assert.equal(fs.readFileSync(path.join(activeCache, 'active-control'), 'utf8'), 'keep',
+      'the active control checkout cache is preserved');
+  } finally {
+    for (const worktree of worktrees) {
+      spawnSync('git', ['-C', root, 'worktree', 'remove', '--force', worktree], { encoding: 'utf8' });
+    }
+    fs.rmSync(fixture, { recursive: true, force: true });
+    for (const cache of retiredCaches) { fs.rmSync(cache, { recursive: true, force: true }); }
+  }
 });

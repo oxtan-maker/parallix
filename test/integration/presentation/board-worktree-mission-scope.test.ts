@@ -109,6 +109,27 @@ function expectedLanes(): Map<string, string> {
   ]);
 }
 
+test('task-2438 board reads persisted repository missions from a sibling worktree', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2438-'));
+  try {
+    writeCatalog(root, ['backlog', 'refined', 'active']);
+    writeTask(root, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
+    const projection = await board(root).builder.build();
+
+    assert.deepEqual(projection.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
+    assert.equal(projection.metrics.verification?.executionMs, 0);
+    assert.equal(projection.metrics.verification?.cpuUs, null);
+    assert.deepEqual(projectedLanes(projection), expectedLanes());
+    const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
+    assert.equal(titles.get(missionId('task-2438-active')), 'Recorded active title');
+    assert.equal(titles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
+    assert.equal(titles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
+    assert.equal(requestedRepository.value, repository);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('task-2438 board reads persisted repository missions from the primary worktree', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2438-'));
   try {
@@ -136,27 +157,6 @@ test('task-2438 board reads persisted repository missions from the primary workt
     assert.equal((await firstBoard.missionQuery.detail(missionId('task-2438-backlog')))?.id, missionId('task-2438-backlog'));
     const active = await firstBoard.missionQuery.detail(missionId('task-2438-active'));
     assert.deepEqual(active?.checkpoints, []);
-    assert.equal(requestedRepository.value, repository);
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test('task-2438 board reads persisted repository missions from a sibling worktree', async () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2438-'));
-  try {
-    writeCatalog(root, ['backlog', 'refined', 'active']);
-    writeTask(root, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
-    const projection = await board(root).builder.build();
-
-    assert.deepEqual(projection.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
-    assert.equal(projection.metrics.verification?.executionMs, 0);
-    assert.equal(projection.metrics.verification?.cpuUs, null);
-    assert.deepEqual(projectedLanes(projection), expectedLanes());
-    const titles = new Map(projection.stages.flatMap((stage) => stage.cards.map((card) => [card.id, card.title])));
-    assert.equal(titles.get(missionId('task-2438-active')), 'Recorded active title');
-    assert.equal(titles.get(missionId('task-2438-sibling')), 'Recorded sibling title');
-    assert.equal(titles.get(missionId('task-2438-backlog')), 'Backlog Markdown title');
     assert.equal(requestedRepository.value, repository);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

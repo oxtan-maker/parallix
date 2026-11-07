@@ -131,7 +131,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         // Absent-aggregate recovery only: local Git evidence that the payload
         // was squash-landed on the mission's recorded base branch (TASK-2516).
         landedIntake: async (slug) => landedMissionIntake(slug, rootDir),
-        cleanup: (slug) => cleanupMissionWorktree(slug, { rootDir }),
+        cleanup: (slug) => cleanupMissionWorktree(slug, { rootDir, configuration }),
         store: services.mission.store,
       });
     }),

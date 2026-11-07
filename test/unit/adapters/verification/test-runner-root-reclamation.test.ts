@@ -7,6 +7,7 @@ import { createTempRootRegistry, recoverRecordedTempRoots, registerRunnerOwner }
 import { probeProcessLiveness, processStartIdentity } from '../../../../src/adapters/process/process-liveness.js';
 import { cleanupRunnerTempRoots, reportUnresolvedTempRoots, signalExitCode } from '../../../lib/test-runner-temp-roots.js';
 import { mkdtemp as registeredMkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
+import { CHECKOUT_CACHE_OWNER_FILE, ensureCheckoutCache } from '../../../../src/adapters/verification/checkout-cache.js';
 
 test('recorded dead roots are reclaimed while live and unrecorded roots survive', () => {
   const fixture = registeredMkdtemp('task-2365-');
@@ -234,5 +235,70 @@ test('disk ownership survives missing manifests and reboot; live children and un
     const again = recoverRecordedTempRoots({ manifestDir: manifests, legacyCoverageBases: [base], ownerLiveness: () => false });
     assert.ok(again.reclaimed.includes(liveChild) && again.reclaimed.includes(uncertain));
     assert.deepEqual(recoverRecordedTempRoots({ manifestDir: manifests, legacyCoverageBases: [base], ownerLiveness: () => false }).reclaimed, []);
+  } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
+});
+
+test('abandoned checkout caches require retired checkout and dead durable owner proof (TASK-2843)', () => {
+  const fixture = registeredMkdtemp('task-2843-recovery-');
+  const base = path.join(fixture, 'cache');
+  const repository = path.join(fixture, 'repo');
+  const commonGit = path.join(repository, '.git');
+  fs.mkdirSync(base);
+  fs.mkdirSync(commonGit, { recursive: true });
+  const linkedCheckout = (name: string) => {
+    const checkout = path.join(fixture, name);
+    const gitDir = path.join(commonGit, 'worktrees', name);
+    fs.mkdirSync(checkout);
+    fs.mkdirSync(gitDir, { recursive: true });
+    fs.writeFileSync(path.join(checkout, '.git'), `gitdir: ${gitDir}\n`);
+    fs.writeFileSync(path.join(gitDir, 'commondir'), '../..\n');
+    return { checkout, gitDir, cache: ensureCheckoutCache(checkout, base) };
+  };
+  const retire = ({ checkout, gitDir }: { checkout: string; gitDir: string }) => {
+    fs.rmSync(checkout, { recursive: true, force: true });
+    fs.rmSync(gitDir, { recursive: true, force: true });
+  };
+  try {
+    const abandoned = linkedCheckout('abandoned');
+    const active = linkedCheckout('active');
+    const uncertain = linkedCheckout('uncertain');
+    const stillRegistered = linkedCheckout('registered');
+    retire(abandoned);
+    retire(uncertain);
+    fs.rmSync(stillRegistered.checkout, { recursive: true, force: true });
+
+    const unowned = path.join(base, 'px-tmp-aaaaaaaaaaaa');
+    fs.mkdirSync(unowned);
+    const plantedTarget = path.join(fixture, 'planted-target');
+    fs.mkdirSync(plantedTarget);
+    fs.copyFileSync(path.join(active.cache, CHECKOUT_CACHE_OWNER_FILE), path.join(plantedTarget, CHECKOUT_CACHE_OWNER_FILE));
+    const planted = path.join(base, 'px-tmp-bbbbbbbbbbbb');
+    fs.symlinkSync(plantedTarget, planted);
+    const mismatched = linkedCheckout('mismatched');
+    const ownerFile = path.join(mismatched.cache, CHECKOUT_CACHE_OWNER_FILE);
+    const owner = JSON.parse(fs.readFileSync(ownerFile, 'utf8'));
+    fs.writeFileSync(ownerFile, JSON.stringify({ ...owner, checkoutPath: `${owner.checkoutPath}-other` }));
+    retire(mismatched);
+
+    const liveness = (_pid: number, startId: string | null) => startId === uncertain.cache ? null : false;
+    const uncertainOwner = JSON.parse(fs.readFileSync(path.join(uncertain.cache, CHECKOUT_CACHE_OWNER_FILE), 'utf8'));
+    fs.writeFileSync(path.join(uncertain.cache, CHECKOUT_CACHE_OWNER_FILE), JSON.stringify({
+      ...uncertainOwner, owner: { ...uncertainOwner.owner, startId: uncertain.cache },
+    }));
+    const report = recoverRecordedTempRoots({ manifestDir: path.join(fixture, 'manifests'), legacyCoverageBases: [base], ownerLiveness: liveness });
+
+    assert.equal(fs.existsSync(abandoned.cache), false, 'retired checkout plus dead exact owner authorizes reclamation');
+    for (const candidate of [active.cache, uncertain.cache, stillRegistered.cache, unowned, planted, mismatched.cache]) {
+      assert.equal(fs.existsSync(candidate), true, `uncertain or active cache survives: ${candidate}`);
+    }
+    assert.deepEqual(report.reclaimed, [abandoned.cache]);
+    assert.deepEqual(report.unresolved.map(entry => [path.basename(entry.root), entry.reason]).sort(), [
+      [path.basename(mismatched.cache), 'checkout-cache path does not match its durable checkout identity'],
+      [path.basename(planted), 'checkout cache is not a non-symlink directory owned by this user'],
+      [path.basename(stillRegistered.cache), 'checkout retirement cannot be confirmed'],
+      [path.basename(uncertain.cache), 'owner absence cannot be confirmed'],
+    ].sort());
+    const again = recoverRecordedTempRoots({ manifestDir: path.join(fixture, 'manifests'), legacyCoverageBases: [base], ownerLiveness: liveness });
+    assert.equal(again.reclaimed.length, 0, 'recovery is idempotent');
   } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
 });

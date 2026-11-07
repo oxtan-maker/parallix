@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { checkoutTestTmpdir, linkSharedTsxCache, createTestTranscriptRoot, restoreFixtureTmpdir } from '../../../lib/test-tmpdir.js';
 import { DISK_TEMP_FALLBACK, bulkStorageProbe, diskBackedTempBase } from '../../../../src/adapters/process/bulk-storage.js';
+import { CHECKOUT_CACHE_OWNER_FILE, ensureCheckoutCache, readCheckoutCacheOwner, retireCheckoutCache } from '../../../../src/adapters/verification/checkout-cache.js';
 import { mkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
 
 test('each checkout gets one stable private temporary directory outside the repository', () => {
@@ -13,9 +14,23 @@ test('each checkout gets one stable private temporary directory outside the repo
   try {
     const first = checkoutTestTmpdir('/work/repo-a', base);
     assert.equal(checkoutTestTmpdir('/work/repo-a/', base), first, 'the same checkout reuses its directory, keeping the tsx cache warm');
-    assert.notEqual(checkoutTestTmpdir('/work/repo-b', base), first, 'another checkout never shares it');
+    const compileCache = path.join(first, 'node-compile-cache');
+    fs.mkdirSync(compileCache);
+    fs.writeFileSync(path.join(compileCache, 'warm-entry'), 'warm');
+    assert.equal(path.join(checkoutTestTmpdir('/work/repo-a', base), 'node-compile-cache'), compileCache,
+      'the same checkout reuses its Node compile-cache path');
+    assert.equal(fs.readFileSync(path.join(compileCache, 'warm-entry'), 'utf8'), 'warm');
+    const other = checkoutTestTmpdir('/work/repo-b', base);
+    assert.notEqual(other, first, 'another checkout never shares it');
+    assert.notEqual(path.join(other, 'node-compile-cache'), compileCache, 'distinct checkouts isolate Node compile caches');
     assert.equal(path.dirname(first), base);
     assert.ok(fs.statSync(first).isDirectory());
+    assert.equal(fs.statSync(path.join(first, CHECKOUT_CACHE_OWNER_FILE)).mode & 0o777, 0o600);
+    assert.deepEqual(readCheckoutCacheOwner(first), {
+      kind: 'parallix-checkout-cache', version: 1, cacheRoot: first,
+      checkoutPath: '/work/repo-a', checkoutGitDir: null, repositoryGitDir: null,
+      owner: { pid: process.pid, startId: readCheckoutCacheOwner(first)?.owner.startId ?? null },
+    }, 'cache creation durably records checkout, repository, and process identity');
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -57,6 +72,17 @@ test('a planted link at the checkout directory on a shared base is refused (TASK
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
+});
+
+test('checkout cache retirement accepts a symlinked temporary base (TASK-2843 F1)', () => {
+  const fixture = mkdtemp('test-tmpdir-symlink-base-');
+  try {
+    const realBase = path.join(fixture, 'real'), linkedBase = path.join(fixture, 'linked');
+    fs.mkdirSync(realBase); fs.symlinkSync(realBase, linkedBase);
+    const cache = ensureCheckoutCache('/work/repo-a', linkedBase);
+    assert.equal(retireCheckoutCache('/work/repo-a', linkedBase), true);
+    assert.equal(fs.existsSync(cache), false);
+  } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
 });
 
 test('nested coverage roots reuse the checkout directory without repeating path segments (px-0011)', () => {
