@@ -1,8 +1,9 @@
 # ADR 0037: AI workflow coordination architecture
 
-Status: Accepted Date: 2026-04-06 
-Last updated: 2026-09-15 
-Related: ADR 0048 (fail-closed harness), ADR 0051 (UI-neutral application boundary), ADR 0053 (persistence and authority)
+Status: Accepted; review-policy amendment approved, implementation pending PX-0046
+Date: 2026-04-06
+Last updated: 2026-11-08
+Related: ADR 0048 (fail-closed harness), ADR 0051 (UI-neutral application boundary), ADR 0053 (persistence and authority), ADR 0064 (terminal ownership), ADR 0066 (context)
 
 ## Context
 
@@ -17,44 +18,24 @@ and the process entry point. The UI-neutral boundary in ADR 0051 requires
 workflow ownership to remain with application use cases while interfaces
 translate requests and render outcomes.
 
-## Options considered
-
-### Agent-followed procedures
-
-Rejected for operations that mutate lifecycle or durable mission state. Prose
-can explain the policy, but it cannot provide the executable boundary needed to
-keep interfaces and concrete mechanisms from owning it.
-
-### Adapter-owned command workflows
-
-Rejected. Adapters may use named host mechanisms, but a multi-integration
-workflow belongs in application and crosses application-owned ports.
-
 ## Decision
 
-Coordinate missions through application-owned command use cases and ports.
-The CLI and TUI translate requests, render results, and map process outcomes;
-they do not own workflow sequencing or directly perform lifecycle mutations.
-Concrete adapters provide Git, filesystem, task, review, agent, persistence,
-and verification mechanisms. Composition supplies those adapters to the
-application use cases, and `src/entry/px.ts` hosts the process only.
+Coordinate missions through application-owned use cases and ports. Interfaces
+translate and render; adapters perform effects; composition wires them; the
+entry point hosts the process. Policy, sequencing and context selection remain
+application concerns. ADR 0053 owns operational authority and persistence.
 
-Checkpoint, status, review, rebase, handoff, integration, and related command
-workflows use the same rule: policy and sequencing belong in application;
-request translation belongs in interfaces; concrete effects belong in adapters.
-An adapter that needs behaviour from another integration receives an
-application-owned port rather than taking workflow ownership through a direct
-cross-adapter dependency.
+PX-0033 replayed nine historical changes; eight targets were evaluable:
 
-Persistence and authority for Mission state, external task material, Git facts,
-review state, and other operational data are defined by ADR 0053. Coordination
-code consumes those authorities through application-owned ports rather than
-deciding their storage inside the workflow.
+| Question | Evidence | Adopted policy |
+| --- | --- | --- |
+| Review coverage | Counterexample union: 4/8 targets versus control 3/8; serious targets 3/6 in both (`p = 1`). Bonus findings: 62/7 P1 versus 19/5 P1; new-prompt Codex found all seven P1s. | PX-0046: counterexample pass; two fresh independent approvals when available, one when only one reviewer is available, fresh same-agent/model fallback otherwise. Human review stays optional. |
+| Custom effort | `xhigh`: 4/8 targets, 47 bonus/6 P1, 65.2 minutes. `medium`: 3/8, 38/4 P1, 59.2 minutes. | PX-0047: configurable effort, default and self-development request `high`; retain requested and effective backend levels. |
 
-Checkpoint evidence represents a completed coordination step. Its persistence
-or presentation format is likewise governed by ADR 0053 rather than by this ADR.
-
-Agent-facing context and evidence exchange are application surfaces: workflow use cases decide what context a step requires and what evidence a step may record, while persistence remains outside this decision.
+The selected misses do not isolate freshness, repeat effort or model diversity;
+the sole target gain was non-serious P3 TASK-2369. PX-0033 retains the full
+methods and limitations. Reviewer policy stays application-owned; ADR 0053 owns
+evidence, ADR 0064 presentation and ADR 0066 fresh-context reconstruction.
 
 
 ## Consequences

@@ -67,9 +67,10 @@ verification and other command children inherit that terminal. Inherited agent
 spawns do not create another host. An interactive standalone agent launch without
 an outer command terminal may use its own operation window in this same mission
 session; this is the fallback for TUI actions and other unhosted callers.
-Concurrent mission operations may
-use separate windows within the same mission session; they must not inject
-commands into an occupied terminal or create another mission session.
+Concurrent mission operations may use separate windows within the same mission
+session; they must not inject commands into an occupied terminal or create
+another mission session. PX-0046 review runs use separately labelled streams;
+ADR 0037 owns their policy and ADR 0053 their durable state.
 
 When an operation finishes or is stopped, close its operation window. Keep
 one console shell in the mission worktree for inspection, reconnection and later

@@ -186,6 +186,10 @@ persists the checked structure.
 
 Review state and review events are durable Mission data.
 
+PX-0046 applies this authority to concurrent reviews: persist each reviewer,
+revision, approval count, finding, decision and availability reason. Provider
+and terminal views remain projections, not quorum stores.
+
 The current pattern:
 
 ```text

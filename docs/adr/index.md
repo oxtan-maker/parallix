@@ -8,7 +8,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 - `docs/adr/0032-mission-refinement-state-and-usage-budget-signals.md` — Add `refined` as the pre-activation mission state and keep `% usage limit` selection signals in `MISSION.md`
 - `docs/adr/0034-module-and-skill-invocation-model.md` — Module/skill invocation model: phase-bound baseline, explicit rule-based self-invocation, and mandatory validation-module loading
 - `docs/adr/0036-mission-sizing-and-dependency-wave-heuristics.md` — Mission sizing tracks, "Too Large" thresholds, and dependency-wave heuristics
-- `docs/adr/0037-ai-workflow-coordination-architecture.md` — Node.js `workflow/` package as repo-adapted coordination CLI for startup, checkpoint, and session handoff; replaces agent-followed documented procedures
+- `docs/adr/0037-ai-workflow-coordination-architecture.md` — Application-owned workflow coordination; operator-approved two fresh agent reviews, one when only one independent reviewer is available, and existing same-model fallback; implementation pending PX-0046
 - `docs/adr/0041-integration-pipeline-gates.md` — Integration-time pipeline gates + per-area gate dehallucination: add staging-deploy + e2e gates before squash-merge, driven by repo-side config; remove hallucinated stage-e2e from `gate_web`
 - `docs/adr/0042-workflow-cli-color-rendering-approach.md` — Replace hand-rolled ANSI palette and buggy `useColor()` with Node.js built-in `util.styleText` for batch/headless CLI color; scoped to batch output rather than a project-wide dependency rule
 - `docs/adr/0043-git-target-resolution-strategy.md` — Local-first git target resolution for workflow branch ancestry, with explicit invariants that keep rebase and integrate aligned
@@ -36,7 +36,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 
 - `docs/adr/0065-generic-decision-capability-and-operator-provider-discovery.md` — Generic typed decision port with direct System One transport, operator-owned provider discovery, and normalized usage-block failures
 
-- `docs/adr/0066-mission-context-management.md` — Default-on repository opt-out for prompted compaction, retained checkpoint conversations and independent provider-native near-limit safeguards
+- `docs/adr/0066-mission-context-management.md` — Default-on prompted compaction and retained implementer checkpoint conversations; fresh reviewer invocations approved for PX-0046, with independent provider-native near-limit safeguards
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.
