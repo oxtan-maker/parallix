@@ -7,7 +7,7 @@ import { assembleStagePrompt } from '../../assets/runtime-assets.js';
 import { resolvePromptOverride } from '../../config/product-config.js';
 import * as stats from './stats.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
-import { isDbAdhocIdentity } from '../../../domain/mission.js';
+import { isDbOwnedPxIdentity } from '../../../domain/mission.js';
 function resolveVerifyCmd(rootDir: string) {
   return formatVerificationCommand(undefined, rootDir);
 }
@@ -28,7 +28,7 @@ function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = nu
   const year = getMissionYear(slug, promptRoot) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(promptRoot, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);
-  const databaseOwned = isDbAdhocIdentity(slug) || dbOwnedNoMirror;
+  const databaseOwned = isDbOwnedPxIdentity(slug) || dbOwnedNoMirror;
   const taskPath = databaseOwned ? '' : resolveTaskPath(slug, promptRoot);
   const intentSourceLine = databaseOwned
     ? `Mission intent: exact database record from \`px status ${slug}\``

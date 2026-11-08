@@ -66,7 +66,7 @@ export function missionBranchRef(slug: string, rootDir: string = process.cwd()):
  * with no filesystem dependency — so `execute-mission-service` imports it from
  * the domain without an application→adapter boundary edge.
  */
-import { isMissionSlugCandidate } from '../../domain/mission.js';
+import { isMissionSlugCandidate, isPxIdentityReference } from '../../domain/mission.js';
 export { isMissionSlugCandidate };
 
 /** @param {string} branch @param {string} [rootDir] */
@@ -141,11 +141,35 @@ function findLegacyMissionDir(slug: string, rootDir: string, baseSlug?: string):
 }
 
 /**
+ * Derive the Mission identity from a worktree directory name by testing each
+ * trailing name segment against the shared domain validator, so this adapter
+ * keeps no grammar of its own (PX-0045). The earlier local `px-\d{4,}` branch
+ * recognized only an undotted identity, so a `px-<NNNN>.<NN>` wave child
+ * worktree inferred no slug at all.
+ *
+ * @param {string} dirName
+ */
+function missionSlugFromDirectoryName(dirName: string): string | null {
+  for (const boundary of ['-', '.']) {
+    const parts = dirName.split(boundary);
+    for (let start = 0; start < parts.length; start += 1) {
+      const candidate = parts.slice(start).join(boundary);
+      if (isMissionSlugCandidate(candidate)) { return candidate.toLowerCase(); }
+    }
+  }
+  return null;
+}
+
+/**
  * Infer mission slug from current context:
  * 1. Explicit slugCandidate (task-NNN)
  * 2. Current branch (mission/slug)
  * 3. Current directory name (mission-task-slug)
  * 4. Registered worktree branch for current directory
+ *
+ * An explicit candidate that the shared owner recognizes as a malformed `px-`
+ * child reference resolves to null instead of falling through to the contextual
+ * steps, so it never retargets the ambient Mission.
  *
  * @param {string} [slugCandidate]
  * @returns {string|null}
@@ -154,6 +178,14 @@ function findLegacyMissionDir(slug: string, rootDir: string, baseSlug?: string):
 export function inferSlug(slugCandidate?: string): string | null {
   if (slugCandidate && isMissionSlugCandidate(slugCandidate)) {
     return slugCandidate.toLowerCase();
+  }
+  if (slugCandidate && isPxIdentityReference(slugCandidate)) {
+    // An explicit `px-<digits>.<…>` token that the shared owner rejects is a
+    // malformed child reference, not a candidate to reinterpret. Falling back
+    // to branch, directory or worktree inference here would silently retarget
+    // the ambient Mission, so `px depends add --slug px-0041.1` would write to
+    // the wrong Mission instead of refusing (PX-0045).
+    return null;
   }
 
   // 1. Check branch
@@ -167,10 +199,9 @@ export function inferSlug(slugCandidate?: string): string | null {
 
   // 3. Check directory name
   const cwd = process.cwd();
-  const dirName = path.basename(cwd);
-  const dirSlugMatch = dirName.match(/((?:task|adhoc)-[a-z0-9][a-z0-9.-]*|px-\d{4,})$/i);
-  if (dirSlugMatch) {
-    return dirSlugMatch[1].toLowerCase();
+  const fromDirectory = missionSlugFromDirectoryName(path.basename(cwd));
+  if (fromDirectory) {
+    return fromDirectory;
   }
 
 

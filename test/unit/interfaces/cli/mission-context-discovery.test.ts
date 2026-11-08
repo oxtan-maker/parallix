@@ -141,6 +141,72 @@ test('mission-bound recovery commands restore worktree after base-started consol
   assert.equal(missionCommandTarget('review', ['--help'], '/base', configuration, () => assert.fail()), '/base');
 });
 
+// PX-0045: a mission-bound command must resolve a dotted wave child to its own
+// worktree. The undotted-only slug candidate left `px active px-0041.01` on the
+// base checkout, where the child Mission does not exist.
+test('mission-bound commands resolve a dotted px wave child to its own worktree (PX-0045)', async () => {
+  const { missionCommandTarget } = await import('../../../../src/composition/mission-command-context.js');
+  const { resolveConfiguration } = await import('../../../../src/composition/config.js');
+  const configuration = resolveConfiguration({ PARALLIX_MISSION_TERMINAL: 'px-0041.01' });
+  const seen: string[] = [];
+  for (const command of ['active', 'review', 'recover', 'integrate']) {
+    assert.equal(missionCommandTarget(command, [], '/base', configuration, (slug, options) => {
+      seen.push(slug); assert.equal(options?.cwd, '/base'); return '/worktrees/px-0041.01';
+    }), '/worktrees/px-0041.01', command);
+  }
+  assert.deepEqual(seen, ['active', 'review', 'recover', 'integrate'].map(() => 'px-0041.01'));
+  assert.equal(missionCommandTarget('active', ['px-0041.02', '--json'], '/base', configuration,
+    slug => { assert.equal(slug, 'px-0041.02'); return '/worktrees/px-0041.02'; }), '/worktrees/px-0041.02');
+  // A malformed child position is not an identity, so it stays on the base
+  // checkout instead of locating a worktree that cannot exist.
+  assert.equal(missionCommandTarget('active', ['px-0041.1'], '/base', configuration, () => assert.fail()), '/base');
+});
+
+// PX-0045 round-4 F2: authoring verbs resolve `--slug` through the shared
+// inferSlug adapter. A malformed explicit child reference must refuse there:
+// falling back to branch/directory inference would retarget the ambient Mission
+// of the current worktree, so `px depends add --slug px-0041.1` would write the
+// wrong Mission instead of failing closed.
+test('authoring --slug refuses a malformed px child reference instead of writing to the ambient mission (PX-0045)', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const { mkdtemp: registeredMkdtemp } = await import('../../../helpers/temp-dir.js');
+  const { createDependsCommand } = await import('../../../../src/interfaces/cli/mission-writes.js');
+  const { inferSlug } = await import('../../../../src/adapters/filesystem/mission-paths.js');
+  const { MissionBriefService } = await import('../../../../src/application/mission-brief-service.js');
+  const { inMemoryTransitionStore } = await import('../../../fixtures/mission-builders.js');
+  const { missionId } = await import('../../../../src/domain/mission.js');
+
+  const ambient = missionId('px-0045');
+  const store = inMemoryTransitionStore(fixtureMission(String(ambient)));
+  const services = {
+    brief: new MissionBriefService(store, { append: async () => {} }),
+    resolveSlug: (explicit?: string) => inferSlug(explicit),
+  };
+  const previous = process.cwd();
+  const parent = registeredMkdtemp('px-0045-authoring-');
+  const worktree = path.join(parent, 'parallix-px-0045');
+  fs.mkdirSync(worktree, { recursive: true });
+  try {
+    process.chdir(worktree);
+    // The hazard: the ambient Mission is exactly what a contextual fallback
+    // would hand back for a malformed explicit child reference.
+    assert.equal(inferSlug(), 'px-0045');
+    assert.equal(inferSlug('px-0041.01'), 'px-0041.01', 'a well-formed child still resolves');
+    const before = structuredClone(store.mission());
+    for (const malformed of ['px-0041.1', 'px-0041.00', 'px-0041.01.02']) {
+      await assert.rejects(
+        createDependsCommand(services)(['add', '--slug', malformed, '--on', 'px-0041.01']),
+        /no mission slug/, malformed,
+      );
+    }
+    assert.deepEqual(store.mission(), before, 'a refused --slug writes nothing');
+  } finally {
+    process.chdir(previous);
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test('checkpoint correction CLI requires operator decision and evidence and keeps public read history (TASK-2803)', async () => {
   const { createCheckpointCommand } = await import('../../../../src/interfaces/cli/mission-writes.js');
   const { MissionCheckpointService } = await import('../../../../src/application/mission-checkpoint-service.js');

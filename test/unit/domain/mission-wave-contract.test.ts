@@ -2,9 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
 import { MissionWaveService } from '../../../src/application/mission-wave-service.js';
-import { decideMission } from '../../../src/domain/mission-workflow.js';
+import { decideMission, type MissionCommand } from '../../../src/domain/mission-workflow.js';
+import { agentFamily } from '../../../src/domain/agents.js';
 import { approveLargeMissionRiskException, convertMissionToWave, type MissionWaveChildContract } from '../../../src/domain/mission-wave.js';
-import { missionLabels, type Mission } from '../../../src/domain/mission.js';
+import { missionLabels, missionId, type Mission } from '../../../src/domain/mission.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 
 const child = (title: string, dependsOn: readonly number[] = []): MissionWaveChildContract => ({
@@ -98,4 +99,29 @@ test('Large draft readiness fails closed without a wave or operator exception an
   assert.equal(decideMission(approved, { type: 'refine' }).status, 'refined');
   const wave = convertMissionToWave(complete, [child('a'), child('b')]);
   assert.throws(() => decideMission(wave.parent, { type: 'refine' }), /non-executable/);
+});
+
+// PX-0045: the dotted identity a `px-NNNN` parent mints is a Mission identity
+// in its own right, so it must pass the domain id validator unchanged. It never
+// becomes a wave parent, which keeps the dotted grammar one level deep, and the
+// parent wave stays non-executable.
+test('a px wave parent mints dotted child identities one level deep with a non-executable parent (PX-0045)', () => {
+  const pxParent = parent({ id: 'px-0041' as Mission['id'] });
+  const wave = convertMissionToWave(pxParent, [child('a'), child('b', [1])]);
+
+  assert.deepEqual(wave.parent.wave?.children, ['px-0041.01', 'px-0041.02']);
+  assert.deepEqual(wave.children.map(mission => mission.id), ['px-0041.01', 'px-0041.02']);
+  for (const mission of wave.children) {
+    assert.equal(missionId(mission.id), mission.id, 'the dotted child id is a valid Mission identity');
+    assert.equal(mission.waveParentId, 'px-0041');
+  }
+  const nonExecutableCommands: readonly MissionCommand[] = [
+    { type: 'refine' },
+    { type: 'activate', agent: agentFamily('claude') },
+  ];
+  for (const command of nonExecutableCommands) {
+    assert.throws(() => decideMission(wave.parent, command), /non-executable/, command.type);
+  }
+  assert.throws(() => convertMissionToWave(wave.children[0], [child('x'), child('y')]), /task-NNNN or px-NNNN/,
+    'a wave child is never a wave parent');
 });

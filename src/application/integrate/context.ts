@@ -4,7 +4,7 @@
  * provider state, and the integration checkout's branch and dirty entries.
  */
 import type { IntegrationReviewSnapshot, IntegrationPullRequest, IntegrationApproval, IntegrationMissionFacts } from '../ports/integration-records.js';
-import { isDbAdhocIdentity } from '../../domain/mission.js';
+import { isDbOwnedPxIdentity } from '../../domain/mission.js';
 import { baseTaskSlug } from './support.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
@@ -123,7 +123,7 @@ class IntegrationContextBuilder {
     // Read task metadata there so integration remains independent of uncommitted
     // or stale files in the primary checkout.
     const missionWorktree = explicitWorktree ?? this.inferMissionWorktree(slug, checkout, resolvedBaseWorktree);
-    const task = isDbAdhocIdentity(slug)
+    const task = isDbOwnedPxIdentity(slug)
       ? { ok: false, matches: [], reason: 'adhoc mission has no Backlog task' }
       : this.dependencies.backlog.resolveTaskFile(slug, missionWorktree);
     const taskAssignee = task.ok ? this.dependencies.backlog.getTaskAssignee(task.taskFile as string) : null;

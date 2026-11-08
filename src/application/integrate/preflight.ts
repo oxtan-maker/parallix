@@ -8,7 +8,7 @@ import type { ParallixConfiguration } from "../ports/configuration.js";
  */
 import path from 'node:path';
 import * as fmt from '../presentation/cli-format.js';
-import { isDbAdhocIdentity } from '../../domain/mission.js';
+import { isDbOwnedPxIdentity } from '../../domain/mission.js';
 import { evaluateTaskStatusForIntegration, type TaskStatusCheck } from './approval.js';
 import { checkReviewProvider } from './preflight-review.js';
 import { checkIntegrationCheckout } from './preflight-checkout.js';
@@ -126,7 +126,7 @@ class IntegrationPreflight {
       if (context.task.matches) {
         context.task.matches.forEach((match: string) => report.log(`  - ${match}`));
       }
-    } else if (isDbAdhocIdentity(context.slug)) {
+    } else if (isDbOwnedPxIdentity(context.slug)) {
       // An adhoc mission has no Backlog task to find: the Mission store carries
       // its status and labels (ADR 0053), so read them there rather than warning
       // about the absence of a file this intake never creates in the base

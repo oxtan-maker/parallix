@@ -82,6 +82,39 @@ describe('Slug namespace', () => {
     // bogus `adhoc-<free-text>` downstream.
     assert.equal(isMissionSlugCandidate('fix hello world greeting'), false);
   });
+
+  // PX-0045: a Mission wave child is one identity, not a parent plus free text.
+  // The dotted `px-<NNNN>.<NN>` form minted by `px split` must survive every
+  // entry the shared slug validator owns. The worktree directory name carried
+  // its own `px-\d{4,}` branch, so a child worktree inferred no slug at all.
+  test('px-wave-child: the shared validator resolves the dotted child identity at every slug entry', () => {
+    assert.equal(inferSlug('px-0041.01'), 'px-0041.01');
+    assert.equal(isMissionSlugCandidate('px-0041.01'), true);
+    // A child is never a parent of another wave, and a malformed position is
+    // not an identity at all. convertMissionToWave numbers children 01-99, so
+    // a zero position is malformed too (PX-0045 round-4 F1).
+    assert.equal(isMissionSlugCandidate('px-0041.1'), false);
+    assert.equal(isMissionSlugCandidate('px-0041.01.02'), false);
+    assert.equal(isMissionSlugCandidate('px-0041.00'), false);
+
+    const previous = process.cwd();
+    const parent = registeredMkdtemp('px-0045-worktree-');
+    const worktree = path.join(parent, 'parallix-px-0041.01');
+    fs.mkdirSync(worktree, { recursive: true });
+    try {
+      process.chdir(worktree);
+      assert.equal(inferSlug(), 'px-0041.01');
+      // An explicit malformed child reference refuses here instead of falling
+      // through to branch/directory/worktree inference and returning the
+      // ambient Mission of the current checkout (PX-0045 round-4 F2).
+      for (const malformed of ['px-0041.1', 'px-0041.00', 'px-0041.01.02']) {
+        assert.equal(inferSlug(malformed), null, malformed);
+      }
+    } finally {
+      process.chdir(previous);
+      fs.rmSync(parent, { recursive: true, force: true });
+    }
+  });
 });
 
 // TASK-2524 (was test/task-2524-slug-duplicate-closeout-repro.test.ts)

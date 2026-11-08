@@ -563,6 +563,44 @@ describe('Mission dependency value', () => {
       );
       assert.deepEqual(JSON.parse(statusJson(status(undefined))).dependencies, []);
     });
+
+    // PX-0045: a Mission wave child is a Mission identity like any other, so the
+    // shared authoring mutation resolves `--slug px-<NNNN>.<NN>` against the
+    // exact stored child. A dotted child that is not stored stays unavailable;
+    // it is never permission to mint an identity or write an aggregate.
+    it('px depends resolves a stored wave child and refuses an unknown one (PX-0045)', async () => {
+      const stored = new Map<string, ReturnType<typeof typedMissionFixture>>([
+        ['px-0042.02', typedMissionFixture('px-0042.02', { repositoryId: repositoryId('repo'), status: 'active' })],
+        ['px-0041.01', typedMissionFixture('px-0041.01', { repositoryId: repositoryId('repo'), status: 'active' })],
+      ]);
+      let version = 1;
+      const saved: Mission[] = [];
+      const store: MissionStore = {
+        load: async (id: MissionId) => {
+          const mission = stored.get(String(id));
+          return mission
+            ? { kind: 'found' as const, mission, version: missionVersion(version) }
+            : { kind: 'missing' as const };
+        },
+        save: async (next) => { saved.push(next); version += 1; return missionVersion(version); },
+      };
+      const service = new MissionBriefService(store, { append: async () => {} });
+      const depends = (target: string, dependency: string) => service.setDependencies({
+        operationId: `px-0045-${target}-${dependency}`,
+        missionId: missionId(target),
+        capabilities: new Set(['mission:context']),
+        dependencies: [missionId(dependency)],
+      });
+
+      assert.equal((await depends('px-0042.02', 'px-0041.01')).status, 'completed');
+      assert.equal(saved[0]?.id, 'px-0042.02', 'the exact stored child is the write target');
+      assert.deepEqual(saved[0]?.dependencies, ['px-0041.01']);
+
+      const unknown = await depends('px-0042.02', 'px-0042.99');
+      assert.notEqual(unknown.status, 'completed');
+      assert.match(unknown.error?.message ?? '', /dependency is not a mission: px-0042\.99/);
+      assert.equal(saved.length, 1, 'an unknown child writes nothing');
+    });
   });
 });
 

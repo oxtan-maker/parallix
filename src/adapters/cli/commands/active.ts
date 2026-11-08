@@ -11,7 +11,7 @@ import { findMissionDir, findCheckpoints, getFirstLine, inferSlug, getMissionYea
 import { resolveTaskFile, transitionTask } from '../../backlog/backlog.js';
 import { assembleStagePrompt } from '../../assets/runtime-assets.js';
 import { resolvePromptConfiguration } from '../../config/product-config.js';
-import { isDbAdhocIdentity } from '../../../domain/mission.js';
+import { isDbOwnedPxIdentity } from '../../../domain/mission.js';
 
 function renderActiveProgress(event: { phase: string; agent?: string }, logFn: Log) {
   if (event.phase === 'review-preparation') {
@@ -187,7 +187,7 @@ function resolveExecuteTaskPath(slug: string, rootDir: string) {
   // exists yet the shared execute prompt still names the canonical slot so the
   // agent preserves the right file once it is drafted; adhoc identities never
   // reach this branch's rendered output because buildExecutePrompt strips the
-  // Backlog-task lines for them (isDbAdhocIdentity below).
+  // Backlog-task lines for them (isDbOwnedPxIdentity below).
   return path.join(rootDir, 'backlog', 'tasks', `<${slug}>.md`);
 }
 
@@ -208,7 +208,7 @@ function buildExecutePrompt(slug: string, checkpointContext: string, options: { 
   // metadata instructions that reference a file that does not exist. Strip
   // those Backlog-task lines only for a DB-owned taskless mission; Backlog-backed
   // (`task-<N>`) missions keep them even when the task file is not yet on disk.
-  const dbOwnedNoTaskFile = isDbAdhocIdentity(slug) || dbOwnedNoMirror;
+  const dbOwnedNoTaskFile = isDbOwnedPxIdentity(slug) || dbOwnedNoMirror;
   let body = template;
   if (dbOwnedNoTaskFile) {
     body = body

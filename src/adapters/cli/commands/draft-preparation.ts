@@ -20,23 +20,24 @@ import { validateDraftClassification } from './draft-prompts.js';
 
 import { runPreDraftHook } from '../../process/pre-draft-hook.js';
 
-import { boundedFailureOutput, describePreparationTiming, flagValue, allocateAdhocDraftTarget, isDbOwnedMission, validateDraftTask } from './draft-workflow-support.js';
+import { boundedFailureOutput, describePreparationTiming, flagValue, allocateAdhocDraftTarget, isDbOwnedMission, validateDraftTask, resolveDraftTargetOrReject } from './draft-workflow-support.js';
 import { detailRows } from './draft-completion.js';
 
 import type { DraftWorkflowEnvironment } from './draft-workflow-adapter.js';
-import { isDbAdhocIdentity } from '../../../domain/mission.js';
+import { isDbOwnedPxIdentity } from '../../../domain/mission.js';
 export async function draftPreflight(environment: DraftWorkflowEnvironment, args: string[], options: Record<string, unknown> = {}): Promise<DraftWorkflowContext> {
   const { deps, exitFn, logFn, errorFn, exitedContext, safeExit } = environment;
   const merged: DraftAdapterDependencies = { ...deps, ...options };
   const { inferSlugFn, resolveMainRepoFn, ensureRepoExistsFn, ensureStandaloneMissionBaselineFn, ensureDraftRepoConfigCommittedFn, detectLaunchBaseBranchFn, resolveTaskFileFn, reportTaskResolutionFn, checkBacklogIntegrityFn, allocateAdhocIdentityFn } = preflightBindings(merged);
   const explicitInput = args[0];
-  const draftTarget = resolveDraftTarget(explicitInput) || { slug: inferSlugFn(explicitInput), syntheticTask: null };
+  // A malformed or nested px-child reference is refused here, before any side
+  // effect (PX-0045); see resolveDraftTargetOrReject.
+  const resolution = resolveDraftTargetOrReject(explicitInput, resolveDraftTarget(explicitInput), environment, options, inferSlugFn);
+  if (!resolution.ok) { return resolution.context; }
+  const draftTarget = resolution.target;
+  // resolveDraftTargetOrReject already refused an empty target with the usage
+  // line, so the slug here is non-empty and that refusal has one owner (PX-0045).
   let slug = draftTarget.slug;
-  if (!slug) {
-    errorFn(fmt.status('FAIL', 'Usage: px draft <slug> [--agent <family>]'));
-    safeExit(1);
-    return exitedContext({ slug: '', options });
-  }
 
   let normalizedSlug = slug.toLowerCase();
   let syntheticTask = draftTarget.syntheticTask;
@@ -53,9 +54,10 @@ export async function draftPreflight(environment: DraftWorkflowEnvironment, args
   // (task-2468): the `adhoc-<text>` slug is replaced by `px-<NNNN>`
   // minted from a per-repository counter, so slug, mission id, branch, and
   // worktree suffix stay one derivable identity with no content hash.
-  // Re-entering an existing DB-owned identity (F6) skips allocation: the
-  // counter is monotonic and repository-scoped, so a re-run reuses the
-  // minted identity instead of minting a second mission/branch/worktree.
+  // Re-entering an existing DB-owned identity (F6, PX-0045) skips allocation:
+  // the counter is monotonic and repository-scoped, and a persisted wave child
+  // already owns its parent-derived identity, so a re-run reuses the minted
+  // identity instead of minting a second mission/branch/worktree.
   const allocatedTarget = allocateAdhocDraftTarget(draftTarget, syntheticTask, slug, mainRepo, allocateAdhocIdentityFn, errorFn, exitFn);
   if (!allocatedTarget) { return exitedContext({ slug, mainRepo, options }); }
   slug = allocatedTarget.slug;
@@ -80,11 +82,11 @@ export async function draftPreflight(environment: DraftWorkflowEnvironment, args
 
   const taskLookupRoot = recordedBase ? launchDir : mainRepo;
   // Probe the operator store for an existing DB-owned mission before the
-  // task-file gate. A web/board-created px-XXXX with persisted planning
-  // fields has no Backlog task file by design; recognizing it here lets the
-  // draft proceed under the same identity instead of bailing "not found".
+  // task-file gate. A web/board-created px-XXXX or a persisted px-XXXX.NN wave
+  // child has no Backlog task file by design; recognizing it here lets the draft
+  // proceed under the same identity instead of bailing "not found".
   const dbOwned = await isDbOwnedMission(normalizedSlug, mainRepo, merged);
-  if (isDbAdhocIdentity(normalizedSlug) && !syntheticTask && !dbOwned) {
+  if (isDbOwnedPxIdentity(normalizedSlug) && !syntheticTask && !dbOwned) {
     errorFn(fmt.status('FAIL', `Mission database record for ${normalizedSlug} is unavailable; px-* draft intent cannot be recovered from a task file.`));
     logFn(`Repair: restore operator database access and confirm \`px status ${normalizedSlug}\` returns the exact Mission, then re-run the draft.`);
     safeExit(1);

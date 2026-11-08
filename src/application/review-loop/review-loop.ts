@@ -11,7 +11,7 @@ import { resumeIntegrationAssessment } from './integration-assessment.js';
  * in `../ports/review-round.ts`.
  */
 import { recordHumanCorrection } from './human-correction.js';
-import { isDbAdhocIdentity, missionId } from '../../domain/mission.js';
+import { isDbOwnedPxIdentity, missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { rebaseImplementer, recordImplementerLaunch } from '../rebase-identity.js';
@@ -61,7 +61,7 @@ async function resolveImplementer(slug: string, requested: string | undefined, p
  */
 function stopsOnMissingTaskFile(slug: string, ports: ReviewLoopPorts, out: Output): boolean {
   if (ports.task.task.ok) { return false; }
-  if (isDbAdhocIdentity(slug)) {
+  if (isDbOwnedPxIdentity(slug)) {
     out.emit({ kind: 'adhoc-without-task', slug: slug });
     return false;
   }

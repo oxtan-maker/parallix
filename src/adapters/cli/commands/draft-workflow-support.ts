@@ -2,13 +2,14 @@ import { commandErrorMessage } from './agent-result.js';
 
 import { draftMissionServices, type DraftAdapterDependencies, type DraftLog, type DraftExit } from './draft-adapter-types.js';
 import type { SyntheticDraftTask, DraftTarget } from './draft-setup.js';
+import type { DraftWorkflowEnvironment } from './draft-workflow-adapter.js';
 
 import type { DraftWorkflowContext } from '../../../application/ports/cli-workflows.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { startDraftAgent, selectAgent, readAgentConfigOrExit } from '../../agents/agents.js';
 import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity } from '../../backlog/backlog.js';
 
-import { missionId, isDbAdhocIdentity } from '../../../domain/mission.js';
+import { missionId, isDbOwnedPxIdentity } from '../../../domain/mission.js';
 
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 
@@ -38,6 +39,40 @@ export function boundedFailureOutput(hook: { output?: string; failureTail?: stri
   return hook.failureTail ?? hook.output ?? '';
 }
 
+/** Either the usable draft target, or the context of an already-reported refusal. */
+export type DraftTargetResolution = { ok: true; target: DraftTarget } | { ok: false; context: DraftWorkflowContext };
+
+/**
+ * Turn the resolved draft target into a usable one, refusing an unusable target
+ * before any draft side effect runs. A malformed or nested px-child reference
+ * (PX-0045) must not fall through to free-text intake, which mints an unrelated
+ * counter identity and drafts the wrong Mission, nor to worktree inference,
+ * which drafts the Mission the operator happens to be standing in. An empty
+ * target is the existing usage error. Both report the repair and exit.
+ */
+export function resolveDraftTargetOrReject(
+  explicitInput: string | undefined,
+  resolved: DraftTarget | null,
+  environment: Pick<DraftWorkflowEnvironment, 'logFn' | 'errorFn' | 'exitedContext' | 'safeExit'>,
+  options: Record<string, unknown>,
+  inferSlugFn: NonNullable<DraftAdapterDependencies['inferSlugFn']>,
+): DraftTargetResolution {
+  const invalid = resolved?.invalidIdentity;
+  if (invalid) {
+    environment.errorFn(fmt.status('FAIL', `${fmt.slug(invalid)} is not a Mission identity: a Mission wave child is <parent>.NN with a two-digit position.`));
+    environment.logFn('Repair: pass the exact child id recorded by the wave, or run px status <parent> and use one of its listed children.');
+    environment.safeExit(1);
+    return { ok: false, context: environment.exitedContext({ slug: invalid, options }) };
+  }
+  const target: DraftTarget = resolved || { slug: inferSlugFn(explicitInput) ?? '', syntheticTask: null };
+  if (!target.slug) {
+    environment.errorFn(fmt.status('FAIL', 'Usage: px draft <slug> [--agent <family>]'));
+    environment.safeExit(1);
+    return { ok: false, context: environment.exitedContext({ slug: '', options }) };
+  }
+  return { ok: true, target };
+}
+
 /** Separate checkout time from install-hook time so slow setup is attributable. */
 export function describePreparationTiming(worktreeMs: number, hook: { durationMs?: number; storeState?: string }): string {
   return `Worktree checkout ${worktreeMs}ms; install hook ${hook.durationMs}ms (store ${hook.storeState}).`;
@@ -65,8 +100,8 @@ export function flagValue(arr: string[], flag: string, name: string, errorFn: Dr
   return value;
 }
 
-export function allocateAdhocDraftTarget(draftTarget: Pick<DraftTarget, "syntheticTask" | "existingAdhocIdentity">, syntheticTask: SyntheticDraftTask | null, slug: string, mainRepo: string, allocateAdhocIdentityFn: NonNullable<DraftAdapterDependencies['allocateAdhocIdentityFn']>, errorFn: DraftLog, exitFn: DraftExit) {
-  if (!syntheticTask || draftTarget.existingAdhocIdentity) { return { slug, syntheticTask }; }
+export function allocateAdhocDraftTarget(draftTarget: Pick<DraftTarget, "syntheticTask" | "existingDbOwnedIdentity">, syntheticTask: SyntheticDraftTask | null, slug: string, mainRepo: string, allocateAdhocIdentityFn: NonNullable<DraftAdapterDependencies['allocateAdhocIdentityFn']>, errorFn: DraftLog, exitFn: DraftExit) {
+  if (!syntheticTask || draftTarget.existingDbOwnedIdentity) { return { slug, syntheticTask }; }
   try {
     const allocated = allocateAdhocIdentityFn(resolveCanonicalRepositoryId(mainRepo));
     return {
@@ -95,11 +130,12 @@ export async function isDbOwnedMission(slug: string, mainRepo: string, merged: D
     if (typeof merged.missionServicesFn !== 'function') { return false; }
     const services = await merged.missionServicesFn(mainRepo);
     const loaded = await services.store.load(missionId(slug));
-    // A web-created px-NNNN mission and a persisted wave child are both born in
-    // the operator store without a Backlog mirror. Imported task-NNNN missions
-    // remain on the Backlog path unless their aggregate explicitly names a wave
-    // parent, so mere presence in the store never bypasses task-file validation.
-    return loaded.kind === 'found' && (isDbAdhocIdentity(slug)
+    // A web-created px-NNNN mission and a persisted px-NNNN.NN wave child are
+    // both born in the operator store without a Backlog mirror. Imported
+    // task-NNNN missions remain on the Backlog path unless their aggregate
+    // explicitly names a wave parent, so mere presence in the store never
+    // bypasses task-file validation.
+    return loaded.kind === 'found' && (isDbOwnedPxIdentity(slug)
       || (loaded.mission.waveParentId !== null && loaded.mission.waveParentId !== undefined));
   } catch {
     return false;

@@ -783,17 +783,15 @@ const DEFAULT_PARALLIX_HOMES = [
   path.join(os.homedir(), '.parallix')
 ];
 
-// Snapshot the developer's default-location Parallix state before the run so
-// the isolation assertions can be delta-based (only lines added by THIS run
-// count as leakage).
-function snapshotDefaultParallixState() {
-  const snapshots = new Map();
-  for (const home of DEFAULT_PARALLIX_HOMES) {
-    for (const file of ['parallix.db', 'agents.local.json']) {
-      const filePath = path.join(home, file);
-      if (fs.existsSync(filePath)) {
-        snapshots.set(filePath, fs.readFileSync(filePath, 'utf8'));
-      }
+// Snapshot only the agent blocking files compared by the isolation assertion.
+// Measurements are checked through the store, so never decode the operator's
+// potentially large binary database as a UTF-8 string here.
+function snapshotDefaultParallixState(homes: readonly string[] = DEFAULT_PARALLIX_HOMES) {
+  const snapshots = new Map<string, string>();
+  for (const home of homes) {
+    const filePath = path.join(home, 'agents.local.json');
+    if (fs.existsSync(filePath)) {
+      snapshots.set(filePath, fs.readFileSync(filePath, 'utf8'));
     }
   }
   return snapshots;
@@ -1221,7 +1219,7 @@ function assertSmokeSelection(agent: string) {
 
 // The helpers are always exported; the smoke tests themselves only register
 // when this file is not being imported purely for its helpers (task-2241).
-export { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure, setupRepository };
+export { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure, setupRepository, snapshotDefaultParallixState };
 
 if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS !== '1') {
   test('real-agent smoke rejects an unsupported Codex override model', {

@@ -238,7 +238,7 @@ export function createCriterionCommand(services: MissionWriteServices) {
 }
 
 /** `px nel set --predicted <bucket>` */
-export function createDependsCommand(services: MissionWriteServices) {
+export function createDependsCommand(services: Pick<MissionWriteServices, 'brief' | 'resolveSlug'>) {
   return async (args: string[] = []): Promise<void> => {
     if (helped(args, DEPENDS_HELP)) { return; }
     const action = args[0];

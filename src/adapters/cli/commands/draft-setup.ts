@@ -6,11 +6,11 @@ import { git, getWorktreeStatus } from '../../git/git.js';
 import { resolveTaskFile, reportTaskResolution, getTaskStorage } from '../../backlog/backlog.js';
 import { getPrimaryBranch, squashTrailingBacklogNoiseIntoPreviousMission } from '../../filesystem/mission-utils.js';
 import { parseDirtyEntry } from './draft-conflicts.js';
-import { isDbAdhocIdentity } from '../../../domain/mission.js';
+import { isDbOwnedPxIdentity, isPxIdentityReference } from '../../../domain/mission.js';
 
 export type { DraftSyntheticTask as SyntheticDraftTask } from '../../../application/ports/cli-workflows.js';
 import type { DraftSyntheticTask as SyntheticDraftTask } from '../../../application/ports/cli-workflows.js';
-export interface DraftTarget { slug: string; syntheticTask: SyntheticDraftTask | null; existingAdhocIdentity?: boolean }
+export interface DraftTarget { slug: string; syntheticTask: SyntheticDraftTask | null; existingDbOwnedIdentity?: boolean; invalidIdentity?: string }
 
 type Log = (_message: string) => void;
 
@@ -34,7 +34,7 @@ function syntheticTaskId(slug: string, seed: string) {
   // src/adapters/backlog/task-file-io.ts). A legacy `adhoc-*` free-text slug
   // keeps its historical hashed identity so existing missions stay resolvable.
   const trimmed = String(slug || '').trim();
-  if (isDbAdhocIdentity(trimmed)) {
+  if (isDbOwnedPxIdentity(trimmed)) {
     return trimmed.toUpperCase();
   }
   const hash = crypto.createHash('sha1').update(String(seed || slug)).digest('hex').slice(0, 8).toUpperCase();
@@ -50,17 +50,26 @@ function resolveDraftTarget(rawInput: string | undefined, cwd = process.cwd()): 
   const explicit = String(rawInput || '').trim();
   if (!explicit) {return null;}
 
-  // Re-entering an existing DB-owned adhoc identity (task-2468, F6): the
-  // `px-<NNNN>` counter is repository-scoped and monotonic, so a
-  // fresh draft of the same identity must reuse the minted identity rather than
-  // minting a second one. Recognize the explicit input as an existing identity
-  // reference; the preflight step skips allocation for it.
-  if (isDbAdhocIdentity(explicit)) {
+  // Re-entering an existing DB-owned identity (task-2468, F6, PX-0045): the
+  // `px-<NNNN>` counter is repository-scoped and monotonic, and a persisted
+  // `px-<NNNN>.<NN>` wave child already carries the identity `px split` gave it,
+  // so a draft of either must reuse the minted identity rather than mint a
+  // second one. Recognize the explicit input as an existing identity reference;
+  // the preflight step skips allocation for it.
+  if (isDbOwnedPxIdentity(explicit)) {
     return {
       slug: explicit.toLowerCase(),
       syntheticTask: null,
-      existingAdhocIdentity: true,
+      existingDbOwnedIdentity: true,
     };
+  }
+
+  // A dotted reference into the `px-` namespace that is not a valid child
+  // identity (PX-0045) must not fall through to free-text intake: that mints an
+  // unrelated counter identity and drafts the wrong Mission. Refuse it here and
+  // allocate nothing.
+  if (isPxIdentityReference(explicit)) {
+    return { slug: '', syntheticTask: null, invalidIdentity: explicit.toLowerCase() };
   }
 
   if (explicit.toLowerCase().startsWith('task-')) {

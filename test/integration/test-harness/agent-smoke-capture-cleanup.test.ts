@@ -14,6 +14,39 @@ const originalTmpdir = os.tmpdir;
 process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS = '1';
 const smokeHelpers = await import('../../e2e/agents/real-agent-smoke.test.js');
 
+test('smoke state snapshots read only agent configuration, never the operator database', (t) => {
+  const tempRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'smoke-state-snapshot-'));
+  const originalReadFileSync = fs.readFileSync;
+  const homes = [path.join(tempRoot, 'linux'), path.join(tempRoot, 'fallback')];
+  const configuration = '{"blocklist":{"custom":false}}';
+  try {
+    for (const home of homes) {
+      fs.mkdirSync(home);
+      fs.writeFileSync(path.join(home, 'parallix.db'), 'binary database');
+    }
+    const agentsPath = path.join(homes[0], 'agents.local.json');
+    fs.writeFileSync(agentsPath, configuration);
+    // Reproduce the failure at the read boundary without allocating a 512 MiB
+    // database or string. Database contents are not part of this snapshot.
+    t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof originalReadFileSync>) => {
+      const [file] = args;
+      if (homes.some(home => String(file) === path.join(home, 'parallix.db'))) {
+        throw Object.assign(new Error('Cannot create a string longer than 0x1fffffe8 characters'), { code: 'ERR_STRING_TOO_LONG' });
+      }
+      return originalReadFileSync(...args);
+    });
+    assert.deepEqual(smokeHelpers.snapshotDefaultParallixState(homes), new Map([[agentsPath, configuration]]));
+    fs.writeFileSync(path.join(homes[1], 'agents.local.json'), '{}');
+    assert.deepEqual(smokeHelpers.snapshotDefaultParallixState(homes), new Map([
+      [agentsPath, configuration],
+      [path.join(homes[1], 'agents.local.json'), '{}'],
+    ]));
+  } finally {
+    fs.readFileSync = originalReadFileSync;
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 function loadSmokeHelpers() {
   return {
     ...smokeHelpers,

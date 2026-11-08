@@ -17,7 +17,7 @@ import { transitionReviewRepair } from './review-repair-lifecycle.js';
  */
 import { reviewPreparationBudgetExceeded } from "../domain/mission-review-preparation-policy.js";
 import * as fmt from './presentation/cli-format.js';
-import { isDbAdhocIdentity } from '../domain/mission.js';
+import { isDbOwnedPxIdentity } from '../domain/mission.js';
 
 import { DeclaredGateRunner } from "./review-preparation-declared-gates.js";
 import { ReviewPreparationContractVerifier, loadRecordedContract } from "./review-preparation-contract.js";
@@ -239,7 +239,7 @@ export class ReviewPreparationExecutor {
       // A DB-owned adhoc identity has no Backlog mirror to transition; the
       // authoritative lifecycle transition above already recorded the review
       // state. Backlog-backed missions keep the hard failure.
-      if (!isDbAdhocIdentity(slug)) {
+      if (!isDbOwnedPxIdentity(slug)) {
         const msg = `Could not transition task ${fmt.slug(slug)} to review.`;
         error(msg);
         return preparationFailure(msg, 'state-machine');
@@ -457,13 +457,13 @@ async function runPreReviewPreparationGates(slug: string, rootDir: string, bindi
 }
 
 function reviewPreparationTaskFailure(slug: string, taskResolution: ReturnType<ReviewPreparationWorkflowPorts['backlog']['resolveTaskFile']>, log: ReviewPreparationBindings['log'], error: ReviewPreparationBindings['error']): ReviewPreparationResult | null {
-  const dbAdhocIdentity = isDbAdhocIdentity(slug);
-  if (!taskResolution.ok && !dbAdhocIdentity) {
+  const dbOwnedPxIdentity = isDbOwnedPxIdentity(slug);
+  if (!taskResolution.ok && !dbOwnedPxIdentity) {
     const msg = `Backlog task file for ${fmt.slug(slug)} not found or ambiguous: ${taskResolution.reason}.`;
     error(msg);
     return preparationFailure(msg, 'state-machine');
   }
-  if (dbAdhocIdentity && !taskResolution.ok) {
+  if (dbOwnedPxIdentity && !taskResolution.ok) {
     log(fmt.status('WARN', `No Backlog mirror for DB-owned adhoc identity ${fmt.slug(slug)}; identity and lifecycle are DB-authoritative.`));
   }
 

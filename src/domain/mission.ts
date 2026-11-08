@@ -24,17 +24,56 @@ export function missionId(value: string): MissionId {
 export const missionSlug = missionId;
 
 /**
- * A DB-owned adhoc identity is `px-<NNNN>` (task-2468): its slug,
- * mission id, branch, and worktree suffix all derive from a repository-scoped
- * counter, so it needs no Backlog task file. Unlike `isMissionSlugCandidate`,
- * this recognizes only the DB-owned namespace — the `task-` and legacy
- * `adhoc-` backings are intentionally excluded — so callers can tell a
- * DB-authoritative identity from a file-backed one without a filesystem read.
+ * The one grammar for the DB-owned `px-` namespace (task-2468, PX-0045): a
+ * counter-minted `px-<NNNN>` and the wave child `px-<NNNN>.<NN>` that `px split`
+ * mints from a `px-` parent. It is kept as a source string so
+ * `isMissionSlugCandidate` composes the same grammar instead of restating it.
+ * The child position is the one-based, zero-padded slot that
+ * `convertMissionToWave` emits for `0 < position < 100`, so `.00` is not an
+ * identity and a nested `px-<NNNN>.<NN>.<NN>` is deliberately absent:
+ * `convertMissionToWave` refuses a dotted parent, so a wave child is never a
+ * wave parent.
+ */
+const PX_IDENTITY_SOURCE = 'px-\\d{4,}(?:\\.(?:0[1-9]|[1-9][0-9]))?';
+const PX_IDENTITY_PATTERN = new RegExp(`^${PX_IDENTITY_SOURCE}$`, 'i');
+const MISSION_SLUG_CANDIDATE_PATTERN = new RegExp(`^(?:(?:task|adhoc)-[a-z0-9][a-z0-9.-]*|${PX_IDENTITY_SOURCE})$`, 'i');
+
+/**
+ * A DB-owned Mission identity is in the `px-` namespace (task-2468, PX-0045):
+ * either a counter-minted `px-<NNNN>` whose slug, mission id, branch, and
+ * worktree suffix all derive from a repository-scoped counter, or the wave
+ * child `px-<NNNN>.<NN>` that `px split` minted from a `px-` parent. Both are
+ * born in the operator store and own no Backlog task file. Unlike
+ * `isMissionSlugCandidate`, this recognizes only the DB-owned namespace — the
+ * `task-` and legacy `adhoc-` backings are intentionally excluded — so callers
+ * can tell a DB-authoritative identity from a file-backed one without a
+ * filesystem read.
  *
  * @param {unknown} value
  */
-export function isDbAdhocIdentity(value: unknown): boolean {
-  return typeof value === 'string' && /^px-\d{4,}$/i.test(value.trim());
+export function isDbOwnedPxIdentity(value: unknown): boolean {
+  return typeof value === 'string' && PX_IDENTITY_PATTERN.test(value.trim());
+}
+
+/**
+ * Whether a value is an attempted reference into the `px-` namespace rather
+ * than a valid identity (PX-0045): a single whitespace-free token that starts
+ * with `px-<digits>.` but is not a valid child identity. An interface uses this
+ * to refuse a malformed or nested child reference instead of letting it fall
+ * through to free-text intake, which mints an unrelated counter identity and
+ * drafts the wrong Mission. It is deliberately broader than
+ * `isDbOwnedPxIdentity` in digit count — `px-41.01` and `px-041.01` are
+ * mis-typed child references, not free text — and deliberately narrower in
+ * shape: the whole value must be one token, so free text that merely starts
+ * with a dotted id (`px-0041.01 fix the parent link`) keeps its preserved
+ * free-text intake. It recognizes the attempt, never a stored Mission; a zero
+ * position (`px-0041.00`) is an attempt too, because `convertMissionToWave`
+ * numbers children from `01`.
+ *
+ * @param {unknown} value
+ */
+export function isPxIdentityReference(value: unknown): boolean {
+  return typeof value === 'string' && /^px-\d+\.\S*$/i.test(value.trim());
 }
 
 /**
@@ -52,11 +91,13 @@ export function isLegacyAdhocIdentity(value: unknown): boolean {
 
 /**
  * A mission slug candidate is one of three backings: `task-<…>` (a Backlog
- * task), `adhoc-<…>` (the legacy free-text identity, still accepted so an
- * existing `adhoc-*` mission stays resolvable), or `px-<NNNN>` (the
- * DB-owned, repository-scoped identity minted by `allocateAdhocIdentity`). No
- * content hash: the counter is the sole origin, so slug, mission id, branch,
- * and worktree suffix stay one derivable identity.
+ * task, including a dotted `task-<NNNN>.<NN>` wave child), `adhoc-<…>` (the
+ * legacy free-text identity, still accepted so an existing `adhoc-*` mission
+ * stays resolvable), or the DB-owned `px-` namespace: `px-<NNNN>` minted by
+ * `allocateAdhocIdentity` and the `px-<NNNN>.<NN>` wave child minted by
+ * `px split`. No content hash: the counter or the parent wave is the sole
+ * origin, so slug, mission id, branch, and worktree suffix stay one derivable
+ * identity.
  *
  * Lives in the domain layer (task-2468, F7): it is a pure predicate over a slug
  * string with no filesystem dependency, so the shared validator has no adapter
@@ -68,7 +109,7 @@ export function isLegacyAdhocIdentity(value: unknown): boolean {
 export function isMissionSlugCandidate(value: unknown): boolean {
   return (
     typeof value === 'string' &&
-    /^(?:(?:task|adhoc)-[a-z0-9][a-z0-9.-]*|px-\d{4,})$/i.test(value.trim())
+    MISSION_SLUG_CANDIDATE_PATTERN.test(value.trim())
   );
 }
 
