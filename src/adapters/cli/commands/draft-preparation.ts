@@ -24,6 +24,7 @@ import { boundedFailureOutput, describePreparationTiming, flagValue, allocateAdh
 import { detailRows } from './draft-completion.js';
 
 import type { DraftWorkflowEnvironment } from './draft-workflow-adapter.js';
+import { isDbAdhocIdentity } from '../../../domain/mission.js';
 export async function draftPreflight(environment: DraftWorkflowEnvironment, args: string[], options: Record<string, unknown> = {}): Promise<DraftWorkflowContext> {
   const { deps, exitFn, logFn, errorFn, exitedContext, safeExit } = environment;
   const merged: DraftAdapterDependencies = { ...deps, ...options };
@@ -83,6 +84,12 @@ export async function draftPreflight(environment: DraftWorkflowEnvironment, args
   // fields has no Backlog task file by design; recognizing it here lets the
   // draft proceed under the same identity instead of bailing "not found".
   const dbOwned = await isDbOwnedMission(normalizedSlug, mainRepo, merged);
+  if (isDbAdhocIdentity(normalizedSlug) && !syntheticTask && !dbOwned) {
+    errorFn(fmt.status('FAIL', `Mission database record for ${normalizedSlug} is unavailable; px-* draft intent cannot be recovered from a task file.`));
+    logFn(`Repair: restore operator database access and confirm \`px status ${normalizedSlug}\` returns the exact Mission, then re-run the draft.`);
+    safeExit(1);
+    return exitedContext({ slug: normalizedSlug, mainRepo, options });
+  }
   if (!validateDraftTask(taskLookupRoot, normalizedSlug, syntheticTask, dbOwned, resolveTaskFileFn, reportTaskResolutionFn, checkBacklogIntegrityFn, errorFn, logFn)) {
     safeExit(1);
     return exitedContext({ slug: normalizedSlug, mainRepo, options });

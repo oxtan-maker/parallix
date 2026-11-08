@@ -23,13 +23,12 @@ import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDraftWorkflowAdapter, DRAFT_CONTRACT_REPAIR_ATTEMPTS } from '../../../src/adapters/cli/commands/draft-stats.js';
 import { recordDraftRefinement } from '../../../src/adapters/cli/commands/draft-workflow-support.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
-import { normalizeDraftClassification, buildRestartPrompt } from '../../../src/adapters/cli/commands/draft-prompts.js';
+import { buildContractRepairPrompt, buildDraftPrompt, normalizeDraftClassification, buildRestartPrompt } from '../../../src/adapters/cli/commands/draft-prompts.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
@@ -517,6 +516,37 @@ test('draft completion refuses unknown until the agent classifies the mission (T
     resolveMissionClassificationFn: () => ({ classification: 'unknown', taskFile: null, source: 'mission' }),
   }).ok, false);
   assert.match(buildRestartPrompt('task-classify'), /unknown must be resolved before draft completion/);
+});
+
+test('px-* initial, classification-restart, and contract-repair prompts keep database intent exclusive (px-0035)', () => {
+  const root = registeredMkdtemp('px-draft-prompt-source-');
+  try {
+    const distractor = path.join(root, 'backlog', 'tasks', 'px-0004 - plausible match.md');
+    fs.mkdirSync(path.dirname(distractor), { recursive: true });
+    fs.writeFileSync(distractor, 'id: TASK-2845\nintent: unrelated visualization\n');
+    const refusal = 'Missing exact list [alpha, beta], quoted text "keep me", and stop checkpoint CP-2.';
+    const prompts = [
+      buildDraftPrompt('px-0004', { rootDir: root, worktree: root }),
+      buildRestartPrompt('px-0004', { rootDir: root, worktree: root }),
+      buildContractRepairPrompt('px-0004', { rootDir: root, worktree: root, refusal }),
+    ];
+
+    for (const prompt of prompts) {
+      assert.match(prompt, /exact record returned by `px status px-0004` is the sole intent authority/);
+      assert.match(prompt, /use only `px status px-0004` for Mission intent/);
+      assert.match(prompt, /exact lists, quoted text, and stop checkpoints/);
+      assert.match(prompt, /Classify this Mission from what it is about/);
+      assert.match(prompt, /Mission recorded with the `bug` label/);
+      assert.doesNotMatch(prompt, /px status px-0004.*reports.*bug.*label/);
+      assert.doesNotMatch(prompt, /classify .* from its recorded database facts/i);
+      assert.doesNotMatch(prompt, /TASK-2845|Backlog task:|Backlog task labels|source: synthetic|intent from `[^`]*backlog\/tasks|plausibly matching task file/);
+    }
+    assert.match(prompts[1], /Focused repair:/);
+    assert.match(prompts[2], /Contract repair:/);
+    assert.match(prompts[2], new RegExp(refusal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 

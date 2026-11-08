@@ -39,12 +39,20 @@ const PARENT_FIXTURE = JSON.parse(
 function parentPrompt(stage: string): string {
   const parent = PARENT_FIXTURE[stage];
   assert.ok(parent, `parent-commit fixture missing for stage ${stage}`);
+  const sourceAwareDraft = stage === 'draft'
+    ? parent
+      .replace('Backlog task: {{taskPath}}', '{{intentSourceLine}}')
+      .replace("The harness has already created the mission branch, worktree, mission record, and backlog task. Your job is to turn the user's intent from `{{taskPath}}` into a complete mission record. There is no mission document to write; every fact below is recorded with a command.", '{{intakeInstructions}}')
+      .replace('- preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file\n- do not edit the backlog `assignee` field; the workflow records ownership itself', '{{providerInstructions}}')
+      .replace('- this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.', '{{bugApplicability}}')
+      .replace('- the harness will transition the task to `ready` after a clean draft; do not transition it yourself', '{{completionTransitionInstruction}}')
+    : parent;
   const normalized = stage === 'review'
     ? `${parent.replace(
       'Do not run any large test gates, thats run automatically by parallix at suitable steps and is not your job. Specific test to validate a code finding is ok.',
       REVIEW_COVERAGE_GUIDANCE,
     )}\n`
-    : parent;
+    : sourceAwareDraft;
   return normalized
     .replace('Do not refresh Graphify after drafting; freshness is maintained at the autonomous-review boundary on the final verified tree.', GRAPHIFY_GUIDANCE)
     .replace('Graph freshness is handled at the autonomous-review boundary, after its final verification and immediately before reviewer launch; do not refresh after ordinary edits.', GRAPHIFY_GUIDANCE)

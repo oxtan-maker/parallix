@@ -1,5 +1,4 @@
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
-import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveTaskFile } from '../../backlog/backlog.js';
@@ -8,6 +7,7 @@ import { assembleStagePrompt } from '../../assets/runtime-assets.js';
 import { resolvePromptOverride } from '../../config/product-config.js';
 import * as stats from './stats.js';
 import { formatVerificationCommand } from '../../verification/verification.js';
+import { isDbAdhocIdentity } from '../../../domain/mission.js';
 function resolveVerifyCmd(rootDir: string) {
   return formatVerificationCommand(undefined, rootDir);
 }
@@ -18,26 +18,8 @@ function resolveTaskPath(slug: string, promptRoot: string) {
   }
   return path.join(promptRoot, 'backlog', 'tasks', `<${slug}>.md`);
 }
-function resolveClassificationInstructions(taskPath: string) {
-  const synthetic = taskPath && fs.existsSync(taskPath) && /^source:\s*synthetic\s*$/mi.test(fs.readFileSync(taskPath, 'utf8'));
-  const intake = synthetic ? 'This task was synthesized by the harness. ' : 'Backlog task labels may describe the task. ';
-  return intake + 'classify this Mission before finishing the draft, including tasks synthesized by the harness. Set exactly one of ai_sdlc or user_value with --classification <ai_sdlc|user_value> in px mission author (or px classification set for a focused edit). Use ai_sdlc for workflow, prompt, or agent-fix work; use user_value for everything else. Unknown is an intake placeholder, never a completed draft classification. Mission state is authoritative; do not add a separate frontmatter field for mission type.';
-}
-function withoutBacklogMirrorInstructions(template: string, slug: string) {
-  return template
-    .split('\n')
-    .flatMap((line) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith('Backlog task:') || /preserve `\{\{taskPath\}\}`/.test(line)) { return []; }
-      if (trimmed.startsWith('The harness has already created the mission branch')) {
-        return [`The harness has already created the mission branch, worktree, and mission record. This DB-owned Mission has no Backlog task file. Turn its recorded intent into a complete mission contract with the commands below.`];
-      }
-      if (trimmed.startsWith('- this section applies only when the backlog task at')) {
-        return [`- this section applies only when \`px status ${slug}\` reports a \`bug\` label. If it does not, ignore this section entirely.`];
-      }
-      return [line];
-    })
-    .join('\n');
+function resolveClassificationInstructions() {
+  return 'Classify this Mission from what it is about: ai_sdlc for workflow, prompt, or agent-fix work; user_value otherwise. Record exactly one in Mission state with --classification <ai_sdlc|user_value> in px mission author; unknown is not a completed draft classification.';
 }
 function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = null, dbOwnedNoMirror = false }: { rootDir?: string; worktree?: string | null; dbOwnedNoMirror?: boolean } = {}) {
   const promptRoot = worktree || rootDir;
@@ -46,18 +28,34 @@ function buildDraftPrompt(slug: string, { rootDir = process.cwd(), worktree = nu
   const year = getMissionYear(slug, promptRoot) || String(new Date().getFullYear());
   const missionPath = path.join(missionDirForSlug(promptRoot, slug), 'MISSION.md');
   const missionDir = path.dirname(missionPath);
-  const taskPath = dbOwnedNoMirror ? '' : resolveTaskPath(slug, promptRoot);
-  const body = dbOwnedNoMirror ? withoutBacklogMirrorInstructions(template, slug) : template;
-  const classificationInstructions = dbOwnedNoMirror
-    ? 'Classify this DB-owned Mission before finishing the draft. Set exactly one of ai_sdlc or user_value with --classification <ai_sdlc|user_value> in px mission author. Mission state is authoritative; do not add a separate frontmatter field for mission type.'
-    : resolveClassificationInstructions(taskPath);
-  return body
+  const databaseOwned = isDbAdhocIdentity(slug) || dbOwnedNoMirror;
+  const taskPath = databaseOwned ? '' : resolveTaskPath(slug, promptRoot);
+  const intentSourceLine = databaseOwned
+    ? `Mission intent: exact database record from \`px status ${slug}\``
+    : `Backlog task: ${taskPath}`;
+  const intakeInstructions = databaseOwned
+    ? `The harness has already created the mission branch, worktree, and Mission database record. The exact record returned by \`px status ${slug}\` is the sole intent authority. Turn that recorded operator intent into a complete mission contract. Preserve explicit requirements verbatim, including exact lists, quoted text, and stop checkpoints. There is no mission document to write; every fact below is recorded with a command.`
+    : `The harness has already created the mission branch, worktree, mission record, and backlog task. Your job is to turn the user's intent from \`${taskPath}\` into a complete mission record. There is no mission document to write; every fact below is recorded with a command.`;
+  const providerInstructions = databaseOwned
+    ? `- use only \`px status ${slug}\` for Mission intent; if the exact record or intent is unavailable, stop with an actionable database-access error`
+    : `- preserve \`${taskPath}\`: update content as needed but do not delete, rename, or move the file
+- do not edit the backlog \`assignee\` field; the workflow records ownership itself`;
+  const bugApplicability = databaseOwned
+    ? '- this section applies only to a Mission recorded with the `bug` label; otherwise ignore it.'
+    : `- this section applies only when the backlog task at \`${taskPath}\` carries a \`bug\` label; otherwise ignore it.`;
+  const completionTransitionInstruction = '- the harness will transition the Mission to `ready` after a clean draft; do not transition it yourself';
+  return template
     .replaceAll('{{slug}}', slug)
     .replaceAll('{{year}}', year)
     .replaceAll('{{missionPath}}', missionPath)
     .replaceAll('{{missionDir}}', missionDir)
     .replaceAll('{{taskPath}}', taskPath)
-    .replaceAll('{{classificationInstructions}}', classificationInstructions)
+    .replaceAll('{{intentSourceLine}}', intentSourceLine)
+    .replaceAll('{{intakeInstructions}}', intakeInstructions)
+    .replaceAll('{{classificationInstructions}}', resolveClassificationInstructions())
+    .replaceAll('{{providerInstructions}}', providerInstructions)
+    .replaceAll('{{bugApplicability}}', bugApplicability)
+    .replaceAll('{{completionTransitionInstruction}}', completionTransitionInstruction)
     .replaceAll('{{verifyCmd}}', resolveVerifyCmd(promptRoot));
 }
 function fallbackDraftCommitMessage(slug: string) {

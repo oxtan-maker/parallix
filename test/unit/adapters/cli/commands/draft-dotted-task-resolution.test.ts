@@ -47,6 +47,9 @@ async function draftPreflight(root: string, input: string) {
       sideEffects.push('allocate');
       return { slug: 'px-0042', taskId: 'PX-0042' };
     },
+    missionServicesFn: async () => ({
+      store: { load: async () => ({ kind: 'found' }) },
+    } as never),
   });
   const ctx = await adapter.preflight([input], {});
   return { ctx, errors: errors.join('\n'), exits, sideEffects };

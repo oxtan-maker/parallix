@@ -159,6 +159,12 @@ test('buildDraftPrompt uses absolute worktree paths and emits no docs/agent-prom
 
   assert.doesNotMatch(prompt, /Mission path:|MISSION\.md/);
   assert.match(prompt, /Backlog task: .*task-8/);
+  assert.match(prompt, /intent from `[^`]*task-8/);
+  assert.match(prompt, /Classify this Mission from what it is about/);
+  assert.match(prompt, /backlog task at `[^`]*task-8[^`]*` carries a `bug` label/);
+  assert.doesNotMatch(prompt, /px status task-8.*bug.*label/);
+  assert.match(prompt, /preserve `[^`]*task-8/);
+  assert.doesNotMatch(prompt, /sole intent authority|do not .*intent from any file/i);
   assert.match(prompt, /verify the draft with `.*` before stopping/);
   assert.doesNotMatch(prompt, /Load the workflow lifecycle/);
   assert.doesNotMatch(prompt, /docs\/agent-prompts/);
@@ -175,8 +181,8 @@ test('buildDraftPrompt omits Backlog mirror instructions for a persisted wave ch
   assert.doesNotMatch(prompt, /Backlog task:/);
   assert.doesNotMatch(prompt, /<task-3000\.01>\.md/);
   assert.doesNotMatch(prompt, /preserve `[^`]*task-3000\.01[^`]*`/);
-  assert.match(prompt, /DB-owned Mission has no Backlog task file/);
-  assert.match(prompt, /px status task-3000\.01/);
+  assert.match(prompt, /Mission database record/);
+  assert.match(prompt, /exact record returned by `px status task-3000\.01` is the sole intent authority/);
 });
 
 test('buildDraftPrompt requires agents to classify synthetic tasks (TASK-2731)', () => {
@@ -199,9 +205,10 @@ test('buildDraftPrompt requires agents to classify synthetic tasks (TASK-2731)',
     ].join('\n'));
 
     const prompt = buildDraftPrompt('task-synth', { rootDir: tempRoot });
-    assert.match(prompt, /including tasks synthesized by the harness/);
-    assert.match(prompt, /Set exactly one of ai_sdlc or user_value/);
-    assert.match(prompt, /Unknown is an intake placeholder, never a completed draft classification/);
+    assert.match(prompt, /Classify this Mission from what it is about/);
+    assert.match(prompt, /Record exactly one in Mission state/);
+    assert.match(prompt, /unknown is not a completed draft classification/);
+    assert.doesNotMatch(prompt, /classification.*Backlog|classification.*synthetic/i);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

@@ -1,9 +1,9 @@
 # Draft core
 Mode: draft. Do not implement the mission — record the mission contract.
 Mission slug: {{slug}}
-Backlog task: {{taskPath}}
+{{intentSourceLine}}
 
-The harness has already created the mission branch, worktree, mission record, and backlog task. Your job is to turn the user's intent from `{{taskPath}}` into a complete mission record. There is no mission document to write; every fact below is recorded with a command.
+{{intakeInstructions}}
 
 Allowed actions:
 - read files and graphify index if present
@@ -61,8 +61,7 @@ Drafting requirements:
 - each success criterion must be specific and checkable: execution records one Goal Check row of evidence per criterion
 - Before locking, check that all criteria and scope constraints can hold together. Challenge absolute guarantees with boundary cases; finite budgets must include all mandatory content, metadata and request overhead. Resolve contradictions during drafting.
 - {{classificationInstructions}}
-- preserve `{{taskPath}}`: update content as needed but do not delete, rename, or move the file
-- do not edit the backlog `assignee` field; the workflow records ownership itself
+{{providerInstructions}}
 - predict the size of the change as a net engineering lines (NEL) bucket — Small (0–80), Medium (81–235) or Large (235+)
 - a Mission-wave child must remain Small or Medium. If new evidence makes the child Large, stop: split the child again, or ask the operator to fold it back into the parent before redefining the wave. Do not record Large on a wave child.
 - if the predicted bucket is Large, first record the parent normally, then run `px split --help` and use `px split` to define at least two child contracts. Every child needs its own goal and reason, scope and out-of-scope boundaries, success criteria, checkpoint plan, runnable gates, Small or Medium predicted NEL bucket and classification; a Large child must be split again before conversion. Choose production-safe integration boundaries: each child must be independently useful, verifiable and safe to integrate, not a partial layer that leaves the primary branch broken.
@@ -71,7 +70,7 @@ Drafting requirements:
 - Plan a brief check where the implementer exercises the changed behavior through the running application’s public interface and records the observed result, using existing tools without adding E2E tests unless explicitly asked for in the intent.
 
 Bug-labeled missions (regression-test-first / "lock the bug"):
-- this section applies only when the backlog task at `{{taskPath}}` carries a `bug` label (in addition to its `ai_sdlc` or `user_value` classification). If there is no `bug` label, ignore this section entirely.
+{{bugApplicability}}
 - make the **first planned checkpoint** (--checkpoint CP-1 in the batch) the authoring of a failing reproduction test that locks the bug before any fix is written. Describe in that checkpoint: the test file location (under `test/`), the reproduction scenario, and the assertion that fails at the mission's parent commit (red) and will pass once the fix lands (green).
 - record the reproduction test's path with `px repro set --test <path>` (for example, `px repro set --test test/task-1354-repro.test.ts`); the table above makes it required for a bug mission. `px status {{slug}}` reports it back for the reviewer to check against the diff.
 - investigate why the defect exists before refinement: inspect repository history, run or read the defect reproduction, inspect the relevant introducing and fixing diffs, and read retained Mission evidence with `px status` and `px history`.
@@ -82,4 +81,4 @@ Graphify-first: before drafting, check if `graphify-out/graph.json` exists. If i
 
 Finishing:
 - verify the draft with `{{verifyCmd}}` before stopping
-- the harness will transition the task to `ready` after a clean draft; do not transition it yourself
+{{completionTransitionInstruction}}

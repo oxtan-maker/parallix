@@ -241,22 +241,11 @@ describe('Prompt parity', () => {
     return { root, file, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
   }
 
-  test('the substituted intake block differs between intakes and names the right authority', () => {
-    const bg = backlogTaskPath();
-    const ah = syntheticTaskPath();
-    try {
-      const bgInstructions = resolveClassificationInstructions(bg.file);
-      const ahInstructions = resolveClassificationInstructions(ah.file);
-
-      assert.notEqual(bgInstructions, ahInstructions, 'the two intakes must substitute different intake blocks');
-      // Backlog intake still targets the Backlog task labels it owns.
-      assert.match(bgInstructions, /Backlog task labels/);
-      // Adhoc intake must not instruct through a Backlog task file it has no such file for.
-      assert.doesNotMatch(ahInstructions, /Backlog task labels/);
-    } finally {
-      bg.cleanup();
-      ah.cleanup();
-    }
+  test('classification guidance is source-independent and records Mission state', () => {
+    const instructions = resolveClassificationInstructions();
+    assert.match(instructions, /Classify this Mission from what it is about/);
+    assert.match(instructions, /Record exactly one in Mission state/);
+    assert.doesNotMatch(instructions, /Backlog|file|DB-owned|synthetic/);
   });
 
   test('the common draft prompt body is intake-independent modulo identity and the intake block', () => {
@@ -265,8 +254,8 @@ describe('Prompt parity', () => {
     try {
       const bgPrompt = buildDraftPrompt('task-1000', { rootDir: bg.root });
       const ahPrompt = buildDraftPrompt('adhoc-fix-hello', { rootDir: ah.root });
-      const bgInstructions = resolveClassificationInstructions(bg.file);
-      const ahInstructions = resolveClassificationInstructions(ah.file);
+      const bgInstructions = resolveClassificationInstructions();
+      const ahInstructions = resolveClassificationInstructions();
 
       // Normalize away the per-mission identity (slug + absolute paths) and the
       // substituted intake block, then the instruction bodies must match: the
@@ -277,8 +266,7 @@ describe('Prompt parity', () => {
           .replaceAll(root, '<root>')
           .replace(/(?:task-1000|adhoc-fix-hello)/g, '<slug>');
       assert.equal(normalize(ahPrompt, ahInstructions, ah.root), normalize(bgPrompt, bgInstructions, bg.root));
-      // The adhoc rendering must not instruct through a Backlog task file it has no such file for.
-      assert.doesNotMatch(ahInstructions, /Backlog task labels/);
+      assert.equal(ahInstructions, bgInstructions, 'classification is Mission state after every intake');
     } finally {
       bg.cleanup();
       ah.cleanup();

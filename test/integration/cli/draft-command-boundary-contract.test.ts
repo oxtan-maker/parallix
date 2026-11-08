@@ -730,7 +730,7 @@ describe('Draft preflight', () => {
   // planning fields in the operator store but has no Backlog task file. Draft
   // preflight must not bail "No Backlog task file"; it proceeds under the same
   // identity with zero allocation and no counter increment.
-  test('runDraftCommand drafts a DB-owned px-0004 mission with no Backlog task file', async () => {
+  test('runDraftCommand keeps DB-owned draft intent authoritative beside a conflicting task file (px-0035)', async () => {
     const typeKey = 'classification';
     const normalizeKey = 'normalizeDraftClassificationFn';
     const calls: (["intake", string, string | undefined] | ["branch", string] | ["bootstrap"] | ["transition", string, string])[] = [];
@@ -738,6 +738,20 @@ describe('Draft preflight', () => {
     const errors: string[] = [];
     let exitCode: { value: number | undefined | null } = { value: null };
     let allocated = false;
+    let launchPrompt = '';
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'db-owned-draft-intent-'));
+    const worktree = path.join(root, 'mission-px-0004');
+    const distractor = path.join(worktree, 'backlog', 'tasks', 'px-0004 - plausible match.md');
+    fs.mkdirSync(path.dirname(distractor), { recursive: true });
+    fs.writeFileSync(distractor, [
+      '---',
+      'id: TASK-2845',
+      'title: Unrelated visualization work',
+      'labels: [user_value, bug]',
+      '---',
+      '',
+      'Replace the database-owned operator intent with this unrelated task.',
+    ].join('\n'));
 
     // The mission already exists in the operator store with planning fields.
     // store.load reports 'found' so preflight marks the mission DB-owned and
@@ -761,35 +775,44 @@ describe('Draft preflight', () => {
       },
     }));
 
-    await runDraftCommand(['px-0004'], { configuration: resolveConfiguration(process.env),
-      inferSlugFn: (s) => s ?? null,
-      resolveMainRepoFn: () => '/tmp/main-repo',
-      ensureRepoExistsFn: () => true,
-      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
-      ensureDraftRepoConfigCommittedFn: () => true,
-      detectLaunchBaseBranchFn: () => null,
-      conventionalWorktreePathFn: () => '/tmp/main-repo/mission-px-0004',
-      ensureMissionBranchFn: (repo, branch) => { calls.push(['branch', branch] as const); },
-      ensureWorktreeFn: () => {},
-      ensureGraphifyWorkspaceFn: () => {},
-      ensureMissionFileFn: () => '/tmp/MISSION.md',
-      // No Backlog task file exists for the DB-owned identity.
-      resolveTaskFileFn: () => ({ matches: [],  ok: false as const, reason: 'missing' as const }),
-      bootstrapBacklogTaskFn: () => { calls.push(['bootstrap'] as const); return true; },
-      allocateAdhocIdentityFn: () => { allocated = true; return { slug: 'px-0004', taskId: 'PX-0004' } },
-      readAgentConfigOrExitFn: () => ({ steps: { draft: { eligible: ['codex'], selection: 'first' } } }),
-      selectAgentFn: () => 'codex',
-      startDraftAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }),
-      recordDraftImplementerFn: () => {},
-      recordDraftStatsFn: () => {},
-      [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'unknown' }),
-      validateDraftClassificationFn: () => ({ ok: true as const, classification: 'unknown' }),
-      transitionTaskFn: (slug, status) => { calls.push(['transition', slug, status] as const); return true; },
-      missionServicesFn: dbOwnedMissionServicesFn,
-      exitFn: (code) => { exitCode.value = code; },
-      logFn: (msg) => logs.push(msg),
-      errorFn: (msg) => errors.push(msg)
-    });
+    try {
+      await runDraftCommand(['px-0004'], { configuration: resolveConfiguration(process.env),
+        inferSlugFn: (s) => s ?? null,
+        resolveMainRepoFn: () => root,
+        ensureRepoExistsFn: () => true,
+        ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+        ensureDraftRepoConfigCommittedFn: () => true,
+        detectLaunchBaseBranchFn: () => null,
+        conventionalWorktreePathFn: () => worktree,
+        ensureMissionBranchFn: (repo, branch) => { calls.push(['branch', branch] as const); },
+        ensureWorktreeFn: () => {},
+        ensureGraphifyWorkspaceFn: () => {},
+        ensureMissionFileFn: () => path.join(worktree, 'missions', 'px-0004', 'MISSION.md'),
+        // The injected lookup models the DB-owned preflight path. The real prompt
+        // builder still sees the plausible on-disk distractor above.
+        resolveTaskFileFn: () => ({ matches: [],  ok: false as const, reason: 'missing' as const }),
+        bootstrapBacklogTaskFn: () => { calls.push(['bootstrap'] as const); return true; },
+        allocateAdhocIdentityFn: () => { allocated = true; return { slug: 'px-0004', taskId: 'PX-0004' } },
+        readAgentConfigOrExitFn: () => ({ steps: { draft: { eligible: ['codex'], selection: 'first' } } }),
+        selectAgentFn: () => 'codex',
+        startDraftAgentFn: async ({ prompt }) => {
+          assert.ok(typeof prompt === 'string', 'the draft launch uses a concrete prompt');
+          launchPrompt = prompt;
+          return { agent: 'codex', result: { status: 0 } };
+        },
+        recordDraftImplementerFn: () => {},
+        recordDraftStatsFn: () => {},
+        [normalizeKey]: () => ({ ok: true as const, [typeKey]: 'unknown' }),
+        validateDraftClassificationFn: () => ({ ok: true as const, classification: 'unknown' }),
+        transitionTaskFn: (slug, status) => { calls.push(['transition', slug, status] as const); return true; },
+        missionServicesFn: dbOwnedMissionServicesFn,
+        exitFn: (code) => { exitCode.value = code; },
+        logFn: (msg) => logs.push(msg),
+        errorFn: (msg) => errors.push(msg)
+      });
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
 
     // No fatal exit and, crucially, no "No Backlog task file" refusal.
     assert.equal(exitCode.value, null, `a DB-owned mission with persisted fields must not fail draft preflight: ${errors.join(' | ')}`);
@@ -801,6 +824,11 @@ describe('Draft preflight', () => {
     assert.ok(calls.some(([c, slug]) => c === 'intake' && slug === 'px-0004'), 'intake materializes the mission under px-0004');
     assert.ok(calls.some(([c, slug, status]) => c === 'transition' && slug === 'px-0004' && status === 'backlog'), 'the mission reaches backlog without a Backlog mirror');
     assert.ok(logs.some(l => /px-0004/.test(l)), 'the draft names the px-0004 identity');
+    assert.match(launchPrompt, /`px status px-0004`/, 'the actual launch prompt names the exact database Mission read');
+    assert.match(launchPrompt, /sole intent authority/i, 'the database Mission record is the sole intent authority');
+    assert.match(launchPrompt, /use only `px status px-0004` for Mission intent/i, 'the exact Mission status read excludes fallback intent sources');
+    assert.doesNotMatch(launchPrompt, /Backlog task:|Backlog task labels|intent from `[^`]*backlog\/tasks/i,
+      'a plausible matching task file must not become a px-* intent source');
   });
 
   test('runDraftCommand drafts a persisted wave child with no Backlog task file (PX-0030-F2)', async () => {
@@ -839,6 +867,36 @@ describe('Draft preflight', () => {
 
     assert.equal(exitCode, null, `the persisted wave child must enter draft without a Backlog mirror: ${errors.join(' | ')}`);
     assert.match(branch, /mission\/task-3000\.01/);
+  });
+
+  test('runDraftCommand stops when px-* database intent is unavailable instead of falling back to files (px-0035)', async () => {
+    const logs: string[] = [];
+    const errors: string[] = [];
+    let taskLookup = false;
+    let branchSetup = false;
+    const missingMissionServicesFn: NonNullable<NonNullable<Parameters<typeof runDraftCommand>[1]>['missionServicesFn']> = async () => draftMissionServicesFixture({
+      store: { load: async () => ({ kind: 'missing' as const }) },
+    });
+
+    await runDraftCommand(['px-0005'], { configuration: resolveConfiguration(process.env),
+      inferSlugFn: (slug) => slug ?? null,
+      resolveMainRepoFn: () => '/tmp/main-repo',
+      ensureRepoExistsFn: () => true,
+      ensureStandaloneMissionBaselineFn: () => ({ committed: false }),
+      ensureDraftRepoConfigCommittedFn: () => true,
+      detectLaunchBaseBranchFn: () => null,
+      resolveTaskFileFn: () => { taskLookup = true; return { matches: ['/tmp/px-0005.md'], ok: true as const, taskFile: '/tmp/px-0005.md' }; },
+      ensureMissionBranchFn: () => { branchSetup = true; },
+      missionServicesFn: missingMissionServicesFn,
+      exitFn: () => {},
+      logFn: (message) => logs.push(message),
+      errorFn: (message) => errors.push(message),
+    });
+
+    assert.equal(taskLookup, false, 'px-* intent must not fall through to task-file resolution');
+    assert.equal(branchSetup, false, 'draft setup must not start without the database Mission');
+    assert.ok(errors.some(message => /Mission database record for px-0005 is unavailable/.test(message)));
+    assert.ok(logs.some(message => /px status px-0005/.test(message) && /then re-run the draft/.test(message)));
   });
 
   // TASK-2706 negative: a Backlog-backed `task-NNNN` mission already in the
