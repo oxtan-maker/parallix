@@ -5,9 +5,9 @@ import fs from 'node:fs';
 import { activeVerificationScope, createActiveVerificationIdentity, type ActiveVerificationOptions as Options } from './active-verification-identity.js';
 export { createActiveVerificationIdentity } from './active-verification-identity.js';
 import { git } from '../git/git.js';
-import { ensureRebaseCompletionRecorder, readRebaseCompletions } from '../git/rebase-completion-recorder.js';
+import { completedRebaseLineage, ensureRebaseCompletionRecorder } from '../git/rebase-completion-recorder.js';
 import { readJson, resolveParallixHome, writeJson } from '../storage/storage.js';
-import { isVerificationBookkeeping, verificationToolchainIdentity } from './verification-proof-inputs.js';
+import { verificationToolchainIdentity } from './verification-proof-inputs.js';
 
 interface ActiveProof {
   policy: 'active-review-v1';
@@ -33,22 +33,8 @@ function matchesProof(proof: ActiveProof | null, scope: string, toolchain: strin
     && revision(proof.verifiedCommit) && typeof proof.inputFingerprint === 'string');
 }
 
-function onlyBookkeeping(root: string, from: string, to: string, gitRunner = git): boolean {
-  const result = gitRunner(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
-  return result.status === 0 && result.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
-}
-
 function completedRebaseCovers(root: string, branch: string, from: string, to: string, gitRunner = git): boolean {
-  let covered = from;
-  for (const record of readRebaseCompletions(root, gitRunner)) {
-    if (!record || !revision(record.from) || !revision(record.to) || record.branch !== branch || !Array.isArray(record.mappings)
-      || !onlyBookkeeping(root, covered, record.from, gitRunner)) { continue; }
-    // Git invokes post-rewrite only after completion. It may drop already
-    // upstream commits, so the covered HEAD need not occur in its mapping list.
-    covered = record.to;
-    if (onlyBookkeeping(root, covered, to, gitRunner)) { return true; }
-  }
-  return false;
+  return completedRebaseLineage(root, branch, from, to, gitRunner) !== null;
 }
 
 /** Active/review scheduling evidence only; configured integration gates and
@@ -57,7 +43,7 @@ export function readActiveVerificationProof(command: string, root: string, optio
   const current = createActiveVerificationIdentity(command, root, options);
   if (current.ok === false) { return current; }
   const integration = readIntegrationVerificationProof(command, root, current);
-  if (integration.ok) { return { ...integration, identity: current.identity, rebased: false }; }
+  if (integration.ok) { return { ...integration, identity: current.identity, rebased: 'lineage' in integration }; }
   const file = proofPath(current.scope, options);
   const cached = readJson<ActiveProof>(file);
   const proof = cached.data;

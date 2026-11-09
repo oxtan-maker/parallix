@@ -7,6 +7,7 @@ import { createEvent } from './review-events.js';
 import { ReviewState } from './review-state.js';
 import { reviewStateDataFrom } from './review-state-mapping.js';
 import { missionBranchName } from '../filesystem/mission-utils.js';
+import { completedRebaseLineageForCheckout } from '../git/rebase-completion-recorder.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 
 interface FeedbackMechanisms {
@@ -20,6 +21,7 @@ export function createIntegrationApprovalEvidence(worktree: string, validation: 
   return {
     samePatch: (a, b) => comparison.samePatch(a, b), now: () => new Date().toISOString(),
     validation,
+    completedRebaseLineage: (from, to) => completedRebaseLineageForCheckout(worktree, from, to),
     async reconcileHumanFeedback(mission, store) {
       const round = mission.review?.rounds.at(-1);
       const decision = round?.decision;

@@ -2,7 +2,8 @@ import type { VerificationReadSnapshot } from './verification-read-snapshot.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { git } from '../git/git.js';
 import { rebaseInProgress } from '../git/rebase-completion-recorder.js';
-import { isVerificationBookkeeping, readVerificationInputs, verificationDigest } from './verification-proof-inputs.js';
+import { isVerificationBookkeeping } from '../../domain/integration-validation-policy.js';
+import { readVerificationInputs, verificationDigest } from './verification-proof-inputs.js';
 
 export interface ActiveVerificationOptions {
   configuration?: ParallixConfiguration;

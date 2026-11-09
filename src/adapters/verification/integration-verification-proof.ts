@@ -5,9 +5,11 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 import type { IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
 import { loadAdapterConfig } from '../config/product-config.js';
 import { git } from '../git/git.js';
+import { completedRebaseLineage, completedRebaseLineageForCheckout, ensureRebaseCompletionRecorder } from '../git/rebase-completion-recorder.js';
+import { isVerificationBookkeeping, type CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
 import { readJson, writeJson } from '../storage/storage.js';
 import { createActiveVerificationIdentity } from './active-verification-identity.js';
-import { isVerificationBookkeeping, verificationDigest } from './verification-proof-inputs.js';
+import { verificationDigest } from './verification-proof-inputs.js';
 
 type Gate = { key: string; command: string };
 type Outcome = { key: string; command: string; exitCode: number | null };
@@ -15,7 +17,7 @@ type Identity = Extract<ReturnType<typeof createActiveVerificationIdentity>, { o
 interface Coverage { command: string; checks: Record<string, string[]> }
 type RunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 /** The executor's own record of one integration gate phase attempt. */
-interface RunMeta { attempt: string | null; startedAt: string; finishedAt: string | null; inputIdentity: string | null }
+interface RunMeta { attempt: string | null; startedAt: string; finishedAt: string | null; inputIdentity: string | null; toolchain?: string | null }
 interface Evidence {
   policy: 'integration-verification-v1';
   scope: string;
@@ -52,8 +54,8 @@ function attemptOf(configuration?: ParallixConfiguration): string | null {
   return typeof operation === 'string' && operation ? `${operation}:${configuration?.runtime?.workflowGeneration ?? 0}` : null;
 }
 
-function headRevision(root: string): string | null {
-  const head = git(['-C', root, 'rev-parse', 'HEAD']);
+function headRevision(root: string, snapshot?: VerificationReadSnapshot): string | null {
+  const head = (snapshot?.git ?? git)(['-C', root, 'rev-parse', 'HEAD']);
   const revision = head.stdout.trim();
   return head.status === 0 && REVISION.test(revision) ? revision : null;
 }
@@ -90,9 +92,9 @@ function covers(coverage: Coverage, gates: readonly Gate[]): boolean {
 }
 
 /** Gate execution identity includes its plan, checkout branch, inputs and toolchain. */
-function runIdentity(root: string, gates: readonly Gate[], configuration?: ParallixConfiguration, readSnapshot?: VerificationReadSnapshot): string | null {
+function runIdentity(root: string, gates: readonly Gate[], configuration?: ParallixConfiguration, readSnapshot?: VerificationReadSnapshot) {
   const current = createActiveVerificationIdentity(JSON.stringify(gates.map(({ key, command }) => ({ key, command }))), root, { configuration }, readSnapshot);
-  return current.ok ? current.identity : null;
+  return current.ok ? { identity: current.identity, toolchain: current.toolchain } : null;
 }
 
 function reusablePlan(coverage: Coverage | null, configured: readonly Gate[] | null, gates: readonly Gate[]): boolean {
@@ -107,6 +109,13 @@ function successfulOutcomes(pending: Pending, outcomes: readonly Outcome[]): boo
       && outcome.command === gate.command && outcome.exitCode === 0));
 }
 
+/** The run's own identity, captured before its first gate. */
+function startedRun(root: string, gates: readonly Gate[], configuration?: ParallixConfiguration): RunMeta {
+  const inputs = runIdentity(root, gates, configuration);
+  return { attempt: attemptOf(configuration), startedAt: new Date().toISOString(), finishedAt: null,
+    inputIdentity: inputs?.identity ?? null, toolchain: inputs?.toolchain ?? null };
+}
+
 /**
  * Record that the configured integration gate phase started, then let it settle.
  * The record replaces prior evidence before execution, including for partial or
@@ -118,6 +127,8 @@ function beginIntegrationRun(root: string, gates: readonly Gate[], configuration
   const file = evidencePath(root);
   const revision = file ? headRevision(root) : null;
   if (!file || !revision || gates.length === 0) { return null; }
+  // Completed rebases can carry this run only when Git records them.
+  try { ensureRebaseCompletionRecorder(root, { writeJson }); } catch { /* unusual layouts keep ordinary reruns */ }
   try {
     const coverage = coverageFor(root);
     const configured = configuredPlan(root);
@@ -127,8 +138,7 @@ function beginIntegrationRun(root: string, gates: readonly Gate[], configuration
       root, file, coverage, configured: configured ?? gates, gates,
       identity: identity && identity.ok ? identity : null,
       plan: coverage && configured ? planDigest(configured, coverage) : null,
-      revision, run: { attempt: attemptOf(configuration), startedAt: new Date().toISOString(), finishedAt: null,
-        inputIdentity: runIdentity(root, gates, configuration) },
+      revision, run: startedRun(root, gates, configuration),
     };
     writeJson(file, { policy: 'integration-verification-v1', status: 'running', run: pending.run, revision,
       gates: gates.map(({ key, command }) => ({ key, command })), outcomes: [] } satisfies RunRecord, { mode: 0o600 });
@@ -172,6 +182,8 @@ function finishIntegrationRun(pending: Pending, outcomes: readonly Outcome[], di
 /** The executor's integration run observation for this checkout, if any. */
 export interface IntegrationGateRun {
   readonly current: boolean;
+  /** Completed rebases that carried this run, on the same toolchain, to the checked-out HEAD. */
+  readonly carried: CompletedRebaseLineage | null;
   readonly status: RunStatus;
   readonly attempt: string | null;
   readonly startedAt: string;
@@ -210,6 +222,16 @@ function storedRevision(data: StoredRun): string {
   if (typeof data.revision === 'string') { return data.revision; }
   return typeof data.coveredCommit === 'string' ? data.coveredCommit : '';
 }
+/** Whether the run covers the current inputs, or completed rebases carried it there on the same toolchain. */
+function runCurrency(root: string, data: StoredRun, revision: string, gates: readonly Gate[],
+  configuration?: ParallixConfiguration, snapshot?: VerificationReadSnapshot) {
+  const inputs = runIdentity(root, gates, configuration, snapshot);
+  const current = typeof data.run?.inputIdentity === 'string' && data.run.inputIdentity === inputs?.identity;
+  const head = headRevision(root, snapshot);
+  const carriable = !current && inputs !== null && data.run?.toolchain === inputs.toolchain && head !== null && head !== revision;
+  return { current, carried: carriable ? completedRebaseLineageForCheckout(root, revision, head, snapshot?.git) : null };
+}
+
 /** Read the run record without reuse identity: an observation, not authority. */
 export function readIntegrationGateRun(root: string, configuration?: ParallixConfiguration, snapshot?: VerificationReadSnapshot): IntegrationGateRun | null {
   try {
@@ -229,7 +251,7 @@ export function readIntegrationGateRun(root: string, configuration?: ParallixCon
     const { startedAt, finishedAt } = runTimes(data, status);
     if (!startedAt) { return null; } // a record without run identity predates observation
     return {
-      current: typeof stored?.inputIdentity === 'string' && stored.inputIdentity === runIdentity(root, observedGates, configuration, snapshot),
+      ...runCurrency(root, data, revision, observedGates, configuration, snapshot),
       status, attempt: typeof stored?.attempt === 'string' ? stored.attempt : null,
       startedAt, finishedAt,
       revision,
@@ -242,7 +264,6 @@ export function readIntegrationGateRun(root: string, configuration?: ParallixCon
 function matchesIdentity(proof: Evidence, current: Identity): boolean {
   return proof.policy === 'integration-verification-v1' && proof.status === 'passed'
     && proof.scope === current.scope && proof.toolchain === current.toolchain
-    && proof.inputFingerprint === current.inputFingerprint
     && typeof proof.verifiedCommit === 'string' && /^[a-f0-9]{40,64}$/.test(proof.verifiedCommit)
     && proof.coveredCommit === proof.verifiedCommit && typeof proof.verifiedAt === 'string'
     && Number.isFinite(Date.parse(proof.verifiedAt));
@@ -261,21 +282,40 @@ function coversRevision(root: string, from: string, to: string, snapshot?: Verif
   return diff.status === 0 && diff.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
 }
 
-/** Integration evidence never inherits the active cache's completed-rebase
- * exception. A different revision requires a successful bookkeeping-only diff. */
+/** After completed rebases, each configured gate is carried by its own successful outcome. */
+function carriedCoverage(proof: Evidence, gates: readonly Gate[]): boolean {
+  return Array.isArray(proof.outcomes) && gates.every(gate => proof.outcomes.some(outcome => outcome && outcome.key === gate.key && outcome.exitCode === 0));
+}
+
+/** The configured coverage and a passed proof of the same scope and toolchain, or null. */
+function storedProof(command: string, root: string, current: Identity, snapshot?: VerificationReadSnapshot) {
+  const coverage = coverageFor(root);
+  const gates = configuredPlan(root);
+  if (!coverage || coverage.command !== command || !gates || !covers(coverage, gates)) { return null; }
+  const file = evidencePath(root, snapshot);
+  if (!file) { return null; }
+  const result = readJson<Evidence>(file);
+  const proof = result.data;
+  return result.ok && proof && matchesIdentity(proof, current) ? { coverage, gates, file, proof } : null;
+}
+
+/** Integration evidence covers its own inputs, bookkeeping-only movement, or
+ * the candidate that completed rebases carried it to, as active/review proof does.
+ * The original verified commit and time are reported, never rewritten. */
 export function readIntegrationVerificationProof(command: string, root: string, current: Identity, snapshot?: VerificationReadSnapshot) {
   const miss = { ok: false as const };
   try {
-    const coverage = coverageFor(root);
-    const gates = configuredPlan(root);
-    if (!coverage || coverage.command !== command || !gates || !covers(coverage, gates)) { return miss; }
-    const file = evidencePath(root, snapshot);
-    if (!file) { return miss; }
-    const result = readJson<Evidence>(file);
-    const proof = result.data;
-    if (!result.ok || !proof || !matchesIdentity(proof, current) || !matchesCoverage(proof, gates, coverage)) { return miss; }
-    if (!coversRevision(root, proof.verifiedCommit, current.commit, snapshot)) { return miss; }
-    return { ok: true as const, proof, diagnostic: `Repository verification passed by reuse of integration evidence ${file}; validated ${proof.verifiedCommit}, covered ${current.commit}.` };
+    const stored = storedProof(command, root, current, snapshot);
+    if (!stored) { return miss; }
+    const { coverage, gates, file, proof } = stored;
+    const diagnostic = (suffix: string) => `Repository verification passed by reuse of integration evidence ${file}; validated ${proof.verifiedCommit}, covered ${current.commit}${suffix}.`;
+    if (proof.inputFingerprint === current.inputFingerprint && matchesCoverage(proof, gates, coverage)
+      && coversRevision(root, proof.verifiedCommit, current.commit, snapshot)) {
+      return { ok: true as const, proof, diagnostic: diagnostic('') };
+    }
+    const lineage = completedRebaseLineage(root, current.branch, proof.verifiedCommit, current.commit, snapshot?.git);
+    if (!lineage || !carriedCoverage(proof, gates)) { return miss; }
+    return { ok: true as const, proof, lineage, diagnostic: diagnostic(` after ${lineage.length} completed rebase(s)`) };
   } catch { return miss; }
 }
 

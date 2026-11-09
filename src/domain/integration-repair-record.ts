@@ -88,7 +88,17 @@ function parseValidation(raw: unknown): NonNullable<IntegrationRepairAssessment[
     || (row.failed !== undefined && typeof row.failed !== 'boolean')
     || !Number.isFinite(Date.parse(text(row, 'createdAt')))) { throw new Error('Invalid retained validation'); }
   return { missionId: text(row, 'missionId'), sha: text(row, 'sha'), hooks: row.hooks as string[], baseline: row.baseline as string | null,
-    createdAt: text(row, 'createdAt'), reference: text(row, 'reference'), ...(row.failed === undefined ? {} : { failed: row.failed as boolean }) };
+    createdAt: text(row, 'createdAt'), reference: text(row, 'reference'), ...(row.failed === undefined ? {} : { failed: row.failed as boolean }),
+    ...(row.carried === undefined ? {} : { carried: parseCarried(row.carried) }) };
+}
+
+function parseCarried(raw: unknown): NonNullable<NonNullable<IntegrationRepairAssessment['validation']>['carried']> {
+  const row = record(raw);
+  if ((row.baseline !== null && typeof row.baseline !== 'string') || !Array.isArray(row.lineage) || !row.lineage.length) {
+    throw new Error('Invalid carried validation');
+  }
+  const lineage = row.lineage.map(step => { const value = record(step); return { from: text(value, 'from'), to: text(value, 'to') }; });
+  return { revision: text(row, 'revision'), baseline: row.baseline as string | null, lineage };
 }
 
 function restorationArchive(row: Record<string, unknown>): Pick<IntegrationRepairAssessment, 'priorRestoration'> {

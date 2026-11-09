@@ -3,7 +3,7 @@ import { integrationRepairCertified } from './repair-certification.js';
 import { missionId } from '../../domain/mission.js';
 import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { currentReviewRound, replaceCurrentRound, revokeApprovedDecision, type ReviewRound } from '../../domain/review.js';
-import { retentionEvidenceMatches, type IntegrationRepairAssessment, type RetentionBlockReason } from '../../domain/integration-approval-retention.js';
+import { retentionEvidenceMatches, type IntegrationRepairAssessment, type RetentionBlockReason, type RetentionValidation } from '../../domain/integration-approval-retention.js';
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
 import type { IntegrationMissionServices } from '../ports/integration-records.js';
 import type { MissionLoadResult } from '../domain-ports.js';
@@ -30,6 +30,18 @@ export async function retainIntegrationApproval(input: RetentionRequest): Promis
   return commitAssessment(input, loaded, round, assessment);
 }
 
+/**
+ * A green validation that completed rebases carried to the candidate keeps its
+ * executed revision, time and reference and names the carried candidate, base
+ * and lineage. Failed, missing or unsupported-lineage validations are unchanged.
+ */
+export function carriedRetentionValidation(evidence: Pick<IntegrationApprovalEvidencePort, 'completedRebaseLineage'>,
+  validation: RetentionValidation | null, candidate: { revision: string; baseline: string }): RetentionValidation | null {
+  if (!validation || validation.failed || validation.sha === candidate.revision) { return validation; }
+  const lineage = evidence.completedRebaseLineage?.(validation.sha, candidate.revision) ?? null;
+  return lineage?.length ? { ...validation, carried: { revision: candidate.revision, baseline: candidate.baseline || null, lineage } } : validation;
+}
+
 async function samePatch(input: RetentionRequest, round: ReviewRound): Promise<boolean | null> {
   if (round.decision?.kind === 'approved' && round.decision.supersession) { return false; }
   if (!round.subject.baseline || !input.candidate.baseline) { return null; }
@@ -38,7 +50,7 @@ async function samePatch(input: RetentionRequest, round: ReviewRound): Promise<b
 
 async function assessCandidate(input: RetentionRequest, round: ReviewRound): Promise<IntegrationRepairAssessment> {
   const patchEqual = await samePatch(input, round);
-  const validation = await input.evidence.validation(input.slug).catch(() => null);
+  const validation = carriedRetentionValidation(input.evidence, await input.evidence.validation(input.slug).catch(() => null), input.candidate);
   const base = { assessedAt: input.evidence.now(), approvedRevision: String(round.decision!.revision),
     candidateRevision: input.candidate.revision, failedGate: round.integrationRepairAssessment!.repair!.cause.gate,
     repair: round.integrationRepairAssessment!.repair!, ...preserveHistoricalRestoration(round.integrationRepairAssessment) };

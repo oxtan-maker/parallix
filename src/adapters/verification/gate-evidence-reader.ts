@@ -19,6 +19,7 @@ import { recoveryEvidenceFileSystem } from '../filesystem/recovery-evidence-fs.j
 import { git } from '../git/git.js';
 import { inspectActiveVerificationProof } from './active-verification-proof.js';
 import { readIntegrationGateRun, type IntegrationGateRun } from './integration-verification-proof.js';
+import { completedRebaseLineageForCheckout } from '../git/rebase-completion-recorder.js';
 
 /**
  * The newest sha-keyed integration validation record for a mission. `hooks` is
@@ -45,10 +46,12 @@ function readCheckout(worktree: string, gitRunner = git): Extract<GateCheckout, 
   return { kind: 'present', revision: head.stdout.trim(), clean: status.stdout.trim() === '' };
 }
 
-/** A recorded gate outcome covers the checkout only on its revision and command. */
-function coversCheckout(run: { revision: string; gates: readonly { key: string; command: string }[] },
-  gate: { key: string; command: string }, checkout: Extract<GateCheckout, { kind: 'present' }>): boolean {
-  return checkout.clean && run.revision === checkout.revision
+/** A recorded gate outcome covers the checkout on its revision and command, or
+ * by key once completed rebases carried the run to the clean checkout. */
+function coversCheckout(run: IntegrationGateRun, gate: { key: string; command: string }, checkout: Extract<GateCheckout, { kind: 'present' }>): boolean {
+  if (!checkout.clean) { return false; }
+  if (run.carried) { return run.gates.some(candidate => candidate.key === gate.key); }
+  return run.current && run.revision === checkout.revision
     && run.gates.find(candidate => candidate.key === gate.key)?.command === gate.command;
 }
 
@@ -58,12 +61,13 @@ function newerResult<T extends GateResultEvidence>(prior: T | null, candidate: T
   return Date.parse(candidate.observedAt) >= Date.parse(prior.observedAt) ? candidate : prior;
 }
 
-/** Project one configured hook without expanding marker coverage. */
+/** Project one configured hook without expanding marker coverage. A marker
+ * carried by completed rebases stays current with its original revision and time. */
 function integrationOutcome(gate: { key: string; command: string }, checkout: Extract<GateCheckout, { kind: 'present' }>,
-  run: IntegrationGateRun | null, marker: Awaited<ReturnType<IntegrationValidationRead>>): IntegrationGateOutcome {
+  run: IntegrationGateRun | null, marker: Awaited<ReturnType<IntegrationValidationRead>>, markerCarried: boolean): IntegrationGateOutcome {
   const outcome = outcomeOfRun(gate, checkout, run);
   if (!marker || !marker.hooks.includes(gate.key)) { return outcome; }
-  const marked = { state: checkout.clean && marker.sha === checkout.revision ? 'current' as const : 'stale' as const,
+  const marked = { state: checkout.clean && (marker.sha === checkout.revision || markerCarried) ? 'current' as const : 'stale' as const,
     revision: marker.sha, observedAt: marker.createdAt };
   if (marker.failed) {
     return { ...outcome, failure: newerResult(outcome.failure, { ...marked, exitCode: null }) };
@@ -75,7 +79,7 @@ function outcomeOfRun(gate: { key: string; command: string }, checkout: Extract<
   run: IntegrationGateRun | null): IntegrationGateOutcome {
   const observed = run?.outcomes.find(record => record.key === gate.key);
   if (!run || !observed) { return { key: gate.key, proof: { state: 'absent' }, failure: null }; }
-  const result = { state: run.current && coversCheckout(run, gate, checkout) ? 'current' as const : 'stale' as const,
+  const result = { state: coversCheckout(run, gate, checkout) ? 'current' as const : 'stale' as const,
     revision: run.revision, observedAt: run.finishedAt ?? run.startedAt };
   return { key: gate.key,
     proof: observed.exitCode === 0 && run.status !== 'cancelled' ? result : { state: 'absent' },
@@ -159,9 +163,11 @@ export class VerificationGateEvidenceReader implements GateEvidenceReader {
     const recordedMarker = await this._options.integrationValidation(scope.missionId);
     // A retry supersedes earlier marker coverage, including cancelled and
     // partially executed runs on the same inputs.
-    const marker = run?.current && recordedMarker && Date.parse(run.startedAt) >= Date.parse(recordedMarker.createdAt)
+    const marker = (run?.current || run?.carried) && recordedMarker && Date.parse(run.startedAt) >= Date.parse(recordedMarker.createdAt)
       ? null : recordedMarker;
-    const gates = configured.map(gate => integrationOutcome(gate, checkout, run, marker));
+    const markerCarried = Boolean(marker && checkout.clean && marker.sha !== checkout.revision
+      && completedRebaseLineageForCheckout(worktree, marker.sha, checkout.revision, this._snapshot?.git ?? this._options.gitRunner));
+    const gates = configured.map(gate => integrationOutcome(gate, checkout, run, marker, markerCarried));
     const running = runningAttempt(run, operation, checkout);
     return { checkout, configured: configured.map(gate => gate.key), gates, running };
   }

@@ -134,14 +134,14 @@ class IntegrationGateStep {
    * commit, only the not-yet validated hooks run. The decision is pure over the
    * marker, the finalized commit, and the paths that differ between them — no
    * repo, branch, or mission-slug special-casing — and every fallback (marker
-   * missing or unreadable, whitelist empty, git diff failed, substantive diff)
-   * runs the full configured set.
+   * missing or unreadable, whitelist empty, later failure, or movement that is
+   * neither bookkeeping nor completed-rebase lineage) runs the full configured set.
    *
    * @param finalizedCommit the finalized integration tree commit the gates will
    *   run against (post-rebase HEAD). A commit other than the validated one is
-   *   covered only when the two trees differ solely in bookkeeping paths
-   *   (TASK-2646); a rebase that changes code, tests, or configuration never
-   *   skips a suite that did not run against the new tree (TASK-2625 F2).
+   *   covered when the two trees differ solely in bookkeeping paths (TASK-2646)
+   *   or completed rebases carried the validated commit to it, whatever the
+   *   rebase brought in; formal origin CI validates that candidate independently.
    */
   async resolveSkippableGates<T extends SkippableGate>({
     configured,
@@ -169,19 +169,28 @@ class IntegrationGateStep {
       return full;
     }
     // A later failed/cancelled validation supersedes the old green whitelist.
-    if (this.dependencies.gates.approvalEvidence) {
-      const latest = await this.dependencies.gates.approvalEvidence(checkout).validation(slug).catch(() => null);
+    const evidence = this.dependencies.gates.approvalEvidence?.(checkout);
+    if (evidence) {
+      const latest = await evidence.validation(slug).catch(() => null);
       if (!latest || latest.failed) { return full; }
     }
     const marker = parseIntegrationValidationMarker(markerEntry);
     if (!marker) { return full; }
     const diff = marker.sha === finalizedCommit ? null : this.diffFromValidated(checkout, marker.sha, finalizedCommit);
-    if (!validationSkipApplies(marker, finalizedCommit, diff)) { return full; }
+    const bookkeeping = validationSkipApplies(marker, finalizedCommit, diff);
+    const lineage = bookkeeping ? null : this.lineageFromValidated(evidence, marker.sha, finalizedCommit);
+    if (!bookkeeping && !validationSkipApplies(marker, finalizedCommit, diff, lineage)) { return full; }
     const { skip, run } = partitionGatesForSkip(configured.map(gate => gate.key), marker);
-    const coverage = diff ? ` (finalized ${finalizedCommit.slice(0, 12)} differs only in backlog bookkeeping)` : '';
+    const coverage = lineage ? ` (carried to finalized ${finalizedCommit.slice(0, 12)} by ${lineage.length} completed rebase(s))`
+      : diff ? ` (finalized ${finalizedCommit.slice(0, 12)} differs only in backlog bookkeeping)` : '';
     log(`Integration gates for ${slug}: ${skip.length} hook(s) already validated at ${marker.sha.slice(0, 12)}${coverage}; skipping ${skip.join(', ')}.`);
     const toRun = run.map(key => configured.find(gate => gate.key === key) as T);
     return { gates: toRun, skippedAll: toRun.length === 0 };
+  }
+
+  /** Completed-rebase lineage from the validated commit; unavailable lineage reads as none (fail open). */
+  lineageFromValidated(evidence: ReturnType<NonNullable<IntegrateGatesPort['approvalEvidence']>> | undefined, validatedSha: string, finalizedCommit: string) {
+    try { return evidence?.completedRebaseLineage?.(validatedSha, finalizedCommit) ?? null; } catch { return null; }
   }
 
   /** The validated-to-finalized path diff; any git failure reads as `ok: false` (fail open). */
@@ -219,9 +228,10 @@ class IntegrationGateStep {
     const requirePreIntegration = this.dependencies.gates.loadRequirePreIntegration(checkout);
     fmt.log.debug(`Integration gate target: slug=${slug} root=${finalTree.rootDir} commit=${finalTree.commit} tree=${finalTree.tree} requirePreIntegration=${requirePreIntegration}`, configuration?.runtime.debug);
 
-    // TASK-2625/TASK-2646: skip the high-level hooks this mission already ran
-    // green on a tree that differs from the finalized one at most in backlog
-    // bookkeeping. Every other case runs the full configured set.
+    // TASK-2625/TASK-2646/PX-0048: skip the high-level hooks this mission already
+    // ran green on a tree that differs from the finalized one at most in backlog
+    // bookkeeping or that completed rebases carried to it. Every other case runs
+    // the full configured set.
     // A dry-run exists to pre-validate the complete configured plan and mint
     // reusable exact-tree proof. Historical hook markers are landing-time
     // optimizations and cannot substitute for that complete execution receipt.
@@ -230,8 +240,8 @@ class IntegrationGateStep {
       slug,
       checkout,
       // Key the skip on the finalized (post-rebase) tree the gates run against,
-      // not the pre-rebase HEAD: a rebase that changes the tree must not let the
-      // mission skip a suite that never ran against the new tree (TASK-2625 F2).
+      // not the pre-rebase HEAD: only bookkeeping or completed-rebase lineage
+      // connects it to the validated commit.
       finalizedCommit: finalTree.commit ?? null,
       operationalHistory: missionServices?.operationalHistory ?? null,
       log: fmt.log.plain,

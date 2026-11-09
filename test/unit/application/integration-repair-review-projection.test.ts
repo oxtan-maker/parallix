@@ -392,6 +392,45 @@ for (const fault of ['missing', 'other-baseline', 'missing-baseline'] as const) 
   });
 }
 
+for (const lineage of ['carried', 'unsupported', 'failed'] as const) {
+  test(`retention after a completed rebase with ${lineage} validation keeps executed evidence truthful (PX-0048)`, async () => {
+    const s = retentionScenario();
+    const marker = (await s.evidence.validation('task-2620'))!;
+    s.evidence.validation = async () => ({ ...marker, sha: 'validated', baseline: 'old-base', ...(lineage === 'failed' ? { failed: true } : {}) });
+    s.evidence.completedRebaseLineage = (from, to) => lineage !== 'unsupported' && from === 'validated' && to === 'candidate'
+      ? [{ from: 'validated', to: 'candidate' }] : null;
+    assert.equal(await retainIntegrationApproval(s.input), lineage === 'carried' ? 'retained' : 'blocked');
+    const assessment = currentReviewRound(s.store.mission().review!).integrationRepairAssessment!;
+    if (lineage !== 'carried') { assert.equal(assessment.validation, undefined, 'no fabricated success'); return; }
+    assert.deepEqual(assessment.validation, { ...marker, sha: 'validated', baseline: 'old-base',
+      carried: { revision: 'candidate', baseline: 'base', lineage: [{ from: 'validated', to: 'candidate' }] } }, 'original sha, time and reference with carried candidate');
+    assert.deepEqual(parseIntegrationRepairAssessment(JSON.stringify(assessment)), assessment, 'carried evidence survives persistence');
+  });
+}
+
+test('restart resumes rebased validated repair without rerunning its gates (PX-0048)', async () => {
+  const s = retentionScenario();
+  const marker = (await s.evidence.validation('task-2620'))!;
+  s.evidence.validation = async () => ({ ...marker, sha: 'validated', baseline: 'old-base' });
+  s.evidence.completedRebaseLineage = (from, to) => from === 'validated' && to === 'candidate' ? [{ from, to }] : null;
+  let runs = 0, recorded = 0, mirrors = 0;
+  const ports = stubIntegrateWorkflowPorts({
+    process: { cwd: () => '/fixture' },
+    missionPaths: { resolveWorktree: () => '/fixture', resolveMissionBaseBranch: () => 'main',
+      resolveBaseWorktree: () => '/fixture', missionBranchName: () => 'mission/task-2620' },
+    git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
+    gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
+      loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { runs++; return { ok: true }; } },
+  });
+  const services = { ...s.services, operationalHistory: { loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async () => { recorded++; } } };
+  const seams = { ...integrationBounceSeams({ transitionTaskFn: () => { mirrors++; } }),
+    routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair launch'); } };
+  await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports, seams,
+    { realAgent: null, realAgentModel: null }), { name: 'IntegrationStopsForHuman' });
+  assert.deepEqual({ runs, recorded, mirrors }, { runs: 0, recorded: 0, mirrors: 1 }, 'reuse is neither a gate execution nor a new validation record');
+  assert.equal(s.store.mission().status, 'integration');
+});
+
 test('retention defers a provider human correction even when the local version is unchanged (TASK-2820)', async () => {
   const s = retentionScenario();
   Object.assign(s.evidence, { reconcileHumanFeedback: async () => false });

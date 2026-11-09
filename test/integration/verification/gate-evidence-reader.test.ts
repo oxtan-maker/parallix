@@ -139,6 +139,41 @@ test('gate evidence reader preserves partial integration marker hook coverage (T
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+test('gate evidence reader keeps marker and run results current across completed rebases with their executed revision (PX-0048)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-rebase-evidence-'));
+  try {
+    const gates = [{ key: 'unit', command: 'true', order: 0 }, { key: 'docs', command: 'true', order: 1 }];
+    const repo = initCommittedRepository(root, { 'src/input.ts': 'export const value = 1;\n',
+      'workflow.config.json': JSON.stringify({ adapters: { gates: { preIntegration: gates } } }) });
+    const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(root, '.git', 'home') });
+    const scope = { repositoryId: repositoryId('px-0048-repository'), missionId: missionId('px-0048-gate') };
+    const head = () => repo.git('rev-parse', 'HEAD').trim();
+    repo.git('checkout', '-b', 'mission/px-0048-gate');
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 2;\n'); repo.git('commit', '-am', 'mission');
+    const validated = head();
+    const marker = { sha: validated, hooks: ['unit'], createdAt: '2026-10-18T09:00:00.000Z' };
+    const reader = new VerificationGateEvidenceReader({ configuration, resolveWorktree: () => root, integrationValidation: async () => marker });
+    const run = createIntegrationVerificationEvidencePort(configuration).start(root, gates);
+    assert.ok(run, 'the run record starts and installs the completed-rebase recorder');
+    run.complete(gates.map(({ key, command }) => ({ key, command, exitCode: 0 })), 'passed');
+    repo.git('checkout', 'main');
+    fs.writeFileSync(path.join(root, 'upstream.ts'), 'upstream\n'); repo.git('add', '.'); repo.git('commit', '-m', 'upstream');
+    repo.git('checkout', 'mission/px-0048-gate'); repo.git('rebase', 'main');
+    const carried = (await reader.readIntegrationGates(scope, null)).gates;
+    assert.notEqual(head(), validated);
+    for (const gate of carried) {
+      assert.equal(gate.proof.state, 'current', `${gate.key} is carried by the completed rebase`);
+      assert.equal(gate.proof.state === 'current' && gate.proof.revision, validated, `${gate.key} keeps its executed revision`);
+    }
+    marker.createdAt = '2099-01-01T00:00:00.000Z'; // a later marker is not superseded by the earlier run
+    assert.deepEqual((await reader.readIntegrationGates(scope, null)).gates[0].proof,
+      { state: 'current', revision: validated, observedAt: marker.createdAt }, 'the marker is carried with its original revision and time');
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 3;\n'); repo.git('commit', '-am', 'new implementation');
+    assert.deepEqual((await reader.readIntegrationGates(scope, null)).gates.map(gate => gate.proof.state), ['stale', 'stale'],
+      'an implementation edit outside a completed rebase makes both results stale');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 // Count the actual boundary, including helpers that do not use a supplied Git double.
 test('board gate inputs are shared per build and refreshed on the next read (TASK-2775)', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-read-snapshot-'));

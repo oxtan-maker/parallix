@@ -1,5 +1,5 @@
 import type { HistoricalMechanicalApprovalSource } from './integration-repair-record.js';
-import type { IntegrationValidationMarker } from './integration-validation-policy.js';
+import type { CompletedRebaseLineage, IntegrationValidationMarker } from './integration-validation-policy.js';
 
 export type RetentionBlockReason = 'mission-change-differs' | 'gate-evidence-missing' | 'gate-failed' | 'comparison-error';
 export interface RetentionValidation extends IntegrationValidationMarker {
@@ -7,6 +7,13 @@ export interface RetentionValidation extends IntegrationValidationMarker {
   readonly reference: string;
   readonly baseline: string | null;
   readonly failed?: boolean;
+  /** The later candidate and base completed rebases carried this validation to; the original fields stay as executed. */
+  readonly carried?: CarriedValidation;
+}
+export interface CarriedValidation {
+  readonly revision: string;
+  readonly baseline: string | null;
+  readonly lineage: CompletedRebaseLineage;
 }
 export interface IntegrationRepairAssessment {
   readonly assessedAt: string;
@@ -23,13 +30,16 @@ export interface IntegrationRepairAssessment {
   readonly normalReviewCostUsd?: number;
 }
 
-/** A judgment's patch equivalence and a gate's committed-tree evidence are separate facts. */
+/** A judgment's patch equivalence and a gate's committed-tree evidence are separate facts. The
+ * gate evidence covers the revision it ran on, or the candidate completed rebases carried it to. */
 export function retentionEvidenceMatches(assessment: Pick<IntegrationRepairAssessment,
   'assessedAt' | 'candidateRevision' | 'failedGate' | 'repair' | 'validation'>, mission?: string, candidateBaseline?: string): boolean {
   const { validation: v, repair, failedGate, candidateRevision, assessedAt } = assessment;
+  const covers = (revision: string, baseline: string | null) => revision === candidateRevision
+    && (candidateBaseline === undefined || Boolean(candidateBaseline) && baseline === candidateBaseline);
   return Boolean(v && !v.failed && v.missionId && (!mission || v.missionId === mission)
-    && (candidateBaseline === undefined || Boolean(candidateBaseline) && v.baseline === candidateBaseline)
-    && v.sha === candidateRevision && failedGate && v.hooks.includes(failedGate) && v.reference
+    && (covers(v.sha, v.baseline) || Boolean(v.carried?.lineage.length) && covers(v.carried!.revision, v.carried!.baseline))
+    && failedGate && v.hooks.includes(failedGate) && v.reference
     && repair && repair.cause.gate === failedGate && retentionTimesMatch(repair.startedAt, v.createdAt, assessedAt));
 }
 

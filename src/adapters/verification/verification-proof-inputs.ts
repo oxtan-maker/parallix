@@ -116,7 +116,3 @@ export function readVerificationInputs(rootDir: string, gitRunner: GitFn, search
   return { ok: true, root, trackedOutput, branch: branch === '(detached)' ? '' : branch,
     commit: oid === '(initial)' ? null : oid, toolchain: toolchainIdentity() };
 }
-
-/** External task catalog paths excluded from active candidate inputs. */
-export const isVerificationBookkeeping = (file: string): boolean =>
-  file.startsWith('backlog/tasks/') || file.startsWith('backlog/completed/');

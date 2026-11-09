@@ -19,6 +19,8 @@ import { mkdtemp } from '../../helpers/temp-dir.js';
 // TASK-2646 extends coverage to a finalized commit that moved past the
 // validated sha: bookkeeping-only movement (direct or through a rebase) reuses
 // the marker; any substantive path or git failure runs the full suite.
+// PX-0048 adds completed-rebase lineage: a recorded completed rebase carries
+// the marker whatever the rebase brought in; edits outside it still run.
 //
 // No .only, no bare .skip.
 import test from 'node:test';
@@ -42,6 +44,8 @@ import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import type { OperationalHistoryService } from '../../../src/application/services/operational-history-service.js';
 import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
 import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
+import { completedRebaseLineageForCheckout, ensureRebaseCompletionRecorder } from '../../../src/adapters/git/rebase-completion-recorder.js';
+import { writeJson } from '../../../src/adapters/storage/storage.js';
 
 const EVENT = INTEGRATION_VALIDATION_EVENT_TYPE;
 const SLUG = 'task-2625';
@@ -109,6 +113,7 @@ function makeStep(overrides: {
   loadLatest?: () => Promise<OperationalHistoryEntry | null> | OperationalHistoryEntry | null;
   runPhaseGates?: IntegrateWorkflowPorts['gates']['runPhaseGates'];
   changedPaths?: (_from: string, _to: string) => ChangedPathsResult;
+  lineageRoot?: string;
 } = {}) {
   const recorded: Array<{ missionId: string; sha: string; hooks: string[]; failed?: boolean }> = [];
   const diffCalls: Array<{ rootDir: string; from: string; to: string }> = [];
@@ -125,6 +130,12 @@ function makeStep(overrides: {
       runPhaseGates: overrides.runPhaseGates
         ? overrides.runPhaseGates
         : async () => phaseGateResult({ skipped: false, gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }], executed: 2 }),
+      // The real completed-rebase owner reads the fixture checkout; the latest validation stays green.
+      ...(overrides.lineageRoot ? { approvalEvidence: () => ({
+        samePatch: async () => true, reconcileHumanFeedback: async () => true, now: () => new Date().toISOString(),
+        validation: async () => ({ missionId: SLUG, sha: 'v', hooks: ['unit'], baseline: null, createdAt: '2026-10-01T00:00:00Z', reference: 'fixture' }),
+        completedRebaseLineage: (from: string, to: string) => completedRebaseLineageForCheckout(overrides.lineageRoot!, from, to),
+      }) } : {}),
     },
     landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
     verification: { formatVerificationCommand: () => 'verify' },
@@ -379,18 +390,24 @@ function openGitRepo() {
   return { root, git, head, commit, close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
-/** Rebase the mission branch onto main and resolve the gates against the post-rebase HEAD. */
-async function resolveAfterRebase(repo: ReturnType<typeof openGitRepo>, validatedSha: string) {
-  repo.git('rebase', '-q', 'main', 'mission');
+/** Resolve the gates against the mission HEAD with the real diff and completed-rebase owners. */
+async function resolveAtHead(repo: ReturnType<typeof openGitRepo>, validatedSha: string, logs: string[] = []) {
   const finalized = repo.head();
   const { step, operationalHistory } = makeStep({
     loadLatest: () => markerEntry(validatedSha, ['unit', 'integration-ci']),
     changedPaths: (from, to) => listChangedPathsBetween(repo.root, from, to),
+    lineageRoot: repo.root,
   });
   const result = await step.resolveSkippableGates({
-    configured: [{ key: 'unit' }, { key: 'integration-ci' }], slug: SLUG, checkout: repo.root, finalizedCommit: finalized, operationalHistory, log: () => {},
+    configured: [{ key: 'unit' }, { key: 'integration-ci' }], slug: SLUG, checkout: repo.root, finalizedCommit: finalized, operationalHistory, log: line => logs.push(line),
   });
   return { finalized, keys: result.gates.map(gate => gate.key) };
+}
+
+/** Rebase the mission branch onto main and resolve the gates against the post-rebase HEAD. */
+async function resolveAfterRebase(repo: ReturnType<typeof openGitRepo>, validatedSha: string, logs: string[] = []) {
+  repo.git('rebase', '-q', 'main', 'mission');
+  return resolveAtHead(repo, validatedSha, logs);
 }
 
 test('listChangedPathsBetween reports moved task records and fails open for unreachable or malformed commits (TASK-2646 SC2/SC5)', () => {
@@ -423,7 +440,7 @@ test('a post-rebase finalized commit reuses validation when main moved only by b
   } finally { repo.close(); }
 });
 
-test('a post-rebase finalized commit runs the full suite when main brought a non-bookkeeping change (TASK-2646 SC4)', async () => {
+test('an unrecorded rebase that brought a non-bookkeeping change runs the full suite (TASK-2646 SC4, PX-0048)', async () => {
   const repo = openGitRepo();
   try {
     repo.git('checkout', '-q', '-b', 'mission');
@@ -433,7 +450,26 @@ test('a post-rebase finalized commit runs the full suite when main brought a non
     repo.commit({ 'backlog/tasks/task-9002 - Other.md': 'status: review\n', 'src/b.ts': 'export const b = 1;\n' }, 'feat: other mission');
     const { finalized, keys } = await resolveAfterRebase(repo, validated);
     assert.notEqual(finalized, validated);
-    assert.deepEqual(keys, ['unit', 'integration-ci'], 'full configured suite');
+    assert.deepEqual(keys, ['unit', 'integration-ci'], 'no completed-rebase lineage: full configured suite');
+  } finally { repo.close(); }
+});
+
+test('a recorded completed rebase carries validated hooks across upstream source, test, dependency and configuration changes; a later edit does not (PX-0048)', async () => {
+  const repo = openGitRepo();
+  try {
+    repo.git('checkout', '-q', '-b', 'mission');
+    repo.commit({ 'src/a.ts': 'export const a = 2;\n' }, 'fix');
+    const validated = repo.head();
+    ensureRebaseCompletionRecorder(repo.root, { writeJson });
+    repo.git('checkout', '-q', 'main');
+    repo.commit({ 'src/b.ts': 'export const b = 1;\n', 'test/b.test.ts': 'b\n', 'package.json': '{}\n', 'workflow.config.json': '{"maxConcurrentCustom":1}\n' }, 'upstream');
+    const logs: string[] = [];
+    const { finalized, keys } = await resolveAfterRebase(repo, validated, logs);
+    assert.notEqual(finalized, validated);
+    assert.deepEqual(keys, [], 'every validated hook is carried');
+    assert.match(logs.join('\n'), new RegExp(`validated at ${validated.slice(0, 12)} \\(carried to finalized ${finalized.slice(0, 12)} by 1 completed rebase`));
+    repo.commit({ 'src/a.ts': 'export const a = 3;\n' }, 'new implementation');
+    assert.deepEqual((await resolveAtHead(repo, validated)).keys, ['unit', 'integration-ci'], 'an edit outside a completed rebase runs');
   } finally { repo.close(); }
 });
 

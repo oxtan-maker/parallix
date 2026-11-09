@@ -104,12 +104,13 @@ test('lead observes current integration evidence and invokes only public integra
   t.after(() => mock.restoreAll());
   mock.method(worktrees, 'resolveWorktree', () => '/target');
   let current = false;
+  let carried: { from: string; to: string }[] | null = null;
   let cpuReads = 0;
   const gates = [{ key: 'unit', command: 'npm test', order: 0 }];
   mock.method(repositoryGates, 'loadPhaseGates', () => gates);
-  mock.method(integrationEvidence, 'readIntegrationGateRun', () => current ? {
-    current: true, status: 'passed', attempt: null, startedAt: '2026-11-06T00:00:00Z', finishedAt: '2026-11-06T00:00:01Z',
-    revision: 'a'.repeat(40), gates, outcomes: [{ key: 'unit', command: 'npm test', exitCode: 0 }],
+  mock.method(integrationEvidence, 'readIntegrationGateRun', () => current || carried ? {
+    current, carried, status: 'passed', attempt: null, startedAt: '2026-11-06T00:00:00Z', finishedAt: '2026-11-06T00:00:01Z',
+    revision: 'a'.repeat(40), gates, outcomes: [{ key: 'unit', command: carried ? 'npm test -- upstream' : 'npm test', exitCode: 0 }],
   } : null);
   mock.method(machineCpu, 'observeMachineCpuUtilization', async () => { cpuReads++; return 0.29; });
   const invocations: unknown[] = [];
@@ -125,6 +126,12 @@ test('lead observes current integration evidence and invokes only public integra
   current = true;
   assert.deepEqual(await port.observeIntegrationPrevalidation!('task-ready'), { currentSuccessfulRun: true, cpuUtilization: null });
   assert.equal(cpuReads, 1, 'current successful evidence bypasses CPU measurement and dry-run admission');
+  current = false;
+  carried = [{ from: 'a'.repeat(40), to: 'b'.repeat(40) }];
+  assert.deepEqual(await port.observeIntegrationPrevalidation!('task-ready'), { currentSuccessfulRun: true, cpuUtilization: null },
+    'a green run carried by completed rebases needs no new dry run (PX-0048)');
+  gates.push({ key: 'new-upstream-gate', command: 'true', order: 1 });
+  assert.equal((await port.observeIntegrationPrevalidation!('task-ready')).currentSuccessfulRun, false, 'a never-passed gate is not carried');
 });
 for (const diagnostic of ['blocking', 'gate-failed', 'stale-work'] as const) {
   test(`board ${diagnostic} review recovery forwards public review without deciding (TASK-2814)`, async t => {

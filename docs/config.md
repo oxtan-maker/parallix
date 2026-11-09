@@ -192,14 +192,29 @@ A partial, failed, cancelled or malformed run cannot establish success. Review,
 handoff and `px verify all` report the integration evidence location and both
 the validated and covered revisions when reusing it.
 
-Integration-backed reuse requires the same checkout, branch, resolved command,
-configuration, tracked substantive inputs and runtime/npm toolchain. A different
-SHA requires a successful Git diff containing only `backlog/tasks/` or
-`backlog/completed/` bookkeeping paths; it does not inherit the completed-rebase
-exception of ordinary active/review verification. Missing, malformed, failed or
-incomplete evidence, dirty inputs, substantive changes or Git lookup failures
-cause normal verification. Starting another integration run clears earlier
-integration-backed evidence, so failed or partial retries cannot reuse it.
+Integration-backed reuse requires the same checkout, branch, resolved command
+and runtime/npm toolchain. Configuration and tracked substantive inputs must
+also match, unless completed rebases, recorded the same way as for
+active/review verification, carried the evidence to the current SHA. Otherwise
+a different SHA requires a successful Git diff containing only `backlog/tasks/`
+or `backlog/completed/` bookkeeping paths.
+
+Local integration validation follows the same completed-rebase rule. Wherever
+Parallix reuses a successful local integration result on its validated revision,
+such as repaired-gate validation at landing or repair resumption,
+integration-backed verification, integration prevalidation and the board, it
+also reuses it after a completed rebase, whatever the rebase brought in:
+upstream source, tests, dependencies or configuration, conflicts resolved in
+Parallix or a terminal, and chains of rebases. Reuse reports the original
+validated revision and time, and a retained approval also records the carried
+candidate and base. Only gates that passed are carried: a gate added upstream,
+a later failure, an unfinished rebase or an implementation commit outside a
+completed rebase still runs normally. Formal origin publication and CI verify
+the actual rebased candidate independently, so rebase-introduced problems are
+caught there. Missing, malformed, failed or incomplete evidence, dirty inputs
+or Git lookup failures cause normal verification. Starting another integration
+run clears earlier integration-backed evidence, so failed or partial retries
+cannot reuse it.
 Review approval, required integration gates and exact publication proof checks
 retain their own authorization requirements.
 

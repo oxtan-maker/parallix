@@ -11,7 +11,7 @@ import type { ReviewRound } from '../../domain/review.js';
 import type { IntegrationMissionServices } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
-import { retainIntegrationApproval, type RetentionOutcome } from './approval-retention.js';
+import { carriedRetentionValidation, retainIntegrationApproval, type RetentionOutcome } from './approval-retention.js';
 import { IntegrationStopsForHuman, reviewBeforeIntegration } from './review-before-integration.js';
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { abortWith } from './support.js';
@@ -106,7 +106,7 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
   const failure = repairCheckpointFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria);
   if (failure) { throw new StructuredFailure(failure, failureReason('mission-contract-incomplete', 'verification')); }
   const needsCertification = !integrationRepairCertified(loaded.mission, worktree);
-  const validation = await evidence.validation(slug).catch(() => null);
+  const validation = carriedRetentionValidation(evidence, await evidence.validation(slug).catch(() => null), { revision, baseline });
   const assessment = pending.integrationRepairAssessment!;
   if (!needsCertification && retentionEvidenceMatches({ ...assessment, assessedAt: evidence.now(), candidateRevision: revision,
     ...(validation ? { validation } : { validation: undefined }) }, slug, baseline)) { return true; }

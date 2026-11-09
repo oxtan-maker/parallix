@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { git } from './git.js';
 import type { RepositoryMetadataWriter } from '../../application/ports/repository-metadata.js';
+import { isVerificationBookkeeping, type CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
 
 export interface RebaseCompletion {
   from: string;
@@ -30,6 +31,44 @@ export function readRebaseCompletions(root: string, gitRunner = git): RebaseComp
     return fs.readFileSync(path.join(stateDirectory(root, gitRunner), 'rebase-completions.jsonl'), 'utf8')
       .split('\n').filter(Boolean).map(line => JSON.parse(line) as RebaseCompletion);
   } catch { return []; }
+}
+
+const revision = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{40,64}$/.test(value);
+
+function onlyBookkeeping(root: string, from: string, to: string, gitRunner = git): boolean {
+  if (from === to) { return true; }
+  const result = gitRunner(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
+  return result.status === 0 && result.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
+}
+
+/**
+ * The completed rebases of `branch` that carry `from` to `to`, or null. Each
+ * step must start where the previous coverage ended, up to bookkeeping, so an
+ * implementation edit outside a rebase breaks the lineage. Rebase content is
+ * not compared: upstream changes and resolved conflicts are carried.
+ */
+export function completedRebaseLineage(root: string, branch: string, from: string, to: string, gitRunner = git): CompletedRebaseLineage | null {
+  let covered = from;
+  const steps: { from: string; to: string }[] = [];
+  for (const record of readRebaseCompletions(root, gitRunner)) {
+    if (!record || !revision(record.from) || !revision(record.to) || record.branch !== branch || !Array.isArray(record.mappings)
+      || !onlyBookkeeping(root, covered, record.from, gitRunner)) { continue; }
+    // Git invokes post-rewrite only after completion. It may drop already
+    // upstream commits, so the covered HEAD need not occur in its mapping list.
+    covered = record.to;
+    steps.push({ from: record.from, to: record.to });
+    if (onlyBookkeeping(root, covered, to, gitRunner)) { return steps; }
+  }
+  return null;
+}
+
+/** Lineage from `from` to the checked-out branch HEAD; null when detached or unreadable. */
+export function completedRebaseLineageForCheckout(root: string, from: string, to: string, gitRunner = git): CompletedRebaseLineage | null {
+  try {
+    const branch = gitRunner(['-C', root, 'symbolic-ref', '--quiet', '--short', 'HEAD']);
+    if (branch.status !== 0 || !branch.stdout.trim() || !revision(from) || !revision(to)) { return null; }
+    return completedRebaseLineage(root, branch.stdout.trim(), from, to, gitRunner);
+  } catch { return null; }
 }
 
 const GIT_HOOKS = [
@@ -95,7 +134,7 @@ if (process.argv[2] === 'rebase') {
     const record = { from: read(['rev-parse', 'ORIG_HEAD']), to: read(['rev-parse', 'HEAD']),
       branch: read(['symbolic-ref', '--quiet', '--short', 'HEAD']), mappings };
     fs.appendFileSync(${JSON.stringify(path.join(state, 'rebase-completions.jsonl'))}, JSON.stringify(record) + '\\n', { mode: 0o600 });
-  } catch { process.stderr.write('Parallix: could not record completed rebase; active verification will run again.\\n'); }
+  } catch { process.stderr.write('Parallix: could not record completed rebase; verification and integration gates will run again.\\n'); }
 }
 process.exitCode = status;
 `;

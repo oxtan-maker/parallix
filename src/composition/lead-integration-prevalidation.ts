@@ -18,9 +18,11 @@ export function createLeadIntegrationPrevalidation(
       if (!missionWorktree) { throw new Error(`No worktree resolved for ${mission}`); }
       const evidence = readIntegrationGateRun(missionWorktree, configuration);
       const configured = loadPhaseGates(missionWorktree, 'preIntegration');
-      const currentSuccessfulRun = evidence?.current === true && evidence.status === 'passed' && configured.length > 0
-        && evidence.gates.length === configured.length && configured.every(gate => evidence.outcomes.some(outcome =>
-          outcome.key === gate.key && outcome.command === gate.command && outcome.exitCode === 0));
+      // A complete green run stays current across completed rebases; each configured gate then carries by key.
+      const currentSuccessfulRun = evidence !== null && evidence.status === 'passed' && configured.length > 0
+        && (evidence.current ? evidence.gates.length === configured.length && configured.every(gate => evidence.outcomes.some(outcome =>
+          outcome.key === gate.key && outcome.command === gate.command && outcome.exitCode === 0))
+          : evidence.carried !== null && configured.every(gate => evidence.outcomes.some(outcome => outcome.key === gate.key && outcome.exitCode === 0)));
       return { currentSuccessfulRun,
         cpuUtilization: currentSuccessfulRun ? null : await observeMachineCpuUtilization() };
     },

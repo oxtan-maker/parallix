@@ -175,7 +175,8 @@ function logIntegrationRepairAssessment(a: StatusMissionData['reviewHistory'][nu
   const source = a.source?.kind ?? (a.repair ? 'original-approval' : 'normal-review');
   const validation = a.source
     ? `; validated ${a.source.validationRevision} at ${a.source.validatedAt}; ${a.source.validationReference}`
-    : a.validation ? `; validated ${a.validation.sha} at ${a.validation.createdAt}; ${a.validation.reference}` : '';
+    : a.validation ? `; validated ${a.validation.sha} at ${a.validation.createdAt}; ${a.validation.reference}${a.validation.carried
+      ? `; carried to ${a.validation.carried.revision} on base ${a.validation.carried.baseline ?? 'unknown'} by ${a.validation.carried.lineage.length} completed rebase(s)` : ''}` : '';
   log(`    integration repair source: ${source}; ${a.outcome}; approved ${a.approvedRevision}; candidate ${a.candidateRevision}; failed gate ${a.failedGate ?? 'unknown'}${validation}`);
 }
 

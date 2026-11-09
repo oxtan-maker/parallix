@@ -1,4 +1,5 @@
 // Split by proof contract; preserves assertions and isolation from verification-proof-reuse.
+import childProcess from 'child_process';
 import fs from 'fs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -7,7 +8,7 @@ import path from 'path';
 import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
 import { runPreReviewGate } from '../../../src/adapters/review/review-gate-handling.js';
 import { readActiveVerificationProof } from '../../../src/adapters/verification/active-verification-proof.js';
-import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { createIntegrationVerificationEvidencePort, readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
 import runWorkflow, {
   captureVerifiedTreeProof,
 } from '../../../src/adapters/verification/verification.js';
@@ -121,3 +122,59 @@ for (const scenario of ['bookkeeping', 'source', 'test', 'config', 'manifest', '
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
 }
+
+test('integration-backed verification and gate runs survive completed rebases with upstream changes, a terminal conflict resolution and a chain (PX-0048)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-rebase-carry-'));
+  try {
+    const command = 'printf x >> .git/all-runs; exit 7';
+    const gates = ['docs', 'build', 'unit'].map((key, order) => ({ key, order, command: 'true' }));
+    const config = { adapters: { verification: { command, defaultArea: 'all', integrationCoverage: {
+      command, checks: { docs: ['docs'], build: ['build'], unit: ['unit'] } } }, gates: { preIntegration: gates } } };
+    const repo = initCommittedRepository(root, { 'workflow.config.json': JSON.stringify(config), 'src/input.ts': 'export const value = 1;\n' });
+    repo.git('checkout', '-b', 'mission');
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 2;\n');
+    repo.git('commit', '-am', 'mission change');
+    const validated = repo.git('rev-parse', 'HEAD').trim();
+    let executions = 0;
+    assert.equal((await runPhaseGates('integration', { slug: 'px-0048', checkoutPath: root, gates, verificationEvidence: createIntegrationVerificationEvidencePort(),
+      commandRunner: () => { executions++; return { status: 0, stdout: '', stderr: '' }; }, log: () => {}, error: () => {} })).ok, true);
+    const file = path.join(root, '.git/integration-verification-proof.json');
+    const original = fs.readFileSync(file, 'utf8');
+    const upstream = (files: Record<string, string>) => {
+      repo.git('checkout', 'main');
+      for (const [name, text] of Object.entries(files)) {
+        fs.mkdirSync(path.dirname(path.join(root, name)), { recursive: true }); fs.writeFileSync(path.join(root, name), text);
+      }
+      repo.git('add', '.'); repo.git('commit', '-m', 'upstream'); repo.git('checkout', 'mission');
+    };
+    upstream({ 'src/input.ts': 'export const value = 9;\n', 'package.json': '{}\n', 'workflow.config.json': JSON.stringify({ ...config, product: { name: 'upstream' } }) });
+    assert.notEqual(childProcess.spawnSync('git', ['rebase', 'main'], { cwd: root, encoding: 'utf8' }).status, 0, 'conflict pauses the rebase');
+    assert.equal(readIntegrationGateRun(root)?.carried ?? null, null, 'an unfinished rebase establishes no lineage');
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 3; // resolved in a terminal\n');
+    repo.git('add', '.'); repo.git('-c', 'core.editor=true', 'rebase', '--continue');
+    upstream({ 'test/upstream.test.ts': 'upstream\n' });
+    repo.git('rebase', 'main');
+    const head = repo.git('rev-parse', 'HEAD').trim();
+    const reused = readActiveVerificationProof(command, root);
+    assert.equal(reused.ok, true, 'chained completed rebases carry the integration evidence');
+    assert.match(reused.ok ? reused.diagnostic : '', new RegExp(`validated ${validated}, covered ${head} after 2 completed rebase`));
+    const output: string[] = [];
+    const previous = process.cwd();
+    try { process.chdir(root); assert.equal((await runWorkflow(['all'], { log: line => output.push(line) })).status, 0); }
+    finally { process.chdir(previous); }
+    assert.equal(fs.existsSync(path.join(root, '.git/all-runs')), false, 'no verifier rerun');
+    assert.equal(fs.readFileSync(file, 'utf8'), original, 'original execution evidence is not rewritten');
+    const run = readIntegrationGateRun(root);
+    assert.equal(run?.current, false);
+    assert.equal(run?.revision, validated, 'the run keeps its executed revision');
+    assert.equal(run?.carried?.length, 2);
+    assert.equal(executions, 3, 'reuse is not a new execution');
+    let publicationRuns = 0;
+    assert.equal(captureVerifiedTreeProof('all', root, { runFn: () => { publicationRuns++; return { signal: null, status: 7, stdout: '', stderr: '' }; } }).ok, false);
+    assert.equal(publicationRuns, 1, 'formal publication still verifies the exact rebased candidate');
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 4;\n');
+    repo.git('commit', '-am', 'new implementation');
+    assert.equal(readActiveVerificationProof(command, root).ok, false, 'an edit outside a completed rebase needs fresh verification');
+    assert.equal(readIntegrationGateRun(root)?.carried ?? null, null);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});

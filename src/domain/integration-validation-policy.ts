@@ -48,6 +48,10 @@ export function isBookkeepingPath(filePath: string): boolean {
   return BOOKKEEPING_PATH_RULE.test(filePath);
 }
 
+/** External task catalog paths excluded from verification candidate inputs and rebase lineage continuity. */
+export const isVerificationBookkeeping = (file: string): boolean =>
+  file.startsWith('backlog/tasks/') || file.startsWith('backlog/completed/');
+
 /**
  * The paths that differ between the validated commit and the finalized commit,
  * as reported through the gates port. `ok: false` covers every git failure,
@@ -57,23 +61,38 @@ export type ValidatedCommitDiff =
   | { readonly ok: true; readonly paths: readonly string[] }
   | { readonly ok: false; readonly error?: string };
 
+/** One completed Git rebase: the pre-rebase HEAD and the rebased HEAD. */
+export interface CompletedRebaseStep {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * The completed rebases that carry a validated commit to a later one, as
+ * proven by the repository's completed-rebase recorder. Rebase content is
+ * deliberately not compared: formal origin CI validates the actual candidate.
+ */
+export type CompletedRebaseLineage = readonly CompletedRebaseStep[];
+
 /**
  * True when the marker authorizes a skip: it exists, its whitelist is
  * non-empty, and the validated commit still covers the finalized commit — it
- * is the same commit, or the two trees differ only in bookkeeping paths
- * (TASK-2646). A missing, failed, or substantive diff falls back to the full
- * suite, so a rebase that brings in real changes never skips (TASK-2625 F2).
+ * is the same commit, the two trees differ only in bookkeeping paths
+ * (TASK-2646), or completed rebases carry the validated commit to it. Any
+ * other movement, including an edit outside a completed rebase, falls back to
+ * the full suite.
  */
 export function validationSkipApplies(
   marker: IntegrationValidationMarker | null,
   finalizedCommit: string | null | undefined,
   diffFromValidated: ValidatedCommitDiff | null = null,
+  lineage: CompletedRebaseLineage | null = null,
 ): boolean {
   if (!marker || marker.hooks.length === 0) { return false; }
   if (!finalizedCommit) { return false; }
   if (marker.sha === finalizedCommit) { return true; }
-  if (!diffFromValidated?.ok) { return false; }
-  return diffFromValidated.paths.every(isBookkeepingPath);
+  if (diffFromValidated?.ok && diffFromValidated.paths.every(isBookkeepingPath)) { return true; }
+  return Boolean(lineage?.length);
 }
 
 /**
