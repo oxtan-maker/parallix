@@ -14,7 +14,7 @@ import * as fmt from '../presentation/cli-format.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { IntegrationReviewSnapshot } from '../ports/integration-records.js';
 import { missionId } from '../../domain/mission.js';
-import { integrationRepairNeedsReview, pendingIntegrationApproval } from '../integration-repair-review.js';
+import { currentIntegrationRepair } from '../integration-repair-review.js';
 import { reportedApprovalStaleness } from '../approval-coverage.js';
 import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
 import {
@@ -25,9 +25,10 @@ import {
   validationSkipApplies,
   type ValidatedCommitDiff,
 } from './validation-marker.js';
-import type { IntegrateGatesPort, IntegrateWorkflowPorts, IntegrationGateRunResult } from '../ports/integrate-workflow.js';
+import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
+import { completeIntegrationGateRunReceipt } from './integration-gate-receipt.js';
 
 /**
  * Minimal shape of a configured gate the skip resolver needs. Kept local to
@@ -293,7 +294,7 @@ class IntegrationGateStep {
       return 'no pre-integration gate configured';
     }
     if (disposition === 'passed') {
-      if (dryRun && !this.completeDryRunReceipt(gatesToRun.gates, result)) {
+      if (dryRun && !completeIntegrationGateRunReceipt(gatesToRun.gates, result)) {
         await this.recordUnsuccessfulGateRun(slug, missionServices, execution);
         throw abortWith(this.dependencies.landing, `Integration dry-run gates produced incomplete or malformed execution evidence for ${slug}.`);
       }
@@ -311,17 +312,10 @@ class IntegrationGateStep {
     return this.repairGateFailure({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, execution);
   }
 
-  /** A green dry-run must carry a complete execution receipt for the exact selected plan. */
-  private completeDryRunReceipt(gates: readonly { key: string; command: string }[], result: IntegrationGateRunResult): boolean {
-    if (result.phase !== 'integration' || result.dryRun || result.skipped || result.cancelled
-      || result.executed !== gates.length || !Array.isArray(result.outcomes) || result.outcomes.length !== gates.length) { return false; }
-    return gates.every(gate => result.outcomes!.some(outcome => outcome.key === gate.key
-      && outcome.command === gate.command && outcome.exitCode === 0));
-  }
-
   private async recordUnsuccessfulGateRun(slug: string, missionServices: IntegrationMissionServices,
     { finalTree, result, configured }: Awaited<ReturnType<IntegrationGateStep['executeGatePlan']>>): Promise<void> {
-    const hooks = result.failedGate ? [result.failedGate.key] : configured.map(gate => gate.key);
+    const failed = result.failures?.length ? result.failures : result.failedGate ? [result.failedGate] : [];
+    const hooks = failed.length ? [...new Set(failed.map(gate => gate.key))] : configured.map(gate => gate.key);
     if (!finalTree.commit || !hooks.length) { return; }
     await missionServices.operationalHistory?.recordIntegrationValidation({ missionId: slug, sha: finalTree.commit,
       hooks, failed: true });
@@ -352,6 +346,10 @@ class IntegrationGateStep {
       missionWorktree: checkout,
       verificationCommand: this.dependencies.verification.formatVerificationCommand(context.area, checkout),
       failedGate: result.failedGate,
+      failedGates: result.failures?.length ? result.failures : result.failedGate ? [result.failedGate] : [],
+      testedRevision: finalTree.commit ?? null,
+      blockedGates: result.blocked ?? [],
+      cancelledGates: result.cancelledGates ?? [],
       gateError: result.error,
       gates: configured,
       implementer,
@@ -407,7 +405,7 @@ class IntegrationGateStep {
     failedGate: Parameters<typeof integrationGateFailureCause>[0], seams: IntegrateSeams) {
     const current = await missionServices.store.load(missionId(bounceSlug));
     if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
-    if (current.mission.status === 'active' && (integrationRepairNeedsReview(current.mission) || pendingIntegrationApproval(current.mission))) { return true; }
+    if (current.mission.status === 'active' && currentIntegrationRepair(current.mission)) { return true; }
     const occurredAt = new Date().toISOString();
     const transition = await missionServices.lifecycle.transition({
       operationId: `integration-gate-rebound:${bounceSlug}`,

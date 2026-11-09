@@ -70,7 +70,13 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   context.emit({ kind: 'reviewer-launching', attempt: round.attempt, reviewer: identities.reviewer });
   let launch;
   try {
-    launch = await ports.agents.launch({ role: 'reviewer', agent: identities.reviewer, exclude: [identities.implementer], prompt: round.promptFacts() });
+    launch = await ports.agents.launch({
+      role: 'reviewer',
+      agent: identities.reviewer,
+      exclude: [identities.implementer],
+      prompt: round.promptFacts(),
+      sessionPolicy: 'fresh-ephemeral',
+    });
   } catch (err: unknown) {
     context.emit({ kind: 'agent-selection', outcome: 'launch-failed', fields: { agent: identities.reviewer, step: 'review', error: (err as Error).message } });
     context.emit({ kind: 'reviewer-launch-failed', reviewer: identities.reviewer, message: (err as Error).message });
@@ -132,7 +138,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
   const persistedOutcome = persistedReviewerOutcome(state, persisted);
   if (persistedOutcome) { return { step: null, reviewState: persistedOutcome }; }
   if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
-  let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state);
+  let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state, round.reviewerLaunch);
   let reviewState: unknown = null;
   const diagnostic = incompleteReviewerDiagnostic(context, round, artifacts);
   if (diagnostic) {
@@ -158,7 +164,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
       },
       implementer: identities.reviewer, step: 'review', role: 'reviewer', exclude: [identities.implementer], maxAttempts,
       verify: async () => {
-        const retry = await reviewerRecoveryOutput(context);
+        const retry = await reviewerRecoveryOutput(context, round.reviewerLaunch);
         if (retry.workflowBlock) { return { ok: false, workflowBlock: retry.workflowBlock }; }
         artifacts = retry.artifacts;
         if (!artifacts.consumed) { return { ok: false, diagnostic: missingReviewerArtifacts(context, round) }; }
@@ -213,14 +219,14 @@ function persistedReviewerOutcome(state: LoopContext['state'], persisted: Awaite
 }
 
 /** A retried child can close readiness by submitting its accepted verdict. */
-async function reviewerRecoveryOutput(context: LoopContext) {
+async function reviewerRecoveryOutput(context: LoopContext, launch?: import('../ports/review-round.js').ReviewAgentLaunchResult | null) {
   const accepted = persistedReviewerOutcome(context.state, await context.ports.state.read());
   if (accepted) {
     return { artifacts: { consumed: true, ok: true, reviewState: accepted } satisfies ReviewerArtifactFacts };
   }
   const workflowBlock = await context.ports.state.verdictBlock?.();
   if (workflowBlock) { return { workflowBlock }; }
-  return { artifacts: await context.ports.artifacts.consumeReviewer(context.identities.reviewer) };
+  return { artifacts: await context.ports.artifacts.consumeReviewer(context.identities.reviewer, undefined, launch) };
 }
 
 async function stopForUnresolvedVerdictBlock(context: LoopContext): Promise<boolean> {
@@ -245,16 +251,21 @@ async function recoverReviewerTimeout(context: LoopContext, round: ReviewRound, 
     context.emit({ kind: 'missing-review-outcome', reviewer: identities.reviewer, providerEnabled: Boolean(ports.provider), branch: ports.branch });
   }
   let recovered: unknown = POLL_TIMEOUT;
+  const collaborators = reboundCollaborators(context, 'reviewer', () => round.promptFacts());
   const recovery = await rebound({
     kind: 'agent-timeout', role: 'reviewer',
     diagnostic: `No usable review outcome for ${ports.branch} after ${elapsedSince(state.startedAt)}.`,
     expectedOutput: ports.provider ? 'a formal review outcome' : 'a review verdict through px',
   }, {
-    ...reboundCollaborators(context, 'reviewer', () => round.promptFacts()),
+    ...collaborators,
+    applyAgentFallback: async options => {
+      round.reviewerLaunch = options.launchResult;
+      return await collaborators.applyAgentFallback!(options);
+    },
     implementer: identities.reviewer, step: 'review', role: 'reviewer', exclude: [identities.implementer],
     maxAttempts: round.occurrenceBudget(DEFAULT_REBOUND_ATTEMPTS),
     verify: async () => {
-      const output = await reviewerRecoveryOutput(context);
+      const output = await reviewerRecoveryOutput(context, round.reviewerLaunch);
       if (output.workflowBlock) { return { ok: false, workflowBlock: output.workflowBlock }; }
       const retry = output.artifacts;
       const diagnostic = retry.diagnostic || `Reviewer output still missing for ${ports.branch}`;

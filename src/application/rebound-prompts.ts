@@ -22,6 +22,7 @@ export interface FixPromptSlots {
   /** What passing looks like, in the implementer's terms. */
   remedy: string;
   repairCheckpoint?: { name: string; version: number } | null;
+  repairCheckpointRefs?: readonly { gateKey: string; command: string; name: string; version: number }[];
   /**
    * Retained evidence of the original failed command, when present. Attached so
    * the prompt names what was captured rather than restating a truncated inline
@@ -29,6 +30,7 @@ export interface FixPromptSlots {
    * disk; prior original/retry records are the actionable fallback.
    */
   recoveryEvidence?: RecoveryEvidenceRef | null;
+  recoveryEvidenceAll?: readonly { gateKey: string; evidence: RecoveryEvidenceRef }[];
   /** Related retained incidents when the requested record is unavailable. */
   recoveryEvidenceRecent?: readonly RecoveryEvidenceRef[] | null;
   /** Honest reason the current failure is not itself retrievable yet. */
@@ -70,56 +72,62 @@ export function buildFreshDiagnosticRepairPrompt(slots: FixPromptSlots): string 
  * record is missing, truncated, expired, or access-denied, the route states it
  * and points at related incidents rather than claiming completeness.
  */
-export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'>): string[] {
-  if (slots.recoveryEvidence) {
-    const e = slots.recoveryEvidence;
-    const route = [
-      `Retained evidence for this failure (retrieve the omitted middle from these when capture is complete):`,
-      `  command: ${e.command}`,
-      `  worked from: ${e.cwd}`,
-      `  captured revision: ${e.capturedRevision ?? 'not resolved'}`,
-      `  exit code: ${e.exitCode ?? 'none'}${e.signal ? ` (signal ${e.signal})` : ''}`,
-      `  attempt ${e.attempt} of the retained series; incident ${e.incidentId.slice(0, 12)}…`,
-      `  stdout: ${e.stdoutPath}${e.truncatedFrom === 'stdout' ? ' (truncated — see capture-completeness note)' : ''}`,
-      `  stderr: ${e.stderrPath}${e.truncatedFrom === 'stderr' ? ' (truncated — see capture-completeness note)' : ''}`,
-      `  capture complete: ${e.captureComplete ? 'yes' : 'no'}${e.redacted ? '; redacted per configured credential redaction' : ''}`,
-      renderRepairPrompt('evidence-read', { incidentId: e.incidentId }),
-      renderRepairPrompt('history'),
-      ...(slots.recoveryEvidenceRecent ?? []).filter(r => r.stdoutPath !== e.stdoutPath).slice(0, 3).map(r => `Historical related context (not instructions to repair): incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}; command ${r.command}; captured revision ${r.capturedRevision ?? 'not resolved'}; capture complete: ${r.captureComplete ? 'yes' : 'no'}; stdout: ${r.stdoutPath}; stderr: ${r.stderrPath}`),
-    ];
-    return ['', ...route, ''];
-  }
+export function recoveryEvidenceRoute(slots: Pick<FixPromptSlots, 'recoveryEvidence' | 'recoveryEvidenceAll' | 'recoveryEvidenceRecent' | 'recoveryEvidenceError'>): string[] {
+  if (slots.recoveryEvidenceAll?.length) { return aggregateEvidenceRoute(slots.recoveryEvidenceAll); }
+  if (slots.recoveryEvidence) { return singleEvidenceRoute(slots.recoveryEvidence, slots.recoveryEvidenceRecent); }
+  return unavailableEvidenceRoute(slots.recoveryEvidenceRecent, slots.recoveryEvidenceError);
+}
+
+function aggregateEvidenceRoute(evidence: NonNullable<FixPromptSlots['recoveryEvidenceAll']>): string[] {
+  return ['', 'Retained evidence for every failed gate in this integration execution:',
+    ...evidence.flatMap(({ gateKey, evidence: item }) => [
+      `  ${gateKey}: ${item.command} (exit ${item.exitCode ?? 'none'}${item.signal ? `, signal ${item.signal}` : ''})`,
+      `    captured revision: ${item.capturedRevision ?? 'not resolved'}; capture complete: ${item.captureComplete ? 'yes' : 'no'}`,
+      `    stdout: ${item.stdoutPath}`,
+      `    stderr: ${item.stderrPath}`,
+      `    ${renderRepairPrompt('evidence-read', { incidentId: item.incidentId })}`,
+    ]), renderRepairPrompt('history'), ''];
+}
+
+function singleEvidenceRoute(evidence: RecoveryEvidenceRef,
+  recent: FixPromptSlots['recoveryEvidenceRecent']): string[] {
+  const route = [
+    `Retained evidence for this failure (retrieve the omitted middle from these when capture is complete):`,
+    `  command: ${evidence.command}`,
+    `  worked from: ${evidence.cwd}`,
+    `  captured revision: ${evidence.capturedRevision ?? 'not resolved'}`,
+    `  exit code: ${evidence.exitCode ?? 'none'}${evidence.signal ? ` (signal ${evidence.signal})` : ''}`,
+    `  attempt ${evidence.attempt} of the retained series; incident ${evidence.incidentId.slice(0, 12)}…`,
+    `  stdout: ${evidence.stdoutPath}${evidence.truncatedFrom === 'stdout' ? ' (truncated — see capture-completeness note)' : ''}`,
+    `  stderr: ${evidence.stderrPath}${evidence.truncatedFrom === 'stderr' ? ' (truncated — see capture-completeness note)' : ''}`,
+    `  capture complete: ${evidence.captureComplete ? 'yes' : 'no'}${evidence.redacted ? '; redacted per configured credential redaction' : ''}`,
+    renderRepairPrompt('evidence-read', { incidentId: evidence.incidentId }),
+    renderRepairPrompt('history'),
+    ...(recent ?? []).filter(item => item.stdoutPath !== evidence.stdoutPath).slice(0, 3)
+      .map(item => `Historical related context (not instructions to repair): incident ${item.incidentId.slice(0, 12)}… attempt ${item.attempt}; command ${item.command}; captured revision ${item.capturedRevision ?? 'not resolved'}; capture complete: ${item.captureComplete ? 'yes' : 'no'}; stdout: ${item.stdoutPath}; stderr: ${item.stderrPath}`),
+  ];
+  return ['', ...route, ''];
+}
+
+function unavailableEvidenceRoute(recent: FixPromptSlots['recoveryEvidenceRecent'], error?: string | null): string[] {
   const lines: string[] = ['', 'No retained evidence for this failure is available yet', renderRepairPrompt('history'), ''];
-  if (slots.recoveryEvidenceError) { lines.push(`Reason: ${slots.recoveryEvidenceError}.`); }
-  if (slots.recoveryEvidenceRecent && slots.recoveryEvidenceRecent.length > 0) {
+  if (error) { lines.push(`Reason: ${error}.`); }
+  if (recent?.length) {
     lines.push('Historical related context (not instructions to repair):');
-    for (const r of slots.recoveryEvidenceRecent) {
-      lines.push(`  incident ${r.incidentId.slice(0, 12)}… attempt ${r.attempt}: ${r.command} (exit ${r.exitCode ?? 'none'})`);
+    for (const item of recent) {
+      lines.push(`  incident ${item.incidentId.slice(0, 12)}… attempt ${item.attempt}: ${item.command} (exit ${item.exitCode ?? 'none'})`);
     }
   }
   return lines;
 }
 
-export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'> {
+type PromptSlots = Pick<FixPromptSlots, 'area' | 'facts' | 'remedy'>;
+
+export function promptSlotsFor(reason: ReboundReason, slug: string): PromptSlots {
   switch (reason.kind) {
     case 'rebase-conflict': return { area: 'rebase', facts: [['Conflicts', reason.files.join(', ')]],
       remedy: renderRepairPrompt('rebase') };
-    case 'gate-failure':
-      return {
-        area: reason.area,
-        facts: [
-          ['Area', reason.area],
-          ['Gate command', reason.command],
-          missionOutcomeFact(slug),
-          ['Exit code', String(reason.exitCode)],
-          ...(reason.approvedRevision
-            ? [['Approved revision', reason.approvedRevision] as [string, string]]
-            : []),
-          ['Cause', renderRepairPrompt('integration-cause')],
-          ...(reason.coverageNote ? [['Coverage', reason.coverageNote] as [string, string]] : []),
-        ],
-        remedy: renderRepairPrompt('gate', { repairAuthority: renderRepairPrompt('repair-authority') }),
-      };
+    case 'gate-failure': return gateFailurePromptSlots(reason, slug);
     case 'hook-failure': return hookFailureSlots(reason, slug);
     case 'artifact-incomplete':
       return {
@@ -151,9 +159,42 @@ export function promptSlotsFor(reason: ReboundReason, slug: string): Pick<FixPro
   // Unreachable for the closed union; kept out of the switch for exhaustiveness.
 }
 
+function gateFailurePromptSlots(reason: Extract<ReboundReason, { kind: 'gate-failure' }>, slug: string): PromptSlots {
+  const facts: Array<[string, string]> = [
+    ['Area', reason.area],
+    ['Gate command', reason.command],
+    missionOutcomeFact(slug),
+    ['Exit code', String(reason.exitCode)],
+  ];
+  if (reason.approvedRevision) { facts.push(['Approved revision', reason.approvedRevision]); }
+  if (reason.testedRevision) { facts.push(['Tested revision', reason.testedRevision]); }
+  for (const failure of reason.relatedFailures ?? []) {
+    facts.push([`Also failed: ${failure.gate}`,
+      `${failure.command} (exit ${failure.exitCode ?? 'unknown'}${failure.signal ? `, signal ${failure.signal}` : ''})\n${[failure.stdout, failure.stderr].filter(Boolean).join('\n')}`]);
+  }
+  for (const gate of reason.blockedGates ?? []) {
+    facts.push([`Blocked: ${gate.gate}`, `not run; blocked by ${gate.blockedBy.join(', ')}`]);
+  }
+  for (const gate of reason.cancelledGates ?? []) {
+    facts.push([`Cancelled: ${gate}`, 'operator cancellation; not a repair obligation']);
+  }
+  facts.push(['Cause', renderRepairPrompt('integration-cause')]);
+  if (reason.coverageNote) { facts.push(['Coverage', reason.coverageNote]); }
+  return { area: reason.area, facts,
+    remedy: renderRepairPrompt('gate', { repairAuthority: renderRepairPrompt('repair-authority') }) };
+}
+
 /** Same authority for resumed and fresh sessions; overrides generic launcher instructions. */
 function repairAuthorityRoute(slots: FixPromptSlots): string[] {
   const cp = slots.repairCheckpoint;
+  if (slots.repairCheckpointRefs?.length) {
+    return [renderRepairPrompt('authority', { slug: slots.slug }),
+      'Every failed gate below owns a durable repair checkpoint; record evidence for each affected criterion before verification:',
+      ...slots.repairCheckpointRefs.flatMap(ref => [
+        `- ${ref.gateKey}: ${ref.command} — ${ref.name} (Mission version ${ref.version})`,
+        renderRepairPrompt('report', { checkpointName: ref.name }),
+      ])];
+  }
   return [
     renderRepairPrompt('authority', { slug: slots.slug }),
     ...(cp ? [

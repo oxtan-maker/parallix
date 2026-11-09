@@ -56,6 +56,33 @@ export type MissionCommand =
   | { readonly type: 'revoke-approval'; readonly review: Review }
   | { readonly type: 'integrate' };
 
+export type ReviewRepairTransitionDecision =
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'rejected'; readonly reason: 'effective-approval' | 'reviewer-eligibility'; readonly message: string }
+  | { readonly kind: 'transition'; readonly command: MissionCommand; readonly actor: AgentFamily };
+
+/** Pure command selection for the application-owned review-repair transition. */
+export function reviewRepairTransitionDecision(mission: Mission, destination: 'active' | 'review', implementer: AgentFamily,
+  occurredAt: string, reviewerEligibility?: ConfiguredReviewerEligibility,
+  cause?: Exclude<ReboundCause, { kind: 'integration-gate-failure' }>): ReviewRepairTransitionDecision {
+  if (mission.review && reviewStatus(mission.review) === 'approved' && mission.status !== 'integration') {
+    return { kind: 'rejected', reason: 'effective-approval',
+      message: `Mission ${mission.id} review repair requires an undecided review round; its effective approval must be revoked by the operator` };
+  }
+  if (mission.status === destination) { return { kind: 'unchanged' }; }
+  if (destination === 'active') {
+    return { kind: 'transition', actor: implementer,
+      command: { type: 'rebound-to-active', agent: implementer, cause: cause ?? { kind: 'review-repair' }, occurredAt } };
+  }
+  if (!mission.review) { return { kind: 'transition', actor: implementer, command: { type: 'begin-review-preparation' } }; }
+  if (!reviewerEligibility) {
+    return { kind: 'rejected', reason: 'reviewer-eligibility',
+      message: 'transitionReviewRepair requires the configured review step reviewerEligibility for a review repair' };
+  }
+  return { kind: 'transition', actor: currentReviewRound(mission.review).reviewer,
+    command: { type: 'submit-for-review', gatesPassed: true, review: mission.review, reviewerEligibility } };
+}
+
 export interface MissionTransition {
   readonly missionId: MissionId;
   /**

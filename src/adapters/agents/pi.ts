@@ -9,6 +9,7 @@ import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import { buildSubagentLimitPrefix } from './subagent-limit.js';
 import { type RenderSink } from './agent-stream-view.js';
 import { type NoOutputWatchdog } from '../process/output-watchdog.js';
+import type { SupervisedChild } from '../process/spawn-tee.js';
 
 interface BuildPiInvocationOptions {
   configuration?: ParallixConfiguration;
@@ -24,7 +25,7 @@ interface PiTeeOptions {
   configuration?: ParallixConfiguration;
   stdoutSink?: RenderSink;
   noOutputWatchdog?: NoOutputWatchdog | null;
-  onSpawn?: (_child: import('node:child_process').ChildProcess) => void;
+  onSpawn?: (_child: SupervisedChild) => void;
 }
 
 interface StartPiAgentOptions {

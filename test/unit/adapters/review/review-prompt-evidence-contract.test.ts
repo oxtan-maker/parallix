@@ -122,7 +122,7 @@ describe("context compaction", { concurrency: false }, () => {
     assert.match(prompt, /current review round and disposition; unresolved findings and implementer resolutions; and the exact revision under review/i);
   }));
 
-  test('task-2317: reviewer round-2 prompt compacts after rebase and reloads the rewritten baseline', () => withEnabledPolicy(repoRoot => {
+  test('reviewer round-2 prompt reloads the rewritten baseline without prior-context compaction (PX-0046.02 F1)', () => withEnabledPolicy(repoRoot => {
     const prompt = buildCompactReviewPrompt({
       reviewer: 'claude',
       implementer: 'codex',
@@ -132,9 +132,10 @@ describe("context compaction", { concurrency: false }, () => {
       repoRoot,
     });
 
-    assert.match(prompt, /When `2` is 2 or later, before beginning this review round compact/i);
+    assert.match(prompt, /When `2` is 2 or later, before beginning this review round reload/i);
+    assert.doesNotMatch(prompt, /compact the prior-round working context/i);
     assert.match(prompt, /exact post-rebase revision and review baseline shown by `git diff post-rebase-baseline-sha\.\.HEAD`/i);
-    assert.match(prompt, /independent of the mission.s declared gates/i);
+    assert.match(prompt, /reload is independent of the mission.s declared gates/i);
   }));
 
   test('repairable gate-error bounce reloads fresh authority and retains diagnostic plus retry state (TASK-2700)', async () => {
@@ -196,7 +197,7 @@ describe("context compaction", { concurrency: false }, () => {
     }
   });
 
-  test('task-2317: reviewer compaction follows successful rebase and baseline recapture before launch', async () => {
+  test('reviewer authority reload follows successful rebase and baseline recapture before launch', async () => {
     const order: string[] = [];
     let baseline = 'pre-rebase-baseline-sha';
     const fake = fakeReviewLoopPorts({
@@ -780,13 +781,17 @@ test('checkpoint, successful-gate and review lifecycle prompts share default-on 
       const execute = buildExecutePrompt('task-2737', 'CP-1 pending', { rootDir: root });
       const review = buildCompactReviewPrompt({ reviewer: 'codex', implementer: 'claude', branch: 'mission/task-2737', attempt: 2, repoRoot: root, reviewBaseline: 'baseline' });
       const repair = buildCompactActOnReviewPrompt({ implementer: 'claude', branch: 'mission/task-2737', attempt: 2, repoRoot: root });
-      for (const prompt of [execute, review, repair]) {
+      for (const prompt of [execute, repair]) {
         if (enabled !== false) { assert.match(prompt, /compact (?:your working|the prior-round working|the implementation) context/); }
         else { assert.doesNotMatch(prompt, /compact (?:your working|the prior-round working|the implementation) context/i); }
         assert.match(prompt, /Repository opinion retained/);
         assert.match(prompt, /locked mission goal|mission goal, scope/);
         assert.doesNotMatch(prompt, /\{\{/);
       }
+      assert.doesNotMatch(review, /compact (?:your working|the prior-round working|the implementation) context/i);
+      assert.match(review, /before beginning this review round reload the locked mission goal and scope/i);
+      assert.match(review, /Repository opinion retained/);
+      assert.doesNotMatch(review, /\{\{/);
       if (enabled !== false) {
         assert.match(execute, /Immediately after recording a checkpoint's evidence, compact your working context/);
         assert.match(execute, /each successful mission-declared Gate\*\*, compact your working context/);
@@ -803,6 +808,35 @@ test('checkpoint, successful-gate and review lifecycle prompts share default-on 
       assert.match(repair, /px resolve --slug/);
     }
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('blank distributed review opinion preserves core and honors one explicit repository override (PX-0046.02)', () => {
+  const root = path.resolve(import.meta.dirname, '../../../..');
+  const core = fs.readFileSync(path.join(root, 'prompts', 'review-core.md'), 'utf8');
+  const blankReviewAssets = {
+    readText(key: string) {
+      if (key === 'prompts/review-core.md') return core;
+      if (key === 'prompts/review.md') return '';
+      throw new Error(`unexpected asset ${key}`);
+    },
+    readBytes() { return new Uint8Array(); },
+    has() { return true; },
+  };
+  const generic = assembleStagePrompt('review', { assets: blankReviewAssets });
+  assert.match(generic, /px verdict approve/);
+  assert.match(generic, /Every request-change finding needs a distinct stable/);
+  assert.doesNotMatch(generic, /counterexample-pass-v1/);
+
+  const temp = registeredMkdtemp('review-opinion-override-');
+  try {
+    const overridePath = path.join(temp, 'review.md');
+    fs.writeFileSync(overridePath, 'Repository-specific review instruction.\n');
+    const customized = assembleStagePrompt('review', { assets: blankReviewAssets, overridePath });
+    assert.match(customized, /px verdict approve/);
+    assert.equal(customized.split('Repository-specific review instruction.').length - 1, 1);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
 });
 
 test('self-development and shipped templates inherit the consumer default-on prompt path (TASK-2737)', () => {

@@ -6,9 +6,20 @@ import type { ParallixConfiguration } from './configuration.js';
  * grants review or publication authority. */
 export interface IntegrationVerificationEvidencePort {
   start(_root: string, _gates: readonly { key: string; command: string }[]): {
-    complete(_outcomes: readonly { key: string; command: string; exitCode: number | null }[],
+    complete(_outcomes: readonly IntegrationGateEvidenceOutcome[],
       _disposition: 'passed' | 'failed' | 'cancelled'): boolean;
   } | null;
+}
+
+/** One configured gate's settled part of an integration run. Blocked and cancelled
+ * parts carry no exit status and are never passes or failures. `result` is absent
+ * on records written before aggregate outcomes. */
+export interface IntegrationGateEvidenceOutcome {
+  key: string; command: string; exitCode: number | null;
+  result?: 'passed' | 'failed' | 'blocked' | 'cancelled';
+  blockedBy?: string[]; signal?: string | null;
+  /** Bounded tail of a failed gate's captured output. */
+  diagnostics?: string;
 }
 
 /** Clean-tree proof reuse requested by the repository gate executor. */

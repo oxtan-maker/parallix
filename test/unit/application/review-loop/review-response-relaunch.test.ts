@@ -97,6 +97,37 @@ for (const recovery of ['artifact', 'timeout'] as const) {
   }
 }
 
+test('timeout recovery consumes artifacts against the retry launch status (PX-0046.01 review F3)', async () => {
+  let launches = 0;
+  const consumedStatuses: Array<number | null> = [];
+  const state = new ReviewState(request.slug, request);
+  const fake = fakeReviewLoopPorts({
+    state,
+    agents: {
+      launch: async launch => {
+        launches++;
+        return { agent: launch.agent, result: launches === 1 ? {} : { status: 0 } };
+      },
+    },
+    artifacts: {
+      consumeReviewer: async (_reviewer, _state, launch) => {
+        consumedStatuses.push(typeof launch?.result?.status === 'number' ? launch.result.status : null);
+        return consumedStatuses.length === 1
+          ? { consumed: false }
+          : { consumed: true, ok: true, reviewState: 'APPROVED' };
+      },
+    },
+  });
+  const context = fakeLoopContext(fake, { state, slug: request.slug });
+
+  const outcome = await runReviewerPhase(context, new ReviewRound(1, context));
+
+  assert.deepEqual(outcome, { outcome: 'stop' });
+  assert.deepEqual(consumedStatuses, [null, 0], 'recovered artifacts must be checked against the retry process result');
+  assert.equal(launches, 2);
+  assert.deepEqual(fake.stops, []);
+});
+
 test('post-response transition re-launches the active reviewer and records exactly one next round before approval', async () => {
   const reviewerOutcomes = ['REQUEST_CHANGES', 'APPROVED'];
   const fake = reviewLoopHarness({
@@ -107,6 +138,7 @@ test('post-response transition re-launches the active reviewer and records exact
   await runReviewLoop(request, fake.ports);
 
   assert.deepEqual(reviewerLaunches(fake).map(launch => launch.agent), ['codex', 'codex'], 'PUSHBACK_ALL must transition back to the active reviewer');
+  assert.ok(reviewerLaunches(fake).every(launch => launch.sessionPolicy === 'fresh-ephemeral'), 'fix-round reviews must never resume an earlier reviewer conversation');
   assert.ok(fake.writes.some(state => state.round === 2 && state.phase === 'reviewing'), 'the next reviewer round must be persisted exactly once before it launches');
   assert.equal(fake.exits.length, 0, `approval-after-response should not escalate: ${fake.errors.join(' | ')}`);
 });
@@ -122,6 +154,7 @@ test('post-response transition keeps the loop active when the reviewer requests 
   await runReviewLoop(request, fake.ports);
 
   assert.equal(reviewerLaunches(fake).length, 3, 'the repeated REQUEST_CHANGES decision must remain a reviewer decision');
+  assert.ok(reviewerLaunches(fake).every(launch => launch.sessionPolicy === 'fresh-ephemeral'), 'every repeated review invocation starts a fresh native conversation');
   assert.ok(fake.writes.filter(state => state.disposition === 'REQUEST_CHANGES').length >= 2, 'each reviewer REQUEST_CHANGES decision must be durable');
   assert.equal(fake.exits.length, 0, `re-review should remain automated: ${fake.errors.join(' | ')}`);
 });

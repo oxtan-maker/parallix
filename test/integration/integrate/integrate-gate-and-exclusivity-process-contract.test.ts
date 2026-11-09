@@ -328,14 +328,14 @@ describe("verify-local integrate gate", () => {
           'custom-agent-smoke': { command: `printf '%s:%s' "${'${PARALLIX_REAL_AGENT-}"'} "${'${PARALLIX_REAL_AGENT_MODEL-}"'} > ${smokeOutput}`, order: 2, run_last: true }
         }
       }));
-      const result = runScript(['integrate', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna'], {
+      const result = runScript(['integrate', '--real-agent', 'codex', '--real-agent-model', 'gpt-6-luna'], {
         ...staticAnalysisStubEnv(tmpDir),
         INTEGRATION_CONFIG_PATH: configPath,
         INTEGRATE_CHANGED_AREAS: 'lib workflow'
       });
       assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
       assert.equal(fs.readFileSync(libOutput, 'utf8'), ':');
-      assert.equal(fs.readFileSync(smokeOutput, 'utf8'), 'codex:gpt-5.6-luna');
+      assert.equal(fs.readFileSync(smokeOutput, 'utf8'), 'codex:gpt-6-luna');
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -344,7 +344,7 @@ describe("verify-local integrate gate", () => {
   test('verify-local integrate rejects incomplete or unsupported real-agent overrides', () => {
     for (const args of [
       ['integrate', '--real-agent', 'codex'],
-      ['integrate', '--real-agent', 'claude', '--real-agent-model', 'gpt-5.6-luna'],
+      ['integrate', '--real-agent', 'claude', '--real-agent-model', 'gpt-6-luna'],
       ['integrate', '--real-agent', 'codex', '--real-agent-model', 'not-gpt'],
       ['integrate', '--real-agent-model']
     ]) {

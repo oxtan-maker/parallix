@@ -17,7 +17,9 @@ import { missionId } from '../../../src/domain/mission.js';
 import {
   ConfiguredReviewerEligibility,
   currentReviewRound,
+  currentRevisionApprovals,
   changeRevision,
+  recordReviewerResult,
   reviewStatus,
   startReview,
 } from '../../../src/domain/review.js';
@@ -132,6 +134,76 @@ describe("SC1: approve on an awaiting-review round is authoritative", () => {
     // A replay must not rewrite the authoritative decision time.
     assert.equal(round.decision?.kind, 'approved');
     assert.equal(round.decision?.decidedAt, '2026-08-21T08:00:00.000Z');
+  });
+
+  it('rejects an approved replay for another revision without minting an alias approval (PX-0046.01 review F2)', async () => {
+    const { store, lifecycle } = await awaitingReview();
+    await recordApproval(
+      'task-2398',
+      {
+        comment: 'LGTM', revision: 'rev-1', decidedAt: '2026-08-21T08:00:00.000Z', source: { kind: 'local' },
+        result: { publicationId: 'native-review-a', reviewerId: 'codex-reviewer', agentFamily: reviewer, outcome: 'completed', status: 0 },
+      },
+      { missionStore: store, lifecycleService: lifecycle },
+    );
+
+    const aliasReplay = await recordApproval(
+      'task-2398',
+      {
+        comment: 'same reviewed head', revision: 'rev-1', decidedAt: '2026-08-21T08:30:00.000Z', source: { kind: 'local' },
+        result: { publicationId: 'native-review-alias', reviewerId: 'codex-alias', agentFamily: agentFamily('claude-alt'), outcome: 'completed', status: 0 },
+      },
+      { missionStore: store, lifecycleService: lifecycle },
+    );
+    assert.equal(aliasReplay.outcome, 'unchanged');
+
+    const replay = await recordApproval(
+      'task-2398',
+      {
+        comment: 'approve moved head', revision: 'rev-2', decidedAt: '2026-08-21T09:00:00.000Z', source: { kind: 'local' },
+        result: { publicationId: 'native-review-b', reviewerId: 'codex-alias', agentFamily: agentFamily('claude-alt'), outcome: 'completed', status: 0 },
+      },
+      { missionStore: store, lifecycleService: lifecycle },
+    );
+
+    assert.equal(replay.outcome, 'failed');
+    assert.match(replay.outcome === 'failed' ? replay.diagnostic : '', /decided revision rev-1.*replay revision rev-2/i);
+    const loaded = await store.load(MISSION);
+    assert.equal(loaded.kind, 'found');
+    const review = loaded.mission.review!;
+    assert.deepEqual(currentReviewRound(review).reviewerResults?.map(result => result.publicationId),
+      ['native-review-a', 'native-review-alias']);
+    assert.deepEqual(currentReviewRound(review).reviewerResults?.map(result => result.agentFamily), [reviewer, reviewer]);
+    assert.equal(currentRevisionApprovals(review, changeRevision('rev-1')).length, 1,
+      'an actor alias cannot contribute another family approval');
+    assert.equal(currentRevisionApprovals(review, changeRevision('rev-2')).length, 0);
+  });
+
+  it('keeps out-of-order reviewer publications exactly once without counting aliases or retries twice (PX-0046.01)', () => {
+    const base = startReview(
+      { change, revision: changeRevision('rev-1') }, reviewer, implementer,
+      '2026-08-21T07:00:00.000Z', eligibility,
+    );
+    const approved = {
+      publicationId: 'native-run-2', reviewerId: 'codex-reviewer', agentFamily: reviewer,
+      revision: changeRevision('rev-1'), decision: 'approved' as const, findings: [],
+      outcome: 'completed' as const, status: 0, publishedAt: '2026-08-21T09:00:00.000Z',
+    };
+    const earlier = {
+      publicationId: 'native-run-1', reviewerId: 'codex-alias', agentFamily: reviewer,
+      revision: changeRevision('rev-1'), decision: 'approved' as const, findings: [],
+      outcome: 'completed' as const, status: 0, publishedAt: '2026-08-21T08:00:00.000Z',
+    };
+    const retry = { ...approved, reviewerId: 'codex-retry-alias', status: 1,
+      publishedAt: '2026-08-21T10:00:00.000Z' };
+    const recorded = recordReviewerResult(recordReviewerResult(recordReviewerResult(base, approved), earlier), retry);
+
+    assert.deepEqual(currentReviewRound(recorded).reviewerResults?.map(result => result.publicationId),
+      ['native-run-1', 'native-run-2'], 'publication order is canonical rather than arrival-dependent');
+    assert.equal(currentRevisionApprovals(recorded, changeRevision('rev-1')).length, 1,
+      'aliases and retries from one agent family contribute one approval');
+    assert.equal(currentReviewRound(recorded).reviewerResults?.[1].reviewerId, 'codex-reviewer',
+      'the first immutable publication wins over changed retry metadata');
   });
 });
 

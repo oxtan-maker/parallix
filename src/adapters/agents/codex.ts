@@ -23,6 +23,7 @@ interface CodexInvocationOptions {
   resume?: boolean;
   sessionId?: string | null;
   model?: string | null;
+  reasoningEffort?: string | null;
   /** Enable Codex's native sandbox when Bubblewrap is unavailable. */
   sandbox?: boolean;
 }
@@ -87,14 +88,18 @@ function hasLiveTty() {
 
 function codexModelArgs(model: string | null) { return model ? ['-m', model] : []; }
 
+function configuredCodexReasoningEffort(configuration: ParallixConfiguration) {
+  return configuration.agents.codexReasoningEffort ?? null;
+}
+
 // Headless `codex exec` and `codex exec resume` read the prompt from stdin when
 // it is `-` (verified against codex-cli 0.162.1). One argv element is capped at
 // 128 KiB on Linux, so a large recovery prompt passed as an argument fails the
 // spawn with E2BIG before Codex runs.
 const CODEX_STDIN_PROMPT = '-';
 
-function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, interactive = hasLiveTty(), env: extraEnv = {}, resume = false, sessionId = null, model = null, sandbox = false }: CodexInvocationOptions): CodexInvocation {
-  const configArgs = headlessCodexOverrides(worktree);
+function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, interactive = hasLiveTty(), env: extraEnv = {}, resume = false, sessionId = null, model = null, reasoningEffort = configuredCodexReasoningEffort(configuration), sandbox = false }: CodexInvocationOptions): CodexInvocation {
+  const configArgs = headlessCodexOverrides(worktree, reasoningEffort);
   const baseEnv = configuration.forwardedEnvironment;
   if (resume) {
     const args = [...configArgs, 'exec'];
@@ -136,7 +141,7 @@ function buildCodexDraftInvocation({ configuration = DEFAULT_CONFIGURATION, prom
   };
 }
 
-function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env = {}, resume = false, sessionId = null, model = null, sandbox = false, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
+function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, worktree, env = {}, resume = false, sessionId = null, model = null, reasoningEffort = configuredCodexReasoningEffort(configuration), sandbox = false, teeOptions = {}, slug = null, role = null, sessionMarkerPort }: StartCodexAgentOptions) {
   // The launcher always tees through spawnAndTee for limit-hit detection, which
   // forces child stdio to ['inherit', 'pipe', 'pipe']. Codex's `--full-auto`
   // interactive UI requires a TTY on stdout, so we always use the headless
@@ -197,7 +202,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
             }
             await port.delete(slug, role);
           } catch (error) { throw error; }
-          const freshInv = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume: false, sessionId: null, model, sandbox });
+          const freshInv = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume: false, sessionId: null, model, reasoningEffort, sandbox });
           return spawnInvocation(freshInv);
         }
         return result;
@@ -205,7 +210,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
       .then(processResult);
   }
 
-  const invocation = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume, sessionId, model, sandbox });
+  const invocation = buildCodexDraftInvocation({ configuration, prompt, worktree, interactive: false, env, resume, sessionId, model, reasoningEffort, sandbox });
   const resultPromise = staleSessionHandler(invocation);
 
   return { invocation, resultPromise };
@@ -257,9 +262,10 @@ function replaceWithLink(source: string, target: string) {
   fs.symlinkSync(source, target);
 }
 
-function headlessCodexOverrides(worktree: string) {
+function headlessCodexOverrides(worktree: string, reasoningEffort: string | null = null) {
   const worktreeParent = path.dirname(path.resolve(worktree));
   return [
+    ...(reasoningEffort ? ['--config', `model_reasoning_effort=${tomlString(reasoningEffort)}`] : []),
     '--config', 'features.multi_agent=true',
     '--config', 'approval_policy="never"',
     '--config', `projects.${tomlString(worktreeParent)}.trust_level="trusted"`,

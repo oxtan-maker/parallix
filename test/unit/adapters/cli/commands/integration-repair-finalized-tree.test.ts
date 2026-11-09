@@ -175,3 +175,25 @@ for (const failure of ['cancelled', 'moved-tree'] as const) {
     assert.equal(recorded, 0);
   });
 }
+
+test('incomplete aggregate green result cannot write reusable integration validation (px-0050.02)', async () => {
+  const args = routeArgs([], [], true);
+  const integration = { ...failedGate, key: 'integration-ci', command: 'npm run test:integration:ci' };
+  args.failedGates = [failedGate, integration];
+  args.gates = [
+    { key: failedGate.key, command: failedGate.command, order: 1 },
+    { key: integration.key, command: integration.command, order: 2 },
+  ];
+  let recorded = 0;
+  args.recordIntegrationValidationFn = async () => { recorded++; };
+  args.runPhaseGatesFn = async () => phaseGateResult({ ok: true, executed: 1, outcomes: [
+    { ...failedGate, exitCode: 0, stderr: '' },
+  ] });
+  args.reboundFn = async (_reason, context) => {
+    assert.equal((await context.verify(1)).ok, false);
+    return { outcome: 'exhausted', attempts: 1, implementer: 'codex', diagnostic: 'incomplete aggregate coverage',
+      classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' } };
+  };
+  assert.equal((await routeIntegrationGateFailure(args)).route, 'exhausted');
+  assert.equal(recorded, 0);
+});

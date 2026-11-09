@@ -24,6 +24,7 @@ import { runGateCommand } from './gate-command-runner.js';
 export { runGateCommand } from './gate-command-runner.js';
 import type { IntegrationVerificationEvidencePort, ReusableVerificationProofPort } from '../../application/ports/integration-verification-evidence.js';
 import { GateDashboard } from './gate-dashboard.js';
+import { blockDependents, evidenceOutcomes, phaseSummary, renderGateOutput, type BlockedGate, type GateRunOutcome, type PhaseGateRunResult } from './phase-gate-outcomes.js';
 import { PhaseGateResources } from './phase-gate-resources.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalGateResources, resolveCanonicalMaxConcurrentGates } from './product-config.js';
@@ -96,43 +97,7 @@ export function loadRepositoryGates(rootDir: string): RepositoryGates {
   };
 }
 
-/** Result of running a configured gate. */
-export interface GateRunOutcome {
-  cpu?: VerificationMeasurement['cpu'];
-  reused?: boolean;
-  failureReason?: import('../../domain/failure-reason.js').FailureReason;
-  signal?: string | null;
-  key: string;
-  command: string;
-  exitCode: number | null;
-  stdout: string;
-  stderr: string;
-  durationMs?: number;
-}
-
-/** Result of running a phase's gates. */
-export interface PhaseGateRunResult {
-  /** True when every configured gate passed (or no gates were configured). */
-  ok: boolean;
-  phase: GatePhase;
-  /** Gates that were configured for this phase. */
-  gates: RepositoryGate[];
-  /** Number of gates actually executed. */
-  executed: number;
-  /** True when no gates were configured (nothing ran). */
-  skipped: boolean;
-  /** True when the run was a plan-only dry run that executed nothing. */
-  dryRun: boolean;
-  /** Operator cancelled the active gate process groups. */
-  cancelled?: boolean;
-  /** The first failing gate, if any. */
-  failedGate: GateRunOutcome | null;
-  /** Complete captured output for every gate that ran. */
-  outcomes?: GateRunOutcome[];
-  /** Whether the complete phase minted reusable integration proof. */
-  proofReusable?: boolean;
-  error: string | null;
-}
+export type { GateRunOutcome, BlockedGate, PhaseGateRunResult } from './phase-gate-outcomes.js';
 
 /** Injectable command runner. Mirrors `spawnSync` return shape. */
 export type GateCommandRunner = (
@@ -290,7 +255,11 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
 
   const liveSerial = maxParallel === 1 && !dashboard && !opts.commandRunner && (!opts.log || opts.log === fmt.log.plain);
 
-  const failure: { failedGate: GateRunOutcome | null; errorText: string | null } = { failedGate: null, errorText: null };
+  // Integration gathers every independent result; other phases stop at the first failure.
+  const failFast = phase !== 'integration';
+
+  const failure: { failedGate: GateRunOutcome | null; errorText: string | null; all: GateRunOutcome[]; blocked: BlockedGate[]; cancelled: GateRunOutcome[] } =
+    { failedGate: null, errorText: null, all: [], blocked: [], cancelled: [] };
 
   let executed = 0;
 
@@ -299,11 +268,9 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
   const coverage = phase === 'integration' ? opts.verificationEvidence?.start(checkoutPath, gates) : null;
 
   const pending = [...gates];
-
   const completed = new Set<string>();
-
   const running = new Set<Promise<GateRunOutcome>>();
-  return { phase, opts, gates, log, error, slug, checkoutPath, runner, env, maxParallel, phaseStarted, controller, cancelByOperator, dashboard, liveSerial, failure, executed, outcomes, coverage, pending, completed, running, cancellation };
+  return { phase, failFast, opts, gates, log, error, slug, checkoutPath, runner, env, maxParallel, phaseStarted, controller, cancelByOperator, dashboard, liveSerial, failure, executed, outcomes, coverage, pending, completed, running, cancellation };
 }
 
 class PhaseGateExecution {
@@ -318,7 +285,7 @@ class PhaseGateExecution {
   }
 
   async startPending(): Promise<void> {
-    while (this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
+    while ((!this.state.failFast || this.state.failure.failedGate === null) && !this.state.controller.signal.aborted) {
       const index = this.state.pending.findIndex(gate => this.resources.launchable(gate)
         && (gate.after || []).every(dependency => this.state.completed.has(dependency)));
       if (index < 0) { break; }
@@ -365,8 +332,7 @@ class PhaseGateExecution {
       ? verification!.readReusableVerificationProof(gate.command, this.state.checkoutPath, { context: proofContext, configuration: this.state.opts.configuration }) : { ok: false, identity: undefined, error: 'reuse disabled' };
     if (reusable.ok) {
       await observation?.complete({ result: 'reused', exitCode: 0, failureReason: null, wallMs: null, cpu: null }).catch(() => undefined);
-      const outcome = Promise.resolve({ key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 });
-      return outcome;
+      return { key: gate.key, command: gate.command, exitCode: 0, stdout: 'reused exact clean-tree proof', stderr: '', durationMs: 0 };
     }
     // Reuse the freshly checked identity snapshot returned even on a cache miss.
     const beforeProof = { ok: Boolean(reusable.identity), identity: reusable.identity, error: reusable.error };
@@ -396,26 +362,48 @@ class PhaseGateExecution {
     this.state.outcomes.push(outcome);
     this.resources.complete(this.state.gates.find(gate => gate.key === outcome.key)!);
     this.state.dashboard?.finishGate(outcome.key, outcome.exitCode, [outcome.stdout, outcome.stderr].filter(Boolean).join('\n'), outcome.durationMs ?? 0, this.state.controller.signal.aborted);
-    if (!this.state.dashboard && !this.state.liveSerial && outcome.exitCode !== 0) { renderGateOutput(this.state.phase, outcome, this.state.log); }
-    if (outcome.exitCode !== 0 && this.state.failure.failedGate === null) {
-      this.state.failure.failedGate = outcome;
-      this.state.failure.errorText = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${this.state.phase}.`;
-      if (!this.state.dashboard) { this.state.log(`Repository gate (${this.state.phase}): ${outcome.key} failed.`); this.state.error(this.state.failure.errorText); }
-      this.state.controller.abort();
-    } else if (outcome.exitCode === 0) {
+    if (outcome.exitCode === 0) {
       this.state.completed.add(outcome.key);
       if (!this.state.dashboard) { this.state.log(`Repository gate (${this.state.phase}): ${outcome.key} passed.`); }
+      return;
     }
+    if (!this.state.dashboard && !this.state.liveSerial) { renderGateOutput(this.state.phase, outcome, this.state.log); }
+    if (this.state.cancellation.operatorCancelled && !this.state.failFast) { this.state.failure.cancelled.push(outcome); }
+    else if (!this.state.failFast || this.state.failure.failedGate === null) { this.settleFailure(outcome); }
+  }
+
+  private settleFailure(outcome: GateRunOutcome): void {
+    const text = `Repository gate "${outcome.key}" exited with code ${outcome.exitCode ?? 'unknown'} for ${this.state.phase}.`;
+    this.recordFailure(outcome, text);
+    if (!this.state.dashboard) { this.state.log(`Repository gate (${this.state.phase}): ${outcome.key} failed.`); this.state.error(text); }
+    if (this.state.failFast) { this.state.controller.abort(); }
+    else { blockDependents(this.state.pending, this.state.failure.all, this.state.failure.blocked); }
+  }
+
+  private recordFailure(outcome: GateRunOutcome, text: string): void {
+    this.state.failure.all.push(outcome);
+    if (this.state.failure.failedGate === null) { this.state.failure.failedGate = outcome; this.state.failure.errorText = text; }
+  }
+
+  /** Operator-stopped parts: killed children and gates that never started. */
+  private cancelledKeys(): string[] {
+    return this.state.cancellation.operatorCancelled && !this.state.failFast
+      ? [...this.state.failure.cancelled.map(outcome => outcome.key), ...this.state.pending.map(gate => gate.key)] : [];
+  }
+
+  private dashboardLine(gate: RepositoryGate): string {
+    const outcome = this.state.outcomes.find(item => item.key === gate.key);
+    const blockedBy = this.state.failure.blocked.find(item => item.key === gate.key)?.blockedBy;
+    if (!outcome) { return blockedBy ? `  ⊘ ${gate.key} blocked by ${blockedBy.join(', ')}` : `  · ${gate.key} not run`; }
+    const killed = this.state.controller.signal.aborted && outcome !== this.state.failure.failedGate && outcome.exitCode !== 0;
+    return `  ${killed ? '×' : outcome.exitCode === 0 ? '✓' : '✗'} ${gate.key} ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s`;
   }
 
   reportDashboard(): void {
     if (this.state.dashboard) {
       this.state.log(`Repository gates (${this.state.phase}): ${this.state.cancellation.operatorCancelled ? 'cancelled' : this.state.failure.failedGate ? 'failed' : 'passed'}; ${this.state.executed}/${this.state.gates.length} completed in ${((Date.now() - this.state.phaseStarted) / 1000).toFixed(1)}s.`);
-      for (const gate of this.state.gates) {
-        const outcome = this.state.outcomes.find(item => item.key === gate.key);
-        this.state.log(`  ${outcome ? this.state.controller.signal.aborted && outcome !== this.state.failure.failedGate && outcome.exitCode !== 0 ? '×' : outcome.exitCode === 0 ? '✓' : '✗' : '·'} ${gate.key}${outcome ? ` ${((outcome.durationMs ?? 0) / 1000).toFixed(1)}s` : ' not run'}`);
-      }
-      if (this.state.failure.failedGate && !this.state.cancellation.operatorCancelled) { renderGateOutput(this.state.phase, this.state.failure.failedGate, this.state.error); }
+      for (const gate of this.state.gates) { this.state.log(this.dashboardLine(gate)); }
+      if (!this.state.cancellation.operatorCancelled) { for (const failed of this.state.failure.all) { renderGateOutput(this.state.phase, failed, this.state.error); } }
     }
   }
 
@@ -430,33 +418,52 @@ class PhaseGateExecution {
     finally { this.close(); }
   }
 
+  private recordUnresolvedDependencies(): void {
+    const { pending, failure, controller, failFast, dashboard, phase } = this.state;
+    if (pending.length === 0 || controller.signal.aborted || (failFast && failure.failedGate !== null)) { return; }
+    const gate = pending[0];
+    const text = `Repository gate "${gate.key}" has unresolved dependencies for ${phase}.`;
+    this.recordFailure({ key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: text }, text);
+    if (!dashboard) { this.state.error(text); }
+  }
+
+  private summarizeAggregate(cancelledKeys: string[]): void {
+    const { all: failures, blocked } = this.state.failure;
+    const { operatorCancelled } = this.state.cancellation;
+    if (operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; return; }
+    if (this.state.failFast || failures.length + blocked.length + cancelledKeys.length === 0) { return; }
+    for (const line of phaseSummary(this.state.phase, failures, blocked, cancelledKeys)) { this.state.log(line); }
+    if (failures.length > 1 || blocked.length > 0) {
+      this.state.failure.errorText = `Repository gates (${this.state.phase}) failed: ${failures.map(outcome => outcome.key).join(', ')}${blocked.length ? `; blocked: ${blocked.map(gate => gate.key).join(', ')}` : ''}.`;
+    }
+  }
+
+  /** The executor reports how the phase settled, so a failed or cancelled run is observable evidence too. */
+  private completeCoverage(cancelledKeys: string[]): boolean {
+    if (!this.state.coverage) { return false; }
+    const settled = this.state.cancellation.operatorCancelled ? 'cancelled'
+      : this.state.failure.failedGate !== null ? 'failed'
+        : this.state.controller.signal.aborted ? 'cancelled' : 'passed';
+    return this.state.coverage.complete(evidenceOutcomes(this.state.gates, this.state.outcomes, this.state.failure.blocked, new Set(cancelledKeys)), settled);
+  }
+
   private async executeGates(): Promise<PhaseGateRunResult> {
     while (this.state.pending.length > 0 || this.state.running.size > 0) {
       await this.startPending();
-      if (this.state.running.size === 0 && this.state.failure.failedGate === null && !this.state.controller.signal.aborted) {
-        const gate = this.state.pending[0];
-        this.state.failure.errorText = `Repository gate "${gate.key}" has unresolved dependencies for ${this.state.phase}.`;
-        this.state.failure.failedGate = { key: gate.key, command: gate.command, exitCode: null, stdout: '', stderr: this.state.failure.errorText };
-        if (!this.state.dashboard) { this.state.error(this.state.failure.errorText); }
+      if (this.state.running.size === 0) {
+        this.recordUnresolvedDependencies();
         break;
       }
-      if (this.state.running.size === 0) { break; }
       const { run, outcome } = await Promise.race([...this.state.running].map(run => run.then(outcome => ({ run, outcome }))));
       this.settleOutcome(run, outcome);
     }
     this.reportDashboard();
-    if (this.state.cancellation.operatorCancelled) { this.state.failure.errorText = `Repository gates (${this.state.phase}) cancelled.`; }
-    let proofReusable = false;
-    if (this.state.coverage) {
-      // The executor reports how the phase settled, so a failed or cancelled run
-      // is observable evidence too instead of an absent result.
-      proofReusable = this.state.coverage.complete(this.state.outcomes,
-        this.state.cancellation.operatorCancelled ? 'cancelled'
-          : this.state.failure.failedGate !== null ? 'failed'
-            : this.state.controller.signal.aborted ? 'cancelled' : 'passed');
-    }
+    const { all: failures, blocked } = this.state.failure;
+    const cancelledKeys = this.cancelledKeys();
+    this.summarizeAggregate(cancelledKeys);
+    const proofReusable = this.completeCoverage(cancelledKeys);
     return {
-      ok: this.state.failure.failedGate === null && !this.state.controller.signal.aborted,
+      ok: failures.length === 0 && !this.state.controller.signal.aborted,
       phase: this.state.phase,
       gates: this.state.gates,
       executed: this.state.executed,
@@ -464,20 +471,14 @@ class PhaseGateExecution {
       dryRun: false,
       cancelled: this.state.cancellation.operatorCancelled,
       failedGate: this.state.failure.failedGate,
+      failures,
+      blocked,
+      ...(cancelledKeys.length ? { cancelledGates: cancelledKeys } : {}),
       outcomes: this.state.outcomes,
       proofReusable,
       error: this.state.failure.errorText,
     };
-
   }
-}
-
-function renderGateOutput(phase: GatePhase, outcome: GateRunOutcome, log: GateLog): void {
-  log(`\n--- Repository gate (${phase}): ${outcome.key} output (exit ${outcome.exitCode ?? 'unknown'}) ---`);
-  log(`Command: ${outcome.command}`);
-  if (outcome.stdout) { log(outcome.stdout.trimEnd()); }
-  if (outcome.stderr) { log(outcome.stderr.trimEnd()); }
-  log(`--- End repository gate (${phase}): ${outcome.key} ---`);
 }
 
 function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRun: boolean, log: GateLog): PhaseGateRunResult | null {

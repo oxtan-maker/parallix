@@ -30,6 +30,22 @@ export interface IntegrationRepairAssessment {
   readonly normalReviewCostUsd?: number;
 }
 
+export type RetentionAssessmentFacts = Omit<IntegrationRepairAssessment, 'outcome' | 'validation'> & {
+  readonly validation?: RetentionValidation;
+};
+
+/** Classify observed patch and gate facts without performing either observation. */
+export function assessApprovalRetention(facts: RetentionAssessmentFacts, patchEquivalent: boolean | null,
+  mission?: string, candidateBaseline?: string): IntegrationRepairAssessment {
+  const { validation, ...assessment } = facts;
+  const retained = retentionEvidenceMatches(facts, mission, candidateBaseline);
+  const outcome = patchEquivalent === null ? 'comparison-error'
+    : !patchEquivalent ? 'mission-change-differs'
+    : retained ? 'retained'
+    : validation?.failed ? 'gate-failed' : 'gate-evidence-missing';
+  return { ...assessment, outcome, ...(retained && validation ? { validation } : {}) };
+}
+
 /** A judgment's patch equivalence and a gate's committed-tree evidence are separate facts. The
  * gate evidence covers the revision it ran on, or the candidate completed rebases carried it to. */
 export function retentionEvidenceMatches(assessment: Pick<IntegrationRepairAssessment,

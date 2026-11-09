@@ -149,6 +149,8 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
     await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries before escalation (got ${reviewerLaunches(fake)} reviewer launches)`);
+    assert.ok(fake.launches.filter(launch => launch.role === 'reviewer').every(launch => launch.sessionPolicy === 'fresh-ephemeral'),
+      'same-family initial and recovery attempts must all use fresh native conversations');
     assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
       `should escalate with the recovery dossier and incomplete-artifact cause. Errors: ${fake.errors.join(' | ')}`);
     assert.ok(fake.logs.some(l => l.includes('human review required') && l.includes('REVIEWER_ARTIFACT_RETRY_EXHAUSTED')),

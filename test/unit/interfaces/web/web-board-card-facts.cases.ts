@@ -33,7 +33,7 @@ test('Board preserves populated mission identity, supplied PR URL and review pha
 
 test('Board leaves absent checkpoint, PR and review facts unknown (TASK-2784)', () => {
   const html = renderedCard(makeCard({ gate: 'unavailable' }));
-  assert.match(html, /Plan unavailable · Completion unknown/);
+  assert.match(html, /checkpoints · completion unknown/);
   assert.match(html, /gate · unavailable/);
   assert.doesNotMatch(html, /Recorded:|PR #|review round \d|round \d\/5/);
   assert.doesNotMatch(html, /<a\b[^>]*>PR /);

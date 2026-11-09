@@ -10,9 +10,8 @@ describe("refresh-global-px script", () => {
   const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'refresh-global-px.sh');
 
   // These tests prove script wiring, command ordering and documented inputs.
-  // They do not execute the script: it
-  // runs `npm pack` and `npm install -g`, which would mutate the operator's actual
-  // global npm install.
+  // The isolated manual rehearsal owns execution because the script crosses the
+  // process and global-install boundary.
 
   test('workflow.config.json wires the generic post-integrate hook to the checked-in script', () => {
     const command = resolvePostIntegrateCommand(REPO_ROOT);
@@ -94,6 +93,20 @@ describe("refresh-global-px script", () => {
     // A trap-based cleanup fires on EXIT regardless of whether a later step fails,
     // so no tarball is left behind in the repo root either way (task-1424).
     assert.match(content, /trap\s+'rm -rf "\$\{PACK_DIR\}"'\s+EXIT/);
+  });
+
+  test('scripts/refresh-global-px.sh binds every rebuild to the current repository review instructions (PX-0046.02)', () => {
+    const content = fs.readFileSync(SCRIPT_PATH, 'utf8');
+    const policyRead = content.indexOf('adapters?.prompts?.reviewOverride');
+    const policyHash = content.indexOf('createHash("sha256")');
+    const build = content.indexOf('npm run build');
+    const install = content.indexOf('npm install -g');
+
+    assert.match(content, /path\.join\(root, "prompts", "review\.md"\)/);
+    assert.doesNotMatch(content, /adapters\?\.prompts\?\.override/);
+    assert.match(content, /Repository review instructions are missing or empty/);
+    assert.ok(policyRead >= 0 && policyHash > policyRead, 'the configured repository policy is resolved and hashed');
+    assert.ok(build > policyHash && install > build, 'each refresh validates current instructions before rebuilding and installing');
   });
 
   test('workflow.config.json wires local version allocation as the integrate pre-commit hook', () => {

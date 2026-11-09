@@ -24,6 +24,8 @@ export interface RepairVerificationProof {
 export interface OpenRepairCheckpoint {
   readonly slug: string;
   readonly incidentId: string;
+  /** Gate identity within an aggregate incident; absent for legacy/single repairs. */
+  readonly gateKey?: string;
   readonly command: string;
   readonly attempt: number;
   readonly worktree?: string;
@@ -52,6 +54,8 @@ export interface RepairCheckpointPort {
   /** Snapshot accepted evidence and occurrences before execution. Legacy adapters produce no coverage. */
   prepareVerification?(_slug: string, _name: string, _scope: { worktree: string; executionRevision: string | null }): Promise<RepairVerificationSnapshot | undefined>;
   verify(_slug: string, _name: string, _proof?: RepairVerificationProof): Promise<void>;
+  /** Atomically certify an aggregate rerun after every checkpoint supplied valid evidence. */
+  verifyAll?(_slug: string, _checks: readonly { readonly name: string; readonly proof: RepairVerificationProof }[]): Promise<void>;
 }
 
 let productionPort: RepairCheckpointPort | undefined;

@@ -2,9 +2,36 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
+const crypto = require('node:crypto');
 const prompt = process.argv.includes('--help') ? '' : fs.readFileSync(0, 'utf8');
 if (process.argv.includes('--help')) { console.log('run --format json'); process.exit(0); }
 const slug = 'task-unit-rehearsal';
+const expectedReviewOpinion = process.env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE
+  ? fs.readFileSync(process.env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE, 'utf8').trimEnd()
+  : '';
+const launchLog = path.join(process.env.REHEARSAL_STATE, 'agent-launches.jsonl');
+const priorLaunches = fs.existsSync(launchLog) ? fs.readFileSync(launchLog, 'utf8').trim().split('\n').filter(Boolean).length : 0;
+const sessionID = `ses_unit_rehearsal_${priorLaunches + 1}`;
+const mode = /^Mode: ([^.]+)\./m.exec(prompt)?.[1] || 'unknown';
+const fullReviewArtifactPath = /"fullReviewArtifact":\s*"([^"]+)"/.exec(prompt)?.[1] || null;
+const fullReviewArtifact = fullReviewArtifactPath && fs.existsSync(fullReviewArtifactPath)
+  ? fs.readFileSync(fullReviewArtifactPath, 'utf8')
+  : '';
+fs.appendFileSync(launchLog, JSON.stringify({
+  mode,
+  args: process.argv.slice(2),
+  sessionID,
+  promptSha256: crypto.createHash('sha256').update(prompt).digest('hex'),
+  reviewOpinionCount: expectedReviewOpinion ? prompt.split(expectedReviewOpinion).length - 1 : 0,
+  reviewReloadInstructionPresent: /before beginning this review round reload the locked mission goal and scope/i.test(prompt),
+  priorRoundCompactionPresent: prompt.includes('compact the prior-round working context'),
+  missionGoalPresent: prompt.includes('Rehearse units through public CLI'),
+  criterionPresent: prompt.includes('The disposable lifecycle reaches integration'),
+  priorFindingPresent: prompt.includes('repair-value'),
+  fullReviewArtifactPresent: Boolean(fullReviewArtifact),
+  fixedResolutionPresent: fullReviewArtifact.includes('repair-value')
+    && (fullReviewArtifact.includes('value is now 2') || fullReviewArtifact.includes('CHANGES_MADE')),
+}) + '\n');
 function px(args) {
   const result = cp.spawnSync(process.env.REHEARSAL_CLI, args, { cwd: process.cwd(), env: process.env, encoding: 'utf8' });
   if (result.status !== 0) throw new Error(args.join(' ') + '\n' + result.stdout + result.stderr);
@@ -62,14 +89,23 @@ if (/^Mode: act-on-review\./m.test(prompt)) {
 if (process.env.REHEARSAL_INTEGRATION_REBOUND === '1' && prompt.includes('The integration gate (not the review gate) failed')) {
   const state = JSON.parse(px(['status', slug, '--json']));
   if (state.missionStatus !== 'active') throw new Error('integration repair must run in active');
-  const checkpoint = state.checkpoints.find(item => item.repair && !item.repair.verified);
-  if (!checkpoint) throw new Error('integration repair must have an authorized checkpoint');
+  const checkpoints = state.checkpoints.filter(item => item.repair && !item.repair.verified);
+  if (!checkpoints.length) throw new Error('integration repair must have an authorized checkpoint');
+  if (process.env.REHEARSAL_AGGREGATE_INTEGRATION_REBOUND === '1') {
+    const gates = checkpoints.map(item => item.repair.gateKey);
+    if (gates.join(',') !== 'unit,integration-ci') throw new Error('expected unit and integration-ci checkpoints before repair launch: ' + gates.join(','));
+  }
   fs.writeFileSync('src/value.js', 'export const value = 3;\n');
+  cp.execFileSync('npm', ['test', '--', '--unit-test-headroom'], {
+    env: { ...process.env, PARALLIX_TEST_COVERAGE: '1' }, stdio: 'inherit',
+  });
   cp.execFileSync(process.execPath, ['integration-probe.cjs'], { stdio: 'inherit' });
-  write(['checkpoint', 'record', '--name', checkpoint.name,
-    '--criterion', 'The disposable lifecycle reaches integration',
-    '--evidence', 'src/value.js: repaired value 3; focused check: node integration-probe.cjs',
-    '--next', 'Revalidate integration gates and obtain fresh independent review']);
+  for (const checkpoint of checkpoints) {
+    write(['checkpoint', 'record', '--name', checkpoint.name,
+      '--criterion', 'The disposable lifecycle reaches integration',
+      '--evidence', `src/value.js: repaired value 3 for ${checkpoint.repair.gateKey || checkpoint.repair.command}; focused check: node integration-probe.cjs`,
+      '--next', 'Revalidate integration gates and obtain fresh independent review']);
+  }
   commit('repair integration value');
   px(['verify', 'all']); px(['verify', 'all']);
   fs.writeFileSync(path.join(process.env.REHEARSAL_STATE, 'integration-repaired'), 'repaired');
@@ -85,4 +121,4 @@ if (/^Mode: review\./m.test(prompt)) {
     write(['verdict', 'approve', '--actor', 'custom', '--comment', 'Repaired value and exact unit proof verified']);
   }
 }
-console.log('{"sessionID":"ses_unit_rehearsal"}');
+console.log(JSON.stringify({ sessionID }));

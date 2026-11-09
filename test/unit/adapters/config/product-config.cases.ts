@@ -16,6 +16,7 @@ import {
   resolveTaskProvider,
   resolveIntegrationMode,
   resolvePromptOverride,
+  resolveReviewPromptOverride,
   resolveReviewAdapter,
   resolveReviewArtifactDir,
   isForgejoReviewEnabled,
@@ -199,6 +200,17 @@ test('resolvePromptOverride resolves relative and absolute overrides and null wh
     writeConfig(rootDir, { adapters: { prompts: { override: '../shared/custom.md' } } });
     const resolved = resolvePromptOverride(rootDir);
     assert.equal(resolved, path.resolve(rootDir, '../shared/custom.md'));
+  });
+});
+
+test('resolveReviewPromptOverride resolves only the review-specific opinion path', () => {
+  withTempConfig(rootDir => {
+    writeConfig(rootDir, { adapters: { prompts: { override: 'all.md' } } });
+    assert.equal(resolveReviewPromptOverride(rootDir), null);
+  });
+  withTempConfig(rootDir => {
+    writeConfig(rootDir, { adapters: { prompts: { reviewOverride: 'prompts/review.md' } } });
+    assert.equal(resolveReviewPromptOverride(rootDir), path.join(rootDir, 'prompts', 'review.md'));
   });
 });
 
@@ -416,6 +428,16 @@ test('resolvePromptOverride keeps an absolute override unchanged', () => {
     const abs = path.join(root, 'absolute-opinion.md');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { prompts: { override: abs } } }));
     assert.equal(pc.resolvePromptOverride(root), abs);
+  });
+});
+
+test('resolveReviewPromptOverride is independent of the legacy all-stage override (PX-0046.02 F2)', () => {
+  withTempDir((root) => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { prompts: { override: 'all.md', reviewOverride: 'review.md' } },
+    }));
+    assert.equal(pc.resolvePromptOverride(root), path.resolve(root, 'all.md'));
+    assert.equal(pc.resolveReviewPromptOverride(root), path.resolve(root, 'review.md'));
   });
 });
 

@@ -193,6 +193,15 @@ omissions. Provider-native session transcripts and tool results are retained
 only when that provider exposes a supported source; their source label and
 completeness are reported rather than inferred from terminal output.
 
+A run whose provider session Parallix stopped after the workflow had already
+recorded the assignment outcome still reports what that provider had resolved:
+its provider identity, model, provider session, and any usage it had reported
+up to that point. The identity remains recorded when no usage snapshot was
+available. Operator cancellation finalizes the same observed metadata before
+re-raising the signal. The record keeps the provider process's own exit, so a
+stopped provider never reads as a clean provider exit while the workflow
+outcome stays the authority for whether the assignment completed.
+
 Claude's native transcript lookup uses the home supplied when Parallix starts.
 If you set `HOME` for the invocation, retention looks in that home's Claude
 project directory.

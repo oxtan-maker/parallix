@@ -3,7 +3,7 @@ import { integrationRepairCertified } from './repair-certification.js';
 import { missionId } from '../../domain/mission.js';
 import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { currentReviewRound, replaceCurrentRound, revokeApprovedDecision, type ReviewRound } from '../../domain/review.js';
-import { retentionEvidenceMatches, type IntegrationRepairAssessment, type RetentionBlockReason, type RetentionValidation } from '../../domain/integration-approval-retention.js';
+import { assessApprovalRetention, type IntegrationRepairAssessment, type RetentionValidation } from '../../domain/integration-approval-retention.js';
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
 import type { IntegrationMissionServices } from '../ports/integration-records.js';
 import type { MissionLoadResult } from '../domain-ports.js';
@@ -55,10 +55,8 @@ async function assessCandidate(input: RetentionRequest, round: ReviewRound): Pro
     candidateRevision: input.candidate.revision, failedGate: round.integrationRepairAssessment!.repair!.cause.gate,
     repair: round.integrationRepairAssessment!.repair!, ...preserveHistoricalRestoration(round.integrationRepairAssessment) };
   // Gates prove the committed tree, not an equivalent patch on a different base.
-  const green = retentionEvidenceMatches({ ...base, ...(validation ? { validation } : {}) }, input.slug, input.candidate.baseline);
-  const fallback: RetentionBlockReason = patchEqual === null ? 'comparison-error'
-    : !patchEqual ? 'mission-change-differs' : validation?.failed ? 'gate-failed' : 'gate-evidence-missing';
-  return { ...base, outcome: patchEqual === true && green ? 'retained' : fallback, ...(green && validation ? { validation } : {}) };
+  return assessApprovalRetention({ ...base, ...(validation ? { validation } : {}) }, patchEqual,
+    input.slug, input.candidate.baseline);
 }
 
 async function commitAssessment(input: RetentionRequest, loaded: Extract<MissionLoadResult, { kind: 'found' }>,

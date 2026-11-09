@@ -286,13 +286,18 @@ describe('repository prompt context policy', () => {
     }
   });
 
-  test('opinion overrides coexist with repository policy and cannot introduce per-stage precedence (TASK-2737)', () => {
-    withConfig({ adapters: { prompts: { override: 'opinion.md', contextCompaction: true } } }, root => {
-      assert.deepEqual(resolvePromptConfiguration(root), { overridePath: path.join(root, 'opinion.md'), contextCompaction: true });
+  test('global and review-only opinion overrides coexist with repository policy (TASK-2737, PX-0046.02 F2)', () => {
+    withConfig({ adapters: { prompts: { override: 'opinion.md', reviewOverride: 'review.md', contextCompaction: true } } }, root => {
+      assert.deepEqual(resolvePromptConfiguration(root), {
+        overridePath: path.join(root, 'opinion.md'),
+        reviewOverridePath: path.join(root, 'review.md'),
+        contextCompaction: true,
+      });
     });
     assert.ok(validateWorkflowConfig({ adapters: { prompts: { execute: { contextCompaction: true } } } }).length);
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
     assert.deepEqual(schema.properties.adapters.properties.prompts.properties.contextCompaction.type, 'boolean');
+    assert.deepEqual(schema.properties.adapters.properties.prompts.properties.reviewOverride.type, 'string');
     assert.equal(schema.properties.adapters.properties.prompts.properties.contextCompaction.default, true);
   });
 });

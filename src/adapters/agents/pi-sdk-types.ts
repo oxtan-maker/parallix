@@ -27,6 +27,8 @@ export interface PiSession {
   sessionId?: string;
   model?: PiModel;
   prompt(prompt: string): Promise<void>;
+  /** Best-effort stop of the in-flight turn; older SDK shapes may omit it. */
+  abort?(): void | Promise<void>;
   subscribe(listener: (event: PiStreamEvent) => void): () => void;
   dispose?(): void;
   getSessionStats?(): PiStats;

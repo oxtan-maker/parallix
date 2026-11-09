@@ -82,6 +82,8 @@ export interface IntegrationGateDefinition {
 
 export interface IntegrationFailedGate {
   key: string; command: string; exitCode: number | null; stdout: string; stderr: string; durationMs?: number;
+  signal?: string | null;
+  failureReason?: import('../../domain/failure-reason.js').FailureReason;
 }
 
 export type IntegrationStash = { created?: boolean; message?: string; rootDir?: string };

@@ -852,7 +852,7 @@ test('checkpoint track is bounded and honest across supplied plan shapes (TASK-2
     { plan: [entry('CP-2', 'completed'), entry('CP-9', 'completed')], fill: '100%', label: '2/2 completed' },
     { plan: [entry('CP-2'), entry('CP-9', 'current')], fill: '0%', label: 'Completion unknown' },
     { plan: Array.from({ length: 100 }, (_, i) => entry(`CP-${i}`, i < 25 ? 'completed' : 'future')), fill: '25%', label: '25/100 completed' },
-    { plan: [], fill: '0%', label: 'Plan unavailable' },
+    { plan: [], fill: '0%', label: 'checkpoints · completion unknown' },
   ];
   for (const { plan, fill, label } of cases) {
     for (const lane of ['backlog', 'refined', 'active', 'review', 'integration', 'done'] as const) {
@@ -862,10 +862,17 @@ test('checkpoint track is bounded and honest across supplied plan shapes (TASK-2
       assert.match(html, new RegExp(label));
       assert.match(html, /Recorded: CP-99/);
       if (plan.length) {
-        assert.match(html, /data-checkpoint-track=""/);
-        assert.equal((html.match(/data-checkpoint-fill=""/g) ?? []).length, 1);
-        assert.ok(html.includes(`width:${fill}`));
-        assert.match(html, /max-width:120px/);
+        if (plan.every(item => item.state !== undefined)) {
+          assert.match(html, /data-checkpoint-track=""/);
+          assert.equal((html.match(/data-checkpoint-fill=""/g) ?? []).length, 1);
+          assert.ok(html.includes(`width:${fill}`));
+          assert.match(html, /max-width:120px/);
+          assert.doesNotMatch(html, /data-checkpoint-current/);
+          assert.doesNotMatch(html, /data-checkpoint-summary|no current checkpoint/);
+        } else {
+          assert.doesNotMatch(html, /data-checkpoint-track|data-checkpoint-fill/);
+          assert.match(html, /data-checkpoint-unknown=""[^>]*>checkpoints · completion unknown<\/span>/);
+        }
       } else {
         assert.doesNotMatch(html, /data-checkpoint-track|data-checkpoint-fill|View checkpoint evidence/);
       }
@@ -880,8 +887,46 @@ test('checkpoint track is bounded and honest across supplied plan shapes (TASK-2
   const absent = renderToStaticMarkup(React.createElement(CheckpointPips, {
     card: { ...toWebBoardSnapshot(makeProjection({ active: [makeCard()] })).stages.find(stage => stage.lane === 'active')!.cards[0], checkpointEvidence: undefined },
   }));
-  assert.match(absent, /Plan unavailable/);
+  assert.match(absent, /checkpoints · completion unknown/);
   assert.doesNotMatch(absent, /0\/0|completed|data-checkpoint-track|data-checkpoint-fill|View checkpoint evidence/);
+});
+
+test('checkpoint gate and review metadata share one ordered bounded row with visible non-colour state labels (PX-0032)', () => {
+  const card = makeCard({ gate: 'running', reviewRound: 3,
+    pullRequest: { kind: 'pull-request', provider: 'forgejo', id: '47', url: 'https://example.invalid/pr/47', sourceBranch: 'mission/task-9999', targetBranch: 'main' }, checkpointEvidence: [
+    { name: 'CP-1', description: 'Plan', state: 'completed', goalCheck: [] },
+    { name: 'CP-2', description: 'Build', state: 'current', goalCheck: [] },
+    { name: 'CP-3', description: 'Verify', state: 'future', goalCheck: [] },
+  ] });
+  const html = render(toWebBoardSnapshot(makeProjection({ active: [card] })));
+  assert.match(html, /data-card-progress-row=""[^>]*height:24px[^>]*>[\s\S]*?aria-label="Checkpoint plan"[\s\S]*?data-gate-status=""[\s\S]*?aria-label="Pull request and review"[\s\S]*?PR #47[\s\S]*?aria-label="Review attempts"/);
+  assert.equal((html.match(/aria-label="Review attempts"/g) ?? []).length, 1, 'review attempts have no separate progress row');
+  assert.equal((html.match(/PR #47/g) ?? []).length, 1, 'pull request information has no separate row');
+  assert.match(html, /aria-description="1\/3 completed · Current: CP-2/);
+  assert.doesNotMatch(html, /data-checkpoint-summary/);
+  assert.match(html, /data-checkpoint-fill=""[^>]*background:#6fd0e8/);
+  assert.match(html, /gate · running/);
+  const detail = renderToStaticMarkup(React.createElement(CheckpointDetail, {
+    card: toWebBoardSnapshot(makeProjection({ active: [card] })).stages.find(stage => stage.lane === 'active')!.cards[0],
+    initial: 'CP-2', onClose: () => {},
+  }));
+  assert.match(detail, /✓.*CP-1 · completed/);
+  assert.match(detail, /▶.*CP-2 · current/);
+  assert.match(detail, /○.*CP-3 · future/);
+});
+
+test('unknown or absent checkpoint state never invents progress and preserves the gate row (PX-0032)', () => {
+  for (const checkpointEvidence of [
+    [{ name: 'CP-1', description: 'Legacy', goalCheck: [{ criterion: 'evidence', evidence: 'npm test' }] }],
+    [],
+  ]) {
+    const html = render(toWebBoardSnapshot(makeProjection({ active: [makeCard({ gate: 'failed', checkpointEvidence })] })));
+    assert.match(html, /data-checkpoint-gate-row=""/);
+    assert.match(html, /gate ✗ FAIL/);
+    assert.doesNotMatch(html, /0\/1|1\/1|data-checkpoint-fill/);
+    if (checkpointEvidence.length) { assert.match(html, /checkpoints · completion unknown/); }
+    else { assert.doesNotMatch(html, /View checkpoint evidence|data-checkpoint-summary/); }
+  }
 });
 
 test('recorded guidance and checkpoint evidence stay distinct from current activity (TASK-2776)', () => {

@@ -6,6 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { resolveConfiguration } from '../../../src/composition/config.js';
+import { tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
+import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
 const originalOpenSync = fs.openSync;
 const originalTmpdir = os.tmpdir;
 
@@ -13,6 +16,123 @@ const originalTmpdir = os.tmpdir;
 // dynamic import so the smoke tests themselves do not register here.
 process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS = '1';
 const smokeHelpers = await import('../../e2e/agents/real-agent-smoke.test.js');
+
+function selectionOptions(overrides: Partial<Parameters<typeof smokeHelpers.selectRealAgentSmoke>[0]> = {}) {
+  return {
+    explicitAgent: null,
+    explicitModel: null,
+    configuredCustomModel: 'local/custom-model',
+    configuredCustomRunner: 'pi',
+    acquireCustomCapacity: async () => null,
+    codexEligible: () => true,
+    codexBlocked: () => false,
+    codexAvailable: () => true,
+    ...overrides,
+  };
+}
+
+test('real-agent smoke keeps configured custom when production admission succeeds (PX-0049)', async () => {
+  let releases = 0;
+  let codexChecks = 0;
+  const selection = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    acquireCustomCapacity: async () => ({ release: () => { releases += 1; } }),
+    codexEligible: () => { codexChecks += 1; return true; },
+  }));
+  assert.deepEqual(selection, {
+    agent: 'custom', runner: 'pi', model: 'local/custom-model', reasoningEffort: null, reason: 'custom-admitted',
+  });
+  assert.equal(releases, 1, 'the capacity probe must not consume the slot used by the real lifecycle');
+  assert.equal(codexChecks, 0, 'admitted custom must not inspect or launch Codex');
+});
+
+test('real-agent smoke selects Luna low only when saturated custom can use Codex (PX-0049)', async () => {
+  const selection = await smokeHelpers.selectRealAgentSmoke(selectionOptions());
+  assert.deepEqual(selection, {
+    agent: 'codex', runner: 'codex', model: 'gpt-6-luna', reasoningEffort: 'low', reason: 'custom-saturated-codex',
+  });
+});
+
+test('real-agent smoke production capacity owner sees its shared disposable lease (PX-0049)', async () => {
+  const root = fs.mkdtempSync(path.join(originalTmpdir(), 'px-0049-shared-admission-'));
+  const policy = path.join(root, 'policy');
+  fs.mkdirSync(policy);
+  fs.writeFileSync(path.join(policy, 'workflow.config.json'), JSON.stringify({
+    adapters: { agents: { maxConcurrentCustom: 1 } },
+  }));
+  const environment = {
+    ...process.env,
+    PARALLIX_HOME: path.join(root, 'operator'),
+    PARALLIX_E2E_CUSTOM_ADMISSION_HOME: path.join(root, 'admission'),
+    PARALLIX_CUSTOM_ADMISSION_REPOSITORY: policy,
+  };
+  smokeHelpers.configureRealAgentSmokeAdmissionHome(environment, root, 'test');
+  const configuration = resolveConfiguration(environment);
+  let held: Awaited<ReturnType<typeof tryAcquireCustomCapacity>> = null;
+  try {
+    held = await tryAcquireCustomCapacity(policy, configuration);
+    assert.ok(held, 'fixture must occupy the configured custom slot');
+    const selection = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+      acquireCustomCapacity: () => tryAcquireCustomCapacity(policy, configuration),
+    }));
+    assert.equal(selection.reason, 'custom-saturated-codex');
+    assert.equal(selection.agent, 'codex');
+  } finally {
+    held?.release();
+    await clearCustomAdmissionStateCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('real-agent smoke preserves custom admission when Codex is ineligible, blocked, or unavailable (PX-0049)', async () => {
+  for (const unavailable of [
+    { codexEligible: () => false },
+    { codexBlocked: () => true },
+    { codexAvailable: () => false },
+  ]) {
+    const selection = await smokeHelpers.selectRealAgentSmoke(selectionOptions(unavailable));
+    assert.equal(selection.agent, 'custom');
+    assert.equal(selection.reason, 'custom-saturated-codex-unavailable');
+  }
+});
+
+test('real-agent smoke explicit overrides stay supported and unsupported Codex models fail before launch (PX-0049)', async () => {
+  const custom = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    explicitAgent: 'custom', explicitModel: 'operator/custom-model',
+  }));
+  assert.equal(custom.agent, 'custom');
+  assert.equal(custom.model, 'operator/custom-model');
+
+  const codex = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    explicitAgent: 'codex', explicitModel: 'gpt-6-luna',
+  }));
+  assert.equal(codex.agent, 'codex');
+  assert.equal(codex.reasoningEffort, 'low');
+
+  await assert.rejects(
+    smokeHelpers.selectRealAgentSmoke(selectionOptions({ explicitAgent: 'codex', explicitModel: 'gpt-6-sol' })),
+    /Codex smoke override requires model gpt-6-luna/,
+  );
+});
+
+test('real-agent smoke selection is final before launch and a custom failure never retries with Codex (PX-0049)', async () => {
+  let selections = 0;
+  const launches: string[] = [];
+  await assert.rejects(smokeHelpers.executeRealAgentSmoke(
+    async () => {
+      selections += 1;
+      return smokeHelpers.selectRealAgentSmoke(selectionOptions({
+        acquireCustomCapacity: async () => ({ release() {} }),
+      }));
+    },
+    async selection => {
+      launches.push(selection.agent);
+      throw new Error('custom lifecycle failed');
+    },
+  ), /custom lifecycle failed/);
+  assert.equal(selections, 1);
+  assert.deepEqual(launches, ['custom']);
+  assert.equal(launches.includes('codex'), false);
+});
 
 test('smoke state snapshots read only agent configuration, never the operator database', (t) => {
   const tempRoot = fs.mkdtempSync(path.join(originalTmpdir(), 'smoke-state-snapshot-'));

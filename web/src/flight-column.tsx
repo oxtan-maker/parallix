@@ -24,13 +24,6 @@ function edgeColor(card: WebMissionCard): string {
   return C.headEdge;
 }
 
-/**
- * The review attempt budget, as stated by the board contract. The client draws
- * the budget it was told about; it never extends it, and it never reads a round
- * number as progress toward the goal — a spent budget is not a finished plan.
- */
-const ATTEMPT_BUDGET = 5;
-
 type AttemptState = 'approved' | 'changes-requested' | 'recorded' | 'current' | 'unknown-outcome';
 
 /**
@@ -70,24 +63,19 @@ function attemptSlot(card: WebMissionCard, currentRound: number, number: number)
 }
 
 /**
- * The review attempts so far, one circle each. Attempts that may never happen
- * are not drawn: the budget bounds what is valid, it is not a promise. It shares no shape
- * with the checkpoint track below it, and it does not blink — whether work is
- * running is the fan's fact, carried by the server's work publication.
+ * Recorded review rounds are independent of retry budgets. Draw the attempts
+ * so far; the fans carry whether work is running.
  */
 function ReviewAttempts({ card }: { card: WebMissionCard }) {
   const currentRound = card.reviewRound;
   if (currentRound === null) { return null; }
-  // The transport admits any finite number. A round the budget cannot hold is
-  // reported as unknown: never clamped into a valid slot, never drawn as extra
-  // circles, never given a negative remainder.
-  if (!Number.isInteger(currentRound) || currentRound < 1 || currentRound > ATTEMPT_BUDGET) {
+  if (!Number.isInteger(currentRound) || currentRound < 1) {
     return (
       <span
         role="group"
         aria-label="Review attempts"
         data-review-round="unknown"
-        title={`the supplied review round ${String(currentRound)} lies outside the attempt budget`}
+        title={`the supplied review round ${String(currentRound)} is not a positive integer`}
         style={{ color: C.faint, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}
       >
         review round unknown
@@ -98,7 +86,7 @@ function ReviewAttempts({ card }: { card: WebMissionCard }) {
     <span
       role="group"
       aria-label="Review attempts"
-      style={{ display: 'inline-flex', gap: SPACE.xs, alignItems: 'center', fontSize: TYPE.meta }}
+      style={{ display: 'inline-flex', flex: '0 0 auto', gap: SPACE.xs, alignItems: 'center', whiteSpace: 'nowrap', fontSize: TYPE.meta }}
     >
       {Array.from({ length: currentRound }, (_unused, index) => {
         const number = index + 1;
@@ -157,30 +145,31 @@ function FlightCardHeader({ card, agent, liveAgent, accent, spinning }: { card: 
   );
 }
 
-function FlightCardReview({ card }: { card: WebMissionCard }) {
+function PullRequestReview({ card }: { card: WebMissionCard }) {
+  if (card.pullRequest === null && card.reviewRound === null) { return null; }
   return (
-(card.pullRequest !== null || card.reviewRound !== null) && (
-          <div style={{ marginBottom: SPACE.md, fontSize: TYPE.meta }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: SPACE.md, flexWrap: 'wrap' }}>
-              {card.pullRequest !== null && (card.pullRequest.url === null
-                ? <span style={{ color: C.cyan }}>PR #{card.pullRequest.id}</span>
-                : <a href={card.pullRequest.url} rel="noreferrer" style={{ color: C.cyan }}>PR #{card.pullRequest.id}</a>)}
-              <ReviewAttempts card={card} />
-            </div>
-          </div>
-        )
+    <span data-review-status="" role="group" aria-label="Pull request and review"
+      style={{ display: 'inline-flex', flex: '0 0 auto', minWidth: 0, alignItems: 'center', gap: SPACE.sm, fontSize: TYPE.meta }}>
+      {card.pullRequest !== null && (card.pullRequest.url === null
+        ? <span style={{ maxWidth: 64, color: C.cyan, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>PR #{card.pullRequest.id}</span>
+        : <a href={card.pullRequest.url} rel="noreferrer" style={{ maxWidth: 64, color: C.cyan, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>PR #{card.pullRequest.id}</a>)}
+      <ReviewAttempts card={card} />
+    </span>
   );
 }
 
 function FlightCardCheckpoint({ card }: { card: WebMissionCard }) {
   return (
-    <div>
+    <div data-card-progress-row="" data-checkpoint-gate-row="" aria-label="Mission progression" style={{ display: 'flex', alignItems: 'center', gap: SPACE.md,
+      width: '100%', minWidth: 0, height: 24, marginBottom: SPACE.md, overflow: 'hidden' }}>
       <CheckpointPips card={card} />
-      <div style={{ marginBottom: SPACE.md, fontSize: TYPE.meta, color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
+      <div data-gate-status="" style={{ flex: '0 0 auto', minWidth: 0, whiteSpace: 'nowrap', fontSize: TYPE.meta,
+        color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
         {card.gate === 'unavailable'
           ? <details><summary style={{ cursor: 'pointer', fontSize: TYPE.micro }}>gate · unknown</summary><span>{GATE_TEXT[card.gate]}</span></details>
           : GATE_TEXT[card.gate]}
       </div>
+      <PullRequestReview card={card} />
     </div>
   );
 }
@@ -215,7 +204,6 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       <FlightCardHeader card={card} agent={agent} liveAgent={liveAgent} accent={accent} spinning={spinning} />
 
       <div style={{ padding: SPACE.lg }}>
-        <FlightCardReview card={card} />
         <FlightCardCheckpoint card={card} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md, flexWrap: 'wrap' }}>
           <ActorLine card={card} />

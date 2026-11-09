@@ -259,7 +259,7 @@ test('selecting a different checkpoint keeps the dialog open and shows its rows 
     // The CP-2 selector button click bubbles up to the backdrop; only a direct
     // backdrop click dismisses the panel, so selecting a checkpoint keeps it open.
     const selectors = page.window.document.querySelectorAll('nav[aria-label="Checkpoints"] button');
-    const cp2 = [...selectors].find((button) => (button.textContent ?? '').trim() === 'CP-2');
+    const cp2 = [...selectors].find((button) => (button.textContent ?? '').includes('CP-2 · unknown'));
     assert.ok(cp2, 'the CP-2 selector button is present');
     await act(async () => { cp2.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
     assert.ok(page.window.document.querySelector('[role="dialog"]'), 'selecting a checkpoint keeps the dialog open');

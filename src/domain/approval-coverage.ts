@@ -6,6 +6,7 @@ import {
   type Review,
   type ReviewDecisionSupersession,
 } from './review.js';
+import { currentRevisionApprovals, validReviewerApprovals } from './reviewer-result.js';
 
 /**
  * Git trailer that marks a commit Parallix made for its own bookkeeping on a
@@ -74,6 +75,28 @@ function effectiveApproval(review: Review | null) {
   return round.decision?.kind === 'approved' ? { round, decision: round.decision } : null;
 }
 
+function resultBackedApprovalCoverage(
+  review: Review,
+  observation: LandedChangeObservation & { readonly landedRevision: ChangeRevision },
+  round: number,
+  approvedRevision: ChangeRevision,
+): ApprovalCoverage {
+  const current = currentRevisionApprovals(review, observation.landedRevision);
+  if (current.length > 0) { return { kind: 'covers', round, approvedRevision: observation.landedRevision }; }
+  const valid = validReviewerApprovals(review);
+  if (valid.length === 0) {
+    return { kind: 'unverifiable', round, approvedRevision: null, reason: 'no valid reviewer result approves the current revision' };
+  }
+  if (observation.sameChange === null) {
+    return { kind: 'unverifiable', round, approvedRevision, reason: `approved revision ${approvedRevision} is not a readable commit` };
+  }
+  if (observation.sameChange === true && currentRevisionApprovals(review, approvedRevision).length > 0) {
+    return { kind: 'covers', round, approvedRevision };
+  }
+  return { kind: 'stale', round, approvedRevision: valid[valid.length - 1].revision,
+    landedRevision: observation.landedRevision, recorded: null };
+}
+
 /**
  * Assess the current effective approval against the observed branch.  Returns
  * `null` when there is no effective approval to cover anything.  A recorded
@@ -96,6 +119,9 @@ export function assessApprovalCoverage(
   }
   if (!observation?.landedRevision) {
     return { kind: 'unverifiable', round, approvedRevision, reason: 'the branch revision cannot be read' };
+  }
+  if (effective.round.reviewerResults !== undefined) {
+    return resultBackedApprovalCoverage(review!, { ...observation, landedRevision: observation.landedRevision }, round, approvedRevision);
   }
   if (observation.landedRevision === approvedRevision || observation.sameChange === true) {
     return { kind: 'covers', round, approvedRevision };

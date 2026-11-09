@@ -8,4 +8,5 @@ export const REVIEW_ROUND_COLUMNS = [
   'superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision',
   'phase, disposition, reviewer_retry_count, implementer_retry_count',
   'implementer_response_content, item_dispositions, blocked_reason',
+  'reviewer_results',
 ].join(', ');

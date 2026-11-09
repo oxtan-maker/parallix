@@ -5,6 +5,8 @@ export function renderPromptContextPolicy(template: string, enabled = true): str
     .replaceAll('{{gateContextAction}}', enabled
       ? "compact your working context before starting the next gate, checkpoint work, or review preparation work. Reload"
       : "before starting the next gate, checkpoint work, or review preparation work, reload")
-    .replaceAll('{{reviewContextAction}}', enabled ? 'compact the prior-round working context. Reload' : 'reload')
+    // Every reviewer invocation is a fresh native conversation. Both policy
+    // modes therefore reload authority instead of referring to prior context.
+    .replaceAll('{{reviewContextAction}}', 'reload')
     .replaceAll('{{actOnReviewContextAction}}', enabled ? 'compact the implementation context and reload' : 'reload');
 }

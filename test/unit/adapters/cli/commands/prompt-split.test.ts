@@ -1,6 +1,6 @@
 // task-2465: each shipped stage prompt is split into a mandatory core half and
 // an overridable default-opinion half; no-override assembly is byte-preserving,
-// and the single `adapters.prompts.override` key swaps only the opinion half.
+// and configured overrides swap only the intended opinion half.
 import test from 'node:test';
 import { renderPromptContextPolicy } from '../../../../../src/application/prompt-context-policy.js';
 import assert from 'node:assert/strict';
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FilesystemAssetStore } from '../../../../../src/adapters/assets/asset-store.js';
 import { assembleStagePrompt } from '../../../../../src/adapters/assets/runtime-assets.js';
-import { resolvePromptOverride, validateWorkflowConfig } from '../../../../../src/adapters/config/product-config.js';
+import { resolvePromptConfiguration, resolvePromptOverride, validateWorkflowConfig } from '../../../../../src/adapters/config/product-config.js';
 import { buildDraftPrompt } from '../../../../../src/adapters/cli/commands/draft-prompts.js';
 import { buildExecutePrompt } from '../../../../../src/adapters/cli/commands/active.js';
 import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from '../../../../../src/adapters/review/review-prompts.js';
@@ -51,12 +51,28 @@ function parentPrompt(stage: string): string {
     ? `${parent.replace(
       'Do not run any large test gates, thats run automatically by parallix at suitable steps and is not your job. Specific test to validate a code finding is ok.',
       REVIEW_COVERAGE_GUIDANCE,
+    ).replace(
+      "- When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This compaction is independent of the mission's declared gates.",
+      "- When `{{attempt}}` is 2 or later, before beginning this review round reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This reload is independent of the mission's declared gates.",
     )}\n`
     : sourceAwareDraft;
   return normalized
     .replace('Do not refresh Graphify after drafting; freshness is maintained at the autonomous-review boundary on the final verified tree.', GRAPHIFY_GUIDANCE)
     .replace('Graph freshness is handled at the autonomous-review boundary, after its final verification and immediately before reviewer launch; do not refresh after ordinary edits.', GRAPHIFY_GUIDANCE)
     .replace('Do not refresh Graphify after ordinary edits: the next autonomous-review boundary refreshes the final verified tree immediately before reviewer launch.', GRAPHIFY_GUIDANCE);
+}
+
+// The parent fixture still owns the mandatory split baseline. This repository's
+// review opinion is now deliberately newer than that baseline: it carries the
+// local counterexample policy while retaining the prior coverage guidance. The
+// distributable's blank review opinion is covered by the package/review owner
+// suites; this source-owner suite must expect the checked-in local opinion.
+function expectedSourcePrompt(stage: string): string {
+  const parent = parentPrompt(stage);
+  if (stage !== 'review') {return parent;}
+  const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', 'review.md'), 'utf8');
+  assert.ok(repositoryOpinion.includes(REVIEW_COVERAGE_GUIDANCE), 'repository review opinion must retain the prior coverage guidance');
+  return parent.replace(REVIEW_COVERAGE_GUIDANCE, repositoryOpinion.trimEnd());
 }
 
 test('Graphify guidance limits automatic updates to landed merges (TASK-2725)', () => {
@@ -85,19 +101,20 @@ function multisetEqual(a: Map<string, number>, b: Map<string, number>): boolean 
   return true;
 }
 
-// --- preservation: core + default (minus the one added heading) equals the
-// parent-commit prompt as a non-blank-line multiset, for every stage. ---
+// --- preservation: core + source opinion (minus the one added heading) equals
+// the authorized source prompt as a non-blank-line multiset, for every stage. ---
 
 for (const [i, stage] of STAGES.entries()) {
-  test(`task-2465-${i}: ${stage} core+default preserves the parent-commit prompt as a non-blank multiset`, () => {
+  test(`task-2465-${i}: ${stage} core+opinion preserves the authorized source prompt as a non-blank multiset`, () => {
     const core = renderPromptContextPolicy(fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}-core.md`), 'utf8'));
     const def = fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}.md`), 'utf8');
     const heading = core.split('\n')[0];
     assert.ok(heading && heading.startsWith('#'), `${stage} core file must begin with a file-naming heading`);
     const got = counts([...nonBlank(core).filter(l => l !== heading), ...nonBlank(def)]);
-    const want = counts(nonBlank(parentPrompt(stage)));
-    assert.ok(multisetEqual(got, want), `${stage}: core+default non-blank multiset must equal parent-commit multiset`);
-    // The added heading is the only line in core that is not in the parent.
+    const want = counts(nonBlank(expectedSourcePrompt(stage)));
+    assert.ok(multisetEqual(got, want), `${stage}: core+opinion non-blank multiset must equal the authorized source prompt`);
+    // Repository-local additions belong in the opinion; the added heading is
+    // still the only core line that is not in the parent baseline.
     const extra = nonBlank(core).filter(l => !nonBlank(parentPrompt(stage)).includes(l));
     assert.deepEqual(extra, [heading], `${stage}: only the added heading may be new`);
   });
@@ -113,13 +130,13 @@ for (const [i, stage] of STAGES.entries()) {
 // section lands out of order relative to its sibling lines. No literal
 // placeholder may leak, and the added core heading must not leak either.
 function assertLaunchKeepsEveryLine(stage: string, launch: string) {
-  const parent = parentPrompt(stage);
+  const expected = expectedSourcePrompt(stage);
   assert.doesNotMatch(launch, /\{\{/, `${stage}: unsubstituted placeholder leaked at launch`);
   // The split appends a `# <filename>` heading to each core; it must not leak
   // into the assembled launch output (a regression the split introduced).
   assert.doesNotMatch(launch, /^#/, `${stage}: added core heading leaked at launch`);
-  assert.ok(isOrderedSubsequence(nonPlaceholderSeq(parent), nonPlaceholderSeq(launch)),
-    `${stage}: launch reordered or dropped pre-split lines (parent order not preserved)`);
+  assert.ok(isOrderedSubsequence(nonPlaceholderSeq(expected), nonPlaceholderSeq(launch)),
+    `${stage}: launch reordered or dropped source-prompt lines (order not preserved)`);
 }
 
 // Non-placeholder lines in order (placeholder lines carry `{{...}}` and are
@@ -141,12 +158,60 @@ test('task-2465-execute launch point preserves every pre-split line (no override
   assertLaunchKeepsEveryLine('execute', buildExecutePrompt('task-2465', 'checkpoint context', { rootDir: realRepoRoot() }));
 });
 
-test('task-2465-review launch point preserves every pre-split line (no override)', () => {
-  assertLaunchKeepsEveryLine('review', buildCompactReviewPrompt({ reviewer: 'codex', branch: 'mission/task-2465', implementer: 'claude', attempt: 1 }));
+test('task-2465-review launch point preserves every authorized source line with repository policy', () => {
+  assertLaunchKeepsEveryLine('review', buildCompactReviewPrompt({ reviewer: 'codex', branch: 'mission/task-2465', implementer: 'claude', attempt: 1, repoRoot: realRepoRoot() }));
 });
 
-test('task-2465-act-on-review launch point preserves every pre-split line (no override)', () => {
-  assertLaunchKeepsEveryLine('act-on-review', buildCompactActOnReviewPrompt({ implementer: 'claude', branch: 'mission/task-2465', attempt: 1 }));
+test('task-2465-act-on-review launch point preserves every source line under real repository configuration', () => {
+  assertLaunchKeepsEveryLine('act-on-review', buildCompactActOnReviewPrompt({ implementer: 'claude', branch: 'mission/task-2465', attempt: 1, repoRoot: realRepoRoot() }));
+});
+
+test('repository review policy is confined to review while every other opinion remains intact (PX-0046.02 F2)', () => {
+  const root = realRepoRoot();
+  const counterexamplePolicy = 'Before a general audit of mission paperwork, perform a short counterexample pass over the changed behavior.';
+  const configuration = resolvePromptConfiguration(root);
+  assert.equal(configuration.overridePath, null, 'the repository must not select the legacy all-stage override');
+  assert.equal(configuration.reviewOverridePath, path.join(root, 'prompts', 'review.md'));
+
+  const prompts = new Map<string, string>([
+    ['draft', buildDraftPrompt('task-2465', { rootDir: root })],
+    ['execute', buildExecutePrompt('task-2465', 'checkpoint context', { rootDir: root })],
+    ['review', buildCompactReviewPrompt({ reviewer: 'codex', branch: 'mission/task-2465', implementer: 'claude', attempt: 1, repoRoot: root })],
+    ['act-on-review', buildCompactActOnReviewPrompt({ implementer: 'claude', branch: 'mission/task-2465', attempt: 1, repoRoot: root })],
+    ['portfolio', assembleStagePrompt('portfolio', configuration)],
+  ]);
+
+  for (const [stage, prompt] of prompts) {
+    const count = prompt.split(counterexamplePolicy).length - 1;
+    assert.equal(count, stage === 'review' ? 1 : 0, `${stage} must receive the repository review policy ${stage === 'review' ? 'once' : 'never'}`);
+  }
+  assert.match(prompts.get('act-on-review') || '', new RegExp(GRAPHIFY_GUIDANCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.match(prompts.get('portfolio') || '', /Graphify-first/);
+});
+
+test('review-only opinion takes precedence for review and is ignored by other stages (PX-0046.02 F2)', () => {
+  const root = registeredMkdtemp('px-0046-review-override-precedence-');
+  try {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      adapters: { prompts: { override: 'all.md', reviewOverride: 'review.md' } },
+    }));
+    fs.writeFileSync(path.join(root, 'all.md'), 'GLOBAL-OPINION-PX-0046\n');
+    fs.writeFileSync(path.join(root, 'review.md'), 'REVIEW-ONLY-OPINION-PX-0046\n');
+    const configuration = resolvePromptConfiguration(root);
+    const review = assembleStagePrompt('review', configuration);
+    const actOnReview = assembleStagePrompt('act-on-review', configuration);
+
+    assert.match(review, /REVIEW-ONLY-OPINION-PX-0046/);
+    assert.doesNotMatch(review, /GLOBAL-OPINION-PX-0046/);
+    assert.match(actOnReview, /GLOBAL-OPINION-PX-0046/);
+    assert.doesNotMatch(actOnReview, /REVIEW-ONLY-OPINION-PX-0046/);
+
+    fs.rmSync(path.join(root, 'review.md'));
+    assert.doesNotThrow(() => assembleStagePrompt('act-on-review', configuration), 'a missing review-only file is irrelevant outside review');
+    assert.throws(() => assembleStagePrompt('review', configuration), /configured but the file is missing/, 'review must fail closed when its selected opinion disappears');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });
 
 // --- assembly reconstruction: no-override assembly must rebuild the
@@ -161,16 +226,16 @@ function normalizeBlankRuns(s: string): string {
 }
 
 for (const [i, stage] of STAGES.entries()) {
-  test(`task-2465-assembly-${i}: ${stage} no-override assembly rebuilds the parent-commit prompt`, () => {
+  test(`task-2465-assembly-${i}: ${stage} no-override assembly rebuilds the authorized source prompt`, () => {
     const assembled = assembleStagePrompt(stage, {});
-    assert.equal(assembled, parentPrompt(stage),
-      `${stage}: no-override assembly must be byte-identical to the parent-commit prompt`);
+    assert.equal(assembled, expectedSourcePrompt(stage),
+      `${stage}: no-override assembly must be byte-identical to the authorized source prompt`);
     // Every stage assembles core+opinion in parent order; interior blank-line
     // runs collapse to one so a removed blank still fails (it merges two
     // blocks) and an added blank is tolerated. An ordered comparison catches a
     // list split (a bullet under the wrong heading) and a dropped/added line.
-    assert.equal(normalizeBlankRuns(assembled), normalizeBlankRuns(parentPrompt(stage)),
-      `${stage}: no-override assembly must rebuild the parent-commit prompt`);
+    assert.equal(normalizeBlankRuns(assembled), normalizeBlankRuns(expectedSourcePrompt(stage)),
+      `${stage}: no-override assembly must rebuild the authorized source prompt`);
   });
 }
 
@@ -255,15 +320,17 @@ test('task-2465: override cannot drop core resolution instructions when the repo
   }
 });
 
-// --- config boundary: exactly one new key; unknown keys beneath it fail through
-// the existing configuration-error path. ---
+// --- config boundary: the closed opinion keys are typed; unknown keys beneath
+// adapters.prompts fail through the existing configuration-error path. ---
 
-test('task-2465: adapters.prompts.override is accepted; unknown keys beneath it are rejected', () => {
+test('task-2465: prompt opinion overrides are accepted; unknown keys beneath them are rejected', () => {
   assert.deepEqual(validateWorkflowConfig({ adapters: { prompts: { override: 'prompts/override.md' } } }), []);
+  assert.deepEqual(validateWorkflowConfig({ adapters: { prompts: { reviewOverride: 'prompts/review.md' } } }), []);
   assert.deepEqual(validateWorkflowConfig({ adapters: {} }), []);
   assert.notDeepEqual(validateWorkflowConfig({ adapters: { prompts: { unknownKey: true } } }), []);
   assert.notDeepEqual(validateWorkflowConfig({ adapters: { prompts: { override: 5 } } }), []);
-  // No per-stage keys: only the single adapters.prompts surface exists.
+  assert.notDeepEqual(validateWorkflowConfig({ adapters: { prompts: { reviewOverride: 5 } } }), []);
+  // No arbitrary per-stage keys: reviewOverride is the one review-only boundary.
   assert.notDeepEqual(validateWorkflowConfig({ adapters: { prompts: { draftOverride: 'x' } } }), []);
 });
 

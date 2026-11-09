@@ -308,6 +308,8 @@ export interface ReviewRound {
   readonly implementer: AgentFamily;
   readonly startedAt: string;
   readonly decision: ReviewerDecision | null;
+  /** Immutable per-reviewer publications; absent only on pre-PX-0046 rounds. */
+  readonly reviewerResults?: readonly import('./reviewer-result.js').ReviewerResult[];
   readonly response: ImplementerResolution | null;
   /** Workflow phase of this round. Reset to `reviewing` when a round begins. */
   readonly phase: ReviewPhase;
@@ -649,6 +651,10 @@ export function revokeApprovedDecision(
   const revokedRound: ReviewRound = {
     ...current,
     decision: { ...current.decision, revocation },
+    ...(current.reviewerResults ? { reviewerResults: current.reviewerResults.map(result =>
+      result.decision === 'approved' && result.agentFamily === current.reviewer
+        && result.revision === current.decision!.revision
+        ? { ...result, revokedAt: revocation.revokedAt } : result) } : {}),
   };
   const superseding = current.decision.supersession?.supersedingRevision;
   const nextRound: ReviewRound = {
@@ -666,6 +672,9 @@ export function revokeApprovedDecision(
   };
   return { ...review, rounds: [...replaceCurrentRound(review, revokedRound), nextRound], intervention: null };
 }
+
+export { currentRevisionApprovals, recordReviewerResult, validReviewerApprovals } from './reviewer-result.js';
+export type { ReviewerResult, ReviewerResultAttribution, ReviewerResultDecision, ReviewerResultOutcome } from './reviewer-result.js';
 
 function requireEligibleReviewer(
   reviewer: AgentFamily,

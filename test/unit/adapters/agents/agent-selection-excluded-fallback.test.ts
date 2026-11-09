@@ -16,9 +16,17 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repositoryReviewPolicy = fs.readFileSync(
+  path.resolve(__dirname, '../../../../prompts/review.md'),
+  'utf8',
+).trimEnd();
 
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
-import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
+import { agentFamily, AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
+import { missionId } from '../../../../src/domain/mission.js';
+import type { SessionMarkerPort } from '../../../../src/application/domain-ports.js';
+import type { AgentLauncherInput } from '../../../../src/adapters/agents/agent-process-types.js';
+import { buildCompactReviewPrompt } from '../../../../src/adapters/review/review-prompts.js';
 import { fakeLauncher } from '../../../lib/agent-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
@@ -27,8 +35,15 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
   try {
     // Simulate: codex and qwen fail, then pool exhausts.
     // Excluded agent 'claude' (the implementer) should be tried as last resort.
-    const launched = [];
+    const launched: AgentLauncherInput[] = [];
     let callCount = 0;
+    const markerCalls = { find: 0, save: 0, delete: 0, shouldResume: 0 };
+    const markerPort: SessionMarkerPort = {
+      find: async () => { markerCalls.find++; return { missionId: missionId('px-0046-fallback'), role: 'review', agent: agentFamily('claude'), lastLaunched: '2026-11-01T00:00:00Z', sessionId: 'implementation-session' }; },
+      save: async () => { markerCalls.save++; },
+      delete: async () => { markerCalls.delete++; },
+      shouldResume: async () => { markerCalls.shouldResume++; return true; },
+    };
 
     const selectAgentFn: NonNullable<NonNullable<Parameters<typeof startAgent>[1]>["selectAgentFn"]> = (step, opts = {}) => {
       callCount++;
@@ -51,15 +66,20 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
     let launcherIndex = 0;
 
     const result = await startAgent('review', {
-      prompt: 'Review the changes.',
+      prompt: actual => buildCompactReviewPrompt({ reviewer: actual, implementer: 'claude', branch: 'mission/px-0046-fallback', attempt: 1 }),
       worktree: tmpRoot,
+      slug: 'px-0046-fallback',
+      role: 'reviewer',
+      sessionPolicy: 'fresh-ephemeral',
+      sessionMarkerPort: markerPort,
       exclude: ['claude'], // implementer excluded for family separation
       isAgentBlockedFn: () => false,
       detectLimitHitFn: () => null,
       updateAgentBlockFn: () => ({}),
       selectAgentFn,
-      launchAgentFn: () => {
-        launched.push(launcherIndex);
+      resolveAgentModelFn: family => `configured-${family}`,
+      launchAgentFn: input => {
+        launched.push(input);
         const r = launcherResults[launcherIndex];
         launcherIndex++;
         return {
@@ -73,6 +93,13 @@ test('startAgent tries excluded agents after non-excluded pool exhausts (TASK-23
 
     assert.equal(result.agent, 'claude', 'excluded agent (implementer) should be tried as last resort');
     assert.equal(launched.length, 3, 'should have launched 3 agents: codex, qwen, then claude');
+    assert.deepEqual(markerCalls, { find: 0, save: 0, delete: 0, shouldResume: 0 }, 'fresh review attempts never read, replace, or delete the implementer marker');
+    for (const input of launched) {
+      assert.equal(input.resume, false);
+      assert.equal(input.sessionId, null);
+      assert.equal(input.model, `configured-${input.env?.FORGEJO_USER}`, 'configured per-family model selection is preserved');
+      assert.equal(input.prompt.split(repositoryReviewPolicy).length - 1, 1, 'fallback attempts retain the repository review policy exactly once');
+    }
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   }

@@ -74,7 +74,8 @@ export interface RunSession {
     resourceBoundary?: { readonly boundary: string; readonly parent: string | null };
     onProcessTreeCpu?: (_observation: ProcessTreeCpuObservation) => void };
   finish(_result: { status?: number | null; signal?: string | null; sessionId?: string | null;
-    processTreeCpu?: ProcessTreeCpuObservation | null; telemetry?: StageTelemetry | null; provider?: string | null; model?: string | null } | null | undefined): void;
+    processTreeCpu?: ProcessTreeCpuObservation | null; telemetry?: StageTelemetry | null; provider?: string | null; model?: string | null;
+    providerExit?: { status: number | null; signal: string | null } | null } | null | undefined): void;
 }
 
 /** Thrown when tmux is configured with `whenUnavailable: "fail"` and cannot run. */
@@ -243,22 +244,43 @@ function runTeeOptions(input: RunSessionInput, identity: AgentRunIdentity & { re
 
 function runIdFor(identity: AgentRunIdentity): string { return agentRunId(identity); }
 
-function providerResources(result: Parameters<RunSession['finish']>[0]): ProviderResourceObservation | null {
-  const telemetry = result?.telemetry;
-  if (!telemetry) { return null; }
-  const candidates = [
-    ['input', telemetry.inputTokens, 'tokens'], ['output', telemetry.outputTokens, 'tokens'],
-    ['cached', telemetry.cachedTokens, 'tokens'], ['reasoning', telemetry.thoughtsTokens, 'tokens'],
-    ['context', telemetry.totalTokens, 'tokens'], ['tool-calls', telemetry.toolCalls, 'count'],
-    ['provider-usage', telemetry.usagePercent, 'percent'], ['cost', telemetry.cost_usd, 'usd'],
-  ] as const;
-  const values = candidates.flatMap(([name, value, unit]) => typeof value === 'number' && Number.isFinite(value) && value >= 0
-    ? [{ name, value, unit }] : []);
-  return values.length ? { provenance: 'provider-reported', provider: telemetry.provider ?? result?.provider ?? null,
-    model: telemetry.model ?? result?.model ?? null, values } : null;
+type RunFinishResult = Parameters<RunSession['finish']>[0];
+type ProviderResourceValue = ProviderResourceObservation['values'][number];
+
+function providerResourceValue(name: string, value: number | null | undefined, unit: ProviderResourceValue['unit']): ProviderResourceValue[] {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? [{ name, value, unit }] : [];
 }
 
-function finishRunCapture(input: RunSessionInput, worktree: string, runId: string, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null, result: Parameters<RunSession['finish']>[0], localCpu: ProcessTreeCpuObservation | null): void {
+function providerResourceValues(telemetry: StageTelemetry | null | undefined): ProviderResourceObservation['values'] {
+  const candidates = [
+    ['input', telemetry?.inputTokens, 'tokens'], ['output', telemetry?.outputTokens, 'tokens'],
+    ['cached', telemetry?.cachedTokens, 'tokens'], ['reasoning', telemetry?.thoughtsTokens, 'tokens'],
+    ['context', telemetry?.totalTokens, 'tokens'], ['tool-calls', telemetry?.toolCalls, 'count'],
+    ['provider-usage', telemetry?.usagePercent, 'percent'], ['cost', telemetry?.cost_usd, 'usd'],
+  ] as const;
+  return candidates.flatMap(([name, value, unit]) => providerResourceValue(name, value, unit));
+}
+
+function providerResources(result: RunFinishResult): ProviderResourceObservation | null {
+  const telemetry = result?.telemetry;
+  const provider = telemetry?.provider ?? result?.provider ?? null;
+  const model = telemetry?.model ?? result?.model ?? null;
+  const values = providerResourceValues(telemetry);
+  return values.length || provider || model ? { provenance: 'provider-reported', provider, model, values } : null;
+}
+
+function providerProcessExit(result: RunFinishResult): { exitCode: number | null; signal: string | null } {
+  const providerExit = result?.providerExit;
+  if (providerExit) {
+    return { exitCode: providerExit.status, signal: providerExit.signal };
+  }
+  return {
+    exitCode: result?.status ?? null,
+    signal: result?.signal ?? null,
+  };
+}
+
+function finishRunCapture(input: RunSessionInput, worktree: string, runId: string, configuration: ParallixConfiguration, choice: TerminalChoice, capture: RunCapture | null, result: RunFinishResult, localCpu: ProcessTreeCpuObservation | null): void {
   const { useTmux, inheritedTerminal } = choice;
 
   if (!capture) { return; }
@@ -268,7 +290,9 @@ function finishRunCapture(input: RunSessionInput, worktree: string, runId: strin
     if (IN_PROCESS_FAMILIES.has(input.family)) {
       provider.sources[0] = { kind: 'terminal-bytes', path: 'stdout', covers: `text the in-process ${input.family} session rendered`, complete: true };
     }
-    capture.finish({ exitCode: result?.status ?? null, signal: result?.signal ?? null, providerSessionId: sessionId, ...provider,
+    // An authoritative-completion stop keeps the assignment successful, but the
+    // record keeps the exit of the provider process that was actually stopped.
+    capture.finish({ ...providerProcessExit(result), providerSessionId: sessionId, ...provider,
       resources: { localProcessTreeCpu: localCpu ?? result?.processTreeCpu ?? null, provider: providerResources(result) } });
   } catch (err) {
     input.log(fmt.status('WARN', `Could not finalize run history ${runId}: ${(err as Error).message}`));

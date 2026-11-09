@@ -288,6 +288,10 @@
             "override": {
               "type": "string",
               "description": "Repo-relative or absolute path to a repo-local default-opinion file. Parallix always assembles the mandatory core half; only the opinion half is replaced. Unknown keys beneath adapters.prompts are rejected."
+            },
+            "reviewOverride": {
+              "type": "string",
+              "description": "Repo-relative or absolute path to a review-only opinion file. It takes precedence over override for review and is ignored by every other stage."
             }
           }
         }

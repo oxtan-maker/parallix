@@ -201,6 +201,42 @@ describe("Codex launcher basics ,", () => {
     assert.ok(inv.args.includes('gpt-5.4-mini'));
   });
 
+  test('scoped Codex effort reaches fresh and resumed draft, implementation, and review launches (PX-0049)', async () => {
+    const launches: string[][] = [];
+    codex.__setSpawnAndTeeForTest((_command, args) => {
+      launches.push([...args]);
+      return Promise.resolve({ status: 0, signal: null, stdout: 'codex resume abc12345\n', stderr: '', error: null });
+    });
+    const configuration = resolveConfiguration({
+      ...environment,
+      PARALLIX_CODEX_REASONING_EFFORT: 'low',
+    });
+    try {
+      for (const launch of [
+        { role: 'draft' as const, resume: false, sessionId: null },
+        { role: 'execute' as const, resume: true, sessionId: 'execute-session' },
+        { role: 'review' as const, resume: true, sessionId: 'review-session' },
+      ]) {
+        const worktree = registeredMkdtemp(`codex-effort-${launch.role}-`);
+        await codex.startCodexDraftAgent({
+          configuration, prompt: `${launch.role} prompt`, worktree,
+          role: launch.role, resume: launch.resume, sessionId: launch.sessionId,
+          model: 'gpt-6-luna',
+        }).resultPromise;
+      }
+      assert.equal(launches.length, 3);
+      for (const args of launches) {
+        assert.ok(args.includes('gpt-6-luna'));
+        assert.ok(args.includes('model_reasoning_effort="low"'));
+      }
+      assert.equal(launches[0].includes('resume'), false);
+      assert.equal(launches[1].includes('resume'), true);
+      assert.equal(launches[2].includes('resume'), true);
+    } finally {
+      codex.__setSpawnAndTeeForTest(null);
+    }
+  });
+
   // ---------- startCodexDraftAgent stale session detection (task-1322) ----------
 
   test('startCodexDraftAgent retries without exec resume when spawn returns "Session not found"', async () => {
@@ -259,13 +295,15 @@ describe("Codex launcher basics ,", () => {
     codex.__setSessionPortForTest(mockSessionPort);
     const capture = { write() {} };
     try {
-      const { resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration(environment),
-        prompt: 'resume prompt', worktree: registeredMkdtemp('codex-stale-'), resume: true, sessionId: 'abc', slug: fixtureMissionId('task-2760'), role: 'execute', teeOptions: { capture } });
+      const { resultPromise } = codex.startCodexDraftAgent({ configuration: resolveConfiguration({ ...environment, PARALLIX_CODEX_REASONING_EFFORT: 'low' }),
+        prompt: 'resume prompt', worktree: registeredMkdtemp('codex-stale-'), resume: true, sessionId: 'abc', slug: fixtureMissionId('task-2760'), role: 'execute', model: 'gpt-6-luna', teeOptions: { capture } });
       const result = await resultPromise;
       assert.equal(spawns.length, 2);
       assert.ok(spawns[0].args.includes('resume'));
       assert.equal(spawns[1].args.includes('resume'), false);
       assert.deepEqual(spawns.map(spawn => [spawn.args.at(-1), spawn.input]), [['-', 'resume prompt'], ['-', 'resume prompt']]);
+      assert.ok(spawns.every(spawn => spawn.args.includes('gpt-6-luna') && spawn.args.includes('model_reasoning_effort="low"')),
+        'resume and stale-session fresh fallback retain the scoped model and effort');
       assert.ok(spawns.every(spawn => spawn.capture === capture && spawn.configuration), 'tee capture and confinement configuration reach both spawns');
       assert.deepEqual(deleted, { missionId: 'task-2760', role: 'execute' });
       assert.equal(result.sessionId, '1234abcd');

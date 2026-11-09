@@ -248,6 +248,22 @@ test('resource gates serialize across runs; failure and cancellation retain desc
   assert.equal((await waiting).ok, true, 'waiting work starts after the cancelled child settles');
 });
 
+test('an integration failure on a resource releases its slot to waiters and blocks only dependents (px-0050.01)', async t => {
+  const { root, run } = await resourceFixture(t, { resources: { test: 1 } });
+  const result = await run([
+    { key: 'unit', command: 'touch unit-ran; printf red >&2; exit 5', order: 0, resource: 'test' },
+    { key: 'integration-ci', command: 'touch second-ran', order: 1, resource: 'test' },
+    { key: 'sonar', command: 'touch dependent-ran', order: 2, after: ['unit'] },
+    { key: 'audit', command: 'touch audit-ran', order: 3 },
+  ], 2);
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.failures?.map(outcome => outcome.key), ['unit']);
+  assert.deepEqual(result.blocked?.map(gate => gate.key), ['sonar']);
+  for (const file of ['unit-ran', 'second-ran', 'audit-ran']) { assert.equal(fs.existsSync(path.join(root, file)), true, `${file}: the waiter still ran after the failure`); }
+  assert.equal(fs.existsSync(path.join(root, 'dependent-ran')), false);
+  assert.equal(result.cancelled, false);
+});
+
 test('undeclared or invalid resources fail before any gate child launches (px-0019)', async t => {
   const { root, run } = await resourceFixture(t, { resources: { test: 0 } });
   const launched = path.join(root, 'launched');

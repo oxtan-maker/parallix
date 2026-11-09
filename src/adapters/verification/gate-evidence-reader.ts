@@ -81,6 +81,8 @@ function outcomeOfRun(gate: { key: string; command: string }, checkout: Extract<
   if (!run || !observed) { return { key: gate.key, proof: { state: 'absent' }, failure: null }; }
   const result = { state: coversCheckout(run, gate, checkout) ? 'current' as const : 'stale' as const,
     revision: run.revision, observedAt: run.finishedAt ?? run.startedAt };
+  // A blocked or cancelled part never ran to a verdict: neither proof nor failure.
+  if (observed.result === 'blocked' || observed.result === 'cancelled') { return { key: gate.key, proof: { state: 'absent' }, failure: null }; }
   return { key: gate.key,
     proof: observed.exitCode === 0 && run.status !== 'cancelled' ? result : { state: 'absent' },
     failure: observed.exitCode !== 0 ? { ...result, exitCode: observed.exitCode } : null };

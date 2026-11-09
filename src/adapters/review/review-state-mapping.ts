@@ -81,9 +81,17 @@ function subjectFromState(state: ReviewStateData, previous: ReviewRound): Review
   return { ...previous.subject, change };
 }
 
+function reattributedReviewerResults(reviewer: AgentFamily, previous: ReviewRound) {
+  if (reviewer === previous.reviewer || !previous.reviewerResults) { return previous.reviewerResults; }
+  return previous.reviewerResults.map(result => result.agentFamily === previous.reviewer
+    ? { ...result, agentFamily: reviewer }
+    : result);
+}
+
 function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRound {
   const phase = state.phase === undefined ? requireReviewPhase(previous.phase) : requireReviewPhase(state.phase);
   const disposition = state.disposition === undefined ? previous.disposition : parseReviewDisposition(state.disposition);
+  const reviewer = familyFrom(state.reviewer, previous.reviewer);
   const startedAt = typeof state.startedAt === 'string' && state.startedAt.trim()
     ? state.startedAt
     : previous.startedAt;
@@ -94,9 +102,15 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
   if (phase === 'approved' && previous.decision?.kind !== 'approved') {
     throw new ReviewPhaseViolation('A loop-state write cannot approve a review; record a reviewer verdict first');
   }
+  // A reviewer can publish its verdict before a capacity-fallback launch
+  // returns. The verdict initially carries the preferred round family; when
+  // the launcher later adopts the family that actually ran, keep the result
+  // attribution aligned with that authoritative identity as one state write.
+  const reviewerResults = reattributedReviewerResults(reviewer, previous);
   return {
     ...previous,
-    reviewer: familyFrom(state.reviewer, previous.reviewer),
+    reviewer,
+    ...(reviewerResults ? { reviewerResults } : {}),
     implementer: familyFrom(state.implementer, previous.implementer),
     subject: subjectFromState(state, previous),
     startedAt,

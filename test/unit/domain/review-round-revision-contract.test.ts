@@ -23,7 +23,7 @@ import { bindReviewPersistence, reviewLoopBindings } from '../../../src/composit
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { ConfiguredReviewerEligibility, changeRevision, currentReviewRound, Review, ReviewRound, startReview, applyImplementerCommand, applyReviewerCommand, beginNextReviewRound, FindingResolution, reviewFindingId, reviewStatus } from '../../../src/domain/review.js';
+import { ConfiguredReviewerEligibility, changeRevision, currentReviewRound, Review, ReviewRound, startReview, applyImplementerCommand, applyReviewerCommand, beginNextReviewRound, FindingResolution, recordReviewerResult, revokeApprovedDecision, reviewFindingId, reviewStatus } from '../../../src/domain/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 import * as os from 'node:os';
 
@@ -173,6 +173,7 @@ describe("stale review round repro", { concurrency: false }, () => {
 
       const result = await bindReviewPersistence(store).consumeReviewerArtifacts('task-2385', 'claude', {
         worktree: tmpDir, revision: 'reviewed-head',
+        processResult: { status: 0, sessionId: 'native-session-42' },
         tmpDir,
         providerEnabled: true,
         readTokenFn: () => 'mock-token',
@@ -197,6 +198,24 @@ describe("stale review round repro", { concurrency: false }, () => {
         [1, 2],
         'round numbers stay 1 and 2 after the verdict persists',
       );
+      assert.equal(store.state.mission.review.rounds[1].reviewerResults?.[0]?.publicationId, 'native-session-42');
+      assert.equal(store.state.mission.review.rounds[1].reviewerResults?.[0]?.reviewerId, 'claude');
+    });
+
+    it('refuses complete approval artifacts when the native run status is unknown (PX-0046.01)', async () => {
+      const store = twoRoundStore();
+      const tmpDir = artifactDir({
+        'task-2385-review-findings.md': 'No blocking findings.',
+        'task-2385-review-outcome.md': 'Verdict: approve',
+        'task-2385-review-verdict.txt': 'approve',
+      });
+      const result = await bindReviewPersistence(store).consumeReviewerArtifacts('task-2385', 'claude', {
+        worktree: tmpDir, tmpDir, revision: 'reviewed-head', processResult: { status: null }, providerEnabled: false,
+      });
+      assert.notEqual(result.ok, true);
+      assert.match(result.diagnostic ?? '', /unknown process status/);
+      assert.equal(store.state.mission.review!.rounds[1].decision, null);
+      assert.equal(store.state.mission.review!.rounds[1].reviewerResults, undefined);
     });
   });
 
@@ -595,6 +614,33 @@ it('flat review state preserves the exact mechanically restored subject and deci
   assert.deepEqual(currentReviewRound(mapped).decision, currentReviewRound(review).decision);
 });
 
+it('flat review state reattributes a recorded verdict when the launcher adopts its fallback family (PX-0046.01 review F4)', () => {
+  const preferred = agentFamily('claude'), actual = agentFamily('custom');
+  let review = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/fallback', targetBranch: 'main' },
+    revision: changeRevision('reviewed-head') }, preferred, agentFamily('codex'), '2026-11-09T06:00:00Z',
+  ConfiguredReviewerEligibility.fromReviewStep({ eligible: [preferred, actual], strategy: 'random' }));
+  review = applyReviewerCommand(review, { type: 'approve', decidedAt: '2026-11-09T06:01:00Z',
+    revision: changeRevision('reviewed-head'), comment: null, source: { kind: 'local' } });
+  review = recordReviewerResult(review, {
+    publicationId: 'fallback-native-session', reviewerId: actual, agentFamily: preferred,
+    revision: changeRevision('reviewed-head'), decision: 'approved', findings: [], outcome: 'completed', status: 0,
+    publishedAt: '2026-11-09T06:01:00Z',
+  });
+
+  const adopted = applyReviewStateToReview(review, {
+    reviewer: actual, implementer: 'codex', round: 1, phase: 'approved', disposition: 'APPROVED',
+  });
+  assert.equal(currentReviewRound(adopted).reviewer, actual);
+  assert.deepEqual(currentReviewRound(adopted).reviewerResults?.map(result => [result.reviewerId, result.agentFamily]),
+    [[actual, actual]], 'the durable result follows the family the launcher actually ran');
+
+  const revoked = revokeApprovedDecision(adopted, 1, {
+    revokedAt: '2026-11-09T06:02:00Z', revokedBy: 'operator', reason: 'new review required', cause: { kind: 'operator' },
+  });
+  assert.equal(revoked.rounds[0]?.reviewerResults?.[0]?.revokedAt, '2026-11-09T06:02:00Z',
+    'fallback attribution remains discoverable by approval revocation');
+});
+
 it('review checkpoint boundaries keep their original proof when latest evidence changes (TASK-2742)', async () => {
   const { captureReviewCheckpointState, recordCheckpoint, uncoveredCompletedCriteria } = await import('../../../src/domain/checkpoint.js');
   const { missionId } = await import('../../../src/domain/mission.js');
@@ -645,5 +691,11 @@ it('reloads both general reviewer verdicts at B while the round starts at A (TAS
     if (loaded.kind !== 'found') { continue; }
     assert.equal(currentReviewRound(loaded.mission.review!).subject.revision, 'A');
     assert.equal(currentReviewRound(loaded.mission.review!).decision?.revision, 'B');
+    assert.deepEqual(currentReviewRound(loaded.mission.review!).reviewerResults, [{
+      publicationId: `round-1:${reviewer}:B:${verdict}`, reviewerId: reviewer, agentFamily: reviewer,
+      revision: 'B', decision: verdict, findings: verdict === 'changes-requested'
+        ? [{ id: 'F1', summary: 'fix B', location: null }] : [],
+      outcome: 'completed', status: 0, publishedAt: '2026-10-01T11:00:00Z',
+    }], 'the exact judged revision and attributed findings survive the recorder seam');
   }
 });

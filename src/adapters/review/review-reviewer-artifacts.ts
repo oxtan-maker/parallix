@@ -15,6 +15,8 @@ import { type ReviewFinding } from '../../domain/review.js';
 import { isEnabled } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
+import { incompleteReviewerArtifacts, invalidReviewerProcessResult } from './reviewer-artifact-admission.js';
+import { reviewerResultAttribution, type ReviewerProcessResult } from './reviewer-result-attribution.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { reviewArtifactPath, staleReviewWrite, renderFindings, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeReviewVerdict, headRevision, type ReviewStateReader } from './review-artifact-files.js';
 import { postWorkflowComment, postWorkflowReview } from './review-workflow-posting.js';
@@ -53,6 +55,8 @@ type ReviewerArtifactOptions = {
   output?: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string };
   /** Mission version the caller read; threaded to the recorders so a stale decision fails closed. */
   expectedVersion?: number;
+  /** Present only for agent-produced artifacts; operator verdicts have no child process. */
+  processResult?: ReviewerProcessResult | null;
 };
 
 export type RepoEventFn = (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
@@ -256,12 +260,14 @@ async function admitReviewerArtifacts(
   options: ReviewerArtifactOptions,
 ): Promise<AdmittedReviewerArtifacts> {
   const { slug, artifacts, verdict, providerEnabled, worktree, error } = ctx;
-  const incomplete = reportIncompleteReviewerArtifacts({
+  const incomplete = incompleteReviewerArtifacts({
     slug, findings: artifacts.findings, outcomeMessage: artifacts.outcomeMessage, verdict,
     findingsPath: artifacts.findingsPath, outcomePath: artifacts.outcomePath, verdictPath: artifacts.verdictPath,
     providerEnabled: Boolean(providerEnabled), error,
   });
   if (incomplete) { return { ok: false, failure: incomplete }; }
+  const invalidProcess = invalidReviewerProcessResult('processResult' in options, options.processResult);
+  if (invalidProcess) { return { ok: false, failure: invalidProcess }; }
   // Past the completeness guard all three artifacts are present.
   const reviewFindings: string = artifacts.findings!;
   const reviewOutcome: string = artifacts.outcomeMessage!;
@@ -334,7 +340,7 @@ export async function consumeReviewerArtifacts(
   };
   const leading = await mirrorStage(true);
   if (leading) { return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: leading }; }
-  const decisionFailure = await recordReviewerArtifactDecision(slug, reviewVerdict, typedFindings, reviewOutcome, options, log, error);
+  const decisionFailure = await recordReviewerArtifactDecision(slug, reviewer, reviewVerdict, typedFindings, reviewOutcome, options, log, error);
   if (decisionFailure) { return decisionFailure; }
 
 
@@ -365,40 +371,11 @@ function reviewerVerdictFrom(verdictRaw: string | null, outcomeMessage: string |
 }
 
 /**
- * Report whichever required reviewer artifact is missing, or null when all
- * three are present. With provider=none there is no PR review to fall back on,
- * so the local state path is named: it is the only place the operator can
- * repair this.
- */
-function reportIncompleteReviewerArtifacts(context: {
-  slug: string; findings: string | null; outcomeMessage: string | null; verdict: string | null;
-  findingsPath: string; outcomePath: string; verdictPath: string;
-  providerEnabled: boolean; error: (_msg: string) => void;
-}): { consumed: true; ok: false; failureReason?: FailureReason; diagnostic: string } | null {
-  const { slug, findings, outcomeMessage, verdict, findingsPath, outcomePath, verdictPath, providerEnabled, error } = context;
-  const localRepair = providerEnabled
-    ? ''
-    : ` No provider review posted (provider=none); add a review-outcome.md with a Verdict line or use \`node parallix review <slug> --submit-review approve\`.`;
-  if (!findings || !outcomeMessage) {
-    const missing: string[] = [];
-    if (!findings) { missing.push('findings'); }
-    if (!outcomeMessage) { missing.push('outcome'); }
-    error(fmt.status('FAIL', `Incomplete reviewer artifacts for ${slug}. Expected ${findingsPath} and ${outcomePath}.${localRepair}`));
-    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing ${missing.join(', ')}` };
-  }
-  if (!verdict) {
-    error(fmt.status('FAIL', `Reviewer artifacts for ${slug} missing verdict. Expected in ${verdictPath} or in ${outcomePath} content.${localRepair}`));
-    return { consumed: true, ok: false, diagnostic: `Reviewer artifacts incomplete: missing verdict` };
-  }
-  return null;
-}
-
-/**
  * Record the decision itself, not just its prose. Without it the round keeps
  * `decision: null`, the Mission never leaves `review` through `request-changes`,
  * and the next review preparation cannot open round N+1.
  */
-async function recordReviewerChangeRequest(slug: string, findings: readonly ReviewFinding[], outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
+async function recordReviewerChangeRequest(slug: string, reviewer: string, findings: readonly ReviewFinding[], outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
   const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
   const decision = await recordRequestedChangesFn(slug, {
     findings,
@@ -406,6 +383,7 @@ async function recordReviewerChangeRequest(slug: string, findings: readonly Revi
     decidedAt: new Date().toISOString(),
     revision: options.revision,
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
+    result: reviewerResultAttribution(reviewer, options.processResult),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
@@ -417,7 +395,7 @@ async function recordReviewerChangeRequest(slug: string, findings: readonly Revi
   return null;
 }
 
-async function recordReviewerApproval(slug: string, outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
+async function recordReviewerApproval(slug: string, reviewer: string, outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
   const recordApprovalFn = options.recordApprovalFn || recordApproval;
   const decision = await recordApprovalFn(slug, {
     comment: outcomeMessage,
@@ -425,6 +403,7 @@ async function recordReviewerApproval(slug: string, outcomeMessage: string, opti
     revision: options.revision,
     source: options.providerEnabled ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
+    result: reviewerResultAttribution(reviewer, options.processResult),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the approve decision for ${slug}: ${decision.diagnostic}`));
@@ -452,12 +431,12 @@ export function reviewerConsumeOutcome(verdict: string, findings: readonly Revie
   return { consumed: true, ok: true, reviewState: null };
 }
 
-async function recordReviewerArtifactDecision(slug: string, reviewVerdict: string, typedFindings: readonly ReviewFinding[], reviewOutcome: string, options: ReviewerArtifactOptions, log: (message: string) => void, error: (message: string) => void) {
+async function recordReviewerArtifactDecision(slug: string, reviewer: string, reviewVerdict: string, typedFindings: readonly ReviewFinding[], reviewOutcome: string, options: ReviewerArtifactOptions, log: (message: string) => void, error: (message: string) => void) {
   if (reviewVerdict === 'request-changes') {
-    const recorded = await recordReviewerChangeRequest(slug, typedFindings, reviewOutcome, options, log, error);
+    const recorded = await recordReviewerChangeRequest(slug, reviewer, typedFindings, reviewOutcome, options, log, error);
     if (recorded) { return recorded; }
   } else if (reviewVerdict === 'approve' && options.missionStore) {
-    const recorded = await recordReviewerApproval(slug, reviewOutcome, options, log, error);
+    const recorded = await recordReviewerApproval(slug, reviewer, reviewOutcome, options, log, error);
     if (recorded) { return recorded; }
   }
 

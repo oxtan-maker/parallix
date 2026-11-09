@@ -1,7 +1,6 @@
 
-// Tier 2 blocking e2e: launches the REAL `custom` agent family (opencode + a
-// pinned local model) through the production launcher path in
-// lib/agents/opencode.ts, over a throwaway repo, using the real `px` CLI.
+// Tier 2 blocking e2e: launches the selected real agent family through its
+// production launcher path over a throwaway repo, using the real `px` CLI.
 //
 // This is deliberately separate from test/e2e/lifecycle/mission-lifecycle.test.ts
 // (Tier 1), which stubs `opencode` entirely and stays the deterministic
@@ -26,6 +25,17 @@ import assert from 'node:assert/strict';
 import { SqliteMeasurementStore } from '../../../src/adapters/sqlite/measurement-store.js';
 import { createTempRootRegistry } from '../../../src/adapters/verification/temp-root-registry.js';
 import { uncoveredCriteria } from '../../../src/domain/checkpoint.js';
+import { resolveProcessConfiguration } from '../../../src/composition/config.js';
+import { tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
+import { workflowLauncherStatus } from '../../../src/adapters/agents/launcher-selection.js';
+import { defaultStepEligibleFamilies } from '../../../src/adapters/agents/agent-block-selection.js';
+import { defaultIsAgentBlockedNow } from '../../../src/adapters/agents/agent-launch-authority.js';
+import {
+  CODEX_SMOKE_MODEL,
+  configureRealAgentSmokeAdmissionHome,
+  selectRealAgentSmoke,
+  type RealAgentSmokeSelection,
+} from '../../helpers/real-agent-smoke-selection.js';
 
 const tempRootRegistry = createTempRootRegistry();
 process.on('SIGINT', () => { tempRootRegistry.cleanup(); process.exit(130); });
@@ -47,24 +57,12 @@ const workflowConfig = JSON.parse(fs.readFileSync(path.resolve(import.meta.dirna
 const CUSTOM_MODEL = workflowConfig?.adapters?.agents?.models?.custom;
 const OVERRIDE_AGENT = process.env.PARALLIX_REAL_AGENT || null;
 const OVERRIDE_MODEL = process.env.PARALLIX_REAL_AGENT_MODEL || null;
-const SMOKE_AGENT = OVERRIDE_AGENT || 'custom';
-const SMOKE_MODEL = OVERRIDE_MODEL || CUSTOM_MODEL;
 // Pi rejects placeholder credentials such as "dummy-key" before contacting a
 // provider. The smoke fixture uses a local vLLM endpoint, for which any
 // non-placeholder bearer token is sufficient, so give only its disposable
 // copied configuration a deterministic test token.
 const LOCAL_PI_E2E_API_KEY = 'parallix-pi-e2e-local-key';
 const RUN_TIMEOUT_MS = Number(process.env.PARALLIX_REAL_AGENT_TIMEOUT_MS || 600000);
-// A cold local backend or a queued shared model can need longer than the
-// original 45-second probe cap before it emits its first response. Keep the
-// probe bounded so an unavailable backend still fails ahead of the lifecycle,
-// while allowing it enough time to establish that the configured model works.
-// Operators can tighten or extend this independently when needed, but it can
-// never outlive the corresponding single-session workflow budget.
-const HEALTHCHECK_TIMEOUT_MS = Math.min(
-  Number(process.env.PARALLIX_REAL_AGENT_HEALTHCHECK_TIMEOUT_MS || 120000),
-  RUN_TIMEOUT_MS
-);
 // The active phase runs up to three sequential model sessions in one px
 // invocation (execute agent, a possible repair relaunch, and the autonomous
 // review loop), so its finite wall deadline must cover three single-session
@@ -299,8 +297,7 @@ function classifyFailure({ stdout, stderr, status, signal }: Partial<Pick<childP
 // opencode subcommands like `opencode models`, which can be tighter or flakier
 // than the launcher path this smoke test is meant to verify.
 function preflightCheck(agent: string, runner: string) {
-  // adapters.agents.models.custom is an optional override (see MISSION.md
-  // "Amended during CP-3 execution"): when unset, the launcher omits -m and
+  // adapters.agents.models.custom is an optional override: when unset, the launcher omits -m and
   // the runner (opencode/pi) falls back to its own configured default model,
   // so this gate no longer requires a pinned model string to exist.
   if (agent === 'codex') {
@@ -323,49 +320,16 @@ function preflightCheck(agent: string, runner: string) {
   return null;
 }
 
-function runOpencodeHealthcheck(repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
-  const command = maybeOpencodePath() || 'opencode';
-  const args = ['run', '--pure', '--dangerously-skip-permissions', '--format', 'json'];
-  if (SMOKE_MODEL) {args.push('-m', SMOKE_MODEL);}
-  args.push('Reply with exactly OK');
-  return runWorkflowAllowFail(
-    repoRoot,
-    env,
-    [command, ...args],
-    timeoutMs,
-    { directCommand: true }
-  );
-}
-
-function runPiHealthcheck(repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
-  // Once setupRepository has linked the selected real executable into binDir,
-  // keep the probe on that exact path too. This prevents an inherited PI_BIN
-  // or a different Node installation from selecting another Pi binary.
-  const command = env.PI_BIN || maybePiPath() || 'pi';
-  const args = ['--print', '--mode', 'json', '--approve'];
-  if (SMOKE_MODEL) {args.push('--model', SMOKE_MODEL);}
-  args.push('Reply with exactly OK');
-  return runWorkflowAllowFail(
-    repoRoot,
-    env,
-    [command, ...args],
-    timeoutMs,
-    { directCommand: true }
-  );
-}
-
-function runCodexHealthcheck(repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
-  const args = ['exec', '--sandbox', 'danger-full-access'];
-  if (SMOKE_MODEL) {args.push('-m', SMOKE_MODEL);}
-  args.push('--cd', repoRoot, 'Reply with exactly OK');
-  return runWorkflowAllowFail(repoRoot, env, [env.CODEX_BIN || 'codex', ...args], timeoutMs, { directCommand: true });
-}
-
-function runHealthcheck(agent: string, runner: string, repoRoot: string, env: NodeJS.ProcessEnv, timeoutMs = HEALTHCHECK_TIMEOUT_MS) {
-  if (agent === 'codex') {return runCodexHealthcheck(repoRoot, env, timeoutMs);}
-  return runner === 'pi'
-    ? runPiHealthcheck(repoRoot, env, timeoutMs)
-    : runOpencodeHealthcheck(repoRoot, env, timeoutMs);
+function assertScopedCodexLaunches(output: string, minimum: number, phase: string) {
+  const launches = output.split('\n').filter(line => line.includes('Launching: codex '));
+  assert.ok(launches.length >= minimum,
+    `[parallix-workflow-failure] expected at least ${minimum} Codex launch(es) during ${phase}, got ${launches.length}`);
+  for (const launch of launches) {
+    assert.match(launch, /-m gpt-6-luna(?:\s|$)/,
+      `[parallix-workflow-failure] ${phase} Codex launch did not retain gpt-6-luna: ${launch}`);
+    assert.match(launch, /model_reasoning_effort="low"/,
+      `[parallix-workflow-failure] ${phase} Codex launch did not retain low reasoning effort: ${launch}`);
+  }
 }
 
 // Materialize links as private files; never retain aliases to operator settings.
@@ -383,7 +347,7 @@ function copyRunnerConfiguration(source: string, target: string, ancestors = new
   }
 }
 
-function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', runnerCommandPath = '' }: { slug: string; title: string; agent?: string; runner?: string; runnerCommandPath?: string }) {
+function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', model = null, runnerCommandPath = '' }: { slug: string; title: string; agent?: string; runner?: string; model?: string | null; runnerCommandPath?: string }) {
   const toolWaitSeconds = Number(process.env.PARALLIX_REAL_AGENT_TOOL_WAIT_SECONDS || 0);
   assert.ok(Number.isInteger(toolWaitSeconds) && toolWaitSeconds >= 0 && toolWaitSeconds <= 60,
     'Manual smoke tool wait must be an integer from 0 to 60 seconds');
@@ -538,7 +502,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', r
     product: { name: 'real-agent-smoke', targetUser: 'tests' },
     adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-      agents: { maxConcurrentCustom: workflowConfig?.adapters?.agents?.maxConcurrentCustom, models: SMOKE_MODEL ? { [agent]: SMOKE_MODEL } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
+      agents: { maxConcurrentCustom: workflowConfig?.adapters?.agents?.maxConcurrentCustom, models: model ? { [agent]: model } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
       verification: { command: './scripts/verify-local.sh {{area}}', defaultArea: 'all' },
       draft: { preDraftCommand: `touch ${PROVISIONED_MARKER}` },
@@ -797,7 +761,8 @@ function snapshotDefaultParallixState(homes: readonly string[] = DEFAULT_PARALLI
   return snapshots;
 }
 
-async function runRealAgentSmoke(agent: string, runner: string) {
+async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
+  const { agent, runner, model } = selection;
   const preflightError = preflightCheck(agent, runner);
   if (preflightError) {
     return assert.fail(
@@ -813,7 +778,7 @@ async function runRealAgentSmoke(agent: string, runner: string) {
     `[${tempPreflight.bucket}] ${tempPreflight.detail}`
   );
   const defaultStateSnapshots = snapshotDefaultParallixState();
-  const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', agent, runner });
+  const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', agent, runner, model });
   const worktree = path.resolve(repo.repoRoot, '..', `${path.basename(repo.repoRoot)}-${slug}`);
   // Parallix-owned state isolation goes through configuration, not a hard
   // filesystem sandbox: PARALLIX_HOME is the highest-precedence resolver input
@@ -831,8 +796,7 @@ async function runRealAgentSmoke(agent: string, runner: string) {
     FORCE_COLOR: '0',
     PRIMARY_WORKTREE: repo.repoRoot,
     PARALLIX_HOME: repo.stateHome,
-    PARALLIX_CUSTOM_ADMISSION_HOME: process.env.PARALLIX_CUSTOM_ADMISSION_HOME
-      || path.join(os.tmpdir(), `parallix-smoke-admission-${process.getuid?.() ?? 'user'}`),
+    PARALLIX_CUSTOM_ADMISSION_HOME: configureRealAgentSmokeAdmissionHome(),
     PARALLIX_CUSTOM_ADMISSION_REPOSITORY: path.resolve(import.meta.dirname, '..', '..', '..'),
     NPM_CONFIG_CACHE: path.join(repo.tmpRoot, 'npm-cache'),
     PATH: `${repo.binDir}${path.delimiter}${process.env.PATH || ''}`,
@@ -846,6 +810,10 @@ async function runRealAgentSmoke(agent: string, runner: string) {
     // Codex adapter; keeping it first on PATH proves model dispatch without
     // trusting another Codex executable selected by the parent environment.
     env.CODEX_BIN = path.join(repo.binDir, 'codex');
+  }
+  delete env.PARALLIX_CODEX_REASONING_EFFORT;
+  if (selection.reasoningEffort) {
+    env.PARALLIX_CODEX_REASONING_EFFORT = selection.reasoningEffort;
   }
   if (agent === 'custom' && runner === 'opencode') {
     env.XDG_CONFIG_HOME = repo.opencodeConfigHome;
@@ -892,20 +860,6 @@ async function runRealAgentSmoke(agent: string, runner: string) {
     // (TASK-2561). The harness must not do that for it: a draft that still
     // ends without its contract is a Parallix failure, never retried here.
     if (draftResult.status !== 0) {
-      // Only diagnose the model after the production draft path has failed.
-      // This probe is not a separate prerequisite for a healthy workflow.
-      const healthcheckResult = await runHealthcheck(agent, runner, repo.repoRoot, env);
-      if (healthcheckResult.status === 0 && !/OK/.test(`${healthcheckResult.stdout || ''}${healthcheckResult.stderr || ''}`)) {
-        healthcheckResult.status = 1;
-      }
-      if (healthcheckResult.status !== 0) {
-        const { bucket, detail } = classifyFailure(healthcheckResult);
-        return assert.fail(
-          `[${bucket}] ${agent} healthcheck after draft failure failed (status=${healthcheckResult.status}, signal=${healthcheckResult.signal}): ${detail}\n` +
-          `stdout:\n${healthcheckResult.stdout}\nstderr:\n${healthcheckResult.stderr}\n` +
-          `draft stdout:\n${draftResult.stdout}\ndraft stderr:\n${draftResult.stderr}`
-        );
-      }
       const { bucket, detail } = /mission contract is incomplete/.test(`${draftResult.stdout || ''}${draftResult.stderr || ''}`)
         ? { bucket: 'parallix-workflow-failure', detail: 'the draft ended with an incomplete mission contract after its bounce-back budget' }
         : classifyFailure(draftResult);
@@ -923,6 +877,7 @@ async function runRealAgentSmoke(agent: string, runner: string) {
       new RegExp(`Running ${agent} to write the mission contract`),
       `[parallix-workflow-failure] expected the real run to select the ${agent} agent family`
     );
+    if (agent === 'codex') { assertScopedCodexLaunches(draftResult.stdout, 1, 'draft'); }
 
     // The draft's output is the mission contract recorded through `px goal
     // set` / `px scope set` / `px gate add`, read back from the operator
@@ -978,10 +933,10 @@ async function runRealAgentSmoke(agent: string, runner: string) {
     // on the suffix rather than the full pinned launcher argument. With no
     // pinned CUSTOM_MODEL override, only assert a model name was recorded at
     // all (the launcher must report whatever default model it actually used).
-    if (SMOKE_MODEL) {
+    if (model) {
       assert.ok(
-        SMOKE_MODEL.endsWith(statsMatch[2]),
-        `draft stats model "${statsMatch[2]}" should correspond to the selected model "${SMOKE_MODEL}"`
+        model.endsWith(statsMatch[2]),
+        `draft stats model "${statsMatch[2]}" should correspond to the selected model "${model}"`
       );
     } else {
       assert.ok(statsMatch[2] && statsMatch[2].length > 0, '[parallix-workflow-failure] draft stats reported an empty model name');
@@ -1010,8 +965,8 @@ async function runRealAgentSmoke(agent: string, runner: string) {
     );
     assert.ok(draftMeasurement, '[parallix-workflow-failure] expected a draft-stage measurement for ' + slug);
     assert.ok(draftMeasurement.model, '[parallix-workflow-failure] expected the stored measurement to record a model');
-    if (SMOKE_MODEL) {
-      const modelBaseName = SMOKE_MODEL.split('/').pop();
+    if (model) {
+      const modelBaseName = model.split('/').at(-1) ?? model;
       assert.ok(
         String(draftMeasurement.model).includes(modelBaseName),
         `[parallix-workflow-failure] expected the stored measurement to record the selected model (${modelBaseName}), got ${draftMeasurement.model}`
@@ -1076,6 +1031,7 @@ async function runRealAgentSmoke(agent: string, runner: string) {
       new RegExp(`Implementation complete \\(${agent}\\)`),
       `[parallix-workflow-failure] expected active phase to select the ${agent} agent family`
     );
+    if (agent === 'codex') { assertScopedCodexLaunches(activeResult.stdout, 2, 'implementation and review'); }
     console.log(`[benchmark] runner=${runner} phase=active duration_ms=${activeDurationMs}`);
 
     // px active autostarts the autonomous review loop - verify it completed successfully
@@ -1199,46 +1155,54 @@ async function runRealAgentSmoke(agent: string, runner: string) {
 // Running both runners back-to-back doubles the gate's wall time, so the
 // non-configured runner is exercised on demand instead:
 //   PARALLIX_REAL_AGENT_RUNNER=pi node test/e2e/agents/real-agent-smoke.test.ts
-// The whole harness above stays runner-parameterized (preflight, healthcheck,
+// The whole harness above stays runner-parameterized (preflight,
 // repo setup), so switching costs an env var, not a code change.
-const SUPPORTED_RUNNERS = ['opencode', 'pi'];
 const CONFIGURED_RUNNER = process.env.PARALLIX_REAL_AGENT_RUNNER
   || workflowConfig?.adapters?.agents?.runners?.custom
   || 'opencode';
 
-function assertSmokeSelection(agent: string) {
-  assert.ok(['custom', 'codex'].includes(agent), `Unknown real agent "${agent}"; expected custom or codex`);
-  if (agent === 'codex') {
-    assert.equal(SMOKE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
-  }
-  assert.ok(
-    SUPPORTED_RUNNERS.includes(CONFIGURED_RUNNER),
-    `Unknown custom runner "${CONFIGURED_RUNNER}" (from PARALLIX_REAL_AGENT_RUNNER or adapters.agents.runners.custom); expected one of: ${SUPPORTED_RUNNERS.join(', ')}`
-  );
+async function resolveSmokeSelection(): Promise<RealAgentSmokeSelection> {
+  configureRealAgentSmokeAdmissionHome();
+  const configuration = resolveProcessConfiguration();
+  return await selectRealAgentSmoke({
+    explicitAgent: OVERRIDE_AGENT,
+    explicitModel: OVERRIDE_MODEL,
+    configuredCustomModel: CUSTOM_MODEL,
+    configuredCustomRunner: CONFIGURED_RUNNER,
+    acquireCustomCapacity: () => tryAcquireCustomCapacity(process.cwd(), configuration),
+    codexEligible: () => defaultStepEligibleFamilies('draft', configuration).includes('codex'),
+    codexBlocked: () => defaultIsAgentBlockedNow('codex', configuration),
+    codexAvailable: () => workflowLauncherStatus('codex', process.cwd(), configuration).supported,
+  });
+}
+
+async function executeRealAgentSmoke(
+  select: () => Promise<RealAgentSmokeSelection> = resolveSmokeSelection,
+  run: (selection: RealAgentSmokeSelection) => Promise<void> = runRealAgentSmoke,
+): Promise<void> {
+  const selection = await select();
+  console.log(`[smoke-selection] agent=${selection.agent} runner=${selection.runner} model=${selection.model ?? 'default'} effort=${selection.reasoningEffort ?? 'default'} reason=${selection.reason}`);
+  await run(selection);
 }
 
 // The helpers are always exported; the smoke tests themselves only register
 // when this file is not being imported purely for its helpers (task-2241).
-export { runWorkflowAllowFail, temporaryCapacityPreflight, classifyFailure, setupRepository, snapshotDefaultParallixState };
+export {
+  runWorkflowAllowFail,
+  temporaryCapacityPreflight,
+  classifyFailure,
+  setupRepository,
+  snapshotDefaultParallixState,
+  selectRealAgentSmoke,
+  configureRealAgentSmokeAdmissionHome,
+  executeRealAgentSmoke,
+};
 
 if (process.env.PARALLIX_E2E_SMOKE_TEST_HELPERS !== '1') {
-  test('real-agent smoke rejects an unsupported Codex override model', {
-    skip: OVERRIDE_AGENT !== 'codex'
-  }, () => {
-    assert.equal(OVERRIDE_MODEL, 'gpt-5.6-luna', 'Codex smoke override requires model gpt-5.6-luna');
-  });
-
-  test('real custom-agent launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
-    skip: SMOKE_AGENT !== 'custom'
-  }, async () => {
-    assertSmokeSelection('custom');
-    await runRealAgentSmoke('custom', CONFIGURED_RUNNER);
-  });
-
-  test('real Codex gpt-5.6-luna launcher smoke: full lifecycle with hello-world task (SC3/SC4/SC5/SC6/SC7)', {
-    skip: SMOKE_AGENT !== 'codex' || SMOKE_MODEL !== 'gpt-5.6-luna'
-  }, async () => {
-    assertSmokeSelection('codex');
-    await runRealAgentSmoke('codex', 'codex');
+  test(`real-agent launcher smoke: full lifecycle with hello-world task (${CODEX_SMOKE_MODEL} fallback)`, async () => {
+    await assert.doesNotReject(
+      () => executeRealAgentSmoke(),
+      '[parallix-workflow-failure] the selected real-agent lifecycle must complete successfully',
+    );
   });
 }

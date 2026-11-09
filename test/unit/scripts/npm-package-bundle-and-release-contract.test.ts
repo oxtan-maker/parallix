@@ -125,6 +125,16 @@ describe("release metadata for the canonical ESM bundle", () => {
     }
   });
 
+  test('published review opinion is an existing zero-byte asset without self-development policy (PX-0046.02)', () => {
+    const repositoryPolicy = fs.readFileSync(path.join(ROOT, 'prompts', 'review.md'));
+    const publishedDefault = fs.readFileSync(path.join(ROOT, 'build', 'prompts', 'review.md'));
+    const bundle = fs.readFileSync(path.join(ROOT, 'build', 'px.mjs'), 'utf8');
+
+    assert.ok(repositoryPolicy.length > 0, 'the Parallix checkout retains its repository review policy');
+    assert.equal(publishedDefault.length, 0, 'the distributable review opinion must be blank');
+    assert.doesNotMatch(bundle, /counterexample-pass-v1/, 'the repository policy must not be embedded in production code');
+  });
+
   test('tokenizer runtime asset preserves the pinned data without embedding it in JavaScript (TASK-2762)', () => {
     const require = createRequire(import.meta.url);
     const source = fs.readFileSync(path.join(path.dirname(require.resolve('jevtok-ts')), '..', 'data.cjs'), 'utf8');

@@ -7,7 +7,7 @@ import { resolveCustomRunner } from "../config/product-config.js";
 import { filterBlockedFallback } from "./agent-block-selection.js";
 import { resolveSandboxProfile } from "../process/bubblewrap.js";
 import { selectConfinement, supportsNativeSandbox, ConfinementBlockedError, isBubblewrapDisabled, isBubblewrapAvailable, BUBBLEWRAP_COMMAND } from "../process/confinement.js";
-import { tryAcquireCustomCapacity, waitForCustomCapacity } from "./custom-capacity.js";
+import { tryAcquireCustomCapacity, waitForCustomCapacity, type CustomCapacityReservation } from "./custom-capacity.js";
 import { FRESH_SESSION_MARKER_PORT } from "../../application/fresh-session-marker-port.js";
 import type { SessionMarkerPort } from "../../application/domain-ports.js";
 import type { SessionRole } from "../../domain/session.js";
@@ -109,6 +109,47 @@ export async function selectAndGateAgent(state: StartAgentLoopState, deps: Start
   return false;
 }
 
+const CAPACITY_SWITCH_STEPS: ReadonlySet<string> = new Set(["draft", "active", "act-on-review", "review"]);
+
+export type CustomCapacityAdmission =
+  | { kind: "reserved"; reservation: CustomCapacityReservation }
+  | { kind: "switched" }
+  | { kind: "wait" };
+
+/**
+ * Probe the existing selection-and-gating loop without its excluded-family
+ * escape hatch. The real state changes only after an independent alternative
+ * is eligible, unblocked and launchable, so custom remains available if every
+ * alternative later fails.
+ */
+export async function admitCustomCapacity(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<CustomCapacityAdmission> {
+  if (deps.pinnedAgent || !CAPACITY_SWITCH_STEPS.has(deps.step)) { return { kind: "wait" }; }
+  const reservation = await tryAcquireCustomCapacity(deps.worktree, deps.configuration);
+  if (reservation) { return { kind: "reserved", reservation }; }
+
+  const probe: StartAgentLoopState = {
+    ...state,
+    chosen: undefined,
+    tried: new Set([...state.tried, "custom"]),
+    launched: new Set(state.launched),
+    agentErrors: new Map(state.agentErrors),
+  };
+  try {
+    const probeDeps = { ...deps, exclude: [] as string[] };
+    while (await selectAndGateAgent(probe, probeDeps)) {}
+  } catch (err) {
+    if (!isAgentPoolExhaustionError(err)) {
+      deps.log(fmt.status("WARN", `Custom-agent capacity alternative probe failed: ${(err as Error).message}`));
+    }
+    return { kind: "wait" };
+  }
+  if (!probe.chosen || probe.chosen === "custom") { return { kind: "wait" }; }
+
+  deps.log(fmt.status("INFO", `Custom-agent capacity is saturated; switching step "${deps.step}" to ${fmt.agent(probe.chosen)} instead of waiting.`));
+  state.chosen = probe.chosen;
+  return { kind: "switched" };
+}
+
 
 /**
  * Resolve everything the launch needs: launcher (custom runners included),
@@ -196,10 +237,25 @@ function launchConfinement(state: StartAgentLoopState, deps: StartAgentLoopDeps)
 }
 
 export async function prepareLaunch(state: StartAgentLoopState, deps: StartAgentLoopDeps): Promise<PreparedLaunch | null> {
-  const { step, log, opts, worktree } = deps;
   const chosen = state.chosen || '';
+  let admitted: CustomCapacityReservation | null = null;
+  if (chosen === 'custom') {
+    const admission = await admitCustomCapacity(state, deps);
+    if (admission.kind === 'switched') { return null; }
+    if (admission.kind === 'reserved') { admitted = admission.reservation; }
+  }
   state.tried.add(chosen);
   state.launched.add(chosen);
+  try {
+    return await assembleLaunch(state, deps, chosen, admitted);
+  } catch (err) {
+    admitted?.release();
+    throw err;
+  }
+}
+
+async function assembleLaunch(state: StartAgentLoopState, deps: StartAgentLoopDeps, chosen: string, admitted: CustomCapacityReservation | null): Promise<PreparedLaunch> {
+  const { step, log, opts, worktree } = deps;
 
   // For custom agent, resolve the actual launcher based on configuration.
   // resolveCustomRunner/resolveCustomLauncher default to process.cwd()
@@ -256,7 +312,7 @@ export async function prepareLaunch(state: StartAgentLoopState, deps: StartAgent
     Object.assign(agentEnv, { PARALLIX_WORKFLOW_OPERATION: deps.configuration.runtime.workflowOperation, PARALLIX_WORKFLOW_GENERATION: String(deps.configuration.runtime.workflowGeneration) });
   }
   const customReservation = chosen === 'custom'
-    ? await waitForCustomCapacity(worktree, async () => {
+    ? admitted ?? await waitForCustomCapacity(worktree, async () => {
       const operationId = authorizedOperationId();
       if (operationId && deps.slug) {
         const head = git(['-C', worktree || process.cwd(), 'rev-parse', 'HEAD']);

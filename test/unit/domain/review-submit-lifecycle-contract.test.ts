@@ -3,8 +3,8 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { missionId, missionLabels, type Mission, intakeMission } from '../../../src/domain/mission.js';
-import { decideMission } from '../../../src/domain/mission-workflow.js';
+import { missionId, missionLabels, type Mission, type OpenMission, intakeMission } from '../../../src/domain/mission.js';
+import { decideMission, reviewRepairTransitionDecision } from '../../../src/domain/mission-workflow.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import {
   changeRevision,
@@ -44,7 +44,7 @@ describe("submit for review idempotent", { concurrency: false }, () => {
     targetBranch: 'main',
   } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
-  function activeMission(): Mission {
+  function activeMission(): OpenMission {
     return {
       id,
       repositoryId: repo,
@@ -156,6 +156,34 @@ describe("submit for review idempotent", { concurrency: false }, () => {
 
     assert.deepEqual(decideMission(interrupted, command).review, review);
     assert.throws(() => decideMission(interrupted, { ...command, gatesPassed: false }), /gates pass/);
+  });
+
+  test('review repair transition selection preserves no-op, initial and configured-review paths (PX-0041.01)', () => {
+    const at = '2026-11-08T10:00:00Z';
+    assert.deepEqual(reviewRepairTransitionDecision(activeMission(), 'active', implementer, at), { kind: 'unchanged' });
+    assert.deepEqual(reviewRepairTransitionDecision(activeMission(), 'review', implementer, at), {
+      kind: 'transition', actor: implementer, command: { type: 'begin-review-preparation' },
+    });
+    const review = submittedReview();
+    assert.deepEqual(reviewRepairTransitionDecision({ ...activeMission(), review }, 'review', implementer, at, reviewerEligibility), {
+      kind: 'transition', actor: reviewer,
+      command: { type: 'submit-for-review', gatesPassed: true, review, reviewerEligibility },
+    });
+    assert.equal(reviewRepairTransitionDecision({ ...activeMission(), review }, 'review', implementer, at).kind, 'rejected');
+  });
+
+  test('review repair transition selection rejects effective approval and retains typed rebound cause (PX-0041.01)', () => {
+    const at = '2026-11-08T10:00:00Z';
+    const approved = applyReviewerCommand(submittedReview(), {
+      type: 'approve', revision: changeRevision('abc123'), decidedAt: at, comment: null, source: { kind: 'local' },
+    });
+    const rejected = reviewRepairTransitionDecision({ ...activeMission(), review: approved }, 'active', implementer, at);
+    assert.equal(rejected.kind, 'rejected');
+    assert.equal(rejected.kind === 'rejected' && rejected.reason, 'effective-approval');
+    const rebound = reviewRepairTransitionDecision({ ...activeMission(), status: 'review', review: submittedReview() },
+      'active', implementer, at, undefined, { kind: 'rebase-repair' });
+    assert.deepEqual(rebound, { kind: 'transition', actor: implementer,
+      command: { type: 'rebound-to-active', agent: implementer, cause: { kind: 'rebase-repair' }, occurredAt: at } });
   });
 });
 

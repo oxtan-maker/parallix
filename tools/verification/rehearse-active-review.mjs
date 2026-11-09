@@ -8,9 +8,18 @@ import { initCommittedRepository } from '../../test/fixtures/git-repository.ts';
 
 const cli = process.argv[2];
 const dirtyHandoffRepair = process.argv.includes('--dirty-handoff-repair');
-const integrationRebound = process.argv.includes('--integration-rebound');
+const aggregateIntegrationRebound = process.argv.includes('--aggregate-integration-rebound');
+const integrationRebound = process.argv.includes('--integration-rebound') || aggregateIntegrationRebound;
 const preferredReviewerFallback = process.argv.includes('--preferred-reviewer-fallback');
+const configureReviewOpinion = process.argv.includes('--configure-review-opinion');
+const reviewOpinionArgument = process.argv.indexOf('--review-opinion-file');
+const reviewOpinionValue = reviewOpinionArgument >= 0 ? process.argv[reviewOpinionArgument + 1] : null;
+const reviewOpinionFile = reviewOpinionArgument >= 0
+  ? path.resolve(reviewOpinionValue ?? '')
+  : null;
 assert.ok(cli && path.isAbsolute(cli), 'supply the public px executable');
+assert.ok(reviewOpinionArgument < 0 || (reviewOpinionValue && reviewOpinionFile && fs.existsSync(reviewOpinionFile)), 'supply an existing --review-opinion-file');
+assert.ok(!configureReviewOpinion || reviewOpinionFile, '--configure-review-opinion requires --review-opinion-file');
 const repository = path.resolve(import.meta.dirname, '../..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'px-unit-policy-rehearsal-'));
 const root = path.join(scratch, 'repo');
@@ -26,9 +35,11 @@ const env = { ...process.env, PARALLIX_HOME: path.join(scratch, 'home'),
   PARALLIX_TEST_COVERAGE: 'true', FORCE_COLOR: '0', PARALLIX_NO_TUI: '1' };
 if (dirtyHandoffRepair) env.REHEARSAL_DIRTY_HANDOFF_REPAIR = '1';
 if (integrationRebound) env.REHEARSAL_INTEGRATION_REBOUND = '1';
+if (aggregateIntegrationRebound) env.REHEARSAL_AGGREGATE_INTEGRATION_REBOUND = '1';
 for (const key of ['NODE_OPTIONS', 'NODE_V8_COVERAGE', 'PI_BIN', 'CLAUDE_BIN', 'CODEX_BIN', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_OPERATION_CAPTURE', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET']) delete env[key];
 if (preferredReviewerFallback) env.CLAUDE_BIN = claudeAgent;
 if (preferredReviewerFallback) env.PATH = scratch + path.delimiter + env.PATH;
+if (reviewOpinionFile) env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE = reviewOpinionFile;
 const run = (cwd, args) => {
   const result = spawnSync(cli, args, { cwd, env, encoding: 'utf8', timeout: 120000, maxBuffer: 20 * 1024 * 1024 });
   fs.appendFileSync(path.join(scratch, 'cli.log'), 'px ' + args.join(' ') + '\n' + result.stdout + result.stderr + '\n');
@@ -75,6 +86,7 @@ process.exit(1);
     "const sha = cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim();",
     "fs.appendFileSync(process.env.REHEARSAL_COUNTS, JSON.stringify({sha,covered,value:fs.readFileSync('src/value.js','utf8').trim(),checkout:process.cwd()})+'\\n');",
     "if(process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR && fs.readFileSync('src/value.js','utf8').includes('value = 1')) { console.error('repair required'); process.exit(1); }",
+    "if(process.env.REHEARSAL_AGGREGATE_INTEGRATION_REBOUND && fs.existsSync(require('node:path').join(process.env.REHEARSAL_STATE,'aggregate-failures-enabled')) && fs.readFileSync('src/value.js','utf8').includes('value = 2')) { console.error('Unit requires repaired value 3'); process.exit(1); }",
     "if(covered) { fs.mkdirSync('coverage',{recursive:true}); fs.writeFileSync('coverage/.lcov-unit.info','TN:\\nSF:src/value.js\\nDA:1,1\\nLF:1\\nLH:1\\nend_of_record\\n'); }",
   ].join('\n');
   initCommittedRepository(root, {
@@ -84,11 +96,13 @@ process.exit(1);
     'src/value.js': 'export const value = 0;\n',
     'src/remove.js': 'remove\n',
     'src/rename.js': 'rename\n',
+    ...(configureReviewOpinion ? { 'prompts/review.md': fs.readFileSync(reviewOpinionFile, 'utf8') } : {}),
     'unit-probe.cjs': probe,
     'integration-probe.cjs': "const fs=require('node:fs'); if(fs.readFileSync('src/value.js','utf8').includes('value = 2')) { console.error('Integration requires repaired value 3'); process.exit(1); } fs.copyFileSync('coverage/.lcov-unit.info','coverage/.lcov-integration-ci.info');\n",
     'package.json': JSON.stringify({ type: 'module', version: '1.0.0', scripts: { build: 'node -e ""', test: 'node unit-probe.cjs' } }),
-    'scripts/verify-local.sh': preferredReviewerFallback ? '#!/bin/sh\nexit 0\n' : fs.readFileSync(path.join(repository, 'scripts/verify-local.sh'), 'utf8'),
+    'scripts/verify-local.sh': preferredReviewerFallback ? '#!/bin/sh\nexit 0\n' : '#!/bin/sh\nPARALLIX_TEST_COVERAGE=0 node unit-probe.cjs\n',
     'workflow.config.json': JSON.stringify({ adapters: {
+      ...(configureReviewOpinion ? { prompts: { reviewOverride: 'prompts/review.md' } } : {}),
       terminal: { host: 'pipe' },
       tasks: { provider: 'backlog-md', storage: 'backlog' },
       agents: { models: { custom: 'stub/custom' }, runners: { custom: 'opencode' } },
@@ -98,14 +112,14 @@ process.exit(1);
       integrate: { postIntegrateCommand: 'echo hook >> "$REHEARSAL_STATE/post-squash-hooks"' },
       gates: { requirePreIntegration: true, preIntegration: [
         { key: 'unit', command: 'PARALLIX_FAST_UNIT=1 PARALLIX_TEST_COVERAGE=1 npm test -- --unit-test-headroom', order: 1 },
-        { key: 'integration-ci', command: integrationRebound ? 'node integration-probe.cjs' : 'cp coverage/.lcov-unit.info coverage/.lcov-integration-ci.info', order: 2, after: ['unit'] },
+        { key: 'integration-ci', command: integrationRebound ? 'node integration-probe.cjs' : 'cp coverage/.lcov-unit.info coverage/.lcov-integration-ci.info', order: 2,
+          ...(aggregateIntegrationRebound ? {} : { after: ['unit'] }) },
         { key: 'coverage-merge', command: 'rm -f coverage/lcov.info && node --import tsx ' + repository + '/scripts/coverage-merge.ts "$PWD/coverage/lcov.info" "$PWD/coverage/.lcov-unit.info" "$PWD/coverage/.lcov-integration-ci.info" && test -s coverage/lcov.info', order: 3, after: ['unit', 'integration-ci'] },
         { key: 'quality-gate', command: 'test -s coverage/lcov.info', order: 4, after: ['coverage-merge'] },
       ] },
     } }),
   });
   fs.chmodSync(path.join(root, 'scripts/verify-local.sh'), 0o755);
-  fs.symlinkSync(path.join(repository, 'scripts/verify-active-units.ts'), path.join(root, 'scripts/verify-active-units.ts'));
   spawnSync('git', ['add', '.'], { cwd: root });
   assert.equal(spawnSync('git', ['commit', '-m', 'install verifier'], { cwd: root }).status, 0);
   run(root, ['draft', slug, '--agent', 'custom']);
@@ -117,12 +131,29 @@ process.exit(1);
   assert.equal(approved.missionStatus, 'integration');
   if (preferredReviewerFallback) {
     const log = fs.readFileSync(path.join(scratch, 'cli.log'), 'utf8');
+    const launches = fs.readFileSync(path.join(scratch, 'agent-launches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+    const reviews = launches.filter(launch => launch.mode === 'review');
+    const nonReviews = launches.filter(launch => launch.mode !== 'review');
     assert.equal(fs.readFileSync(path.join(scratch, 'preferred-reviewer-launches'), 'utf8'), 'claude\n');
     assert.match(log, /reviewer fell back from claude to custom/i);
     assert.doesNotMatch(log, /Incomplete reviewer artifact|REVIEWER_ARTIFACT_RETRY_EXHAUSTED/);
     assert.ok(approved.review?.history?.length > 0, 'status includes durable review history');
     assert.ok(approved.review.history.every(round => round.reviewer === 'custom'), JSON.stringify(approved.review.history));
-    console.log(JSON.stringify({ lifecycle: 'public-review-preferred-runtime-fallback', invocation: 'px active task-unit-rehearsal --implementer custom --reviewer claude', preferredLaunches: 1, actualReviewer: 'custom', incompleteArtifactRetries: 0, operatorState: env.PARALLIX_HOME, disposableRepository: root }, null, 2));
+    assert.equal(reviews.length, 2, 'initial and post-fix reviews each launch once');
+    assert.equal(new Set(reviews.map(review => review.sessionID)).size, reviews.length, 'each reviewer receives a new native session');
+    assert.ok(reviews.every(review => !review.args.includes('-s') && !review.args.includes('--continue')), JSON.stringify(reviews));
+    assert.ok(reviews.every(review => review.args.includes('-m') && review.args.includes('stub/custom')), JSON.stringify(reviews));
+    const expectedOpinionCount = configureReviewOpinion ? 1 : 0;
+    assert.ok(reviews.every(review => review.reviewOpinionCount === expectedOpinionCount), JSON.stringify(reviews));
+    assert.ok(nonReviews.every(launch => launch.reviewOpinionCount === 0),
+      'repository review opinion must not reach non-review launches: ' + JSON.stringify(nonReviews));
+    assert.ok(reviews.every(review => review.reviewReloadInstructionPresent && !review.priorRoundCompactionPresent), JSON.stringify(reviews));
+    assert.ok(reviews.every(review => review.missionGoalPresent && review.criterionPresent), JSON.stringify(reviews));
+    assert.ok(reviews.every(review => review.fullReviewArtifactPresent), JSON.stringify(reviews));
+    assert.notEqual(reviews[0].promptSha256, reviews[1].promptSha256, 'post-fix review rebuilds its prompt from revised state');
+    assert.equal(reviews[0].fixedResolutionPresent, false, 'initial prompt has no future resolution');
+    assert.equal(reviews[1].fixedResolutionPresent, true, 'post-fix artifact carries the authoritative resolution');
+    console.log(JSON.stringify({ lifecycle: 'public-review-preferred-runtime-fallback', invocation: 'px active task-unit-rehearsal --implementer custom --reviewer claude', preferredLaunches: 1, actualReviewer: 'custom', reviewerLaunches: reviews, nonReviewOpinionCounts: nonReviews.map(launch => ({ mode: launch.mode, count: launch.reviewOpinionCount })), incompleteArtifactRetries: 0, operatorState: env.PARALLIX_HOME, disposableRepository: root }, null, 2));
   } else if (dirtyHandoffRepair) {
     const observed = fs.readFileSync(path.join(scratch, 'before-rebase'), 'utf8');
     assert.equal(observed, 'workflow(' + slug + '): auto-commit mission artifacts before handoff\nuntracked repair output\n');
@@ -149,17 +180,23 @@ process.exit(1);
       assert.equal(before.filter(row => row.value === value).length, 1,
         'one broad unit run per implementation/repair version; bookkeeping commits must not hide duplicate execution');
     }
+    if (aggregateIntegrationRebound) fs.writeFileSync(path.join(scratch, 'aggregate-failures-enabled'), 'yes');
     run(worktree, ['integrate', slug]);
     if (integrationRebound) {
       const repaired = JSON.parse(run(worktree, ['status', slug, '--json']));
       assert.equal(repaired.missionStatus, 'integration', 'repair must receive fresh review before another integration');
       assert.ok(fs.existsSync(path.join(scratch, 'integration-repaired')), 'integration failure launched the repair agent');
+      if (aggregateIntegrationRebound) {
+        const aggregate = repaired.checkpoints.filter(checkpoint => checkpoint.repair?.incidentId?.startsWith('integration:'));
+        assert.deepEqual(aggregate.map(checkpoint => checkpoint.repair.gateKey), ['unit', 'integration-ci']);
+        assert.ok(aggregate.every(checkpoint => checkpoint.repair.verified && checkpoint.repair.exactSuccessCoverage));
+      }
       run(worktree, ['integrate', slug]);
     }
     assert.equal(fs.readFileSync(path.join(scratch, 'post-squash-hooks'), 'utf8').trim().split('\n').length, 1,
       'configured post-squash maintenance runs once after landing');
     const after = fs.readFileSync(countFile, 'utf8').trim().split('\n').map(JSON.parse);
-    assert.equal(after.filter(row => row.covered).length, integrationRebound ? 2 : 1,
+    assert.equal(after.filter(row => row.covered).length, aggregateIntegrationRebound ? 3 : integrationRebound ? 2 : 1,
       'the repaired integration validation must be reused on the second integration');
     assert.equal(after.filter(row => !row.covered && row.checkout === root).length, 0,
       'local publication must not introduce a post-squash unit run');
@@ -169,7 +206,8 @@ process.exit(1);
     }
     const proofReuses = fs.readFileSync(path.join(scratch, 'proof-reuse.log'), 'utf8').trim().split('\\n').length;
     assert.ok(proofReuses >= 2, 'unchanged execute and repair probes reuse proof');
-    console.log(JSON.stringify({ lifecycle: integrationRebound ? 'active-review-repair-review-integration-active-repair-review-integration' : 'active-review-repair-review-integration', proofReuses, activeUnitRuns: after.filter(row => !row.covered && row.checkout === worktree),
+    console.log(JSON.stringify({ lifecycle: aggregateIntegrationRebound ? 'active-review-integration-two-failures-one-repair-two-checkpoints-full-rerun-review-integration'
+      : integrationRebound ? 'active-review-repair-review-integration-active-repair-review-integration' : 'active-review-repair-review-integration', proofReuses, activeUnitRuns: after.filter(row => !row.covered && row.checkout === worktree),
       publicationUnitRuns: after.filter(row => !row.covered && row.checkout === root),
       integrationUnitRuns: after.filter(row => row.covered), successfulRunsPerUnchangedCandidate: 1,
       postSquashHookRuns: 1, coverageMerge: 'passed', isolatedQualityBoundary: 'passed (double; real Sonar wiring covered by owning contracts)' }, null, 2));
@@ -179,4 +217,5 @@ process.exit(1);
   throw error;
 } finally {
   fs.rmSync(scratch, { recursive: true, force: true });
+  assert.equal(fs.existsSync(scratch), false, 'disposable repository and operator state are cleaned up');
 }

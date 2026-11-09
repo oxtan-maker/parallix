@@ -15,6 +15,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  currentIntegrationRepair,
   integrationRepairNeedsReview,
   integrationGateWithdrawals,
   integrationRepairPrComment,
@@ -118,7 +119,9 @@ const table: Array<{ status: Mission['status']; review: Review; expected: boolea
 
 for (const row of table) {
   test(`task-2620: needsReview status=${row.status} review=${reviewStatus(row.review)} repair=${integrationGateWithdrawals(mission(row.status, row.review)).length > 0}`, () => {
-    assert.equal(integrationRepairNeedsReview(mission(row.status, row.review)), row.expected);
+    const current = mission(row.status, row.review);
+    assert.equal(integrationRepairNeedsReview(current), row.expected);
+    assert.equal(currentIntegrationRepair(current)?.kind ?? null, row.expected ? 'review-required' : null);
   });
 }
 
@@ -298,6 +301,7 @@ test('gate failure retains original judgment while pending repair blocks recover
   assert.equal(s.active.review!.rounds.length, 1);
   assert.deepEqual(currentReviewRound(s.active.review!).decision, currentReviewRound(s.approved.review!).decision);
   assert.ok(pendingIntegrationApproval(s.active));
+  assert.equal(currentIntegrationRepair(s.active)?.kind, 'approval-retention');
   const assessment = currentReviewRound(s.active.review!).integrationRepairAssessment!;
   assert.deepEqual(parseIntegrationRepairAssessment(JSON.stringify(assessment)), assessment, 'restart preserves incident');
   assert.throws(() => decideMission(s.active, { type: 'approve', review: s.active.review! }), /proven evidence/);

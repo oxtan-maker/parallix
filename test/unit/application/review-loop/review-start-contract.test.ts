@@ -22,7 +22,7 @@ test("start resumes the review-preparation-assigned reviewer instead of reselect
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
   await runReviewLoop({ slug, implementer: 'claude', maxAttempts: 3 }, fake.ports);
-  assert.deepEqual(fake.launches.map(launch => [launch.role, launch.agent, launch.prompt?.attempt]), [['reviewer', 'custom', 3]]);
+  assert.deepEqual(fake.launches.map(launch => [launch.role, launch.agent, launch.prompt?.attempt, launch.sessionPolicy]), [['reviewer', 'custom', 3, 'fresh-ephemeral']]);
   assert.equal(fake.current()?.reviewer, 'custom');
   assert.deepEqual(fake.exits, []);
 });
@@ -431,7 +431,7 @@ function changedRepairScenario(status: 'active' | 'review' = 'active') {
 test('successful changed integration repair requires a fresh current-revision reviewer decision (TASK-2824)', async () => {
   const { fake, store, mission, decisions } = changedRepairScenario();
   await runReviewLoop({ slug, isContinue: true }, fake.ports);
-  assert.deepEqual(fake.launches.map(item => [item.role, item.agent, item.prompt?.attempt]), [['reviewer', 'claude', 2]], fake.errors.join('\n'));
+  assert.deepEqual(fake.launches.map(item => [item.role, item.agent, item.prompt?.attempt, item.sessionPolicy]), [['reviewer', 'claude', 2, 'fresh-ephemeral']], fake.errors.join('\n'));
   assert.deepEqual(decisions, ['repaired-revision'], 'historical approval must never be replayed');
   assert.deepEqual(fake.exits, []);
   const result = store.mission();

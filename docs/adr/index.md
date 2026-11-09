@@ -36,7 +36,7 @@ ADR 0023 remains in WrGroceries and is cross-referenced here instead of copied.
 
 - `docs/adr/0065-generic-decision-capability-and-operator-provider-discovery.md` — Generic typed decision port with direct System One transport, operator-owned provider discovery, and normalized usage-block failures
 
-- `docs/adr/0066-mission-context-management.md` — Default-on prompted compaction and retained implementer checkpoint conversations; fresh reviewer invocations approved for PX-0046, with independent provider-native near-limit safeguards
+- `docs/adr/0066-mission-context-management.md` — Default-on prompted compaction and retained implementer checkpoint conversations; fresh reviewer invocations implemented by PX-0046.02, with independent provider-native near-limit safeguards
 
 ## Cross-reference
 - `docs/adr/0023-ai-sdlc-configuration.md` remains in WrGroceries at `/home/magnus/code/visualBoard-task-1302/docs/adr/0023-ai-sdlc-configuration.md`.

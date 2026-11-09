@@ -49,6 +49,8 @@ export interface AgentConfiguration {
   readonly nvmBin: OptionalString;
   readonly graphifyBin: OptionalString;
   readonly codexHome: OptionalString;
+  /** Per-process Codex CLI override; unset keeps the operator/default effort. */
+  readonly codexReasoningEffort: OptionalString;
   readonly searchPath: string;
   readonly cliCommand: OptionalString;
   readonly keepTempArtifacts: boolean;
@@ -164,6 +166,7 @@ export const DEFAULT_CONFIGURATION: ParallixConfiguration = {
     nvmBin: undefined,
     graphifyBin: undefined,
     codexHome: undefined,
+    codexReasoningEffort: undefined,
     searchPath: '',
     cliCommand: undefined,
     keepTempArtifacts: false,
@@ -244,5 +247,6 @@ export const DEFAULT_CONFIGURATION: ParallixConfiguration = {
 /** Repository prompt policy resolved by the existing workflow configuration adapter. */
 export interface PromptConfiguration {
   readonly overridePath: string | null;
+  readonly reviewOverridePath: string | null;
   readonly contextCompaction: boolean;
 }

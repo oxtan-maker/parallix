@@ -8,6 +8,9 @@ import {
   persistReviewStateOrThrow,
   assertReviewStatePersisted,
 } from '../../../src/adapters/review/review-state.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { changeRevision, currentReviewRound, reviewFindingId } from '../../../src/domain/review.js';
+import { missionId } from '../../../src/domain/mission.js';
 
 // task-2220: a review-state write that did not reach durable storage must never
 // report success. The original repro drove a git pre-commit hook rejection;
@@ -51,4 +54,29 @@ test('durable review checkpoints fail closed with mission phase round stage and 
     ),
     /mission task-2220, phase fixing, round 4, stage write: rename denied/
   );
+});
+
+test('per-reviewer results survive the SQLite mission aggregate round trip unchanged (PX-0046.01)', async () => {
+  const reviewerResults = [{
+    publicationId: 'session-42', reviewerId: 'codex-reviewer', agentFamily: agentFamily('codex'),
+    revision: changeRevision('rev-1'), decision: 'changes-requested' as const,
+    findings: [{ id: reviewFindingId('F1'), summary: 'Keep attribution', location: 'src/domain/review.ts' }],
+    outcome: 'completed' as const, status: 0, publishedAt: '2026-11-08T10:00:00Z', revokedAt: null,
+  }];
+  await withMissionDatabase('px-0046-01-roundtrip', async ({ slug, store, openStore }) => {
+    const loaded = await store.load(missionId(slug));
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { return; }
+    const round = currentReviewRound(loaded.mission.review!);
+    await store.save({ ...loaded.mission, review: { ...loaded.mission.review!, rounds: [{ ...round, reviewerResults }] } }, loaded.version);
+
+    const reopened = await openStore();
+    try {
+      const reloaded = await reopened.store.load(missionId(slug));
+      assert.equal(reloaded.kind, 'found');
+      if (reloaded.kind === 'found') {
+        assert.deepEqual(currentReviewRound(reloaded.mission.review!).reviewerResults, reviewerResults);
+      }
+    } finally { await reopened.db.close(); }
+  });
 });

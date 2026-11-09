@@ -10,6 +10,8 @@ import { phaseGateResult } from '../../../../helpers/phase-gate-result.js';
 import { MissionLifecycleService } from '../../../../../src/application/mission-lifecycle-service.js';
 import { agentFamily } from '../../../../../src/domain/agents.js';
 import { missionVersion } from '../../../../../src/application/domain-ports.js';
+import fs from 'node:fs';
+import { mkdtemp } from '../../../../helpers/temp-dir.js';
 
 /** Cases executed by the integration gate rebound contract; all boundaries doubled. */
 export function integrationGateCheckpointCases(route: typeof routeIntegrationGateFailure): void {
@@ -147,5 +149,78 @@ export function integrationGateCheckpointCases(route: typeof routeIntegrationGat
     assert.deepEqual(commands, [unit.command, integration.command]);
     assert.equal(certified, 1);
     assert.equal(reruns, 2);
+  });
+
+  test('aggregate integration failures open one checkpoint per failed gate before one implementer handoff (px-0050.02)', async t => {
+    const worktree = mkdtemp('aggregate-integration-repair-');
+    t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+    const unit = { key: 'unit', command: 'npm test', exitCode: 1, stdout: 'unit failed in a.test.ts', stderr: '' };
+    const integration = { key: 'integration-ci', command: 'npm run test:integration:ci:prebuilt', exitCode: 2,
+      stdout: '', stderr: 'integration failed in b.test.ts' };
+    const opened: Array<{ incidentId: string; gateKey?: string; command: string }> = [];
+    const verified: string[] = [];
+    const events: string[] = [];
+    let prompt = '';
+    const names = new Map<string, string>();
+    const result = await route({
+      slug: 'fixture', missionWorktree: worktree, failedGate: unit, failedGates: [unit, integration],
+      testedRevision: 'tested-revision', blockedGates: [{ key: 'browser', command: 'npm run browser', blockedBy: ['unit'] }],
+      cancelledGates: ['agent-e2e'], gates: [
+        { key: unit.key, command: unit.command, order: 0 },
+        { key: integration.key, command: integration.command, order: 1 },
+      ], implementer: 'codex', repositoryId: 'fixture',
+      startAgentFn: async (_step, options) => {
+        events.push('launch');
+        assert.equal(opened.length, 2, 'all aggregate checkpoints exist before the implementer starts');
+        if (typeof options.prompt !== 'function') { assert.fail('aggregate repair launch must render its fresh prompt for the selected agent'); }
+        prompt = options.prompt('codex');
+        return { result: { status: 0 } };
+      },
+      transitionTaskFn: async () => { events.push('transition'); },
+      captureFinalTreeFn: () => ({ ok: true, rootDir: worktree, commit: 'tested-revision', tree: 'tree' }),
+      runPhaseGatesFn: async () => ({ ok: true, phase: 'integration', gates: [], executed: 2, skipped: false,
+        dryRun: false, failedGate: null, failures: [], outcomes: [
+          { ...unit, exitCode: 0, stdout: '', stderr: '' }, { ...integration, exitCode: 0, stdout: '', stderr: '' },
+        ], error: null }),
+      reboundFn: (reason, context) => {
+        assert.equal(reason.kind, 'gate-failure');
+        assert.equal(reason.testedRevision, 'tested-revision');
+        assert.deepEqual(reason.relatedFailures?.map(failure => failure.gate), ['integration-ci']);
+        assert.deepEqual(reason.blockedGates, [{ gate: 'browser', blockedBy: ['unit'] }]);
+        assert.deepEqual(reason.cancelledGates, ['agent-e2e']);
+        return rebound(reason, { ...context, maxAttempts: 1, repairCheckpoints: {
+          open: async input => {
+            opened.push(input);
+            const identity = `${input.incidentId}:${input.gateKey ?? ''}`;
+            const name = names.get(identity) ?? `CP-${names.size + 2}`;
+            names.set(identity, name);
+            return { name, version: opened.length };
+          },
+          readBlocker: async () => undefined,
+          prepareVerification: async (_slug, name, scope) => {
+            const input = opened.find(item => names.get(`${item.incidentId}:${item.gateKey ?? ''}`) === name)!;
+            return { missionId: 'fixture', command: input.command, worktree, executionRevision: scope.executionRevision!,
+              executionMissionRevision: 3, checkpointEvidenceRevision: 3, authorizedGates: [], authorizedCriteria: [],
+              verifiedOccurrence: { checkpoint: name, incidentId: input.incidentId, attempt: 1, openedMissionRevision: 1,
+                worktree, failureRevision: 'tested-revision', failureEvidenceId: `${input.gateKey}:1` }, coveredOccurrences: [] };
+          },
+          verify: async (_slug, name) => { verified.push(name); },
+          verifyAll: async (_slug, checks) => { verified.push(...checks.map(check => check.name)); },
+        } });
+      }, log() {}, error() {},
+    });
+    assert.equal(result.route, 'fixed');
+    assert.equal(events.filter(event => event === 'launch').length, 1);
+    assert.deepEqual(opened.map(item => [item.incidentId, item.gateKey, item.command]), [
+      ['integration:tested-revision', 'unit', unit.command],
+      ['integration:tested-revision', 'integration-ci', integration.command],
+    ]);
+    assert.deepEqual(verified, ['CP-2', 'CP-3']);
+    assert.match(prompt, /Also failed: integration-ci/);
+    assert.match(prompt, /Blocked: browser/);
+    assert.match(prompt, /Cancelled: agent-e2e/);
+    assert.match(prompt, /Retained evidence for every failed gate/);
+    assert.match(prompt, /CP-2/);
+    assert.match(prompt, /CP-3/);
   });
 }

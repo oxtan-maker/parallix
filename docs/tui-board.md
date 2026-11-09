@@ -135,14 +135,19 @@ the mission worktree is missing, is on another branch, or the base cannot be
 resolved, the command stops before any merge or push and its outcome names the
 mission and the missing fact.
 
-Web cards show a bounded neutral checkpoint track with cyan fill for the fraction
-of supplied entries explicitly marked completed. Hover the track to read its
-counts and separate current and recorded checkpoint labels; screen readers receive
-the same summary. Current work does not add completion. Checkpoint
+In-flight web cards put checkpoint progression, gate status, and pull-request
+review information on one compact row in implementation order: checkpoints →
+gates → review.
+The bounded checkpoint control retains the existing solid progress bar and
+completion check. Its tooltip and accessible description name the completed and
+total counts plus the current and recorded checkpoints; the dialog's labelled
+state symbols keep completed, current, and future entries distinct without
+colour alone.
+Current work does not add completion. Checkpoint
 names are labels, so sparse names do not change the supplied plan size. Missing
-or empty plans show plan unavailable without a progress track; legacy plans with
-omitted states show
-completion unknown and no fill, even when evidence is present. Checkpoint tracks
+or empty plans omit the checkpoint control while leaving the gate status visible;
+legacy plans with omitted states show completion unknown as a disclosure without
+an empty progress track, even when evidence is present. Checkpoint tracks
 never blink.
 
 Click the checkpoint track, or focus it and press Enter or Space, to open the
@@ -396,6 +401,9 @@ The web board keeps informational body and metadata text at 11px or larger,
 including unavailable actions and unknown states. Secondary text colors meet
 4.5:1 contrast on their rendered surfaces, including faded shipped cards.
 Decorative strokes and hidden glyphs use separate treatments.
+
+Review circles show recorded rounds and outcomes, including rounds beyond five.
+The round number does not indicate how many retries remain.
 
 Focusable mission cards show hover and keyboard focus outlines. Use Up/Down to
 move the current mission selection, then Enter or Space to open its operation

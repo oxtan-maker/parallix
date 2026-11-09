@@ -19,8 +19,8 @@ test('integrate CLI interface delegates the unchanged argv and options to its ap
 });
 
 test('integrate CLI interface parses the public flags without adapter dependencies', () => {
-  assert.deepEqual(parseIntegrateCliRequest(['task-2332.07', '--dry-run', '--real-agent', 'codex', '--real-agent-model', 'gpt-5.6-luna']), {
-    explicitSlug: 'task-2332.07', dryRun: true, noIntegrationGates: false, noGate: false, recoverLanded: false, realAgent: 'codex', realAgentModel: 'gpt-5.6-luna',
+  assert.deepEqual(parseIntegrateCliRequest(['task-2332.07', '--dry-run', '--real-agent', 'codex', '--real-agent-model', 'gpt-6-luna']), {
+    explicitSlug: 'task-2332.07', dryRun: true, noIntegrationGates: false, noGate: false, recoverLanded: false, realAgent: 'codex', realAgentModel: 'gpt-6-luna',
   });
 });
 

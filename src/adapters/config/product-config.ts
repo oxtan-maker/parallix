@@ -284,12 +284,15 @@ function validatePromptsSection(section: unknown, issues: string[]): void {
   if ('override' in section && typeof section.override !== 'string') {
     issues.push('adapters.prompts.override must be a string');
   }
+  if ('reviewOverride' in section && typeof section.reviewOverride !== 'string') {
+    issues.push('adapters.prompts.reviewOverride must be a string');
+  }
   if ('contextCompaction' in section && typeof section.contextCompaction !== 'boolean') {
     issues.push('adapters.prompts.contextCompaction must be a boolean');
   }
   for (const key of Object.keys(section)) {
-    if (key !== 'override' && key !== 'contextCompaction') {
-      issues.push('adapters.prompts may only contain "override" and "contextCompaction"');
+    if (key !== 'override' && key !== 'reviewOverride' && key !== 'contextCompaction') {
+      issues.push('adapters.prompts may only contain "override", "reviewOverride" and "contextCompaction"');
     }
   }
 }
@@ -673,7 +676,16 @@ export function resolvePromptOverride(rootDir: string = process.cwd()): string |
   return path.isAbsolute(override) ? override : path.resolve(rootDir, override);
 }
 
-/** Repository policy overrides the built-in off default; no host or per-stage override. */
+/** Resolve a repository opinion that applies only to review launches. */
+export function resolveReviewPromptOverride(rootDir: string = process.cwd()): string | null {
+  const prompts = loadAdapterConfig(rootDir).prompts;
+  if (!isPlainObject(prompts)) {return null;}
+  const override = prompts.reviewOverride;
+  if (typeof override !== 'string' || override.trim() === '') {return null;}
+  return path.isAbsolute(override) ? override : path.resolve(rootDir, override);
+}
+
+/** Repository policy overrides the built-in off default; no host override. */
 export function resolvePromptConfiguration(rootDir: string = process.cwd()): PromptConfiguration {
   const prompts = loadAdapterConfig(rootDir).prompts;
   if (prompts !== undefined && !isPlainObject(prompts)) {
@@ -684,6 +696,7 @@ export function resolvePromptConfiguration(rootDir: string = process.cwd()): Pro
   if (issues.length) { throw new Error(issues.join('; ')); }
   return Object.freeze({
     overridePath: resolvePromptOverride(rootDir),
+    reviewOverridePath: resolveReviewPromptOverride(rootDir),
     contextCompaction: !isPlainObject(prompts) || prompts.contextCompaction !== false,
   });
 }

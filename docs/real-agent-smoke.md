@@ -1,12 +1,12 @@
 # Real-agent launcher smoke test
 
 `test/e2e/agents/real-agent-smoke.test.ts` is a **blocking** integration gate
-(`custom-agent-smoke` in `config/integration-pipelines.json`) that launches
-the real `opencode` binary against a pinned local model through the
-production launcher path in `src/adapters/agents/opencode.ts`. It exists specifically
-to fail closed when Parallix breaks its own local-agent launch path while
-developing itself — see `missions/task-1359/MISSION.md` and `missions/task-2201/MISSION.md`
-for the original implementation and the retake that corrected the lifecycle coverage.
+that runs a real agent through the full production lifecycle. It normally uses
+the repository's configured custom runner and model behavior. If production
+custom admission is already saturated, it can instead use Codex with
+`gpt-6-luna` and low reasoning effort when Codex is eligible, unblocked, and
+available. It exists to fail closed when Parallix breaks its own launcher or
+lifecycle path while developing itself.
 
 This is a second, additive tier on top of the deterministic
 `test/e2e/lifecycle/mission-lifecycle.test.ts` harness (the `workflow` gate), which
@@ -33,11 +33,11 @@ configured local agent, integration must stop rather than merge silently.
   behavior. If `adapters.agents.models.custom` is set, the test reads it and
   writes it into the throwaway repo's own `workflow.config.json` so the
   smoke run exercises that exact override.
-- For the self-development Codex override, `codex` must be on `PATH` and
-  `gpt-5.6-luna` must be available to that Codex installation.
+- For the capacity fallback or self-development Codex override, `codex` must be
+  on `PATH` and `gpt-6-luna` must be available to that Codex installation.
 - The default custom smoke route needs no cloud credentials because its model is
-  local. The explicit Codex override instead requires the operator's usable
-  Codex authentication and model access.
+  local. Both the capacity fallback and explicit Codex override require the
+  operator's usable Codex authentication and model access.
 
 ## Invocation
 
@@ -60,12 +60,19 @@ progress feed. The disposable repository starts with a committed root
 
 ## Configured admission and concurrent replay
 
-Custom launches use production admission and the canonical checkout's
-`adapters.agents.maxConcurrentCustom`. Separate smoke repositories and mission
-worktrees share a lease-only admission database, while each retains its own
-mission database, blocklist, credentials and runner sessions. There is no
-lifecycle-wide smoke lock or separate smoke concurrency limit. A stalled tool
-occupies its session's slot; other sessions can use the remaining capacity.
+Before starting the lifecycle, the smoke asks production custom admission for
+a slot. An admitted probe is released immediately and the configured custom
+runner remains selected. If admission is saturated, the smoke selects Codex
+with `gpt-6-luna` and low effort only when the existing agent policy, block
+authority, and launcher availability checks all allow it. Otherwise custom
+remains selected and follows its existing admission wait/failure behavior.
+
+This decision is made once. A custom launcher or lifecycle failure never
+retries on Codex, and a capacity change after custom was selected is handled by
+normal custom admission. Separate smoke repositories and mission worktrees
+share a disposable lease-only admission database under the system temporary
+directory while retaining isolated
+mission state, credentials, blocklists, and runner sessions.
 
 Build the CLI before replaying (`npm run build`). Use the configured custom
 runner with a reachable model backend and sufficient temporary storage. For a
@@ -89,14 +96,18 @@ hello-world fixture. Both runs must pass the existing lifecycle assertions.
 The `[smoke-fixture]` output identifies each disposable repository, operator
 home, runner state and shared admission directory. Observe two live admission
 leases and a second runner making progress while the first has a sleeping tool;
-verify that the operator homes and runner directories differ. Admission at
-capacity waits for a lease to be released rather than changing agent family.
+verify that the operator homes and runner directories differ. If capacity
+changes after a run has selected custom, its launch waits for a lease under the
+normal custom policy rather than changing family mid-lifecycle.
 
 For a replay with its own lease database, give both invocations the same
-absolute `PARALLIX_CUSTOM_ADMISSION_HOME` beneath a disposable directory.
+absolute `PARALLIX_E2E_CUSTOM_ADMISSION_HOME` beneath a disposable directory.
+The E2E bootstrap maps that explicit test-only value to
+`PARALLIX_CUSTOM_ADMISSION_HOME`; an inherited production admission home is
+still discarded to protect operator state.
 Capacity still comes from the canonical checkout. Keep the session and active
 wall deadlines finite; `PARALLIX_REAL_AGENT_TIMEOUT_MS` bounds each session,
-with twice that allowance for the active phase. Retained fixtures and captures
+with three times that allowance for the active phase. Retained fixtures and captures
 contain copied credentials: remove only the directories belonging to these
 runs after inspection, once their children have exited. Do not remove a shared
 admission database while another run is using it.
@@ -142,7 +153,7 @@ When this repository cannot use its local custom-agent route, request the
 Codex smoke lifecycle explicitly during integration:
 
 ```
-px integrate task-2269 --real-agent codex --real-agent-model gpt-5.6-luna
+px integrate task-2269 --real-agent codex --real-agent-model gpt-6-luna
 ```
 
 The flags are a required pair. `px integrate` and
@@ -174,13 +185,11 @@ share production admission capacity across worktrees; a queued session waits
 until an occupied slot is released.
 A green full-lifecycle run measured ~4
 minutes (242s) on the reference workstation; failing runs usually fail faster
-(a draft-phase failure is often visible within ~40s). After a draft failure,
-the diagnostic health probe allows up to 120s by default so a cold or queued
-local backend can return its first response; set
-`PARALLIX_REAL_AGENT_HEALTHCHECK_TIMEOUT_MS` to tune that limit. The
+(a draft-phase failure is often visible within ~40s). The smoke makes no
+separate real-model probe: the actual lifecycle command is the availability
+check and its captured output supplies the failure diagnostic. The
 single-session timeout defaults to 600s and can be raised via
-`PARALLIX_REAL_AGENT_TIMEOUT_MS`; the health-probe limit is capped at that
-single-session budget, and the active phase gets three times that budget because one
+`PARALLIX_REAL_AGENT_TIMEOUT_MS`; the active phase gets three times that budget because one
 `px active` invocation covers up to three sequential model sessions (execute
 agent, a possible repair relaunch, and the autonomous review loop). Occasional local-model flakiness
 (slow tool calls, transient backend hiccups) is a known risk of this tier —
@@ -189,8 +198,9 @@ a genuine Parallix regression.
 
 ## Lifecycle depth covered
 
-The gate runs the full `draft -> active -> review` lifecycle with the real
-`custom` agent family, through the production launcher path in `src/adapters/agents/opencode.ts`.
+The gate runs the full `draft -> active -> review` lifecycle through the
+production launcher for the family selected before launch: normally the
+configured custom runner, or Codex for the admitted capacity fallback.
 
 While the original implementation stopped at `draft` (because `draft` and `active` both
 funnel through the same launcher code path), the corrected smoke test exercises
@@ -247,8 +257,7 @@ A failing run prefixes its assertion message with one of three buckets:
   incomplete mission contract after Parallix's own bounce-back, the draft-stats
   line was missing or malformed, or a later phase exited unsuccessfully
   without a recognized environment or launcher error. Timeouts in the active
-  phase use the same environment classification as draft and health-probe
-  timeouts. This is the
+  phase use the same environment classification as draft timeouts. This is the
   `TASK-1273` class of bug.
 
 Mission activation and integration read the recorded contract in SQLite, and
@@ -256,20 +265,11 @@ handoff checks its recorded checkpoint evidence. These steps do not require a
 `MISSION.md` file or a mission metadata directory; a recorded base branch must
 still exist locally.
 
-The smoke harness does two preflight checks before the full lifecycle run:
-
-- It verifies that the real `opencode` binary is present on `PATH`.
-- It runs a tiny real `opencode run ... 'Reply with exactly OK'` probe with the
-  configured model and the same child environment the lifecycle test will use.
-
-That fast launcher probe is intentional: it catches broken local `opencode`
-runtime state (for example SQLite/WAL or missing-model failures) in seconds
-instead of letting the main draft phase burn the full timeout and misattribute
-the problem to Parallix lifecycle logic. The probe is judged on its answer, not
-only on its exit status: a runner can exhaust its own provider retries and still
-exit 0, so the probe must actually return `OK`. An unreachable backend therefore
-reports `[local-model-environment]` up front instead of surfacing later as a
-`[parallix-workflow-failure]` phantom draft.
+Before the lifecycle, the harness only performs cheap executable and
+configuration checks for the selected launcher. It does not call a model. A
+missing binary fails immediately; model, provider, and workflow failures come
+from the real draft/active command, with its finite deadline and captured
+stdout/stderr.
 
 The harness also removes the inherited `PWD` variable from the child
 environment. `opencode` trusts `PWD` over the process's real working directory
@@ -305,15 +305,12 @@ test (TASK-2201) adds explicit validation of:
 
 - **Reviewer forcing (and cost containment)**: The harness writes an
   `agents.local.json` blocklist into the isolated `PARALLIX_HOME` that blocks
-  every agent family except `custom` (the product's supported local-blocklist
-  mechanism). Reviewer selection in `startReviewLoop`
-  therefore finds no different-family candidate and takes its single-family
-  fallback: `custom` reviews its own PR. The test asserts
-  `review-state.json.reviewer === "custom"` strictly. This both encodes the
-  original "force custom as reviewer on its own PR" requirement and guarantees
-  the blocking gate can never fall back to launching an expensive cloud agent
-  (claude/codex). Note that `FORGEJO_USER` does not force the reviewer — it is
-  overwritten by `startAgent` with the chosen agent family.
+  every family except the runner selected before the lifecycle. Reviewer
+  selection therefore takes its single-family fallback, and the test strictly
+  asserts that the selected family also performs review. This prevents a
+  second, unintended cloud or local family from entering the disposable run.
+  `FORGEJO_USER` does not force the reviewer; `startAgent` overwrites it with
+  the chosen family.
 
 - **Verification gate that fails where missions stalled**: The throwaway repo
   ships a `scripts/verify-local.sh` that is also its configured verification

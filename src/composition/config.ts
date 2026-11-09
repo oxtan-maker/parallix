@@ -54,6 +54,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
       reviewNoOutputMaxMs: milliseconds(e('WORKFLOW_REVIEW_AGENT_NO_OUTPUT_MAX_MS')),
       opencodeBin: e('OPENCODE_BIN'), piBin: e('PI_BIN'), nvmBin: e('NVM_BIN'),
       graphifyBin: e('GRAPHIFY_BIN'), codexHome: e('CODEX_HOME'),
+      codexReasoningEffort: e('PARALLIX_CODEX_REASONING_EFFORT'),
       searchPath: e('PATH') ?? '', cliCommand: e('PARALLIX_CLI_COMMAND'),
       keepTempArtifacts: e('PARALLIX_KEEP_TEMP_ARTIFACTS') === '1',
       bubblewrapDisabled: optOut(e('PARALLIX_NO_BUBBLEWRAP')),

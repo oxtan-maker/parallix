@@ -55,7 +55,7 @@ test('a recorded review disposition stays off the reserved action green (TASK-26
   assert.doesNotMatch(html, /future attempts|of 5/, 'rounds that may not happen are not announced');
 });
 
-test('the attempt budget stays absent without a review round (TASK-2666)', () => {
+test('review attempts stay absent without a review round (TASK-2666)', () => {
   const html = renderPips(wireCard(makeFullCard({ reviewRound: null, reviewPhase: null, reviewHistory: [] })));
 
   assert.doesNotMatch(html, /aria-label="Review attempts|round \d+ of 5/);
@@ -83,9 +83,7 @@ for (const [phase, reviewPhase] of [['review', 'reviewing'], ['review-response',
 }
 
 /*
- * TASK-2773.05 — the review attempt budget is a countdown of five attempts, not
- * a progress bar. These cases pin the contract the presentation may and may not
- * claim from the supplied round facts.
+ * Review attempts describe recorded round facts, independently of retry budgets.
  */
 
 function reviewCard(overrides: Partial<MissionCard>): WebMissionCard {
@@ -116,7 +114,7 @@ function labels(html: string): string[] {
   return attempts(html).map((tag) => /aria-label="([^"]+)"/.exec(tag)?.[1] ?? 'missing');
 }
 
-for (const roundNumber of [1, 2, 3, 4, 5]) {
+for (const roundNumber of [1, 2, 3, 4, 5, 6, 10, 99]) {
   test(`round ${roundNumber} draws only the attempts so far, no future rounds (TASK-2773.05)`, () => {
     const html = renderPips(reviewCard({
       reviewRound: roundNumber,
@@ -125,6 +123,8 @@ for (const roundNumber of [1, 2, 3, 4, 5]) {
     }));
 
     assert.equal(attempts(html).length, roundNumber, 'only attempts that happened are drawn');
+    assert.match(labels(html).at(-1) ?? '', new RegExp(`^attempt ${roundNumber}: current attempt, no outcome recorded$`));
+    assert.doesNotMatch(html, /review round unknown/);
     assert.doesNotMatch(html, /future attempts|round \d+ of 5|not yet used/, 'no future round is announced');
   });
 }
@@ -204,11 +204,25 @@ test('a disposition outside the two named outcomes is shown verbatim, not as app
   assert.doesNotMatch(labels(html)[0], /approved/i);
 });
 
-for (const invalid of [0, 6, -1, 2.5, 99]) {
-  test(`an out-of-range or fractional round ${invalid} is unknown, never a relabeled budget (TASK-2773.05)`, () => {
+test('continuation rounds preserve recorded outcomes beyond round five (TASK-2845)', () => {
+  const html = renderPips(reviewCard({
+    reviewRound: 7,
+    reviewPhase: 'approved',
+    reviewDisposition: 'APPROVED',
+    reviewHistory: [round(5, 'REQUEST_CHANGES'), round(6, 'REQUEST_CHANGES'), round(7, 'APPROVED')],
+  }));
+
+  assert.deepEqual(states(html), ['unknown-outcome', 'unknown-outcome', 'unknown-outcome', 'unknown-outcome',
+    'changes-requested', 'changes-requested', 'approved']);
+  assert.equal(labels(html).at(-1), 'attempt 7: outcome recorded: approved');
+  assert.doesNotMatch(html, /review round unknown|exhausted|budget spent|no attempts left/i);
+});
+
+for (const invalid of [0, -1, 2.5]) {
+  test(`a nonpositive or fractional round ${invalid} is unknown (TASK-2773.05)`, () => {
     const html = renderPips(reviewCard({ reviewRound: invalid, reviewPhase: 'reviewing', reviewHistory: [round(1, 'APPROVED')] }));
 
-    assert.equal(attempts(html).length, 0, 'no attempt circles are drawn for a round the budget cannot hold');
+    assert.equal(attempts(html).length, 0, 'no attempt circles are drawn for an invalid round number');
     assert.match(html, /review round unknown/);
     assert.doesNotMatch(html, /round \d+ of 5|future attempts remaining/);
     assert.doesNotMatch(unknownRoundText(html), /\d/, 'no clamped round and no negative remaining count is printed');
@@ -276,7 +290,7 @@ const inactive: readonly [string, WebMissionCard][] = [
   ['review work without a recorded phase', { ...activityCard('review'), reviewPhase: null }],
 ];
 for (const [state, card] of inactive) {
-  test(`the attempt budget reads the same for ${state} (TASK-2686)`, () => {
+  test(`review attempts read the same for ${state} (TASK-2686)`, () => {
     const html = renderPips(card);
 
     assert.doesNotMatch(html, /review-pip--running|blink/);
@@ -285,7 +299,7 @@ for (const [state, card] of inactive) {
     }
     assert.match(html, /aria-label="Review attempts"/);
     assert.deepEqual(states(html), ['unknown-outcome', 'unknown-outcome', 'current'],
-      'work state cannot change what the attempt budget claims');
+      'work state cannot change the recorded review attempts');
   });
 }
 

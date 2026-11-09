@@ -278,13 +278,22 @@ or a provider block requires recovery, an eligible replacement can take over;
 the family that actually launches becomes the implementer for subsequent work.
 
 
-Review output distinguishes an initial reviewer selection from a resumed review.
-Round 1 starts with initial-selection wording; continuing an existing round or
-starting a later round retains resume wording. During integration, `Next:` names
-an operator action, while verification progress describes checks the workflow
-handles. Missing workflow statistics display as `n/a`. If dirty paths prevent
-noise squashing, the message names a bounded set of paths and explains that the
-trailing backlog commits remain separate; untracked-only state uses debug output.
+Review output distinguishes initial selection from continuation of the persisted
+workflow round. Each agent review invocation still starts a fresh native
+conversation, including retries, later fix rounds and same-family fallback. Its
+prompt reloads the authoritative Mission, revision, findings and resolutions and
+always includes the generic workflow, verdict and evidence contract. Additional
+repository review instructions are explicit: this repository points
+`adapters.prompts.reviewOverride` at `prompts/review.md`, where its counterexample
+pass lives without replacing another stage's opinion. A successful
+self-development integration runs `scripts/refresh-global-px.sh`,
+which rebuilds and reinstalls the runner and validates that the latest landed
+repository instructions remain selected; configured model and effort selection
+does not change. During integration, `Next:` names an operator action, while
+verification progress describes checks the workflow handles. Missing workflow
+statistics display as `n/a`. If dirty paths prevent noise squashing, the message
+names a bounded set of paths and explains that the trailing backlog commits remain
+separate; untracked-only state uses debug output.
 
 ### Recording defect provenance
 
@@ -477,6 +486,13 @@ original approval, bound to the revision it judged. Historical approval does not
 authorize landing: pending repair, failed or cancelled gates and uncommitted work
 block integration, including after interruption. Resume verification with
 `px integrate <slug>`.
+When one integration execution finds several independent failures, Parallix opens
+one durable repair checkpoint for each failed gate before one implementer handoff.
+Blocked and cancelled gates remain visible execution status but are not repair
+obligations. Every failed-gate checkpoint needs fresh authorized evidence, and
+the complete configured integration plan must rerun green before the checkpoints
+are certified together or integration can resume. Retrying or restarting the
+same tested revision reuses the incident-and-gate checkpoints.
 `px review <slug>` and `px active <slug>` also resume the authorized exact check,
 repair certification and pending patch assessment before review preparation.
 This includes an approved mission already in review with preparation pending;

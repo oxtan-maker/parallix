@@ -77,7 +77,11 @@ export async function awaitAgentResult(
   log(fmt.status('INFO', 'The workflow recorded the agent assignment outcome; stopping the provider session after authoritative completion.'));
   await stopChild(child);
   const stopped = await resultPromise;
-  return { ...stopped, status: 0, signal: null, error: null, failureReason: undefined, completedAuthoritatively: true };
+  // The persisted workflow outcome owns completion, but the provider session was
+  // stopped by us. Keep its real exit state so durable run history cannot report
+  // an interrupted provider process as a clean provider exit (px-0036.01).
+  return { ...stopped, status: 0, signal: null, error: null, failureReason: undefined, completedAuthoritatively: true,
+    providerExit: { status: stopped.status ?? null, signal: stopped.signal ?? null } };
 }
 
 

@@ -135,6 +135,7 @@ export function reboundCollaborators(context: LoopContext, role: ReviewRole, pro
     agent: (prompt ? context.identities[role] : launchOptions.agent) as string,
     exclude: prompt ? [excludedFor(context, role)] : (launchOptions.exclude as string[] | undefined) ?? [],
     ...(prompt ? { prompt: prompt() } : {}),
+    ...(role === 'reviewer' ? { sessionPolicy: 'fresh-ephemeral' as const } : {}),
     recovery: { prompt: launchOptions.prompt as (_actual: string) => unknown, sessionPolicy: launchOptions.sessionPolicy },
   }) ?? null;
   return {

@@ -25,6 +25,7 @@ import { missionId } from '../../../domain/mission.js';
 import { rebound, type GateFailureReason, type ReboundContext, type ReboundOutcome } from '../../../application/rebound-kernel.js';
 import { runPhaseGates, type GateRunOutcome, type PhaseGateRunResult, type RepositoryGate } from '../../config/repository-gates.js';
 import { captureFinalIntegrationTree } from './integrate-gates.js';
+import { completeIntegrationGateRunReceipt } from '../../../application/integrate/integration-gate-receipt.js';
 
 import { invalidateApprovedPrReview, type ApprovalInvalidation } from '../../review/integration-approval-invalidation.js';
 export { invalidateApprovedPrReview, type ApprovalInvalidation } from '../../review/integration-approval-invalidation.js';
@@ -76,10 +77,20 @@ export function integrationOnlyCoverageNote(gateCommand: string, verificationCom
   return `integration-only — this gate command is not the mission's ordinary verification command (${verify}), so the failing test is not necessarily covered by it. Reproduce with the gate command above; a green ${verify} does not close this failure.`;
 }
 
+type IntegrationGateFailureReasonOptions = {
+  gateError?: string | null;
+  verificationCommand?: string | null;
+  approvedRevision?: string | null;
+  failedGates?: readonly GateRunOutcome[];
+  testedRevision?: string | null;
+  blockedGates?: readonly { readonly key: string; readonly blockedBy: readonly string[] }[];
+  cancelledGates?: readonly string[];
+};
+
 /** Structured gate-failure reason for the rebound kernel. */
 export function integrationGateFailureReason(
   failedGate: GateRunOutcome,
-  opts: { gateError?: string | null; verificationCommand?: string | null; approvedRevision?: string | null } = {},
+  opts: IntegrationGateFailureReasonOptions = {},
 ): GateFailureReason {
   const coverageNote = integrationOnlyCoverageNote(failedGate.command, opts.verificationCommand ?? null);
   const reason: GateFailureReason = {
@@ -91,9 +102,7 @@ export function integrationGateFailureReason(
     exitCode: failedGate.exitCode,
     stdout: failedGate.stdout,
     stderr: failedGate.stderr,
-    ...(opts.gateError ? { error: opts.gateError } : {}),
-    ...(opts.approvedRevision !== undefined ? { approvedRevision: opts.approvedRevision } : {}),
-    ...(coverageNote ? { coverageNote } : {}),
+    ...integrationGateFailureContext(failedGate, opts, coverageNote),
   };
   // TASK-2620 AC4: agent-smoke runs against a shared local vLLM under
   // concurrency and flakes. Retry it once on an unchanged tree; a persistent
@@ -104,6 +113,26 @@ export function integrationGateFailureReason(
     reason.environment = true;
   }
   return reason;
+}
+
+function integrationGateFailureContext(failedGate: GateRunOutcome, opts: IntegrationGateFailureReasonOptions,
+  coverageNote: string | null): Partial<GateFailureReason> {
+  const context: Partial<GateFailureReason> = {};
+  if (opts.gateError) { context.error = opts.gateError; }
+  if (opts.approvedRevision !== undefined) { context.approvedRevision = opts.approvedRevision; }
+  if (opts.testedRevision !== undefined) { context.testedRevision = opts.testedRevision; }
+  if (opts.failedGates && opts.failedGates.length > 1) {
+    context.relatedFailures = opts.failedGates.filter(gate => gate.key !== failedGate.key).map(gate => ({
+      gate: gate.key, command: gate.command, exitCode: gate.exitCode,
+      signal: gate.signal ?? null, stdout: gate.stdout, stderr: gate.stderr,
+    }));
+  }
+  if (opts.blockedGates?.length) {
+    context.blockedGates = opts.blockedGates.map(gate => ({ gate: gate.key, blockedBy: gate.blockedBy }));
+  }
+  if (opts.cancelledGates?.length) { context.cancelledGates = [...opts.cancelledGates]; }
+  if (coverageNote) { context.coverageNote = coverageNote; }
+  return context;
 }
 
 function integrationGateRerunFailure(result: PhaseGateRunResult, verificationCommand: string | null | undefined, approvedRevision: string | null) {
@@ -205,6 +234,10 @@ export interface IntegrationGateRouteOptions {
   /** The mission's ordinary verification command, for the coverage note. */
   verificationCommand?: string | null;
   failedGate: GateRunOutcome | null | undefined;
+  failedGates?: readonly GateRunOutcome[];
+  testedRevision?: string | null;
+  blockedGates?: readonly { readonly key: string; readonly command: string; readonly blockedBy: readonly string[] }[];
+  cancelledGates?: readonly string[];
   gateError?: string | null;
   /** The full configured gate set, re-run verbatim to verify a repair. */
   gates: RepositoryGate[];
@@ -258,7 +291,6 @@ export interface IntegrationGateRouteOptions {
  */
 export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOptions): Promise<IntegrationGateRoute> {
   const {
-    slug,
     missionWorktree,
     failedGate,
     captureFinalTreeFn = captureFinalIntegrationTree,
@@ -268,18 +300,9 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
     error = fmt.log.plainError,
   } = opts;
 
-  if (!failedGate) {
-    error(fmt.status('FAIL', `Integration gates failed for ${slug} without naming a failed gate; nothing to bounce. Human action required.`));
-    return { route: 'stranded', detail: 'no failed gate recorded' };
-  }
-
-  // A fresh bounded repair budget starts here, per `px integrate` (TASK-2620
-  // AC5). The kernel's own attempt counter enforces it, so no lifetime counter
-  // is read or spent: a later human resume starts with the full budget again.
-  if (!opts.implementer) {
-    error(fmt.status('FAIL', `No implementer could be named for ${slug}; not bouncing the integration gate failure. Human action required.`));
-    return { route: 'stranded', detail: 'no implementer resolvable' };
-  }
+  const stranded = integrationGateStrandedRoute(opts, error);
+  if (stranded) { return stranded; }
+  const routedGate = failedGate as GateRunOutcome;
 
   // The revision the reviewer's approval was given to, observed before the
   //    implementer touches the worktree. Comparing it with the revision the
@@ -290,42 +313,89 @@ export async function routeIntegrationGateFailure(opts: IntegrationGateRouteOpti
   const preRepairRevision = committedRevision(approvedTree);
   // The revision the reviewer approved (A); HEAD may already carry bookkeeping after it.
   const approvedRevision = opts.approvedRevision ?? preRepairRevision;
+  const failedGates = opts.failedGates?.length ? [...opts.failedGates] : [routedGate];
+  const failureReasons = failedGates.map(gate => integrationGateFailureReason(gate, {
+    gateError: opts.gateError, verificationCommand: opts.verificationCommand, approvedRevision,
+    testedRevision: opts.testedRevision ?? preRepairRevision,
+  }));
 
   const outcome = await reboundFn(
-    integrationGateFailureReason(failedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand, approvedRevision }),
-    {
-      slug,
-      worktree: missionWorktree,
-      implementer: opts.implementer,
-      maxAttempts: INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION,
-      startAgent: opts.startAgentFn,
-      transitionToImplementer: opts.reactivateMissionFn ?? opts.transitionTaskFn,
-      ...(opts.applyAgentFallbackFn ? { applyAgentFallback: opts.applyAgentFallbackFn } : {}),
-      verify: createRepairVerifier(opts, failedGate, approvedRevision, log),
-      log,
-      error,
-    },
+    integrationGateFailureReason(routedGate, { gateError: opts.gateError, verificationCommand: opts.verificationCommand,
+      approvedRevision, failedGates, testedRevision: opts.testedRevision ?? preRepairRevision,
+      blockedGates: opts.blockedGates, cancelledGates: opts.cancelledGates }),
+    integrationReboundContext(opts, failedGates, failureReasons, approvedRevision, preRepairRevision,
+      captureFinalTreeFn, log, error),
   );
+  return settleIntegrationGateRebound({ opts, failedGate: routedGate, outcome, approvedRevision, preRepairRevision,
+    captureFinalTreeFn, invalidateApprovalFn, log, error });
+}
 
+function integrationGateStrandedRoute(opts: IntegrationGateRouteOptions,
+  error: (_message: string) => void): Extract<IntegrationGateRoute, { route: 'stranded' }> | null {
+  if (!opts.failedGate) {
+    error(fmt.status('FAIL', `Integration gates failed for ${opts.slug} without naming a failed gate; nothing to bounce. Human action required.`));
+    return { route: 'stranded', detail: 'no failed gate recorded' };
+  }
+  // A fresh bounded repair budget starts per `px integrate`; no lifetime counter
+  // is read or spent, so a later human resume starts with the full budget again.
+  if (!opts.implementer) {
+    error(fmt.status('FAIL', `No implementer could be named for ${opts.slug}; not bouncing the integration gate failure. Human action required.`));
+    return { route: 'stranded', detail: 'no implementer resolvable' };
+  }
+  return null;
+}
+
+function integrationReboundContext(opts: IntegrationGateRouteOptions, failedGates: readonly GateRunOutcome[],
+  failureReasons: readonly GateFailureReason[], approvedRevision: string | null, preRepairRevision: string | null,
+  captureFinalTreeFn: typeof captureFinalIntegrationTree, log: (_message: string) => void,
+  error: (_message: string) => void): ReboundContext {
+  return {
+    slug: opts.slug,
+    worktree: opts.missionWorktree,
+    implementer: opts.implementer,
+    head: opts.testedRevision ?? preRepairRevision ?? undefined,
+    readHead: () => committedRevision(captureFinalTreeFn(opts.missionWorktree)),
+    ...(opts.testedRevision ? { repairIncidentId: `integration:${opts.testedRevision}` } : {}),
+    ...(opts.failedGates && failedGates.length > 1 ? {
+      repairObligations: failedGates.map((gate, index) => ({ gateKey: gate.key, reason: failureReasons[index] })),
+    } : {}),
+    maxAttempts: INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION,
+    startAgent: opts.startAgentFn,
+    transitionToImplementer: opts.reactivateMissionFn ?? opts.transitionTaskFn,
+    ...(opts.applyAgentFallbackFn ? { applyAgentFallback: opts.applyAgentFallbackFn } : {}),
+    verify: createRepairVerifier(opts, failedGates, approvedRevision, log),
+    log,
+    error,
+  };
+}
+
+async function settleIntegrationGateRebound({ opts, failedGate, outcome, approvedRevision, preRepairRevision,
+  captureFinalTreeFn, invalidateApprovalFn, log, error }: {
+  opts: IntegrationGateRouteOptions; failedGate: GateRunOutcome; outcome: ReboundOutcome;
+  approvedRevision: string | null; preRepairRevision: string | null;
+  captureFinalTreeFn: typeof captureFinalIntegrationTree; invalidateApprovalFn: typeof invalidateApprovedPrReview;
+  log: (_message: string) => void; error: (_message: string) => void;
+}): Promise<IntegrationGateRoute> {
   const rebounds = outcome.attempts;
   if (outcome.outcome === 'fixed') {
-    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision, preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, log, error });
+    return routeFixedIntegrationGateRebound({ opts, failedGate, outcome, rebounds, approvedRevision,
+      preRepairRevision, captureFinalTreeFn, invalidateApprovalFn, log, error });
   }
   if (outcome.outcome === 'human-only') {
-    error(fmt.status('FAIL', `Integration gate ${failedGate.key} requires human action for ${slug}: ${outcome.diagnostic}. No repair agent was launched.`));
+    error(fmt.status('FAIL', `Integration gate ${failedGate.key} requires human action for ${opts.slug}: ${outcome.diagnostic}. No repair agent was launched.`));
     return { route: 'human-only', rebounds, diagnostic: outcome.diagnostic };
   }
   await withdrawChangedExhaustedRepair(opts, failedGate, approvedRevision, captureFinalTreeFn, invalidateApprovalFn);
-  error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${slug} again for a fresh repair budget, or px review ${slug} once the gate is fixed.`));
+  error(fmt.status('FAIL', `Integration gate ${failedGate.key} still fails for ${opts.slug} after ${rebounds} repair(s) within this integrate's bounded budget. Address the failed gate, then run px integrate ${opts.slug} again for a fresh repair budget, or px review ${opts.slug} once the gate is fixed.`));
   return { route: 'exhausted', rebounds, diagnostic: outcome.diagnostic };
 }
 
 function greenGateRun(result: PhaseGateRunResult): boolean { return result.ok && !result.cancelled && !result.skipped; }
 
-function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGate: GateRunOutcome,
+function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGates: readonly GateRunOutcome[],
   approvedRevision: string | null, log: (_message: string) => void): ReboundContext['verify'] {
   const { missionWorktree, slug, gates, captureFinalTreeFn = captureFinalIntegrationTree, runPhaseGatesFn = runPhaseGates } = opts;
-  let requiredCommand = failedGate.command;
+  let requiredCommand = failedGates[0].command;
   return async () => {
     const tree = captureFinalTreeFn(missionWorktree);
     if (!tree.ok) { return { ok: false, diagnostic: `The repair is not committed, so the integration gates cannot re-run: ${tree.error}` }; }
@@ -334,8 +404,14 @@ function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGate: Gat
       realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
     const after = captureFinalTreeFn(missionWorktree);
     if (!after.ok || after.commit !== tree.commit) { return { ok: false, diagnostic: 'Mission tree changed during integration verification' }; }
-    await recordRepairValidation(opts, tree.commit, rerun, failedGate, log);
-    if (greenGateRun(rerun)) { return { ok: true, command: requiredCommand, diagnostic: '' }; }
+    if (failedGates.length > 1 && greenGateRun(rerun) && !completeIntegrationGateRunReceipt(gates, rerun)) {
+      return { ok: false, command: requiredCommand, diagnostic: 'Aggregate integration rerun did not return complete passing coverage for every configured gate' };
+    }
+    await recordRepairValidation(opts, tree.commit, rerun, failedGates[0], log);
+    if (greenGateRun(rerun)) {
+      return { ok: true, command: requiredCommand, diagnostic: '',
+        exactExecutions: failedGates.map(gate => ({ command: gate.command, worktree: missionWorktree, exitCode: 0 as const })) };
+    }
     if (rerun.failedGate) { requiredCommand = rerun.failedGate.command; }
     return integrationGateRerunFailure(rerun, opts.verificationCommand, approvedRevision);
   };

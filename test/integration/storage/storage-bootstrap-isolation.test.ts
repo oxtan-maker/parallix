@@ -29,6 +29,11 @@ const executionRoot = path.resolve(
 const packageJson = JSON.parse(fs.readFileSync(path.join(executionRoot, 'package.json'), 'utf8'));
 
 const PROBE_CODE = 'process.stdout.write(process.env.PARALLIX_HOME ?? "")';
+const ADMISSION_PROBE_CODE = 'process.stdout.write(JSON.stringify({home:process.env.PARALLIX_HOME,admission:process.env.PARALLIX_CUSTOM_ADMISSION_HOME}))';
+const SMOKE_ADMISSION_PROBE_CODE = `
+  const smoke = await import('./test/helpers/real-agent-smoke-selection.ts');
+  process.stdout.write(smoke.configureRealAgentSmokeAdmissionHome());
+`;
 
 /**
  * Extract the `--import <module>` flags from an e2e npm script such as
@@ -57,6 +62,54 @@ function e2eImportFlags(scriptName: string): string[] {
   );
   return flags;
 }
+
+test('agent E2E entry permits only its explicit disposable admission-home override (PX-0049)', () => {
+  const admissionHome = fs.mkdtempSync(path.join(os.tmpdir(), 'px-0049-bootstrap-admission-'));
+  try {
+    const env = {
+      ...process.env,
+      PARALLIX_HOME: undefined,
+      PARALLIX_CUSTOM_ADMISSION_HOME: '/operator/admission/must-not-leak',
+      PARALLIX_E2E_CUSTOM_ADMISSION_HOME: admissionHome,
+    };
+    const result = spawnSync(
+      process.execPath,
+      [...e2eImportFlags('test:agent-e2e'), '--input-type=module', '-e', ADMISSION_PROBE_CODE],
+      { encoding: 'utf8', cwd: executionRoot, env, timeout: 30_000 }
+    );
+    assert.equal(result.error, undefined, `agent E2E admission probe failed to spawn: ${result.error?.message ?? ''}`);
+    assert.equal(result.status, 0, `agent E2E admission probe exited ${result.status}: ${result.stderr || ''}`);
+    const observed = JSON.parse(result.stdout) as { home: string; admission: string };
+    assert.ok(observed.home.startsWith(os.tmpdir()));
+    assert.notEqual(path.resolve(observed.home), path.resolve(admissionHome));
+    assert.equal(path.resolve(observed.admission), path.resolve(admissionHome));
+  } finally {
+    fs.rmSync(admissionHome, { recursive: true, force: true });
+  }
+});
+
+test('agent E2E public entry gives separate processes one shared disposable admission home (PX-0049)', () => {
+  const probe = () => {
+    const env = { ...process.env };
+    delete env.PARALLIX_HOME;
+    delete env.PARALLIX_E2E_CUSTOM_ADMISSION_HOME;
+    env.PARALLIX_CUSTOM_ADMISSION_HOME = '/operator/admission/must-not-leak';
+    const result = spawnSync(
+      process.execPath,
+      [...e2eImportFlags('test:agent-e2e'), '--input-type=module', '-e', SMOKE_ADMISSION_PROBE_CODE],
+      { encoding: 'utf8', cwd: executionRoot, env, timeout: 30_000 }
+    );
+    assert.equal(result.error, undefined, `agent E2E shared admission probe failed to spawn: ${result.error?.message ?? ''}`);
+    assert.equal(result.status, 0, `agent E2E shared admission probe exited ${result.status}: ${result.stderr || ''}`);
+    return result.stdout;
+  };
+  const first = probe();
+  const second = probe();
+  assert.equal(first, second);
+  assert.ok(first.startsWith(os.tmpdir()));
+  assert.match(path.basename(first), /^parallix-smoke-admission-/);
+  assert.notEqual(first, '/operator/admission/must-not-leak');
+});
 
 function probeEntryHome(scriptName: string): string {
   const env = { ...process.env };

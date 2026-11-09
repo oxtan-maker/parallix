@@ -48,6 +48,8 @@ export interface CheckpointData {
   /** Harness-owned incident identity; agent recording preserves this metadata. */
   readonly repair?: {
     readonly incidentId: string;
+    /** Gate identity within an aggregate integration incident. */
+    readonly gateKey?: string;
     readonly command: string;
     readonly authorizedGates: readonly string[];
     readonly authorizedCriteria: readonly string[];

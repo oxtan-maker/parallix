@@ -25,6 +25,7 @@ import { isStaleWrite, type MissionStore, type MissionVersion } from '../../appl
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { missionId, type Mission } from '../../domain/mission.js';
 import { requireReviewIdentity } from '../../domain/mission-workflow.js';
+import { attachReviewerResult } from './reviewer-result-attribution.js';
 import {
   applyImplementerCommand,
   applyReviewerCommand,
@@ -39,6 +40,7 @@ import {
   type ReviewFinding,
   type ReviewItemDisposition,
   type Review,
+  type ReviewerResultAttribution,
 } from '../../domain/review.js';
 
 /**
@@ -120,6 +122,7 @@ export async function recordRequestedChanges(
     /** Mission version the caller read; a mismatch fails closed. */
     expectedVersion?: number;
     observedRound?: ReviewRoundObservation;
+    result?: ReviewerResultAttribution;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -143,7 +146,7 @@ export async function recordRequestedChanges(
     const rejected = requestedChangesRejection(slug, mission.review, input.findings);
     if (rejected) { return rejected; }
 
-    const review = applyReviewerCommand(mission.review, {
+    let review = applyReviewerCommand(mission.review, {
       type: 'request-changes',
       decidedAt: input.decidedAt,
       revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
@@ -151,6 +154,7 @@ export async function recordRequestedChanges(
       findings: input.findings,
       ...(disposition === 'REQUEST_CHANGES' ? {} : { disposition: disposition }),
     });
+    review = attachReviewerResult(review, 'changes-requested', input, input.findings);
     const version = await store.save({ ...mission, review }, loaded.version);
 
     return await settleRequestedChanges(slug, { ...mission, review }, version, ports);
@@ -225,6 +229,21 @@ function blockedApproval(slug: string, review: Review): ReviewRoundResult {
   return { outcome: 'failed', diagnostic: workflowBlock.diagnostic, workflowBlock };
 }
 
+async function replayRecordedApproval(
+  slug: string,
+  input: { revision?: string | null; decidedAt: string; result?: ReviewerResultAttribution },
+  mission: Mission & { review: Review },
+  version: MissionVersion,
+  store: MissionStore,
+  ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult> {
+  // Pre-cutover approvals remain legacy records; attributed rounds accept another publication.
+  const review = currentReviewRound(mission.review).reviewerResults === undefined
+    ? mission.review : attachReviewerResult(mission.review, 'approved', input, []);
+  const savedVersion = review === mission.review ? version : await store.save({ ...mission, review }, version);
+  return await replayApprovalTransition(slug, input.decidedAt, { ...mission, review }, savedVersion, ports)
+    ?? (review === mission.review ? { outcome: 'unchanged', reason: 'review is already approved' } : { outcome: 'recorded' });
+}
 /**
  * Record authoritative approval and its Mission lifecycle boundary.
  * Provider callers invoke this after a successful POST. A replay settles the
@@ -241,6 +260,7 @@ export async function recordApproval(
     /** Mission version the caller read; a mismatch fails closed. */
     expectedVersion?: number;
     observedRound?: ReviewRoundObservation;
+    result?: ReviewerResultAttribution;
   },
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
@@ -257,8 +277,7 @@ export async function recordApproval(
       // The decision is already recorded, but the review → integration boundary
       // may have failed after it was saved. Replaying the approve finishes that
       // transition instead of leaving the mission parked in review forever.
-      return await replayApprovalTransition(slug, input.decidedAt, mission, loaded.version, ports)
-        ?? { outcome: 'unchanged', reason: `review is already ${status}` };
+      return await replayRecordedApproval(slug, input, mission, loaded.version, store, ports);
     }
     if (status !== 'awaiting-review') {
       // The round cannot legally reach `approved` from here (REVIEW_PHASE_TRANSITIONS
@@ -279,13 +298,14 @@ export async function recordApproval(
         diagnostic: `Approve cannot be recorded for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
       };
     }
-    const review = applyReviewerCommand(mission.review, {
+    let review = applyReviewerCommand(mission.review, {
       type: 'approve',
       decidedAt: input.decidedAt,
       revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
       comment: input.comment,
       source,
     });
+    review = attachReviewerResult(review, 'approved', input, []);
     if (mission.status === 'active') {
       return await approveRepairedActiveLane(slug, input.decidedAt, loaded.version, review, ports);
     }

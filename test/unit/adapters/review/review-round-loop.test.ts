@@ -298,6 +298,8 @@ it('observed approval retries one stale write and rechecks the round (TASK-2821 
       await recorder.recordApproval(state, { disposition: 'APPROVED', revision: 'rev-1', decidedAt: '2026-08-16T14:00:00.000Z', comment: null });
       assert.equal(store.mission().status, 'integration');
       assert.equal(currentReviewRound(store.mission().review!).decision?.kind, 'approved');
+      assert.equal(currentReviewRound(store.mission().review!).reviewerResults?.length, 1,
+        'the conflict retry preserves one publication');
       assert.equal(store.mission().title, 'concurrent event');
       assert.equal(attempts, 2);
     } else {

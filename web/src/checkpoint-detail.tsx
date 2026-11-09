@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { WebMissionCard } from '../../src/interfaces/web/transport.js';
 import { C, MODAL, RADIUS, SPACE, TYPE } from './palette.js';
 
+const STATE_MARK = {
+  completed: '✓', current: '▶', future: '○', unknown: '?',
+} as const;
+
 function useDialogFocus(panel: React.RefObject<HTMLElement | null>, onClose: () => void) {
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -78,6 +82,7 @@ export function CheckpointDetail({ card, initial, onClose }: {
         <nav aria-label="Checkpoints" style={{ display: 'flex', flexWrap: 'wrap', gap: SPACE.sm, marginBottom: SPACE.lg }}>
           {evidence.map((checkpoint) => {
             const chosen = checkpoint.name === active?.name;
+            const state = checkpoint.state ?? 'unknown';
             return (
               <button
                 key={checkpoint.name}
@@ -92,7 +97,7 @@ export function CheckpointDetail({ card, initial, onClose }: {
                   padding: `${SPACE.xs}px ${SPACE.md}px`,
                 }}
               >
-                {checkpoint.name}
+                <span aria-hidden="true">{STATE_MARK[state]} </span>{checkpoint.name} · {state}
               </button>
             );
           })}

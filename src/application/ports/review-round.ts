@@ -16,6 +16,7 @@ import type { PullRequestReference } from '../../domain/review.js';
 import type { GateFailureReason, HookFailureReason, ReboundReason } from '../rebound-kernel.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { MissionLifecycleService } from '../mission-lifecycle-service.js';
+import type { SessionLaunchPolicy } from '../../domain/session.js';
 
 /* ------------------------------------------------------------------ *
  * Entry
@@ -265,6 +266,8 @@ export interface ReviewAgentLaunch {
   readonly role: ReviewRole;
   readonly agent: string;
   readonly exclude: readonly (string | undefined)[];
+  /** Native conversation policy for this invocation. */
+  readonly sessionPolicy?: SessionLaunchPolicy;
   /** The role prompt; absent for a bare repair launch that carries only `recovery`. */
   readonly prompt?: ReviewPromptFacts;
   /** Recovery instructions appended to the role prompt by a rebound. */
@@ -310,7 +313,7 @@ export interface ImplementerArtifactFacts {
 
 /** Workflow output written by the reviewer and implementer for this round. */
 export interface ReviewArtifactPort {
-  consumeReviewer(_reviewer: string, _state?: ReviewLoopState): Promise<ReviewerArtifactFacts>;
+  consumeReviewer(_reviewer: string, _state?: ReviewLoopState, _launch?: ReviewAgentLaunchResult | null): Promise<ReviewerArtifactFacts>;
   consumeImplementer(_implementer: string, _state?: ReviewLoopState): Promise<ImplementerArtifactFacts>;
 }
 

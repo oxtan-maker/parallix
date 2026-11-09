@@ -301,3 +301,127 @@ for (const pinned of [false, true]) {
     assert.equal(blocks.get('claude')!.until, formatBlockUntil(ceilToNextHour(new Date('2026-11-03T20:50:00.000Z'))));
   });
 }
+
+// ---------- px-0051: a saturated custom pool reroutes to another eligible agent instead of waiting ----------
+
+import { tryAcquireCustomCapacity, activeCustomCapacityCount } from '../../../../src/adapters/agents/custom-capacity.js';
+import { clearCustomAdmissionStateCache } from '../../../../src/adapters/sqlite/custom-admission-state.js';
+import { admitCustomCapacity } from '../../../../src/adapters/agents/agent-launch-preparation.js';
+import type { StartAgentLoopDeps } from '../../../../src/adapters/agents/agent-launch-context.js';
+import { resolveBlockContext } from '../../../../src/adapters/agents/agent-block-selection.js';
+
+type CapacityFixture = {
+  options: StartAgentOptions; launched: string[]; logs: string[]; configuration: ReturnType<typeof resolveConfiguration>;
+  holder: { release(): void } | null;
+};
+
+/** One custom slot (maxConcurrentCustom 1), optionally held, with a recording launcher and ordered selection. */
+async function capacityFixture(t: { after(fn: () => Promise<void> | void): void }, order: string[], eligible: string[], opts: {
+  held?: boolean; unlimited?: boolean; exclude?: string[]; blocked?: string[]; failing?: string[]; pinned?: boolean; agent?: string;
+} = {}): Promise<CapacityFixture> {
+  const root = registeredMkdtemp('px-0051-capacity-');
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: opts.unlimited ? {} : { maxConcurrentCustom: 1 } } }));
+  const configuration = resolveConfiguration({ ...environment, PARALLIX_CUSTOM_ADMISSION_HOME: root, PARALLIX_CUSTOM_ADMISSION_REPOSITORY: root });
+  const holder = opts.held ? await tryAcquireCustomCapacity(root, configuration) : null;
+  const fixture: CapacityFixture = { launched: [], logs: [], configuration, holder, options: {} as StartAgentOptions };
+  t.after(async () => { fixture.holder?.release(); await clearCustomAdmissionStateCache(); });
+  const blocked = new Set(opts.blocked ?? []);
+  const failing = new Set(opts.failing ?? []);
+  fixture.options = {
+    configuration, worktree: root, prompt: 'Work', exclude: opts.exclude ?? [], pinnedAgent: opts.pinned, ...(opts.agent ? { agent: opts.agent } : {}),
+    isAgentBlockedFn: family => blocked.has(family), assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null,
+    detectLimitHitFn: () => null, updateAgentBlockFn: () => ({ reason: null }), log: (line: string) => { fixture.logs.push(line); },
+    runtimeBlockContextFn: async (_step: string, tried: ReadonlySet<string>) => resolveBlockContext(eligible, tried, blocked),
+    selectAgentFn: (_step, selection) => {
+      const exclude = selection?.exclude instanceof Set ? selection.exclude : new Set<string>();
+      const selected = order.find(family => !exclude.has(family));
+      if (!selected) { throw new Error('No eligible agents are available: all eligible agents have been tried or are excluded.'); }
+      return selected;
+    },
+    launchAgentFn: (input: AgentLauncherInput) => {
+      const family = input.env!.FORGEJO_USER!;
+      fixture.launched.push(family);
+      return { invocation: { command: family, args: [] }, result: { status: failing.has(family) ? 1 : 0, stdout: '', stderr: failing.has(family) ? 'controlled failure' : '' } };
+    },
+  };
+  return fixture;
+}
+
+for (const step of ['draft', 'active', 'act-on-review']) {
+  test(`saturated custom reroutes an unpinned ${step} launch to another eligible agent (px-0051)`, async (t) => {
+    const f = await capacityFixture(t, ['custom', 'codex'], ['custom', 'codex'], { held: true });
+    const result = await startAgent(step, f.options);
+    assert.equal(result.agent, 'codex');
+    assert.deepEqual(f.launched, ['codex'], 'custom is never launched');
+    assert.ok(f.logs.some(line => /saturated; switching step ".*" to .*codex.* instead of waiting/.test(line)));
+    assert.ok(!f.logs.some(line => /waiting for an available slot/.test(line)), 'no capacity wait begins');
+  });
+}
+
+test('saturated custom review switches to an independent agent and never to the implementer family (px-0051)', async (t) => {
+  const f = await capacityFixture(t, ['custom', 'codex', 'vibe'], ['custom', 'codex', 'vibe'], { held: true, exclude: ['codex'] });
+  assert.equal((await startAgent('review', f.options)).agent, 'vibe');
+  assert.deepEqual(f.launched, ['vibe']);
+});
+
+test('free custom capacity launches custom immediately, passes the reservation to the launch and releases it on settle (px-0051)', async (t) => {
+  const f = await capacityFixture(t, ['custom', 'codex'], ['custom', 'codex']);
+  let heldDuringLaunch = -1;
+  f.options.onLaunch = async () => { heldDuringLaunch = await activeCustomCapacityCount(f.configuration); };
+  assert.equal((await startAgent('review', f.options)).agent, 'custom');
+  assert.deepEqual(f.launched, ['custom']);
+  assert.equal(await activeCustomCapacityCount(f.configuration), 0, 'settled launch releases its slot');
+  assert.equal(heldDuringLaunch, 1, 'the acquired reservation is held while the launch runs');
+  assert.ok(!f.logs.some(line => /saturated/.test(line)));
+});
+
+test('unset maxConcurrentCustom launches custom immediately (px-0051)', async (t) => {
+  const f = await capacityFixture(t, ['custom', 'codex'], ['custom', 'codex'], { unlimited: true });
+  assert.equal((await startAgent('draft', f.options)).agent, 'custom');
+  assert.deepEqual(f.launched, ['custom']);
+});
+
+// Waiting decisions: the admission pause is a real 1 s timer, so the wait-versus-switch decision is asserted at its owner.
+for (const [label, step, order, eligible, exclude] of [
+  ['no alternative is eligible', 'draft', ['custom'], ['custom'], []],
+  ['the only alternative is the implementer family', 'review', ['custom', 'codex'], ['custom', 'codex'], ['codex']],
+  ['pinned custom is saturated', 'active', ['custom', 'codex'], ['custom', 'codex'], []],
+  ['a step outside draft, active, act-on-review and review is saturated', 'conflict-resolution', ['custom', 'codex'], ['custom', 'codex'], []],
+] as const) {
+  test(`saturated custom still waits when ${label} (px-0051)`, async (t) => {
+    const pinned = label.startsWith('pinned');
+    const f = await capacityFixture(t, [...order], [...eligible], { held: true, exclude: [...exclude], pinned, agent: pinned ? 'custom' : undefined });
+    const state = { chosen: 'custom', tried: new Set<string>(exclude), launched: new Set<string>(), agentErrors: new Map(), iteration: 1 };
+    const deps = { configuration: f.configuration, step, opts: f.options, pinnedAgent: pinned, worktree: f.options.worktree,
+      log: f.options.log!, selectAgentFn: f.options.selectAgentFn!, isAgentBlockedFn: f.options.isAgentBlockedFn!,
+      assertAgentSupportedFn: f.options.assertAgentSupportedFn!, runtimeBlockContext: f.options.runtimeBlockContextFn! };
+    assert.deepEqual(await admitCustomCapacity(state, deps as unknown as StartAgentLoopDeps), { kind: 'wait' });
+    assert.equal(state.chosen, 'custom');
+    assert.ok(!state.tried.has('custom') && !state.launched.has('custom'));
+    assert.ok(!f.logs.some(line => /switching step/.test(line)), 'no reroute is logged');
+  });
+}
+
+test('saturated custom review waits when every independent alternative is usage blocked (px-0051)', async (t) => {
+  const f = await capacityFixture(t, ['custom', 'claude', 'codex'], ['custom', 'claude', 'codex'], {
+    held: true, exclude: ['codex'], blocked: ['claude'],
+  });
+  const state = { chosen: 'custom', tried: new Set<string>(['codex']), launched: new Set<string>(), agentErrors: new Map(), iteration: 1 };
+  const deps = { configuration: f.configuration, step: 'review', opts: f.options, pinnedAgent: false, worktree: f.options.worktree,
+    log: f.options.log!, selectAgentFn: f.options.selectAgentFn!, isAgentBlockedFn: f.options.isAgentBlockedFn!, exclude: ['codex'],
+    assertAgentSupportedFn: f.options.assertAgentSupportedFn!, runtimeBlockContext: f.options.runtimeBlockContextFn! };
+  assert.deepEqual(await admitCustomCapacity(state, deps as unknown as StartAgentLoopDeps), { kind: 'wait' });
+  assert.equal(state.chosen, 'custom');
+  assert.ok(!f.logs.some(line => /switching step/.test(line)));
+});
+
+test('saturated custom returns to waiting when every alternative fails instead of exhausting the pool (px-0051)', async (t) => {
+  const f = await capacityFixture(t, ['custom', 'codex'], ['custom', 'codex'], { held: true, failing: ['codex'] });
+  const launchAgentFn = f.options.launchAgentFn!;
+  // The failing alternative frees the slot, so the returned custom attempt is admitted without a wall-clock wait.
+  f.options.launchAgentFn = (input: AgentLauncherInput) => { f.holder?.release(); f.holder = null; return launchAgentFn(input); };
+  const result = await startAgent('draft', f.options);
+  assert.equal(result.agent, 'custom');
+  assert.deepEqual(f.launched, ['codex', 'custom'], 'custom launches after the alternative failed, not pool exhaustion');
+  assert.ok(f.logs.some(line => /saturated; switching/.test(line)));
+});

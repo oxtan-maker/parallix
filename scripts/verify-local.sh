@@ -189,8 +189,8 @@ gate_integrate() {
       echo "FAIL: unsupported real agent $real_agent (supported: codex)" >&2
       return 1
     fi
-    if [ "$real_agent_model" != "gpt-5.6-luna" ]; then
-      echo "FAIL: unsupported Codex real-agent model $real_agent_model (supported: gpt-5.6-luna)" >&2
+    if [ "$real_agent_model" != "gpt-6-luna" ]; then
+      echo "FAIL: unsupported Codex real-agent model $real_agent_model (supported: gpt-6-luna)" >&2
       return 1
     fi
   fi

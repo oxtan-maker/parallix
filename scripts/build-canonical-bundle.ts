@@ -253,7 +253,10 @@ assets.assets = RUNTIME_ASSET_KEYS.map((key): AssetEntry => {
   const sourcePath = key.startsWith('migrations/')
     ? path.join(root, 'src', 'adapters', 'sqlite', key)
     : path.join(root, key);
-  const contents = fs.readFileSync(sourcePath);
+  // Repository review policy is an explicit local override. The distributable
+  // keeps the canonical review opinion asset present but blank so unrelated
+  // repositories receive only the mandatory generic review core.
+  const contents = key === 'prompts/review.md' ? Buffer.alloc(0) : fs.readFileSync(sourcePath);
   const stagedPath = path.join(buildDir, key);
   fs.mkdirSync(path.dirname(stagedPath), { recursive: true });
   fs.writeFileSync(stagedPath, contents);

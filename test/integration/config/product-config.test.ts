@@ -692,8 +692,12 @@ test('validateWorkflowConfig enforces the closed prompts section (TASK-2737)', (
     ['adapters.prompts.override must be a string']
   );
   assert.deepEqual(
+    validateWorkflowConfig({ adapters: { prompts: { reviewOverride: 9 } } }),
+    ['adapters.prompts.reviewOverride must be a string']
+  );
+  assert.deepEqual(
     validateWorkflowConfig({ adapters: { prompts: { surface: 'x' } } }),
-    ['adapters.prompts may only contain "override" and "contextCompaction"']
+    ['adapters.prompts may only contain "override", "reviewOverride" and "contextCompaction"']
   );
   for (const contextCompaction of [true, false]) {
     assert.deepEqual(

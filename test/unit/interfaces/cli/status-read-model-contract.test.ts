@@ -615,7 +615,7 @@ describe("status lists all checkpoints and evidence", () => {
 
   test('status exposes durable invalid-contract blocker and harness repair state (TASK-2695)', async () => {
     const repair: NonNullable<CheckpointData['repair']> = {
-      incidentId: 'incident', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: [], attempt: 1,
+      incidentId: 'incident', gateKey: 'unit', command: 'npm test', authorizedGates: ['npm test'], authorizedCriteria: [], attempt: 1,
       evidenceRecorded: false, verified: false, blocker: {
         command: 'npm test', diagnostic: 'support module rejected', authorityReason: 'operator owns checks', proposedCorrection: 'select owner',
       },
@@ -623,7 +623,7 @@ describe("status lists all checkpoints and evidence", () => {
     const result = await statusResult(repair);
     const lines: string[] = [];
     renderStatus(result, line => lines.push(line));
-    assert.match(lines.join('\n'), /Repair incident: incident; attempt 1; harness verified: false/);
+    assert.match(lines.join('\n'), /Repair incident: incident; gate unit; attempt 1; harness verified: false/);
     assert.match(lines.join('\n'), /Human review required:.*support module rejected/);
     assert.deepEqual(JSON.parse(statusJson(result)).checkpoints.at(-1).repair, repair);
   });

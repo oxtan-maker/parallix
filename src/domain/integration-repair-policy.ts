@@ -1,12 +1,16 @@
 import type { Mission } from './mission.js';
-import { currentReviewRound, decidedRevisionOf, reviewStatus, type ReviewRevocationCause, type ReviewRound } from './review.js';
+import { currentReviewRound, decidedRevisionOf, reviewStatus, type Review, type ReviewRevocationCause, type ReviewRound } from './review.js';
 
 type WithdrawnApproval = ReviewRound & {
   readonly decision: Extract<NonNullable<ReviewRound['decision']>, { kind: 'approved' }>;
 };
 
+export type CurrentIntegrationRepair =
+  | { readonly kind: 'review-required'; readonly withdrawn: WithdrawnApproval }
+  | { readonly kind: 'approval-retention'; readonly round: ReviewRound };
+
 /** Approvals a red integration gate withdrew, oldest first. */
-export function integrationGateWithdrawals(mission: Mission): readonly WithdrawnApproval[] {
+export function integrationGateWithdrawals(mission: Pick<Mission, 'review'>): readonly WithdrawnApproval[] {
   const rounds: readonly ReviewRound[] = mission.review?.rounds ?? [];
   return rounds.filter((round): round is WithdrawnApproval => round.decision?.kind === 'approved'
     && round.decision.revocation?.cause?.kind === 'integration-gate-failure');
@@ -18,15 +22,23 @@ export function integrationGateWithdrawals(mission: Mission): readonly Withdrawn
  * repair range; missing display facts never waive the review requirement.
  */
 export function integrationRepairNeedsReview(mission: Mission): boolean {
-  if ((mission.status !== 'active' && mission.status !== 'review') || !mission.review
-    || reviewStatus(mission.review) === 'approved') { return false; }
-  const withdrawn = integrationGateWithdrawals(mission).at(-1);
-  return Boolean(withdrawn && !repairApproval(mission, withdrawn));
+  return currentIntegrationRepair(mission)?.kind === 'review-required';
 }
 
 /** A subsequent approval closes this repair even if a later correction withdraws it. */
-function repairApproval(mission: Mission, withdrawn: WithdrawnApproval): ReviewRound | undefined {
-  return mission.review?.rounds.find(round => round.number > withdrawn.number && round.decision?.kind === 'approved');
+function repairApproval(review: Review, withdrawn: WithdrawnApproval): ReviewRound | undefined {
+  return review.rounds.find(round => round.number > withdrawn.number && round.decision?.kind === 'approved');
+}
+
+/** The one current integration-repair obligation, excluding resolved history. */
+export function currentIntegrationRepair(mission: Pick<Mission, 'review' | 'status'>): CurrentIntegrationRepair | null {
+  if (!['active', 'review'].includes(mission.status) || !mission.review) { return null; }
+  if (reviewStatus(mission.review) === 'approved') {
+    const round = currentReviewRound(mission.review);
+    return round.integrationRepairAssessment?.repair ? { kind: 'approval-retention', round } : null;
+  }
+  const withdrawn = integrationGateWithdrawals(mission).at(-1);
+  return withdrawn && !repairApproval(mission.review, withdrawn) ? { kind: 'review-required', withdrawn } : null;
 }
 
 /**
@@ -52,7 +64,7 @@ export interface IntegrationRepairFacts {
 
 export function latestIntegrationRepair(mission: Mission): IntegrationRepairFacts | null {
   const withdrawn = recordedWithdrawal(mission);
-  const current = withdrawn && (repairApproval(mission, withdrawn) ?? mission.review?.rounds.at(-1));
+  const current = withdrawn && mission.review && (repairApproval(mission.review, withdrawn) ?? mission.review.rounds.at(-1));
   if (!withdrawn || !current || current.number <= withdrawn.number) { return null; }
   const cause = withdrawn.decision.revocation!.cause as Extract<ReviewRevocationCause, { kind: 'integration-gate-failure' }>;
   const approvedRevision = String(withdrawn.decision.revision);
@@ -87,7 +99,6 @@ function recordedWithdrawal(mission: Mission): WithdrawnApproval | undefined {
 
 /** Retaining the judgment does not give an active repair permission to land. */
 export function pendingIntegrationApproval(mission: Pick<Mission, 'review' | 'status'>): ReviewRound | null {
-  if (!['active', 'review'].includes(mission.status) || !mission.review || reviewStatus(mission.review) !== 'approved') { return null; }
-  const round = currentReviewRound(mission.review);
-  return round.integrationRepairAssessment?.repair ? round : null;
+  const current = currentIntegrationRepair(mission);
+  return current?.kind === 'approval-retention' ? current.round : null;
 }

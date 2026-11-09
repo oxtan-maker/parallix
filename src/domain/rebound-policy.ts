@@ -43,6 +43,20 @@ export interface GateFailureReason {
    * reads it; only the prompt facts print it.
    */
   approvedRevision?: string | null;
+  /** Other actual failures from the same aggregate integration execution. */
+  relatedFailures?: readonly {
+    readonly gate: string;
+    readonly command: string;
+    readonly exitCode: number | null;
+    readonly signal?: string | null;
+    readonly stdout: string;
+    readonly stderr: string;
+  }[];
+  /** Finalized revision the aggregate integration execution tested. */
+  testedRevision?: string | null;
+  /** Parts of the same aggregate execution that did not become repair obligations. */
+  blockedGates?: readonly { readonly gate: string; readonly blockedBy: readonly string[] }[];
+  cancelledGates?: readonly string[];
 }
 
 /** A Git hook rejected a workflow-owned Git operation. */

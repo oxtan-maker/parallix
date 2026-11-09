@@ -547,7 +547,7 @@ interface LifecycleSummary {
   draft: { taskStatus: string | null; missionId: string; missionHasBaseBranch: boolean } | null;
   active: { taskStatus: string | null; checkpointFiles: string[]; milestoneFiles: string[]; reviewState: { phase: string; disposition: string | null }; taskIdCount: number } | null;
   integrate: {
-    gateFailed?: boolean; exitCode?: number; worktreeStillExists?: boolean;
+    gateFailed?: boolean; exitCode?: number; worktreeStillExists?: boolean; gateOutput?: string; gateMarkers?: string[];
     rootTaskStatus?: string | null; worktreeExistsAfter?: boolean;
     closeout?: { mission: Record<string, import('node:sqlite').SQLOutputValue> | undefined; measurements: Record<string, import('node:sqlite').SQLOutputValue> | undefined };
     mainHeadBefore?: string; mainHeadAfter?: string; featureHeadAfter?: string;
@@ -628,13 +628,23 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
       // post-integrate hook.
       const worktreeConfigPath = path.join(worktree, 'workflow.config.json');
       const worktreeConfig = JSON.parse(fs.readFileSync(worktreeConfigPath, 'utf8'));
-      worktreeConfig.adapters.gates = { preIntegration: [{ key: 'failing-gate', command: 'exit 7' }] };
+      // px-0050.01: two independent failures, one passing gate and one dependent of a failed prerequisite.
+      const markers = path.join(repo.tmpRoot, 'gate-markers');
+      fs.mkdirSync(markers, { recursive: true });
+      worktreeConfig.adapters.gates = { preIntegration: [
+        { key: 'failing-gate', command: `: > ${markers}/failing; printf first-defect >&2; exit 7`, order: 1 },
+        { key: 'second-failing-gate', command: `: > ${markers}/second; printf second-defect >&2; exit 3`, order: 2 },
+        { key: 'passing-gate', command: `: > ${markers}/passing`, order: 3 },
+        { key: 'dependent-gate', command: `: > ${markers}/dependent`, order: 4, after: ['failing-gate'] },
+      ] };
       fs.writeFileSync(worktreeConfigPath, JSON.stringify(worktreeConfig, null, 2));
       runGit(worktree, ['add', '--', 'workflow.config.json']);
       runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);
 
       const gateResult = await runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true });
       summary.integrate = {
+        gateOutput: `${gateResult.stdout}\n${gateResult.stderr}`,
+        gateMarkers: fs.readdirSync(markers).sort(),
         gateFailed: true,
         exitCode: gateResult.status,
         worktreeStillExists: fs.existsSync(worktree),
@@ -1093,6 +1103,16 @@ test('a failed integration gate aborts before the post-integrate hook can run (S
   assert.ok(summary.integrate != null);
   assert.ok(summary.integrate.postIntegrateHookLines);
   assert.deepEqual(summary.integrate.postIntegrateHookLines, []);
+});
+
+test('integrate finishes every independent gate, blocks failed-prerequisite dependents and reports each failure (px-0050.01)', async () => {
+  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
+  assert.deepEqual(summary.integrate?.gateMarkers, ['failing', 'passing', 'second'], 'independent gates ran; the dependent of the failed prerequisite did not');
+  const output = summary.integrate?.gateOutput ?? '';
+  assert.match(output, /first-defect/);
+  assert.match(output, /second-defect/);
+  assert.match(output, /2 failed, 1 blocked, 0 cancelled/);
+  assert.match(output, /dependent-gate blocked by failing-gate/);
 });
 
 test('a repo with no post-integrate hook configured runs px integrate with unchanged behavior (SC1)', async () => {

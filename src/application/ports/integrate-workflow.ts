@@ -172,6 +172,10 @@ export interface IntegrationGateRunResult {
   readonly cancelled?: boolean;
   readonly error?: string | null;
   readonly failedGate?: IntegrationFailedGate | null;
+  /** Every actual failure; `failedGate` remains the first one for unmigrated consumers. */
+  readonly failures?: readonly IntegrationFailedGate[];
+  readonly blocked?: readonly { readonly key: string; readonly command: string; readonly blockedBy: readonly string[] }[];
+  readonly cancelledGates?: readonly string[];
   readonly outcomes?: readonly IntegrationFailedGate[];
   readonly proofReusable?: boolean;
 }
@@ -192,6 +196,13 @@ export interface IntegrationGateRoute {
 export interface IntegrationGateFailureRequest {
   slug: string; missionWorktree: string; verificationCommand?: string | null;
   failedGate: IntegrationFailedGate | null | undefined; gateError?: string | null;
+  /** Every gate that actually ran and failed in the same integration execution. */
+  failedGates?: readonly IntegrationFailedGate[];
+  /** Finalized revision all failures were observed against. */
+  testedRevision?: string | null;
+  /** Non-failures retained for truthful aggregate status, never repair obligations. */
+  blockedGates?: readonly { readonly key: string; readonly command: string; readonly blockedBy: readonly string[] }[];
+  cancelledGates?: readonly string[];
   gates: IntegrationGateDefinition[]; implementer: string; repositoryId: string;
   approvedRevision?: string | null; branch?: string | null; approval?: IntegrationApproval;
   reportedStaleness?: string | null; realAgent?: string | null; realAgentModel?: string | null;

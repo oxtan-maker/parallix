@@ -426,11 +426,11 @@ test('this repository shares one test slot across test gates and leaves other st
 });
 
 test('buildGateEnv scrubs BASH_ENV and threads real-agent selection', () => {
-  const env = buildGateEnv('integration', 'task-1', '/tmp/co', { BASH_ENV: '/x', PATH: '/usr/bin' } as NodeJS.ProcessEnv, { realAgent: 'codex', realAgentModel: 'gpt-5.6-luna' });
+  const env = buildGateEnv('integration', 'task-1', '/tmp/co', { BASH_ENV: '/x', PATH: '/usr/bin' } as NodeJS.ProcessEnv, { realAgent: 'codex', realAgentModel: 'gpt-6-luna' });
   assert.equal(env.PATH, '/usr/bin');
   assert.equal('BASH_ENV' in env ? env.BASH_ENV : undefined, undefined);
   assert.equal(env.PARALLIX_REAL_AGENT, 'codex');
-  assert.equal(env.PARALLIX_REAL_AGENT_MODEL, 'gpt-5.6-luna');
+  assert.equal(env.PARALLIX_REAL_AGENT_MODEL, 'gpt-6-luna');
 });
 
 test('dry run resolves the integration plan without executing any gate', async () => {
@@ -482,34 +482,127 @@ test('parallel gates overlap within the configured bound', async () => {
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 
-test('a parallel failure reports its key and does not launch queued gates', async () => {
+type Runner = GateCommandRunner;
+
+/** `red` fails fast; `slow` is an independent peer that settles on its own or when aborted. */
+function failingPeerRunner(launched: string[], aborted: string[]): Runner {
+  return (command, _args, options) => new Promise(resolve => {
+    launched.push(command);
+    if (command === 'red') { setTimeout(() => resolve({ status: 7, stdout: '', stderr: 'original failure' }), 5); return; }
+    const settle = setTimeout(() => resolve({ status: 0, stdout: '', stderr: '' }), 60);
+    options.signal?.addEventListener('abort', () => { clearTimeout(settle); aborted.push(command); resolve({ status: null, stdout: '', stderr: 'stopped' }); }, { once: true });
+  });
+}
+
+const PEER_GATES = [{ key: 'red', command: 'red', order: 1 }, { key: 'slow', command: 'slow', order: 2 }, { key: 'queued', command: 'queued', order: 3 }];
+
+test('an integration failure lets independent peers and queued gates finish (px-0050.01)', async () => {
   const checkout = makeCheckout();
   try {
     const launched: string[] = [];
-    let peerStopped = false;
-    const runner: GateCommandRunner = (command, _args, options) => new Promise(resolve => {
-      launched.push(command);
-      if (command === 'red') {
-        setTimeout(() => resolve({ status: 7, stdout: '', stderr: 'original failure' }), 5);
-      } else {
-        const fallback = setTimeout(() => resolve({ status: 0, stdout: '', stderr: '' }), 100);
-        options.signal?.addEventListener('abort', () => {
-          clearTimeout(fallback);
-          peerStopped = true;
-          resolve({ status: null, stdout: '', stderr: 'stopped' });
-        }, { once: true });
-      }
-    });
+    const aborted: string[] = [];
     const result = await runPhaseGates('integration', {
-      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner,
-      gates: [{ key: 'red', command: 'red', order: 1 }, { key: 'slow', command: 'slow', order: 2 }, { key: 'queued', command: 'queued', order: 3 }],
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: failingPeerRunner(launched, aborted), gates: PEER_GATES,
     });
     assert.equal(result.ok, false);
     assert.equal(result.failedGate?.key, 'red');
-    assert.equal(peerStopped, true, 'active peers stop on the first failure');
+    assert.deepEqual(result.failures?.map(outcome => outcome.key), ['red']);
+    assert.deepEqual(aborted, [], 'a failure never stops owned children');
     assert.equal(result.cancelled, false, 'failure remains eligible for rebound');
     assert.match(result.error!, /red.*code 7/);
-    assert.deepEqual(launched.sort(), ['red', 'slow'], 'a failed gate prevents queued work from starting');
+    assert.deepEqual(launched.sort(), ['queued', 'red', 'slow'], 'queued independent work still starts');
+    assert.equal(result.executed, 3);
+    assert.equal(result.outcomes?.find(outcome => outcome.key === 'queued')?.exitCode, 0);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('handoff and review keep fail-fast: the first failure stops peers and queued gates (px-0050.01)', async () => {
+  for (const phase of ['handoff', 'review'] as const) {
+    const checkout = makeCheckout();
+    try {
+      const launched: string[] = [];
+      const aborted: string[] = [];
+      const result = await runPhaseGates(phase, {
+        slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: failingPeerRunner(launched, aborted), gates: PEER_GATES,
+      });
+      assert.equal(result.ok, false);
+      assert.equal(result.failedGate?.key, 'red');
+      assert.deepEqual(aborted, ['slow'], `${phase}: active peers stop on the first failure`);
+      assert.deepEqual(launched.sort(), ['red', 'slow'], `${phase}: a failed gate prevents queued work from starting`);
+      assert.equal(result.blocked?.length, 0);
+    } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+  }
+});
+
+test('two independent integration failures are both retained with a compatible singular projection (px-0050.01)', async () => {
+  const checkout = makeCheckout();
+  try {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const runner: Runner = command => Promise.resolve(command === 'ok'
+      ? { status: 0, stdout: 'fine', stderr: '' } : { status: command === 'a' ? 3 : 4, stdout: `${command} out`, stderr: `${command} err` });
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 3, commandRunner: runner, log: line => output.push(line),
+      gates: [{ key: 'a', command: 'a', order: 1 }, { key: 'b', command: 'b', order: 2 }, { key: 'ok', command: 'ok', order: 3 }],
+      error: line => { output.push(line); errors.push(line); },
+    });
+    assert.equal(result.ok, false);
+    assert.deepEqual(errors.filter(line => /exited with code/.test(line)).sort(),
+      ['Repository gate "a" exited with code 3 for integration.', 'Repository gate "b" exited with code 4 for integration.'], 'one error line names each failing gate');
+    assert.deepEqual(result.failures?.map(outcome => [outcome.key, outcome.exitCode, outcome.stderr]).sort(), [['a', 3, 'a err'], ['b', 4, 'b err']]);
+    assert.equal(result.failedGate, result.failures?.[0], 'singular projection is the first settled failure');
+    assert.equal(result.executed, 3);
+    assert.deepEqual(result.blocked, []);
+    assert.match(result.error!, /failed: a, b|failed: b, a/);
+    const rendered = output.join('\n');
+    assert.match(rendered, /2 failed, 0 blocked, 0 cancelled/);
+    assert.match(rendered, /a err/);
+    assert.match(rendered, /b err/);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('dependents of a failed prerequisite are blocked transitively without launching (px-0050.01)', async () => {
+  const checkout = makeCheckout();
+  try {
+    const launched: string[] = [];
+    const output: string[] = [];
+    const runner: Runner = command => { launched.push(command); return { status: command === 'build' ? 2 : 0, stdout: '', stderr: command === 'build' ? 'compile error' : '' }; };
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner, log: line => output.push(line), error: line => output.push(line),
+      gates: [{ key: 'build', command: 'build', order: 1 }, { key: 'tests', command: 'tests', order: 2, after: ['build'] },
+        { key: 'sonar', command: 'sonar', order: 3, after: ['tests'] }, { key: 'audit', command: 'audit', order: 4 }, { key: 'both', command: 'both', order: 5, after: ['audit', 'build'] }],
+    });
+    assert.deepEqual(launched.sort(), ['audit', 'build'], 'only runnable gates launch');
+    assert.deepEqual(result.blocked?.map(gate => [gate.key, gate.blockedBy]).sort(), [['both', ['build']], ['sonar', ['tests']], ['tests', ['build']]]);
+    assert.deepEqual(result.failures?.map(outcome => outcome.key), ['build'], 'blocked gates are not test failures');
+    assert.equal(result.outcomes?.some(outcome => outcome.key === 'tests'), false, 'blocked gates have no outcome');
+    assert.equal(result.executed, 2);
+    assert.match(output.join('\n'), /tests blocked by build/);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('operator cancellation stops owned children and reports cancelled parts distinctly (px-0050.01)', async () => {
+  const checkout = makeCheckout();
+  try {
+    const controller = new AbortController();
+    const started: string[] = [];
+    const runner: Runner = (command, _args, options) => new Promise(resolve => {
+      started.push(command);
+      if (command === 'red') { resolve({ status: 7, stdout: '', stderr: 'red' }); return; }
+      options.signal?.addEventListener('abort', () => resolve({ status: null, stdout: '', stderr: 'stopped', signal: 'SIGTERM' }), { once: true });
+      if (started.length === 2) { setTimeout(() => controller.abort(), 20); }
+    });
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2558', checkoutPath: checkout, maxParallel: 2, commandRunner: runner, signal: controller.signal, log: () => {}, error: () => {},
+      gates: [{ key: 'red', command: 'red', order: 1 }, { key: 'slow', command: 'slow', order: 2 }, { key: 'later', command: 'later', order: 3, after: ['slow'] }],
+    });
+    assert.equal(result.cancelled, true);
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.failures?.map(outcome => outcome.key), ['red'], 'a stopped child is cancelled, not a failure');
+    assert.deepEqual([...result.cancelledGates!].sort(), ['later', 'slow']);
+    assert.deepEqual(result.blocked, []);
+    assert.deepEqual(started.sort(), ['red', 'slow']);
+    assert.match(result.error!, /cancelled/);
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 

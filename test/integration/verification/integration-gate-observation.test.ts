@@ -1,5 +1,6 @@
 // Split along execution, shell-verifier and observation contracts to bound suite time.
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -101,5 +102,49 @@ test('cancelled and interrupted integration attempts cannot inherit a prior pass
     assert.equal(spawnSync('git', ['-C', checkout, 'checkout', 'main'], { encoding: 'utf8' }).status, 0);
     fs.writeFileSync(path.join(checkout, 'changed'), 'new input');
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'stale');
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('an aggregate integration run persists every failure, blocked and cancelled part distinctly (px-0050.01)', async () => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-aggregate-record-'));
+  try {
+    initCommittedRepository(checkout, { 'workflow.config.json': JSON.stringify({ adapters: { gates: { preIntegration: [
+      { key: 'unit', command: 'printf unit-defect >&2; exit 3', order: 1 },
+      { key: 'lint', command: 'printf lint-defect >&2; exit 4', order: 2 },
+      { key: 'good', command: 'true', order: 3 },
+      { key: 'sonar', command: 'touch .git/must-not-run', order: 4, after: ['unit', 'good'] },
+    ] } } }) });
+    const { configuration, observer } = gateBoardObserver(checkout);
+    const result = await runPhaseGates('integration', { slug: 'px-0050', checkoutPath: checkout, log: () => {}, error: () => {},
+      maxParallel: 3, configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration) });
+    assert.equal(result.ok, false);
+    assert.equal(fs.existsSync(path.join(checkout, '.git/must-not-run')), false);
+    const revision = spawnSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+    const record = JSON.parse(fs.readFileSync(path.join(checkout, '.git/integration-verification-proof.json'), 'utf8'));
+    assert.equal(record.status, 'failed');
+    assert.equal(record.revision, revision, 'the tested revision is retained');
+    const byKey = Object.fromEntries(record.outcomes.map((outcome: { key: string }) => [outcome.key, outcome]));
+    assert.deepEqual([byKey.unit.result, byKey.unit.exitCode, byKey.unit.diagnostics, byKey.unit.command], ['failed', 3, 'unit-defect', 'printf unit-defect >&2; exit 3']);
+    assert.deepEqual([byKey.lint.result, byKey.lint.exitCode, byKey.lint.diagnostics], ['failed', 4, 'lint-defect']);
+    assert.equal(byKey.good.result, 'passed');
+    assert.deepEqual([byKey.sonar.result, byKey.sonar.exitCode, byKey.sonar.blockedBy], ['blocked', null, ['unit']]);
+    assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'failed');
+
+    const reader = new VerificationGateEvidenceReader({ configuration, resolveWorktree: () => checkout, integrationValidation: async () => null });
+    const plan = ['unit', 'lint', 'good', 'sonar'].map(key => ({ key, command: byKey[key].command }));
+    const evidence = await reader.readIntegrationGates({ repositoryId: GATE_BOARD_MISSION.repositoryId, missionId: GATE_BOARD_MISSION.id }, GATE_BOARD_ATTEMPT);
+    const sonar = evidence.gates.find(gate => gate.key === 'sonar')!;
+    assert.deepEqual([sonar.proof.state, sonar.failure], ['absent', null], 'a blocked part is neither a pass nor a test failure');
+    assert.equal(evidence.gates.find(gate => gate.key === 'unit')!.failure?.exitCode, 3);
+    assert.equal(evidence.gates.find(gate => gate.key === 'good')!.proof.state, 'current');
+
+    const port = createIntegrationVerificationEvidencePort(configuration);
+    port.start(checkout, plan)!.complete([
+      { key: 'unit', command: plan[0].command, exitCode: null, result: 'cancelled', signal: 'SIGTERM' },
+      { key: 'good', command: 'true', exitCode: null, result: 'cancelled' },
+    ], 'cancelled');
+    const cancelled = await reader.readIntegrationGates({ repositoryId: GATE_BOARD_MISSION.repositoryId, missionId: GATE_BOARD_MISSION.id }, GATE_BOARD_ATTEMPT);
+    assert.deepEqual(cancelled.gates.map(gate => [gate.key, gate.proof.state, gate.failure]).filter(([key]) => key === 'unit' || key === 'good'),
+      [['unit', 'absent', null], ['good', 'absent', null]], 'cancelled parts are neither passes nor failures');
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });

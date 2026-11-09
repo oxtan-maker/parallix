@@ -30,31 +30,37 @@ export type PromptStage = 'draft' | 'execute' | 'review' | 'act-on-review' | 'po
 
 /**
  * Assemble a stage prompt from the mandatory Parallix core file plus either the
- * shipped default-opinion file or one repo-local override selected by the single
- * `adapters.prompts.override` configuration key (resolved by the config package).
+ * shipped default-opinion file or a repo-local override resolved by the config
+ * package. The legacy `adapters.prompts.override` applies to every stage;
+ * `adapters.prompts.reviewOverride` applies only to review and takes precedence
+ * there so repository review policy cannot displace other stage opinions.
  *
  * Shape is load-two-files-and-concatenate: the core half is always assembled in
  * and cannot be dropped by an override, so no core instruction is removable.
- * The review default-opinion half is also retained before an override: it
- * contains the workflow guidance against redundant batched coverage, which
- * must reach reviewers regardless of local opinion customization. No
+ * A non-empty review default-opinion half is retained before a distinct local
+ * override. The distributed review opinion is intentionally empty; a repository
+ * opts into its own review policy through the same override boundary. No
  * registry, resolver hierarchy, plugin interface, factory, or new dependency.
  * Context actions in the core are rendered from the typed repository policy;
  * opinion content cannot remove those obligations.
  *
  * @param stage Stage slug selecting the `prompts/<stage>-core.md` /
  *   `prompts/<stage>.md` pair.
- * @param overridePath Absolute path to a repo-local opinion half, or null for
- *   the shipped default. An unset/absent path keeps today's prompts byte for
- *   byte within the selected context policy.
+ * @param overridePath Absolute path to the legacy all-stage opinion half, or
+ *   null for the shipped default.
+ * @param reviewOverridePath Absolute path to a review-only opinion half. It is
+ *   ignored for every other stage and takes precedence over overridePath for
+ *   review.
  */
-export function assembleStagePrompt(stage: PromptStage, { overridePath, contextCompaction = true, assets = runtimeAssetStore }: Partial<PromptConfiguration> & { assets?: AssetStore } = {}): string {
+export function assembleStagePrompt(stage: PromptStage, { overridePath, reviewOverridePath, contextCompaction = true, assets = runtimeAssetStore }: Partial<PromptConfiguration> & { assets?: AssetStore } = {}): string {
   const core = assets.readText(`prompts/${stage}-core.md`);
   const defaultOpinion = assets.readText(`prompts/${stage}.md`);
-  const opinion = overridePath
-    ? stage === 'review'
-      ? `${defaultOpinion.replace(/\n+$/, '')}\n\n${readOverride(stage, overridePath).replace(/^\n+/, '')}`
-      : readOverride(stage, overridePath)
+  const effectiveOverridePath = stage === 'review' ? reviewOverridePath || overridePath : overridePath;
+  const overrideOpinion = effectiveOverridePath ? readOverride(stage, effectiveOverridePath) : null;
+  const opinion = overrideOpinion !== null
+    ? stage === 'review' && defaultOpinion.trim() && defaultOpinion !== overrideOpinion
+      ? `${defaultOpinion.replace(/\n+$/, '')}\n\n${overrideOpinion.replace(/^\n+/, '')}`
+      : overrideOpinion
     : defaultOpinion;
   // Strip the file-naming heading from the core before assembly so a no-override
   // launch reproduces the pre-split prompt byte-for-byte (one added heading per

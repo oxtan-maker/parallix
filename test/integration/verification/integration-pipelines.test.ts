@@ -403,12 +403,12 @@ test('buildIntegrationGateEnv forwards the validated Codex override as dedicated
     processEnv: {},
     gitRunner: createMockGitRunner('lib/commands/integrate.ts'),
     realAgent: 'codex',
-    realAgentModel: 'gpt-5.6-luna'
+    realAgentModel: 'gpt-6-luna'
   });
 
   assert.equal(env.PARALLIX_REAL_AGENT, 'codex');
-  assert.equal(env.PARALLIX_REAL_AGENT_MODEL, 'gpt-5.6-luna');
-  assert.equal(Object.values(env).some(value => String(value).includes('gpt-5.6-luna') && value !== 'gpt-5.6-luna'), false);
+  assert.equal(env.PARALLIX_REAL_AGENT_MODEL, 'gpt-6-luna');
+  assert.equal(Object.values(env).some(value => String(value).includes('gpt-6-luna') && value !== 'gpt-6-luna'), false);
 });
 
 test('buildIntegrationGateEnv inherits the invoking environment by default', () => {

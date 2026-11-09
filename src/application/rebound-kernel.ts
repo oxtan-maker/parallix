@@ -6,6 +6,7 @@ import { elideBounceOutput } from './output-elision.js';
 import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
 import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { DEFAULT_REBOUND_ATTEMPTS, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
+import type { GateFailureReason } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
 export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, ReviewPreparationVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
 import { recoveryEvidenceRoute } from './rebound-prompts.js';
@@ -61,6 +62,8 @@ export interface VerifyResult {
   ok: boolean;
   /** Supplied only by an adapter that just executed this exact command successfully. */
   exactExecution?: { readonly command: string; readonly worktree: string; readonly exitCode: 0 };
+  /** Receipts from one authoritative aggregate rerun, one per repaired gate. */
+  exactExecutions?: readonly { readonly command: string; readonly worktree: string; readonly exitCode: 0 }[];
   workflowBlock?: import('./review-verdict-readiness.js').VerdictBlock;
   /** Exact check identity supplied by the verification adapter. */
   command?: string;
@@ -83,6 +86,8 @@ export interface ReboundContext {
   /** Resume the harness-created incident with its original retained evidence. */
   retainedFailure?: RecoveryEvidenceRef;
   repairIncidentId?: string;
+  /** Actual failed gates from one aggregate execution; each owns a checkpoint before launch. */
+  repairObligations?: readonly { readonly gateKey: string; readonly reason: GateFailureReason }[];
   slug: string;
   worktree: string;
   implementer: string;
@@ -278,7 +283,7 @@ export async function rebound(reason: ReboundReason, context: ReboundContext): P
   return outcome;
 }
 
-interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; launchFailure?: LaunchFailure; }
+interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; aggregateEvidence?: Array<{ gateKey: string; evidence?: RecoveryEvidenceRef }>; launchFailure?: LaunchFailure; }
 
 function humanOnlyOutcome(state: ReboundState, context: ReboundContext, error: ReboundContext['error']): ReboundOutcome {
   error?.(fmt.status('FAIL', `${state.classification.label}: ${state.classification.failureClass} (${state.classification.dispatchAction}). Human intervention required — not bouncing.`));
@@ -420,10 +425,15 @@ function stopRepair(state: ReboundState, context: ReboundContext, diagnostic: st
 }
 
 async function repairBlockerOutcome(state: ReboundState, context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, launch: Awaited<ReturnType<typeof launchFixAttempt>>): Promise<ReboundOutcome | null> {
-  const { repairPort, repairCheckpoint } = prepared;
+  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
   const { slug } = context;
   let blocker: InvalidContractBlocker | undefined;
-  try { blocker = launch.invalidContract ?? (repairCheckpoint ? await repairPort!.readBlocker(slug, repairCheckpoint.name) : undefined); }
+  try {
+    blocker = launch.invalidContract;
+    for (const checkpoint of repairCheckpointRefs.length ? repairCheckpointRefs : repairCheckpoint ? [repairCheckpoint] : []) {
+      blocker ??= await repairPort!.readBlocker(slug, checkpoint.name);
+    }
+  }
   catch (cause) { return stopRepair(state, context, `Cannot read repair blocker: ${String(cause)}`); }
   if (blocker) {
     if (launch.repairAttempted) { state.attempts++; }
@@ -485,9 +495,6 @@ async function launchFixAttempt(options: {
     return { ok: false, implementer, diagnostic: `Could not launch ${role} (${implementer}): ${(err as Error).message}`, repairAttempted: false, ...none };
   }
 
-  if (applyAgentFallback) {
-    implementer = await applyAgentFallback({ launchResult, original: implementer }) || implementer;
-  }
-
+  if (applyAgentFallback) { implementer = await applyAgentFallback({ launchResult, original: implementer }) || implementer; }
   return launchStatus(launchResult, implementer);
 }

@@ -14,6 +14,8 @@ import { missionVersion, type MissionStore } from '../../../src/application/doma
 import { missionId, type Mission } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { reviewFindingId } from '../../../src/domain/review.js';
+import { integrationServices } from '../../helpers/stub-integration-services.js';
+import { verifyRestartedRepair } from '../../../src/application/integrate/repair-certification.js';
 
 describe('Checkpoint repair freshness', () => {
   // Rows remember the review round they were recorded in; repair rounds owe fresh rows.
@@ -152,6 +154,23 @@ test('incident repair records only its affected criterion and preserves original
   const nextRound = await repair.open({ ...request, incidentId: 'incident-2' });
   assert.equal(nextRound?.name, 'CP-3');
   assert.equal(store.mission().checkpoints[1].repair?.verified, true);
+});
+
+test('aggregate repair checkpoint identity is incident-and-gate and is idempotent across retry and restart (px-0050.02)', async () => {
+  const { mission, store, repair } = incidentFixture();
+  const base = { slug: mission.id, incidentId: 'integration:revision-a', attempt: 1, worktree: '/fixture',
+    failureRevision: 'revision-a', failureEvidenceId: 'evidence' };
+  const unit = await repair.open({ ...base, gateKey: 'unit', command: 'npm test' });
+  const integration = await repair.open({ ...base, gateKey: 'integration-ci', command: 'npm run test:integration:ci:prebuilt' });
+  assert.equal(unit?.name, 'CP-2');
+  assert.equal(integration?.name, 'CP-3');
+  const retry = await new RepairCheckpointService(store).open({ ...base, gateKey: 'unit', command: 'npm test', attempt: 2 });
+  assert.equal(retry?.name, 'CP-2');
+  assert.equal(store.mission().checkpoints.length, 3, 'restart does not duplicate the same incident/gate obligation');
+  assert.deepEqual(store.mission().checkpoints.slice(1).map(cp => [cp.repair?.incidentId, cp.repair?.gateKey, cp.repair?.command]), [
+    ['integration:revision-a', 'unit', 'npm test'],
+    ['integration:revision-a', 'integration-ci', 'npm run test:integration:ci:prebuilt'],
+  ]);
 });
 
 test("structured blocker validates exact command, survives evidence writes and blocks review preparation (TASK-2695)", async () => {
@@ -624,6 +643,74 @@ describe('Exact repair success coverage', () => {
     const source = f.store.mission().checkpoints.find(cp => cp.name === 'CP-3')!;
     assert.equal(source.repair!.exactSuccessCoverage!.execution.producer, 'rebound-exact-verifier');
     assert.equal(source.repair!.occurrence!.failureEvidenceId, 'failure-store:2');
+  });
+
+  test('aggregate rerun requires evidence for every failed gate and certifies all checkpoints atomically (px-0050.02)', async () => {
+    const f = incidentFixture();
+    const worktree = '/isolated/worktree';
+    await f.store.save({ ...f.store.mission(), declaredGates: ['npm test', 'npm run integration'] } as Mission);
+    const open = async (gateKey: string, command: string, suffix: string) => f.repair.open({ slug: f.mission.id,
+      incidentId: 'integration:failed-head', gateKey, command, attempt: 1, worktree,
+      failureRevision: 'failed-head', failureEvidenceId: `retained:${suffix}` });
+    await open('unit', 'npm test', 'unit');
+    await open('integration-ci', 'npm run integration', 'integration');
+    await f.record('CP-2');
+    let executions = 0;
+    const prepared = { fixPrompt: '', repairPort: f.repair, repairCheckpoint: { name: 'CP-2', version: 1 },
+      repairCheckpointRefs: [
+        { gateKey: 'unit', command: 'npm test', name: 'CP-2', version: 1 },
+        { gateKey: 'integration-ci', command: 'npm run integration', name: 'CP-3', version: 1 },
+      ] };
+    await assert.rejects(runCheckpointVerification({ slug: f.mission.id, worktree, implementer: 'codex',
+      readHead: () => 'fixed-head', startAgent: async () => ({ result: { status: 0 } }),
+      verify: () => { executions++; return { ok: true }; },
+    }, prepared, 1), /Every aggregate repair checkpoint needs fresh authorized evidence/);
+    assert.equal(executions, 0, 'a partial evidence set cannot consume the authoritative rerun');
+    assert.deepEqual(f.store.mission().checkpoints.slice(1).map(cp => cp.repair?.verified), [false, false]);
+
+    await f.record('CP-3');
+    const verification = await runCheckpointVerification({ slug: f.mission.id, worktree, implementer: 'codex',
+      readHead: () => 'fixed-head', startAgent: async () => ({ result: { status: 0 } }),
+      verify: () => ({ ok: true, command: 'npm test', exactExecutions: [
+        { command: 'npm test', worktree, exitCode: 0 },
+        { command: 'npm run integration', worktree, exitCode: 0 },
+      ] }),
+    }, prepared, 1);
+    const before = (await f.store.load()).version;
+    await verification.certify();
+    const after = await f.store.load();
+    assert.equal(after.version, before + 1, 'both gates settle in one Mission CAS write');
+    assert.deepEqual(after.mission.checkpoints.slice(1).map(cp => cp.repair?.verified), [true, true]);
+    assert.deepEqual(after.mission.checkpoints.slice(1).map(cp => cp.repair?.exactSuccessCoverage?.command),
+      ['npm test', 'npm run integration']);
+    assert.deepEqual(effectiveRepairObligations(after.mission.checkpoints, after.mission.declaredGates,
+      after.mission.successCriteria, worktree), []);
+  });
+
+  test('restart reruns the configured phase once and settles every outstanding gate checkpoint (px-0050.02)', async () => {
+    const f = incidentFixture();
+    const worktree = '/isolated/restart-worktree';
+    const gates = [
+      { key: 'unit', command: 'npm test', order: 1 },
+      { key: 'integration-ci', command: 'npm run integration', order: 2 },
+    ];
+    await f.store.save({ ...f.store.mission(), declaredGates: gates.map(gate => gate.command) } as Mission);
+    for (const gate of gates) {
+      await f.repair.open({ slug: f.mission.id, incidentId: 'integration:failed-head', gateKey: gate.key,
+        command: gate.command, attempt: 1, worktree, failureRevision: 'failed-head', failureEvidenceId: `retained:${gate.key}` });
+    }
+    await f.record('CP-2');
+    await f.record('CP-3');
+    let reruns = 0;
+    const passed = await verifyRestartedRepair({ slug: f.mission.id, services: integrationServices({ store: f.store }),
+      worktree, revision: 'fixed-head', gates, head: () => 'fixed-head', run: async () => {
+        reruns++;
+        return { ok: true, phase: 'integration', gates, executed: gates.length, skipped: false, dryRun: false,
+          failedGate: null, failures: [], outcomes: gates.map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })), error: null };
+      } });
+    assert.equal(passed, true);
+    assert.equal(reruns, 1);
+    assert.deepEqual(f.store.mission().checkpoints.slice(1).map(cp => cp.repair?.verified), [true, true]);
   });
 
   test('reused success or an unrelated execution receipt cannot create occurrence coverage (TASK-2802)', async () => {

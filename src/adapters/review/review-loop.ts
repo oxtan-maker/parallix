@@ -215,8 +215,11 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     ].filter(Boolean).join('\n\n');
   };
   return {
-    async launch({ role, agent, exclude, prompt, recovery }) {
+    async launch({ role, agent, exclude, prompt, recovery, sessionPolicy }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
+      const launchSessionPolicy = role === 'reviewer'
+        ? 'fresh-ephemeral' as const
+        : sessionPolicy ?? recovery?.sessionPolicy;
       return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', {
         configuration: reviewerLaunchConfiguration(bindings.configuration, role, prompt),
         agent,
@@ -227,7 +230,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
           const current = await (bindings.readReviewState ?? readReviewState)(slug, worktree, bindings.missionStore);
           return current?.round === prompt.attempt && current.disposition !== null;
         } } : {}),
-        ...(recovery?.sessionPolicy === undefined ? {} : { sessionPolicy: recovery.sessionPolicy }),
+        ...(launchSessionPolicy === undefined ? {} : { sessionPolicy: launchSessionPolicy }),
         // A bare repair launch is not review work the board reports.
         onLaunch: async ({ agent: launched, model }: { agent: string; model: string | null }) => {
           if (role === 'implementer' && bindings.missionStore) {
@@ -304,6 +307,36 @@ function gateFacts(result: Awaited<ReturnType<typeof runPreReviewGate>>): PreRev
     : { ok: false, area: result.area, exitCode: result.exitCode, diagnostic: [result.stdout, result.stderr, result.error].filter(Boolean).join('\n'), reason: gateFailureReason(result) };
 }
 
+function approvalRevocationPort(
+  slug: string,
+  branch: string,
+  worktree: string,
+  missionStore: MissionStore | null,
+  lifecycleService: MissionLifecycleService | null,
+): ReviewLoopPorts['approvalRevocation'] {
+  if (!missionStore || !lifecycleService) { return null; }
+  return {
+    async revoke({ round, operator, reason }) {
+      const loaded = await missionStore.load(missionId(slug));
+      if (loaded.kind !== 'found') { return { ok: false, diagnostic: `mission ${slug} has no recorded review` }; }
+      // The human already dismissed or superseded the approval on the
+      // provider; a failed provider update is reported, not fatal.
+      const useCase = new RevokeReviewDecisionUseCase(missionStore, lifecycleService, {
+        async dismissApproval(mission, approvedRound, why) {
+          const decision = mission.review?.rounds.find(entry => entry.number === approvedRound)?.decision;
+          if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
+          dismissProviderApproval(branch, decision.decidedAt, why, { rootDir: worktree });
+        },
+      }, createGitChangeIdentity(worktree));
+      const outcome = await useCase.execute({
+        slug, round, reason, operator, occurredAt: new Date().toISOString(),
+        expectedVersion: loaded.version,
+      });
+      return outcome.status === 'completed' ? { ok: true } : { ok: false, diagnostic: outcome.error?.message ?? 'revocation was not recorded' };
+    },
+  };
+}
+
 /**
  * Bind every review-loop mechanism for one Mission. The composition root
  * supplies the review authority; the request supplies the worktree, prompt
@@ -351,26 +384,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) }
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
-    approvalRevocation: missionStore && lifecycleService ? {
-      async revoke({ round, operator, reason }) {
-        const loaded = await missionStore.load(missionId(slug));
-        if (loaded.kind !== 'found') { return { ok: false, diagnostic: `mission ${slug} has no recorded review` }; }
-        // The human already dismissed or superseded the approval on the
-        // provider; a failed provider update is reported, not fatal.
-        const useCase = new RevokeReviewDecisionUseCase(missionStore, lifecycleService, {
-          async dismissApproval(mission, approvedRound, why) {
-            const decision = mission.review?.rounds.find(entry => entry.number === approvedRound)?.decision;
-            if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
-            dismissProviderApproval(branch, decision.decidedAt, why, { rootDir: worktree });
-          },
-        }, createGitChangeIdentity(worktree));
-        const outcome = await useCase.execute({
-          slug, round, reason, operator, occurredAt: new Date().toISOString(),
-          expectedVersion: loaded.version,
-        });
-        return outcome.status === 'completed' ? { ok: true } : { ok: false, diagnostic: outcome.error?.message ?? 'revocation was not recorded' };
-      },
-    } : null,
+    approvalRevocation: approvalRevocationPort(slug, branch, worktree, missionStore, lifecycleService),
     humanFeedback: composeHumanFeedback({ slug, branch, worktree, providerEnabled, missionStore, log, error, fetchComments, tokenFor, recordHumanNote }),
     routing: {
       eligibleFamilies: () => eligibleAgentsForStep('review', { configuration: bindings.configuration }),
@@ -380,7 +394,10 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     },
     agents: agentPort(slug, branch, worktree, missionPath, target, bindings, writeState, log, error),
     artifacts: {
-      consumeReviewer: async (reviewer, state) => await (bindings.consumeReviewerArtifacts ?? consumeReviewerArtifacts)(slug, reviewer, { ...artifactOptions(state), verbose, missionStore }),
+      consumeReviewer: async (reviewer, state, launch) => await (bindings.consumeReviewerArtifacts ?? consumeReviewerArtifacts)(slug, reviewer, {
+        ...artifactOptions(state), verbose, missionStore,
+        ...(launch ? { processResult: launch.result ?? null } : {}),
+      }),
       consumeImplementer: async (implementer, state) => await (bindings.consumeImplementerArtifacts ?? consumeImplementerArtifacts)(slug, implementer, artifactOptions(state)),
     },
     preReview: {

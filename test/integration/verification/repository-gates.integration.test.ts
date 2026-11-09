@@ -29,11 +29,11 @@ test('configured parallel integration gates run real commands through the phase 
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 
-test('parallel failure terminates an active process group and preserves rebound evidence', async () => {
+test('handoff failure terminates an active process group and preserves rebound evidence', async () => {
   const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-fail-fast-'));
   try {
     const started = Date.now();
-    const result = await runPhaseGates('integration', {
+    const result = await runPhaseGates('handoff', {
       slug: 'task-2586', checkoutPath: checkout, maxParallel: 2, log: () => {}, error: () => {},
       gates: [
         { key: 'red', command: 'while [ ! -f ready ]; do sleep 0.01; done; printf defect >&2; exit 7', order: 1 },
@@ -50,6 +50,55 @@ test('parallel failure terminates an active process group and preserves rebound 
     assert.ok(Date.now() - started < 5000, 'peer termination avoids its 30-second wait');
     assert.equal(fs.existsSync(path.join(checkout, 'leaked')), false);
     assert.equal(fs.existsSync(path.join(checkout, 'queued')), false);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('integration failure leaves real peer processes and queued gates running to completion (px-0050.01)', async () => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-aggregate-'));
+  try {
+    const result = await runPhaseGates('integration', {
+      slug: 'task-2586', checkoutPath: checkout, maxParallel: 2, log: () => {}, error: () => {},
+      gates: [
+        { key: 'red', command: 'while [ ! -f ready ]; do sleep 0.01; done; printf defect >&2; exit 7', order: 1 },
+        { key: 'peer', command: 'touch ready; sleep 0.3; touch finished', order: 2 },
+        { key: 'queued', command: 'touch queued', order: 3 },
+        { key: 'dependent', command: 'touch dependent', order: 4, after: ['red'] },
+      ],
+    });
+    assert.equal(result.ok, false);
+    assert.equal(result.cancelled, false);
+    assert.equal(result.failedGate?.key, 'red');
+    assert.equal(result.failedGate?.stderr, 'defect');
+    assert.equal(result.executed, 3);
+    assert.deepEqual(result.blocked?.map(gate => gate.key), ['dependent']);
+    assert.equal(fs.existsSync(path.join(checkout, 'finished')), true, 'the independent peer was not terminated');
+    assert.equal(fs.existsSync(path.join(checkout, 'queued')), true);
+    assert.equal(fs.existsSync(path.join(checkout, 'dependent')), false);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
+test('operator cancellation terminates real owned process groups while earlier failures stay failures (px-0050.01)', async () => {
+  const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-cancel-'));
+  try {
+    const controller = new AbortController();
+    const started = Date.now();
+    const running = runPhaseGates('integration', {
+      slug: 'task-2586', checkoutPath: checkout, maxParallel: 2, log: () => {}, error: () => {}, signal: controller.signal,
+      gates: [
+        { key: 'red', command: 'printf defect >&2; exit 7', order: 1 },
+        { key: 'peer', command: 'touch ready; sleep 30; touch leaked', order: 2 },
+        { key: 'after-peer', command: 'touch started-after-peer', order: 3, after: ['peer'] },
+      ],
+    });
+    while (!fs.existsSync(path.join(checkout, 'ready'))) { await new Promise(resolve => setTimeout(resolve, 10)); }
+    controller.abort();
+    const result = await running;
+    assert.equal(result.cancelled, true);
+    assert.deepEqual(result.failures?.map(outcome => outcome.key), ['red']);
+    assert.deepEqual([...result.cancelledGates!].sort(), ['after-peer', 'peer']);
+    assert.ok(Date.now() - started < 5000, 'the owned child was stopped rather than awaited');
+    assert.equal(fs.existsSync(path.join(checkout, 'leaked')), false);
+    assert.equal(fs.existsSync(path.join(checkout, 'started-after-peer')), false);
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 

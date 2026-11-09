@@ -16,6 +16,7 @@
       "worktreePattern": "../<repo>-<slug>"
     },
     "verification": { "command": "./scripts/verify-local.sh {{area}}", "defaultArea": "all" },
+    "prompts": { "reviewOverride": "prompts/review.md" },
     "review": { "provider": "forgejo", "baseUrl": "http://localhost:3300", "remote": "review", "repo": "magnus/parallix" },
     "draft": { "preDraftCommand": "./scripts/px-install.sh" },
     "integrate": { "preCommitCommand": "./scripts/bump-version.sh", "postIntegrateCommand": "./scripts/refresh-global-px.sh && npm run sonar:delete-branch" },

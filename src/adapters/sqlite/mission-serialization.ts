@@ -157,6 +157,7 @@ export interface MissionReviewRoundRecord {
   /** JSON array of {kind: 'fixed'|'pushed_back'|'parked', findingId: string} */
   readonly item_dispositions: string | null;
   readonly blocked_reason: string | null;
+  readonly reviewer_results?: string | null;
 }
 
 export interface MissionReviewStageLaunchRecord {
@@ -497,6 +498,8 @@ function reviewRoundFrom(
       : { implementerResponseContent: row.implementer_response_content }),
     ...(itemDispositions === null ? {} : { itemDispositions }),
     ...(row.blocked_reason === null ? {} : { blockedReason: row.blocked_reason }),
+    ...(row.reviewer_results === null || row.reviewer_results === undefined
+      ? {} : { reviewerResults: JSON.parse(row.reviewer_results) as ReviewRound['reviewerResults'] }),
   };
 }
 

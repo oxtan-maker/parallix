@@ -338,8 +338,9 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     await clickAt(page.getByRole('button', { name: /View checkpoint evidence for CP-1/ }));
     const evidence = page.getByRole('dialog', { name: /Checkpoint evidence/ });
     await evidence.waitFor();
-    assert.deepEqual(await evidence.getByRole('navigation', { name: 'Checkpoints' }).getByRole('button').allTextContents(), ['CP-1', 'CP-2', 'CP-3']);
-    await clickAt(evidence.getByRole('button', { name: 'CP-1', exact: true }));
+    assert.deepEqual(await evidence.getByRole('navigation', { name: 'Checkpoints' }).getByRole('button').allTextContents(),
+      ['✓ CP-1 · completed', '▶ CP-2 · current', '○ CP-3 · future']);
+    await clickAt(evidence.getByRole('button', { name: 'CP-1 · completed', exact: true }));
     assert.match(await evidence.textContent() ?? '', /visible.*evidence: npm test/);
     await clickAt(evidence.getByRole('button', { name: 'close', exact: true }));
     await evidence.waitFor({ state: 'hidden' });

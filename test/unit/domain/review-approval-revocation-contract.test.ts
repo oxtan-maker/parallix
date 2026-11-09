@@ -16,6 +16,9 @@ import {
   applyReviewerCommand,
   changeRevision,
   ConfiguredReviewerEligibility,
+  currentReviewRound,
+  currentRevisionApprovals,
+  recordReviewerResult,
   reviewFindingId,
   startReview,
   reviewStatus,
@@ -332,6 +335,41 @@ describe("stand down", { concurrency: false }, () => {
     assert.equal(missionApprovalCoverage(approved, identity('c3c3c3c', { a1a1a1a: 'same', c3c3c3c: 'same' }))?.kind, 'covers');
   });
 
+  test('a result-backed approval distinguishes same, changed and unreadable revisions (PX-0046.01 review F1, F5)', async () => {
+    const resultBacked = recordReviewerResult(approved, {
+      publicationId: 'native-review-a', reviewerId: 'custom-reviewer', agentFamily: agentFamily('custom'),
+      revision: changeRevision('a1a1a1a'), decision: 'approved', findings: [], outcome: 'completed', status: 0,
+      publishedAt: '2026-09-22T00:01:00Z',
+    });
+
+    assert.deepEqual(assessApprovalCoverage(resultBacked, {
+      landedRevision: changeRevision('a-plus-bookkeeping'), sameChange: true,
+    }), { kind: 'covers', round: 1, approvedRevision: changeRevision('a1a1a1a') });
+    assert.equal(assessApprovalCoverage(resultBacked, {
+      landedRevision: changeRevision('different-change'), sameChange: false,
+    })?.kind, 'stale');
+    assert.deepEqual(assessApprovalCoverage(resultBacked, {
+      landedRevision: changeRevision('unreadable-change'), sameChange: null,
+    }), {
+      kind: 'unverifiable', round: 1, approvedRevision: changeRevision('a1a1a1a'),
+      reason: 'approved revision a1a1a1a is not a readable commit',
+    });
+
+    const resultMission = { ...mission, review: resultBacked };
+    const memory = memoryStore(resultMission);
+    const recording = await recordBranchMove({
+      store: memory.store, slug,
+      identity: { branchHead: () => 'unreadable-change', changeIdentity: () => null },
+      landedRevision: 'unreadable-change', movedFrom: 'a1a1a1a',
+      recordedBy: 'px rebase', occurredAt: '2026-11-09T06:30:00Z',
+    });
+    assert.equal(recording.outcome, 'unverifiable');
+    assert.equal(memory.saves, 0, 'unknown identity must not permanently supersede the approval');
+    const decision = currentReviewRound(memory.current.review!).decision;
+    assert.equal(decision?.kind, 'approved');
+    if (decision?.kind === 'approved') { assert.equal(decision.supersession, undefined); }
+  });
+
   test('retained coverage follows the proven candidate while judgment stays at the original revision (TASK-2820)', () => {
     const first = approved.rounds[0];
     const assessment = { assessedAt: '2026-10-25T12:00:00Z', approvedRevision: String(first.decision!.revision), candidateRevision: 'retained-B',
@@ -355,6 +393,32 @@ describe("stand down", { concurrency: false }, () => {
       ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }));
     assert.equal(assessApprovalCoverage(open, { landedRevision: changeRevision('zzz'), sameChange: false }), null);
     assert.equal(assessApprovalCoverage(null, null), null);
+  });
+
+  test('only completed non-revoked results for the current revision approve (PX-0046.01)', () => {
+    const publish = (publicationId: string, revision: string, outcome: 'completed' | 'missing-output', status: number | null,
+      revokedAt: string | null = null) => ({
+      publicationId, reviewerId: publicationId, agentFamily: agentFamily(publicationId),
+      revision: changeRevision(revision), decision: 'approved' as const,
+      findings: publicationId === 'stale'
+        ? [{ id: reviewFindingId('prior-finding'), summary: 'Retained finding', location: 'src/domain/review.ts' }] : [],
+      outcome, status,
+      publishedAt: `2026-09-22T00:0${publicationId.length}:00Z`, revokedAt,
+    });
+    let results = startReview(approved.rounds[0].subject, agentFamily('custom'), agentFamily('codex'), '2026-09-22T00:00:00Z',
+      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }));
+    for (const result of [
+      publish('stale', 'old-revision', 'completed', 0),
+      publish('revoked', 'a1a1a1a', 'completed', 0, '2026-09-22T00:10:00Z'),
+      publish('missing', 'a1a1a1a', 'missing-output', 0),
+      publish('unknown', 'a1a1a1a', 'completed', null),
+      publish('failed', 'a1a1a1a', 'completed', 1),
+      publish('valid', 'a1a1a1a', 'completed', 0),
+    ]) { results = recordReviewerResult(results, result); }
+
+    assert.deepEqual(currentRevisionApprovals(results, changeRevision('a1a1a1a')).map(result => result.publicationId), ['valid']);
+    assert.deepEqual(currentReviewRound(results).reviewerResults?.flatMap(result => result.findings).map(finding => finding.id),
+      ['prior-finding'], 'invalid outcomes remain recorded without erasing attributed findings');
   });
 
   test('a recorded supersession keeps the approval effective, in history, and authoritative over later observation', () => {

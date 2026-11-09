@@ -17,7 +17,7 @@ export const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task 
 const REAL_AGENT_OPTION = '--real-agent';
 const REAL_AGENT_MODEL_OPTION = '--real-agent-model';
 const INTEGRATE_VALUE_OPTIONS = new Set([REAL_AGENT_OPTION, REAL_AGENT_MODEL_OPTION]);
-const CODEX_REAL_AGENT_MODEL = 'gpt-5.6-luna';
+const CODEX_REAL_AGENT_MODEL = 'gpt-6-luna';
 const INTEGRATE_BOOLEAN_OPTIONS: ReadonlyMap<string, 'dryRun' | 'noIntegrationGates' | 'noGate' | 'recoverLanded'> = new Map([['--dry-run', 'dryRun'], ['--no-integration-gates', 'noIntegrationGates'], ['--no-gate', 'noGate'], ['--recover-landed', 'recoverLanded']]);
 
 export interface IntegrateRequest {

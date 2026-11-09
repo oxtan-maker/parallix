@@ -7,6 +7,16 @@ import { createAgentStreamRenderer, type AgentStreamRenderer, type RenderSink } 
 import { createOutputWatchdog, type NoOutputWatchdog } from '../process/output-watchdog.js';
 import { PiStreamNormalizer } from './pi-stream-render.js';
 import { finiteOrNull } from './agent-stream-events.js';
+import type { PiWorkerObservation } from './pi-worker-protocol.js';
+
+// A stopped worker gets a finite window to land the session's final events and
+// stats before its result is settled from what it observed. Telemetry recovery
+// must never hold the process open past this bound.
+const PI_SHUTDOWN_FLUSH_MS = 1000;
+
+// Observed provider facts are re-published at most this often: enough that a
+// hard kill keeps near-current usage, cheap enough to ride a streaming session.
+const PI_OBSERVATION_MIN_INTERVAL_MS = 500;
 
 // Lazily-loaded SDK, using native dynamic import to avoid startup cost.
 // Import cost and SDK-owned ambient configuration are isolated in the worker.
@@ -139,6 +149,68 @@ interface PiRunState {
   stopReason?: string;
 }
 
+/** The provider session was stopped before it finished; its observed facts still stand. */
+function isInterruptedPiSession(error: unknown): boolean {
+  return error instanceof Error && (error as { interrupted?: boolean }).interrupted === true;
+}
+
+function abortPiSession(session: PiSession | null): void {
+  try { void session?.abort?.(); } catch { /* The session may already be gone. */ }
+}
+
+async function flushInterruptedPiSession(error: unknown, prompting: Promise<void> | null, session: PiSession | null): Promise<void> {
+  if (!isInterruptedPiSession(error) || !prompting) { return; }
+  abortPiSession(session);
+  // Finite flush: give the aborted session a bounded chance to settle its final
+  // events and stats, then settle from the snapshot regardless.
+  await Promise.race([prompting.then(() => undefined, () => undefined),
+    new Promise(resolve => { setTimeout(resolve, PI_SHUTDOWN_FLUSH_MS); })]);
+}
+
+/** Reject when `signal` aborts, leaving the session promise itself untouched. */
+function untilInterrupted(prompting: Promise<void>, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const fail = () => { reject(Object.assign(new Error('Pi session stopped before it completed'), { interrupted: true })); };
+    if (signal.aborted) { fail(); return; }
+    signal.addEventListener('abort', fail, { once: true });
+    const settle = (run: () => void) => { signal.removeEventListener('abort', fail); run(); };
+    prompting.then(() => settle(resolve), (error: unknown) => settle(() => reject(error)));
+  });
+}
+
+/** What the provider has resolved so far; published before the session finishes. */
+function piObservation(session: PiSession, baseline: PiStats): PiWorkerObservation {
+  const modelId = session.model?.id;
+  return {
+    provider: 'pi',
+    ...(modelId ? { model: modelId } : {}),
+    ...(session.sessionId ? { sessionId: session.sessionId } : {}),
+    telemetry: extractTelemetryFromStats(invocationStats(sessionValue(() => session.getSessionStats?.(), {}), baseline), modelId),
+  };
+}
+
+/** Publish changed provider facts immediately, then at a bounded stream cadence. */
+function createObservationPublisher(session: PiSession, baseline: PiStats, onObserved?: (_observation: PiWorkerObservation) => void) {
+  let publishedObservation = '';
+  let lastPublishedAtMs = 0;
+  const publish = () => {
+    const observation = piObservation(session, baseline);
+    const signature = JSON.stringify(observation);
+    if (signature === publishedObservation) { return; }
+    publishedObservation = signature;
+    onObserved?.(observation);
+  };
+  return {
+    publish,
+    republish: () => {
+      const now = Date.now();
+      if (now - lastPublishedAtMs < PI_OBSERVATION_MIN_INTERVAL_MS) { return; }
+      lastPublishedAtMs = now;
+      publish();
+    },
+  };
+}
+
 function sessionValue<T>(read: () => T | null | undefined, fallback: T): T {
   try { return read() ?? fallback; } catch { return fallback; }
 }
@@ -177,26 +249,35 @@ async function runPiSession(
   createSession: PiSessionFactory, sdkOptions: PiSessionOptions, prompt: string,
   watchdog: ReturnType<typeof createOutputWatchdog>, renderer: AgentStreamRenderer,
   attempts: number, startedAt: string, usage: { baseline: PiStats | null },
+  onObserved?: (_observation: PiWorkerObservation) => void, interruptSignal?: AbortSignal,
 ) {
   const state: PiRunState = { assistantText: '', settleError: null };
   let session: PiSession | null = null;
   let unsubscribe: (() => void) | undefined;
+  let prompting: Promise<void> | null = null;
   try {
     const created = await createSession(sdkOptions);
     session = created.session;
     usage.baseline ??= sessionValue(() => created.session.getSessionStats?.(), {});
+    // Publish the resolved model and session before the first token, then again
+    // as the session's usage moves: a shutdown that stops this worker must not
+    // lose what it had already observed, even when the final result never lands.
+    const observations = createObservationPublisher(created.session, usage.baseline as PiStats, onObserved);
+    observations.publish();
     renderer.render([{ kind: 'system', model: session.model?.id || null, sessionId: session.sessionId || null,
       tools: sessionValue(() => created.session.getActiveToolNames?.().length, null) }]);
     if (created.modelFallbackMessage) {
       renderer.render([{ kind: 'diagnostic', text: created.modelFallbackMessage, isError: false }]);
     }
-    unsubscribe = subscribePiEvents(session, watchdog, renderer, state);
-    await session.prompt(prompt);
+    unsubscribe = subscribePiEvents(session, watchdog, renderer, state, observations.republish);
+    prompting = session.prompt(prompt);
+    await (interruptSignal ? untilInterrupted(prompting, interruptSignal) : prompting);
     if (state.settleError) { throw new Error(state.settleError); }
     const result = piResult(session, state, null, attempts, startedAt, usage.baseline);
     if (!state.assistantText && result.stdout) { renderer.render([{ kind: 'text', text: result.stdout, agent: null }]); }
     return result;
   } catch (error: unknown) {
+    await flushInterruptedPiSession(error, prompting, session);
     return piResult(session, state, error, attempts, startedAt, usage.baseline || {});
   } finally {
     try { unsubscribe?.(); } finally { session?.dispose?.(); }
@@ -206,10 +287,11 @@ async function runPiSession(
 async function runPiAttempts(
   createSession: PiSessionFactory, sdkOptions: PiSessionOptions, prompt: string, watchdog: ReturnType<typeof createOutputWatchdog>,
   renderer: AgentStreamRenderer, maxTransientRetries: number, startedAt: string, resume: boolean,
+  onObserved?: (_observation: PiWorkerObservation) => void, interruptSignal?: AbortSignal,
 ) {
   const usage: { baseline: PiStats | null } = { baseline: resume ? null : {} };
   for (let attempts = 0; ; attempts += 1) {
-    const result = await runPiSession(createSession, sdkOptions, prompt, watchdog, renderer, attempts, startedAt, usage);
+    const result = await runPiSession(createSession, sdkOptions, prompt, watchdog, renderer, attempts, startedAt, usage, onObserved, interruptSignal);
     if (attempts >= maxTransientRetries || !isTransientPiFailure(result) || result.status === 0) { return result; }
     renderer.render([{ kind: 'activity', label: 'retrying', message: `↻ retry ${attempts + 1}/${maxTransientRetries} · ${result.stderr}` }]);
   }
@@ -239,7 +321,7 @@ function updatePiSettlement(event: PiStreamEvent, state: PiRunState) {
     }
 }
 
-function subscribePiEvents(session: PiSession, watchdog: { noteOutput: () => void }, renderer: AgentStreamRenderer, state: PiRunState) {
+function subscribePiEvents(session: PiSession, watchdog: { noteOutput: () => void }, renderer: AgentStreamRenderer, state: PiRunState, onObservation?: () => void) {
   const normalizer = new PiStreamNormalizer();
   return session.subscribe((event) => {
     let events;
@@ -250,6 +332,7 @@ function subscribePiEvents(session: PiSession, watchdog: { noteOutput: () => voi
     renderer.render(events);
     if (events.length || event.type === 'tool_execution_update') { watchdog.noteOutput(); }
     updatePiSettlement(event, state);
+    onObservation?.();
   });
 }
 
@@ -260,6 +343,8 @@ export async function runPiSdk(request: {
   prompt: string; worktree: string; resume?: boolean; sessionId?: string | null; model?: string | null;
   maxTransientRetries?: number; stdoutSink?: RenderSink; noOutputWatchdog?: NoOutputWatchdog | null;
   clearStaleMarker: () => Promise<void>;
+  onObserved?: (_observation: PiWorkerObservation) => void;
+  interruptSignal?: AbortSignal;
 }) {
   const startedAt = new Date().toISOString();
   const renderer = createAgentStreamRenderer(request.stdoutSink, {}, request.configuration ?? DEFAULT_CONFIGURATION);
@@ -272,7 +357,8 @@ export async function runPiSdk(request: {
     });
     const options = await createSdkSessionOptions(sdk, request.worktree, manager, request.model ?? null);
     const result = await runPiAttempts(_createAgentSession || sdk.createAgentSession, options, request.prompt,
-      watchdog, renderer, request.maxTransientRetries ?? 1, startedAt, request.resume ?? false);
+      watchdog, renderer, request.maxTransientRetries ?? 1, startedAt, request.resume ?? false,
+      request.onObserved, request.interruptSignal);
     renderPiResult(renderer, result);
     const { stats: _stats, ...launchResult } = result;
     return launchResult;

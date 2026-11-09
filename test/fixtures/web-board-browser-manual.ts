@@ -79,17 +79,21 @@ try {
     for (const kind of ['long','unknown','review'] as const) {
       const card=makeCard({lane:kind==='long'?'active':'review',status:kind==='long'?'active':'review',blockingReason:null, currentWork:{operationId:'manual-live',phase:'execute',summary:'Disposable work',agent:null,updatedAt:new Date().toISOString(),freshness:'live'}, checkpoint:kind==='unknown'?null:'CP-1',
         checkpointEvidence:kind==='unknown'?[]:Array.from({length:100},(_,i)=>({name:`CP-${i+1}`,description:`Step ${i+1}`,goalCheck:[],state:'future' as const})),
-        reviewRound:kind==='review'?2:kind==='unknown'?99:null, reviewPhase:kind==='review'?'reviewing':null, reviewHistory:[], reviewDisposition:kind==='review'?'REQUEST_CHANGES':null});
+        reviewRound:kind==='review'?6:kind==='unknown'?0:null, reviewPhase:kind==='review'?'reviewing':null, reviewHistory:[], reviewDisposition:kind==='review'?'REQUEST_CHANGES':null});
       await fixture.render(toWebBoardSnapshot(makeProjection({[kind==='long'?'active':'review']:[card]})));
       if(kind!=='unknown') {
         await page.getByRole('button',{name:/View checkpoint evidence/}).click();
-        await page.getByRole('dialog').getByRole('button',{name:'CP-100',exact:true}).click();
+        await page.getByRole('dialog').getByRole('button',{name:'CP-100 · future',exact:true}).click();
         await page.keyboard.press('Escape');
       }
-      if(kind==='review') assert.ok(await page.getByLabel(/outcome recorded: changes requested/).count());
+      if(kind==='review') {
+        assert.equal(await page.locator('[data-review-attempt]').count(),6);
+        assert.equal(await page.getByLabel('attempt 6: outcome recorded: changes requested', {exact:true}).isVisible(),true);
+        assert.doesNotMatch(await page.locator('[data-board-card]').innerText(),/review round unknown/);
+      }
       if(kind==='unknown') {
         assert.match(await page.locator('[data-board-card]').innerText(),/review round unknown/);
-        assert.match(await page.getByRole('group',{name:'Checkpoint plan',exact:true}).getAttribute('aria-description') ?? '',/Plan unavailable.*Completion unknown/);
+        assert.match(await page.getByRole('group',{name:'Checkpoint plan',exact:true}).getAttribute('aria-description') ?? '',/Checkpoint plan unavailable.*Completion unknown/);
       }
       assert.ok(await page.locator('.fan.spin').count());
       await page.emulateMedia({reducedMotion:'reduce'});

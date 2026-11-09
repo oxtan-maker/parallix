@@ -2,7 +2,7 @@ import type { VerificationReadSnapshot } from './verification-read-snapshot.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
-import type { IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
+import type { IntegrationGateEvidenceOutcome, IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
 import { loadAdapterConfig } from '../config/product-config.js';
 import { git } from '../git/git.js';
 import { completedRebaseLineage, completedRebaseLineageForCheckout, ensureRebaseCompletionRecorder } from '../git/rebase-completion-recorder.js';
@@ -12,7 +12,7 @@ import { createActiveVerificationIdentity } from './active-verification-identity
 import { verificationDigest } from './verification-proof-inputs.js';
 
 type Gate = { key: string; command: string };
-type Outcome = { key: string; command: string; exitCode: number | null };
+type Outcome = IntegrationGateEvidenceOutcome;
 type Identity = Extract<ReturnType<typeof createActiveVerificationIdentity>, { ok: true }>;
 interface Coverage { command: string; checks: Record<string, string[]> }
 type RunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
@@ -174,7 +174,7 @@ function finishIntegrationRun(pending: Pending, outcomes: readonly Outcome[], di
     writeJson(pending.file, { policy: 'integration-verification-v1',
       status: disposition, run, revision: pending.revision,
       gates: pending.gates.map(({ key, command }) => ({ key, command })),
-      outcomes: outcomes.map(({ key, command, exitCode }) => ({ key, command, exitCode })) } satisfies RunRecord, { mode: 0o600 });
+      outcomes: [...outcomes] } satisfies RunRecord, { mode: 0o600 });
     return false;
   } catch { return false; }
 }
@@ -203,7 +203,8 @@ function validStatus(status: unknown): status is RunStatus {
 function runOutcomes(data: StoredRun): Outcome[] {
   return (Array.isArray(data.outcomes) ? data.outcomes : []).filter((outcome): outcome is Outcome =>
     !!outcome && typeof outcome.key === 'string' && typeof outcome.command === 'string'
-    && (outcome.exitCode === null || typeof outcome.exitCode === 'number'));
+    && (outcome.exitCode === null || typeof outcome.exitCode === 'number')
+    && (outcome.result === undefined || ['passed', 'failed', 'blocked', 'cancelled'].includes(outcome.result)));
 }
 function runGates(data: StoredRun, outcomes: Outcome[]): Gate[] {
   const gates = (Array.isArray(data.gates) ? data.gates : []).filter((gate): gate is Gate =>

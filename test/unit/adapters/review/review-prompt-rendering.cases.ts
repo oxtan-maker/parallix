@@ -1,6 +1,8 @@
 // Prompt rendering uses shipped templates and in-process inputs only.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { WORKFLOW_AGENT_NAMES } from '../../../../src/adapters/agents/agents.js';
 import {
   PROMPT_ENTRYPOINTS,
@@ -9,8 +11,14 @@ import {
   buildReviewPrompt,
   buildActOnReviewPrompt,
   buildCompactReviewPrompt,
-  buildCompactActOnReviewPrompt
+  buildCompactActOnReviewPrompt,
 } from '../../../../src/adapters/review/review-prompts.js';
+
+const REPO_ROOT = path.resolve(import.meta.dirname, '../../../..');
+const REPOSITORY_REVIEW_POLICY = fs.readFileSync(
+  path.join(REPO_ROOT, 'prompts', 'review.md'),
+  'utf8',
+).trimEnd();
 
 test('PROMPT_ENTRYPOINTS covers all supported agent families', () => {
   // Sourced from the launcher registry so a newly added agent family cannot
@@ -67,6 +75,32 @@ test('buildReviewPrompt includes claude entrypoint for claude reviewer', () => {
     attempt: 1
   });
   assert.match(prompt, /\/review all/);
+});
+
+test('every self-development review builder carries the repository policy once, including same-agent fallback (PX-0046.02)', () => {
+  const inputs = [
+    { reviewer: 'codex', implementer: 'claude', branch: 'mission/px-0046-direct', attempt: 1 },
+    { reviewer: 'claude', implementer: 'codex', branch: 'mission/px-0046-continue', attempt: 2 },
+    { reviewer: 'custom', implementer: 'custom', branch: 'mission/px-0046-fallback', attempt: 3 },
+  ];
+  for (const input of inputs) {
+    for (const prompt of [buildReviewPrompt(input), buildCompactReviewPrompt(input)]) {
+      assert.equal(prompt.split(REPOSITORY_REVIEW_POLICY).length - 1, 1);
+      assert.match(prompt, /px verdict approve/);
+      assert.match(prompt, /Every request-change finding needs a distinct stable `F<number>` id/);
+    }
+  }
+});
+
+test('self-development counterexample policy has no production-code copy (PX-0046.02)', () => {
+  const productionPromptSource = fs.readFileSync(
+    path.join(REPO_ROOT, 'src/adapters/review/review-prompts.ts'),
+    'utf8',
+  );
+  const policyLead = 'Before a general audit of mission paperwork, perform a short counterexample pass over the changed behavior.';
+
+  assert.match(REPOSITORY_REVIEW_POLICY, new RegExp(policyLead.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.doesNotMatch(productionPromptSource, /counterexample-pass-v1/);
 });
 
 test('buildActOnReviewPrompt renders the runtime act-on-review prompt for dry-run output', () => {

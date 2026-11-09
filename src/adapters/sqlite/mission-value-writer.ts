@@ -179,8 +179,8 @@ export class SqliteMissionValueWriter {
             approval_source_provider, revoked_at, revoked_by, revoked_reason, revoked_cause, revoked_gate, revoked_gate_command, revoked_gate_log,
                   superseded_at, superseding_revision, superseded_by, responded_at, resulting_revision,
             phase, disposition, reviewer_retry_count, implementer_retry_count,
-            implementer_response_content, item_dispositions, blocked_reason)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            implementer_response_content, item_dispositions, blocked_reason, reviewer_results)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [missionId, roundPosition, ...reviewIdentityColumns(round), ...reviewDecisionColumns(round), ...reviewApprovalColumns(round), ...reviewWithdrawalColumns(round), ...reviewSupersessionColumns(round), ...reviewResponseColumns(round)],
     );
 
@@ -302,6 +302,7 @@ function reviewResponseColumns(round: ReviewRound): SqlParameter[] {
     round.implementerResponseContent ?? null,
     round.itemDispositions ? JSON.stringify(round.itemDispositions) : null,
     round.blockedReason ?? null,
+    round.reviewerResults === undefined ? null : JSON.stringify(round.reviewerResults),
   ];
 }
 

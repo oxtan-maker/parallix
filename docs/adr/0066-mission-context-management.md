@@ -1,6 +1,6 @@
 # ADR 0066: Mission context management
 
-**Status:** Accepted; fresh-review exception approved, implementation pending PX-0046
+**Status:** Accepted; fresh-review exception implemented by PX-0046.02
 
 **Date:** 2026-10-14
 
@@ -97,15 +97,15 @@ precedence over the built-in on default. There is no environment, per-user,
 per-agent or per-stage override. The opinion override coexists with this policy
 and does not remove core workflow rules.
 
-Until PX-0046 lands, apply the policy consistently after recorded checkpoints,
-after successful mission-declared gates, before review rounds after the first,
-and before act-on-review, including missions without gates. Off prompts retain the
-state-reload obligations without requesting compaction. On prompts request
-compaction and reload the same authoritative state.
+Apply the policy consistently after recorded checkpoints, after successful
+mission-declared gates, and before act-on-review, including missions without
+gates. Off prompts retain the state-reload obligations without requesting
+compaction. On prompts request compaction and reload the same authoritative
+state.
 
-PX-0046 will replace review-round compaction with fresh reviewer invocations,
-including fallback and relaunches. Reconstruct them from the Mission, revision,
-findings and resolutions; native within-review compaction remains allowed.
+Every reviewer invocation starts a fresh native conversation, including fallback
+and relaunches. Reconstruct it from the Mission, revision, findings and
+resolutions; native within-review compaction remains allowed.
 
 Keep durable checkpoint evidence, locked goals and scope, successful-gate
 records, failed-gate diagnostics, unresolved findings, implementer resolutions,

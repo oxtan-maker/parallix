@@ -88,6 +88,16 @@ test('integration dry-run routes a repairable red receipt with exact failure evi
   assert.equal(observations().unsuccessful.length, 1, 'the red run remains recorded as failed evidence');
 });
 
+test('an aggregate red receipt records every failed gate while repair keeps the singular projection (px-0050.01)', async () => {
+  const unit = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+  const types = { ...gates[1], exitCode: 2, stdout: '', stderr: 'type defect' };
+  const { step, request, observations } = await fixture(receipt({ ok: false, failedGate: unit, failures: [unit, types], outcomes: [unit, types], error: 'two failed' }));
+  await assert.rejects(quiet(() => step.runRequiredLocalGates(request)), { name: 'IntegrationAbort' });
+  assert.equal(observations().repairRequests[0]?.failedGate?.command, unit.command);
+  assert.deepEqual((observations().unsuccessful[0] as { hooks: string[]; failed: boolean }).hooks, ['unit', 'types']);
+  assert.equal((observations().unsuccessful[0] as { failed: boolean }).failed, true);
+});
+
 for (const [scenario, result] of [
   ['cancelled', receipt({ ok: false, cancelled: true, executed: 1, outcomes: [{ ...gates[0], exitCode: null, stdout: '', stderr: 'cancelled' }], error: 'cancelled' })],
   ['partial', receipt({ executed: 1, outcomes: [{ ...gates[0], exitCode: 0, stdout: '', stderr: '' }] })],

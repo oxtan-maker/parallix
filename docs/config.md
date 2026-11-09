@@ -301,7 +301,11 @@ rounded up to the next hour. A successful launcher presence check does not clear
 
 `adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
 across local custom-agent processes that share `PARALLIX_HOME`; its default is
-unlimited custom-agent launches. `subagents.maxParallel` is separate: it is an
+unlimited custom-agent launches. When the custom pool is saturated, an unpinned
+draft, active, act-on-review or review launch goes to another eligible agent
+instead of waiting (for review, only an agent independent of the implementer);
+if no such agent exists, that launch waits for custom capacity. `subagents.maxParallel`
+is separate: it is an
 advisory prompt limit for subagents created inside one agent, not process
 admission control. `models` is an object whose keys
 are agent-family names and whose string values are model identifiers; unlisted
@@ -368,39 +372,40 @@ harness substitutes, parser-visible tokens and formats, permitted
 lifecycle mechanics), and an overridable **default-opinion** half that is taste
 (how to review, evidence standards, thoroughness, tone).
 
-`adapters.prompts` accepts `override` and the boolean `contextCompaction`.
-When `override` is unset, Parallix assembles the shipped core and default-opinion
-halves. A shipped default-opinion half may be empty when a stage has no
-tailorable opinion content.
+`adapters.prompts` accepts `override`, `reviewOverride`, and the boolean
+`contextCompaction`. When both override paths are unset, Parallix assembles the
+shipped core and default-opinion halves. A shipped default-opinion half may be
+empty when a stage has no tailorable opinion content.
 
 When `override` is set to a repo-relative or absolute path, Parallix assembles
 the same mandatory core half and reads the local opinion from that one file.
 For draft, execute, act-on-review, and portfolio, that file replaces the shipped
-opinion half (including an empty shipped default). For review, Parallix keeps
-the shipped default-opinion guidance before appending the local opinion, so
-reviewers retain the instruction not to repeat large batched coverage that
-Parallix already ran or deliberately schedules later. The core half is always
-assembled in and cannot be dropped by an override, so no mechanically required
+opinion half (including an empty shipped default). `reviewOverride` selects a
+review-only local opinion and takes precedence over `override` for that stage;
+draft, execute, act-on-review, and portfolio ignore it. The distributed review
+opinion file exists but is zero bytes, so a clean installation supplies only the
+generic mandatory review contract. Parallix's own checkout uses the review-only
+boundary for its counterexample policy. The core half is always assembled in
+and cannot be dropped by either override, so no mechanically required
 instruction is removable.
-There is exactly one such key; there are no per-stage, per-agent, per-model,
-or per-user override keys.
 
 ```json
 {
   "adapters": {
     "prompts": {
-      "override": "config/my-review-opinion.md"
+      "reviewOverride": "config/my-review-opinion.md"
     }
   }
 }
 ```
 
-An unknown key beneath `adapters.prompts` (for example `adapters.prompts.draftOverride`,
-or any property other than `override` and `contextCompaction`) is rejected through the existing
-configuration-error path, so a repository cannot invent a second or per-stage
-override surface. The five shipped default-opinion files selected when no
-override is configured are `prompts/draft.md`, `prompts/execute.md`, `prompts/review.md`,
-`prompts/act-on-review.md`, and `prompts/portfolio.md`.
+An unknown key beneath `adapters.prompts` (for example
+`adapters.prompts.draftOverride`, or any property other than `override`,
+`reviewOverride`, and `contextCompaction`) is rejected through the existing
+configuration-error path. The five shipped default-opinion files selected when
+no applicable override is configured are `prompts/draft.md`,
+`prompts/execute.md`, `prompts/review.md`, `prompts/act-on-review.md`, and
+`prompts/portfolio.md`.
 
 ### Context compaction
 
@@ -557,9 +562,15 @@ every ready gate without waiting for another check to finish. A gate
 with `after` waits for each named producer. Output is emitted as a complete,
 labeled section per gate after it finishes, so concurrent command streams stay
 readable. When the interactive dashboard is unavailable, each gate instead
-prints a readable start and completion line as it runs. A failure stops queued
-gates, terminates active gates, and blocks the phase. Integration then routes
-the original failure through gate rebound; operator cancellation aborts instead.
+prints a readable start and completion line as it runs. In `handoff` and
+`review`, a failure stops queued gates, terminates active gates, and blocks the
+phase. In `integration`, a failure does not stop independent gates: every gate
+that can still run finishes, and a gate whose `after` prerequisite failed (or was
+itself blocked) is reported as blocked and not run. The phase then reports each
+failure, blocked gate and cancelled gate separately, and integration routes the
+first failure through gate rebound. Operator cancellation is the only thing that
+stops running gates early, and cancelled or blocked gates are never recorded as
+passes or failures.
 
 Set `adapters.gates.maxConcurrent` to cap independent verification runs across
 processes and worktrees sharing Parallix admission state. Like
@@ -649,8 +660,8 @@ that is, before the `review` → integration transition, not before the review
 itself. `preIntegration` gates run before the integration merge. They also
 execute for `px integrate <slug> --dry-run` against the finalized mission
 checkout, using the same runner and evidence identity while stopping before
-every landing effect. A repairable red gate enters the retained integration
-repair route and must rerun both the failed check and this complete configured
+every landing effect. Repairable failures enter one retained integration repair
+handoff with a checkpoint per failed gate and must rerun the complete configured
 plan; existing human-only classifications stop with their evidence and launch
 no agent. Configuring one phase does not require configuring the
 others; unconfigured phases remain gated-off.

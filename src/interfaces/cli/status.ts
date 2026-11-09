@@ -278,7 +278,7 @@ function logCheckpointPlan(missionData: StatusMissionData, log: (_msg: string) =
     for (const checkpoint of checkpoints) {
       log(`  ${checkpoint.recorded ? '[x]' : '[ ]'} ${checkpoint.name}: ${checkpoint.description}`.trimEnd());
       if (checkpoint.repair) {
-        log(`      Repair incident: ${checkpoint.repair.incidentId}; attempt ${checkpoint.repair.attempt}; harness verified: ${checkpoint.repair.verified}`);
+        log(`      Repair incident: ${checkpoint.repair.incidentId}${checkpoint.repair.gateKey ? `; gate ${checkpoint.repair.gateKey}` : ''}; attempt ${checkpoint.repair.attempt}; harness verified: ${checkpoint.repair.verified}`);
         if (checkpoint.repair.acknowledgedBlocker) {
           log(`      Prior stop acknowledged by ${checkpoint.repair.acknowledgedBy} at ${checkpoint.repair.acknowledgedAt}: ${JSON.stringify(checkpoint.repair.acknowledgedBlocker)}`);
         }

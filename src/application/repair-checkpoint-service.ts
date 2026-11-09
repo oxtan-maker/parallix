@@ -26,27 +26,13 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     const loaded = await this.load(request.slug);
     if (!loaded.mission.brief) { return null; } // Historical document authority remains separate.
     const checkpoints = loaded.mission.checkpoints;
-    if (checkpoints.some(cp => cp.repair?.blocker)) { throw new Error('Invalid locked contract awaits operator decision'); }
-    const prior = checkpoints.find(cp => cp.repair?.incidentId === request.incidentId);
-    const priorRepair = prior?.repair;
-    const number = Math.max(0, ...checkpoints.map(cp => Number(cp.name.slice(3)))) + 1;
-    if (priorRepair && (JSON.stringify(priorRepair.authorizedGates) !== JSON.stringify(loaded.mission.declaredGates ?? [])
-      || JSON.stringify(priorRepair.authorizedCriteria) !== JSON.stringify(loaded.mission.successCriteria ?? []))) {
-      throw new Error('Authorized required checks changed during repair; operator decision required');
-    }
-    const name = prior?.name ?? `CP-${number}`;
-    const occurrence = newFailureOccurrence(request, loaded.version + 1);
-    const checkpoint: CheckpointData = {
-      missionId: loaded.mission.id, name,
-      firstLine: `Repair incident ${request.incidentId}: ${request.command}`,
-      // Reopening keeps its rows and provenance; a new incident carries accepted coverage.
-      goalCheck: prior?.goalCheck ?? carriedGoalCheckRows(checkpoints),
-      nextActionText: 'Record authorized repair evidence, complete remaining checkpoints and rerun the authorized required check.',
-      repair: { ...priorRepair, incidentId: request.incidentId, command: request.command, authorizedGates: loaded.mission.declaredGates ?? [], authorizedCriteria: loaded.mission.successCriteria ?? [], attempt: request.attempt, evidenceRecorded: false, verified: false,
-        occurrence },
-    };
+    const prior = priorRepairCheckpoint(checkpoints, request);
+    assertRepairCheckpointOpenAuthority(loaded.mission, checkpoints, prior);
+    const name = prior?.name ?? nextRepairCheckpointName(checkpoints);
+    const checkpoint = openRepairCheckpoint(loaded.mission, loaded.version, checkpoints, request, prior, name);
     const version = await this._store.save({ ...loaded.mission,
-      checkpoints: [...checkpoints.filter(cp => cp.name !== name), checkpoint],
+      checkpoints: [...checkpoints.filter(cp => cp.name !== name), checkpoint]
+        .sort((left, right) => Number(left.name.slice(3)) - Number(right.name.slice(3))),
     } as Mission, loaded.version);
     return { name, version };
   }
@@ -159,18 +145,42 @@ export class RepairCheckpointService implements RepairCheckpointPort {
   async verify(slug: string, name: string, proof?: RepairVerificationProof): Promise<void> {
     const loaded = await this.load(slug);
     const checkpoint = loaded.mission.checkpoints.find(cp => cp.name === name);
-    if (!checkpoint?.repair || checkpoint.repair.blocker || !checkpoint.repair.evidenceRecorded || !freshGoalCheckRows(checkpoint.goalCheck).length) {
-      throw new Error(`Repair checkpoint ${name} needs fresh authorized evidence before repair success`);
-    }
-    if (JSON.stringify(checkpoint.repair.authorizedGates) !== JSON.stringify(loaded.mission.declaredGates ?? [])
-      || JSON.stringify(checkpoint.repair.authorizedCriteria) !== JSON.stringify(loaded.mission.successCriteria ?? [])) {
-      throw new Error('Authorized required checks changed during repair; unrelated success is not repair proof');
-    }
-    if (proof) { this.assertCoverageProof(loaded.mission, checkpoint, proof); }
+    this.assertVerifiable(loaded.mission, checkpoint, name, proof);
     const exactSuccessCoverage = proof ? { ...proof.snapshot, producer: 'harness-exact-check' as const,
       verifiedMissionRevision: loaded.version + 1, execution: proof.execution } : undefined;
     await this._store.save({ ...loaded.mission, checkpoints: loaded.mission.checkpoints.map(cp => cp.name === name
       ? { ...cp, repair: { ...checkpoint.repair!, verified: true, ...(exactSuccessCoverage ? { exactSuccessCoverage } : {}) } } : cp) } as Mission, loaded.version);
+  }
+
+  /** One aggregate rerun is one CAS write: no gate can settle while a sibling remains unverified. */
+  async verifyAll(slug: string, checks: readonly { readonly name: string; readonly proof: RepairVerificationProof }[]): Promise<void> {
+    if (checks.length < 2 || new Set(checks.map(check => check.name)).size !== checks.length) {
+      throw new Error('Aggregate repair verification requires distinct checkpoints');
+    }
+    const loaded = await this.load(slug);
+    const byName = new Map(checks.map(check => [check.name, check]));
+    for (const check of checks) {
+      this.assertVerifiable(loaded.mission, loaded.mission.checkpoints.find(cp => cp.name === check.name), check.name, check.proof);
+    }
+    await this._store.save({ ...loaded.mission, checkpoints: loaded.mission.checkpoints.map(cp => {
+      const check = byName.get(cp.name);
+      if (!check) { return cp; }
+      return { ...cp, repair: { ...cp.repair!, verified: true, exactSuccessCoverage: {
+        ...check.proof.snapshot, producer: 'harness-exact-check' as const,
+        verifiedMissionRevision: loaded.version + 1, execution: check.proof.execution,
+      } } };
+    }) } as Mission, loaded.version);
+  }
+
+  private assertVerifiable(mission: Mission, checkpoint: CheckpointData | undefined, name: string, proof?: RepairVerificationProof): asserts checkpoint is CheckpointData {
+    if (!checkpoint?.repair || checkpoint.repair.blocker || !checkpoint.repair.evidenceRecorded || !freshGoalCheckRows(checkpoint.goalCheck).length) {
+      throw new Error(`Repair checkpoint ${name} needs fresh authorized evidence before repair success`);
+    }
+    if (JSON.stringify(checkpoint.repair.authorizedGates) !== JSON.stringify(mission.declaredGates ?? [])
+      || JSON.stringify(checkpoint.repair.authorizedCriteria) !== JSON.stringify(mission.successCriteria ?? [])) {
+      throw new Error('Authorized required checks changed during repair; unrelated success is not repair proof');
+    }
+    if (proof) { this.assertCoverageProof(mission, checkpoint, proof); }
   }
 
   private assertCoverageProof(mission: Mission, checkpoint: CheckpointData, proof: RepairVerificationProof): void {
@@ -216,6 +226,41 @@ export class RepairCheckpointService implements RepairCheckpointPort {
       return completed({ version }, []);
     } catch (cause) { return writeFailure(cause); }
   }
+}
+
+function priorRepairCheckpoint(checkpoints: readonly CheckpointData[], request: OpenRepairCheckpoint): CheckpointData | undefined {
+  return checkpoints.find(cp => cp.repair?.incidentId === request.incidentId && cp.repair?.gateKey === request.gateKey);
+}
+
+function assertRepairCheckpointOpenAuthority(mission: Mission, checkpoints: readonly CheckpointData[],
+  prior: CheckpointData | undefined): void {
+  if (checkpoints.some(cp => cp.repair?.blocker)) { throw new Error('Invalid locked contract awaits operator decision'); }
+  const repair = prior?.repair;
+  if (repair && (JSON.stringify(repair.authorizedGates) !== JSON.stringify(mission.declaredGates ?? [])
+    || JSON.stringify(repair.authorizedCriteria) !== JSON.stringify(mission.successCriteria ?? []))) {
+    throw new Error('Authorized required checks changed during repair; operator decision required');
+  }
+}
+
+function nextRepairCheckpointName(checkpoints: readonly CheckpointData[]): string {
+  const number = Math.max(0, ...checkpoints.map(cp => Number(cp.name.slice(3)))) + 1;
+  return `CP-${number}`;
+}
+
+function openRepairCheckpoint(mission: Mission, version: number, checkpoints: readonly CheckpointData[],
+  request: OpenRepairCheckpoint, prior: CheckpointData | undefined, name: string): CheckpointData {
+  const occurrence = newFailureOccurrence(request, version + 1);
+  return {
+    missionId: mission.id,
+    name,
+    firstLine: `Repair incident ${request.incidentId}${request.gateKey ? ` gate ${request.gateKey}` : ''}: ${request.command}`,
+    // Reopening keeps its rows and provenance; a new incident carries accepted coverage.
+    goalCheck: prior?.goalCheck ?? carriedGoalCheckRows(checkpoints),
+    nextActionText: 'Record authorized repair evidence, complete remaining checkpoints and rerun the authorized required check.',
+    repair: { ...prior?.repair, incidentId: request.incidentId, ...(request.gateKey ? { gateKey: request.gateKey } : {}),
+      command: request.command, authorizedGates: mission.declaredGates ?? [], authorizedCriteria: mission.successCriteria ?? [],
+      attempt: request.attempt, evidenceRecorded: false, verified: false, occurrence },
+  };
 }
 
 export function repairContractFailure(checkpoints: readonly CheckpointData[], gates?: readonly string[], criteria?: readonly string[]): string | null {

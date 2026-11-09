@@ -1,9 +1,11 @@
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import test, { mock } from 'node:test';
+import test, { mock, type TestContext } from 'node:test';
 import os from 'node:os';
+import { EventEmitter } from 'node:events';
 import assert from 'node:assert/strict';
+import type { PiWorkerChild } from '../../../../src/adapters/agents/pi-worker-client.js';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
 import { openRunSession, TerminalHostUnavailableError } from '../../../../src/adapters/agents/run-session.js';
 import { missionRunsDir } from '../../../../src/adapters/filesystem/run-history-store.js';
@@ -64,6 +66,17 @@ test('the pipe host captures durably and reports what is not covered (TASK-2643)
   ] });
   assert.ok(finished.omissions.some((line: string) => /No codex provider-native transcript/.test(line)));
   assert.ok(finished.omissions.some((line: string) => /reasoning/.test(line)));
+});
+
+test('run history retains an observed provider and model when usage telemetry is unavailable (px-0036.01)', () => {
+  const { worktree, deps, input } = setup('pipe');
+  const session = openRunSession({ ...input, family: 'pi' }, deps)!;
+  session.finish({ status: 1, signal: null, sessionId: 'worker-session', provider: 'pi', model: 'fixture-model', telemetry: null });
+  const finished = record(worktree, session.runId);
+
+  assert.deepEqual(finished.resources.provider, {
+    provenance: 'provider-reported', provider: 'pi', model: 'fixture-model', values: [],
+  }, 'resolved provider identity remains durable even when the provider reported no usage snapshot');
 });
 
 test('nested process resources inherit the composition-resolved parent boundary (TASK-2835)', () => {
@@ -279,6 +292,25 @@ test('a persisted workflow outcome stops a lingering agent without launching fal
   assert.equal(outcome.completedAuthoritatively, true);
 });
 
+test('verdict-first signal death stays distinct from authoritative workflow success (px-0036.01)', async t => {
+  const { awaitAgentResult } = await import('../../../../src/adapters/agents/agent-launch-process.js');
+  const { worktree, deps, input } = setup('pipe');
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  let settle!: (result: { status: number | null; signal: string | null; stdout: string; stderr: string }) => void;
+  const provider = new Promise<Parameters<typeof settle>[0]>(resolve => { settle = resolve; });
+  const outcome = await awaitAgentResult(provider, async () => true, { pid: 42 }, () => {}, async () => {
+    settle({ status: null, signal: 'SIGTERM', stdout: '', stderr: '' });
+  });
+  const session = openRunSession({ ...input, family: 'claude' }, deps)!;
+  session.finish(outcome);
+  const finished = record(worktree, session.runId);
+
+  assert.equal(outcome.status, 0, 'the durable workflow verdict still owns launch success');
+  assert.deepEqual(outcome.providerExit, { status: null, signal: 'SIGTERM' });
+  assert.equal(finished.exitCode, null, 'a signal-stopped provider has no clean numeric exit');
+  assert.equal(finished.signal, 'SIGTERM', 'run history keeps the provider process signal');
+});
+
 test('a capture finalized before any spawn stays retrievable and reads stopped without a fabricated exit (px-0027)', async () => {
   const { getRun } = await import('../../../../src/application/run-history.js');
   const { runHistoryFileSystem } = await import('../../../../src/adapters/filesystem/run-history-store.js');
@@ -292,4 +324,233 @@ test('a capture finalized before any spawn stays retrievable and reads stopped w
   assert.equal(finished.execution, null);
   const lookup = getRun({ runsDir: missionRunsDir(worktree, 'task-7'), fs: runHistoryFileSystem, isAlive: () => false }, session.runId);
   assert.equal(lookup.ok && lookup.run?.execution, 'stopped');
+});
+
+
+// --- Pi result transport across verdict-first shutdown (px-0036.01) ---
+
+const observedPiSession = {
+  provider: 'pi', model: 'fixture-model', sessionId: 'worker-session',
+  telemetry: { provider: 'pi', model: 'fixture-model', inputTokens: 4, outputTokens: 2, cachedTokens: 1,
+    totalTokens: 7, toolCalls: 3, cost_usd: 0.25, usagePercent: null },
+};
+
+/**
+ * A Pi worker double speaking the worker IPC protocol in-process, so the Pi
+ * result transport and its stop path stay unit-testable without a child
+ * process (ADR 0057). `drain` selects whether the worker settles when its
+ * client asks it to stop, or ignores the request so the client's hard signal
+ * escalation is exercised against a captured process-group signal.
+ */
+function piWorkerDouble(t: TestContext, drain: boolean) {
+  const emitter = new EventEmitter();
+  let connected = true;
+  const sent: unknown[] = [];
+  const settle = (code: number | null, signal: NodeJS.Signals | null) => {
+    if (!connected) { return; }
+    connected = false;
+    emitter.emit('close', code, signal);
+  };
+  // A failed case must not leave the client promise, or its signal listeners,
+  // hanging for the next case.
+  t.after(() => settle(1, 'SIGKILL'));
+  const child = {
+    pid: 4_242,
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    get connected() { return connected; },
+    send(message: unknown) {
+      sent.push(message);
+      if (drain && (message as { kind?: string })?.kind === 'stop') { queueMicrotask(() => settle(1, null)); }
+      return true;
+    },
+    on: (event: string, listener: (...args: unknown[]) => void) => emitter.on(event, listener),
+    once: (event: string, listener: (...args: unknown[]) => void) => emitter.once(event, listener),
+  } as unknown as PiWorkerChild;
+  return {
+    child,
+    sent,
+    settle,
+    publish: (message: unknown) => { emitter.emit('message', message); },
+    /** The stop request the launch makes through the client's own stop path. */
+    stop: (signal: NodeJS.Signals) => { (child as { terminateTree?: (_s: NodeJS.Signals) => void }).terminateTree!(signal); },
+  };
+}
+
+/** Capture process-group signals instead of delivering them to this test process. */
+function captureTreeSignals(t: TestContext): NodeJS.Signals[] {
+  const signals: NodeJS.Signals[] = [];
+  const original = process.kill;
+  process.kill = ((pid: number, signal?: NodeJS.Signals | number) => {
+    if (typeof pid === 'number' && pid < 0) { signals.push((signal ?? 'SIGTERM') as NodeJS.Signals); return true; }
+    return original.call(process, pid as number, signal as NodeJS.Signals | number | undefined);
+  }) as typeof process.kill;
+  t.after(() => { process.kill = original; });
+  return signals;
+}
+
+test('verdict-first Pi shutdown retains the observed model, session and telemetry (px-0036.01)', async t => {
+  const { worktree, deps, input } = setup('pipe');
+  const { awaitAgentResult } = await import('../../../../src/adapters/agents/agent-launch-process.js');
+  const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
+  const worker = piWorkerDouble(t, true);
+  const listenerCounts = [process.listenerCount('SIGTERM'), process.listenerCount('SIGINT')];
+  const resultPromise = startPiWorker({ prompt: 'review the branch', worktree },
+    { command: 'px-pi-worker-double', args: [], options: { env: {} } }, async () => {}, { command: 'px', args: [] },
+    { spawn: () => worker.child });
+  worker.publish({ kind: 'observed', observation: observedPiSession });
+
+  const stopRequests: NodeJS.Signals[] = [];
+  const outcome = await awaitAgentResult(resultPromise, async () => true, worker.child, () => {},
+    async () => { stopRequests.push('SIGTERM'); worker.stop('SIGTERM'); });
+  const session = openRunSession({ ...input, family: 'pi', model: 'configured-model' }, deps)!;
+  session.finish(outcome);
+  const finished = record(worktree, session.runId);
+
+  assert.equal(outcome.completedAuthoritatively, true);
+  assert.equal(outcome.status, 0, 'the persisted workflow outcome still owns completion');
+  assert.equal(outcome.model, 'fixture-model', 'the resolved model survives verdict-first shutdown');
+  assert.equal(outcome.sessionId, 'worker-session', 'the provider session survives verdict-first shutdown');
+  assert.equal(outcome.telemetry?.totalTokens, 7, 'provider usage survives verdict-first shutdown');
+  assert.deepEqual(stopRequests, ['SIGTERM'], 'the launch stops the provider once, after the verdict is durable');
+  assert.ok(worker.sent.some((message: unknown) => (message as { kind?: string })?.kind === 'stop'),
+    'the client asks its worker to settle over IPC before it signals it');
+  assert.equal(finished.providerSessionId, 'worker-session');
+  assert.equal(finished.resources.provider?.model, 'fixture-model');
+  assert.deepEqual(finished.resources.provider?.values.map((value: { name: string }) => value.name),
+    ['input', 'output', 'cached', 'context', 'tool-calls', 'cost']);
+  assert.equal(finished.exitCode, 1, 'the record does not report an interrupted provider as a clean exit');
+  assert.deepEqual([process.listenerCount('SIGTERM'), process.listenerCount('SIGINT')], listenerCounts,
+    'the client leaves no signal listener behind');
+});
+
+test('a sparse final Pi result enriches rather than erases observed facts (px-0036.01)', async t => {
+  const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
+  const worker = piWorkerDouble(t, false);
+  const resultPromise = startPiWorker({ prompt: 'review the branch', worktree: 'fixture' },
+    { command: 'px-pi-worker-double', args: [], options: { env: {} } }, async () => {}, { command: 'px', args: [] },
+    { spawn: () => worker.child });
+  worker.publish({ kind: 'observed', observation: observedPiSession });
+  worker.publish({ kind: 'result', result: {
+    status: 1, signal: null, stdout: 'partial output', stderr: 'fixture aborted', error: new Error('fixture aborted'),
+    sessionId: null, provider: null, model: null,
+    telemetry: { provider: null, model: null, outputTokens: 9 }, transientRetries: 0,
+    startedAt: new Date().toISOString(), endedAt: new Date().toISOString(),
+  } });
+  worker.settle(1, null);
+
+  const outcome = await resultPromise;
+  assert.equal(outcome.status, 1, 'the final provider failure remains authoritative');
+  assert.equal(outcome.stderr, 'fixture aborted');
+  assert.equal(outcome.provider, 'pi');
+  assert.equal(outcome.model, 'fixture-model');
+  assert.equal(outcome.sessionId, 'worker-session');
+  assert.deepEqual(outcome.telemetry, {
+    ...observedPiSession.telemetry,
+    outputTokens: 9,
+  }, 'non-null final fields enrich the observation without erasing its other usage fields');
+});
+
+test('a Pi worker that ignores the stop request still takes the hard signal without losing its observed facts (px-0036.01)', async t => {
+  const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
+  const worker = piWorkerDouble(t, false);
+  const treeSignals = captureTreeSignals(t);
+  const resultPromise = startPiWorker({ prompt: 'review the branch', worktree: 'fixture' },
+    { command: 'px-pi-worker-double', args: [], options: { env: {} } }, async () => {}, { command: 'px', args: [] },
+    { spawn: () => worker.child });
+  worker.publish({ kind: 'observed', observation: observedPiSession });
+
+  worker.stop('SIGTERM');
+  assert.ok(worker.sent.some((message: unknown) => (message as { kind?: string })?.kind === 'stop'),
+    'a graceful stop is requested over IPC first');
+  assert.deepEqual(treeSignals, [], 'the graceful request does not also kill the process group');
+  worker.stop('SIGKILL');
+  assert.deepEqual(treeSignals, ['SIGKILL'],
+    'the escalation keeps its teeth: recovering telemetry never downgrades or skips the hard signal');
+  worker.settle(null, 'SIGKILL');
+
+  const outcome = await resultPromise;
+  assert.equal(outcome.model, 'fixture-model', 'even a hard reap keeps the model the worker observed');
+  assert.equal(outcome.sessionId, 'worker-session');
+});
+
+test('a silent Pi worker is stopped by its liveness bound with the observed session retained (px-0036.01)', async t => {
+  const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
+  const worker = piWorkerDouble(t, true);
+  const resultPromise = startPiWorker({ prompt: 'review the branch', worktree: 'fixture',
+    teeOptions: { noOutputWatchdog: { maxNoOutputMs: 40 } } },
+    { command: 'px-pi-worker-double', args: [], options: { env: {} } }, async () => {}, { command: 'px', args: [] },
+    { spawn: () => worker.child });
+  worker.publish({ kind: 'observed', observation: observedPiSession });
+
+  const outcome = await resultPromise;
+  assert.equal(outcome.status, 1, 'a liveness timeout is never reported as provider success');
+  assert.equal(outcome.model, 'fixture-model', 'the resolved model survives a liveness timeout');
+  assert.equal(outcome.sessionId, 'worker-session');
+  assert.equal(outcome.telemetry?.totalTokens, 7);
+  assert.ok(worker.sent.some((message: unknown) => (message as { kind?: string })?.kind === 'stop'),
+    'the liveness stop drains the worker instead of signalling it');
+});
+
+test('operator cancellation finalizes observed run metadata before re-raising the parent signal (px-0036.01)', async t => {
+  const { launchPrepared } = await import('../../../../src/adapters/agents/agent-launch-process.js');
+  const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
+  const { worktree } = setup('pipe');
+  const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(worktree, '.home'), PARALLIX_NO_BUBBLEWRAP: '1' });
+  const worker = piWorkerDouble(t, false);
+  const signal = 'SIGTERM' as const;
+  const existingListeners = process.listeners(signal);
+  const originalKill = process.kill;
+  let stateWhenReraised: string | null = null;
+  let observedRunId: string | null = null;
+  let noteReraised!: () => void;
+  const reraised = new Promise<void>(resolve => { noteReraised = resolve; });
+
+  process.kill = ((pid: number, delivered?: NodeJS.Signals | number) => {
+    if (pid === process.pid && delivered !== 0) {
+      const runs = fs.readdirSync(missionRunsDir(worktree, 'task-7'));
+      assert.equal(runs.length, 1);
+      observedRunId = runs[0]!;
+      stateWhenReraised = record(worktree, observedRunId).state;
+      noteReraised();
+      return true;
+    }
+    if (pid === -worker.child.pid!) {
+      worker.settle(null, delivered as NodeJS.Signals);
+      return true;
+    }
+    return originalKill.call(process, pid, delivered as NodeJS.Signals | number | undefined);
+  }) as typeof process.kill;
+  t.after(() => { process.kill = originalKill; });
+
+  const prepared: Parameters<typeof launchPrepared>[0] = {
+    launcher: options => {
+      const resultPromise = startPiWorker({ prompt: options.prompt, worktree,
+        ...(options.teeOptions ? { teeOptions: options.teeOptions as Parameters<typeof startPiWorker>[0]['teeOptions'] } : {}) },
+      { command: 'pi', args: [], options: { env: {} } }, async () => {}, { command: 'px', args: [] },
+      { spawn: () => worker.child });
+      worker.publish({ kind: 'observed', observation: { ...observedPiSession, telemetry: null } });
+      queueMicrotask(() => {
+        const own = process.listeners(signal).filter(listener => !existingListeners.includes(listener));
+        own.forEach(listener => (listener as (_signal: NodeJS.Signals) => void)(signal));
+      });
+      return { invocation: { command: 'pi', args: [], options: { cwd: worktree } }, resultPromise };
+    },
+    agentEnv: {}, resume: false, sessionId: null, launchSessionMarkerPort: undefined, sessionRole: null,
+    actualPrompt: 'review the branch', model: 'configured-model', watchdogConfig: null,
+    customReservation: null, effectiveProfile: null, nativeSandbox: false,
+  };
+
+  const launched = await launchPrepared(prepared, { configuration, step: 'execute', slug: 'task-7', worktree,
+    role: null, onLaunch: undefined, unrefChild: false, log: () => {}, authoritativeCompletion: undefined,
+    launchAdmission: undefined }, 'pi', 1);
+  await reraised;
+
+  assert.equal(stateWhenReraised, 'exited', 'run history is finalized before the parent receives its cancellation signal again');
+  assert.ok(observedRunId);
+  const finished = record(worktree, observedRunId);
+  assert.equal(finished.providerSessionId, 'worker-session');
+  assert.equal(finished.resources.provider?.provider, 'pi');
+  assert.equal(finished.resources.provider?.model, 'fixture-model');
+  assert.equal(launched.result.status, 1, 'operator cancellation is not rewritten as provider success');
 });
