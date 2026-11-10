@@ -28,6 +28,7 @@ export interface OpenRepairCheckpoint {
   readonly gateKey?: string;
   readonly command: string;
   readonly attempt: number;
+  readonly maxAttempts?: number;
   readonly worktree?: string;
   readonly failureRevision?: string | null;
   readonly failureEvidenceId?: string;
@@ -50,6 +51,8 @@ export interface OperatorResumeVerdict {
 /** Harness-owned durable repair boundary, composed once for all rebound consumers. */
 export interface RepairCheckpointPort {
   open(_request: OpenRepairCheckpoint): Promise<{ name: string; version: number } | null>;
+  /** Retain one consumed attempt only after the agent process actually ran. */
+  recordAttempt?(_slug: string, _name: string, _attempt: number): Promise<void>;
   readBlocker(_slug: string, _name: string): Promise<InvalidContractBlocker | undefined>;
   /** Snapshot accepted evidence and occurrences before execution. Legacy adapters produce no coverage. */
   prepareVerification?(_slug: string, _name: string, _scope: { worktree: string; executionRevision: string | null }): Promise<RepairVerificationSnapshot | undefined>;

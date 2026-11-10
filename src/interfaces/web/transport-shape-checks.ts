@@ -126,12 +126,36 @@ function checkReviewRound(object: unknown, path: string, problems: string[]): vo
   checkStringArray(object, 'fixes', path, problems);
 }
 
+function checkReviewWindowAllowance(value: unknown, path: string, problems: string[]): void {
+  if (value === null) { return; }
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    problems.push(`${path} must be a whole positive attempt count or null`);
+  }
+}
+
+function checkRepairBudget(value: unknown, path: string, problems: string[]): void {
+  if (value === null) { return; }
+  if (!isPlainObject(value)) { problems.push(`${path} must be an object or null`); return; }
+  checkKeys(value, ['attemptsUsed', 'maxAttempts', 'exhausted'], ['attemptsUsed', 'maxAttempts', 'exhausted'], path, problems);
+  checkFiniteNumber(value, 'attemptsUsed', path, problems);
+  checkFiniteNumber(value, 'maxAttempts', path, problems);
+  checkBoolean(value, 'exhausted', path, problems);
+  const { attemptsUsed, maxAttempts, exhausted } = value;
+  if (!Number.isSafeInteger(attemptsUsed) || Number(attemptsUsed) < 0
+    || !Number.isSafeInteger(maxAttempts) || Number(maxAttempts) < 1
+    || Number(attemptsUsed) > Number(maxAttempts)) {
+    problems.push(`${path} must contain whole counters with 0 <= attemptsUsed <= maxAttempts`);
+  } else if (exhausted !== (attemptsUsed === maxAttempts)) {
+    problems.push(`${path}.exhausted must match its retained counters`);
+  }
+}
+
 export function checkMissionCard(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'currentCheckpoint', 'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
+      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewWindowAllowance', 'repairBudget', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
@@ -165,6 +189,14 @@ export function checkMissionCard(object: unknown, path: string, problems: string
     object.reviewHistory.forEach((round, index) => checkReviewRound(round, `${path}.reviewHistory[${index}]`, problems));
   } else {
     problems.push(`${path}.reviewHistory must be an array`);
+  }
+  // The budget facts are optional-and-nullable: an omitted field means the
+  // snapshot predates them, and null means the server has no such fact.
+  if (Object.prototype.hasOwnProperty.call(object, 'reviewWindowAllowance')) {
+    checkReviewWindowAllowance(object.reviewWindowAllowance, `${path}.reviewWindowAllowance`, problems);
+  }
+  if (Object.prototype.hasOwnProperty.call(object, 'repairBudget')) {
+    checkRepairBudget(object.repairBudget, `${path}.repairBudget`, problems);
   }
   checkNullableString(object, 'blockingReason', path, problems);
   checkStringArray(object, 'flags', path, problems);

@@ -63,12 +63,18 @@ function parentPrompt(stage: string): string {
 }
 
 // The parent fixture still owns the mandatory split baseline. This repository's
-// review opinion is now deliberately newer than that baseline: it carries the
-// local counterexample policy while retaining the prior coverage guidance. The
-// distributable's blank review opinion is covered by the package/review owner
-// suites; this source-owner suite must expect the checked-in local opinion.
+// execute and review opinions are now deliberately newer than that baseline:
+// execute carries the existing-owner policy, while review carries the local
+// counterexample policy and retains the prior coverage guidance. This
+// source-owner suite must expect those checked-in opinions without weakening
+// the byte-for-byte reconstruction check for the mandatory core.
 function expectedSourcePrompt(stage: string): string {
   const parent = parentPrompt(stage);
+  if (stage === 'execute') {
+    const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', 'execute.md'), 'utf8');
+    assert.match(repositoryOpinion, /<existing_owner_first>/, 'repository execute opinion must retain the existing-owner policy');
+    return `${parent.replace(/\n+$/, '')}\n\n${repositoryOpinion.replace(/^\n+/, '')}`;
+  }
   if (stage !== 'review') {return parent;}
   const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', 'review.md'), 'utf8');
   assert.ok(repositoryOpinion.includes(REVIEW_COVERAGE_GUIDANCE), 'repository review opinion must retain the prior coverage guidance');
@@ -185,6 +191,7 @@ test('repository review policy is confined to review while every other opinion r
     const count = prompt.split(counterexamplePolicy).length - 1;
     assert.equal(count, stage === 'review' ? 1 : 0, `${stage} must receive the repository review policy ${stage === 'review' ? 'once' : 'never'}`);
   }
+  assert.match(prompts.get('execute') || '', /<existing_owner_first>/, 'execute must retain the repository existing-owner policy');
   assert.match(prompts.get('act-on-review') || '', new RegExp(GRAPHIFY_GUIDANCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(prompts.get('portfolio') || '', /Graphify-first/);
 });

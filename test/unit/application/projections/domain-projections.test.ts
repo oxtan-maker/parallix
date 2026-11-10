@@ -6,6 +6,8 @@ import { projectActivityLog } from '../../../../src/application/projections/acti
 import { projectAgentAvailability } from '../../../../src/application/projections/agent-status.js';
 import { cumulativeFlow, medianCycleTimeSeries } from '../../../../src/application/projections/analytics.js';
 import { availableBoardCommands, attentionQueue, boardLane, projectMissionCard, wipCounts } from '../../../../src/application/projections/mission-board.js';
+import { projectRepairBudget } from '../../../../src/application/projections/repair-budget.js';
+import type { CheckpointData } from '../../../../src/domain/checkpoint.js';
 import { projectMissionDetail } from '../../../../src/application/projections/mission-detail.js';
 import { projectRepositorySelector } from '../../../../src/application/projections/repository-selector.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -40,7 +42,6 @@ const reviewerEligibility = ConfiguredReviewerEligibility.fromReviewStep({
   eligible: [reviewer],
   strategy: 'random',
 });
-
 function reviewConversation() {
   return startReview(
     reviewedSubject,
@@ -345,4 +346,55 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
   assert.deepEqual(complete.checkpointEvidence.map(cp => cp.state), ['completed', 'completed', 'completed']);
   const gap = projectMissionCard({ ...mission, checkpoints: [checkpoints[0], { ...checkpoints[1], goalCheck: [{ criterion: 'done', evidence: 'npm test' }], nextActionText: 'resume CP-1' }, checkpoints[2]] }, facts);
   assert.deepEqual(gap.checkpointEvidence.map(cp => cp.state), ['current', 'completed', 'future']);
+});
+
+function repairRow(attemptsUsed: number, maxAttempts?: number, verified = false): NonNullable<CheckpointData['repair']> {
+  return {
+    incidentId: 'incident', command: 'npm test', authorizedGates: [], authorizedCriteria: ['delivers'],
+    attempt: Math.max(1, attemptsUsed), attemptsUsed, ...(maxAttempts === undefined ? {} : { maxAttempts }),
+    evidenceRecorded: true, verified,
+  };
+}
+
+test('mission cards project the current retained repair budget (TASK-2845)', () => {
+  const spent: readonly CheckpointData[] = [
+    { missionId: id, name: 'CP-1', goalCheck: [], nextActionText: '', repair: repairRow(2, 2) },
+  ];
+  assert.deepEqual(projectRepairBudget(spent), { attemptsUsed: 2, maxAttempts: 2, exhausted: true });
+  assert.deepEqual(projectRepairBudget([
+    { missionId: id, name: 'CP-1', goalCheck: [], nextActionText: '', repair: repairRow(1, 2) },
+  ]), { attemptsUsed: 1, maxAttempts: 2, exhausted: false });
+});
+
+test('repair budget selects an older unresolved incident past newer verified history (TASK-2845 review F6)', () => {
+  const checkpoints: readonly CheckpointData[] = [
+    { missionId: id, name: 'CP-6', goalCheck: [], nextActionText: '', repair: repairRow(2, 2) },
+    { missionId: id, name: 'CP-7', goalCheck: [], nextActionText: '', repair: {
+      ...repairRow(1, 1, true), incidentId: 'verified-later',
+    } },
+  ];
+
+  assert.deepEqual(projectRepairBudget(checkpoints), { attemptsUsed: 2, maxAttempts: 2, exhausted: true });
+});
+
+test('repair-budget projection keeps absent, legacy, malformed and settled facts absent (TASK-2845)', () => {
+  const checkpoint = (repair?: CheckpointData['repair']): CheckpointData =>
+    ({ missionId: id, name: 'CP-1', goalCheck: [], nextActionText: '', ...(repair ? { repair } : {}) });
+  assert.equal(projectRepairBudget([checkpoint()]), null);
+  assert.equal(projectRepairBudget([checkpoint(repairRow(1))]), null, 'legacy rows do not invent a grant');
+  assert.equal(projectRepairBudget([checkpoint(repairRow(2, 1))]), null, 'contradictory counters fail closed');
+  assert.equal(projectRepairBudget([checkpoint(repairRow(2, 2, true))]), null, 'verified repair history is not an active budget');
+});
+
+test('mission cards keep the review allowance and repair budget as separate server facts (TASK-2845)', () => {
+  const mission = {
+    id, repositoryId: repo, title: 'Repair budget', labels: missionLabels(['ai_sdlc']),
+    status: 'review' as const, closedAt: null, assignee: null, review: null, netEngineeringLines: null,
+    checkpoints: [{ missionId: id, name: 'CP-1', goalCheck: [], nextActionText: '', repair: repairRow(2, 2) }],
+  };
+  const card = projectMissionCard(mission, {
+    latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+  });
+  assert.equal(card.reviewWindowAllowance, 5);
+  assert.deepEqual(card.repairBudget, { attemptsUsed: 2, maxAttempts: 2, exhausted: true });
 });

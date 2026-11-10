@@ -1,4 +1,5 @@
 import type { ProviderExecutionFacts } from '../../application/projections/provider-execution.js';
+import type { RepairBudgetFacts } from '../../application/projections/repair-budget.js';
 /**
  * Web transport wire vocabulary: the versioned DTO types, request kinds, and
  * the `WebTransportError` raised when a value cannot cross the JSON wire.
@@ -171,6 +172,10 @@ export interface WebMissionCard {
   readonly reviewRecovery: import('../../application/review-recovery.js').ReviewRecovery | null;
   readonly reviewDisposition: string | null;
   readonly reviewHistory: readonly WebReviewRoundSummary[];
+  /** Autonomous attempts per review entry; never a validity bound on reviewRound. */
+  readonly reviewWindowAllowance?: number | null;
+  /** The retained repair-attempt budget; null when the mission retains no repair fact. */
+  readonly repairBudget?: RepairBudgetFacts | null;
   readonly blockingReason: string | null;
   readonly flags: readonly string[];
   readonly activity: WebMissionActivity;

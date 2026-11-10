@@ -54,6 +54,10 @@ export interface CheckpointData {
     readonly authorizedGates: readonly string[];
     readonly authorizedCriteria: readonly string[];
     readonly attempt: number;
+    /** Agent repair processes that actually ran; prompt/launcher failures do not count. */
+    readonly attemptsUsed?: number;
+    /** Attempts granted to this repair invocation. */
+    readonly maxAttempts?: number;
     readonly evidenceRecorded: boolean;
     readonly verified: boolean;
     readonly occurrence?: RepairOccurrence;

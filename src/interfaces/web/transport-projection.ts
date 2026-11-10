@@ -147,6 +147,8 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
       pushbacks: [...round.pushbacks],
       fixes: [...round.fixes],
     })),
+    reviewWindowAllowance: card.reviewWindowAllowance ?? null,
+    repairBudget: card.repairBudget ?? null,
     blockingReason: card.blockingReason,
     flags: [...card.flags],
     ...(card.execution ? { execution: card.execution } : {}),

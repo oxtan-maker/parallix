@@ -59,7 +59,7 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       "Checkpoint evidence from another mission is rejected, and a checkpoint that is not review-preparation-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.",
     fileLocation: 'src/domain/checkpoint.ts',
-    line: 109,
+    line: 113,
     anchor: 'export function recordCheckpoint',
   },
   Review: {

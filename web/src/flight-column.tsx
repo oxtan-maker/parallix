@@ -86,6 +86,7 @@ function ReviewAttempts({ card }: { card: WebMissionCard }) {
     <span
       role="group"
       aria-label="Review attempts"
+      data-review-round={currentRound}
       style={{ display: 'inline-flex', flex: '0 0 auto', gap: SPACE.xs, alignItems: 'center', whiteSpace: 'nowrap', fontSize: TYPE.meta }}
     >
       {Array.from({ length: currentRound }, (_unused, index) => {
@@ -112,6 +113,29 @@ function ReviewAttempts({ card }: { card: WebMissionCard }) {
         );
       })}
     </span>
+  );
+}
+
+function RepairBudgetFact({ card }: { card: WebMissionCard }) {
+  const budget = card.repairBudget;
+  if (!budget) { return null; }
+  const cue = budget.exhausted ? card.reviewRecovery?.action ?? null : null;
+  const state = budget.exhausted ? 'spent; the repair budget is exhausted' : 'used';
+  const allowance = card.reviewWindowAllowance;
+  const windowNote = allowance === null || allowance === undefined ? '' : `; Autonomous review window: ${allowance} attempts per review entry`;
+  return (
+    <p
+      data-repair-budget
+      data-repair-attempts-used={budget.attemptsUsed}
+      data-repair-attempts-max={budget.maxAttempts}
+      data-repair-exhausted={budget.exhausted}
+      {...(cue === null ? {} : { 'data-repair-recovery-cue': cue })}
+      aria-label={`Retained repair attempts: ${budget.attemptsUsed} of ${budget.maxAttempts} ${state}${cue === null ? '' : `; next decision: ${cue}`}`}
+      title={`repair attempts ${budget.attemptsUsed}/${budget.maxAttempts}${windowNote}${cue === null ? '' : `; next decision: ${cue}`}`}
+      style={{ margin: `0 0 ${SPACE.md}px`, color: budget.exhausted ? C.amber : C.faint, fontSize: TYPE.meta }}
+    >
+      {`repair attempts${budget.exhausted ? ' spent' : ''} (${budget.attemptsUsed}/${budget.maxAttempts})`}
+    </p>
   );
 }
 
@@ -205,6 +229,7 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
 
       <div style={{ padding: SPACE.lg }}>
         <FlightCardCheckpoint card={card} />
+        <RepairBudgetFact card={card} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md, flexWrap: 'wrap' }}>
           <ActorLine card={card} />
           <details style={{ color: C.faint, fontSize: TYPE.micro }}>

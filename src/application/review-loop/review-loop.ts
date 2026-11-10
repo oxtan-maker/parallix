@@ -21,8 +21,8 @@ import { selectReviewer } from './reviewer-selection.js';
 import { runReviewerPhase } from './reviewer-phase.js';
 import { runImplementerPhase } from './implementer-phase.js';
 import { DEFAULT_REBOUNDS_PER_ROUND, ReviewRound, stopIfControllerSuperseded, type LoopContext } from './round.js';
-
-export const DEFAULT_MAX_ATTEMPTS = 5;
+import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
+export const DEFAULT_MAX_ATTEMPTS = AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS;
 
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
 type Start = Required<Pick<ReviewLoopRequest, 'dryRun' | 'isContinue' | 'verbose'>> & { slug: string };

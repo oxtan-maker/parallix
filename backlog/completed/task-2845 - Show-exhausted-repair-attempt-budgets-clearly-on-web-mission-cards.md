@@ -1,8 +1,8 @@
 ---
 id: TASK-2845
 title: Show exhausted repair-attempt budgets clearly on web mission cards
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-07 08:35'
 labels:
   - bug

@@ -54,7 +54,6 @@ test('a recorded review disposition stays off the reserved action green (TASK-26
   assert.ok(!attempts(html).some((tag) => tag.includes('#5ee08a')), 'green marks only an actionable control or a passed gate');
   assert.doesNotMatch(html, /future attempts|of 5/, 'rounds that may not happen are not announced');
 });
-
 test('review attempts stay absent without a review round (TASK-2666)', () => {
   const html = renderPips(wireCard(makeFullCard({ reviewRound: null, reviewPhase: null, reviewHistory: [] })));
 
@@ -114,7 +113,7 @@ function labels(html: string): string[] {
   return attempts(html).map((tag) => /aria-label="([^"]+)"/.exec(tag)?.[1] ?? 'missing');
 }
 
-for (const roundNumber of [1, 2, 3, 4, 5, 6, 10, 99]) {
+for (const roundNumber of [1, 2, 3, 4, 5]) {
   test(`round ${roundNumber} draws only the attempts so far, no future rounds (TASK-2773.05)`, () => {
     const html = renderPips(reviewCard({
       reviewRound: roundNumber,
@@ -204,7 +203,7 @@ test('a disposition outside the two named outcomes is shown verbatim, not as app
   assert.doesNotMatch(labels(html)[0], /approved/i);
 });
 
-test('continuation rounds preserve recorded outcomes beyond round five (TASK-2845)', () => {
+test('a continuation round preserves its recorded outcome beyond round five (TASK-2845)', () => {
   const html = renderPips(reviewCard({
     reviewRound: 7,
     reviewPhase: 'approved',
@@ -212,17 +211,17 @@ test('continuation rounds preserve recorded outcomes beyond round five (TASK-284
     reviewHistory: [round(5, 'REQUEST_CHANGES'), round(6, 'REQUEST_CHANGES'), round(7, 'APPROVED')],
   }));
 
-  assert.deepEqual(states(html), ['unknown-outcome', 'unknown-outcome', 'unknown-outcome', 'unknown-outcome',
-    'changes-requested', 'changes-requested', 'approved']);
-  assert.equal(labels(html).at(-1), 'attempt 7: outcome recorded: approved');
+  assert.deepEqual(states(html), ['unknown-outcome', 'unknown-outcome', 'unknown-outcome', 'unknown-outcome', 'changes-requested', 'changes-requested', 'approved']);
+  assert.equal(labels(html)[6], 'attempt 7: outcome recorded: approved');
+  assert.doesNotMatch(html, /data-review-continuation-round/);
   assert.doesNotMatch(html, /review round unknown|exhausted|budget spent|no attempts left/i);
 });
 
 for (const invalid of [0, -1, 2.5]) {
-  test(`a nonpositive or fractional round ${invalid} is unknown (TASK-2773.05)`, () => {
+  test(`a malformed review round ${invalid} is unknown, never a relabeled budget (TASK-2773.05)`, () => {
     const html = renderPips(reviewCard({ reviewRound: invalid, reviewPhase: 'reviewing', reviewHistory: [round(1, 'APPROVED')] }));
 
-    assert.equal(attempts(html).length, 0, 'no attempt circles are drawn for an invalid round number');
+    assert.equal(attempts(html).length, 0, 'no attempt circles are drawn for a malformed round');
     assert.match(html, /review round unknown/);
     assert.doesNotMatch(html, /round \d+ of 5|future attempts remaining/);
     assert.doesNotMatch(unknownRoundText(html), /\d/, 'no clamped round and no negative remaining count is printed');
@@ -314,4 +313,89 @@ test('review status prose is not printed beside the PR link and attempt icons (T
 
   assert.doesNotMatch(visible, /REQUEST_CHANGES|fixing|reviewing/i, 'icons carry the status; no prose repeats it');
   assert.match(html, /aria-label="attempt 2: outcome recorded: changes requested"/, 'the icon keeps its accessible description');
+});
+
+function repairTag(html: string): string {
+  return /<p[^>]*data-repair-budget[\s\S]*?<\/p>/.exec(html)?.[0] ?? '';
+}
+
+function visibleText(tag: string): string {
+  return tag.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+const px0031Budget = { attemptsUsed: 2, maxAttempts: 2, exhausted: true };
+const px0031Recovery: NonNullable<MissionCard['reviewRecovery']> = {
+  action: 'acknowledge-and-resume', humanStop: 'MAX_ATTEMPTS',
+  evidence: ['Review stopped for human review: MAX_ATTEMPTS'],
+  guidance: 'Acknowledge the stop and resume.',
+};
+
+function px0031Card(overrides: Partial<MissionCard> = {}): WebMissionCard {
+  return reviewCard({
+    reviewRound: 6,
+    reviewPhase: 'fixing',
+    reviewDisposition: 'REQUEST_CHANGES',
+    reviewRecovery: px0031Recovery,
+    reviewWindowAllowance: 5,
+    repairBudget: px0031Budget,
+    reviewHistory: Array.from({ length: 6 }, (_unused, index) => round(index + 1, 'REQUEST_CHANGES')),
+    ...overrides,
+  });
+}
+
+test('the px-0031 card keeps all six review attempts and explicitly shows spent repair attempts (TASK-2845)', () => {
+  const html = renderPips(px0031Card());
+  const repair = repairTag(html);
+  assert.match(html, /data-review-round="6"/);
+  assert.equal(attempts(html).length, 6);
+  assert.doesNotMatch(html, /data-review-continuation-round/);
+  assert.match(html, /data-review-attempt="6"[^>]*data-review-state="changes-requested"/);
+  assert.match(repair, /Autonomous review window: 5 attempts per review entry/);
+  assert.equal(visibleText(repair), 'repair attempts spent (2/2)');
+  assert.match(repair, /data-repair-exhausted="true"/);
+  assert.match(repair, /aria-label="Retained repair attempts: 2 of 2 spent; the repair budget is exhausted; next decision: acknowledge-and-resume"/);
+  assert.match(repair, /data-repair-recovery-cue="acknowledge-and-resume"/);
+});
+
+for (const continuation of [7, 12]) {
+  test(`continuation round ${continuation} keeps its review history (TASK-2845)`, () => {
+    const html = renderPips(px0031Card({ reviewRound: continuation }));
+    assert.match(html, new RegExp(`data-review-round="${continuation}"`));
+    assert.doesNotMatch(html, /data-review-continuation-round/);
+    assert.equal(attempts(html).length, continuation);
+    assert.match(html, new RegExp(`data-review-attempt="${continuation}"`));
+    assert.doesNotMatch(html, /review round unknown/);
+  });
+}
+
+test('round, autonomous allowance and repair usage remain three facts without changing actions (TASK-2845)', () => {
+  const withBudget = renderPips(px0031Card());
+  const withoutBudget = renderPips(px0031Card({ repairBudget: null }));
+  const actions = (html: string) => html.match(/data-action-kind="[^"]+"/g) ?? [];
+  assert.match(withBudget, /data-review-round="6"/);
+  assert.match(repairTag(withBudget), /Autonomous review window: 5 attempts per review entry/);
+  assert.match(withBudget, /data-repair-attempts-used="2"/);
+  assert.deepEqual(actions(withBudget), actions(withoutBudget));
+  assert.doesNotMatch(visibleText(repairTag(withBudget)), /approved|complete|passed/i);
+});
+
+test('pre-review repair usage is shown without inventing review facts (TASK-2845)', () => {
+  const html = renderPips(px0031Card({
+    pullRequest: null, reviewRound: null, reviewPhase: null, reviewHistory: [],
+    reviewWindowAllowance: null,
+  }));
+  assert.equal(visibleText(repairTag(html)), 'repair attempts spent (2/2)');
+  assert.doesNotMatch(html, /data-review-round=|data-review-window-allowance/);
+});
+
+test('ordinary reviews retain every attempt with no added allowance decoration (TASK-2845)', () => {
+  const html = renderPips(px0031Card({ repairBudget: null, reviewRecovery: null }));
+  assert.equal(attempts(html).length, 6);
+  assert.doesNotMatch(html, /data-review-window|data-review-continuation|data-repair-budget|‖/);
+});
+
+test('repair usage below the limit is distinct from a spent budget (TASK-2845)', () => {
+  const html = renderPips(px0031Card({ repairBudget: { attemptsUsed: 1, maxAttempts: 2, exhausted: false } }));
+  assert.equal(visibleText(repairTag(html)), 'repair attempts (1/2)');
+  assert.doesNotMatch(repairTag(html), /spent|data-repair-recovery-cue/);
 });

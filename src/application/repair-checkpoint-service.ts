@@ -2,7 +2,7 @@ import type { CheckpointEvidenceReferences } from './mission-checkpoint-service.
 import { findUnverifiableRecordedRow } from './static-evidence.js';
 import type { MissionStore } from './domain-ports.js';
 import type { OpenRepairCheckpoint, OperatorResumeVerdict, RepairCheckpointPort, RepairVerificationProof } from './ports/repair-checkpoint.js';
-import { effectiveRepairObligations, repairOccurrence, sameRepairAuthority, sameRepairOccurrence, validExactExecution } from '../domain/repair-coverage.js';
+import { effectiveRepairObligations, repairOccurrence, sameRepairAuthority, sameRepairOccurrence, validExactExecution, type RepairOccurrence } from '../domain/repair-coverage.js';
 import { missionId, type Mission } from '../domain/mission.js';
 import { assertInvalidContractBlocker, type InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { loadForCommand, isLoaded, writeFailure, type MissionCommandRequest } from './mission-command-support.js';
@@ -40,6 +40,18 @@ export class RepairCheckpointService implements RepairCheckpointPort {
   async readBlocker(slug: string, name: string): Promise<InvalidContractBlocker | undefined> {
     const loaded = await this.load(slug);
     return loaded.mission.checkpoints.find(cp => cp.name === name)?.repair?.blocker;
+  }
+
+  async recordAttempt(slug: string, name: string, attempt: number): Promise<void> {
+    const loaded = await this.load(slug);
+    const checkpoint = loaded.mission.checkpoints.find(cp => cp.name === name);
+    if (!checkpoint?.repair || checkpoint.repair.attempt !== attempt) {
+      throw new Error(`Repair checkpoint ${name} does not own prepared attempt ${attempt}`);
+    }
+    if (checkpoint.repair.attemptsUsed === attempt) { return; }
+    await this._store.save({ ...loaded.mission, checkpoints: loaded.mission.checkpoints.map(cp => cp.name === name
+      ? { ...cp, repair: { ...checkpoint.repair!, attemptsUsed: attempt } }
+      : cp) } as Mission, loaded.version);
   }
 
   /**
@@ -257,9 +269,23 @@ function openRepairCheckpoint(mission: Mission, version: number, checkpoints: re
     // Reopening keeps its rows and provenance; a new incident carries accepted coverage.
     goalCheck: prior?.goalCheck ?? carriedGoalCheckRows(checkpoints),
     nextActionText: 'Record authorized repair evidence, complete remaining checkpoints and rerun the authorized required check.',
-    repair: { ...prior?.repair, incidentId: request.incidentId, ...(request.gateKey ? { gateKey: request.gateKey } : {}),
-      command: request.command, authorizedGates: mission.declaredGates ?? [], authorizedCriteria: mission.successCriteria ?? [],
-      attempt: request.attempt, evidenceRecorded: false, verified: false, occurrence },
+    repair: openRepairRow(request, mission, prior?.repair, occurrence),
+  };
+}
+
+function openRepairRow(request: OpenRepairCheckpoint, mission: Mission, prior: CheckpointData['repair'],
+  occurrence: RepairOccurrence | undefined): NonNullable<CheckpointData['repair']> {
+  const priorUsed = prior?.attemptsUsed;
+  const attemptsUsed = request.attempt === 1
+    ? 0
+    : typeof priorUsed === 'number' && Number.isInteger(priorUsed) && priorUsed >= 0 ? priorUsed : 0;
+  return {
+    ...prior, incidentId: request.incidentId, ...(request.gateKey ? { gateKey: request.gateKey } : {}),
+    command: request.command,
+    authorizedGates: mission.declaredGates ?? [], authorizedCriteria: mission.successCriteria ?? [],
+    attempt: request.attempt, attemptsUsed, evidenceRecorded: false, verified: false,
+    ...(request.maxAttempts === undefined ? {} : { maxAttempts: request.maxAttempts }),
+    occurrence,
   };
 }
 

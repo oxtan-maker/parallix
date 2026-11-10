@@ -29,6 +29,12 @@ const cases = [
     checkpointEvidence: checkpoints(3, 1, false), reviewRound: 3 }),
   makeCard({ id: missionId('task-checkpoint-long'), title: 'One hundred checkpoint plan', gate: 'unavailable', checkpoint: 'CP-99',
     checkpointEvidence: checkpoints(100, 99), pullRequest: { ...pullRequest, id: '826' }, reviewRound: 5 }),
+  makeCard({ id: missionId('task-checkpoint-repair'), title: 'Exhausted retained repair', gate: 'failed',
+    checkpointEvidence: checkpoints(3, 1), reviewRound: 6,
+    reviewWindowAllowance: 5,
+    reviewRecovery: { action: 'acknowledge-and-resume', humanStop: 'MAX_ATTEMPTS',
+      evidence: ['Review stopped for human review: MAX_ATTEMPTS'], guidance: 'Acknowledge the stop and resume.' },
+    repairBudget: { attemptsUsed: 2, maxAttempts: 2, exhausted: true } }),
 ];
 
 async function geometry(card: Locator) {
@@ -38,10 +44,12 @@ async function geometry(card: Locator) {
     const gate = row.querySelector<HTMLElement>('[data-gate-status]')!;
     const review = row.querySelector<HTMLElement>('[aria-label="Pull request and review"]')
       ?? row.querySelector<HTMLElement>('[aria-label="Review attempts"]')!;
+    const repair = element.querySelector<HTMLElement>('[data-repair-budget]');
     const rowBox = row.getBoundingClientRect();
     const progressBox = progress?.getBoundingClientRect() ?? null;
     const gateBox = gate.getBoundingClientRect();
     const reviewBox = review.getBoundingClientRect();
+    const repairBox = repair?.getBoundingClientRect() ?? null;
     return {
       rowHeight: rowBox.height,
       rowWidth: row.clientWidth,
@@ -54,6 +62,8 @@ async function geometry(card: Locator) {
       overlap: progressBox !== null && (progressBox.right > gateBox.left || gateBox.right > reviewBox.left),
       ordered: progressBox !== null && progressBox.left < gateBox.left && gateBox.left < reviewBox.left,
       sameLine: progressBox !== null && Math.abs((progressBox.top + progressBox.bottom) / 2 - (reviewBox.top + reviewBox.bottom) / 2) < 1,
+      repairVisible: repairBox === null || (repairBox.left >= rowBox.left && repairBox.right <= rowBox.right),
+      repairBelowProgress: repairBox === null || repairBox.top >= rowBox.bottom,
     };
   });
 }
@@ -72,10 +82,12 @@ try {
       assert.equal(result.overlap, false, `${card.id} progress and gate do not overlap at ${viewport.width}px`);
       assert.equal(result.ordered, true, `${card.id} reads checkpoints, gate, review at ${viewport.width}px`);
       assert.equal(result.sameLine, true, `${card.id} progression stays on one line at ${viewport.width}px`);
+      assert.equal(result.repairVisible, true, `${card.id} repair metric stays visible at ${viewport.width}px`);
+      assert.equal(result.repairBelowProgress, true, `${card.id} repair usage has its own line at ${viewport.width}px`);
     }
     assert.equal(await fixture.page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth), false,
       `board has no horizontal overflow at ${viewport.width}px`);
-    const screenshotCard = fixture.page.locator('[data-board-card="task-checkpoint-partial"]');
+    const screenshotCard = fixture.page.locator('[data-board-card="task-checkpoint-repair"]');
     await screenshotCard.scrollIntoViewIfNeeded();
     if (viewport.width < 500) {
       await screenshotCard.evaluate((element) => {
@@ -119,6 +131,14 @@ try {
   const long = fixture.page.locator('[data-board-card="task-checkpoint-long"]');
   assert.match(await long.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /99\/100 completed · Current: CP-100/);
   assert.match(await long.textContent() ?? '', /gate · unknown/);
+  assert.equal(await long.locator('[data-review-attempt]').count(), 5, 'ordinary review history stays intact');
+  assert.equal(await long.locator('[data-review-window-allowance], [data-repair-budget]').count(), 0);
+  const repair = fixture.page.locator('[data-board-card="task-checkpoint-repair"]');
+  assert.equal(await repair.locator('[data-review-attempt]').count(), 6, 'round six keeps every review attempt');
+  assert.equal(await repair.locator('[data-repair-budget]').textContent(), 'repair attempts spent (2/2)');
+  assert.match(await repair.locator('[data-repair-budget]').getAttribute('title') ?? '', /Autonomous review window: 5 attempts per review entry/);
+  await repair.locator('[data-review-recovery] > summary').click();
+  assert.equal(await repair.getByText('Acknowledge the stop and resume.', { exact: true }).isVisible(), true);
   assert.equal(fixture.requests.length, 0);
   console.log('PASS: checkpoints → gates → review stays compact at desktop/narrow widths with accessible dialogs and zero command writes');
 } finally { await fixture.close(); }

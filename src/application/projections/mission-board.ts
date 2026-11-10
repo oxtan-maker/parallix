@@ -4,6 +4,8 @@ import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';
 import type { ProviderExecutionFacts } from './provider-execution.js';
 import { projectReviewHistory } from './review-history.js';
+import { projectRepairBudget, type RepairBudgetFacts } from './repair-budget.js';
+import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
 export { projectReviewHistory } from './review-history.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import { isPlannedCheckpoint, latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
@@ -164,6 +166,10 @@ export interface MissionCard {
    * the card rather than living in the previous reviewer's context.
    */
   readonly reviewHistory: readonly ReviewRoundSummary[];
+  /** Autonomous attempts per review entry; never a validity bound on reviewRound. */
+  readonly reviewWindowAllowance?: number | null;
+  /** Latest unresolved retained repair-attempt budget. */
+  readonly repairBudget?: RepairBudgetFacts | null;
   readonly currentWork: LiveMissionWork | null;
   /**
    * The live agent session running this mission's current command, or `null`
@@ -388,6 +394,8 @@ function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSu
     approvalOwed: reviewApprovalOwed(mission.review),
     approvalCoverage: facts.approvalCoverage ?? null,
     reviewHistory: projectReviewHistory(mission.review),
+    reviewWindowAllowance: AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS,
+    repairBudget: projectRepairBudget(mission.checkpoints),
   };
 }
 

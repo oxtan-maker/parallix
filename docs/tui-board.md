@@ -110,6 +110,12 @@ reason, and name the family the provider observation saw in the same header
 label a flight card uses. The assigned family never stands in for the executing
 worker, and no card header carries a work badge or an execution count row.
 
+A web flight card with an unresolved retained repair shows its usage below the
+existing progression row, for example `repair attempts spent (2/2)`. Its tooltip
+distinguishes the autonomous review allowance from repair usage. Review history
+keeps one mark per recorded round. The Review recovery disclosure carries the
+recorded recovery guidance; repair usage does not change enabled actions.
+
 Web cards show the available commands alongside Cancel. When no command can
 run, one unavailable control explains why. Commands that can run together remain
 individually accessible.

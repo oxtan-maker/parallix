@@ -11,6 +11,7 @@ import { RepairCheckpointService } from '../../../src/application/repair-checkpo
 import { buildTypedMissionRecoveryAdvice } from '../../../src/application/typed-mission-recovery-advice.js';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
+import { projectRepairBudget } from '../../../src/application/projections/repair-budget.js';
 
 /** Cases owned and executed by rebound-kernel-contract.test.ts. In-process ports only. */
 export function repairCheckpointCases(): void {
@@ -249,6 +250,43 @@ export function repairCheckpointCases(): void {
     assert.equal(repair.evidenceRecorded, false);
     assert.equal(repair.verified, false);
     assert.equal(repair.exactSuccessCoverage, undefined);
+  });
+
+  test('a deterministic launch failure consumes no retained repair attempt (TASK-2845 review F11)', async t => {
+    const f = realRepair(t);
+    const e2big = Object.assign(new Error('spawn E2BIG'), { code: 'E2BIG', errno: -7, syscall: 'spawn' });
+    const outcome = await rebound(reason, { ...f.options, maxAttempts: 1,
+      startAgent: async () => ({ result: { status: null, signal: null, error: e2big } }),
+      verify: () => assert.fail('a process that never started cannot be verified'),
+    });
+
+    assert.equal(outcome.attempts, 0);
+    const repair = f.store.mission().checkpoints.at(-1)!.repair!;
+    assert.equal(repair.attempt, 1, 'the prepared prompt is still auditable');
+    assert.equal(repair.attemptsUsed, 0, 'preparing attempt one does not spend it');
+    assert.deepEqual(projectRepairBudget(f.store.mission().checkpoints), {
+      attemptsUsed: 0, maxAttempts: 1, exhausted: false,
+    });
+  });
+
+  test('a launch failure after one agent run retains one consumed attempt, not the prepared second attempt (TASK-2845 review F11)', async t => {
+    const f = realRepair(t);
+    const e2big = Object.assign(new Error('spawn E2BIG'), { code: 'E2BIG', errno: -7, syscall: 'spawn' });
+    let launches = 0;
+    const outcome = await rebound(reason, { ...f.options,
+      startAgent: async () => ({ result: ++launches === 1
+        ? { status: 1 }
+        : { status: null, signal: null, error: e2big } }),
+      verify: () => assert.fail('neither failed launch reaches verification'),
+    });
+
+    assert.equal(outcome.attempts, 1);
+    const repair = f.store.mission().checkpoints.at(-1)!.repair!;
+    assert.equal(repair.attempt, 2, 'the second prompt was prepared');
+    assert.equal(repair.attemptsUsed, 1, 'only the agent process that ran spends repair currency');
+    assert.deepEqual(projectRepairBudget(f.store.mission().checkpoints), {
+      attemptsUsed: 1, maxAttempts: 2, exhausted: false,
+    });
   });
 
   test('snapshot preparation port failure returns the structured kernel stop (TASK-2802 F1)', async () => {

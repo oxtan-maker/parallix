@@ -1,10 +1,9 @@
 import { classifyRecoveryReason as classifyReboundReason } from './rebound-classification.js';
 import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
 export type { ReboundLaunchOptions, ReboundStartAgent } from './ports/repair-agent-launch.js';
-import { prepareRepairPrompt, runCheckpointVerification } from './rebound-checkpoints.js';
+import { prepareRepairPrompt, readRepairCheckpointBlocker, recordConsumedRepairAttempts, runCheckpointVerification } from './rebound-checkpoints.js';
 import { elideBounceOutput } from './output-elision.js';
 import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
-import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { DEFAULT_REBOUND_ATTEMPTS, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
 import type { GateFailureReason } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
@@ -337,8 +336,8 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     const fingerprintBefore = failureFingerprint(state.reason);
     const launch = await launchFixAttempt({ startAgent, applyAgentFallback, implementer: state.implementer, fixPrompt, slug, worktree, step: context.step, role: context.role, exclude: context.exclude, sessionPolicy: 'fresh-ephemeral' });
     state.implementer = launch.implementer;
-    const blockerOutcome = await repairBlockerOutcome(state, context, prepared, launch);
-    if (blockerOutcome) { return blockerOutcome; }
+    const checkpointOutcome = await repairCheckpointOutcome(state, context, prepared, launch, attempt);
+    if (checkpointOutcome) { return checkpointOutcome; }
     const launchResult = handleLaunchResult(state, launch, maxLaunchRetries, error);
     if (launchResult === 'retry') { attempt--; continue; }
     if (launchResult === 'skip') { await recordSpentLaunch(state, context, [attempt, maxAttempts], { strategy, headBefore, fingerprintBefore }, startedAt, launch, log); continue; }
@@ -424,15 +423,13 @@ function stopRepair(state: ReboundState, context: ReboundContext, diagnostic: st
   return humanOnlyOutcome(state, context, context.error);
 }
 
-async function repairBlockerOutcome(state: ReboundState, context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, launch: Awaited<ReturnType<typeof launchFixAttempt>>): Promise<ReboundOutcome | null> {
-  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
+async function repairCheckpointOutcome(state: ReboundState, context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, launch: Awaited<ReturnType<typeof launchFixAttempt>>, attempt: number): Promise<ReboundOutcome | null> {
   const { slug } = context;
-  let blocker: InvalidContractBlocker | undefined;
+  const accountingFailure = await recordConsumedRepairAttempts(slug, prepared, launch, attempt);
+  if (accountingFailure) { return stopRepair(state, context, accountingFailure); }
+  let blocker = launch.invalidContract;
   try {
-    blocker = launch.invalidContract;
-    for (const checkpoint of repairCheckpointRefs.length ? repairCheckpointRefs : repairCheckpoint ? [repairCheckpoint] : []) {
-      blocker ??= await repairPort!.readBlocker(slug, checkpoint.name);
-    }
+    blocker ??= await readRepairCheckpointBlocker(slug, prepared);
   }
   catch (cause) { return stopRepair(state, context, `Cannot read repair blocker: ${String(cause)}`); }
   if (blocker) {

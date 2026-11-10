@@ -6,6 +6,8 @@ import { captureGateFailureEvidence, recoveryEvidenceForPrompt } from './rebound
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
 import { buildFreshDiagnosticRepairPrompt, promptSlotsFor, recoveryEvidenceRoute } from './rebound-prompts.js';
 import { renderRepairPrompt } from './ports/repair-prompts.js';
+import type { FixLaunch } from './rebound-launch-result.js';
+import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
 
 // Non-gate checkpoints store workflow labels, not executable checks. Keep the
 // encoding shared with continuation so legacy interrupted repairs stay resumable.
@@ -39,6 +41,31 @@ interface PreparedRepairPrompt {
   repairPort: RepairCheckpointPort | undefined;
   repairCheckpoint: { name: string; version: number } | null;
   repairCheckpointRefs?: readonly RepairCheckpointRef[];
+}
+
+/** Retains attempt usage only after an agent repair process actually ran. */
+export async function recordConsumedRepairAttempts(slug: string, prepared: PreparedRepairPrompt,
+  launch: Pick<FixLaunch, 'repairAttempted'>, attempt: number): Promise<string | null> {
+  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
+  if (!launch.repairAttempted || !repairCheckpoint) { return null; }
+  const checkpoints = repairCheckpointRefs.length ? repairCheckpointRefs : [repairCheckpoint];
+  try {
+    for (const checkpoint of checkpoints) {
+      await repairPort!.recordAttempt?.(slug, checkpoint.name, attempt);
+    }
+    return null;
+  } catch (cause) { return `Repair attempt accounting failed after launch: ${String(cause)}`; }
+}
+
+/** Reads the first blocker from the prepared checkpoint set. */
+export async function readRepairCheckpointBlocker(slug: string,
+  prepared: PreparedRepairPrompt): Promise<InvalidContractBlocker | undefined> {
+  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
+  let blocker: InvalidContractBlocker | undefined;
+  for (const checkpoint of repairCheckpointRefs.length ? repairCheckpointRefs : repairCheckpoint ? [repairCheckpoint] : []) {
+    blocker ??= await repairPort!.readBlocker(slug, checkpoint.name);
+  }
+  return blocker;
 }
 
 /** Persists the harness checkpoint before exposing each fresh diagnostic repair prompt. */
@@ -81,7 +108,7 @@ async function prepareCheckpointRepairPrompt(state: RepairPromptState, context: 
   const obligations = context.repairObligations?.length ? context.repairObligations : null;
   await captureAggregateEvidence(state, context, obligations, command);
   const { repairCheckpoint, repairCheckpointRefs } = await openRepairCheckpointSet(
-    state, context, obligations, repairPort, command, attempt);
+    state, context, obligations, repairPort, command, attempt, maxAttempts);
   const lookup = recoveryPromptLookup(context);
   const slots = { label: state.classification.label, slug, worktree, diagnostic: state.diagnostic,
     originalDiagnostic: state.originalDiagnostic, classification: state.classification, attempt, maxAttempts,
@@ -120,21 +147,21 @@ function reuseCapturedEvidence(state: RepairPromptState, reason: Extract<Rebound
 
 async function openRepairCheckpointSet(state: RepairPromptState, context: ReboundContext,
   obligations: ReboundContext['repairObligations'] | null, repairPort: RepairCheckpointPort | undefined,
-  command: string, attempt: number): Promise<{ repairCheckpoint: { name: string; version: number } | null;
+  command: string, attempt: number, maxAttempts: number): Promise<{ repairCheckpoint: { name: string; version: number } | null;
     repairCheckpointRefs: RepairCheckpointRef[] }> {
   const refs: RepairCheckpointRef[] = [];
   if (obligations) {
     for (const obligation of obligations) {
       const evidence = state.aggregateEvidence?.find(item => item.gateKey === obligation.gateKey)?.evidence;
       const opened = await repairPort?.open({ slug: context.slug, incidentId: state.occurrenceId,
-        gateKey: obligation.gateKey, command: obligation.reason.command, attempt,
+        gateKey: obligation.gateKey, command: obligation.reason.command, attempt, maxAttempts,
         ...failureOccurrence(obligation.reason.command, context.worktree, evidence) });
       if (opened) { refs.push({ gateKey: obligation.gateKey, command: obligation.reason.command, ...opened }); }
     }
     return { repairCheckpoint: refs[0] ?? null, repairCheckpointRefs: refs };
   }
   const repairCheckpoint = await repairPort?.open({ slug: context.slug, incidentId: state.occurrenceId,
-    command, attempt, ...failureOccurrence(command, context.worktree, state.capturedEvidence) }) ?? null;
+    command, attempt, maxAttempts, ...failureOccurrence(command, context.worktree, state.capturedEvidence) }) ?? null;
   return { repairCheckpoint, repairCheckpointRefs: refs };
 }
 
