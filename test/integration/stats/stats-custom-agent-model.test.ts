@@ -51,28 +51,21 @@ async function withStoredClassification(run: () => Promise<void> | void) {
 // (e.g. qwen3.6-27b-q8) in the "Agent performance" table because the model
 // column in the measurement database is not populated with the actual model name.
 
-test('task-2337: telemetryToStatsFields uses model option when telemetry.model is null/empty', () => {
-  // When telemetry has no model, the model option should be used (not agentFamily)
+test('task-2337: telemetryToStatsFields leaves an unobserved model unavailable', () => {
   const result = stats.telemetryToStatsFields(
     { provider: 'openai', inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
-    { agentFamily: 'custom', model: 'qwen3.6-27b-q8' }
   );
-  assert.equal(result.model, 'qwen3.6-27b-q8', 'model should be the configured model, not agentFamily');
+  assert.equal(result.model, '', 'a configured family or model is not an observed model');
   assert.equal(result.provider, 'openai');
 
-  // When both telemetry.model and model option are absent, falls back to agentFamily
-  const noModel = stats.telemetryToStatsFields(
-    { provider: 'openai', inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
-    { agentFamily: 'custom' }
-  );
-  assert.equal(noModel.model, 'custom', 'should fall back to agentFamily when no model is provided');
+  const unavailable = stats.telemetryToStatsFields(null);
+  assert.equal(unavailable.provider, '');
+  assert.equal(unavailable.model, '');
 });
 
-test('task-2337: telemetryToStatsFields prefers telemetry.model over model option', () => {
-  // When telemetry has a model, it takes precedence
+test('task-2337: telemetryToStatsFields preserves an observed telemetry model', () => {
   const result = stats.telemetryToStatsFields(
     { provider: 'openai', model: 'gpt-5.4-mini', inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
-    { agentFamily: 'codex', model: 'gpt-5.4-mini' }
   );
   assert.equal(result.model, 'gpt-5.4-mini');
 });
@@ -86,8 +79,7 @@ test('task-2337: recordStageStats records model for custom agent', async () => {
         stage: 'active',
         rootDir: root,
         implementer: 'custom',
-        model: 'qwen3.6-27b-q8',
-        telemetry: providerResourceObservation({ inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }),
+        telemetry: providerResourceObservation({ provider: 'local', model: 'qwen3.6-27b-q8', inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }),
         durationMinutes: 5,
       });
       assert.equal(row.model, 'qwen3.6-27b-q8', 'recorded row should have the actual model name, not "custom"');
@@ -130,8 +122,8 @@ test('task-2337: accumulateStageStats preserves model for custom agent', async (
   const dbPath = path.join(root, 'parallix.db');
   try {
     await withStoredClassification(async () => {
-      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: providerResourceObservation({ inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }), durationMinutes: 5, dbPath });
-      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: providerResourceObservation({ inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }), durationMinutes: 8, dbPath });
+      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', telemetry: providerResourceObservation({ provider: 'local', model: 'qwen3.6-27b-q8', inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }), durationMinutes: 5, dbPath });
+      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', telemetry: providerResourceObservation({ provider: 'local', model: 'qwen3.6-27b-q8', inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }), durationMinutes: 8, dbPath });
       const data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), rootDir: root, dbPath });
       assert.equal(data.rows.length, 1, 'should have exactly one accumulated row');
       assert.equal(data.rows[0].model, 'qwen3.6-27b-q8', 'accumulated row should preserve model name');

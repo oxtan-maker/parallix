@@ -15,7 +15,6 @@ import { resolveTaskFile, transitionTask, getTaskStatus } from '../../backlog/ba
 import { resolveWorktree } from '../../filesystem/mission-utils.js';
 
 import * as stats from './stats.js';
-import { resolveAgentModel } from '../../config/product-config.js';
 
 export async function recordDraftImplementer({
   selected,
@@ -38,13 +37,13 @@ export async function recordDraftImplementer({
 
 /**
  * Record a draft-stage stats row after the draft agent completes. Token/usage
- * columns come from the agent result's telemetry (currently Codex only); other
- * families record honest zeros with provider/model set to the family name.
+ * columns come only from the agent result's provider telemetry; facts the
+ * provider did not report remain unavailable.
  * Best-effort: a failure here must never fail the draft.
  */
 export function recordDraftStats({ configuration, slug, rootDir, agentFamily, result, log = fmt.log.plain }: { configuration?: ParallixConfiguration; slug: string; rootDir: string; agentFamily: string; result?: { runId?: string; startedAt?: string; endedAt?: string; telemetry?: Record<string, unknown> | ProviderResourceObservation | null; providerResources?: ProviderResourceObservation | null } | null; log?: DraftLog; error?: DraftLog }) {
   if (!result) { return; }
-  let durationMinutes = 0;
+  let durationMinutes: number | undefined;
   if (result.startedAt && result.endedAt) {
     durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
   }
@@ -55,7 +54,6 @@ export function recordDraftStats({ configuration, slug, rootDir, agentFamily, re
       stage: 'draft',
       rootDir,
       implementer: agentFamily,
-      model: resolveAgentModel(agentFamily, rootDir),
       telemetry: result.providerResources ?? providerResourceObservation(result.telemetry),
       durationMinutes,
     });

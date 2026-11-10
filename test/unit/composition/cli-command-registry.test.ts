@@ -39,8 +39,8 @@ for (const mode of ['empty', 'report', 'failure'] as const) {
       return 0;
     });
     mock.method(config, 'resolveAgentModel', () => 'fixture-model');
-    mock.method(stats, 'recordStageStatsSafe', async (_stage: string, options: { stage: string; model: string }) => {
-      assert.equal(options.stage, 'recovery'); assert.equal(options.model, 'fixture-model'); events.push('usage');
+    mock.method(stats, 'recordStageStatsSafe', async (_stage: string, options: { stage: string; model?: string }) => {
+      assert.equal(options.stage, 'recovery'); assert.equal(options.model, undefined); events.push('usage');
     });
     mock.method(agents, 'startAgent', async (stage: string, options: { agent: string; sessionMarkerPort: unknown; worktree: string; prompt: string }) => {
       assert.equal(stage, 'execute'); assert.equal(options.agent, 'custom'); assert.equal(options.worktree, '/fixture');

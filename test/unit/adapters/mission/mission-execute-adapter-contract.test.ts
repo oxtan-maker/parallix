@@ -56,7 +56,6 @@ describe('Execute Mission adapters', () => {
       enforceExecuteCommitSafety() {},
       getTaskStatus() { return 'active'; },
       recordActiveStats() {},
-      resolveAgentModel() { return 'gpt-5'; },
       resolveStageTelemetry() { return null; },
       async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
       async performReviewPreparation() { return { ok: true as const }; },
@@ -278,7 +277,7 @@ describe('Execute Mission adapters', () => {
     assert.equal(statusLaunch.rebaseDeferred, true);
   });
 
-  test('telemetry adapter derives the stage window and duration from the launch detail', async () => {
+  test('telemetry adapter derives the stage window and duration without a configured-model fallback', async () => {
     const recorded: Parameters<ExecuteMissionRuntime['recordActiveStats']>[0][] = [];
     const windows: Parameters<ExecuteMissionRuntime['resolveStageTelemetry']>[0][] = [];
     const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
@@ -297,7 +296,7 @@ describe('Execute Mission adapters', () => {
     assert.equal(recorded.length, 1);
     assert.equal(recorded[0].implementer, 'codex');
     assert.equal(recorded[0].runId, 'execute-codex-a1-missionrun');
-    assert.equal(recorded[0].model, 'gpt-5');
+    assert.equal('model' in recorded[0], false);
     assert.equal(recorded[0].durationMinutes, 3);
     assert.equal(windows[0].sinceMs, Date.parse('2026-07-20T10:00:00Z'));
   });
@@ -388,7 +387,6 @@ describe('Execute Mission characterization', () => {
       enforceExecuteCommitSafety() { calls.push('safety'); },
       getTaskStatus() { calls.push('status'); return 'active'; },
       recordActiveStats(record: { implementer: string }) { calls.push(`stats:${record.implementer}`); },
-      resolveAgentModel() { calls.push('model'); return 'gpt-5'; },
       resolveStageTelemetry() { calls.push('telemetry'); return null; },
       async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
       async performReviewPreparation(slug: string, options: { worktree: string; forgejoUser?: string }) {
@@ -429,7 +427,7 @@ describe('Execute Mission characterization', () => {
     assert.deepEqual(calls, [
       'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt',
       'launch-record:codex', 'load', 'safety',
-      'model', 'telemetry', 'stats:codex',
+      'telemetry', 'stats:codex',
       'load', 'load', 'load', 'synchronize',
       "review-preparation:task-1:/worktree:codex",
     ]);

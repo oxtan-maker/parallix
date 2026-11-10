@@ -8,7 +8,6 @@ import startupPreflight from '../cli/startup-preflight.js';
 import { buildCheckpointContext, buildExecutePrompt, enforceExecuteCommitSafety, selectLaunchAndRecord } from '../cli/commands/active.js';
 import { validateCheckpointsBeforeReviewPreparation } from './checkpoint-validation.js';
 import { getTaskStatus, resolveTaskFile } from '../backlog/backlog.js';
-import { resolveAgentModel } from '../config/product-config.js';
 import * as stats from '../cli/commands/stats.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import { git as awaitableGit } from '../git/git.js';
@@ -75,7 +74,6 @@ export interface ExecuteMissionRuntime {
   readonly enforceExecuteCommitSafety: (...args: Parameters<typeof enforceExecuteCommitSafety>) => void;
   readonly getTaskStatus: typeof getTaskStatus;
   readonly recordActiveStats: (options: NonNullable<Parameters<typeof stats.recordActiveStats>[0]> & { slug: string; rootDir: string; implementer: string }) => void;
-  readonly resolveAgentModel: typeof resolveAgentModel;
   readonly resolveStageTelemetry: (options: NonNullable<Parameters<typeof resolveStageTelemetry>[0]>) => ReturnType<typeof resolveStageTelemetry>;
   /** Individual post-execute mechanisms. The application service owns their ordering. */
   readonly performReviewPreparation: (slug: string, options: { forgejoUser?: string; worktree: string; force?: boolean }) => ReturnType<typeof performReviewPreparation>;
@@ -240,11 +238,10 @@ export class ExecuteTelemetryAdapter implements ExecuteTelemetryPort {
       runId: result?.runId,
       rootDir: record.worktree,
       implementer: record.agent,
-      model: this._runtime.resolveAgentModel(record.agent, record.worktree) ?? undefined,
       telemetry: this._runtime.resolveStageTelemetry({ worktree: record.worktree, result, sinceMs }),
       durationMinutes: result?.startedAt && result.endedAt
         ? (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000
-        : 0,
+        : undefined,
     });
   }
 }
@@ -355,7 +352,6 @@ export function createDefaultExecuteMissionRuntime(configuration: ParallixConfig
     enforceExecuteCommitSafety,
     getTaskStatus,
     recordActiveStats: options => stats.recordActiveStats({ ...options, configuration }),
-    resolveAgentModel,
     resolveStageTelemetry,
     performReviewPreparation: (slug, options) => performReviewPreparation(slug, { ...options, configuration }),
     reviewLoopMechanisms: createReviewLoopPorts,

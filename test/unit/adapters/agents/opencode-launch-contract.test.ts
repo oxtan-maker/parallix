@@ -508,7 +508,6 @@ describe("OpenCode launcher telemetry ,", () => {
     const dbFile = path.join(dir, 'parallix.db');
     try {
       const fields = stats.telemetryToStatsFields(result.telemetry, {
-        agentFamily: 'custom',
         durationMinutes: 5,
       });
       stats.upsertMeasurementRow(

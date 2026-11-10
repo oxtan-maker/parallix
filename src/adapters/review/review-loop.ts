@@ -44,7 +44,6 @@ import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent 
 
 import { rebaseBeforeReviewRound } from './rebase.js';
 import { packageRoot } from '../filesystem/package-root.js';
-import { resolveAgentModel } from '../config/product-config.js';
 import { resolvePollIntervalMs, resolvePollTimeoutMs, pollForReview, pollForDisposition } from './review-polling.js';
 import { buildMetadataFooter, resolveArtifactDir, consumeReviewerArtifacts, consumeImplementerArtifacts } from './review-artifacts.js';
 import { pushReviewRef, isStaleInfoPushRejection, fetchReviewBranch } from '../forgejo/forgejo.js';
@@ -252,7 +251,6 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
         stage: reviewer ? 'review' : 'follow-up', slug, rootDir: worktree, worktree, reviewer: identity.reviewer, implementer: identity.implementer,
         result: launch?.result ?? undefined, sinceMs: stageLaunchSinceMs(launch?.result) || 0, log, error,
         state: state, writeReviewStateFn: writeState,
-        model: resolveAgentModel((reviewer ? identity.reviewer : identity.implementer)!, worktree),
         missionStore: bindings.missionStore ?? null,
       });
     },

@@ -86,24 +86,28 @@ function statsActorFields(row: StatsRow) {
   };
 }
 
+function optionalStatsValue(value: unknown): string | undefined {
+  return value === null || value === undefined || String(value).trim() === '' ? undefined : String(value);
+}
+
 function statsTokenFields(row: StatsRow) {
   return {
-    input_tokens: row.input_tokens || '0',
-    output_tokens: row.output_tokens || '0',
-    cached_tokens: row.cached_tokens || '0',
-    thoughts_tokens: row.thoughts_tokens || '0',
-    context_tokens: row.context_tokens || '0',
-    tool_calls: row.tool_calls || '0'
+    input_tokens: optionalStatsValue(row.input_tokens),
+    output_tokens: optionalStatsValue(row.output_tokens),
+    cached_tokens: optionalStatsValue(row.cached_tokens),
+    thoughts_tokens: optionalStatsValue(row.thoughts_tokens),
+    context_tokens: optionalStatsValue(row.context_tokens),
+    tool_calls: optionalStatsValue(row.tool_calls)
   };
 }
 
 function statsUsageFields(row: StatsRow) {
   return {
-    openai_usage_before: row.openai_usage_before || '0',
-    openai_usage_after: row.openai_usage_after || '',
-    openai_usage_delta: row.openai_usage_delta || '0',
-    duration_minutes: row.duration_minutes || '0',
-    cost_usd: row.cost_usd || '0'
+    openai_usage_before: optionalStatsValue(row.openai_usage_before),
+    openai_usage_after: optionalStatsValue(row.openai_usage_after),
+    openai_usage_delta: optionalStatsValue(row.openai_usage_delta),
+    duration_minutes: optionalStatsValue(row.duration_minutes),
+    cost_usd: optionalStatsValue(row.cost_usd)
   };
 }
 
@@ -227,9 +231,13 @@ function canonicalizeStatsRow(row: StatsRow, options: NormalizeStatsRowOptions =
   };
   for (const key of USAGE_NUMBERS) {
     const value = (normalized as Record<string, unknown>)[key];
-    if (key === 'openai_usage_after' && quotaUsageLevel(value) === null) { canonical.openai_usage_after = ''; continue; }
-    if (key === 'pr_fix_rounds' && (canonical as Record<string, unknown>)[key] === undefined) { continue; }
-    (canonical as Record<string, unknown>)[key] = String(Math.max(0, Number.parseInt(String(value), 10) || 0));
+    if (value === undefined || value === null || String(value).trim() === '') {
+      (canonical as Record<string, unknown>)[key] = undefined;
+      continue;
+    }
+    if (key === 'openai_usage_after' && quotaUsageLevel(value) === null) { canonical.openai_usage_after = undefined; continue; }
+    const parsed = Number.parseInt(String(value), 10);
+    (canonical as Record<string, unknown>)[key] = Number.isFinite(parsed) ? String(Math.max(0, parsed)) : undefined;
   }
   if (row.runId) { canonical.runId = row.runId; }
   return canonical;

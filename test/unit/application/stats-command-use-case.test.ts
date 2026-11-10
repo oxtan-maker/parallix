@@ -171,7 +171,7 @@ test('stage accumulation sequences classification, read, merge and write without
   assert.equal(result.row.tool_calls, '3');
   assert.equal(result.row.duration_minutes, '5');
   assert.equal(result.row.cost_usd, '0.5');
-  assert.equal(result.row.openai_usage_before, '0');
+  assert.equal(result.row.openai_usage_before, '3');
   assert.equal(result.row.openai_usage_after, '50');
   assert.equal(result.row.openai_usage_delta, '4');
   assert.equal(result.row.provider, 'openai');
@@ -220,6 +220,14 @@ test('active and review recording preserve implementer credit without fabricatin
   assert.deepEqual(calls, ['classification', 'write'], 'stage telemetry does not read review history');
 });
 
+test('review recording never substitutes the reviewer for an unavailable implementer (TASK-2363 pattern)', () => {
+  const useCase = new StatsRecordingUseCase(recordingPort());
+  const review = useCase.recordReview({ slug: 'task-1', date: '2026-06-23', reviewer: 'claude' });
+  assert.equal(review.row.implementer, null);
+  assert.equal(review.row.implementer_agent, '');
+  assert.equal(review.row.reviewer_agent, 'claude');
+});
+
 test('stage recording leaves unavailable review measurements unknown (TASK-2818)', () => {
   const useCase = new StatsRecordingUseCase(recordingPort());
   assert.equal(useCase.recordActive({ slug: 'task-1', date: '2026-06-23' }).row.pr_fix_rounds, undefined);
@@ -229,6 +237,84 @@ test('missing quota telemetry stays unavailable while recorded zero stays zero (
   const useCase = new StatsRecordingUseCase(recordingPort());
   for (const usagePercent of [undefined, NaN, Infinity, -1, 101, 0, 25]) {
     const result = useCase.recordActive({ slug: 'task-quota', date: '2026-06-23', implementer: 'codex', telemetry: providerResourceObservation({ usagePercent }) });
-    assert.equal(result.row.openai_usage_after, usagePercent === 0 || usagePercent === 25 ? String(usagePercent) : '');
+    assert.equal(result.row.openai_usage_after, usagePercent === 0 || usagePercent === 25 ? String(usagePercent) : undefined);
   }
+});
+
+test('two unavailable stage observations stay unavailable when accumulated (TASK-2363 pattern)', () => {
+  let stored: StatsRow | undefined;
+  const useCase = new StatsRecordingUseCase(recordingPort({
+    readMeasurements: () => stored ? [stored] : [],
+    upsert: row => {
+      stored = row;
+      return { changed: true, row, data: { headers: [], rows: [row] } };
+    },
+  }));
+
+  useCase.accumulateStage({ slug: 'task-unavailable', stage: 'active', date: '2026-06-23', implementer: 'codex' });
+  const result = useCase.accumulateStage({ slug: 'task-unavailable', stage: 'active', date: '2026-06-23', implementer: 'codex' });
+
+  assert.equal(result.row.provider, '');
+  assert.equal(result.row.model, '');
+  for (const key of ['input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
+    'tool_calls', 'openai_usage_before', 'openai_usage_after', 'openai_usage_delta', 'duration_minutes', 'cost_usd'] as const) {
+    assert.equal(result.row[key], undefined, key);
+  }
+  assert.ok(Object.values(result.row).every(value => value !== 'undefined'));
+});
+
+test('one-sided stage observations preserve measured facts in either arrival order (PX-0056 F1)', () => {
+  const observed = providerResourceObservation({ provider: 'openai', model: 'gpt-5', inputTokens: 100,
+    outputTokens: 10, cachedTokens: 5, thoughtsTokens: 4, totalTokens: 110, toolCalls: 3,
+    usagePercent: 40, cost_usd: 0.5 });
+  const unavailable = providerResourceObservation({ model: 'gpt-5' });
+
+  for (const [first, second] of [[observed, unavailable], [unavailable, observed]] as const) {
+    let stored: StatsRow | undefined;
+    const useCase = new StatsRecordingUseCase(recordingPort({
+      readMeasurements: () => stored ? [stored] : [],
+      upsert: row => { stored = row; return { changed: true, row, data: { headers: [], rows: [row] } }; },
+    }));
+    useCase.accumulateStage({ slug: 'task-partial', stage: 'review', date: '2026-06-23',
+      implementer: 'codex', reviewer: 'claude', telemetry: first, durationMinutes: 2 });
+    const result = useCase.accumulateStage({ slug: 'task-partial', stage: 'review', date: '2026-06-23',
+      implementer: 'codex', reviewer: 'claude', telemetry: second, durationMinutes: 3 });
+
+    assert.deepEqual({ provider: result.row.provider, model: result.row.model, input: result.row.input_tokens,
+      output: result.row.output_tokens, cached: result.row.cached_tokens, thoughts: result.row.thoughts_tokens,
+      context: result.row.context_tokens, tools: result.row.tool_calls, usage: result.row.openai_usage_after,
+      duration: result.row.duration_minutes, cost: result.row.cost_usd },
+    { provider: 'openai', model: 'gpt-5', input: '100', output: '10', cached: '5', thoughts: '4',
+      context: '110', tools: '3', usage: '40', duration: '5', cost: '0.5' });
+  }
+});
+
+test('configured family is not a provider observation (TASK-2363 pattern)', () => {
+  const useCase = new StatsRecordingUseCase(recordingPort());
+  const result = useCase.recordActive({
+    slug: 'task-configured', date: '2026-06-23', implementer: 'codex',
+  });
+  assert.equal(result.row.provider, '');
+  assert.equal(result.row.model, '');
+});
+
+test('legacy family-model aggregate cannot absorb an unavailable stage observation (TASK-2363 pattern)', () => {
+  const stored: StatsRow[] = [{
+    repo: 'parallix', mission: 'task-legacy', stage: 'active', implementer: 'codex', implementer_agent: 'codex',
+    provider: 'codex', model: 'codex', input_tokens: '10',
+  }];
+  const useCase = new StatsRecordingUseCase(recordingPort({
+    readMeasurements: () => stored,
+    upsert: row => {
+      const index = stored.findIndex(item => item.model === row.model);
+      if (index >= 0) { stored[index] = row; } else { stored.push(row); }
+      return { changed: true, row, data: { headers: [], rows: stored } };
+    },
+  }));
+
+  useCase.accumulateStage({ slug: 'task-legacy', stage: 'active', date: '2026-06-23', implementer: 'codex' });
+
+  assert.deepEqual(stored.map(row => row.model), ['codex', '']);
+  assert.equal(stored[0].input_tokens, '10');
+  assert.equal(stored[1].input_tokens, undefined);
 });

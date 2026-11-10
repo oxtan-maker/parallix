@@ -168,7 +168,6 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
             implementer: agent,
             result: launched?.result,
             sinceMs: stageLaunchSinceMs(launched?.result),
-            model: resolveAgentModel(agent, worktree),
           });
         }
         fmt.log.info(`[lead] Recovery agent ${agent ?? 'with no reported family'} finished for ${fmt.slug(request.missionId)}; rechecking the board`);

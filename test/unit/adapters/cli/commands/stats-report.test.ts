@@ -125,6 +125,22 @@ test('renderMissionPhaseReport shows zeros for unknown mission', () => {
   assert.ok(statsReport.renderMissionPhaseReport([], 'unknown', { repo: 'r' }).includes('No telemetry rows'));
 });
 
+test('mission phase report distinguishes unavailable usage from observed zero (TASK-2363 pattern)', () => {
+  const report = statsReport.renderMissionPhaseReport([
+    { date: '2026-06-01', repo: 'r', mission: 'nullable', stage: 'active', implementer: 'codex', provider: 'openai', model: 'gpt-6.1-sol' },
+    { date: '2026-06-01', repo: 'r', mission: 'nullable', stage: 'follow-up', implementer: 'codex', provider: 'openai', model: 'gpt-6.1-sol',
+      input_tokens: '0', output_tokens: '0', cached_tokens: '0', tool_calls: '0', duration_minutes: '0', openai_usage_after: '0', cost_usd: '0' },
+  ], 'nullable', { repo: 'r' });
+  const active = (report.split('\n').find(line => line.startsWith('execute')) ?? '').trimEnd();
+  const followUp = (report.split('\n').find(line => line.startsWith('follow-up')) ?? '').trimEnd();
+  const total = (report.split('\n').find(line => line.startsWith('total')) ?? '').trimEnd();
+
+  assert.match(active, /—\s+—\s+—\s+—\s+—\s+—\s+—$/);
+  assert.match(followUp, /0\s+0\s+0\s+0\s+0\s+0\s+0$/);
+  assert.match(total, /0\s+0\s+0\s+0\s+0\s+—\s+0$/);
+  assert.doesNotMatch(report, /NaN|undefined/);
+});
+
 test('buildWeeklyWindows returns two week windows', () => {
   const w = stats.buildWeeklyWindows(new Date('2026-06-20'));
   assert.ok(w.current && w.previous && w.current.start instanceof Date);

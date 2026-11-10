@@ -199,9 +199,10 @@ function accumulateStageResource(byStage: Record<string, number | null>, row: St
       byStage[bucket] = Math.max(byStage[bucket] ?? 0, value);
     }
   } else {
-    const value = family === 'cost' ? (Number.parseFloat(String(row.cost_usd)) || 0)
-      : (Number.parseInt(String(row.duration_minutes), 10) || 0);
-    byStage[bucket] = (byStage[bucket] ?? 0) + value;
+    const raw = family === 'cost' ? row.cost_usd : row.duration_minutes;
+    if (raw === null || raw === undefined || String(raw).trim() === '') { return; }
+    const value = family === 'cost' ? Number.parseFloat(String(raw)) : Number.parseInt(String(raw), 10);
+    if (Number.isFinite(value)) { byStage[bucket] = (byStage[bucket] ?? 0) + value; }
   }
 }
 
@@ -230,11 +231,11 @@ function summarizeAgentStageSpend(rows: readonly ReportRow[], window: DateWindow
     .map(({ actor, model, rows: groupRows }) => {
       const family = classifyAgentSpendFamily(model ?? actor, groupRows);
       const byStage: Record<string, number | null> = {};
-      for (const { stage } of AGENT_SPEND_STAGE_COLUMNS) {byStage[stage] = family === 'usage' ? null : 0;}
+      for (const { stage } of AGENT_SPEND_STAGE_COLUMNS) {byStage[stage] = null;}
       for (const row of groupRows) { accumulateStageResource(byStage, row, family, knownStages); }
       const values = Object.values(byStage).filter((value): value is number => value !== null);
       // Quota levels per stage and dollars/minutes alike: the total adds the stage columns.
-      const total = family === 'usage' && values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0);
+      const total = values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0);
       return { implementer: model ?? 'unavailable', model, actor, family, byStage, total };
     });
 }

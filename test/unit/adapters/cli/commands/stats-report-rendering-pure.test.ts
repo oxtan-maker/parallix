@@ -148,6 +148,18 @@ test('quota peaks preserve zero and reject missing or invalid snapshots (TASK-28
   assert.equal(sr.formatAgentSpendCell(zero.total, zero.total, zero.family), '0%');
 });
 
+test('missing duration and cost stay unavailable in stage spend without NaN (TASK-2363 pattern)', () => {
+  const output = sr.summarizeAgentStageSpend([
+    row({ implementer: 'custom', implementer_agent: 'custom', model: 'local-model', duration_minutes: undefined }),
+    row({ stage: 'review', implementer: 'codex', reviewer_agent: 'claude', provider: 'anthropic', model: 'claude-sonnet', cost_usd: undefined }),
+  ], WIN);
+
+  assert.deepEqual(output.map(item => [item.family, item.total]), [['cost', null], ['duration', null]]);
+  assert.equal(output[0].byStage.review, null);
+  assert.equal(output[1].byStage.active, null);
+  assert.ok(output.every(item => Object.values(item.byStage).every(value => value === null || !Number.isNaN(value))));
+});
+
 test('a same-family model replacement keeps earlier returns with the model that wrote the work (TASK-2832)', () => {
   const rows = [row({ stage: 'active', model: 'gpt-6.1-sol', date: '2024-01-10' }), row({ stage: 'follow-up', model: 'gpt-6-astra', date: '2024-01-20' }),
     row({ stage: 'default', model: '', date: '2024-01-25' })];

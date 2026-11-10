@@ -107,15 +107,13 @@ test('mission phase report Cost ($) column preserves fractional dollar costs (ta
   assert.match(totalLine, /2\.34/, 'total equals sum of displayed phase costs');
 });
 
-test('mission phase report Cost ($) column shows 0 for rows without cost_usd', () => {
+test('mission phase report Cost ($) column shows unavailable for rows without cost_usd', () => {
   const report = renderMissionPhaseReport(rows(), 'task-1285', { repo: TEST_REPO });
   const lines = report.split('\n');
-  // Rows without cost_usd should show 0 in the cost column
+  // Recorded rows without cost_usd must not invent a measured zero.
   const draftLine = lines.find(l => /\bdraft\b/.test(l));
   assert.ok(draftLine, 'draft line present');
-  // The last column (cost) should be 0 for draft row since original rows don't have cost_usd
-  // formatStatsTable uses padded columns, so just check 0 appears at the end
-  assert.ok(/\b0\s*$/.test(draftLine), 'cost column is 0 when not set');
+  assert.ok(/—\s*$/.test(draftLine), 'cost column is unavailable when not set');
 });
 
 test('mission phase report review phase attributes to reviewer_agent, not implementer_agent', () => {

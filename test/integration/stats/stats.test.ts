@@ -571,7 +571,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Claude row from cost_usd, 
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /claude-1\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+\$0 \(0%\)\s+\$0 \(0%\)\s+\$10 \(100%\)/);
+  assert.match(spendSection, /claude-1\s+\$1 \(10%\)\s+\$3 \(30%\)\s+\$6 \(60%\)\s+—\s+—\s+\$10 \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
 });
 
@@ -584,7 +584,7 @@ test('task-1414: renderWeeklyStatsReport aggregates a Custom/local row from dura
 
   const plain = __mm2.stripAnsi(report);
   const spendSection = plain.slice(plain.indexOf('Agent spend by stage this week'));
-  assert.match(spendSection, /custom-1\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+0m \(0%\)\s+0m \(0%\)\s+50m \(100%\)/);
+  assert.match(spendSection, /custom-1\s+5m \(10%\)\s+15m \(30%\)\s+30m \(60%\)\s+—\s+—\s+50m \(100%\)/);
   assert.doesNotMatch(spendSection, /999/);
 });
 
@@ -800,8 +800,8 @@ test('task-1251 and task-1314: normalizeStatsRow migrates a legacy 5-column row 
   assert.deepEqual(Object.keys(row), stats.STATS_HEADERS);
   assert.equal(row.repo, stats.resolveStatsRepoName(process.cwd()));
   assert.equal(row.stage, 'default');         // legacy rows fold into the default stage
-  assert.equal(row.input_tokens, '0');
-  assert.equal(row.openai_usage_after, '');
+  assert.equal(row.input_tokens, undefined);
+  assert.equal(row.openai_usage_after, undefined);
 });
 
 test('task-1314: stats mission reports filter to the active repo', async () => {
@@ -885,10 +885,10 @@ test('re-recording a row stored before model-keyed identity updates it instead o
   }
 });
 
-test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero fallback', () => {
+test('task-1251: telemetryToStatsFields maps observed telemetry without fabricating fallback facts', () => {
   const mapped = stats.telemetryToStatsFields(
     { provider: 'openai', model: 'gpt-5.4-mini', inputTokens: 1000, outputTokens: 50, cachedTokens: 900, totalTokens: 1050, toolCalls: 7, usagePercent: 42.6 },
-    { agentFamily: 'codex', durationMinutes: 3.4 }
+    { durationMinutes: 3.4 }
   );
   assert.equal(mapped.provider, 'openai');
   assert.equal(mapped.model, 'gpt-5.4-mini');
@@ -896,14 +896,20 @@ test('task-1251: telemetryToStatsFields maps codex telemetry, with honest-zero f
   assert.equal(mapped.context_tokens, '1050');
   assert.equal(mapped.tool_calls, '7');
   assert.equal(mapped.openai_usage_after, '43'); // rounded snapshot
-  assert.equal(mapped.openai_usage_before, '0'); // before/delta deferred to follow-up
+  assert.equal(mapped.openai_usage_before, undefined); // before/delta were not observed
   assert.equal(mapped.duration_minutes, '3');
 
-  const zero = stats.telemetryToStatsFields(null, { agentFamily: 'claude' });
-  assert.equal(zero.provider, 'claude');
-  assert.equal(zero.model, 'claude');
-  assert.equal(zero.input_tokens, '0');
-  assert.equal(zero.openai_usage_after, '');
+  const unavailable = stats.telemetryToStatsFields(null);
+  assert.equal(unavailable.provider, '');
+  assert.equal(unavailable.model, '');
+  assert.equal(unavailable.input_tokens, undefined);
+  assert.equal(unavailable.openai_usage_after, undefined);
+
+  const observedZero = stats.telemetryToStatsFields({
+    provider: 'openai', model: 'gpt-5.4-mini', inputTokens: 0, usagePercent: 0,
+  });
+  assert.equal(observedZero.input_tokens, '0');
+  assert.equal(observedZero.openai_usage_after, '0');
 });
 
 test('task-1301: renderRangeStatsReport counts unique missions when a mission has multiple stage rows', () => {
@@ -1322,7 +1328,6 @@ test('task-2362: thoughts_tokens survives telemetryToStatsFields and the measure
   const fields = stats.telemetryToStatsFields(
     { provider: 'openai', model: 'qwen3.8-max', inputTokens: 1000, outputTokens: 200,
       cachedTokens: 900, thoughtsTokens: 150, totalTokens: 1200, toolCalls: 3 },
-    { agentFamily: 'qwen' }
   );
   assert.equal(fields.thoughts_tokens, '150', 'thinking tokens mapped to their own column');
   assert.equal(fields.output_tokens, '200', 'thinking tokens not folded into output');

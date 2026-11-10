@@ -75,7 +75,7 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
     await withStatisticsDatabase(async ({ db, databasePath }) => {
       const store = new SqliteMeasurementStore(databasePath);
       try {
-        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', reviewer: 'claude', store }) });
+        recordStageStats({ configuration: resolveConfiguration(process.env), ...({ slug: 'task-500', stage: 'review', rootDir: root, date: '2026-06-02', implementer: 'codex', reviewer: 'claude', store }) });
       } finally {
         store.close();
       }
@@ -131,6 +131,44 @@ describe("defect A: an unrecorded review-fix count stays unknown", () => {
       assert.equal(cohort?.n, 2, 'both missions are in the decision window population');
       assert.equal(cohort?.observationCounts.reviewFixRounds, 1, 'only the measured zero is an observation');
       assert.equal(cohort?.medianReviewFixRounds, 0);
+    });
+  });
+});
+
+describe('usage NULL and zero remain distinct through the StatsRow bridge', () => {
+  it('round-trips stored NULL as unavailable and stored zero as zero (TASK-2363 pattern)', async () => {
+    await withStatisticsDatabase(async ({ databasePath }) => {
+      const store = new SqliteMeasurementStore(databasePath);
+      try {
+        store.upsertMeasurement({ repo: REPO, mission: 'task-null', stage: 'active', actorKey: 'codex-null' });
+        store.upsertMeasurement({
+          repo: REPO, mission: 'task-zero', stage: 'active', actorKey: 'codex-zero',
+          input_tokens: 0, output_tokens: 0, cached_tokens: 0, thoughts_tokens: 0, context_tokens: 0,
+          tool_calls: 0, openai_usage_before: 0, openai_usage_after: 0, openai_usage_delta: 0,
+          duration_minutes: 0, cost_usd: 0,
+        });
+
+        const rows = stats.loadMeasurementRows({ store }).rows;
+        const unavailable = rows.find(row => row.mission === 'task-null');
+        const zero = rows.find(row => row.mission === 'task-zero');
+        assert.ok(unavailable);
+        assert.ok(zero);
+        for (const key of ['input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
+          'tool_calls', 'openai_usage_before', 'openai_usage_after', 'openai_usage_delta', 'duration_minutes', 'cost_usd'] as const) {
+          assert.equal(unavailable[key], undefined, `NULL ${key}`);
+          assert.equal(zero[key], '0', `zero ${key}`);
+        }
+
+        const unavailableRecord = stats.statsRowToMeasurement(unavailable);
+        const zeroRecord = stats.statsRowToMeasurement(zero);
+        for (const key of ['input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
+          'tool_calls', 'openai_usage_before', 'openai_usage_after', 'openai_usage_delta', 'duration_minutes', 'cost_usd'] as const) {
+          assert.equal(unavailableRecord[key], undefined, `round-trip NULL ${key}`);
+          assert.equal(zeroRecord[key], 0, `round-trip zero ${key}`);
+        }
+      } finally {
+        store.close();
+      }
     });
   });
 });

@@ -291,10 +291,21 @@ function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, optio
     return lines.join('\n');
   }
 
-  const num = (row: StatsRow, key: StatsField) => String(Number.parseInt(String(row[key]), 10) || 0);
+  const integer = (value: unknown): number | null => {
+    if (value === null || value === undefined || String(value).trim() === '') { return null; }
+    const parsed = Number.parseInt(String(value), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const decimal = (value: unknown): number | null => {
+    if (value === null || value === undefined || String(value).trim() === '') { return null; }
+    const parsed = Number.parseFloat(String(value));
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const num = (row: StatsRow, key: StatsField) => integer(row[key])?.toString() ?? '\u2014';
   const cost = (value: unknown) => {
-    const n = Number.parseFloat(String(value));
-    if (!Number.isFinite(n) || n === 0) { return '0'; }
+    const n = decimal(value);
+    if (n === null) { return '\u2014'; }
+    if (n === 0) { return '0'; }
     return String(Math.round(n * 100) / 100);
   };
   const tableRows: string[][] = [];
@@ -309,13 +320,15 @@ function renderMissionPhaseReport(rows: readonly StatsRow[], slug: string, optio
     }
   }
 
-  const totals: number[] = ['input_tokens', 'output_tokens', 'cached_tokens', 'tool_calls', 'duration_minutes']
+  const totals = ['input_tokens', 'output_tokens', 'cached_tokens', 'tool_calls', 'duration_minutes']
     .map(key => key as StatsField)
-    .map(key => missionRows.reduce((sum, row) => sum + (Number.parseInt(String(row[key]), 10) || 0), 0));
-  const totalCost = tableRows
-    .filter(r => r[0] !== 'total')
-    .reduce((sum, r) => sum + (Number.parseFloat(cost(r[10])) || 0), 0);
-  tableRows.push(['total', '', '', '', String(totals[0]), String(totals[1]), String(totals[2]), String(totals[3]), String(totals[4]), '\u2014', cost(totalCost)]);
+    .map(key => missionRows.map(row => integer(row[key])).filter((value): value is number => value !== null))
+    .map(values => values.length ? String(values.reduce((sum, value) => sum + value, 0)) : '\u2014');
+  // Sum the displayed, rounded phase values so the total reconciles exactly
+  // with the cells above it while still excluding unavailable observations.
+  const costs = missionRows.map(row => decimal(cost(row.cost_usd))).filter((value): value is number => value !== null);
+  const totalCost = costs.length ? cost(costs.reduce((sum, value) => sum + value, 0)) : '\u2014';
+  tableRows.push(['total', '', '', '', ...totals, '\u2014', totalCost]);
 
   lines.push(formatStatsTable(
     ['Phase', 'Provider', 'Model', 'Implementer', 'Input', 'Output', 'Cached', 'Tool calls', 'Duration (min)', 'Usage %', 'Cost ($)'],

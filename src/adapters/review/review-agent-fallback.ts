@@ -29,9 +29,8 @@ export function getStats(): typeof statsModule {
 }
 
 // Stage telemetry recording is best-effort: a failure must never break the
-// review loop. Token columns are populated only for the codex role (the C2 rule
-// guarantees at most one of implementer/reviewer is codex); other families
-// record honest zeros (architecture migration).
+// review loop. Resource columns contain only provider observations; unavailable
+// values remain unavailable for every family.
 //
 // Codex writes a fresh-counter rollout per launch, so we sum total_token_usage
 // across every rollout since the FIRST launch for this stored mission phase and
@@ -81,7 +80,7 @@ export async function markStageLaunchRecorded(
 }
 
 function stageMeasurements({ result, worktree, sinceMs }: Parameters<typeof recordStageStatsSafe>[1]) {
-  let durationMinutes = 0;
+  let durationMinutes: number | undefined;
   if (result && result.startedAt && result.endedAt) {
     durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
   }
@@ -105,11 +104,10 @@ export async function recordStageStatsSafe(
     error?: (_msg: string) => void;
     state?: FallbackReviewState;
     writeReviewStateFn?: ReviewStateWriter;
-    model?: string | null;
     missionStore?: MissionStore | null;
   }
 ): Promise<void> {
-  const { stage, slug, rootDir, worktree, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, model = null, missionStore = null } = opts;
+  const { stage, slug, rootDir, worktree, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, missionStore = null } = opts;
   const { durationMinutes, telemetry, runId } = stageMeasurements(opts);
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
@@ -125,7 +123,7 @@ export async function recordStageStatsSafe(
     }))) {
       return;
     }
-    try { getStats().accumulateStageStats({ configuration: opts.configuration, stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model, runId }); } catch { /* best-effort */ }
+    try { getStats().accumulateStageStats({ configuration: opts.configuration, stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, runId }); } catch { /* best-effort */ }
   } catch (err: unknown) {
     log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));
   }

@@ -18,7 +18,6 @@ export interface StageStatsRequest {
   readonly reviewer?: string;
   readonly telemetry?: ProviderResourceObservation | null;
   readonly durationMinutes?: number;
-  readonly model?: string | null;
 }
 
 /** Telemetry field mapping is pure and shared with compatibility consumers. */
@@ -28,31 +27,36 @@ function observationValue(observation: ProviderResourceObservation | null, name:
 
 function telemetryUsageFields(observation: ProviderResourceObservation | null) {
   const quota = quotaUsageLevel(observationValue(observation, 'provider-usage'));
+  const value = (name: string) => {
+    const observed = observationValue(observation, name);
+    return observed === undefined ? undefined : String(observed);
+  };
   return {
-    input_tokens: String(observationValue(observation, 'input') || 0),
-    output_tokens: String(observationValue(observation, 'output') || 0),
-    cached_tokens: String(observationValue(observation, 'cached') || 0),
-    thoughts_tokens: String(observationValue(observation, 'reasoning') || 0),
-    context_tokens: String(observationValue(observation, 'context') || 0),
-    tool_calls: String(observationValue(observation, 'tool-calls') || 0),
-    openai_usage_before: '0',
-    openai_usage_after: quota === null ? '' : String(Math.round(quota)),
-    openai_usage_delta: '0',
+    input_tokens: value('input'),
+    output_tokens: value('output'),
+    cached_tokens: value('cached'),
+    thoughts_tokens: value('reasoning'),
+    context_tokens: value('context'),
+    tool_calls: value('tool-calls'),
+    openai_usage_before: undefined,
+    openai_usage_after: quota === null ? undefined : String(Math.round(quota)),
+    openai_usage_delta: undefined,
   };
 }
 
 export function telemetryToStatsFields(
   telemetry: ProviderResourceObservation | Record<string, unknown> | null | undefined,
-  options: { agentFamily?: string; durationMinutes?: number; model?: string | null } = {},
+  options: { durationMinutes?: number } = {},
 ) {
-  const { agentFamily, durationMinutes = 0, model } = options;
-  const observation = providerResourceObservation(telemetry, { provider: model || agentFamily, model: model || agentFamily });
+  const observation = providerResourceObservation(telemetry);
+  const duration = options.durationMinutes;
   return {
-    provider: observation?.provider || model || agentFamily || '',
-    model: observation?.model || model || agentFamily || '',
+    provider: observation?.provider || '',
+    model: observation?.model || '',
     ...telemetryUsageFields(observation),
-    duration_minutes: String(Math.max(0, Math.round(durationMinutes) || 0)),
-    cost_usd: String(observationValue(observation, 'cost') ?? 0),
+    duration_minutes: typeof duration === 'number' && Number.isFinite(duration) && duration >= 0
+      ? String(Math.round(duration)) : undefined,
+    cost_usd: observationValue(observation, 'cost')?.toString(),
   };
 }
 
@@ -79,7 +83,6 @@ export class StatsRecordingUseCase {
   recordReview(request: Omit<StageStatsRequest, 'stage'> & { readonly stage?: string }) {
     return this.recordStage({
       ...request, stage: request.stage ?? 'review',
-      implementer: request.implementer || request.reviewer,
     });
   }
 
@@ -119,32 +122,43 @@ export class StatsRecordingUseCase {
     if (!classification) {
       throw new Error(`Cannot record stage stats for ${request.slug}: ${error || 'missing classification'}`);
     }
-    const agentFamily = request.implementer || request.reviewer || 'unknown';
     return canonicalizeStatsRow({
       date: request.date, repo: this._port.repositoryName, mission: request.slug, classification,
       runId: request.runId,
-      implementer: agentFamily,
+      implementer: request.implementer,
       implementer_agent: request.implementer || '', reviewer_agent: request.reviewer || '', stage: request.stage,
-      ...telemetryToStatsFields(request.telemetry, { agentFamily, durationMinutes: request.durationMinutes, model: request.model }),
+      ...telemetryToStatsFields(request.telemetry, { durationMinutes: request.durationMinutes }),
     });
   }
 }
 
+function observed(value: unknown): boolean {
+  return value !== null && value !== undefined && String(value).trim() !== '';
+}
+
+function mergeObserved(existing: unknown, incoming: unknown, combine: (a: string, b: string) => string) {
+  if (!observed(existing)) { return observed(incoming) ? String(incoming) : undefined; }
+  if (!observed(incoming)) { return String(existing); }
+  return combine(String(existing), String(incoming));
+}
+
 function mergeStageRows(existing: StatsRow, incoming: StatsRow): StatsRow {
   const merged = { ...existing, ...incoming,
-    provider: mergeLabel(String(existing.provider), String(incoming.provider)),
+    provider: mergeLabel(observed(existing.provider) ? String(existing.provider) : '',
+      observed(incoming.provider) ? String(incoming.provider) : ''),
     // Identity includes the model, so a merged pair always shares one concrete model.
     model: existing.model, actorKey: existing.actorKey,
-    cost_usd: accumulateDecimalStrings(String(existing.cost_usd), String(incoming.cost_usd)),
+    cost_usd: mergeObserved(existing.cost_usd, incoming.cost_usd, accumulateDecimalStrings),
   };
   for (const key of [
     'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens',
     'tool_calls', 'openai_usage_delta', 'duration_minutes',
   ] as const) {
-    merged[key] = accumulateIntegerStrings(String(existing[key]), String(incoming[key]));
+    merged[key] = mergeObserved(existing[key], incoming[key], accumulateIntegerStrings);
   }
-  merged.openai_usage_before = accumulateIntegerStrings(String(existing.openai_usage_before), String(incoming.openai_usage_before), { mode: 'replace' });
-  merged.openai_usage_after = !existing.openai_usage_after && !incoming.openai_usage_after ? ''
-    : accumulateIntegerStrings(String(existing.openai_usage_after), String(incoming.openai_usage_after), { mode: 'max' });
+  merged.openai_usage_before = mergeObserved(existing.openai_usage_before, incoming.openai_usage_before,
+    (a, b) => accumulateIntegerStrings(a, b, { mode: 'replace' }));
+  merged.openai_usage_after = mergeObserved(existing.openai_usage_after, incoming.openai_usage_after,
+    (a, b) => accumulateIntegerStrings(a, b, { mode: 'max' }));
   return merged;
 }

@@ -99,8 +99,6 @@ function getMeasurementStore(options: StatsOptions = {}): StatisticsMeasurementS
  * must survive storage rather than becoming an invented measured zero.
  */
 function measurementToStatsRow(record: import('../../../application/ports/mission-measurements.js').UsageRecord & { readonly actorKey?: string }): StatsRow {
-  const numeric = (value: unknown) => (value === null || value === undefined ? '0' : String(value));
-  // Missing review observations and quota levels are not measured zeros.
   const nullableNumeric = (value: unknown) => (value === null || value === undefined ? undefined : String(value));
   return {
     date: record.date || '',
@@ -116,17 +114,17 @@ function measurementToStatsRow(record: import('../../../application/ports/missio
     implementer_agent: record.implementer_agent || '',
     reviewer_agent: record.reviewer_agent || '',
     stage: record.stage || 'default',
-    input_tokens: numeric(record.input_tokens),
-    output_tokens: numeric(record.output_tokens),
-    cached_tokens: numeric(record.cached_tokens),
-    thoughts_tokens: numeric(record.thoughts_tokens),
-    context_tokens: numeric(record.context_tokens),
-    tool_calls: numeric(record.tool_calls),
-    openai_usage_before: numeric(record.openai_usage_before),
+    input_tokens: nullableNumeric(record.input_tokens),
+    output_tokens: nullableNumeric(record.output_tokens),
+    cached_tokens: nullableNumeric(record.cached_tokens),
+    thoughts_tokens: nullableNumeric(record.thoughts_tokens),
+    context_tokens: nullableNumeric(record.context_tokens),
+    tool_calls: nullableNumeric(record.tool_calls),
+    openai_usage_before: nullableNumeric(record.openai_usage_before),
     openai_usage_after: nullableNumeric(record.openai_usage_after),
-    openai_usage_delta: numeric(record.openai_usage_delta),
-    duration_minutes: numeric(record.duration_minutes),
-    cost_usd: numeric(record.cost_usd),
+    openai_usage_delta: nullableNumeric(record.openai_usage_delta),
+    duration_minutes: nullableNumeric(record.duration_minutes),
+    cost_usd: nullableNumeric(record.cost_usd),
   };
 }
 
@@ -137,12 +135,14 @@ function measurementToStatsRow(record: import('../../../application/ports/missio
  */
 function statsRowToMeasurement(row: StatsRow) {
   const int = (value: unknown) => {
+    if (value === null || value === undefined || String(value).trim() === '') { return undefined; }
     const parsed = Number.parseInt(String(value), 10);
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : undefined;
   };
   const dec = (value: unknown) => {
+    if (value === null || value === undefined || String(value).trim() === '') { return undefined; }
     const parsed = Number.parseFloat(String(value));
-    return Number.isFinite(parsed) ? parsed : 0;
+    return Number.isFinite(parsed) ? parsed : undefined;
   };
   return {
     repo: String(row.repo || ''),
@@ -153,7 +153,7 @@ function statsRowToMeasurement(row: StatsRow) {
     date: row.date || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
-    pr_fix_rounds: row.pr_fix_rounds === null || row.pr_fix_rounds === undefined ? undefined : int(row.pr_fix_rounds),
+    pr_fix_rounds: int(row.pr_fix_rounds),
     provider: row.provider || '',
     model: row.model || '',
     implementer_agent: row.implementer_agent || '',
@@ -165,7 +165,7 @@ function statsRowToMeasurement(row: StatsRow) {
     context_tokens: int(row.context_tokens),
     tool_calls: int(row.tool_calls),
     openai_usage_before: int(row.openai_usage_before),
-    openai_usage_after: row.openai_usage_after ? int(row.openai_usage_after) : undefined,
+    openai_usage_after: int(row.openai_usage_after),
     openai_usage_delta: int(row.openai_usage_delta),
     duration_minutes: int(row.duration_minutes),
     cost_usd: dec(row.cost_usd),
@@ -315,7 +315,6 @@ export interface StatsRecordingOptions extends StatsOptions {
   reviewer?: string;
   telemetry?: StageStatsRequest['telemetry'];
   durationMinutes?: number;
-  model?: string | null;
   missionStore?: ReviewReadStore | null;
   readMissionFlow?: StatsReadBinding['readMissionFlow'];
   /** Injected workflow history; defaults to the operator state's lane and rebound history. */
@@ -343,7 +342,7 @@ function stageRequest(options: StatsRecordingOptions): StageStatsRequest {
     runId: options.runId,
     date: options.date ?? formatDateOnly(new Date()),
     implementer: options.implementer, reviewer: options.reviewer,
-    telemetry: options.telemetry, durationMinutes: options.durationMinutes, model: options.model,
+    telemetry: options.telemetry, durationMinutes: options.durationMinutes,
   };
 }
 

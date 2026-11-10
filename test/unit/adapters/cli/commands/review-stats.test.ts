@@ -115,7 +115,7 @@ test('task-2213: weekly report retains live active-stage spend while excluding t
   const spend = report.slice(report.indexOf('Agent spend by stage this week'));
 
   assert.match(performance, /qwen3\.5\s+1\s+2\b/);
-  assert.match(spend, /qwen3\.5\s+0m \(0%\)\s+15m \(75%\)/);
+  assert.match(spend, /qwen3\.5\s+—\s+15m \(75%\)/);
 });
 
 test('task-2213: completing implementer fallback is used when its model telemetry is absent', () => {
