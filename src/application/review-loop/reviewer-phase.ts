@@ -13,8 +13,34 @@ import { isArtifactInfraFailure, isPollTimeout, POLL_TIMEOUT, type ReviewerArtif
 import { pinReviewBaseline } from './pin-baseline.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
+import { selectReviewer } from './reviewer-selection.js';
 
 type ReviewOutcome = { outcome: 'stop' } | { reviewState: unknown };
+
+/** Re-evaluate separation only at a judgment boundary, using the actual roles. */
+function routeCollidingReviewer(context: LoopContext): boolean {
+  const { identities, state } = context;
+  if (identities.reviewer !== identities.implementer) { return true; }
+  // Provider-disabled autonomous review consumes workflow-owned artifacts and
+  // launches neither role, so there is no agent-family collision to reroute.
+  if (identities.reviewer === 'autonomous' && !context.ports.provider) { return true; }
+  const selected = selectReviewer({
+    implementer: identities.implementer,
+    isContinue: true,
+    persisted: state,
+    maxAttempts: context.maxAttempts,
+    dryRun: context.dryRun,
+    providerEnabled: Boolean(context.ports.provider),
+    slug: context.slug,
+  }, context.ports.routing, context);
+  if (!selected) {
+    context.exit(1);
+    return false;
+  }
+  identities.reviewer = selected.reviewer;
+  state.reviewer = selected.reviewer;
+  return true;
+}
 
 /** The recorded integration repair the reviewer is told about. */
 async function integrationRepairBrief(context: LoopContext): Promise<string> {
@@ -354,6 +380,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
     return { outcome: 'stop' };
   }
   if (state.phase !== 'reviewing') { return { reviewState: await resumeFixingPhaseReview(context, round) }; }
+  if (!routeCollidingReviewer(context)) { return { outcome: 'stop' }; }
   // TASK-2582: the round-open boundary persists the authoritative active →
   // review transition before any destination-state work starts.
   if (!context.dryRun && !(await context.ports.state.openRound(state))) {

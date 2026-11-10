@@ -31,7 +31,9 @@ import {
   ConfiguredReviewerEligibility,
   currentReviewRound,
   reviewStatus,
+  type ReviewRound,
 } from '../../domain/review.js';
+import { agentFamily } from '../../domain/agents.js';
 import {
   persistReviewStateOrThrow,
   writeReviewState,
@@ -49,6 +51,13 @@ export interface OpenReviewRoundOptions {
 export type OpenReviewRoundResult =
   | { readonly ok: true }
   | { readonly ok: false; readonly diagnostic: string };
+
+function nextRoundAgents(state: ReviewLoopState, current: ReviewRound) {
+  return {
+    reviewer: state.reviewer ? agentFamily(state.reviewer) : current.reviewer,
+    implementer: state.implementer ? agentFamily(state.implementer) : current.implementer,
+  };
+}
 
 /**
  * Open a review round at the loop's review preparation boundary.
@@ -129,12 +138,13 @@ async function settleReviewLane(
     // recorded over a still-active Mission if the transition then failed
     // (review round 4, F8).
     const current = currentReviewRound(review);
+    const { reviewer, implementer } = nextRoundAgents(state, current);
     const eligibility = ConfiguredReviewerEligibility.fromReviewStep({
-      eligible: [current.reviewer],
+      eligible: [reviewer],
       strategy: 'random',
     });
     try {
-      review = beginNextReviewRound(review, current.reviewer, current.implementer, state.startedAt, eligibility);
+      review = beginNextReviewRound(review, reviewer, implementer, state.startedAt, eligibility);
     } catch (err) {
       return { ok: false, diagnostic: `Cannot advance the review round for ${slug}: ${err instanceof Error ? err.message : String(err)}` };
     }

@@ -13,7 +13,7 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
 
   // Operator-authorized TASK-2762 replacement: one real-tool batch preserves
   // every diagnostic assertion; private shell probes retain stage/status behavior.
-  test('standard analysis tools retain every diagnostic in one batch (TASK-2762)', () => {
+  test('standard ESLint and TypeScript tools retain every diagnostic in one batch (TASK-2762)', () => {
     const root = registeredMkdtemp('standard-analysis-batch-');
     try {
       const scenarios = [{ name: 'clean project', file: 'src/fixture.ts', source: 'export const validValue = 1;' },
@@ -44,6 +44,12 @@ const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
         assert.ok(actual, scenario.name);
         assert.match(JSON.stringify(scenario.name.includes('compiler') ? actual.compiler : actual.lint), scenario.diagnostic, scenario.name);
       }
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('standard test hygiene retains its focused-test diagnostic (TASK-2762)', () => {
+    const root = registeredMkdtemp('standard-analysis-hygiene-');
+    try {
       const focused = invalidAnalysis.find(scenario => scenario.name === 'focused test')!;
       const focusFile = path.join(root, focused.file);
       fs.mkdirSync(path.dirname(focusFile), { recursive: true });

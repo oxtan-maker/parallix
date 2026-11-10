@@ -22,7 +22,7 @@ await installModuleMocks();
 const { openRepairFixture, seedGit } = await import('../../lib/integration-repair-fixture.js');
 const { run: runCli } = await import('../../../src/composition/create-cli.js');
 
-test('continued review preserves the Codex PR after Claude reassignment (TASK-2784)', async t => {
+test('continued review reroutes a colliding persisted reviewer after Claude reassignment (TASK-2784, px-0054.01)', async t => {
   const fixture = await openRepairFixture({ slug: 'task-reassignment', state: 'undecided-review' });
   t.after(() => fixture.close());
   const { root, repo, worktree, slug, git } = fixture;
@@ -66,7 +66,7 @@ test('continued review preserves the Codex PR after Claude reassignment (TASK-27
   fs.writeFileSync(configPath, JSON.stringify(config));
   fs.writeFileSync(path.join(worktree, 'config/agents.json'), JSON.stringify({ steps: {
     active: { eligible: ['codex', 'claude', 'custom'], selection: 'random' },
-    review: { eligible: ['custom'], selection: 'random' },
+    review: { eligible: ['claude', 'custom'], selection: 'random' },
   } }));
   const taskPath = path.join(worktree, 'backlog/tasks', `${slug} - Fixture.md`);
   fs.writeFileSync(taskPath, fs.readFileSync(taskPath, 'utf8').replace('ready-for-integration', 'review').replace('[custom]', '[codex]'));
@@ -80,8 +80,8 @@ test('continued review preserves the Codex PR after Claude reassignment (TASK-27
     ['config', '--add', `url.${bare}.insteadOf`, origin.replace('http://', `http://${user}:${user}-token@`) + '/fixture/repo.git']));
   const mission = await fixture.load();
   const review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '739', url,
-    sourceBranch: branch, targetBranch: 'main' }, revision: changeRevision(oldHead) }, agentFamily('custom'), agentFamily('codex'),
-    '2026-10-19T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' }));
+    sourceBranch: branch, targetBranch: 'main' }, revision: changeRevision(oldHead) }, agentFamily('claude'), agentFamily('codex'),
+    '2026-10-19T10:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude'), agentFamily('custom')], strategy: 'random' }));
   await new SqliteMissionStore(fixture.database).save({ ...mission, assignee: agentFamily('codex'), review }, missionVersion(await fixture.version()));
   const messages: string[] = [];
   const logger = setLogger({ log: message => { messages.push(String(message)); }, error: message => { messages.push(String(message)); } });
@@ -105,7 +105,7 @@ test('continued review preserves the Codex PR after Claude reassignment (TASK-27
       return { status: 0, stdout: '', stderr: '' };
     })(),
   }));
-  const args = ['review', slug, '--implementer', 'claude', '--reviewer', 'custom'];
+  const args = ['review', slug, '--implementer', 'claude'];
   // Keep the real continuation probe and its timeout, but advance its idle
   // waits without spending two seconds of this workflow case's wall budget.
   // The polling contract owns real interval/timeout assertions in review.test.

@@ -7,8 +7,11 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ConfiguredReviewerEligibility,
+  applyReviewerCommand,
   beginNextReviewRound,
   changeRevision,
+  currentReviewRound,
+  reviewFindingId,
   startReview,
 } from '../../../../src/domain/review.js';
 import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
@@ -20,6 +23,9 @@ import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/missi
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { consumeReviewerArtifacts } from '../../../../src/adapters/review/review-artifacts.js';
+import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { applyReviewStateToReview } from '../../../../src/adapters/review/review-state-mapping.js';
 
 // Regression provenance: TASK-2339.
 describe("self review forbidden", { concurrency: false }, () => {
@@ -132,6 +138,138 @@ describe("self review forbidden", { concurrency: false }, () => {
       }),
       /Invalid agent config/,
     );
+  });
+});
+
+describe('current-role reviewer independence', { concurrency: false }, () => {
+  test('keeps a non-colliding explicit reviewer and an approved historical reviewer unchanged (px-0054.01)', () => {
+    const routing = {
+      eligibleFamilies: () => ['claude', 'codex', 'custom'],
+      nominate: () => assert.fail('an already valid reviewer must not be reselected'),
+      launcherStatus: () => ({ supported: true, detail: '' }),
+      runtimeMatrix: () => [],
+    };
+    const common = { maxAttempts: 2, dryRun: false, providerEnabled: true, slug: 'px-0054-stable' };
+
+    const explicit = selectReviewer({
+      ...common,
+      preferredReviewer: 'custom',
+      implementer: 'claude',
+      isContinue: false,
+      persisted: null,
+    }, routing, { emit: () => {} });
+    const historical = selectReviewer({
+      ...common,
+      implementer: 'claude',
+      isContinue: true,
+      persisted: { reviewer: 'claude', round: 1, phase: 'approved' },
+    }, routing, { emit: () => {} });
+
+    assert.equal(explicit?.reviewer, 'custom');
+    assert.equal(historical?.reviewer, 'claude');
+  });
+
+  test('reroutes a persisted reviewer that now matches the reassigned implementer (px-0054.01)', () => {
+    const nominations: string[][] = [];
+    const selected = selectReviewer({
+      implementer: 'claude',
+      isContinue: true,
+      persisted: { reviewer: 'claude', round: 2, phase: 'reviewing' },
+      maxAttempts: 2,
+      dryRun: false,
+      providerEnabled: true,
+      slug: 'px-0054-restart',
+    }, {
+      eligibleFamilies: () => ['claude', 'codex'],
+      nominate: excluded => {
+        nominations.push([...excluded]);
+        return 'codex';
+      },
+      launcherStatus: () => ({ supported: true, detail: '' }),
+      runtimeMatrix: () => [],
+    }, { emit: () => {} });
+
+    assert.equal(selected?.reviewer, 'codex');
+    assert.ok(nominations.some(excluded => excluded.includes('claude')));
+  });
+
+  test('reroutes the next-round reviewer after implementer fallback creates a collision (px-0054.01)', async () => {
+    let head = 'revision-1';
+    let reviewNumber = 0;
+    const fake = fakeReviewLoopPorts({
+      slug: 'px-0054-fallback',
+      agents: {
+        launch: async launch => {
+          if (launch.role === 'implementer') {
+            head = 'revision-2';
+            return { agent: 'claude', result: { status: 0 } };
+          }
+          return { agent: launch.agent, result: { status: 0 } };
+        },
+      },
+      artifacts: {
+        consumeReviewer: async () => {
+          reviewNumber += 1;
+          return reviewNumber === 1
+            ? { consumed: true, ok: true, reviewState: 'REQUEST_CHANGES', reviewFindings: [{ id: 'F1', summary: 'exercise the fixing phase' }] }
+            : { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] };
+        },
+        consumeImplementer: async () => ({ consumed: true, ok: true, disposition: 'CHANGES_MADE', changedRevision: true }),
+      },
+      preReview: { head: () => head },
+    });
+
+    await runReviewLoop({
+      slug: 'px-0054-fallback',
+      implementer: 'codex',
+      maxAttempts: 2,
+      skipReviewPreparation: true,
+    }, fake.ports);
+
+    const reviewerLaunches = fake.launches.filter(launch => launch.role === 'reviewer');
+    assert.deepEqual(reviewerLaunches.map(launch => launch.agent), ['claude', 'codex']);
+    assert.ok(reviewerLaunches.every(launch => !launch.exclude.includes(launch.agent)));
+    assert.equal(fake.current()?.phase, 'approved');
+  });
+
+  test('later implementer adoption does not rewrite an earlier judgment identity, revision, or time (px-0054.01)', () => {
+    const startedAt = '2026-11-10T09:00:00Z';
+    const decidedAt = '2026-11-10T09:05:00Z';
+    const review = applyReviewerCommand(startReview(
+      {
+        change: { kind: 'local-branch', sourceBranch: 'mission/px-0054-history', targetBranch: 'main' },
+        revision: changeRevision('review-preparation-1'),
+      },
+      fixtureAgentFamily('claude'),
+      fixtureAgentFamily('codex'),
+      startedAt,
+      ConfiguredReviewerEligibility.fromReviewStep({
+        eligible: [fixtureAgentFamily('claude'), fixtureAgentFamily('codex')],
+        strategy: 'random',
+      }),
+    ), {
+      type: 'request-changes',
+      decidedAt,
+      revision: changeRevision('review-preparation-1'),
+      comment: 'Fix the collision.',
+      findings: [{ id: reviewFindingId('F1'), summary: 'Keep roles independent.', location: null }],
+    });
+    const original = currentReviewRound(review);
+
+    const updated = applyReviewStateToReview(review, {
+      round: 1,
+      phase: 'fixing',
+      disposition: 'REQUEST_CHANGES',
+      reviewer: 'claude',
+      implementer: 'claude',
+    });
+    const historical = currentReviewRound(updated);
+
+    assert.equal(historical.reviewer, 'claude');
+    assert.equal(historical.implementer, 'codex');
+    assert.equal(historical.decision?.revision, 'review-preparation-1');
+    assert.equal(historical.decision?.decidedAt, decidedAt);
+    assert.deepEqual(historical.decision, original.decision);
   });
 });
 

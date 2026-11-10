@@ -558,6 +558,11 @@ without usable review output, automatic review tries the next configured eligibl
 independent family. Positive provider availability or quota evidence blocks the
 failed family before reselection; ambiguous failures affect only that run. The
 actual fallback family is recorded as reviewer for artifacts and continuation.
+Before each later judgment, review routing compares that actual reviewer with the
+current actual implementer again; reassignment, restart, or a provider/quota
+fallback cannot silently turn a multi-family round into self-review. Completed
+rounds keep the reviewer, implementer, revision, and decision time that actually
+produced their judgment.
 For manual control, restrict the configured review eligibility to the intended
 family, or stop the workflow and resume it later with
 `px review --reviewer <family>`. Mutating implementer and repair ownership remains

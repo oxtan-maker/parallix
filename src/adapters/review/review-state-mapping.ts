@@ -88,6 +88,13 @@ function reattributedReviewerResults(reviewer: AgentFamily, previous: ReviewRoun
     : result);
 }
 
+function implementerFromState(state: ReviewStateData, previous: ReviewRound): AgentFamily {
+  // A later fixing-phase fallback is the next implementer, not the author of
+  // the revision this recorded judgment evaluated. Keep that historical role
+  // immutable once the reviewer has decided this round.
+  return previous.decision ? previous.implementer : familyFrom(state.implementer, previous.implementer);
+}
+
 function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRound {
   const phase = state.phase === undefined ? requireReviewPhase(previous.phase) : requireReviewPhase(state.phase);
   const disposition = state.disposition === undefined ? previous.disposition : parseReviewDisposition(state.disposition);
@@ -111,7 +118,7 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
     ...previous,
     reviewer,
     ...(reviewerResults ? { reviewerResults } : {}),
-    implementer: familyFrom(state.implementer, previous.implementer),
+    implementer: implementerFromState(state, previous),
     subject: subjectFromState(state, previous),
     startedAt,
     // Typed verdicts and resolutions may commit while an agent is running.

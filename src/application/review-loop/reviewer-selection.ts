@@ -159,7 +159,8 @@ function exhaustedReviewerRoute(selection: Selection, context: Context, reviewer
 function routeRunnableReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null): boolean {
   let reviewerStatus = context.routing.launcherStatus(selection.reviewer!);
   const triedReviewers = new Set<string>();
-  while (!context.agents.includes(selection.reviewer!) || !reviewerStatus.supported) {
+  while (!context.agents.includes(selection.reviewer!) || !reviewerStatus.supported
+    || selection.reviewer === context.implementer && hasDifferentFamilyRoute(context)) {
     if (!context.agents.includes(selection.reviewer!)) {
       context.emit({ kind: 'agent-selection', outcome: 'skipped-blocked', fields: { agent: selection.reviewer, step: 'review' } });
     }
@@ -204,8 +205,9 @@ export function selectReviewer(
   const round = request.persisted?.round || 1;
   const willLaunchRounds = request.maxAttempts >= round;
   const resumesInFixingPhase = request.persisted?.phase === 'fixing' && !request.dryRun;
+  const resumesDecidedPhase = request.persisted?.phase === 'approved' && !request.dryRun;
 
-  const routed = routeSelectedReviewer(selection, context, persistedContinueReviewer, willLaunchRounds, resumesInFixingPhase);
+  const routed = routeSelectedReviewer(selection, context, persistedContinueReviewer, willLaunchRounds, resumesInFixingPhase, resumesDecidedPhase);
   if (!routed) { return null; }
 
   context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source, round, isContinue: request.isContinue });
@@ -222,9 +224,13 @@ function continuedReviewer(request: ReviewerSelectionRequest): string | null {
   return request.persisted?.reviewer ?? null;
 }
 
-function routeSelectedReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null, willLaunchRounds: boolean, resumesInFixingPhase: boolean): boolean {
+function routeSelectedReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null, willLaunchRounds: boolean, resumesInFixingPhase: boolean, resumesDecidedPhase: boolean): boolean {
   if (selection.source === 'fallback') {
     context.emit({ kind: 'autonomous-reviewer-selected' });
+    return true;
+  } else if (resumesDecidedPhase) {
+    // This is historical attribution, not a new judgment route. Preserve the
+    // reviewer that made the decision even when the implementer later changes.
     return true;
   } else if (resumesInFixingPhase) {
     context.emit({ kind: 'fixing-reviewer-resumed', reviewer: selection.reviewer });

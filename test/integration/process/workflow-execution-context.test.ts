@@ -252,8 +252,8 @@ test('a root from an unrelated repository fails instead of resolving through the
 });
 
 test('a recorded non-main base is checked out beside its own repository only once the mission identity is established (TASK-2777)', async t => {
-  const [removedSlug, liveSlug] = ['task-97783', 'task-97784'];
-  const fixture = repository(t, [removedSlug, liveSlug]);
+  const slug = 'task-97783';
+  const fixture = repository(t, [slug]);
   // The configured primary checkout belongs to another repository: the base
   // worktree ADR 0045 auto-creates must still land beside this repository.
   const otherParent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'px-unrelated-repo-')));
@@ -263,32 +263,37 @@ test('a recorded non-main base is checked out beside its own repository only onc
   git(other, 'init', '-q', '-b', 'main');
   const configuration = resolveConfiguration({ PRIMARY_WORKTREE: other, PATH: process.env.PATH, HOME: otherParent });
   git(fixture.primary, 'branch', 'base/paid');
-  for (const slug of [removedSlug, liveSlug]) { git(fixture.primary, 'config', `branch.mission/${slug}.parallixBase`, 'base/paid'); }
+  git(fixture.primary, 'config', `branch.mission/${slug}.parallixBase`, 'base/paid');
   const probe = (base: string, landedSlug: string) => findLandedSquashOnBaseBranch(base, landedSlug);
   const worktrees = () => git(fixture.primary, 'worktree', 'list', '--porcelain');
-  // An unproven removal is a failure, and probing the base branch adds no checkout.
-  fs.rmSync(fixture.worktrees[removedSlug], { recursive: true, force: true });
+  // Temporarily hide the registered checkout: an unproven removal is a failure,
+  // and probing the base branch adds no checkout. Restoring the same checkout
+  // then exercises the live path without paying for an unrelated second mission.
+  const hiddenWorktree = `${fixture.worktrees[slug]}-hidden`;
+  fs.renameSync(fixture.worktrees[slug], hiddenWorktree);
   const start = worktrees();
-  const unproven = resolveMissionExecutionContext(removedSlug, fixture.primary, configuration, args => gitModule.git(args), probe);
+  const unproven = resolveMissionExecutionContext(slug, fixture.primary, configuration, args => gitModule.git(args), probe);
   assert.equal(unproven.ok, false);
-  assert.match(unproven.reason!, new RegExp(`Mission ${removedSlug}: mission worktree .* for mission/${removedSlug} is missing`));
+  assert.match(unproven.reason!, new RegExp(`Mission ${slug}: mission worktree .* for mission/${slug} is missing`));
   assert.equal(worktrees(), start, 'an unproven removal must not add a checkout');
+  fs.renameSync(hiddenWorktree, fixture.worktrees[slug]);
   // A live mission whose recorded base exists but is not checked out gets it at the conventional path.
   const expectedBase = conventionalBaseWorktreePath('base/paid', fixture.primary);
-  const live = resolveMissionExecutionContext(liveSlug, fixture.primary, configuration);
+  const live = resolveMissionExecutionContext(slug, fixture.primary, configuration);
   assert.equal(live.ok, true, live.ok ? '' : live.reason);
-  if (live.ok) { assert.deepEqual(live.context, { missionId: liveSlug, missionWorktree: fixture.worktrees[liveSlug], missionBranch: `mission/${liveSlug}`, baseWorktree: expectedBase, baseBranch: 'base/paid' }); }
+  if (live.ok) { assert.deepEqual(live.context, { missionId: slug, missionWorktree: fixture.worktrees[slug], missionBranch: `mission/${slug}`, baseWorktree: expectedBase, baseBranch: 'base/paid' }); }
   assert.equal(git(expectedBase, 'branch', '--show-current'), 'base/paid');
   const created = worktrees();
-  assert.equal(resolveMissionExecutionContext(liveSlug, fixture.primary, configuration).ok, true);
+  assert.equal(resolveMissionExecutionContext(slug, fixture.primary, configuration).ok, true);
   assert.equal(worktrees(), created, 'a second resolution reuses the base checkout');
   assert.doesNotMatch(git(other, 'worktree', 'list', '--porcelain'), /base-base-paid/);
   // Once the landing on the base is proven, a removed base checkout is recreated for the closeout.
-  git(expectedBase, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', `Fixture landing\n\nTask: ${removedSlug}\n`);
+  git(expectedBase, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', `Fixture landing\n\nTask: ${slug}\n`);
   git(fixture.primary, 'worktree', 'remove', expectedBase);
-  const proven = resolveMissionExecutionContext(removedSlug, fixture.primary, configuration, args => gitModule.git(args), probe);
+  fs.rmSync(fixture.worktrees[slug], { recursive: true, force: true });
+  const proven = resolveMissionExecutionContext(slug, fixture.primary, configuration, args => gitModule.git(args), probe);
   assert.equal(proven.ok, true, proven.ok ? '' : proven.reason);
-  if (proven.ok) { assert.deepEqual(proven.context, { missionId: removedSlug, missionWorktree: null, missionBranch: `mission/${removedSlug}`, baseWorktree: expectedBase, baseBranch: 'base/paid' }); }
+  if (proven.ok) { assert.deepEqual(proven.context, { missionId: slug, missionWorktree: null, missionBranch: `mission/${slug}`, baseWorktree: expectedBase, baseBranch: 'base/paid' }); }
 });
 
 test('a terminal integrate run with an unresolved context runs nothing, mutates nothing and releases its claim (TASK-2777)', async t => {
