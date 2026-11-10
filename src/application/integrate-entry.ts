@@ -1,5 +1,6 @@
 import * as fmt from './presentation/cli-format.js';
-import type { IntegrateOptions } from './integrate-workflow.js';
+import type { IntegrateOptions, ResolvedIntegrateOptions } from './integrate-workflow.js';
+import type { MissionExecutionContextResolution } from './ports/mission-execution-context.js';
 import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
 import type { IntegrateRunState } from './integrate/squash.js';
 import type { IntegrateSeams } from './integrate/gates.js';
@@ -8,7 +9,7 @@ import { parseIntegrateArgs, type IntegrateRequest } from './integrate/support.j
 import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/execution-activity-recorder.js';
 
 interface IntegrateEntrySteps {
-  runIntegration(slug: string, request: IntegrateRequest, options: IntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1>;
+  runIntegration(slug: string, request: IntegrateRequest, options: ResolvedIntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1>;
   restoreTemporaryStash(slug: string, stash: IntegrateRunState['temporaryStash']): 0 | 1;
 }
 
@@ -81,6 +82,9 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
       fmt.log.warn('integrate ignores --no-gate. The landed squash commit relies on the local git hooks for validation.');
     }
 
+    // The exclusive claim comes first: resolving the context may add the ADR 0045
+    // base worktree, so a losing concurrent run must be rejected before any Git
+    // mutation. An unresolved context releases the claim and stops the run.
     const releaseIntegration = await ports.process.claimIntegration(slug);
     if (!releaseIntegration) {
       fmt.log.fail(`Integration of ${slug} is already running in another process. Wait for it to finish before retrying.`);
@@ -89,19 +93,28 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
     }
 
     try {
-      const seams = integrationSeams(options, ports);
-      const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
-      try {
-        // TASK-2620: a repair re-review no longer restarts integration. The
-        // run executes once; on a repaired-and-re-approved revision it stops in
-        // the integration lane for the human.
-        exitCode = await steps.runIntegration(slug, request, options, seams, state);
-      } catch (error) {
-        exitCode = integrationFailure(error, ports, state);
-      }
-      exitCode = Math.max(exitCode, steps.restoreTemporaryStash(slug, state.temporaryStash));
-      if (state.nextActionMessage) {
-        fmt.log.info(state.nextActionMessage);
+      // The one resolution of a run, for every caller: the board and its
+      // supervisor only observe, so none of them mutates before this claim.
+      // Nothing below substitutes the working directory.
+      const execution: MissionExecutionContextResolution = ports.missionContext.resolve(slug, options.executionRoot ?? ports.process.cwd());
+      if (!execution.ok) {
+        fmt.log.fail(execution.reason);
+        exitCode = 1;
+      } else {
+        const seams = integrationSeams(options, ports);
+        const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
+        try {
+          // TASK-2620: a repair re-review no longer restarts integration. The
+          // run executes once; on a repaired-and-re-approved revision it stops in
+          // the integration lane for the human.
+          exitCode = await steps.runIntegration(slug, request, { ...options, executionContext: execution.context }, seams, state);
+        } catch (error) {
+          exitCode = integrationFailure(error, ports, state);
+        }
+        exitCode = Math.max(exitCode, steps.restoreTemporaryStash(slug, state.temporaryStash));
+        if (state.nextActionMessage) {
+          fmt.log.info(state.nextActionMessage);
+        }
       }
     } finally {
       await releaseIntegration();

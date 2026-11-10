@@ -181,7 +181,7 @@ class MissionLanding {
     const lane = await run.missionServices.store.load(missionId(slug));
     const recordedTitle = lane.kind === 'found' ? String(lane.mission.title ?? '').trim() : '';
     const summary = (recordedTitle || this.dependencies.missionPaths.missionTitle(slug) || slug).replace(/\s+/g, ' ').trim();
-    // A DB-owned adhoc identity has no Backlog task file; the closeout is
+    // A DB-owned identity has no Backlog task file; the closeout is
     // best-effort and guards every task-file access, so mainTaskFile stays empty.
     const mainTaskFile = resolveIntegrationTaskPath(context.task?.taskFile, context.missionWorktree, baseWorktree);
     if (mainTaskFile === null) {

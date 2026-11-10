@@ -1,4 +1,5 @@
 import { failureReason, StructuredFailure } from '../domain/failure-reason.js';
+import type { MissionVersion } from './domain-ports.js';
 import { integrationRepairNeedsReview } from '../domain/integration-repair-policy.js';
 import { classifyReboundReason, type ReboundReason } from '../domain/rebound-policy.js';
 import { isReviewerPoolExhausted } from '../domain/reviewer-assignment-policy.js';
@@ -182,17 +183,18 @@ export class ReviewSubmissionService {
 }
 
 /** Stage entry records intent, without inventing a Review subject or verification. */
-export async function beginReviewPreparation(slug: string, services: Pick<ReviewPreparationMissionServices, 'store' | 'lifecycle'>): Promise<void> {
+export async function beginReviewPreparation(slug: string, services: Pick<ReviewPreparationMissionServices, 'store' | 'lifecycle'>): Promise<MissionVersion> {
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error(`The operator database holds no Mission ${slug}; review preparation cannot read its recorded contract.`); }
-  if (loaded.mission.status === 'review') { return; }
+  if (loaded.mission.status === 'review') { return loaded.version; }
   const result = await services.lifecycle.transition({
     operationId: `review-preparation:${slug}`, missionId: loaded.mission.id, expectedVersion: loaded.version,
     capabilities: new Set(['mission:transition']), command: { type: 'begin-review-preparation' },
     actor: loaded.mission.assignee ?? 'review', occurredAt: new Date().toISOString(),
     idempotencyKey: `review-preparation:${slug}:${loaded.version}`,
   });
-  if (result.status !== 'completed') { throw new StructuredFailure(result.error?.message ?? 'Cannot enter review preparation', result.error?.failureReason ?? failureReason('state-machine', 'lifecycle', { operation: 'begin-review-preparation' })); }
+  if (result.status !== 'completed' || !result.value) { throw new StructuredFailure(result.error?.message ?? 'Cannot enter review preparation', result.error?.failureReason ?? failureReason('state-machine', 'lifecycle', { operation: 'begin-review-preparation' })); }
+  return result.value.version;
 }
 
 /** Reuse the planned checkpoint owner for concrete implementation/evidence repairs. */

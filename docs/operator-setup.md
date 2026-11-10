@@ -646,10 +646,10 @@ If the local base advances while a conflict agent is completing the rebase,
 review preparation rebases again in the same review round; that mechanical retry
 does not spend another agent-repair attempt.
 
-From the mission worktree, run `px review` to enter review. It creates the first
-Review prepares a known Mission or resumes its recorded round,
-intervention or unfinished repair. Web review actions select that mission
-worktree automatically. Review preparation
+From the mission worktree, run `px review` to enter review. It prepares a known Mission or resumes its recorded round,
+intervention or unfinished repair. If an implementer response is already recorded,
+it prepares the next round even when the mission remains in review. Web review
+actions select that mission worktree automatically. Review preparation
 still requires completed success criteria and checkpoint evidence; entering
 review supplies neither evidence nor approval. Use `--status` to inspect the
 recorded Review and enabled provider PR status without running the workflow. `--start`, `--continue` and the stop-only `--resume`

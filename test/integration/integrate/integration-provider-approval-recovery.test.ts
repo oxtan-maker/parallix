@@ -1,4 +1,5 @@
 import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { forgejoApiFixture } from '../../fixtures/forgejo-api.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
@@ -189,6 +190,7 @@ async function seedActiveApprovedByReviewer(slug: string, reviewerLogin: string,
     database,
     home,
     previousHome,
+    root,
     slug,
     cleanup: async () => {
       await database.close();
@@ -338,8 +340,7 @@ test('task-2420: buildIntegrationContext derives reviewerUser from the recorded 
 
     let capturedReviewerUser: string | null | undefined;
     const context = await buildIntegrationContext('task-2420', {
-      baseBranch: 'main',
-      baseWorktree: root,
+      executionContext: missionExecutionContext({ missionId: 'task-2420', missionWorktree: root, baseWorktree: root, baseBranch: 'main' }),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
       getPrStatusFn: () => ({ raw: '', number: undefined, title: undefined, state: undefined, url: undefined, createdAt: null,  exists: true as const, merged: false }),
@@ -441,8 +442,7 @@ test('task-2420: buildIntegrationContext passes the authoritative store to the d
   try {
     let capturedReviewerUser: string | null | undefined;
     const context = await buildIntegrationContext('task-2420', {
-      baseBranch: 'main',
-      baseWorktree: root,
+      executionContext: missionExecutionContext({ missionId: 'task-2420', missionWorktree: root, baseWorktree: root, baseBranch: 'main' }),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
       getPrStatusFn: () => ({ raw: '', number: undefined, title: undefined, state: undefined, url: undefined, createdAt: null,  exists: true as const, merged: false }),
@@ -479,6 +479,7 @@ test('task-2420: buildIntegrationContext without the authoritative store does no
   try {
     let capturedReviewerUser: string | null | undefined;
     await buildIntegrationContext('task-2420-neg', {
+      executionContext: missionExecutionContext({ missionId: 'task-2420-neg', missionWorktree: ctx.root, baseWorktree: ctx.root, baseBranch: 'main' }),
       isForgejoReviewEnabledFn: () => true,
       readTokenFn: () => null,
       getPrStatusFn: () => ({ raw: '', number: undefined, title: undefined, state: undefined, url: undefined, createdAt: null,  exists: true as const, merged: false }),

@@ -20,6 +20,7 @@ import { completed, failure } from '../../../src/application/contracts.js';
 import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { requestReviewIntervention } from '../../../src/domain/review.js';
+import { bindReviewOperatorResume } from '../../../src/composition/review-operator-resume.js';
 
 function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }, preparation: {
   select?: ConstructorParameters<typeof WorkflowOperationService>[5];
@@ -341,13 +342,65 @@ test('browser review resumes through the same operator continuation as px review
     const result = await f.service.admit(shape === 'cli' ? cli : browser);
     assert.equal(result.status, 'accepted', `${shape}: ${JSON.stringify(result)}`);
     const operation = await f.service.operation(shape);
-    admitted.push({ command: operation?.command, operatorInvocation: operation?.operatorInvocation, invocation: { ...operation?.invocation, interactive: false } });
-    await f.service.run(shape, async run => { executed.push(run); return completed({}); });
+    admitted.push({ command: operation?.command, operatorInvocation: operation?.operatorInvocation,
+      permit: operation?.reviewOperatorResume?.recovery.action,
+      invocation: { ...operation?.invocation, interactive: false } });
+    await f.service.run(shape, async run => {
+      executed.push(run);
+      const ownedResume = bindReviewOperatorResume(f.store, true, {}, async () => ({
+        workflow: { id: shape, phase: 'executing', reason: null },
+        liveness: { workflow: true, coordinator: true, execution: false, reviewer: false },
+      }), operation?.reviewOperatorResume);
+      assert.equal((await ownedResume!.assess('task-one')).outcome, 'permitted', `${shape} recovery survives its own claimed workflow`);
+      return completed({});
+    });
   }
   assert.deepEqual(admitted[1], admitted[0]);
-  assert.deepEqual(admitted[0], { command: 'review:submit', operatorInvocation: true, invocation: { command: 'review', args: ['task-one'], interactive: false } });
+  assert.deepEqual(admitted[0], { command: 'review:submit', operatorInvocation: true, permit: 'acknowledge-and-resume',
+    invocation: { command: 'review', args: ['task-one'], interactive: false } });
   assert.deepEqual(executed.map(run => [run.kind, run.operatorInvocation]), [['review:submit', true], ['review:submit', true]]);
 });
+
+test('CLI recovery preserves explicit options and interactive mode (PX-0041.03)', async () => {
+  const f = fixture();
+  const review = requestReviewIntervention(pendingReview('task-one'), {
+    requestedAt: '2026-11-04T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
+  });
+  f.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
+  const invocation = { command: 'review' as const, interactive: true,
+    args: ['task-one', '--max-attempts', '1', '--reviewer', 'configured-reviewer', '--actor', 'operator'] };
+  const admitted = await f.service.admit({ operationId: 'cli-options', missionId: 'task-one', kind: 'review:submit',
+    capabilities: new Set(['review:submit']), operatorInvocation: true, invocation });
+  assert.equal(admitted.status, 'accepted');
+  assert.deepEqual((await f.service.operation('cli-options'))?.invocation, invocation);
+  assert.equal((await f.service.operation('cli-options'))?.reviewOperatorResume?.recovery.action, 'acknowledge-and-resume');
+});
+
+for (const shape of ['cli', 'browser'] as const) {
+  test(`${shape} recovery retains admission through its active-to-review transition (PX-0041.03)`, async () => {
+    const f = fixture();
+    const review = requestReviewIntervention(pendingReview('task-one'), {
+      requestedAt: '2026-11-04T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
+    });
+    f.missions.set('task-one', fixtureMission('task-one', { status: 'active', review }));
+    const result = await f.service.admit({ operationId: shape, missionId: 'task-one', kind: 'review:submit',
+      capabilities: new Set(['review:submit']), ...(shape === 'cli' ? {
+        operatorInvocation: true, invocation: { command: 'review' as const, args: ['task-one'] },
+      } : { missionStatusAtRequest: 'active' }) });
+    assert.equal(result.status, 'accepted', JSON.stringify(result));
+    assert.equal(f.missions.get('task-one')?.status, 'review');
+    let outcome: string | null = null;
+    await f.service.run(shape, async () => {
+      const operation = await f.service.operation(shape);
+      const resume = bindReviewOperatorResume(f.store, true, {}, async () => assert.fail('the claimed operation must use its admission'), operation?.reviewOperatorResume);
+      outcome = (await resume!.assess('task-one')).outcome;
+      return completed({});
+    });
+    assert.equal(outcome, 'permitted');
+    assert.equal((await f.service.operation(shape))?.phase, 'completed');
+    assert.deepEqual(f.events, ['active:review']);
+  });
+}
 
 test('browser review resumes only for an acknowledge-and-resume decision (TASK-2839)', async () => {
   const review = requestReviewIntervention(pendingReview('task-one'), {
@@ -377,6 +430,14 @@ test('browser review resumes only for an acknowledge-and-resume decision (TASK-2
   const healthyRefusal = await healthy.service.admit(request);
   assert.equal(healthyRefusal.status, 'failed');
   assert.deepEqual(healthy.launches, []);
+
+  const directLive = fixture(false, undefined, { reviewExecution: async () => ({ workflow: { id: 'other-review', phase: 'executing', reason: null },
+    liveness: { workflow: true, coordinator: false, execution: false, reviewer: false } }) });
+  directLive.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
+  const directRefusal = await directLive.service.admit({ ...request, missionStatusAtRequest: undefined,
+    operatorInvocation: true, invocation: { command: 'review', args: ['task-one'], interactive: false } });
+  assert.equal(directRefusal.status, 'failed');
+  assert.deepEqual(directLive.launches, [], 'pre-existing owned work is refused before direct CLI admission');
 });
 
 test('CLI review retains eligibility outside integration continuation (TASK-2750)', async () => {

@@ -53,6 +53,7 @@ import { statusMissionTitle } from './status-board.js';
 import { createReviewLivenessReader } from './review-liveness.js';
 import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
+import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
 import type { ReviewLoopObservers } from '../adapters/review/review-workflow-adapter.js';
 import type { StartReviewRound } from '../application/ports/review-round.js';
@@ -74,16 +75,19 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         mission.lifecycle,
         reviewerSessionPort,
       );
+      const reviewLiveness = createReviewLivenessReader(services, rootDir, configuration);
+      const ownedOperation = configuration.runtime.workflowOperation && services.operatorState.db
+        ? await new SqliteWorkflowOperationStore(services.operatorState.db, mission.repositoryId).get(configuration.runtime.workflowOperation) : null;
       const adapter = createReviewWorkflowAdapter({
         configuration,
         ...options,
-        operatorResume: bindReviewOperatorResume(services.mission.store, context.operatorReview ?? false, options ?? {}),
+        operatorResume: bindReviewOperatorResume(services.mission.store, context.operatorReview ?? false, options ?? {}, reviewLiveness, ownedOperation?.reviewOperatorResume),
         // SC4: refuse to review a mission whose payload already landed.
         payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
         missionServicesFn,
         requireReviewAggregate: true,
         readReviewStateFn: persistence.readReviewState,
-        readReviewLiveness: createReviewLivenessReader(services, rootDir, configuration),
+        readReviewLiveness: reviewLiveness,
         writeReviewStateFn: persistence.writeReviewState,
         resetReviewStateFn: persistence.resetReviewState,
         createEventFn: persistence.createEvent,
@@ -97,7 +101,7 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
           ...observers,
           configuration,
-          integrationRepair: integrationRepairContinuation(mission, configuration),
+          integrationRepair: integrationRepairContinuation(mission, configuration, rootDir),
           integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
           classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
@@ -184,11 +188,17 @@ function createActiveService(context: CliCommandContext): Command {
 }
 
 function createIntegrationRunner(context: CliCommandContext, runReview: (args: string[], options: Record<string, unknown>, borrowed?: Awaited<ReturnType<typeof createProductionApplicationServices>>) => Promise<unknown>) {
-  const { rootDir, scope } = context;
+  const { rootDir, configuration, scope } = context;
   const { withMissionFactories } = scope;
   const runIntegrated = (innerArgs: string[], innerOptions: Record<string, unknown>, services: Awaited<ReturnType<typeof createProductionApplicationServices>>) =>
     withMissionFactories((missionServicesFn) => integrate(innerArgs, {
       ...innerOptions,
+      // The composition root owns the runtime configuration identity, and the
+      // integrate adapter resolves its mission execution context from it
+      // (PRIMARY_WORKTREE, worktree pattern, storage). The CLI runtime only
+      // carries command/exit fields, so this is where that identity is handed
+      // over — the same way resolveConflict and draft receive it (TASK-2777).
+      configuration,
       // In-process CLI and board workflows must return through their owners:
       // process.exit skips current-work cleanup and caller verification.
       exitFn: typeof innerOptions.exitFn === 'function' ? innerOptions.exitFn as (_code: number) => void : ((code: number) => {

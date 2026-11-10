@@ -204,12 +204,17 @@ function createBoardReviewPreparationWorkflow(
           const rounds = existing.kind === 'found' ? existing.mission.review?.rounds?.length ?? 0 : 0;
           return rounds > 0 ? { round: rounds } : null;
         },
-        isKnownMission: async () => (await store.load(missionId(slug))).kind === 'found',
+        loadMission: async () => {
+          const loaded = await store.load(missionId(slug));
+          return loaded.kind === 'found' ? { kind: 'found' as const } : loaded;
+        },
         clearHumanIntervention: async () => undefined,
         invalidateResolvedBlocker: async () => undefined,
         invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
-        mechanisms: () => createReviewLoopPorts(slug, {}, { integrationRepair: integrationRepairContinuation(missionServices, configuration), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
+        missionUnavailable: (_mission, reason) => { throw new Error(`Mission authority is unavailable for ${slug}: ${reason}`); },
+        reviewRecoveryRefused: (_mission, reason) => { throw new Error(`Review recovery refused for ${slug}: ${reason}`); },
+        mechanisms: () => createReviewLoopPorts(slug, {}, { integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };

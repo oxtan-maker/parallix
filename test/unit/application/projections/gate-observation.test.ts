@@ -43,7 +43,8 @@ function gate(command: string, evidence: Partial<Omit<DeclaredGateEvidence, 'com
   return { command, proof: { state: 'absent' }, failure: null, ...evidence };
 }
 
-function reader(declared: MissionGateEvidence | Error, integration: IntegrationGateEvidence | Error = new Error('not read')): GateEvidenceReader & { reads: number } {
+function reader(declared: MissionGateEvidence | Error,
+  integration: IntegrationGateEvidence | Error = { checkout: present, configured: [], gates: [], running: null }): GateEvidenceReader & { reads: number } {
   const evidence = {
     reads: 0,
     async readDeclaredGates() { evidence.reads += 1; if (declared instanceof Error) { throw declared; } return declared; },
@@ -55,11 +56,27 @@ function reader(declared: MissionGateEvidence | Error, integration: IntegrationG
 const observe = (evidence: GateEvidenceReader, subject: Mission, owner: WorkflowOperation | null = null) =>
   new VerificationGateObserver(evidence).observeGate(subject, owner);
 
-test('a mission with no declared gate is unconfigured without reading evidence (TASK-2775)', async () => {
+test('a mission with no declared gate is unconfigured when no integration run is active (TASK-2775)', async () => {
   const evidence = reader(new Error('must not read'));
   assert.equal(await observe(evidence, mission('active', [])), 'unconfigured');
   assert.equal(await observe(evidence, mission('backlog', [])), 'unconfigured');
-  assert.equal(evidence.reads, 0);
+  assert.equal(evidence.reads, 1, 'active checks integration evidence; backlog has no live checkout run or declared gate');
+});
+
+test('an unreadable live integration run record is unavailable, never absence or success (PX-0052)', async () => {
+  // A malformed or unreadable run record is an unobservable read, not a missing run.
+  // Falling through to the declared proof would certify an old pass (PX-0052 F6).
+  const liveReader: GateEvidenceReader = {
+    async readDeclaredGates() { return { checkout: present, gates: [gate(GATE, { proof: proof('current') })] }; },
+    async readIntegrationGates() { throw new Error('Integration execution evidence is unreadable'); },
+  };
+  assert.equal(await observe(liveReader, mission('active')), 'unavailable', 'an unobservable run cannot fall through to a current pass');
+  assert.equal(await observe(liveReader, mission('review')), 'unavailable');
+  const unreadableIntegration: GateEvidenceReader = {
+    ...liveReader,
+    async readIntegrationGates() { throw new Error('Integration execution evidence is unreadable'); },
+  };
+  assert.equal(await observe(unreadableIntegration, mission('integration')), 'unavailable', 'the integration lane already fails closed');
 });
 
 test('a just-started mission without a checkout or evidence has not run its gate (TASK-2775)', async () => {
@@ -168,6 +185,21 @@ test('integration observes the configured plan per gate, never the workflow phas
   assert.equal(await observe(plan(['unit']), mission('done')), 'not-run');
   assert.equal(await observe(plan(['unit'], { checkout: { kind: 'absent' } }), mission('done')), 'unavailable');
   assert.equal(await observe(reader(unused, new Error('history unavailable')), mission('integration')), 'unavailable');
+});
+
+test('a live integration run from the shared evidence read reports running for a mission that has a checkout (PX-0052)', async () => {
+  const declared = { checkout: present, gates: [gate(GATE, { proof: proof('current') })] };
+  const running: IntegrationGateEvidence = { checkout: present, configured: ['unit'], gates: [],
+    running: { attempt: null, startedAt: '2026-10-18T09:00:00.000Z' } };
+  const idlePlan: IntegrationGateEvidence = { ...running, running: null };
+  assert.equal(await observe(reader(declared, running), mission('review')), 'running', 'a dry-run has no workflow operation');
+  assert.equal(await observe(reader(declared, running), mission('active')), 'running');
+  assert.equal(await observe(reader(declared, idlePlan), mission('review')), 'passed', 'no run leaves the declared result');
+  const idle = reader(declared, running);
+  assert.equal(await observe(idle, mission('backlog')), 'passed', 'a backlog mission has no checkout whose run could be observed');
+  assert.equal(idle.reads, 1);
+  assert.equal(await observe(reader(declared, running), mission('active', [])), 'running', 'a run in progress outranks no declared gate');
+  assert.equal(await observe(reader(declared, idlePlan), mission('active', [])), 'unconfigured');
 });
 
 test('combined gate states rank failure over staleness over absence over success (TASK-2775)', () => {

@@ -236,7 +236,7 @@ export interface ExecuteRepairLaunchPort {
     readonly prompt: string;
     readonly sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy;
     readonly onAgentChanged?: (_agent: string, _model?: string | null) => Promise<void>;
-  }): ReturnType<import('../rebound-kernel.js').ReboundStartAgent>;
+  }): Promise<import('./agent-launch-result.js').AgentLaunchResult | null | undefined>;
   available(_agent: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
   readHead(_worktree: string): string | null;
 }
@@ -259,7 +259,7 @@ export interface ExecuteOperatorOutputPort {
  * read-revision write and no adapter can choose a transition.
  */
 export interface ExecuteMissionPorts {
-  readonly integrationRepair?: { resume(_slug: string): Promise<'none' | 'retained' | 'changed' | 'blocked'> };
+  readonly integrationRepair?: import('./integration-records.js').IntegrationRepairContinuationPort;
 
   readonly workspace: MissionWorkspacePort;
   readonly agentExecution: AgentExecutionPort;

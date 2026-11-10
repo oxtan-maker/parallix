@@ -203,6 +203,6 @@ export function runOptions(recorder: Recorder, extra: Record<string, unknown> = 
 }
 
 /** Full lifecycle receipt facts for handoff orchestration fixtures. */
-export function reviewPreparationTransitionValue(version = missionVersion(3)): import('../../src/application/mission-lifecycle-service.js').MissionTransitionResult {
-  return { version, mission: RECORDED_MISSION_LOAD.mission, previousAssignee: null, from: 'active', to: 'review', laneChanged: true };
+export function reviewPreparationTransitionValue(version = missionVersion(3), mission = RECORDED_MISSION_LOAD.mission): import('../../src/application/mission-lifecycle-service.js').MissionTransitionResult {
+  return { version, mission, previousAssignee: null, from: 'active', to: 'review', laneChanged: true };
 }

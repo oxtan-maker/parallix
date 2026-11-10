@@ -119,6 +119,7 @@ test('px review production entry guard gives known-Mission guidance before revie
     inferSlugFn: slug => slug ?? null,
     resolveWorktreeFn: () => process.cwd(),
     requireReviewAggregate: true,
+    missionStore: { load: async () => ({ kind: 'missing' }), save: async () => assert.fail('missing Mission must not be written') },
     reviewLoopMechanisms: () => { launched = true; return declinedLoop(); },
   });
   assert.equal(launched, false, 'the default path stops before the reviewer-launch seam');

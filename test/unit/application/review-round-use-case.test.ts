@@ -4,20 +4,26 @@ import { ReviewRoundUseCase } from '../../../src/application/review-round-use-ca
 import type { ReviewRoundEntryPort, StartReviewRound } from '../../../src/application/ports/review-round.js';
 import { fakeReviewLoopPorts, type ReviewLoopFakeOverrides } from '../../helpers/review-loop-ports.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
+import type { ReviewOperatorResumeAssessment } from '../../../src/application/review-recovery.js';
 
-function fixture(round: number | null = 2, controllerFree = false, overrides: ReviewLoopFakeOverrides = {}, operator = false) {
+function fixture(round: number | null = 2, controllerFree = false, overrides: ReviewLoopFakeOverrides = {}, operator = false, assessment: ReviewOperatorResumeAssessment = { outcome: 'not-required' }) {
   const calls: string[] = [];
   const requests: StartReviewRound[] = [];
   const fake = fakeReviewLoopPorts({ slug: 'task-2637', lock: { tryAcquire: () => controllerFree, release: () => {} }, ...overrides });
   const port: ReviewRoundEntryPort = {
-    operatorResume: operator ? { acknowledge: async () => { calls.push('acknowledge operator'); } } : undefined,
+    operatorResume: operator ? {
+      assess: async () => assessment,
+      acknowledge: async () => { calls.push('acknowledge operator'); },
+    } : undefined,
     loadRound: async () => round === null ? null : { round },
-    isKnownMission: async () => true,
+    loadMission: async () => ({ kind: 'found' }),
     clearHumanIntervention: async () => { calls.push('clear intervention'); },
     invalidateResolvedBlocker: async () => { calls.push('invalidate blocker'); },
     mechanisms: request => { calls.push('bind mechanisms'); requests.push(request); return fake.ports; },
     invalidMaxAttempts: raw => { calls.push(`invalid ${raw}`); },
     missingReviewAggregate: () => { calls.push('missing aggregate'); },
+    missionUnavailable: (_slug, reason) => { calls.push(`unavailable ${reason}`); },
+    reviewRecoveryRefused: (_slug, reason) => { calls.push(`recovery refused ${reason}`); },
   };
   return { calls, requests, fake, port, useCase: new ReviewRoundUseCase(port) };
 }
@@ -49,11 +55,34 @@ test('starting a review runs the application loop over the bound mechanisms, not
 
 test('rejects an unknown mission without a persisted Review before entry effects (TASK-2696)', async () => {
   const { calls, requests, fake, useCase, port } = fixture(null, true);
-  port.isKnownMission = async () => false;
+  port.loadMission = async () => ({ kind: 'missing' });
   await useCase.enter({ ...base, rawMaxAttempts: null });
   assert.deepEqual(calls, ['missing aggregate']);
   assert.deepEqual(requests, []);
   assert.deepEqual(fake.launches, []);
+});
+
+test('direct operator recovery uses authoritative eligibility before acknowledgment or loop effects (PX-0041.03)', async () => {
+  for (const assessment of [
+    { outcome: 'unavailable' as const, reason: 'database offline' },
+    { outcome: 'missing' as const },
+    { outcome: 'refused' as const, recovery: null, reason: 'review work is still live' },
+  ]) {
+    const f = fixture(2, false, {}, true, assessment);
+    await f.useCase.enter({ ...base, rawMaxAttempts: null });
+    const expected = assessment.outcome === 'unavailable' ? ['unavailable database offline']
+      : assessment.outcome === 'missing' ? ['missing aggregate']
+        : ['recovery refused review work is still live'];
+    assert.deepEqual(f.calls, expected, assessment.outcome);
+    assert.deepEqual(f.requests, [], 'a refused authority read binds no loop mechanisms');
+    assert.deepEqual(f.fake.launches, [], 'a refused authority read launches no agent');
+  }
+
+  const permitted = fixture(2, false, {}, true, {
+    outcome: 'permitted', recovery: { action: 'acknowledge-and-resume', humanStop: 'MAX_ATTEMPTS', evidence: ['settled'], guidance: 'resume' },
+  });
+  await permitted.useCase.enter({ ...base, rawMaxAttempts: null });
+  assert.deepEqual(permitted.calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
 });
 
 test("start creates the missing Review through review preparation and completes autonomous review (TASK-2696)", async () => {
@@ -323,7 +352,7 @@ test('invocation options cannot grant or replace the composed operator acknowled
   const unbound = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug });
   const nested = await unbound.preflight([], { operatorResume: forged });
   assert.equal(nested?.options.operatorResume, undefined);
-  const bound = { acknowledge: async () => {} };
+  const bound = { assess: async () => ({ outcome: 'not-required' as const }), acknowledge: async () => {} };
   const direct = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug, operatorResume: bound });
   assert.equal((await direct.preflight([], { operatorResume: forged }))?.options.operatorResume, bound);
 });

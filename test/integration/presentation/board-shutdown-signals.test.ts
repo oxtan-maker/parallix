@@ -333,6 +333,7 @@ interface InflightBoardFixture {
 /** Real board, isolated Mission authority and a bounded barrier provider. */
 async function launchInflightBoard(t: TestContext): Promise<InflightBoardFixture> {
   const baseRoot = mkdtemp('parallix-2375-sc3-');
+  const baseCheckout = path.join(baseRoot, 'repository');
   const fixtureRoot = path.join(baseRoot, SC3_SLUG);
   const stateRoot = path.join(baseRoot, 'state');
   const stubDir = path.join(baseRoot, 'stubs');
@@ -368,15 +369,15 @@ async function launchInflightBoard(t: TestContext): Promise<InflightBoardFixture
       await rm(terminalRoot, { recursive: true, force: true });
     }
   });
-  await mkdir(fixtureRoot, { recursive: true });
+  await mkdir(baseCheckout, { recursive: true });
   await mkdir(stateRoot, { recursive: true });
   await mkdir(stubDir, { recursive: true });
-  await writeFile(path.join(fixtureRoot, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe' } } }));
-  await mkdir(path.join(fixtureRoot, 'backlog', 'tasks'), { recursive: true });
-  await mkdir(path.join(fixtureRoot, 'missions', SC3_SLUG), { recursive: true });
-  await writeFile(path.join(fixtureRoot, 'missions', SC3_SLUG, 'MISSION.md'), `# ${SC3_SLUG}\n`);
+  await writeFile(path.join(baseCheckout, 'workflow.config.json'), JSON.stringify({ adapters: { terminal: { host: 'pipe' } } }));
+  await mkdir(path.join(baseCheckout, 'backlog', 'tasks'), { recursive: true });
+  await mkdir(path.join(baseCheckout, 'missions', SC3_SLUG), { recursive: true });
+  await writeFile(path.join(baseCheckout, 'missions', SC3_SLUG, 'MISSION.md'), `# ${SC3_SLUG}\n`);
   await writeFile(
-    path.join(fixtureRoot, 'backlog', 'tasks', `${SC3_SLUG}.md`),
+    path.join(baseCheckout, 'backlog', 'tasks', `${SC3_SLUG}.md`),
     ['---', `id: ${SC3_SLUG.toUpperCase()}`, 'title: In-flight shutdown fixture', 'status: refined', 'assignee: []', 'labels: [ai_sdlc]', '---', ''].join('\n'),
   );
   const stub = [
@@ -399,16 +400,16 @@ async function launchInflightBoard(t: TestContext): Promise<InflightBoardFixture
   // The verify-local git compat shim (Apple Git 2.24) misparses a bare
   // `init -q -b main` (the -q is taken as the target directory), so the
   // explicit `.` target is required, matching test/native-sea-executable-smoke.
-  await gitIn(fixtureRoot, 'init', '-q', '-b', 'main', '.');
-  await gitIn(fixtureRoot, 'config', 'user.email', 'fixture@parallix.local');
-  await gitIn(fixtureRoot, 'config', 'user.name', 'fixture');
-  await gitIn(fixtureRoot, 'add', '-A');
-  await gitIn(fixtureRoot, 'commit', '-q', '-m', 'init');
-  await gitIn(fixtureRoot, 'checkout', '-q', '-b', `mission/${SC3_SLUG}`);
+  await gitIn(baseCheckout, 'init', '-q', '-b', 'main', '.');
+  await gitIn(baseCheckout, 'config', 'user.email', 'fixture@parallix.local');
+  await gitIn(baseCheckout, 'config', 'user.name', 'fixture');
+  await gitIn(baseCheckout, 'add', '-A');
+  await gitIn(baseCheckout, 'commit', '-q', '-m', 'init');
+  await gitIn(baseCheckout, 'worktree', 'add', '-q', '-b', `mission/${SC3_SLUG}`, fixtureRoot, 'main');
   await seedInflightMission(fixtureRoot, stateRoot);
 
   const configuration = resolveConfiguration({
-    ...process.env, PARALLIX_HOME: stateRoot, PRIMARY_WORKTREE: fixtureRoot,
+    ...process.env, PARALLIX_HOME: stateRoot, PRIMARY_WORKTREE: baseCheckout,
     WORKFLOW_AGENT: 'claude', PARALLIX_NO_BUBBLEWRAP: '1',
     PARALLIX_TERMINAL_STATE_DIR: terminalRoot, PATH: `${stubDir}:${process.env.PATH}`,
   });

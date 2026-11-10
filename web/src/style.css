@@ -166,6 +166,30 @@ body {
 }
 
 /*
+ * Gate status icons: the supplied design's rules, verbatim. Only the running
+ * gate's small arc rotates; the frame, leaves and layout never move.
+ */
+.pg-icon { fill:none; stroke:currentColor; stroke-width:1.9;
+  stroke-linecap:round; stroke-linejoin:round; overflow:visible; }
+.pg-icon[data-state="running"] { color:#e8b84b; }
+.pg-icon[data-state="passed"] { color:#5ee08a; }
+.pg-icon[data-state="failed"] { color:#e2604e; }
+.pg-icon[data-state="stale"] { color:#e8b84b; }
+.pg-icon[data-state="not-run"],
+.pg-icon[data-state="unconfigured"],
+.pg-icon[data-state="unknown"] { color:#8b97a1; }
+
+.pg-icon[data-animate="true"][data-state="running"] .pg-spin {
+  transform-box:view-box; transform-origin:17.5px 17.5px;
+  animation:pg-spin 1.6s linear infinite;
+}
+@keyframes pg-spin { to { transform:rotate(360deg); } }
+
+@media (prefers-reduced-motion:reduce) {
+  .pg-spin { animation:none !important; }
+}
+
+/*
  * The done-history disclosure. Collapse and expand are browser-owned via
  * <details>, so the board needs no handler and no state for them; the two
  * summary variants below reproduce the reference artifact's expanded column

@@ -234,17 +234,22 @@ until the step that produces it has run.
 
 Before integration, the gate is the set of gates the mission declares; from
 integration on, it is the repository's configured pre-integration plan. The
-cell shows one state:
+card shows one state:
 
 | State | Meaning |
 |---|---|
-| `running` | the integration gate executor is observed running for the owning workflow attempt |
-| `✓` passed | every applicable gate has a passing result that covers the worktree's current inputs |
-| `✗ FAIL` | a gate failed on the current revision, and no later pass covers the same inputs |
+| `running` | the integration gate executor is observed running for the owning workflow attempt, or by a live `px integrate --dry-run` process that owns no workflow operation |
+| `passed` | every applicable gate has a passing result that covers the worktree's current inputs |
+| `failed` | a gate failed on the current revision, and no later pass covers the same inputs |
 | `stale` | the only results cover an earlier revision, earlier inputs or uncommitted changes |
-| `not run` | gates apply but none has a result yet, including a mission that has not started |
-| `none configured` | the mission declares no gate, or no pre-integration gate is configured, so none will run |
+| `not-run` | gates apply but none has a result yet, including a mission that has not started |
+| `unconfigured` | the mission declares no gate, or no pre-integration gate is configured, so none will run |
 | `unavailable` | the worktree or verification evidence could not be read |
+
+Each surface renders that state in its own form. The terminal board writes it as
+text (`gate ✓`, `gate ✗ FAIL`, `gate · stale`); the web board renders the same
+state as an inline icon whose accessible name is the state, with no visible gate
+text, and only the running icon moves.
 
 Passing results are the verification proofs the gate executor writes after an
 exit code of 0. Failures are the recovery evidence captured before a repair
@@ -342,6 +347,13 @@ integration closeout resumes through `px integrate <slug> --recover-landed` so
 the remaining statistics, cleanup and post-integration hook finish without
 another gate run or merge.
 
+Integration picks its checkouts from the Mission rather than from the directory
+you invoked it in, so the same command lands the same mission from the primary
+checkout or from the mission checkout. If no mission checkout remains, the
+command either points at `--recover-landed` when the landing is already on the
+receiving base, or names the mission and the checkout it expected; it never
+falls back to running integration in the current checkout.
+
 From the repository root, `px status` checks stored Mission state before calling
 a retained worktree stale. Live Missions stay out of cleanup diagnostics even
 when their task mirror is missing or still says `done`. If Mission authority is
@@ -423,7 +435,8 @@ Other surfaces keep the mission and action visible; expand **Reason** or
 **Blocking reason** to read the duplicate text. Distinct reasons stay separate.
 **Recovery** expands coordinator evidence beside the activity line. These
 disclosures support keyboard and touch. An unknown gate stays explicitly
-unknown; expand its detail to read the unavailable observation.
+unknown: the web board carries its observation on the icon itself, read by
+assistive technology without an extra control.
 
 Command feedback appears in the initiating mission card's footer and is
 announced as a polite status update. It follows the mission between lanes.

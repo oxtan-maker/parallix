@@ -2,6 +2,7 @@ import type { ReviewPreparationWorkflowPorts } from '../../../src/application/po
 import { draftMissionServicesFixture } from '../../helpers/draft-mission-services.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
 import { phaseGateResult } from '../../helpers/phase-gate-result.js';
@@ -415,6 +416,9 @@ for (const outcome of ['approved', 'rejected', 'throws', 'unavailable'] as const
     let reviews = 0, releases = 0;
     const ports = stubIntegrateWorkflowPorts({
       process: { cwd: () => '/wt', claimIntegration: async () => async () => { releases++; } },
+      // The review runs in the Mission checkout named by the resolved context, not
+      // in the process working directory.
+      missionContext: { resolve: () => ({ ok: true as const, context: missionExecutionContext({ missionId: 'task-x', missionWorktree: '/wt', baseWorktree: '/repo' }) }) },
       missionPaths: { inferSlug: () => 'task-x' },
       landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }),
         isAbort: error => error instanceof Error && error.name === 'IntegrationAbort' },

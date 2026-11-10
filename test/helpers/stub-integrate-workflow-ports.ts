@@ -5,6 +5,10 @@ type Overrides = { [K in keyof IntegrateWorkflowPorts]?: Partial<IntegrateWorkfl
 /** Unused collaborators fail immediately; each case supplies its exercised boundaries. */
 export function stubIntegrateWorkflowPorts(overrides: Overrides = {}): IntegrateWorkflowPorts {
   return {
+    missionContext: {
+      resolve: () => { throw new Error('Unexpected integrate boundary: missionContext.resolve'); },
+      ...overrides.missionContext,
+    },
     process: {
       terminate: () => { throw new Error('Unexpected integrate boundary: process.terminate'); },
       cwd: () => { throw new Error('Unexpected integrate boundary: process.cwd'); },

@@ -1,0 +1,1 @@
+Before defining the Mission's implementation scope, investigate whether the requested behavior already exists. When an owner exists, frame the scope around modifying that owner and its callers, rather than constructing equivalent new infrastructure. Do not presume that an owner is absent without examining repository evidence.

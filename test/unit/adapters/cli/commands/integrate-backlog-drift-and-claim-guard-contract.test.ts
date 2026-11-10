@@ -1,6 +1,7 @@
 import { activitySnapshots } from '../../../../fixtures/execution-activity.js';
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
 import { fixtureMission, approvedReview as fixtureApprovedReview } from '../../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 import { missionVersion } from '../../../../../src/application/domain-ports.js';
 import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
@@ -19,6 +20,7 @@ import type { Mission } from '../../../../../src/domain/mission.js';
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
+mockModule('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 mockModule('../../../../../src/adapters/git/git.js', import.meta.url);
 mockModule('../../../../../src/adapters/backlog/backlog.js', import.meta.url);
@@ -54,6 +56,7 @@ describe("backlog drift retry", () => {
   const integrateConflict = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate-conflict.js')>('../../../../../src/adapters/cli/commands/integrate-conflict.js', import.meta.url);
   const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const __mm1 = mockModule<typeof import('../../../../../src/composition/application-services.js')>('../../../../../src/composition/application-services.js', import.meta.url);
+  const executionContextModule = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 
   const { areAllBacklogOnlyConflicts } = areAllBacklogOnlyConflictsModule;
 
@@ -364,6 +367,7 @@ describe("backlog drift retry", () => {
 
   const TEST_SLUG = 'task-2242';
   const FAKE_ROOT = '/tmp/task-2242-integrate-root';
+  const MISSION_WORKTREE = path.join(FAKE_ROOT, '..', TEST_SLUG);
 
   // The integrate command entry point is the module's default export; its helpers
   // are named exports. Expose both through the ESM mock facade.
@@ -399,7 +403,13 @@ describe("backlog drift retry", () => {
     // subprocess per call) and to the operator's live repository when left unmocked.
     mock.method(missionUtilsCjs, 'resolveMissionBaseBranch', () => 'main');
     mock.method(missionUtilsCjs, 'resolveBaseWorktree', () => FAKE_ROOT);
-    mock.method(missionUtilsCjs, 'resolveWorktree', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
+    mock.method(missionUtilsCjs, 'resolveWorktree', () => MISSION_WORKTREE);
+    // The checkouts come from the composition-resolved Mission identity, matching the
+    // mocked worktree layout: the mission checkout beside the base, base at FAKE_ROOT.
+    mock.method(executionContextModule, 'resolveMissionExecutionContext', () => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: MISSION_WORKTREE, baseWorktree: FAKE_ROOT, baseBranch: 'main' }),
+    }));
     mock.method(missionUtilsCjs, 'findMissionDocInBranches', () => []);
     mock.method(gitCjs, 'detectRebaseState', () => ({ inProgress: false, rebaseHead: '', detached: false, unmergedFiles: [], rebaseDir: null }));
     mock.method(integrateConflict, 'getUnresolvedIndexConflicts', () => ({ ok: true as const, files: [] }));
@@ -747,6 +757,7 @@ describe("exclusive integrate claim", () => {
           return async () => { held = false; };
         },
       },
+      missionContext: { resolve: () => ({ ok: true as const, context: missionExecutionContext({ missionId: 'task-exclusive', missionWorktree: '/tmp/task-exclusive', baseWorktree: '/tmp/base' }) }) },
       missionPaths: { inferSlug: () => 'task-exclusive' },
       git: { git: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }) },
       landing: { isAbort: () => false },
@@ -788,6 +799,11 @@ describe("exclusive integrate claim", () => {
         chdir: () => {},
         claimIntegration: async () => async () => { released++; },
       },
+      missionContext: { resolve: () => ({ ok: true as const, context: {
+        // Landing is proven on the base and closeout already removed the checkout,
+        // which is the state this case reports without rerunning the gates.
+        missionId: 'task-closed', missionWorktree: null, missionBranch: 'mission/task-closed', baseWorktree: '/tmp/base', baseBranch: 'main',
+      } }) },
       missionPaths: { inferSlug: () => 'task-closed', getPrimaryWorktree: () => '/tmp/base', missionBranchName: () => 'mission/task-closed', conventionalWorktreePath: () => '/tmp/base-task-closed' },
       fileSystem: { existsSync: () => false },
       git: { git: () => ({ signal: null,  status: branchRemains ? 0 : 1, stdout: '', stderr: '' }) },
@@ -814,6 +830,37 @@ describe("exclusive integrate claim", () => {
     assert.deepEqual(exits, [0, 1]);
     assert.equal(gateCalls, 0);
     assert.equal(released, 2);
+  });
+
+  // TASK-2777: the entry resolves the execution context, so a context naming a
+  // different Mission must stop before the landed-closeout, closed-Mission and
+  // repair branches read its base checkout.
+  test('a context describing another mission stops before closeout or repair reads it', async () => {
+    const abort = new Error('integration abort');
+    let serviceCalls = 0;
+    const exits: number[] = [];
+    const workflow = createIntegrateWorkflow(stubIntegrateWorkflowPorts({
+      process: { terminate: () => {}, cwd: () => '/tmp/base', chdir: () => {}, claimIntegration: async () => async () => {} },
+      missionContext: { resolve: () => ({ ok: true as const, context: missionExecutionContext({ missionId: 'task-other', missionWorktree: '/tmp/task-other', baseWorktree: '/tmp/other-base', baseBranch: 'main' }) }) },
+      missionPaths: { inferSlug: () => 'task-closed' },
+      fileSystem: { existsSync: () => false },
+      git: { git: () => ({ signal: null, status: 0, stdout: '', stderr: '' }) },
+      checkout: { findLandedSquashOnBaseBranch: () => assert.fail('Unexpected landing probe against another mission base') },
+      landing: { isAbort: (error: unknown) => error === abort, createAbort: () => abort },
+      agents: { startAgent: async () => assert.fail('Unexpected agent launch'), selectAgent: () => null, workflowLauncherStatus: () => null, applyAgentFallback: () => assert.fail('Unexpected agent fallback') },
+      backlog: { transitionTask: () => assert.fail('Unexpected backlog transition') },
+      gates: { routeIntegrationGateFailure: async () => assert.fail('Unexpected gate repair') },
+    }));
+    const result = await workflow.integrate(['task-closed'], {
+      missionServicesFn: async () => {
+        serviceCalls++;
+        return integrationServices({ store: { load: async () => ({ kind: 'found', mission: fixtureMission('task-closed', { status: 'done', closedAt: '2026-09-27T20:50:34Z' }), version: missionVersion(1) }) } });
+      },
+      exitFn: code => { exits.push(code); },
+    });
+    assert.deepEqual(result, { exitCode: 1 });
+    assert.deepEqual(exits, [1]);
+    assert.equal(serviceCalls, 0, 'a mismatched context must not reach the mission store');
   });
 });
 

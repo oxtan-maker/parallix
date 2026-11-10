@@ -819,7 +819,9 @@ test('board and focused reads observe the gate with the owning workflow (TASK-27
   const reads: string[] = [];
   const gates = new VerificationGateObserver({
     async readDeclaredGates(scope) { reads.push(scope.missionId); return { checkout: { kind: 'present', revision: 'a'.repeat(40), clean: true }, gates: [] }; },
-    async readIntegrationGates() { throw new Error('not applicable'); },
+    async readIntegrationGates() {
+      return { checkout: { kind: 'present', revision: 'a'.repeat(40), clean: true }, configured: [], gates: [], running: null };
+    },
   });
   const builder = new BoardProjectionBuilder(
     makeMissionAdapter([fixtureMission(id1, { repositoryId: repo, status: 'active', declaredGates: ['npm test'] }), fixtureMission(id2, { repositoryId: repo, status: 'active', declaredGates: ['npm test'] })]),

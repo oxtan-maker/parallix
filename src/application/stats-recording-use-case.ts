@@ -1,4 +1,5 @@
 import type { StatisticsRecordingPort, StatisticsWriteResult } from './ports/statistics-recording.js';
+import { providerResourceObservation, type ProviderResourceObservation } from './run-history-types.js';
 import {
   canonicalizeStatsRow, sameStatsIdentity, accumulateIntegerStrings, quotaUsageLevel,
   accumulateDecimalStrings, mergeLabel, type StatsRow,
@@ -8,40 +9,32 @@ import type { StatsReportSelection } from './services/statistics-report-selectio
 import type { ReviewStatistics } from './services/review-statistics.js';
 import { selectStatsReport } from './services/statistics-report-selection.js';
 
-export interface StageTelemetry {
-  readonly provider?: string | null;
-  readonly model?: string | null;
-  readonly inputTokens?: number;
-  readonly outputTokens?: number;
-  readonly cachedTokens?: number;
-  readonly thoughtsTokens?: number;
-  readonly totalTokens?: number;
-  readonly toolCalls?: number;
-  readonly usagePercent?: number | null;
-  readonly cost_usd?: number;
-}
-
 export interface StageStatsRequest {
+  readonly runId?: string;
   readonly slug: string;
   readonly stage: string;
   readonly date: string;
   readonly implementer?: string;
   readonly reviewer?: string;
-  readonly telemetry?: StageTelemetry | null;
+  readonly telemetry?: ProviderResourceObservation | null;
   readonly durationMinutes?: number;
   readonly model?: string | null;
 }
 
 /** Telemetry field mapping is pure and shared with compatibility consumers. */
-function telemetryUsageFields(t: StageTelemetry | null | undefined) {
-  const quota = quotaUsageLevel(t?.usagePercent);
+function observationValue(observation: ProviderResourceObservation | null, name: string): number | undefined {
+  return observation?.values.find(value => value.name === name)?.value;
+}
+
+function telemetryUsageFields(observation: ProviderResourceObservation | null) {
+  const quota = quotaUsageLevel(observationValue(observation, 'provider-usage'));
   return {
-    input_tokens: String(t?.inputTokens || 0),
-    output_tokens: String(t?.outputTokens || 0),
-    cached_tokens: String(t?.cachedTokens || 0),
-    thoughts_tokens: String(t?.thoughtsTokens || 0),
-    context_tokens: String(t?.totalTokens || 0),
-    tool_calls: String(t?.toolCalls || 0),
+    input_tokens: String(observationValue(observation, 'input') || 0),
+    output_tokens: String(observationValue(observation, 'output') || 0),
+    cached_tokens: String(observationValue(observation, 'cached') || 0),
+    thoughts_tokens: String(observationValue(observation, 'reasoning') || 0),
+    context_tokens: String(observationValue(observation, 'context') || 0),
+    tool_calls: String(observationValue(observation, 'tool-calls') || 0),
     openai_usage_before: '0',
     openai_usage_after: quota === null ? '' : String(Math.round(quota)),
     openai_usage_delta: '0',
@@ -49,17 +42,17 @@ function telemetryUsageFields(t: StageTelemetry | null | undefined) {
 }
 
 export function telemetryToStatsFields(
-  telemetry: StageTelemetry | null | undefined,
+  telemetry: ProviderResourceObservation | Record<string, unknown> | null | undefined,
   options: { agentFamily?: string; durationMinutes?: number; model?: string | null } = {},
 ) {
   const { agentFamily, durationMinutes = 0, model } = options;
-  const t = telemetry;
+  const observation = providerResourceObservation(telemetry, { provider: model || agentFamily, model: model || agentFamily });
   return {
-    provider: t?.provider || model || agentFamily || '',
-    model: t?.model || model || agentFamily || '',
-    ...telemetryUsageFields(t),
+    provider: observation?.provider || model || agentFamily || '',
+    model: observation?.model || model || agentFamily || '',
+    ...telemetryUsageFields(observation),
     duration_minutes: String(Math.max(0, Math.round(durationMinutes) || 0)),
-    cost_usd: String(typeof t?.cost_usd === 'number' ? t.cost_usd : 0),
+    cost_usd: String(observationValue(observation, 'cost') ?? 0),
   };
 }
 
@@ -129,6 +122,7 @@ export class StatsRecordingUseCase {
     const agentFamily = request.implementer || request.reviewer || 'unknown';
     return canonicalizeStatsRow({
       date: request.date, repo: this._port.repositoryName, mission: request.slug, classification,
+      runId: request.runId,
       implementer: agentFamily,
       implementer_agent: request.implementer || '', reviewer_agent: request.reviewer || '', stage: request.stage,
       ...telemetryToStatsFields(request.telemetry, { agentFamily, durationMinutes: request.durationMinutes, model: request.model }),

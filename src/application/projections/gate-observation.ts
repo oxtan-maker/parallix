@@ -51,9 +51,12 @@ export class VerificationGateObserver {
     const scope: GateEvidenceScope = { repositoryId: mission.repositoryId, missionId: mission.id };
     // An approved mission may integrate from active or review.
     try {
-      return mission.status === 'integration' || mission.status === 'done' || operation?.command === 'integrate:merge'
-        ? await this.integration(scope, operation)
-        : await this.declared(mission, scope);
+      if (mission.status === 'integration' || mission.status === 'done' || operation?.command === 'integrate:merge') {
+        return await this.integration(scope, operation);
+      }
+      if ((mission.status === 'active' || mission.status === 'review')
+        && (await this._evidence.readIntegrationGates(scope, operation)).running) { return 'running'; }
+      return await this.declared(mission, scope);
     } catch {
       return 'unavailable';
     }

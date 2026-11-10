@@ -24,7 +24,7 @@ test('Board preserves populated mission identity, supplied PR URL and review pha
   assert.ok(html.includes(card.id));
   assert.ok(html.includes(card.title));
   assert.match(html, /Recorded: CP-2\.md/);
-  assert.match(html, /gate ✓<\/div>/);
+  assert.match(html, /data-gate="passed"[^>]*>[\s\S]*?<svg[^>]*aria-label="Passed"/);
   assert.match(html, /<a href="https:\/\/example\.invalid\/pr\/42"[^>]*>PR #42<\/a>/);
   assert.match(html, /aria-label="Review attempts"/, 'the review budget renders as a named group');
   assert.match(html, /data-review-attempt="2"[^>]*data-review-state="changes-requested"/,
@@ -34,7 +34,8 @@ test('Board preserves populated mission identity, supplied PR URL and review pha
 test('Board leaves absent checkpoint, PR and review facts unknown (TASK-2784)', () => {
   const html = renderedCard(makeCard({ gate: 'unavailable' }));
   assert.match(html, /checkpoints · completion unknown/);
-  assert.match(html, /gate · unavailable/);
+  assert.match(html, /data-gate="unavailable"[^>]*>[\s\S]*?<svg[^>]*aria-label="Unknown"/);
+  assert.match(html, /Gate evidence could not be observed/);
   assert.doesNotMatch(html, /Recorded:|PR #|review round \d|round \d\/5/);
   assert.doesNotMatch(html, /<a\b[^>]*>PR /);
 });

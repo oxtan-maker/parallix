@@ -146,20 +146,9 @@ function reviewFields({ recorded, card }: StatusSources) {
     approvalOwed: card?.approvalOwed,
     approvalCoverage: card?.approvalCoverage ?? null,
     integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
-    reviewHistory: (card?.reviewHistory || []).map((r) => ({
-      number: r.number,
-      startRevision: r.startRevision,
-      decidedRevision: r.decidedRevision ?? null,
-      integrationRepairAssessment: r.integrationRepairAssessment as import('../../../domain/integration-approval-retention.js').IntegrationRepairAssessment | undefined,
-      reviewer: r.reviewer,
-      implementer: r.implementer,
-      disposition: r.disposition ?? 'pending',
-      comment: r.comment,
-      findingSummaries: r.findingSummaries || [],
-      fixes: r.fixes || [],
-      pushbacks: r.pushbacks || [],
-      revocation: r.revocation ?? null,
-      supersession: r.supersession ?? null,
-    }))
+    // The board card's rounds are the review-round read model; status carries
+    // them through unchanged rather than widening each field into a mirror type
+    // that could contradict the board (TASK-2846).
+    reviewHistory: card?.reviewHistory ?? []
   };
 }

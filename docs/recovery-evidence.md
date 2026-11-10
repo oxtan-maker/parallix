@@ -57,7 +57,10 @@ approval-retention assessment before review preparation. Direct review, execute 
 use the same owners; board and lead offer the safe execute continuation while
 that assessment is pending. Equivalent repairs retain the independent judgment
 and stop in the integration lane for human landing. Changed patches follow the
-existing approval-revocation and review path; unproven evidence stops explicitly.
+existing approval-revocation and review path; from execute that means fresh
+review with the recorded implementer, not another execute agent. Unproven
+evidence stops explicitly. This assessment always runs before generic retained
+repair; a dry-run review only reports that it is pending.
 
 Checkpoint snapshots also carry the recorded review round and repaired-gate
 metadata when present. Older rows without these fields remain valid.

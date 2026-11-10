@@ -30,7 +30,8 @@ import {
   type OperationLogReadAdapter,
   type ReviewReadAdapter,
 } from '../../../../src/application/projections/board-readers.js';
-import type { UsageRecord, UsageRepository } from '../../../../src/application/ports/mission-measurements.js';
+import { matchesUsageFilter } from '../../../fixtures/metrics-adapter.js';
+import type { UsageFilter, UsageRecord, UsageRepository } from '../../../../src/application/ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../../../src/application/ports/operation-history.js';
 import type { MissionId, MissionStatus } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -39,9 +40,6 @@ import { repositoryId, type RepositoryId } from '../../../../src/domain/reposito
 // module's named exports, so this must be the default import.
 import stats from '../../../../src/adapters/cli/commands/stats.js';
 import { reviewStatistics, type ReviewStatistics } from '../../../../src/application/services/review-statistics.js';
-import { reconcileRecoveryEvidence, recoveryConflictIdentity, recoveryIdentity, recoveryInstant,
-  type StatsRecoveryEvidence } from '../../../../src/application/stats-recovery-evidence.js';
-import { analyzeStatsRecovery } from '../../../../src/application/stats-recovery-analysis.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 import { flowElapsedOwnership } from '../../../../src/application/projections/flow-elapsed-ownership.js';
 import { flowStatistics, type FlowMissionFacts } from '../../../../src/application/projections/flow-statistics.js';
@@ -51,26 +49,6 @@ import { controlledVerificationComparisons } from '../../../../src/application/p
 import type { RunRecord } from '../../../../src/application/run-history-types.js';
 import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
-test('historical recovery identities normalize offsets and retain conflicts (TASK-2834)', () => {
-  const identity = recoveryIdentity('forgejo-review', ['repo', 735, 42]);
-  const evidence = (raw: Readonly<Record<string, unknown>>): StatsRecoveryEvidence => ({ identity,
-    source: 'forgejo-review', kind: 'review-decision', observedAt: recoveryInstant('2026-11-03T07:00:00+01:00'),
-    links: { repositoryId: 'repo', missionId: 'task-2834', revision: 'abc', pullRequest: 735 },
-    provenance: 'Forgejo GET /pulls/735/reviews id=42', collectionEra: 'historical-reconstruction',
-    classification: 'direct-observation', raw });
-  assert.equal(evidence({ state: 'REQUEST_CHANGES' }).observedAt, '2026-11-03T06:00:00.000Z');
-  assert.throws(() => recoveryInstant('not-a-timestamp'), /Invalid recovery timestamp/);
-  const first = evidence({ state: 'REQUEST_CHANGES' });
-  const result = reconcileRecoveryEvidence([first, first, evidence({ state: 'APPROVED' })]);
-  assert.equal(result.evidence.length, 1);
-  assert.equal(result.duplicateCount, 1);
-  assert.deepEqual(result.conflicts.map(conflict => conflict.fields), [['raw']]);
-  assert.equal(result.conflicts[0]?.retained.raw.state, 'REQUEST_CHANGES');
-  const conflict = result.conflicts[0]!;
-  assert.equal(recoveryConflictIdentity({ ...conflict, fields: ['raw', 'provenance'] }),
-    recoveryConflictIdentity({ ...conflict, retained: conflict.conflicting, conflicting: conflict.retained,
-      fields: ['provenance', 'raw'] }), 'conflict identity is independent of collection and field order');
-});
 function workflowOperation(overrides: Partial<WorkflowOperation> = {}): WorkflowOperation {
   return { id: 'op', repositoryId: repositoryId('repo'), missionId: fixtureMissionId('px-1'), requestKey: 'request',
     command: 'active:execute', generation: 1, phase: 'completed', providerStarted: true,
@@ -211,7 +189,6 @@ test('fully observed repair chain reports a measured cross-batch dependency path
   });
   assert.equal(report.unknowns.some(value => value.includes('End-to-end critical path unknown')), false);
 });
-
 test('exclusive elapsed ownership reconciles overlap from observed ownership rather than row order (TASK-2835)', () => {
   const gate = attempt('gate', 25, 35, { gate: 'check', plan: ['check'], requestedAt: instant(25) });
   const history = [
@@ -341,7 +318,8 @@ test('fresh run resources preserve units and deduplicate nested waited trees on 
   assert.equal(report.agentResources.cpuUs, 120, 'the outer waited tree already includes its nested descendant');
   assert.equal(report.agentResources.cpuObservations, 3);
   assert.equal(report.agentResources.runs.length, 3, 'a retained provider/local copy is counted once');
-  assert.deepEqual(report.agentResources.runs[1]?.provider?.values, [{ name: 'input', value: 10, unit: 'tokens' }]);
+  assert.deepEqual(report.agentResources.runs.map(({ runId, model, provider }) => ({ runId, model, provider })),
+    [{ runId: 'agent-codex-execute-1-a', model: 'gpt-6.1-sol', provider: { provenance: 'provider-reported', provider: 'openai', model: 'gpt-6.1-sol', values: [{ name: 'input', value: 40, unit: 'tokens' }] } }, { runId: 'agent-codex-repair-1-b', model: 'gpt-6.1-sol', provider: { provenance: 'provider-reported', provider: 'openai', model: 'gpt-6.1-sol', values: [{ name: 'input', value: 10, unit: 'tokens' }] } }, { runId: 'agent-codex-review-1-c', model: 'gpt-6.1-sol', provider: { provenance: 'provider-reported', provider: 'openai', model: 'gpt-6.1-sol', values: [{ name: 'input', value: 10, unit: 'tokens' }] } }], 'agentResources output stays unchanged while reading through ProviderResourceObservation (TASK-2846.03)');
   assert.equal(report.dependencyPath?.durationMs, 40, 'the path is exclusive elapsed time, not concurrent run time');
   assert.ok(report.dependencyPath?.nodeIds.includes('gate:failed-gate'));
   assert.ok(report.dependencyPath?.nodeIds.includes('gate:passed-gate'));
@@ -633,7 +611,7 @@ const WINDOW = stats.createWindow('2026-08-03', 1);
 class MemoryUsageRepository implements UsageRepository {
   constructor(private readonly records: readonly UsageRecord[]) {}
   async findAll(): Promise<readonly UsageRecord[]> { return this.records; }
-  async findWhere(predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]> { return this.records.filter(predicate); }
+  async findWhere(filter: UsageFilter): Promise<readonly UsageRecord[]> { return this.records.filter((record) => matchesUsageFilter(record, filter)); }
   async save(): Promise<void> {}
   async saveAll(): Promise<void> {}
   async clear(): Promise<void> {}
@@ -951,49 +929,4 @@ test('deciders are exclusive and partial telemetry leaves decided share availabl
   const complete = { decisions: [decisions[0]], attempts: [sample,
     classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', mission: 'early', round: 1 })], coverage: 'complete' as const };
   assert.equal(reviewRounds(complete, windows.current).coverage, 'complete');
-});
-
-test('historical analysis labels coverage, distributions and unavailable telemetry (TASK-2834)', () => {
-  const record = (overrides: Partial<StatsRecoveryEvidence>): StatsRecoveryEvidence => ({
-    identity: String(overrides.identity), source: overrides.source ?? 'rebound-repair',
-    kind: overrides.kind ?? 'repair-attempt', observedAt: overrides.observedAt ?? '2026-10-01T10:00:00.000Z',
-    links: overrides.links ?? { repositoryId: 'repo', missionId: 'task-1', revision: 'abc', pullRequest: null },
-    provenance: overrides.provenance ?? 'operational_history/rebound.repair/1',
-    collectionEra: 'historical-reconstruction', classification: 'direct-observation', raw: overrides.raw ?? {},
-  });
-  const evidence = [
-    record({ identity: 'repair-1', raw: { durationMs: 100, model: 'gpt-6.1-sol', stage: 'integration' } }),
-    record({ identity: 'repair-2', observedAt: '2026-10-02T10:00:00Z', raw: { durationMs: 300, model: 'gpt-6.1-sol', stage: 'integration' } }),
-    record({ identity: 'pr-1', source: 'forgejo-pr', kind: 'workflow-telemetry',
-      links: { repositoryId: 'repo', missionId: 'task-1', revision: 'abc', pullRequest: 735 }, raw: {} }),
-    record({ identity: 'review-1', source: 'forgejo-review', kind: 'review-decision', observedAt: '2026-10-01T11:00:00Z',
-      links: { repositoryId: 'repo', missionId: 'task-1', revision: 'abc', pullRequest: 735 }, raw: { state: 'REQUEST_CHANGES' } }),
-  ];
-  const analysis = analyzeStatsRecovery({ rows: [
-    { mission: 'task-1', repo: 'repo', date: '2026-10-01', model: 'gpt-6.1-sol', stage: 'execute', pr_fix_rounds: 2 },
-    { mission: 'task-2', repo: 'repo', date: '2026-10-02', model: 'claude', stage: 'execute' },
-  ], sources: [], changes: [
-    { mission: 'task-1', before: [1], beforeObserved: true, after: 2, byImplementer: { codex: 2 }, returns: [
-      { identity: 'review:1', author: 'codex', at: '2026-10-01T11:00:00Z', origin: { actor: 'agent',
-        stage: 'agent-review', decisionIdentity: 'review:1', revision: 'abc', sender: 'claude', cause: 'changes-requested' } },
-      { identity: 'repair:1', author: 'codex', at: '2026-10-02T11:00:00Z', origin: { actor: 'workflow',
-        stage: 'workflow', decisionIdentity: 'repair:1', revision: null, sender: 'parallix', cause: 'repair' } },
-    ] },
-    { mission: 'task-2', before: [], beforeObserved: false, after: null, byImplementer: {}, returns: [] },
-  ], recovery: { evidence, conflicts: [], duplicateCount: 0,
-    failures: [{ source: 'forgejo-review-comment', detail: 'page unavailable' }], completedSources: ['rebound-repair'] } });
-  assert.equal(analysis.metrics.returnsPerMission.classification, 'reconstructed-fact');
-  assert.deepEqual([analysis.metrics.returnsPerMission.observationCount, analysis.metrics.returnsPerMission.denominator], [1, 2]);
-  assert.deepEqual([analysis.metrics.repairAttemptDuration.median, analysis.metrics.repairAttemptDuration.p90], [200, 280]);
-  assert.equal(analysis.metrics.repairAttemptDuration.uncertainty?.confidence,
-    'sampling uncertainty only; retention bias is not corrected');
-  assert.equal(analysis.metrics.prToReviewTurnaround.median, 3_600_000);
-  assert.ok(analysis.cohorts.some(item => item.dimension === 'model' && item.value === 'gpt-6.1-sol'));
-  assert.deepEqual(analysis.cohorts.filter(item => item.dimension === 'cause').map(item => item.value).sort(),
-    ['changes-requested', 'repair'], 'cause cohorts come from distinct final-owner returns, never approvals');
-  assert.equal(analysis.cohorts.some(item => item.dimension === 'cause' && item.value === 'approved'), false);
-  assert.ok(analysis.unavailable.some(item => item.metric === 'CPU' && item.classification === 'unavailable'));
-  assert.match(analysis.interpretation.missingness.join(' '), /1\/2 return-eligible missions/);
-  assert.match(analysis.interpretation.representativeness, /no representativeness claim or correction multiplier/);
-  assert.doesNotMatch(JSON.stringify(analysis.metrics), /gateAttempts|cpuUs|dag/);
 });

@@ -19,7 +19,7 @@ import { createReviewLoopPorts } from '../review/review-loop.js';
 import { runReviewLoop } from '../../application/review-loop/review-loop.js';
 import * as repairReviewPreparation from "../cli/commands/repair-review-preparation.js";
 import type { MissionTransitionStore, SessionMarkerPort } from '../../application/domain-ports.js';
-import { missionId } from '../../domain/mission.js';
+import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import type {
   AgentExecutionPort,
   AgentLaunchOutcome,
@@ -172,7 +172,7 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
     const agentConfig = this.readAgentConfig();
     const loaded = await this._missionStore.load(missionId(request.slug));
     if (loaded.kind === 'unavailable') { throw new Error(`Cannot resolve Mission prompt authority: ${loaded.reason}`); }
-    const dbOwnedNoMirror = loaded.kind === 'found' && Boolean(loaded.mission.waveParentId);
+    const dbOwnedNoMirror = loaded.kind === 'found' && backlogMirrorOwnership(loaded.mission).kind === 'none';
     return {
       agentConfig,
       // `startAgent` checks the selected launcher's health after the Mission
@@ -221,9 +221,11 @@ export class AgentExecutionAdapter implements AgentExecutionPort {
  * `AgentLaunchOutcome.detail`. Only this adapter reads it.
  */
 interface AgentRunDetail {
+  readonly runId?: string;
   readonly startedAt?: string;
   readonly endedAt?: string;
-  readonly telemetry?: { provider?: string } & Record<string, unknown>;
+  readonly telemetry?: Record<string, unknown>;
+  readonly providerResources?: import('../../application/run-history-types.js').ProviderResourceObservation | null;
 }
 
 /** Execute statistics and stage telemetry writes. */
@@ -235,6 +237,7 @@ export class ExecuteTelemetryAdapter implements ExecuteTelemetryPort {
     const sinceMs = result?.startedAt ? Date.parse(result.startedAt) : 0;
     this._runtime.recordActiveStats({
       slug: record.slug,
+      runId: result?.runId,
       rootDir: record.worktree,
       implementer: record.agent,
       model: this._runtime.resolveAgentModel(record.agent, record.worktree) ?? undefined,

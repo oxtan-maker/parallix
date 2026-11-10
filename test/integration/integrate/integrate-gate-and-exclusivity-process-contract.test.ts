@@ -504,14 +504,19 @@ describe("exclusive integrate process claim", () => {
   const firstRun = `
   import { createIntegrateWorkflow } from './src/application/integrate-workflow.ts';
   import { createIntegratePorts } from './src/adapters/cli/commands/integrate.ts';
+  import { missionExecutionContext } from './test/fixtures/mission-execution-context.ts';
   const slug = process.env.PARALLIX_CLAIM_TEST_SLUG;
   const ports = createIntegratePorts();
   const workflow = createIntegrateWorkflow({
     ...ports,
+    missionContext: { resolve: () => ({ ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture/' + slug, baseWorktree: '/fixture', baseBranch: 'main' }) }) },
     process: { ...ports.process, terminate: () => {} },
     missionPaths: { ...ports.missionPaths, inferSlug: () => slug },
   });
   process.stdin.resume();
+  // This case owns cross-process claim exclusivity, so it supplies the checkouts the
+  // entry resolves from Mission identity once it holds the claim; the resolver itself
+  // is owned by test/integration/process/workflow-execution-context.test.ts.
   await workflow.integrate([slug], {
     missionServicesFn: async () => {
       process.stdout.write('CLAIMED');
@@ -547,6 +552,7 @@ describe("exclusive integrate process claim", () => {
     let missionReads = 0;
     const workflow = createIntegrateWorkflow(stubIntegrateWorkflowPorts({
       ...ports,
+      missionContext: { resolve: () => { throw new Error('a run that loses the claim must not resolve its context'); } },
       process: { ...ports.process, terminate: () => {} },
       missionPaths: { ...ports.missionPaths, inferSlug: () => slug },
     }));

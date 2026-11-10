@@ -17,32 +17,62 @@ export function reviewRoundLimit(persistedRound: number | null, requested: numbe
   return persistedRound ? Math.max(persistedRound + DEFAULT_MAX_ATTEMPTS - 1, DEFAULT_MAX_ATTEMPTS) : DEFAULT_MAX_ATTEMPTS;
 }
 
+type ReviewRoundRequest = Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> & { readonly rawMaxAttempts: string | null };
+type PersistedRound = Awaited<ReturnType<ReviewRoundEntryPort['loadRound']>>;
+type OperatorEntry = 'absent' | 'ready' | 'stopped';
+
 /** Infer first review preparation or continuation from the authoritative Review. */
 export class ReviewRoundUseCase {
   constructor(private readonly _entry: ReviewRoundEntryPort, private readonly _runLoop: typeof runReviewLoop = runReviewLoop) {}
 
-  async enter(request: Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> & { readonly rawMaxAttempts: string | null }): Promise<void> {
+  async enter(request: ReviewRoundRequest): Promise<void> {
     const parsed = request.rawMaxAttempts === null ? DEFAULT_MAX_ATTEMPTS : Number(request.rawMaxAttempts);
     if (!Number.isInteger(parsed) || parsed < 1) {
       this._entry.invalidMaxAttempts(request.rawMaxAttempts ?? '');
       return;
     }
     const persisted = await this._entry.loadRound(request.slug);
-    if (!persisted && !await this._entry.isKnownMission(request.slug)) {
-      this._entry.missingReviewAggregate(request.slug);
-      return;
-    }
-    // Only a direct operator can acknowledge a correction or clear a stop.
-    if (!request.dryRun && this._entry.operatorResume) {
-      await this._entry.operatorResume.acknowledge(request.slug);
-      if (persisted) {
-        await this._entry.clearHumanIntervention(request.slug);
-        await this._entry.invalidateResolvedBlocker(request.slug);
+    const operatorEntry = await this.prepareOperatorEntry(request, persisted);
+    if (operatorEntry === 'stopped') { return; }
+    if (!persisted && operatorEntry === 'absent') {
+      const mission = await this._entry.loadMission(request.slug);
+      if (mission.kind === 'unavailable') {
+        this._entry.missionUnavailable(request.slug, mission.reason);
+        return;
+      }
+      if (mission.kind === 'missing') {
+        this._entry.missingReviewAggregate(request.slug);
+        return;
       }
     }
     const maxAttempts = reviewRoundLimit(persisted?.round ?? null, request.rawMaxAttempts === null ? null : parsed);
     const round = { ...request, maxAttempts, isContinue: Boolean(persisted) };
     await this._runLoop(round, await this._entry.mechanisms(round));
+  }
+
+  /** Only a direct operator can acknowledge a correction or clear a stop. */
+  private async prepareOperatorEntry(request: ReviewRoundRequest, persisted: PersistedRound): Promise<OperatorEntry> {
+    const resume = this._entry.operatorResume;
+    if (request.dryRun || !resume) { return 'absent'; }
+    const assessment = await resume.assess(request.slug);
+    if (assessment.outcome === 'unavailable') {
+      this._entry.missionUnavailable(request.slug, assessment.reason);
+      return 'stopped';
+    }
+    if (assessment.outcome === 'missing') {
+      this._entry.missingReviewAggregate(request.slug);
+      return 'stopped';
+    }
+    if (assessment.outcome === 'refused') {
+      this._entry.reviewRecoveryRefused(request.slug, assessment.reason);
+      return 'stopped';
+    }
+    await resume.acknowledge(request.slug);
+    if (persisted) {
+      await this._entry.clearHumanIntervention(request.slug);
+      await this._entry.invalidateResolvedBlocker(request.slug);
+    }
+    return 'ready';
   }
 }
 

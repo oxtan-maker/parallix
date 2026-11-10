@@ -55,6 +55,31 @@ export function isDbOwnedPxIdentity(value: unknown): boolean {
   return typeof value === 'string' && PX_IDENTITY_PATTERN.test(value.trim());
 }
 
+/** The aggregate-backed decision for whether a Mission owns a Backlog mirror. */
+export type BacklogMirrorOwnership =
+  | { readonly kind: 'none'; readonly authority: 'mission'; readonly reason: 'db-owned-px' | 'wave-child' }
+  | { readonly kind: 'required'; readonly authority: 'backlog' };
+
+/**
+ * Decide Backlog mirror ownership from persisted Mission facts.
+ *
+ * Counter-minted `px-*` Missions are DB-owned by identity. Wave children are
+ * DB-owned because the persisted aggregate names the parent that minted them;
+ * their dotted spelling is deliberately irrelevant. Every other Mission keeps
+ * the strict Backlog-mirror contract.
+ */
+export function backlogMirrorOwnership(
+  mission: Pick<MissionData, 'id' | 'waveParentId'>,
+): BacklogMirrorOwnership {
+  if (isDbOwnedPxIdentity(mission.id)) {
+    return { kind: 'none', authority: 'mission', reason: 'db-owned-px' };
+  }
+  if (mission.waveParentId !== null && mission.waveParentId !== undefined) {
+    return { kind: 'none', authority: 'mission', reason: 'wave-child' };
+  }
+  return { kind: 'required', authority: 'backlog' };
+}
+
 /**
  * Whether a value is an attempted reference into the `px-` namespace rather
  * than a valid identity (PX-0045): a single whitespace-free token that starts

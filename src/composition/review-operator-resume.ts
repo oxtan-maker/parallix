@@ -3,6 +3,9 @@ import type { MissionStore } from '../application/domain-ports.js';
 import type { ReviewOperatorResumePort } from '../application/ports/review-round.js';
 import { MissionCheckpointService } from '../application/mission-checkpoint-service.js';
 import { missionId } from '../domain/mission.js';
+import { assessReviewOperatorResume } from '../application/review-recovery.js';
+import type { ReviewLivenessReader } from '../application/projections/review-liveness.js';
+import type { ReviewOperatorResumePermit } from '../application/review-recovery.js';
 
 const cliInvocation = new AsyncLocalStorage<boolean>();
 
@@ -17,9 +20,12 @@ export function bindReviewOperatorResume(
   store: MissionStore,
   direct: boolean,
   options: { readonly nestedWork?: unknown; readonly integrationOwnsReview?: unknown },
+  readReviewLiveness?: ReviewLivenessReader,
+  permit?: ReviewOperatorResumePermit | null,
 ): ReviewOperatorResumePort | undefined {
   if (!direct || options.nestedWork || options.integrationOwnsReview) { return undefined; }
   return {
+    assess: slug => assessReviewOperatorResume(slug, () => store.load(missionId(slug)), readReviewLiveness, permit),
     acknowledge: async slug => {
       await new MissionCheckpointService(store).acknowledgeOperatorResume({
         operationId: `review-entry:${slug}`, missionId: missionId(slug),

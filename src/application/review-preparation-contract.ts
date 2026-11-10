@@ -9,7 +9,7 @@ import { evaluateMissionEvidence } from './mission-evidence-readiness.js';
 import * as path from 'node:path';
 import * as fmt from './presentation/cli-format.js';
 import type { AgentFamily } from '../domain/agents.js';
-import { missionId } from '../domain/mission.js';
+import { backlogMirrorOwnership, missionId, type BacklogMirrorOwnership } from '../domain/mission.js';
 import type { Review } from '../domain/review.js';
 import type { ReviewPreparationLog, ReviewPreparationMissionServicesPort, ReviewPreparationResult, ReviewPreparationWorkflowPorts } from "./ports/review-preparation-workflow.js";
 import type { CheckpointData } from '../domain/checkpoint.js';
@@ -30,7 +30,7 @@ export async function loadRecordedContract(
   missionDirPath: string,
   slug: string,
 ): Promise<
-  | { ok: true; implementer?: AgentFamily | null; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; successCriterionIds?: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null }
+  | { ok: true; implementer?: AgentFamily | null; draftedInDb: boolean; checkpoints: readonly CheckpointData[]; successCriteria: readonly string[]; successCriterionIds?: readonly string[]; completedSuccessCriteria: readonly number[]; gates: readonly string[]; review: Review | null; mirrorOwnership: BacklogMirrorOwnership }
   | { ok: false; error: string }
 > {
   try {
@@ -51,6 +51,7 @@ export async function loadRecordedContract(
       successCriterionIds: mission.successCriterionIds,
       completedSuccessCriteria: mission.completedSuccessCriteria ?? [],
       gates: mission.declaredGates ?? [],
+      mirrorOwnership: backlogMirrorOwnership(mission),
       // The open review round names the affected criteria a repair must re-evidence.
       review: mission.review ?? null,
     };

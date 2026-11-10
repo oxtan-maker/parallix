@@ -20,7 +20,8 @@ mockModule('../../../../src/adapters/filesystem/mission-utils.js', import.meta.u
 await installModuleMocks();
 const { ConcreteMissionReadAdapter } = await import('../../../../src/adapters/backlog/concrete-mission-read-adapter.js');
 const { BoardProjectionBuilder } = await import('../../../../src/application/projections/board-readers.js');
-const { snapshotWorktreeTopology } = await import('../../../../src/adapters/git/worktree.js');
+const { parseWorktreeTopology, primaryRepositoryWorktree, registeredWorktreeAt, snapshotWorktreeTopology,
+  worktreeForBranch } = await import('../../../../src/adapters/git/worktree.js');
 const { repositoryId } = await import('../../../../src/domain/repository.js');
 
 // ---- task-1004 task-file and slug-suffix resolution (consolidated from test/task_1004.test.ts, TASK-2622.09) ----
@@ -328,6 +329,29 @@ describe("merge-noise classification of backlog paths", () => {
 
 // ---- task-2407 snapshotWorktreeTopology composition export (consolidated from test/task-2407-snapshot-worktree-topology-runtime-repro.test.ts, TASK-2622.09) ----
 describe("snapshotWorktreeTopology composition export", async () => {
+  test('worktree topology owns porcelain parsing and repository-scoped branch/path lookup (TASK-2777)', () => {
+    const topology = parseWorktreeTopology([
+      'worktree /repo main',
+      'HEAD a',
+      'branch refs/heads/main',
+      '',
+      'worktree /repo mission',
+      'HEAD b',
+      'branch refs/heads/mission/task-2777',
+      '',
+      'worktree /repo stale',
+      'HEAD c',
+      'branch refs/heads/mission/stale',
+      'prunable gitdir file points to non-existent location',
+      '',
+    ].join('\n'));
+
+    assert.equal(primaryRepositoryWorktree(topology)?.path, '/repo main');
+    assert.equal(worktreeForBranch(topology, 'mission/task-2777')?.path, '/repo mission');
+    assert.equal(worktreeForBranch(topology, 'mission/stale')?.prunable, true);
+    assert.equal(registeredWorktreeAt(topology, '/repo mission')?.branch, 'refs/heads/mission/task-2777');
+  });
+
   /**
    * Runtime regression for task-2407: `snapshotWorktreeTopology` must be a
    * callable named export once the real CLI composition graph is loaded.

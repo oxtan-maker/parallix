@@ -18,26 +18,6 @@ import { continueReviewClearsIntervention, continueReviewInvalidatesBlocker, clo
 /** Command dispatch awaits completion and forwards failures; receipts are owned by each command. */
 type ReviewCommandObserver<Handler extends (...args: never[]) => unknown> = (...args: Parameters<Handler>) => unknown;
 
-/**
- * Whether a slug identifies a known Mission.
- *
- * The Mission store is the single authority here: a mission persisted in the
- * operator database is known regardless of whether the retired
- * `missions/<slug>` directory still exists. A store read failure fails closed:
- * the retired directory is not an identity authority.
- *
- * @param {string} slug
- * @param {MissionStore|null|undefined} store
- */
-async function isKnownMission(slug: string, store: MissionStore | null | undefined): Promise<boolean> {
-  if (!store) { return false; }
-  try {
-    return (await store.load(missionId(slug))).kind === 'found';
-  } catch {
-    return false;
-  }
-}
-
 /** Per-invocation output and current-work observers the review loop reports to. */
 export type ReviewLoopObservers = Pick<ReviewLoopBindings, 'log' | 'error' | 'exit' | 'onAgentLaunched' | 'onAutonomousStop'>;
 
@@ -98,7 +78,16 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     const port: ReviewRoundEntryPort = {
       operatorResume: o.operatorResume,
       loadRound: async slug => await Promise.resolve((o.readReviewStateFn || readReviewState)(slug, worktree(slug) || process.cwd(), o.missionStore)),
-      isKnownMission: async slug => !o.requireReviewAggregate || await isKnownMission(slug, o.missionStore),
+      loadMission: async slug => {
+        if (!o.requireReviewAggregate) { return { kind: 'found' as const }; }
+        if (!o.missionStore) { return { kind: 'unavailable' as const, reason: 'Operator database is unavailable' }; }
+        try {
+          const loaded = await o.missionStore.load(missionId(slug));
+          return loaded.kind === 'found' ? { kind: 'found' as const } : loaded;
+        } catch (error) {
+          return { kind: 'unavailable' as const, reason: error instanceof Error ? error.message : 'Operator database is unavailable' };
+        }
+      },
       clearHumanIntervention: async slug => { await (o.continueReviewClearsInterventionFn ?? continueReviewClearsIntervention)(slug, context.args, helperOptions); },
       invalidateResolvedBlocker: async slug => { if (o.missionStore) { await continueReviewInvalidatesBlocker(slug, context.args, helperOptions); } },
       mechanisms: request => {
@@ -109,6 +98,14 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
       invalidMaxAttempts: raw => this.invalidMaxAttempts(raw),
       missingReviewAggregate: slug => {
         (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} is unknown or has no valid Review aggregate; load a known Mission before review.`));
+        (o.exit || process.exit)(1);
+      },
+      missionUnavailable: (slug, reason) => {
+        (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission authority is unavailable for ${slug}: ${reason}`));
+        (o.exit || process.exit)(1);
+      },
+      reviewRecoveryRefused: (slug, reason) => {
+        (o.error || fmt.log.plainError)(fmt.status('FAIL', `Review recovery refused for ${slug}: ${reason}`));
         (o.exit || process.exit)(1);
       },
     };

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { POLL_TIMEOUT, isPollTimeout, type ImplementerArtifactFacts, type ProviderPoll } from '../../../../src/application/ports/review-round.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
+import type { AgentLaunchResult } from '../../../../src/application/ports/agent-launch-result.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 // Regression provenance: TASK-1221.
@@ -481,4 +482,23 @@ describe('preferred reviewer runtime fallback authority', () => {
     assert.ok(persistedReviewers.length > 1, 'the implementer phase performs later bookkeeping writes');
     assert.ok(persistedReviewers.slice(1).every(reviewer => reviewer === 'vibe'), JSON.stringify(persistedReviewers));
   });
+});
+
+test('a reviewer recovery launch result is the same AgentLaunchResult the artifact consumer and fallback adoption read (TASK-2846.02)', async () => {
+  const launched: AgentLaunchResult[] = [];
+  const consumed: Array<AgentLaunchResult | null | undefined> = [];
+  const fake = fakeReviewLoopPorts({
+    slug: 'task-2846-single-launch-type', provider: {},
+    routing: { eligibleFamilies: () => ['codex', 'vibe', 'custom'], nominate: () => 'codex' },
+    agents: { launch: async launch => {
+      const result: AgentLaunchResult = { agent: launched.length === 0 ? launch.agent : 'vibe', result: { status: 0, stopReason: 'output-token-limit' } };
+      launched.push(result);
+      return result;
+    } },
+    artifacts: { consumeReviewer: async (_reviewer, _state, launch) => { consumed.push(launch); return { consumed: false }; } },
+  });
+  await runReviewLoop({ slug: 'task-2846-single-launch-type', implementer: 'custom', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
+  assert.ok(launched.length >= 2, 'the recovery rebound launched again');
+  assert.ok(consumed.some(launch => launch === launched[0]), 'the consumer reads the launch result unchanged');
+  assert.equal(fake.current()?.reviewer, 'vibe', 'the fallback family from the recovery launch result is adopted');
 });

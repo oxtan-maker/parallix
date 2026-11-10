@@ -86,7 +86,7 @@ function stageMeasurements({ result, worktree, sinceMs }: Parameters<typeof reco
     durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
   }
   const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
-  return { durationMinutes, telemetry };
+  return { durationMinutes, telemetry, runId: result?.runId };
 }
 
 export async function recordStageStatsSafe(
@@ -110,7 +110,7 @@ export async function recordStageStatsSafe(
   }
 ): Promise<void> {
   const { stage, slug, rootDir, worktree, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, model = null, missionStore = null } = opts;
-  const { durationMinutes, telemetry } = stageMeasurements(opts);
+  const { durationMinutes, telemetry, runId } = stageMeasurements(opts);
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
     const currentState = state && await readReviewState(slug, worktree || process.cwd(), missionStore);
@@ -125,7 +125,7 @@ export async function recordStageStatsSafe(
     }))) {
       return;
     }
-    try { getStats().accumulateStageStats({ configuration: opts.configuration, stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model }); } catch { /* best-effort */ }
+    try { getStats().accumulateStageStats({ configuration: opts.configuration, stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, model, runId }); } catch { /* best-effort */ }
   } catch (err: unknown) {
     log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));
   }

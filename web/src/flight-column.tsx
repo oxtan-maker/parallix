@@ -9,13 +9,14 @@ import type { CSSProperties, DragEvent } from 'react';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
+import { GateIcon } from './gate-icon.js';
 import { CheckpointPips } from './checkpoint-pips.js';
 import { LaneHeader, laneCard, laneEmpty } from './lane-header.js';
 import { C, REVIEW, SPACE, TRACK, TYPE } from './palette.js';
 import type { PendingCommands } from './pending-command.js';
 import { ReasonDisclosure } from './reason-disclosure.js';
 import { ActorLine, AgentLabel } from './card-activity.js';
-import { actorLine, coordinatorText, executingFamily, executionDiagnosticText, familyAccent, GATE_COLOR, GATE_TEXT, isSpinning } from './format.js';
+import { actorLine, coordinatorText, executingFamily, executionDiagnosticText, familyAccent, isSpinning } from './format.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -187,12 +188,7 @@ function FlightCardCheckpoint({ card }: { card: WebMissionCard }) {
     <div data-card-progress-row="" data-checkpoint-gate-row="" aria-label="Mission progression" style={{ display: 'flex', alignItems: 'center', gap: SPACE.md,
       width: '100%', minWidth: 0, height: 24, marginBottom: SPACE.md, overflow: 'hidden' }}>
       <CheckpointPips card={card} />
-      <div data-gate-status="" style={{ flex: '0 0 auto', minWidth: 0, whiteSpace: 'nowrap', fontSize: TYPE.meta,
-        color: GATE_COLOR[card.gate], fontWeight: card.gate === 'failed' ? 700 : 400 }}>
-        {card.gate === 'unavailable'
-          ? <details><summary style={{ cursor: 'pointer', fontSize: TYPE.micro }}>gate · unknown</summary><span>{GATE_TEXT[card.gate]}</span></details>
-          : GATE_TEXT[card.gate]}
-      </div>
+      <GateIcon gate={card.gate} />
       <PullRequestReview card={card} />
     </div>
   );

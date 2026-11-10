@@ -114,16 +114,9 @@ function renderedStatusLines(history: ReturnType<typeof projectReviewHistory>): 
       reviewPhase: 'fixing',
       reviewRound: 1,
       reviewDisposition: 'REQUEST_CHANGES',
-      reviewHistory: history.map((round) => ({
-        number: round.number,
-        reviewer: round.reviewer,
-        implementer: round.implementer,
-        disposition: round.disposition ?? 'pending',
-        comment: round.comment,
-        findingSummaries: round.findingSummaries,
-        fixes: round.fixes,
-        pushbacks: round.pushbacks,
-      })),
+      // Status carries the board projection's rounds unchanged; the mirror map
+      // it used to widen them through is gone (TASK-2846).
+      reviewHistory: history,
     },
     prInfo: null,
     staleWorktrees: [],

@@ -13,10 +13,9 @@ import { ExecutionStartService, ExecutionStartRefusal } from './execution-start-
 import { MissionLifecycleService } from './mission-lifecycle-service.js';
 import { beginReviewPreparation } from './review-submission-service.js';
 import { MissionIntakeService } from './mission-intake-service.js';
-import type { Mission, MissionLabel } from '../domain/mission.js';
+import type { MissionLabel } from '../domain/mission.js';
 import type { WorkflowOperationStore, WorkflowProcessPort, WorkflowOperationRecord as WorkflowOperation } from './ports/workflow-operation.js';
-import { currentReviewRound } from '../domain/review.js';
-import { decideReviewRecovery, reviewRecoveryApplies } from './review-recovery.js';
+import { assessReviewOperatorResume, type ReviewOperatorResumePermit } from './review-recovery.js';
 import type { ReviewLivenessReader } from './projections/review-liveness.js';
 
 export interface WorkflowAcceptance {
@@ -27,11 +26,12 @@ export type WorkflowAdmission = WorkflowAcceptance | ApplicationOutcome<unknown>
 export { isWorkflowCommand } from '../domain/workflow-operation.js';
 type DraftInput = { title: string; labels: readonly MissionLabel[]; status: string };
 interface AdmissionPreparation { readonly agent: string | null; readonly draft: DraftInput | null; }
+interface OperatorReviewRequest { readonly request: BoardCommandRequest; readonly permit: ReviewOperatorResumePermit | null; }
 
-function isBrowserReviewSubmission(request: BoardCommandRequest): boolean {
+function isOperatorReviewSubmission(request: BoardCommandRequest): boolean {
   return request.kind === 'review:submit'
-    && !request.operatorInvocation
-    && request.missionStatusAtRequest !== undefined;
+    && (request.operatorInvocation === true && request.invocation?.command === 'review'
+      || !request.operatorInvocation && request.missionStatusAtRequest !== undefined);
 }
 
 /** Admission and execution share policy; no transaction spans external work. */
@@ -112,9 +112,9 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     try {
       const existing = await this._operations.readOnly(() => this.existingAdmission(request, key));
       if (existing) { return existing; }
-      const preparedRequest = await this.operatorReviewRequest(request);
-      if ('status' in preparedRequest) { return preparedRequest; }
-      request = preparedRequest;
+      const operatorReview = await this.operatorReviewRequest(request);
+      if ('status' in operatorReview) { return operatorReview; }
+      request = operatorReview.request;
       const prepared = await this.prepareAdmission(request);
       if ('status' in prepared) { return prepared; }
       accepted = await this._operations.transaction(async () => {
@@ -128,10 +128,13 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
         if (loaded.kind !== 'found' || loaded.mission.repositoryId !== this._repository) {
           return failure('unavailable', 'Mission authority could not find this mission');
         }
+        if (operatorReview.permit && operatorReview.permit.missionVersion !== loaded.version) {
+          return failure('conflict', 'Mission changed after Review recovery was assessed; retry the command');
+        }
         const ineligible = this.admissionEligibility(request, loaded);
         if (ineligible) { return ineligible; }
         const command = request.kind as WorkflowCommand;
-        const outcome = await this.accept(request, loaded, key, command, prepared.agent);
+        const outcome = await this.accept(request, loaded, key, command, prepared.agent, operatorReview.permit);
         inserted = outcome.status === 'accepted';
         return outcome;
       });
@@ -144,36 +147,22 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     return accepted;
   }
 
-  /** Browser authentication is established by the web host before this typed action reaches admission. */
-  private async operatorReviewRequest(request: BoardCommandRequest): Promise<BoardCommandRequest | ApplicationOutcome<unknown>> {
-    if (!isBrowserReviewSubmission(request)) { return request; }
+  /** Observe recovery before either authenticated browser or direct CLI admission creates ownership. */
+  private async operatorReviewRequest(request: BoardCommandRequest): Promise<OperatorReviewRequest | ApplicationOutcome<unknown>> {
+    if (!isOperatorReviewSubmission(request)) { return { request, permit: null }; }
     const loaded = await this._operations.readOnly(() => this._missions.load(missionId(request.missionId)));
     if (loaded.kind === 'unavailable') { return failure('unavailable', loaded.reason); }
     if (loaded.kind !== 'found' || loaded.mission.repositoryId !== this._repository) {
       return failure('unavailable', 'Mission authority could not find this mission');
     }
-    return this.recoveredOperatorReviewRequest(request, loaded.mission);
-  }
-
-  private async recoveredOperatorReviewRequest(request: BoardCommandRequest, mission: Mission): Promise<BoardCommandRequest | ApplicationOutcome<unknown>> {
-    const phase = mission.review ? currentReviewRound(mission.review).phase : null;
-    const humanStop = mission.review?.intervention?.reason ?? null;
-    if (!reviewRecoveryApplies(phase, humanStop)) { return request; }
-    const observation = await this._reviewExecution?.(request.missionId);
-    const recovery = decideReviewRecovery(request.missionId, {
-      phase,
-      humanStop,
-      workflow: observation?.workflow,
-      liveness: observation?.liveness,
-    });
-    if (recovery?.action !== 'acknowledge-and-resume') {
-      return failure('conflict', recovery?.guidance ?? 'Review recovery is not awaiting operator acknowledgment');
-    }
-    return {
-      ...request,
-      operatorInvocation: true,
-      invocation: { command: 'review', args: [request.missionId], interactive: false },
-    };
+    const assessment = await assessReviewOperatorResume(request.missionId, async () => loaded, this._reviewExecution);
+    if (assessment.outcome === 'not-required') { return { request, permit: null }; }
+    if (assessment.outcome === 'unavailable') { return failure('unavailable', assessment.reason); }
+    if (assessment.outcome === 'missing') { return failure('unavailable', 'Mission authority could not find this mission'); }
+    if (assessment.outcome === 'refused') { return failure('conflict', assessment.reason); }
+    return { request: request.operatorInvocation ? request : { ...request, operatorInvocation: true,
+      invocation: { command: 'review', args: [request.missionId], interactive: false } },
+      permit: { missionId: loaded.mission.id, missionVersion: loaded.version, recovery: assessment.recovery } };
   }
 
   private admissionRequestRefusal(request: BoardCommandRequest, key: string): ApplicationOutcome<unknown> | null {
@@ -247,20 +236,24 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     return loaded;
   }
 
-  private async accept(request: BoardCommandRequest, loaded: Extract<Awaited<ReturnType<MissionTransitionStore['load']>>, { kind: 'found' }>, key: string, command: WorkflowCommand, agent: string | null): Promise<WorkflowAdmission> {
+  private async accept(request: BoardCommandRequest, loaded: Extract<Awaited<ReturnType<MissionTransitionStore['load']>>, { kind: 'found' }>, key: string, command: WorkflowCommand, agent: string | null, reviewOperatorResume: ReviewOperatorResumePermit | null): Promise<WorkflowAdmission> {
         const now = new Date().toISOString();
         let operation: WorkflowOperation = { ...workflowOperation({
           id: request.operationId, repositoryId: this._repository, missionId: loaded.mission.id,
           requestKey: key, command, generation: 0, phase: 'accepted', providerStarted: false, agent,
           reviewer: request.reviewer ?? null, originalStatus: loaded.mission.status,
           previousAssignee: loaded.mission.assignee, owner: null, createdAt: now, updatedAt: now, reason: null,
-        }), operatorInvocation: request.operatorInvocation, invocation: request.invocation, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent };
+        }), operatorInvocation: request.operatorInvocation, invocation: request.invocation, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent,
+          reviewOperatorResume: reviewOperatorResume ?? undefined };
         if (command === 'active:execute' && agent && !pendingIntegrationApproval(loaded.mission)) {
           const activation = await new ExecutionStartService(this._missions).start(loaded.mission.id, agent, operation.id, loaded.version);
           operation = { ...operation, activationVersion: activation.version };
         }
         if (command === 'review:submit' && !pendingIntegrationApproval(loaded.mission)) {
-          await beginReviewPreparation(loaded.mission.id, { store: this._missions, lifecycle: new MissionLifecycleService(this._missions) });
+          const preparedVersion = await beginReviewPreparation(loaded.mission.id, { store: this._missions, lifecycle: new MissionLifecycleService(this._missions) });
+          // Admission's own atomic lane transition preserves the checked recovery facts.
+          if (reviewOperatorResume) { operation = { ...operation,
+            reviewOperatorResume: { ...reviewOperatorResume, missionVersion: preparedVersion } }; }
         }
         await this._operations.insert(operation);
         await this._operations.activity.publish(executionActivity(operation, 'running', 'preparing workflow', operation.owner, this._revision()), operation.id);

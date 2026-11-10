@@ -1,5 +1,6 @@
 export interface UsageRecord {
   readonly id?: string;
+  readonly runId?: string;
   readonly date?: string;
   readonly repo?: string;
   readonly mission?: string;
@@ -24,7 +25,30 @@ export interface UsageRecord {
   readonly cost_usd?: number;
 }
 
+/** Text fields of a usage record that a filter may match by equality. */
+export type UsageFilterField =
+  | 'date'
+  | 'repo'
+  | 'mission'
+  | 'classification'
+  | 'implementer'
+  | 'provider'
+  | 'model'
+  | 'implementer_agent'
+  | 'reviewer_agent'
+  | 'stage';
+
+/**
+ * Conjunction of equality constraints; omitted fields are unconstrained.
+ *
+ * Constraints compare against the exposed `UsageRecord` values, where an unset
+ * text field is `undefined`; an empty-string constraint therefore matches no
+ * record, even where the storage layer keeps empty text.
+ */
+export type UsageFilter = { readonly [K in UsageFilterField]?: string };
+
 export interface UsageRepository {
   findAll(): Promise<readonly UsageRecord[]>;
-  findWhere(_predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]>;
+  /** Records matching every constraint in `filter`, in `findAll` order. */
+  findWhere(_filter: UsageFilter): Promise<readonly UsageRecord[]>;
 }

@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 
 import { git } from './git.js';
+import { primaryRepositoryWorktree, readRepositoryWorktrees, type GitReader } from './worktree.js';
 import { repositoryId, type RepositoryId } from '../../domain/repository.js';
 
 // ---------------------------------------------------------------------------
@@ -23,17 +24,9 @@ import { repositoryId, type RepositoryId } from '../../domain/repository.js';
  * Mission worktrees resolve back to the checkout they were created from;
  * anything Git cannot describe as a worktree is its own root.
  */
-export function resolvePrimaryCheckout(rootDir: string): string {
+export function resolvePrimaryCheckout(rootDir: string, gitFn: GitReader = git): string {
   try {
-    // `git worktree list` always reports the main working tree first.
-    const listed = git(['-C', rootDir, 'worktree', 'list', '--porcelain'], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (listed.status !== 0) {
-      return rootDir;
-    }
-    const first = (listed.stdout || '').split('\n').find((line) => line.startsWith('worktree '));
-    return first ? first.slice('worktree '.length).trim() : rootDir;
+    return primaryRepositoryWorktree(readRepositoryWorktrees(rootDir, gitFn))?.path ?? rootDir;
   } catch {
     return rootDir;
   }

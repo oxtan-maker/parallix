@@ -3,7 +3,7 @@ import { missionId } from '../../domain/mission.js';
 import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { integrationRepairMustReactivate, integrationRepairRoute, repairedRevisionReviewEligible, repairCanResumeIntegration } from '../../domain/integration-gate-policy.js';
 import { integrationRepairNeedsReview } from '../integration-repair-review.js';
-import { abortWith } from './support.js';
+import { abortWith, projectBacklogTransition } from './support.js';
 import type { IntegrationGateDefinition } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts, IntegrationGateRoute } from '../ports/integrate-workflow.js';
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
@@ -33,7 +33,7 @@ async function completeRepairReview({ request, ports, configured, checkout, rout
 async function stopNonContinuingRepair({ request, ports, route }: GateRepairCompletion): Promise<void> {
   const { slug, seams } = request;
   if (route.route === 'retained') {
-    await seams.transitionTaskFn(slug, 'ready-for-integration');
+    await projectBacklogTransition(request.context.mirrorOwnership, seams.transitionTaskFn, slug, 'ready-for-integration');
     throw new IntegrationStopsForHuman(`Original approval retained for ${slug}; review the PR and run px integrate ${slug} to land.`);
   }
   if (route.route === 'human-only') {
@@ -76,6 +76,6 @@ export async function completeGateRepairRoute(completion: GateRepairCompletion):
   if (!repairCanResumeIntegration(repaired.mission.status)) {
     throw abortWith(landing, `Mission ${slug} cannot resume integration from ${repaired.mission.status}.`);
   }
-  await seams.transitionTaskFn(slug, 'ready-for-integration');
+  await projectBacklogTransition(request.context.mirrorOwnership, seams.transitionTaskFn, slug, 'ready-for-integration');
   return `${configured.length} integration gate(s) passed after ${route.rebounds} integration-gate rebound(s)`;
 }

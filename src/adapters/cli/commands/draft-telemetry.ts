@@ -2,8 +2,12 @@
 
 import type { ParallixConfiguration } from "../../../application/ports/configuration.js";
 import { type DraftLog } from './draft-adapter-types.js';
+import {
+  recordDraftImplementerAssignment,
+  type DraftImplementerRecordingPort,
+} from '../../../application/draft-command-use-case.js';
 
-import type { StageStatsRequest } from '../../../application/stats-recording-use-case.js';
+import { providerResourceObservation, type ProviderResourceObservation } from '../../../application/run-history-types.js';
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 
@@ -24,25 +28,12 @@ export async function recordDraftImplementer({
   slug,
   worktree
 }: { selected: string; actual: string; taskResolution?: Pick<ReturnType<typeof resolveTaskFile>, 'ok' | 'taskFile'> | null; slug: string; worktree: string; log?: DraftLog; plumbingLog?: DraftLog; transitionTaskFn?: typeof transitionTask; getTaskStatusFn?: typeof getTaskStatus }) {
-  if (!taskResolution || !taskResolution.ok || !taskResolution.taskFile || !actual) {
-    return actual || selected;
-  }
-
-  if (selected && actual !== selected) {
-    log(fmt.status('INFO', `Draft agent fell back from ${fmt.agent(selected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
-  } else {
-    plumbingLog(fmt.status('INFO', `Enforcing draft agent ${fmt.agent(actual)} as assignee...`));
-  }
-
-  const currentStatus = getTaskStatusFn(taskResolution.taskFile);
-  if (!currentStatus || !await transitionTaskFn(slug, currentStatus, {
-    implementer: actual,
-    rootDir: draftStatsRoot(worktree, slug),
-    log: plumbingLog,
-  })) {
-    log(fmt.status('WARN', `Could not enforce draft agent ${fmt.agent(actual)} in backlog task.`));
-  }
-  return actual;
+  const port: DraftImplementerRecordingPort = {
+    getTaskStatus: getTaskStatusFn,
+    transitionTask: transitionTaskFn,
+    resolveRoot: draftStatsRoot,
+  };
+  return recordDraftImplementerAssignment({ selected, actual, taskResolution, slug, worktree, log, plumbingLog }, port);
 }
 
 /**
@@ -51,7 +42,7 @@ export async function recordDraftImplementer({
  * families record honest zeros with provider/model set to the family name.
  * Best-effort: a failure here must never fail the draft.
  */
-export function recordDraftStats({ configuration, slug, rootDir, agentFamily, result, log = fmt.log.plain }: { configuration?: ParallixConfiguration; slug: string; rootDir: string; agentFamily: string; result?: { startedAt?: string; endedAt?: string; telemetry?: StageStatsRequest['telemetry'] } | null; log?: DraftLog; error?: DraftLog }) {
+export function recordDraftStats({ configuration, slug, rootDir, agentFamily, result, log = fmt.log.plain }: { configuration?: ParallixConfiguration; slug: string; rootDir: string; agentFamily: string; result?: { runId?: string; startedAt?: string; endedAt?: string; telemetry?: Record<string, unknown> | ProviderResourceObservation | null; providerResources?: ProviderResourceObservation | null } | null; log?: DraftLog; error?: DraftLog }) {
   if (!result) { return; }
   let durationMinutes = 0;
   if (result.startedAt && result.endedAt) {
@@ -60,11 +51,12 @@ export function recordDraftStats({ configuration, slug, rootDir, agentFamily, re
   try {
     const { row } = stats.recordStageStats({
       configuration, slug,
+      runId: result.runId,
       stage: 'draft',
       rootDir,
       implementer: agentFamily,
       model: resolveAgentModel(agentFamily, rootDir),
-      telemetry: result.telemetry || null,
+      telemetry: result.providerResources ?? providerResourceObservation(result.telemetry),
       durationMinutes,
     });
     log(fmt.status('INFO', `Draft stats recorded: ${slug} stage=draft provider=${row.provider} model=${row.model} input_tokens=${row.input_tokens} tool_calls=${row.tool_calls}`));

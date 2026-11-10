@@ -45,6 +45,7 @@ export const parseBaseBranchLine = worktree.parseBaseBranchLine;
 export const readRecordedBaseBranch = worktree.readRecordedBaseBranch;
 export const resolveMissionBaseBranch = worktree.resolveMissionBaseBranch;
 export const resolveBaseWorktree = worktree.resolveBaseWorktree;
+export const checkOutBaseWorktree = worktree.checkOutBaseWorktree;
 export const resolveWorktree = worktree.resolveWorktree;
 
 export const graphifyAvailable = graphify.graphifyAvailable;

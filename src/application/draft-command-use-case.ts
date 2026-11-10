@@ -5,6 +5,33 @@ import {
   NO_EXECUTION_ACTIVITY,
   type ExecutionActivityPort,
 } from './recording/execution-activity-recorder.js';
+import * as fmt from './presentation/cli-format.js';
+
+export type DraftImplementerLog = (_message: string) => void;
+
+export interface DraftImplementerRecordingPort {
+  getTaskStatus(taskFile: string): string | null;
+  transitionTask(
+    slug: string,
+    status: string,
+    options: {
+      implementer: string;
+      rootDir: string;
+      log: DraftImplementerLog;
+    },
+  ): boolean | Promise<boolean>;
+  resolveRoot(worktree: string, slug: string): string;
+}
+
+export interface DraftImplementerRecordingRequest {
+  selected: string;
+  actual: string;
+  taskResolution?: { ok: boolean; taskFile?: string } | null;
+  slug: string;
+  worktree: string;
+  log: DraftImplementerLog;
+  plumbingLog: DraftImplementerLog;
+}
 
 /**
  * A draft workflow step signalled exit (its exit function was called).
@@ -108,6 +135,33 @@ async function bestEffort(publish: () => Promise<void>): Promise<void> {
   try {
     await publish();
   } catch {}
+}
+
+/** Owns the post-launch decision to project the actual draft agent into Backlog. */
+export async function recordDraftImplementerAssignment(
+  request: DraftImplementerRecordingRequest,
+  port: DraftImplementerRecordingPort,
+): Promise<string> {
+  const { selected, actual, taskResolution, slug, worktree, log, plumbingLog } = request;
+  if (!taskResolution?.ok || !taskResolution.taskFile || !actual) {
+    return actual || selected;
+  }
+
+  if (selected && actual !== selected) {
+    log(fmt.status('INFO', `Draft agent fell back from ${fmt.agent(selected)} to ${fmt.agent(actual)}; enforcing backlog assignee.`));
+  } else {
+    plumbingLog(fmt.status('INFO', `Enforcing draft agent ${fmt.agent(actual)} as assignee...`));
+  }
+
+  const currentStatus = port.getTaskStatus(taskResolution.taskFile);
+  if (!currentStatus || !await port.transitionTask(slug, currentStatus, {
+    implementer: actual,
+    rootDir: port.resolveRoot(worktree, slug),
+    log: plumbingLog,
+  })) {
+    log(fmt.status('WARN', `Could not enforce draft agent ${fmt.agent(actual)} in backlog task.`));
+  }
+  return actual;
 }
 
 // Re-export context type so callers can reference it

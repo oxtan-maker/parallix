@@ -1,6 +1,7 @@
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
 import { fixtureMission } from '../../../../fixtures/mission-builders.js';
 import { integrationContext } from '../../../../fixtures/integration-context.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
@@ -546,8 +547,7 @@ describe("local review-state approval fallback", () => {
     try {
       process.chdir(tmpRoot);
       const result = await buildIntegrationContext('task-1219', {
-        baseBranch: 'main',
-        baseWorktree: tmpRoot,
+        executionContext: missionExecutionContext({ missionId: 'task-1219', baseBranch: 'main', baseWorktree: tmpRoot, missionWorktree: tmpRoot }),
         isForgejoReviewEnabledFn: () => true,
         readTokenFn: () => null,
         getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 1219 }),
@@ -586,8 +586,7 @@ describe("local review-state approval fallback", () => {
     try {
       process.chdir(tmpRoot);
       const result = await buildIntegrationContext('task-1219', {
-        baseBranch: 'main',
-        baseWorktree: tmpRoot,
+        executionContext: missionExecutionContext({ missionId: 'task-1219', baseBranch: 'main', baseWorktree: tmpRoot, missionWorktree: tmpRoot }),
         isForgejoReviewEnabledFn: () => true,
         readTokenFn: () => null,
         getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 1219 }),
@@ -626,8 +625,7 @@ describe("local review-state approval fallback", () => {
     try {
       process.chdir(tmpRoot);
       const result = await buildIntegrationContext('task-1219', {
-        baseBranch: 'main',
-        baseWorktree: tmpRoot,
+        executionContext: missionExecutionContext({ missionId: 'task-1219', baseBranch: 'main', baseWorktree: tmpRoot, missionWorktree: tmpRoot }),
         isForgejoReviewEnabledFn: () => true,
         readTokenFn: () => null,
         getPrStatusFn: () => ({ raw: '', title: undefined, url: undefined, createdAt: null,  exists: true as const, state: 'open', merged: false, number: 1219 }),
@@ -750,12 +748,14 @@ describe("preflight classification source", () => {
       taskAssignee: 'codex',
       forgejoUser: 'codex',
       taskAssigneeWarning: null,
+      mirrorOwnership: { kind: 'required', authority: 'backlog' },
       pr: { exists: false, raw: 'no PR found' },
       approval: { ok: false, error: 'pr-missing', reviewState: null },
       mainBranch: 'main',
       baseWorktree: '/tmp',
       baseBranch: 'main',
       missionWorktree: '/tmp/mission',
+      executionCheckout: '/tmp/mission',
       mainDirty: false,
       mainDirtyEntries: []
     }, overrides);

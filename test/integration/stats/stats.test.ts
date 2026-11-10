@@ -15,6 +15,7 @@ import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
 import { createStatisticsCommand, createStatsMissionFlowReader, type StatsCompositionOptions } from '../../../src/composition/stats.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { ReportRow } from '../../../src/adapters/cli/commands/stats-rendering-types.js';
+import { providerResourceObservation } from '../../../src/application/run-history-types.js';
 
 // Bind each invocation through composition so its repository and database
 // options reach the statistics workflow adapter.
@@ -236,7 +237,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       rootDir: root,
       dbPath: dbFile,
       implementer: 'custom',
-      telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 100, outputTokens: 10, cachedTokens: 5, totalTokens: 115, toolCalls: 2, usagePercent: 7, cost_usd: 0.25 },
+      telemetry: providerResourceObservation({ provider: 'openai', model: 'gpt-5', inputTokens: 100, outputTokens: 10, cachedTokens: 5, totalTokens: 115, toolCalls: 2, usagePercent: 7, cost_usd: 0.25 }),
       durationMinutes: 3,
       date: '2026-06-24',
     });
@@ -246,7 +247,7 @@ test('task-1342: accumulateStageStats sums repeated launches for the same missio
       rootDir: root,
       dbPath: dbFile,
       implementer: 'custom',
-      telemetry: { provider: 'openai', model: 'gpt-5', inputTokens: 40, outputTokens: 4, cachedTokens: 1, totalTokens: 45, toolCalls: 1, usagePercent: 9, cost_usd: 0.5 },
+      telemetry: providerResourceObservation({ provider: 'openai', model: 'gpt-5', inputTokens: 40, outputTokens: 4, cachedTokens: 1, totalTokens: 45, toolCalls: 1, usagePercent: 9, cost_usd: 0.5 }),
       durationMinutes: 2,
       date: '2026-06-24',
     });
@@ -1002,7 +1003,7 @@ test('recordReviewStats records the reviewer-session telemetry on the review row
       dbPath: dbFile,
       reviewer: 'codex',
       implementer: 'claude',
-      telemetry: { provider: 'openai', model: 'gpt-5-codex', inputTokens: 800, outputTokens: 150, cachedTokens: 20, toolCalls: 3 },
+      telemetry: providerResourceObservation({ provider: 'openai', model: 'gpt-5-codex', inputTokens: 800, outputTokens: 150, cachedTokens: 20, toolCalls: 3 }),
       date: '2026-06-15',
     });
 

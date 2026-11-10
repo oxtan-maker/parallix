@@ -28,7 +28,7 @@ import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 import { availableBoardCommands } from '../../../src/application/projections/mission-board.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { triggerFromTransition } from '../../../src/domain/board-event.js';
-import { missionId, missionLabels, MissionRuleViolation, type Mission, type MissionStatus } from '../../../src/domain/mission.js';
+import { backlogMirrorOwnership, missionId, missionLabels, MissionRuleViolation, type Mission, type MissionStatus } from '../../../src/domain/mission.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { recordIntegrationStats } from '../../../src/adapters/cli/commands/stats.js';
@@ -114,6 +114,21 @@ describe('Slug namespace', () => {
       process.chdir(previous);
       fs.rmSync(parent, { recursive: true, force: true });
     }
+  });
+
+  test('mirror ownership uses persisted wave facts and preserves px and ordinary task boundaries (TASK-2847)', () => {
+    assert.deepEqual(backlogMirrorOwnership({ id: missionId('px-0041'), waveParentId: null }), {
+      kind: 'none', authority: 'mission', reason: 'db-owned-px',
+    });
+    assert.deepEqual(backlogMirrorOwnership({ id: missionId('task-2846.02'), waveParentId: missionId('task-2846') }), {
+      kind: 'none', authority: 'mission', reason: 'wave-child',
+    });
+    assert.deepEqual(backlogMirrorOwnership({ id: missionId('task-2846.02'), waveParentId: null }), {
+      kind: 'required', authority: 'backlog',
+    });
+    assert.deepEqual(backlogMirrorOwnership({ id: missionId('task-2846'), waveParentId: null }), {
+      kind: 'required', authority: 'backlog',
+    });
   });
 });
 

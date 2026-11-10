@@ -1,5 +1,10 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
-import type { UsageRecord, UsageRepository } from '../../application/ports/mission-measurements.js';
+import type {
+  UsageFilter,
+  UsageFilterField,
+  UsageRecord,
+  UsageRepository,
+} from '../../application/ports/mission-measurements.js';
 
 /**
  * SQLite-backed usage statistics repository.
@@ -24,14 +29,55 @@ export class SqliteUsageRepository implements UsageRepository {
     return rows.map((row) => recordFromRow(row));
   }
 
-  async findWhere(
-    predicate: (_record: UsageRecord) => boolean,
-  ): Promise<readonly UsageRecord[]> {
-    const all = await this.findAll();
-    return all.filter(predicate);
+  async findWhere(filter: UsageFilter): Promise<readonly UsageRecord[]> {
+    const predicates = FILTER_COLUMNS.flatMap((column) => {
+      const value = filter[column];
+      return value === undefined ? [] : [equalityPredicate(column, value)];
+    });
+    const where = predicates.length > 0
+      ? ` WHERE ${predicates.map((predicate) => predicate.sql).join(' AND ')}`
+      : '';
+    const rows = await this.db.query<Record<string, unknown>>(
+      `SELECT * FROM usage_statistics${where} ORDER BY id ASC`,
+      predicates.flatMap((predicate) => predicate.params),
+    );
+    return rows.map((row) => recordFromRow(row));
   }
-
 }
+
+/** Column names are fixed here, never taken from caller input, so the SQL text stays static per filter shape. */
+const FILTER_COLUMNS: readonly UsageFilterField[] = [
+  'date',
+  'repo',
+  'mission',
+  'classification',
+  'implementer',
+  'provider',
+  'model',
+  'implementer_agent',
+  'reviewer_agent',
+  'stage',
+];
+
+/**
+ * Equality predicate over the raw column, matching what the port exposes.
+ *
+ * `recordFromRow` normalises empty and NULL text to `undefined`, so no record
+ * ever presents an empty text field and an empty-string constraint is
+ * unsatisfiable — it is closed in SQL as `1 = 0` instead of matching the empty text
+ * the schema defaults `repo`/`mission` to. Keeping the bare column on the
+ * satisfiable branch keeps the (repo, mission, stage) index usable.
+ */
+function equalityPredicate(column: UsageFilterField, value: string): SqlPredicate {
+  return value === '' ? NEVER_MATCH : { sql: `${column} = ?`, params: [value] };
+}
+
+interface SqlPredicate {
+  readonly sql: string;
+  readonly params: readonly string[];
+}
+
+const NEVER_MATCH: SqlPredicate = { sql: '1 = 0', params: [] };
 
 /** SQL NULL → undefined (unavailable); otherwise coerce to a finite number. */
 function num(value: unknown): number | undefined {
@@ -45,6 +91,7 @@ function num(value: unknown): number | undefined {
 function recordFromRow(row: Record<string, unknown>): UsageRecord {
   return {
     id: row.id !== undefined && row.id !== null ? String(row.id) : undefined,
+    runId: row.run_id ? String(row.run_id) : undefined,
     date: row.date ? String(row.date) : undefined,
     repo: row.repo ? String(row.repo) : undefined,
     mission: row.mission ? String(row.mission) : undefined,

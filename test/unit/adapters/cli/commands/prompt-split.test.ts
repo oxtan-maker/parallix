@@ -63,16 +63,19 @@ function parentPrompt(stage: string): string {
 }
 
 // The parent fixture still owns the mandatory split baseline. This repository's
-// execute and review opinions are now deliberately newer than that baseline:
-// execute carries the existing-owner policy, while review carries the local
-// counterexample policy and retains the prior coverage guidance. This
+// draft, execute and review opinions are now deliberately newer than that
+// baseline: draft and execute carry their existing-owner policies, while review
+// carries the local counterexample policy and retains the prior coverage guidance. This
 // source-owner suite must expect those checked-in opinions without weakening
 // the byte-for-byte reconstruction check for the mandatory core.
 function expectedSourcePrompt(stage: string): string {
   const parent = parentPrompt(stage);
-  if (stage === 'execute') {
-    const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', 'execute.md'), 'utf8');
-    assert.match(repositoryOpinion, /<existing_owner_first>/, 'repository execute opinion must retain the existing-owner policy');
+  if (stage === 'draft' || stage === 'execute') {
+    const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}.md`), 'utf8');
+    const retainedPolicy = stage === 'draft'
+      ? /Before defining the Mission's implementation scope, investigate whether the requested behavior already exists/
+      : /<existing_owner_first>/;
+    assert.match(repositoryOpinion, retainedPolicy, `repository ${stage} opinion must retain the existing-owner policy`);
     return `${parent.replace(/\n+$/, '')}\n\n${repositoryOpinion.replace(/^\n+/, '')}`;
   }
   if (stage !== 'review') {return parent;}
@@ -192,6 +195,7 @@ test('repository review policy is confined to review while every other opinion r
     assert.equal(count, stage === 'review' ? 1 : 0, `${stage} must receive the repository review policy ${stage === 'review' ? 'once' : 'never'}`);
   }
   assert.match(prompts.get('execute') || '', /<existing_owner_first>/, 'execute must retain the repository existing-owner policy');
+  assert.match(prompts.get('draft') || '', /Before defining the Mission's implementation scope, investigate whether the requested behavior already exists/, 'draft must retain the repository existing-owner policy');
   assert.match(prompts.get('act-on-review') || '', new RegExp(GRAPHIFY_GUIDANCE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   assert.match(prompts.get('portfolio') || '', /Graphify-first/);
 });
@@ -351,9 +355,9 @@ test('draft-core changes require a matching preservation fixture (TASK-2712)', (
     fs.writeFileSync(path.join(root, 'prompts/draft-core.md'), core.replace('Mode: draft.', 'Mode: draft.\nKeep the introducing mission accountable.'));
     fs.writeFileSync(path.join(root, 'prompts/draft.md'), opinion);
     const assembled = assembleStagePrompt('draft', { assets: new FilesystemAssetStore(root) });
-    assert.notEqual(assembled, parentPrompt('draft'), 'the unchanged fixture rejects new core guidance');
-    assert.equal(multisetEqual(counts(nonBlank(assembled)), counts(nonBlank(parentPrompt('draft')))), false);
-    const matching = parentPrompt('draft').replace('Mode: draft.', 'Mode: draft.\nKeep the introducing mission accountable.');
+    assert.notEqual(assembled, expectedSourcePrompt('draft'), 'the unchanged fixture rejects new core guidance');
+    assert.equal(multisetEqual(counts(nonBlank(assembled)), counts(nonBlank(expectedSourcePrompt('draft')))), false);
+    const matching = expectedSourcePrompt('draft').replace('Mode: draft.', 'Mode: draft.\nKeep the introducing mission accountable.');
     assert.equal(assembled, matching, 'a matching fixture preserves byte-identical assembly');
     assert.ok(multisetEqual(counts(nonBlank(assembled)), counts(nonBlank(matching))));
     assert.ok(isOrderedSubsequence(nonPlaceholderSeq(matching), nonPlaceholderSeq(assembled)));

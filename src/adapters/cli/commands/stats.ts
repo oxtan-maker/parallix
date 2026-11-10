@@ -104,6 +104,7 @@ function measurementToStatsRow(record: import('../../../application/ports/missio
   const nullableNumeric = (value: unknown) => (value === null || value === undefined ? undefined : String(value));
   return {
     date: record.date || '',
+    ...(record.runId ? { runId: record.runId } : {}),
     actorKey: record.actorKey,
     repo: record.repo || '',
     mission: record.mission || '',
@@ -148,6 +149,7 @@ function statsRowToMeasurement(row: StatsRow) {
     mission: String(row.mission || ''),
     stage: String(row.stage || 'default'),
     actorKey: row.actorKey || statsRowIdentityKey(row),
+    runId: row.runId,
     date: row.date || '',
     classification: row.classification || '',
     implementer: row.implementer || '',
@@ -305,6 +307,7 @@ function upsertMeasurementRow(row: StatsRow, options: StatsOptions = {}) {
 }
 
 export interface StatsRecordingOptions extends StatsOptions {
+  runId?: string;
   slug?: string;
   stage?: string;
   date?: string;
@@ -337,6 +340,7 @@ export function createStatsRecordingUseCase(options: StatsRecordingOptions): Sta
 function stageRequest(options: StatsRecordingOptions): StageStatsRequest {
   return {
     slug: options.slug || '', stage: options.stage || '',
+    runId: options.runId,
     date: options.date ?? formatDateOnly(new Date()),
     implementer: options.implementer, reviewer: options.reviewer,
     telemetry: options.telemetry, durationMinutes: options.durationMinutes, model: options.model,

@@ -61,10 +61,10 @@ try {
   assert.equal(await recovery.getAttribute('open'), '');
   await session.send('Emulation.setTouchEmulationEnabled', { enabled: false });
   await session.detach();
-  const unknown = first.locator('summary', { hasText: 'gate · unknown' });
-  await unknown.click();
-  assert.equal(await first.getByText('gate · unavailable', { exact: true }).isVisible(), true);
-  assert.equal(await second.getByText('gate ✗ FAIL', { exact: true }).isVisible(), true);
+  const unknown = first.locator('[data-gate="unavailable"]');
+  assert.equal(await unknown.locator('svg').getAttribute('aria-label'), 'Unknown');
+  assert.equal(await unknown.getAttribute('title'), 'Gate evidence could not be observed');
+  assert.equal(await second.locator('[data-gate="failed"] svg').getAttribute('aria-label'), 'Not passing');
   for (const article of [first, second]) {
     assert.equal(await article.evaluate(node => getComputedStyle(node).borderTopColor), 'rgb(226, 96, 78)');
   }

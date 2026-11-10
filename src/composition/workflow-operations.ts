@@ -21,7 +21,8 @@ import { WorkflowProcessAdapter } from '../adapters/process/workflow-process.js'
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
 import { resolveWorktree } from '../adapters/git/worktree.js';
-import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
+import { observeMissionCheckout } from '../adapters/git/mission-execution-context.js';
+import { findLandedSquashOnBaseBranch } from '../adapters/cli/commands/landed-squash.js';
 import { openRunCapture } from '../adapters/filesystem/run-history-store.js';
 import { resolveConfiguredCredentialRedactor } from '../application/recovery-evidence.js';
 import type { createProductionApplicationServices } from './application-services.js';
@@ -99,7 +100,7 @@ interface WorkerDependencies {
   readonly compose?: typeof composeWorkflowOperations;
   readonly capture?: typeof openRunCapture;
   readonly host?: typeof hostWorkflowExecutor;
-  readonly context?: typeof resolveMissionExecutionContext;
+  readonly context?: typeof observeMissionCheckout;
 }
 export async function runWorkflowWorker(id: string, root: string, configuration: ParallixConfiguration, execute = false, createGraph: typeof createProductionApplicationServices = async (...args) => {
     const { createProductionApplicationServices } = await import('./application-services.js');
@@ -164,8 +165,19 @@ async function superviseWorkflow(id: string, operation: import('../application/p
 function executionCheckout(operation: import('../application/ports/workflow-operation.js').WorkflowOperationRecord, root: string,
   configuration: ParallixConfiguration, dependencies: WorkerDependencies): { ok: true; root: string } | { ok: false; reason: string } {
   if (operation.command === 'draft:create') { return { ok: true, root }; }
-  const resolved = (dependencies.context ?? resolveMissionExecutionContext)(operation.missionId, root, configuration);
-  return resolved.ok ? { ok: true, root: resolved.context.missionWorktree } : resolved;
+  // The board host's checkout only locates the repository. A mission checkout that
+  // integration closeout already removed still resolves, because the landing is
+  // proven on the receiving base; then no checkout remains to run the operation in.
+  // Read-only: the supervisor holds no integration claim, so the executor's own
+  // entry resolves, and may add, the base worktree once it has won that claim.
+  const resolved = (dependencies.context ?? observeMissionCheckout)(operation.missionId, root, configuration,
+    git, (baseWorktree, slug) => findLandedSquashOnBaseBranch(baseWorktree, slug));
+  if (!resolved.ok) { return resolved; }
+  const missionWorktree = resolved.missionWorktree;
+  if (!missionWorktree) {
+    return { ok: false, reason: `Mission ${operation.missionId}: its landing is proven on ${resolved.baseBranch}, but no mission checkout remains. Run px integrate ${operation.missionId} --recover-landed to finish closeout.` };
+  }
+  return { ok: true, root: missionWorktree };
 }
 
 

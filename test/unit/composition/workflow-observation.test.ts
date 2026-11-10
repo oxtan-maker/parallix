@@ -3,11 +3,27 @@ import assert from 'node:assert/strict';
 import { createReviewLivenessReader, reviewLivenessSystem } from '../../../src/composition/review-liveness.js';
 import type { ProductionApplicationServices } from '../../../src/composition/application-services.js';
 import type { MissionTerminalCapability } from '../../../src/application/ports/mission-terminal.js';
+import { workflowOperation } from '../../../src/domain/workflow-operation.js';
+import { missionId } from '../../../src/domain/mission.js';
+import { repositoryId } from '../../../src/domain/repository.js';
+import { requestReviewIntervention } from '../../../src/domain/review.js';
+import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
+import { assessReviewOperatorResume } from '../../../src/application/review-recovery.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
+import type { RunSummary } from '../../../src/application/run-history.js';
+import { WorkflowProcessAdapter } from '../../../src/adapters/process/workflow-process.js';
 
 test('orphan observation excludes the querying CLI capture and preserves unknown execution (TASK-2826)', async t => {
-  const runs = [{ record: { captureKind: 'coordinator', supervisorPid: process.pid }, state: 'running', execution: 'unknown' }];
-  t.mock.method(reviewLivenessSystem, 'startProcessTableRead', async () => []);
-  t.mock.method(reviewLivenessSystem, 'detectRunningMissionSessions', () => []);
+  const runs = [{ record: { captureKind: 'coordinator', supervisorPid: process.pid }, state: 'running', execution: 'unknown', executionProbeUnavailable: false }];
+  t.mock.method(reviewLivenessSystem, 'startProcessTableRead', async () => [
+    { pid: process.pid, elapsedSeconds: 1, args: 'px review task-one' },
+    { pid: 42, elapsedSeconds: 1, args: 'unrelated' },
+  ]);
+  t.mock.method(reviewLivenessSystem, 'detectRunningMissionSessions', (options: Parameters<typeof reviewLivenessSystem.detectRunningMissionSessions>[0]) => {
+    assert.deepEqual(options.listProcesses?.()?.map(entry => entry.pid), [42], 'the admitting CLI must not report itself as pre-existing ownership');
+    return [];
+  });
   t.mock.method(reviewLivenessSystem, 'createMissionTerminalCapability', () => ({ history: () => ({ ok: true, runs, unattributed: [] }) }) as unknown as MissionTerminalCapability);
   const graph = { operatorState: { db: { query: async () => [] } }, mission: { repositoryId: 'repo' } } as unknown as ProductionApplicationServices;
   const read = createReviewLivenessReader(graph, '/unused', resolveConfiguration({}));
@@ -15,11 +31,79 @@ test('orphan observation excludes the querying CLI capture and preserves unknown
     workflow: null,
     liveness: { workflow: false, coordinator: false, execution: false, reviewer: false },
   });
-  runs.push({ record: { captureKind: 'agent', supervisorPid: 10 }, state: 'interrupted', execution: 'unknown' });
+  runs.push({ record: { captureKind: 'agent', supervisorPid: 10 }, state: 'interrupted', execution: 'unknown', executionProbeUnavailable: false });
   assert.deepEqual(await read('task-one'), {
     workflow: null,
     liveness: { workflow: false, coordinator: false, execution: null, reviewer: null },
   });
+  runs[1]!.execution = 'stopped';
+  runs[1]!.executionProbeUnavailable = true;
+  assert.equal((await read('task-one')).liveness.execution, null, 'a retained inconclusive provider probe cannot prove termination');
+});
+
+test('review observation excludes its admitted legacy owner but retains other workflow ownership (PX-0041.03 F2)', async t => {
+  const operation = { ...workflowOperation({
+    id: 'legacy-review', repositoryId: repositoryId('repo'), missionId: missionId('task-one'), requestKey: 'legacy-review',
+    command: 'review:submit', generation: 0, phase: 'accepted', providerStarted: false, agent: null, reviewer: null,
+    originalStatus: 'review', previousAssignee: null, owner: null,
+    createdAt: '2026-11-10T10:00:00.000Z', updatedAt: '2026-11-10T10:00:00.000Z', reason: null,
+  }), phase: 'executing' as const, generation: 1, owner: { pid: process.pid, identity: 'legacy-owner' },
+    launcher: { pid: 42, identity: 'legacy-supervisor' },
+    operatorInvocation: true, invocation: { command: 'review' as const, args: ['task-one'], interactive: false } };
+  t.mock.method(reviewLivenessSystem, 'startProcessTableRead', async () => []);
+  t.mock.method(reviewLivenessSystem, 'detectRunningMissionSessions', () => []);
+  const runs: RunSummary[] = [{ record: {
+    version: 1, runId: 'legacy-supervisor', missionId: 'task-one', repositoryId: 'repo',
+    captureKind: 'coordinator', supervisorPid: 42, operationId: operation.id, role: 'review',
+    family: null, attempt: null, terminalHost: 'pipe', hostFallbackReason: null, tmux: null,
+    state: 'running', startedAt: operation.createdAt, endedAt: null, exitCode: null, signal: null,
+    providerSessionId: null, redacted: false, sources: [], omissions: [],
+    streams: { stdout: { bytes: 0, retainedBytes: 0, omitted: [] }, stderr: { bytes: 0, retainedBytes: 0, omitted: [] } },
+  }, state: 'running', execution: 'stopped', coverage: [] }];
+  const terminal = reviewLivenessSystem.createMissionTerminalCapability('/unused', resolveConfiguration({}));
+  t.mock.method(terminal, 'history', () => ({ ok: true, runs, unattributed: [] }));
+  t.mock.method(reviewLivenessSystem, 'createMissionTerminalCapability', () => terminal);
+  let storedOperation = operation;
+  const db = new SqliteDatabaseAdapter();
+  t.mock.method(db, 'query', async () => [{ record_json: JSON.stringify(storedOperation) }]);
+  t.mock.method(WorkflowProcessAdapter.prototype, 'alive', async () => null);
+  const graph = { operatorState: { db }, mission: { repositoryId: repositoryId('repo') } };
+
+  const owned = createReviewLivenessReader(graph, '/unused', resolveConfiguration({
+    PARALLIX_WORKFLOW_OPERATION: operation.id, PARALLIX_WORKFLOW_GENERATION: '1',
+  }));
+  assert.deepEqual(await owned('task-one'), {
+    workflow: null,
+    liveness: { workflow: false, coordinator: false, execution: false, reviewer: false },
+  });
+  const competing = createReviewLivenessReader(graph, '/unused', resolveConfiguration({
+    PARALLIX_WORKFLOW_OPERATION: 'another-review', PARALLIX_WORKFLOW_GENERATION: '1',
+  }));
+  assert.deepEqual(await competing('task-one'), {
+    workflow: { id: operation.id, phase: 'executing', reason: null },
+    liveness: { workflow: null, coordinator: true, execution: false, reviewer: false },
+  });
+  const review = requestReviewIntervention(pendingReview('task-one'), {
+    requestedAt: '2026-11-10T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
+  });
+  const mission = fixtureMission('task-one', { status: 'review', review });
+  const load = async () => ({ kind: 'found' as const, mission, version: missionVersion(7) });
+  assert.equal((await assessReviewOperatorResume('task-one', load, owned)).outcome, 'permitted');
+  assert.equal((await assessReviewOperatorResume('task-one', load, competing)).outcome, 'refused');
+  for (const generation of [undefined, '2']) {
+    const stale = createReviewLivenessReader(graph, '/unused', resolveConfiguration({
+      PARALLIX_WORKFLOW_OPERATION: operation.id,
+      ...(generation ? { PARALLIX_WORKFLOW_GENERATION: generation } : {}),
+    }));
+    assert.equal((await stale('task-one')).workflow?.id, operation.id, 'an unconfirmed or stale generation cannot hide ownership');
+    assert.equal((await assessReviewOperatorResume('task-one', load, stale)).outcome, 'refused');
+  }
+  runs.push({ ...runs[0]!, record: { ...runs[0]!.record, supervisorPid: 43 } });
+  assert.equal((await assessReviewOperatorResume('task-one', load, owned)).outcome, 'refused', 'a different supervisor is competing ownership');
+  runs.pop();
+  storedOperation = { ...operation, owner: { pid: process.pid + 1, identity: 'another-owner' } };
+  assert.equal((await owned('task-one')).workflow?.id, operation.id, 'inherited environment cannot hide another process owner');
+  assert.equal((await assessReviewOperatorResume('task-one', load, owned)).outcome, 'refused');
 });
 import { EventEmitter } from 'node:events';
 import { workflowObservationCapabilities, workflowObservationSystem } from '../../../src/composition/workflow-observation.js';

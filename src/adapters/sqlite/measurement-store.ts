@@ -31,7 +31,7 @@ import { resolveDatabasePath } from './database-path-resolver.js';
 const MEASUREMENT_COLUMNS = [
   'date', 'repo', 'mission', 'classification', 'implementer', 'pr_fix_rounds',
   'provider', 'model', 'implementer_agent', 'reviewer_agent', 'stage',
-  'actor_key',
+  'actor_key', 'run_id',
   'input_tokens', 'output_tokens', 'cached_tokens', 'thoughts_tokens',
   'context_tokens',
   'tool_calls', 'openai_usage_before', 'openai_usage_after',
@@ -40,7 +40,7 @@ const MEASUREMENT_COLUMNS = [
 
 /** Fields compared to decide whether an upsert actually changed the row. */
 const COMPARED_FIELDS: readonly (keyof MeasurementRecord)[] = [
-  'date', 'classification', 'implementer', 'pr_fix_rounds', 'provider',
+  'date', 'classification', 'implementer', 'pr_fix_rounds', 'runId', 'provider',
   'model', 'implementer_agent', 'reviewer_agent', 'input_tokens',
   'output_tokens', 'cached_tokens', 'thoughts_tokens', 'context_tokens', 'tool_calls',
   'openai_usage_before', 'openai_usage_after', 'openai_usage_delta',
@@ -63,6 +63,7 @@ const UPSERT_SQL =
      model = excluded.model,
      implementer_agent = excluded.implementer_agent,
      reviewer_agent = excluded.reviewer_agent,
+     run_id = excluded.run_id,
      input_tokens = excluded.input_tokens,
      output_tokens = excluded.output_tokens,
      cached_tokens = excluded.cached_tokens,
@@ -212,6 +213,7 @@ function rowToRecord(row: Record<string, unknown>): MeasurementRecord {
     reviewer_agent: text(row.reviewer_agent),
     stage: String(row.stage ?? 'default'),
     actorKey: String(row.actor_key ?? ''),
+    runId: text(row.run_id),
     input_tokens: num(row.input_tokens),
     output_tokens: num(row.output_tokens),
     cached_tokens: num(row.cached_tokens),
@@ -240,6 +242,7 @@ function bindValues(record: MeasurementRecord): (string | number | null)[] {
     record.reviewer_agent ?? null,
     record.stage,
     record.actorKey,
+    record.runId ?? null,
     ...usageBindings(record),
   ];
 }

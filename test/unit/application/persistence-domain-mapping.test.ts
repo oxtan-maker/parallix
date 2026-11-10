@@ -48,11 +48,13 @@ function exportedDomainTypeNames(): Set<string> {
   return names;
 }
 
-function sourceLine(fileLocation: string, line: number): string | null {
+function citationDrift(label: string, fileLocation: string, anchor: string): string | null {
   const full = path.join(ROOT, fileLocation);
-  if (!fs.existsSync(full)) { return null; }
-  const lines = fs.readFileSync(full, 'utf8').split('\n');
-  return line >= 1 && line <= lines.length ? (lines[line - 1] as string) : null;
+  if (!fs.existsSync(full)) { return `${label}: ${fileLocation} does not exist`; }
+  const source = fs.readFileSync(full, 'utf8');
+  return source.includes(anchor)
+    ? null
+    : `${label}: ${fileLocation} no longer contains ${JSON.stringify(anchor)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,20 +145,12 @@ test('SC1: every domain-type resolution has a stated invariant', () => {
   );
 });
 
-test('SC1: every invariant citation points at a line containing its anchor', () => {
+test('SC1: every invariant citation names a file containing its anchor', () => {
   const drifted: string[] = [];
   for (const concept of Object.keys(DOMAIN_CONCEPT_INVARIANTS) as DomainConceptName[]) {
     const invariant = DOMAIN_CONCEPT_INVARIANTS[concept];
-    const line = sourceLine(invariant.fileLocation, invariant.line);
-    if (line === null) {
-      drifted.push(`${concept}: ${invariant.fileLocation}:${invariant.line} is out of range`);
-      continue;
-    }
-    if (!line.includes(invariant.anchor)) {
-      drifted.push(
-        `${concept}: ${invariant.fileLocation}:${invariant.line} no longer contains ${JSON.stringify(invariant.anchor)}`,
-      );
-    }
+    const issue = citationDrift(concept, invariant.fileLocation, invariant.anchor);
+    if (issue !== null) { drifted.push(issue); }
   }
   assert.deepEqual(drifted, [], `Stale invariant citations:\n${drifted.join('\n')}`);
 });
@@ -212,19 +206,11 @@ test('SC1: every technical-metadata item states why it is not a domain entity', 
   );
 });
 
-test('SC1: every technical-metadata citation points at a line containing its anchor', () => {
+test('SC1: every technical-metadata citation names a file containing its anchor', () => {
   const drifted: string[] = [];
   for (const item of TECHNICAL_PERSISTENCE_METADATA) {
-    const line = sourceLine(item.fileLocation, item.line);
-    if (line === null) {
-      drifted.push(`${item.id}: ${item.fileLocation}:${item.line} is out of range`);
-      continue;
-    }
-    if (!line.includes(item.anchor)) {
-      drifted.push(
-        `${item.id}: ${item.fileLocation}:${item.line} no longer contains ${JSON.stringify(item.anchor)}`,
-      );
-    }
+    const issue = citationDrift(item.id, item.fileLocation, item.anchor);
+    if (issue !== null) { drifted.push(issue); }
   }
   assert.deepEqual(drifted, [], `Stale technical-metadata citations:\n${drifted.join('\n')}`);
 });
@@ -237,6 +223,15 @@ test('SC1: technical-metadata ids are unique', () => {
 // ---------------------------------------------------------------------------
 // Detector fixtures: the enumerating test really bites
 // ---------------------------------------------------------------------------
+
+test('SC1 detector bites: a missing citation anchor is reported (TASK-2846.05)', () => {
+  const invariant = DOMAIN_CONCEPT_INVARIANTS.Mission;
+  const missingAnchor = `${invariant.anchor}__missing`;
+  assert.equal(
+    citationDrift('Mission', invariant.fileLocation, missingAnchor),
+    `Mission: ${invariant.fileLocation} no longer contains ${JSON.stringify(missingAnchor)}`,
+  );
+});
 
 test('SC1 detector bites: an unresolved entry is reported', () => {
   const invented = 'mission-read-from-a-table-that-does-not-exist';

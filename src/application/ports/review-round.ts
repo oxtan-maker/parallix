@@ -17,6 +17,8 @@ import type { GateFailureReason, HookFailureReason, ReboundReason } from '../reb
 import type { MissionStore } from '../domain-ports.js';
 import type { MissionLifecycleService } from '../mission-lifecycle-service.js';
 import type { SessionLaunchPolicy } from '../../domain/session.js';
+import type { AgentLaunchResult } from './agent-launch-result.js';
+import type { ReviewOperatorResumeAssessment } from '../review-recovery.js';
 
 /* ------------------------------------------------------------------ *
  * Entry
@@ -46,11 +48,13 @@ export interface ReviewRoundEntryPort {
   /** Bound only by composition for a direct operator invocation. */
   readonly operatorResume?: ReviewOperatorResumePort;
   loadRound(_slug: string): Promise<PersistedReviewRound | null>;
-  isKnownMission(_slug: string): Promise<boolean>;
+  loadMission(_slug: string): Promise<{ readonly kind: 'found' | 'missing' } | { readonly kind: 'unavailable'; readonly reason: string }>;
   clearHumanIntervention(_slug: string): Promise<void>;
   invalidateResolvedBlocker(_slug: string): Promise<void>;
   invalidMaxAttempts(_raw: string): void;
   missingReviewAggregate(_slug: string): void;
+  missionUnavailable(_slug: string, _reason: string): void;
+  reviewRecoveryRefused(_slug: string, _reason: string): void;
   /** Bind the review mechanisms for this request; the application runs the loop. */
   mechanisms(_request: StartReviewRound): Promise<ReviewLoopPorts> | ReviewLoopPorts;
 }
@@ -274,19 +278,13 @@ export interface ReviewAgentLaunch {
   readonly recovery?: { prompt: (_actualAgent: string) => unknown; sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy };
 }
 
-export interface ReviewAgentLaunchResult {
-  /** The family the launcher actually ran (differs after a capacity fallback). */
-  readonly agent?: string | null;
-  readonly result?: { telemetry?: { provider?: string | null; cost_usd?: number } | null; status?: number | null; stopReason?: string; startedAt?: string; endedAt?: string; [key: string]: unknown } | null;
-}
-
 export interface ReviewAgentPort {
   /** Launch a role; throws when the launcher cannot start it. */
-  launch(_launch: ReviewAgentLaunch): Promise<ReviewAgentLaunchResult | null | undefined>;
+  launch(_launch: ReviewAgentLaunch): Promise<AgentLaunchResult | null | undefined>;
   /** The full prompt a dry run prints for a role. */
   dryRunPrompt(_role: ReviewRole, _facts: ReviewPromptFacts): string;
   /** Best-effort stage telemetry for a completed launch. */
-  recordStage(_role: ReviewRole, _state: ReviewLoopState, _identity: { reviewer?: string; implementer?: string }, _launch: ReviewAgentLaunchResult | null | undefined): Promise<void>;
+  recordStage(_role: ReviewRole, _state: ReviewLoopState, _identity: { reviewer?: string; implementer?: string }, _launch: AgentLaunchResult | null | undefined): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -313,7 +311,7 @@ export interface ImplementerArtifactFacts {
 
 /** Workflow output written by the reviewer and implementer for this round. */
 export interface ReviewArtifactPort {
-  consumeReviewer(_reviewer: string, _state?: ReviewLoopState, _launch?: ReviewAgentLaunchResult | null): Promise<ReviewerArtifactFacts>;
+  consumeReviewer(_reviewer: string, _state?: ReviewLoopState, _launch?: AgentLaunchResult | null): Promise<ReviewerArtifactFacts>;
   consumeImplementer(_implementer: string, _state?: ReviewLoopState): Promise<ImplementerArtifactFacts>;
 }
 
@@ -376,7 +374,7 @@ export interface ReviewControllerLock {
  * ------------------------------------------------------------------ */
 
 export interface ReviewLoopPorts {
-  readonly integrationRepair?: { resume(_slug: string): Promise<'none' | 'retained' | 'changed' | 'blocked'> };
+  readonly integrationRepair?: import('./integration-records.js').IntegrationRepairContinuationPort;
   readonly integrationApprovalEvidence?: import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
   readonly retainedRepair?: RetainedRepairPort;
   readonly branch: string;
@@ -427,5 +425,6 @@ export interface RetainedRepairPort {
 
 /** Explicit operator acknowledgment; supplies no repair or review evidence. */
 export interface ReviewOperatorResumePort {
+  assess(_slug: string): Promise<ReviewOperatorResumeAssessment>;
   acknowledge(_slug: string): Promise<void>;
 }

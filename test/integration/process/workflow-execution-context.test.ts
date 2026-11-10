@@ -7,7 +7,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import * as gitModule from '../../../src/adapters/git/git.js';
 import { resolveMissionExecutionContext } from '../../../src/adapters/git/mission-execution-context.js';
+import { findLandedSquashOnBaseBranch } from '../../../src/adapters/cli/commands/landed-squash.js';
+import { conventionalBaseWorktreePath } from '../../../src/adapters/git/worktree.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { runWorkflowWorker, type composeWorkflowOperations } from '../../../src/composition/workflow-operations.js';
 import { createBoardIntegrateService } from '../../../src/composition/application-services.js';
@@ -16,6 +19,7 @@ import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import type { WorkflowOperationRecord as WorkflowOperation } from '../../../src/application/ports/workflow-operation.js';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
 
 /** A primary checkout on main (the web host's root) plus one worktree per mission. */
 function repository(t: test.TestContext, slugs: readonly string[]) {
@@ -180,4 +184,203 @@ test("base-started console execute, review preparation, review and retry resolve
   }
   assert.equal(git(fixture.primary, 'status', '--porcelain'), before);
   assert.equal(git(fixture.primary, 'branch', '--show-current').trim(), 'main');
+});
+
+test('a sibling mission cwd, a non-main receiving base and a linked worktree path with spaces resolve to one identity pair (TASK-2777)', async t => {
+  const slug = 'task-97779';
+  const fixture = repository(t, [slug]);
+  // A linked worktree is where a mission checkout actually lives on a workstation:
+  // an arbitrary path, spaces included, registered through a symlinked parent.
+  const parent = path.dirname(fixture.primary);
+  const linked = path.join(parent, 'linked parent', `${slug} wt`);
+  const baseWorktree = path.join(parent, 'linked parent', 'base wt');
+  git(fixture.primary, 'worktree', 'add', '-q', '-b', 'base/paid', baseWorktree);
+  git(fixture.primary, 'worktree', 'move', fixture.worktrees[slug], linked);
+  git(fixture.primary, 'config', `branch.mission/${slug}.parallixBase`, 'base/paid');
+  fs.symlinkSync(path.join(parent, 'linked parent'), path.join(parent, 'link'));
+  const expected = { missionId: slug, missionWorktree: linked, missionBranch: `mission/${slug}`, baseWorktree, baseBranch: 'base/paid' };
+  // The host that admits the operation may stand anywhere in the repository.
+  for (const root of [fixture.primary, linked, baseWorktree, path.join(parent, 'link', 'base wt')]) {
+    const resolution = resolveMissionExecutionContext(slug, root, fixture.configuration);
+    assert.equal(resolution.ok, true, resolution.ok ? '' : resolution.reason);
+    if (resolution.ok) { assert.deepEqual(resolution.context, expected); }
+  }
+});
+
+test('a removed mission checkout stays a failure until the landing on the receiving base proves the closeout (TASK-2777)', async t => {
+  const slug = 'task-97780';
+  const fixture = repository(t, [slug]);
+  // Integration landed the squash on the receiving base and closeout removed the
+  // checkout; the commit is the durable evidence, so recovery still resolves.
+  git(fixture.primary, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', `Fixture landing\n\nTask: ${slug}\n`);
+  fs.rmSync(fixture.worktrees[slug], { recursive: true, force: true });
+  // Without the landing probe the same repository state is the ordinary missing
+  // checkout failure; a removed checkout is never assumed to be a landing.
+  const unproven = resolveMissionExecutionContext(slug, fixture.primary, fixture.configuration);
+  assert.equal(unproven.ok, false);
+  assert.match(unproven.reason!, /mission worktree .* for mission\/task-97780 is missing/);
+  const recovered = resolveMissionExecutionContext(slug, fixture.primary, fixture.configuration,
+    args => gitModule.git(args), (base, landedSlug) => findLandedSquashOnBaseBranch(base, landedSlug));
+  assert.equal(recovered.ok, true, recovered.ok ? '' : recovered.reason);
+  if (recovered.ok) {
+    assert.deepEqual(recovered.context, { missionId: slug, missionWorktree: null, missionBranch: `mission/${slug}`, baseWorktree: fixture.primary, baseBranch: 'main' });
+  }
+  // A supervisor settles the operation with the closeout command instead of
+  // running the executor in the receiving base checkout.
+  const result = await supervise(slug, fixture.primary, fixture.configuration);
+  assert.equal(result.code, 1);
+  assert.deepEqual(result.executed, []);
+  assert.match(result.operation().reason!, new RegExp(`Mission ${slug}: its landing is proven on main, but no mission checkout remains\\. Run px integrate ${slug} --recover-landed to finish closeout\\.$`));
+});
+
+test('a root from an unrelated repository fails instead of resolving through the configured primary checkout (TASK-2777)', async t => {
+  const slug = 'task-97782';
+  // Repository A owns the mission checkout and the configured primary identity.
+  const fixture = repository(t, [slug]);
+  const otherParent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'px-unrelated-repo-')));
+  t.after(() => fs.rmSync(otherParent, { recursive: true, force: true }));
+  const other = path.join(otherParent, 'repo');
+  fs.mkdirSync(other);
+  git(other, 'init', '-q', '-b', 'main');
+  git(other, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'base');
+  // Repository B is a different repository that never held this Mission, so the
+  // PRIMARY_WORKTREE override must not carry the resolution across the boundary.
+  const resolution = resolveMissionExecutionContext(slug, other, fixture.configuration);
+  assert.equal(resolution.ok, false);
+  assert.match(resolution.reason!, new RegExp(`Mission ${slug}: no worktree is checked out on mission/${slug} in the repository at ${escapeRegExp(other)}`));
+  assert.ok(!resolution.reason!.includes(fixture.primary), `resolution reached outside the root repository: ${resolution.reason}`);
+});
+
+test('a recorded non-main base is checked out beside its own repository only once the mission identity is established (TASK-2777)', async t => {
+  const [removedSlug, liveSlug] = ['task-97783', 'task-97784'];
+  const fixture = repository(t, [removedSlug, liveSlug]);
+  // The configured primary checkout belongs to another repository: the base
+  // worktree ADR 0045 auto-creates must still land beside this repository.
+  const otherParent = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'px-unrelated-repo-')));
+  t.after(() => fs.rmSync(otherParent, { recursive: true, force: true }));
+  const other = path.join(otherParent, 'repo');
+  fs.mkdirSync(other);
+  git(other, 'init', '-q', '-b', 'main');
+  const configuration = resolveConfiguration({ PRIMARY_WORKTREE: other, PATH: process.env.PATH, HOME: otherParent });
+  git(fixture.primary, 'branch', 'base/paid');
+  for (const slug of [removedSlug, liveSlug]) { git(fixture.primary, 'config', `branch.mission/${slug}.parallixBase`, 'base/paid'); }
+  const probe = (base: string, landedSlug: string) => findLandedSquashOnBaseBranch(base, landedSlug);
+  const worktrees = () => git(fixture.primary, 'worktree', 'list', '--porcelain');
+  // An unproven removal is a failure, and probing the base branch adds no checkout.
+  fs.rmSync(fixture.worktrees[removedSlug], { recursive: true, force: true });
+  const start = worktrees();
+  const unproven = resolveMissionExecutionContext(removedSlug, fixture.primary, configuration, args => gitModule.git(args), probe);
+  assert.equal(unproven.ok, false);
+  assert.match(unproven.reason!, new RegExp(`Mission ${removedSlug}: mission worktree .* for mission/${removedSlug} is missing`));
+  assert.equal(worktrees(), start, 'an unproven removal must not add a checkout');
+  // A live mission whose recorded base exists but is not checked out gets it at the conventional path.
+  const expectedBase = conventionalBaseWorktreePath('base/paid', fixture.primary);
+  const live = resolveMissionExecutionContext(liveSlug, fixture.primary, configuration);
+  assert.equal(live.ok, true, live.ok ? '' : live.reason);
+  if (live.ok) { assert.deepEqual(live.context, { missionId: liveSlug, missionWorktree: fixture.worktrees[liveSlug], missionBranch: `mission/${liveSlug}`, baseWorktree: expectedBase, baseBranch: 'base/paid' }); }
+  assert.equal(git(expectedBase, 'branch', '--show-current'), 'base/paid');
+  const created = worktrees();
+  assert.equal(resolveMissionExecutionContext(liveSlug, fixture.primary, configuration).ok, true);
+  assert.equal(worktrees(), created, 'a second resolution reuses the base checkout');
+  assert.doesNotMatch(git(other, 'worktree', 'list', '--porcelain'), /base-base-paid/);
+  // Once the landing on the base is proven, a removed base checkout is recreated for the closeout.
+  git(expectedBase, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', `Fixture landing\n\nTask: ${removedSlug}\n`);
+  git(fixture.primary, 'worktree', 'remove', expectedBase);
+  const proven = resolveMissionExecutionContext(removedSlug, fixture.primary, configuration, args => gitModule.git(args), probe);
+  assert.equal(proven.ok, true, proven.ok ? '' : proven.reason);
+  if (proven.ok) { assert.deepEqual(proven.context, { missionId: removedSlug, missionWorktree: null, missionBranch: `mission/${removedSlug}`, baseWorktree: expectedBase, baseBranch: 'base/paid' }); }
+});
+
+test('a terminal integrate run with an unresolved context runs nothing, mutates nothing and releases its claim (TASK-2777)', async t => {
+  const slug = 'task-97781';
+  const fixture = repository(t, [slug]);
+  fs.rmSync(fixture.worktrees[slug], { recursive: true, force: true });
+  const before = { status: git(fixture.primary, 'status', '--porcelain'), worktrees: git(fixture.primary, 'worktree', 'list', '--porcelain'), branch: git(fixture.primary, 'branch', '--show-current') };
+  const { createIntegratePorts } = await import('../../../src/adapters/cli/commands/integrate.js');
+  const { runIntegrateEntry } = await import('../../../src/application/integrate-entry.js');
+  const ports = createIntegratePorts(fixture.configuration);
+  ports.process.cwd = () => fixture.primary;
+  let stepsRun = 0;
+  const steps = { runIntegration: async () => { stepsRun++; return 0 as const; }, restoreTemporaryStash: () => 0 as const };
+  const lines: string[] = [];
+  const previous = setLogger({ log: (message: unknown) => { lines.push(String(message)); }, error: (message: unknown) => { lines.push(String(message)); } });
+  t.after(() => { setLogger(previous); });
+  const result = await runIntegrateEntry([slug], { configuration: fixture.configuration, exitFn: () => {} }, ports, steps);
+  assert.deepEqual(result, { exitCode: 1 });
+  assert.equal(stepsRun, 0);
+  assert.match(lines.join('\n'), new RegExp(`Mission ${slug}: mission worktree .* is missing`));
+  // The claim taken for the run is released on the failed resolution, so the operator can retry immediately.
+  const release = await createIntegratePorts(fixture.configuration).process.claimIntegration(slug);
+  assert.ok(release);
+  release();
+  assert.deepEqual({ status: git(fixture.primary, 'status', '--porcelain'), worktrees: git(fixture.primary, 'worktree', 'list', '--porcelain'), branch: git(fixture.primary, 'branch', '--show-current') }, before);
+});
+
+test('a terminal integrate run that loses the exclusive claim adds no base worktree (TASK-2777)', async t => {
+  const slug = 'task-97785';
+  const fixture = repository(t, [slug]);
+  git(fixture.primary, 'branch', 'base/paid');
+  git(fixture.primary, 'config', `branch.mission/${slug}.parallixBase`, 'base/paid');
+  const { createIntegratePorts } = await import('../../../src/adapters/cli/commands/integrate.js');
+  const { runIntegrateEntry } = await import('../../../src/application/integrate-entry.js');
+  const ports = createIntegratePorts(fixture.configuration);
+  ports.process.cwd = () => fixture.primary;
+  const held = await createIntegratePorts(fixture.configuration).process.claimIntegration(slug);
+  assert.ok(held);
+  t.after(() => { void held(); });
+  const worktrees = () => git(fixture.primary, 'worktree', 'list', '--porcelain');
+  const before = worktrees();
+  let stepsRun = 0;
+  const steps = { runIntegration: async () => { stepsRun++; return 0 as const; }, restoreTemporaryStash: () => 0 as const };
+  const lines: string[] = [];
+  const previous = setLogger({ log: (message: unknown) => { lines.push(String(message)); }, error: (message: unknown) => { lines.push(String(message)); } });
+  t.after(() => { setLogger(previous); });
+  const result = await runIntegrateEntry([slug], { configuration: fixture.configuration, exitFn: () => {} }, ports, steps);
+  assert.deepEqual(result, { exitCode: 1 });
+  assert.equal(stepsRun, 0);
+  assert.match(lines.join('\n'), /already running in another process/);
+  assert.equal(worktrees(), before, 'the losing run must not add the recorded base checkout');
+});
+
+test('a primary checkout on another branch is never labelled the receiving base worktree (TASK-2777)', async t => {
+  const [landedSlug, liveSlug] = ['task-97786', 'task-97787'];
+  const fixture = repository(t, [landedSlug, liveSlug]);
+  const probe = (base: string, slug: string) => findLandedSquashOnBaseBranch(base, slug);
+  git(fixture.primary, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '--allow-empty', '-m', `Fixture landing\n\nTask: ${landedSlug}\n`);
+  fs.rmSync(fixture.worktrees[landedSlug], { recursive: true, force: true });
+  git(fixture.primary, 'checkout', '-q', '-b', 'scratch');
+  const worktrees = () => git(fixture.primary, 'worktree', 'list', '--porcelain');
+  const before = worktrees();
+  for (const [slug, proof] of [[landedSlug, probe], [liveSlug, undefined]] as const) {
+    const resolved = resolveMissionExecutionContext(slug, fixture.primary, fixture.configuration, args => gitModule.git(args), proof);
+    assert.equal(resolved.ok, false, `${slug} must not resolve against a primary checkout on scratch`);
+    if (!resolved.ok) { assert.match(resolved.reason, /receiving base main is not checked out: the repository checkout .* is on scratch/); }
+  }
+  assert.equal(worktrees(), before);
+});
+
+test('board admission and its supervisor add no base worktree before the shared integration claim is won (TASK-2777)', async t => {
+  const slug = 'task-97788';
+  const fixture = repository(t, [slug]);
+  git(fixture.primary, 'branch', 'base/paid');
+  git(fixture.primary, 'config', `branch.mission/${slug}.parallixBase`, 'base/paid');
+  const worktrees = () => git(fixture.primary, 'worktree', 'list', '--porcelain');
+  const before = worktrees();
+  // The supervisor hosts the executor in the mission checkout and only observes.
+  const supervised = await supervise(slug, fixture.primary, fixture.configuration);
+  assert.deepEqual(supervised.executed, [fixture.worktrees[slug]]);
+  assert.equal(worktrees(), before, 'the supervisor must not add the recorded base checkout');
+  // A terminal integrate already holds the claim: the board run loses it before any Git mutation.
+  const { createIntegratePorts } = await import('../../../src/adapters/cli/commands/integrate.js');
+  const held = await createIntegratePorts(fixture.configuration).process.claimIntegration(slug);
+  assert.ok(held);
+  t.after(() => { void held(); });
+  const lines: string[] = [];
+  const previous = setLogger({ log: (message: unknown) => { lines.push(String(message)); }, error: (message: unknown) => { lines.push(String(message)); } });
+  t.after(() => { setLogger(previous); });
+  const store = { load: async () => ({ kind: 'found', version: 1, mission: { id: slug, status: 'integration', labels: ['ai_sdlc'], brief: null, review: null, checkpoints: [] } }) };
+  const service = createBoardIntegrateService({ store } as never, NO_EXECUTION_ACTIVITY, fixture.configuration, fixture.primary);
+  await assert.rejects(service.execute([slug, '--dry-run']), /exited with code 1/);
+  assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in another process`));
+  assert.equal(worktrees(), before, 'the losing board run must not add the recorded base checkout');
 });

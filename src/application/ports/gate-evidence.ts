@@ -60,11 +60,13 @@ export interface IntegrationGateOutcome extends GateOutcomeEvidence {
  * is covered; `running` is the executor's own unsettled run record for the
  * attempt being observed, never a workflow phase.
  */
+export type RunningIntegrationGate = { readonly attempt: string | null; readonly startedAt: string };
+
 export interface IntegrationGateEvidence {
   readonly checkout: GateCheckout;
   readonly configured: readonly string[];
   readonly gates: readonly IntegrationGateOutcome[];
-  readonly running: { readonly attempt: string; readonly startedAt: string } | null;
+  readonly running: RunningIntegrationGate | null;
 }
 
 /**

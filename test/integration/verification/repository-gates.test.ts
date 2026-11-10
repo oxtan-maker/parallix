@@ -310,6 +310,15 @@ test('loadRequirePreIntegration defaults to false and honours the opt-in flag', 
   }
 });
 
+test('an unreadable workflow configuration cannot disable integration gates (PX-0052)', () => {
+  const checkout = makeCheckout();
+  try {
+    fs.writeFileSync(path.join(checkout, 'workflow.config.json'), '<<<<<<< HEAD\n{ "adapters": {} }');
+    assert.throws(() => loadPhaseGates(checkout, 'preIntegration'), /Workflow configuration .* is unreadable/);
+    assert.throws(() => loadRequirePreIntegration(checkout), /Workflow configuration .* is unreadable/);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
 test('validateRepositoryGates rejects an unknown gates key and a non-boolean requirePreIntegration', () => {
   const issues = validateRepositoryGates({ gates: { preIntegration: [], notAGateKey: {} } });
   assert.ok(issues.some((i) => /notAGateKey is not a recognised key/.test(i)), `expected unknown-key issue, got: ${issues.join('; ')}`);

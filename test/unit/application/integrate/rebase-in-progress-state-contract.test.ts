@@ -1,4 +1,5 @@
 import { fixtureMission, inMemoryTransitionStore, pendingReview } from '../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import { applyReviewerCommand, changeRevision } from '../../../../src/domain/review.js';
 import { decideMission } from '../../../../src/domain/mission-workflow.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
@@ -204,7 +205,7 @@ describe("integration rebase state", async () => {
         loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { assert.equal(rebased, true); return { ok: true }; } },
     });
     const seams = { ...integrationBounceSeams({ transitionTaskFn: () => true }), routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
-    await assert.rejects(resumePendingIntegrationRepair(SLUG, services, ports, seams, { realAgent: null, realAgentModel: null }), { name: 'IntegrationStopsForHuman' });
+    await assert.rejects(resumePendingIntegrationRepair(SLUG, services, ports, missionExecutionContext({ missionId: SLUG }), seams, { realAgent: null, realAgentModel: null }), { name: 'IntegrationStopsForHuman' });
     assert.equal(comparisons, 1); assert.equal(store.mission().status, 'integration');
     assert.equal(store.mission().review!.rounds.length, 1);
     assert.equal(store.mission().review!.rounds[0].decision?.revision, 'approved-A');
@@ -244,7 +245,7 @@ describe("integration rebase state", async () => {
     const seams = { ...integrationBounceSeams(), routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
 
     try {
-      await assert.rejects(resumePendingIntegrationRepair(SLUG, services, ports, seams,
+      await assert.rejects(resumePendingIntegrationRepair(SLUG, services, ports, missionExecutionContext({ missionId: SLUG }), seams,
         { realAgent: null, realAgentModel: null, dryRun: true }), { name: 'IntegrationAbort' });
       assert.match(output.join('\n'), /requires a rebase onto main.*dry-run did not mutate/);
       assert.equal(rebased, false, 'dry-run never invokes the mutating shared rebase owner');

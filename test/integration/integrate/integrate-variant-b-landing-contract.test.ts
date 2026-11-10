@@ -5,6 +5,7 @@ import { missionVersion } from '../../../src/application/domain-ports.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 // Historical regression provenance: TASK-1109, TASK-2367.
 // Behavior-owned suite (TASK-2622.09, integration-ci): `px integrate` Variant B landing — the full
 // squash-merge path and its guards (task-1109) and the completion persistence order before statistics
@@ -29,6 +30,7 @@ mockModule('../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/stats.js', import.meta.url);
 mockModule('../../../src/composition/application-services.js', import.meta.url);
 mockModule('../../../src/adapters/verification/verification.js', import.meta.url);
+mockModule('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 const { reportMergeConflicts } = await import('../../../src/application/integrate/landing.js');
@@ -53,6 +55,7 @@ describe("Variant B landing", () => {
   const runtimeMatrixModule = mockModule<typeof import('../../../src/adapters/agents/runtime-matrix.js')>('../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
   const statsModule = mockModule<typeof import('../../../src/adapters/cli/commands/stats.js')>('../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const __mm1 = mockModule<typeof import('../../../src/composition/application-services.js')>('../../../src/composition/application-services.js', import.meta.url);
+  const executionContext = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
   const __mm2 = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   const { mock } = test;
@@ -101,6 +104,12 @@ describe("Variant B landing", () => {
     mock.method(missionUtils, 'findMissionArea', () => 'docs');
     mock.method(missionUtils, 'getPrimaryWorktree', () => FAKE_ROOT);
     mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
+    // Composition resolves the checkouts once from Mission identity; these landing
+    // fixtures keep the mission checkout and receiving base on the fake root.
+    mock.method(executionContext, 'resolveMissionExecutionContext', (slug: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: slug, missionWorktree: path.join(FAKE_ROOT, '..', TEST_SLUG), baseWorktree: FAKE_ROOT, baseBranch: 'main' }),
+    }));
     mock.method(missionUtils, 'resolveMainRepo', () => FAKE_ROOT);
     mock.method(missionUtils, 'missionTitle', () => 'Test Mission');
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
@@ -703,6 +712,7 @@ describe("integration completion order", () => {
   const forgejo = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
   const stats = mockModule<typeof import('../../../src/adapters/cli/commands/stats.js')>('../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const verification = mockModule<typeof import('../../../src/adapters/verification/verification.js')>('../../../src/adapters/verification/verification.js', import.meta.url);
+  const executionContext = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
   const integrate = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   const SLUG = 'task-2367-fixture';
@@ -722,6 +732,10 @@ describe("integration completion order", () => {
     mock.method(missionUtils, 'findMissionDir', () => path.join(ROOT, 'missions', SLUG));
     mock.method(missionUtils, 'findMissionArea', () => 'all');
     mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(ROOT, '..', SLUG));
+    mock.method(executionContext, 'resolveMissionExecutionContext', (id: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: id, missionWorktree: path.join(ROOT, '..', SLUG), baseWorktree: ROOT, baseBranch: 'main' }),
+    }));
     mock.method(missionUtils, 'resolveMainRepo', () => ROOT);
     mock.method(missionUtils, 'missionTitle', () => 'fixture');
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);

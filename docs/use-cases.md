@@ -201,7 +201,11 @@ conversion assigns deterministic child identities, validates every complete
 child contract and its acyclic prerequisite graph, and commits the parent and
 all children atomically. The parent remains a visible, non-executable planning
 container; `px status` reports each child, its recorded prerequisites, and the
-`px draft <child-id>` entry point. Each child must estimate as Small or Medium;
+`px draft <child-id>` entry point. Wave children are owned by their Mission
+records and do not have separate Backlog task files; review, repair and
+integration continue from Mission status, labels and recorded agent identity.
+Landing every child does not currently close or archive the planning parent or
+its Backlog task automatically. Each child must estimate as Small or Medium;
 a still-Large contract must be split again before conversion.
 Dependencies communicate the plan but do not schedule execution. If splitting
 would be less safe, only a direct operator decision can record the rationale for

@@ -93,11 +93,13 @@ test('composed command exits preserve status and cleanup without terminating the
  */
 function runDevWithAnchor(
   args: string[],
-  { home, cwd, timeoutMs = 8000 }: { home?: string; cwd?: string; timeoutMs?: number } = {},
+  { home, cwd, primaryWorktree, timeoutMs = 8000 }: { home?: string; cwd?: string; primaryWorktree?: string; timeoutMs?: number } = {},
 ) {
   const homeDirective = home ? `process.env.PARALLIX_HOME = ${JSON.stringify(home)};` : '';
   const cwdDirective = cwd ? `process.chdir(${JSON.stringify(cwd)});` : '';
-  const primaryWorktreeDirective = cwd ? `process.env.PRIMARY_WORKTREE = ${JSON.stringify(cwd)};` : '';
+  const primaryWorktreeDirective = primaryWorktree || cwd
+    ? `process.env.PRIMARY_WORKTREE = ${JSON.stringify(primaryWorktree ?? cwd)};`
+    : '';
   const script = [
     homeDirective,
     cwdDirective,
@@ -127,15 +129,16 @@ function runDevWithAnchor(
  * depend on the test checkout's `backlog/tasks` state (which integration
  * deletes on landing). Returns both the Parallix home and the fixture repo.
  */
-async function withIsolatedUnclassifiedFixture(): Promise<{ home: string; repo: string }> {
+async function withIsolatedUnclassifiedFixture(): Promise<{ home: string; repo: string; missionRepo: string }> {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2599-home-'));
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2599-repo-'));
+  const missionRepo = `${repo}-mission`;
   const previousHome = process.env.PARALLIX_HOME;
   process.env.PARALLIX_HOME = home;
   try {
-    // A `main` branch exists so the primary-branch detector resolves, and the
-    // current branch is the mission branch the preflight expects.
-    execSync('git init -q && git config user.email test@parallix && git config user.name test && git commit -q --allow-empty -m init && git branch main && git checkout -b mission/task-2599', {
+    // Keep the receiving base and mission in distinct registered checkouts. The
+    // integration context contract rejects labelling a mission checkout as main.
+    execSync('git init -q && git config user.email test@parallix && git config user.name test && git commit -q --allow-empty -m init && git branch -M main', {
       cwd: repo,
       stdio: 'ignore',
     });
@@ -155,6 +158,9 @@ async function withIsolatedUnclassifiedFixture(): Promise<{ home: string; repo: 
     execSync(`git -C ${JSON.stringify(repo)} add . && git -C ${JSON.stringify(repo)} commit -q -m fixture`, {
       stdio: 'ignore',
     });
+    execSync(`git -C ${JSON.stringify(repo)} worktree add -q -b mission/${slug} ${JSON.stringify(missionRepo)} main`, {
+      stdio: 'ignore',
+    });
     const db = new SqliteDatabaseAdapter();
     await db.open({ path: path.join(home, 'parallix.db') });
     await new SqliteMigrationRunner(db).applyPending(loadDefaultMigrations());
@@ -172,10 +178,11 @@ async function withIsolatedUnclassifiedFixture(): Promise<{ home: string; repo: 
     await db.close();
   } catch (error) {
     releaseHome(home, previousHome);
+    fs.rmSync(missionRepo, { recursive: true, force: true });
     fs.rmSync(repo, { recursive: true, force: true });
     throw error;
   }
-  return { home, repo };
+  return { home, repo, missionRepo };
 }
 
 /** Release a temp Parallix home once its child has exited. */
@@ -194,12 +201,14 @@ test('SC1/SC2: a completed dev operation returns control with status 0 even with
 
 test('SC3: a missing-classification integrate failure returns control with a non-zero status even with a loop anchor present', async () => {
   const previousHome = process.env.PARALLIX_HOME;
-  const { home, repo } = await withIsolatedUnclassifiedFixture();
+  const { home, repo, missionRepo } = await withIsolatedUnclassifiedFixture();
   try {
     // The fixture repo has no `review.provider`, so the preflight performs no
     // Forgejo lookups; the fixture owns its own task file, so the test is
     // self-contained and independent of the test checkout's backlog state.
-    const child = runDevWithAnchor(['integrate', slug, '--dry-run'], { home, cwd: repo, timeoutMs: 8000 });
+    const child = runDevWithAnchor(['integrate', slug, '--dry-run'], {
+      home, cwd: missionRepo, primaryWorktree: repo, timeoutMs: 8000,
+    });
     assert.equal(child.error, undefined, child.error?.message ?? '');
     assert.notEqual(child.status, 0, `expected a non-zero exit, got status=${child.status}`);
     const output = `${child.stdout ?? ''}${child.stderr ?? ''}`;
@@ -209,6 +218,7 @@ test('SC3: a missing-classification integrate failure returns control with a non
     assert.ok(!/Forgejo API returned HTTP|failed to resolve PR/.test(output), 'unexpected Forgejo remote lookup');
   } finally {
     releaseHome(home, previousHome);
+    fs.rmSync(missionRepo, { recursive: true, force: true });
     fs.rmSync(repo, { recursive: true, force: true });
   }
 });

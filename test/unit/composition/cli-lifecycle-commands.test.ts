@@ -3,6 +3,7 @@
 import test, { mock, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { ExecutionActivityRecorder, NO_EXECUTION_ACTIVITY } from '../../../src/application/recording/execution-activity-recorder.js';
 import { completed, failure } from '../../../src/application/contracts.js';
@@ -29,6 +30,10 @@ const reviewCli = mockModule<typeof import('../../../src/interfaces/cli/review.j
 await installModuleMocks();
 const { createLifecycleCommands } = await import('../../../src/composition/cli-lifecycle-commands.js');
 const { ownWorkflowCli } = await import('../../../src/composition/workflow-cli.js');
+
+// Distinct from DEFAULT_CONFIGURATION so a dropped composition-root identity is
+// visible instead of masked by an unconfigured default.
+const configuration = resolveConfiguration({ PATH: '/composed/bin', PARALLIX_HOME: '/composed/home' });
 
 function fixture(t: TestContext, denyAdmission = false, currentWork: ProductionApplicationServices['currentWork'] = NO_EXECUTION_ACTIVITY) {
   t.after(() => { mock.restoreAll(); configureMissionWriteAuthorization(null); });
@@ -59,19 +64,34 @@ function fixture(t: TestContext, denyAdmission = false, currentWork: ProductionA
   };
   const registry: Record<string, Command> = {};
   const commands = createLifecycleCommands({ rootDir: '/fixture', packageDir: '/fixture',
-    configuration: resolveConfiguration({}), scope, active: async () => {}, commands: () => registry });
+    configuration, scope, active: async () => {}, commands: () => registry });
   Object.assign(registry, commands);
   ownWorkflowCli(registry, async () => graph);
+  const integrateOptions: Array<Parameters<typeof integration.default>[1]> = [];
   mock.method(integration, 'default', async (_args: string[], options: Parameters<typeof integration.default>[1]) => {
     assert.ok(options?.reReviewFn);
+    integrateOptions.push(options);
     await options.reReviewFn('task-nested', '/fixture');
   });
   mock.method(reviewCli, 'createReviewCommand', () => async () => { directReviews++; });
   // Invoke the internal integration entry deliberately without its outer CLI
   // wrapper: the nested callback must itself retain the admission fallback.
-  return { invoke: () => commands.integrate(['task-nested']), requests, borrowedGraphs, graph,
+  return { invoke: () => commands.integrate(['task-nested']), requests, borrowedGraphs, graph, integrateOptions,
     commands, directReviews: () => directReviews, admissionsClosed: () => admissionsClosed };
 }
+
+// The terminal CLI runtime only carries command/exit fields; the composition
+// root must hand its resolved configuration to the integrate adapter, which
+// resolves the mission execution context from that identity (TASK-2777).
+test('terminal integrate runner retains the composition-root configuration identity (TASK-2777)', async t => {
+  const f = fixture(t);
+  await f.invoke();
+  assert.equal(f.integrateOptions.length, 1);
+  const [options] = f.integrateOptions;
+  assert.ok(options, 'the terminal integrate route reached the adapter once');
+  assert.equal(options.configuration, configuration);
+  assert.equal(options.configuration?.storage.parallixHome, '/composed/home');
+});
 
 test('unowned integration re-review goes through workflow admission (TASK-2762)', async t => {
   const f = fixture(t);
@@ -131,8 +151,16 @@ async function integrationCompletion(t: TestContext, control: { code?: 0 | 1; er
     { identity: () => ({ pid: 100, identity: 'fixture' }), launch: async () => {},
       alive: async () => true, stop: async () => true },
     mission.repositoryId, async () => 'codex', async () => {});
-  const ports = integration.createIntegratePorts();
-  ports.missionPaths.inferSlug = () => mission.id;
+  const productionPorts = integration.createIntegratePorts();
+  productionPorts.missionPaths.inferSlug = () => mission.id;
+  // The checkouts are the composition's to resolve; this suite doubles storage,
+  // process launch and integration effects, so it supplies that resolution too.
+  const ports = {
+    ...productionPorts,
+    missionContext: {
+      resolve: () => ({ ok: true as const, context: missionExecutionContext({ missionId: mission.id, missionWorktree: `/fixture/${mission.id}`, baseWorktree: '/fixture', baseBranch: 'main' }) }),
+    },
+  };
   let released = false;
   ports.process.claimIntegration = async () => async () => { released = true; if (control.cleanup) { throw control.cleanup; } };
   mock.method(integration, 'default', (args: string[], options: Parameters<typeof integration.default>[1]) =>

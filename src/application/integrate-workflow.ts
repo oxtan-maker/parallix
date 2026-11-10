@@ -23,7 +23,7 @@ import type { MissionExecutionContext } from './ports/mission-execution-context.
  */
 import * as fmt from './presentation/cli-format.js';
 import { createIntegrationStrategy } from './services/integration-dispatch.js';
-import { missionId } from '../domain/mission.js';
+import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import { integrationRepairNeedsReview } from './integration-repair-review.js';
 import { evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
@@ -55,11 +55,16 @@ export interface IntegrateOptions extends Partial<IntegrateSeams> {
   /** The outer `px integrate` publication nested repair and review report into (TASK-2620). */
   nestedWork?: unknown;
   /**
-   * Checkouts resolved from the Mission identity by a board-admitted operation.
-   * Absent, a terminal run keeps reading them from its working directory.
+   * Any checkout of the Mission's repository an admitting composition (the board
+   * host) locates it from; defaults to the process working directory. It only
+   * finds the repository: the entry resolves the Mission and receiving-base
+   * checkouts itself, after it holds the integration claim.
    */
-  executionContext?: MissionExecutionContext;
+  executionRoot?: string;
 }
+
+/** A run always carries the resolved checkouts its nested steps depend on. */
+export type ResolvedIntegrateOptions = IntegrateOptions & { executionContext: MissionExecutionContext };
 
 function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
 
@@ -95,14 +100,12 @@ class IntegrateWorkflow {
   // the timestamps (never assign Mission.status), close it to `done`, and remove
   // the worktree and local branch. Every effect reuses a tested integration
   // port, so the closeout performs zero new remote side effects.
-  /** @param {string} slug @param {any} missionServices @param {string} rootDir */
-  async recoverLandedCloseout(slug: string, missionServices: IntegrationMissionServices, rootDir: string): Promise<0> {
-    // The hook runs from the base checkout; resolve the landed base branch the
-    // same way the integration context does (legacy missions fall back to the
-    // primary branch).
-    let baseBranch: string;
-    try { baseBranch = this.dependencies.missionPaths.resolveMissionBaseBranch(slug, rootDir); } catch { baseBranch = this.dependencies.missionPaths.getPrimaryBranch(); }
-    const baseWorktree = this.dependencies.missionPaths.resolveBaseWorktree(slug, { rootDir });
+  /** @param {string} slug @param {any} missionServices @param {MissionExecutionContext} execution */
+  async recoverLandedCloseout(slug: string, missionServices: IntegrationMissionServices, execution: MissionExecutionContext): Promise<0> {
+    // The landing already happened on the resolved receiving base; the closeout
+    // runs there and never re-derives the base from a working directory.
+    const baseBranch = execution.baseBranch;
+    const baseWorktree = execution.baseWorktree;
     const missionWorktree = this.dependencies.missionPaths.conventionalWorktreePath(slug);
     if (this.dependencies.ports.process.cwd() === missionWorktree || this.dependencies.ports.process.cwd().startsWith(missionWorktree + '/')) {
       this.dependencies.ports.process.chdir(baseWorktree);
@@ -146,6 +149,7 @@ class IntegrateWorkflow {
       throw abortWith(this.dependencies.landing, `Mission ${missionId(slug)} not found in SQLite. Materialize through the intake boundary before integration.`);
     }
     if (missionLoad.kind === 'found') {
+      context.mirrorOwnership = backlogMirrorOwnership(missionLoad.mission);
       context.missionStatus = missionLoad.mission.status;
       context.missionBrief = missionLoad.mission.brief ?? null;
       context.missionLabels = missionLoad.mission.labels;
@@ -204,7 +208,9 @@ class IntegrateWorkflow {
       }
       await this.dependencies.runIntegrationRebase(slug, { baseWorktree, baseBranch, git, missionServicesFn });
       const checkout = this.dependencies.ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: String(baseWorktree) });
-      const removed = prepareBacklogPayload(this.dependencies.ports, checkout, baseBranch);
+      const removed = context.mirrorOwnership.kind === 'none'
+        ? new Set<string>()
+        : prepareBacklogPayload(this.dependencies.ports, checkout, baseBranch);
       if (removed.size > 0 && git(['-C', checkout, 'commit', '--only', '-m', 'Remove stale completed-task copies before integration', '--', ...removed]).status !== 0) {
         throw abortWith(this.dependencies.landing, 'Could not commit stale backlog cleanup before integration gates.');
       }
@@ -253,20 +259,20 @@ class IntegrateWorkflow {
     return 1;
   }
 
-  private async tryResumeIntegration(slug: string, request: IntegrateRequest, missionServices: IntegrationMissionServices, seams: IntegrateSeams): Promise<0 | null> {
+  private async tryResumeIntegration(slug: string, request: IntegrateRequest, missionServices: IntegrationMissionServices, seams: IntegrateSeams, execution: MissionExecutionContext): Promise<0 | null> {
     // TASK-2517 CP-3: a landed-but-stranded mission short-circuits the whole run —
     // no rebase, no gates, no publish — and closes directly.
     if (request.recoverLanded) {
-      await this.recoverLandedCloseout(slug, missionServices, this.dependencies.ports.process.cwd());
+      await this.recoverLandedCloseout(slug, missionServices, execution);
       return 0;
     }
     const existing = await missionServices.store.load(missionId(slug));
     if (existing.kind === 'found' && existing.mission.status === 'done' && existing.mission.closedAt) {
-      const landed = this.dependencies.ports.checkout.findLandedSquashOnBaseBranch(this.dependencies.ports.process.cwd(), slug);
+      const landed = this.dependencies.ports.checkout.findLandedSquashOnBaseBranch(execution.baseWorktree, slug);
       if (!landed) {
         throw abortWith(this.dependencies.landing, `Mission ${slug} is closed in SQLite, but its landed commit is absent from the base branch. Inspect the lifecycle record before retrying integration.`);
       }
-      const primary = this.dependencies.missionPaths.getPrimaryWorktree();
+      const primary = execution.baseWorktree;
       const branch = this.dependencies.missionPaths.missionBranchName(slug, primary);
       const branchExists = this.dependencies.ports.git.git(['-C', primary, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
       if (branchExists || this.dependencies.ports.fileSystem.existsSync(this.dependencies.missionPaths.conventionalWorktreePath(slug))) {
@@ -275,10 +281,10 @@ class IntegrateWorkflow {
       fmt.log.info(`Mission ${slug} already integrated as ${landed.slice(0, 12)}; no integration gates or merge rerun.`);
       return 0;
     }
-    await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, seams, request);
+    await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, execution, seams, request);
     const repair = await missionServices.store.load(missionId(slug));
     if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
-      return reviewBeforeIntegration(slug, this.dependencies.ports.process.cwd(), this.dependencies.ports.landing, seams.reReviewFn);
+      return reviewBeforeIntegration(slug, this.executionContextFor(slug, execution).missionWorktree, this.dependencies.ports.landing, seams.reReviewFn);
     }
     return null;
   }
@@ -298,28 +304,45 @@ class IntegrateWorkflow {
     }).needed;
   }
 
-  /** Explicit checkouts replace every working-directory read of the context builder. */
-  private executionCheckouts(slug: string, execution: MissionExecutionContext | undefined) {
-    if (!execution) { return {}; }
+  /**
+   * The context must describe the Mission being integrated. This runs before
+   * any recovery, closed-Mission or repair branch reads it, so a context for
+   * another Mission can never drive closeout or repair against its base.
+   */
+  private validatedExecutionContext(slug: string, execution: MissionExecutionContext): MissionExecutionContext {
     if (execution.missionId !== slug) {
       throw abortWith(this.dependencies.landing, `Execution context for ${execution.missionId} cannot integrate mission ${slug}.`);
     }
-    const { missionWorktree, baseWorktree, baseBranch } = execution;
-    return { missionWorktree, baseWorktree, baseBranch,
-      getCurrentBranchFn: () => this.dependencies.ports.git.git(['-C', missionWorktree, 'branch', '--show-current']).stdout.trim() };
+    return execution;
   }
 
-  async runIntegration(slug: string, request: IntegrateRequest, options: IntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1> {
+  /** The resolved checkouts are required: a mismatched identity or a landed Mission without a checkout stops the run. */
+  private executionContextFor(slug: string, execution: MissionExecutionContext): MissionExecutionContext & { missionWorktree: string } {
+    const validated = this.validatedExecutionContext(slug, execution);
+    const missionWorktree = validated.missionWorktree;
+    if (!missionWorktree) {
+      throw abortWith(this.dependencies.landing, `Mission ${slug}: its landing is proven on ${execution.baseBranch}, but no mission checkout remains. Run px integrate ${slug} --recover-landed to finish closeout.`);
+    }
+    return { ...execution, missionWorktree };
+  }
+
+  async runIntegration(slug: string, request: IntegrateRequest, options: ResolvedIntegrateOptions, seams: IntegrateSeams, state: IntegrateRunState): Promise<0 | 1> {
     const { dryRun } = request;
-    const { missionServicesFn } = options;
+    const { missionServicesFn, executionContext } = options;
     if (typeof missionServicesFn !== 'function') { throw new Error('integrate command requires injected mission services'); }
     // Resolve the authoritative store before buildIntegrationContext so the
     // reviewer lookup (TASK-2420 review round 2, F1) receives its `missionStore`
     // argument; the store is rootDir-independent.
+    const execution = this.validatedExecutionContext(slug, executionContext);
     const missionServices = await missionServicesFn(this.dependencies.ports.process.cwd());
-    const resumed = await this.tryResumeIntegration(slug, request, missionServices, seams);
+    const resumed = await this.tryResumeIntegration(slug, request, missionServices, seams, execution);
     if (resumed !== null) { return resumed; }
-    const context: IntegrationContext = await this.dependencies.buildIntegrationContext(slug, { missionStore: missionServices.store, ...this.executionCheckouts(slug, options.executionContext) });
+    const checkouts = this.executionContextFor(slug, execution);
+    const context: IntegrationContext = await this.dependencies.buildIntegrationContext(slug, {
+      missionStore: missionServices.store,
+      executionContext: checkouts,
+      getCurrentBranchFn: () => this.dependencies.ports.git.getCurrentBranch(checkouts.missionWorktree),
+    });
     const missionLoad = await this.loadMissionAuthority(slug, context, missionServices);
     this.requireReadableApprovedRevision(context, missionLoad);
 
@@ -351,7 +374,7 @@ class IntegrateWorkflow {
     // real integration operations run through `strategy.run`, so a non-local
     // mode refuses the local primary merge / unimplemented steps instead of
     // silently performing them (SC4 / SC6).
-    const strategy = createIntegrationStrategy(this.dependencies.ports.productConfig.resolveIntegrationMode(context.baseWorktree ?? this.dependencies.ports.process.cwd()));
+    const strategy = createIntegrationStrategy(this.dependencies.ports.productConfig.resolveIntegrationMode(context.baseWorktree));
     const gateRequest = { slug, context, missionLoad, missionServices, ...request, seams, configuration: options.configuration };
     let verificationEvidence = await strategy.run('run-required-local-gates', () => this.dependencies.runRequiredLocalGates(gateRequest));
     // Gates certify a particular landing candidate.  If the primary advanced
@@ -383,7 +406,7 @@ class IntegrateWorkflow {
     if (strategy.mode === 'github-pr') {
       return (await this.dependencies.landThroughGithubPr({ slug, context, missionServices, strategy })) ? 0 : 1;
     }
-    const landingBase = { baseWorktree: String(context.baseWorktree), baseBranch: String(context.baseBranch) };
+    const landingBase = { baseWorktree: context.baseWorktree, baseBranch: context.baseBranch };
     for (let attempt = 0; attempt < 3; attempt++) {
       const landed = await withBaseMutation(this.dependencies.ports.process, landingBase.baseWorktree, landingBase.baseBranch, async () => {
         if (this.landingNeedsRebase(slug, context)) { return false; }

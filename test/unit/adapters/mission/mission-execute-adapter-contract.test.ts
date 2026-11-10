@@ -291,11 +291,12 @@ describe('Execute Mission adapters', () => {
       agent: 'codex',
       launch: {
         agent: 'codex', rebaseDeferred: false, errored: false, errorMessage: null, exitStatus: 0,
-        detail: { startedAt: '2026-07-20T10:00:00Z', endedAt: '2026-07-20T10:03:00Z' },
+        detail: { runId: 'execute-codex-a1-missionrun', startedAt: '2026-07-20T10:00:00Z', endedAt: '2026-07-20T10:03:00Z' },
       },
     });
     assert.equal(recorded.length, 1);
     assert.equal(recorded[0].implementer, 'codex');
+    assert.equal(recorded[0].runId, 'execute-codex-a1-missionrun');
     assert.equal(recorded[0].model, 'gpt-5');
     assert.equal(recorded[0].durationMinutes, 3);
     assert.equal(windows[0].sinceMs, Date.parse('2026-07-20T10:00:00Z'));

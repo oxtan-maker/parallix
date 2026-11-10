@@ -687,6 +687,20 @@ test('integration rebase repair returns to ready-for-integration (TASK-2746)', a
   assert.deepEqual(calls, ['ready-for-integration']);
 });
 
+test('rebase repair keeps a persisted wave child lifecycle DB-only (TASK-2847)', async () => {
+  const calls: string[] = [];
+  const store = inMemoryTransitionStore(fixtureMission('task-2846.02', {
+    status: 'integration', waveParentId: fixtureMission('task-2846').id,
+  }));
+  await transitionRebaseRepair('task-2846.02', 'active', { rootDir: '/mission' }, {
+    missionServices: async () => ({ store }),
+    cwd: () => '/wrong',
+    transitionTask: (_slug, status) => { calls.push(status); },
+    reviewerEligibility: () => assert.fail('integration repair does not resume review'),
+  });
+  assert.deepEqual(calls, [], 'no Backlog lifecycle projection is emitted');
+});
+
 // ---- TASK-2830 Git lock contention during rebase replay ----
 // task-2816 run workflow-821be616 stopped at pick 23/26 on an existing
 // per-worktree index.lock before any resolver launch; Git requeued the pick and

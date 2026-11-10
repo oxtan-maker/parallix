@@ -11,6 +11,7 @@ import type { IntegrateAgentsPort, IntegrateLandingPort } from '../ports/integra
 import type { MissionStore } from '../domain-ports.js';
 import { missionId } from '../../domain/mission.js';
 import type { IntegrationContext } from './context.js';
+import type { BacklogMirrorOwnership } from '../../domain/mission.js';
 
 export const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
@@ -100,6 +101,16 @@ export interface BounceSeams {
   applyAgentFallbackFn: IntegrateAgentsPort['applyAgentFallback'];
   selectAgentFn?: IntegrateAgentsPort['selectAgent'];
   workflowLauncherStatusFn?: IntegrateAgentsPort['workflowLauncherStatus'];
+}
+
+/** Project authoritative lifecycle state only when this Mission owns a Backlog mirror. */
+export function projectBacklogTransition(
+  ownership: BacklogMirrorOwnership,
+  transition: BounceSeams['transitionTaskFn'],
+  slug: string,
+  status: string,
+): unknown {
+  return ownership.kind === 'none' ? true : transition(slug, status);
 }
 
 /** Read current recorded ownership, retaining known identity on a transient read failure. */

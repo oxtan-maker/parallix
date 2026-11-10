@@ -227,7 +227,7 @@ test('attention items render the server rank, reason kind, detail and action dis
 test('card facts render from the server without substitution', () => {
   const html = render(populated());
   assert.match(html, /CP-2\.md/);
-  assert.match(html, /gate ✗ FAIL/);
+  assert.match(html, /data-gate="failed"[^>]*>[\s\S]*?aria-label="Not passing"/);
   assert.match(html, /act on reviewer findings/);
   assert.doesNotMatch(html, /future attempts|round 2 of 5/, 'rounds that may not happen are not announced');
   assert.match(html, /href="https:\/\/example\.invalid\/pr\/47"/);
@@ -336,15 +336,15 @@ test('an empty snapshot states each region is empty and never shows a zero metri
 });
 
 test('each observed non-passing gate state renders distinctly, never as a pass (TASK-2775)', () => {
-  for (const [gate, text] of [
-    ['unavailable', 'gate · unavailable'], ['not-run', 'gate · not run'], ['unconfigured', 'gate · none configured'],
-    ['stale', 'gate · stale'], ['running', 'gate · running'], ['failed', 'gate ✗ FAIL'],
+  for (const [gate, label] of [
+    ['unavailable', 'Unknown'], ['not-run', 'Not run'], ['unconfigured', 'Not configured'],
+    ['stale', 'Stale'], ['running', 'Running'], ['failed', 'Not passing'],
   ] as const) {
     const html = render(snapshotOf({
       stages: makeProjection({ active: [makeCard({ checkpoint: 'CP-1.md', gate })] }).stages,
     }));
-    assert.ok(html.includes(text), `${gate} renders ${text}`);
-    assert.ok(!html.includes('gate ✓'), `${gate} never renders as passed`);
+    assert.ok(html.includes(`data-gate="${gate}"`) && html.includes(`aria-label="${label}"`), `${gate} renders the ${label} icon`);
+    assert.ok(!html.includes('aria-label="Passed"'), `${gate} never renders as passed`);
   }
 });
 
@@ -905,7 +905,7 @@ test('checkpoint gate and review metadata share one ordered bounded row with vis
   assert.match(html, /aria-description="1\/3 completed · Current: CP-2/);
   assert.doesNotMatch(html, /data-checkpoint-summary/);
   assert.match(html, /data-checkpoint-fill=""[^>]*background:#6fd0e8/);
-  assert.match(html, /gate · running/);
+  assert.match(html, /data-gate="running"[^>]*>[\s\S]*?aria-label="Running"/);
   const detail = renderToStaticMarkup(React.createElement(CheckpointDetail, {
     card: toWebBoardSnapshot(makeProjection({ active: [card] })).stages.find(stage => stage.lane === 'active')!.cards[0],
     initial: 'CP-2', onClose: () => {},
@@ -922,7 +922,7 @@ test('unknown or absent checkpoint state never invents progress and preserves th
   ]) {
     const html = render(toWebBoardSnapshot(makeProjection({ active: [makeCard({ gate: 'failed', checkpointEvidence })] })));
     assert.match(html, /data-checkpoint-gate-row=""/);
-    assert.match(html, /gate ✗ FAIL/);
+    assert.match(html, /data-gate="failed"/);
     assert.doesNotMatch(html, /0\/1|1\/1|data-checkpoint-fill/);
     if (checkpointEvidence.length) { assert.match(html, /checkpoints · completion unknown/); }
     else { assert.doesNotMatch(html, /View checkpoint evidence|data-checkpoint-summary/); }

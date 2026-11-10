@@ -9,7 +9,7 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import { startDraftAgent, selectAgent, readAgentConfigOrExit } from '../../agents/agents.js';
 import { resolveTaskFile, reportTaskResolution, checkBacklogIntegrity } from '../../backlog/backlog.js';
 
-import { missionId, isDbOwnedPxIdentity } from '../../../domain/mission.js';
+import { backlogMirrorOwnership, missionId } from '../../../domain/mission.js';
 
 import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 
@@ -135,8 +135,7 @@ export async function isDbOwnedMission(slug: string, mainRepo: string, merged: D
     // task-NNNN missions remain on the Backlog path unless their aggregate
     // explicitly names a wave parent, so mere presence in the store never
     // bypasses task-file validation.
-    return loaded.kind === 'found' && (isDbOwnedPxIdentity(slug)
-      || (loaded.mission.waveParentId !== null && loaded.mission.waveParentId !== undefined));
+    return loaded.kind === 'found' && backlogMirrorOwnership(loaded.mission).kind === 'none';
   } catch {
     return false;
   }

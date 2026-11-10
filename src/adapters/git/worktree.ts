@@ -101,31 +101,8 @@ export function resolveMainRepo(configuration: ParallixConfiguration = DEFAULT_C
 }
 
 function primaryWorktreeFromPorcelain(lines: string[], primaryBranch: string): string | null {
-    const worktrees: Array<{path: string; branch: string|null; bare: boolean}> = [];
-    let current: {path: string; branch: string|null; bare: boolean} | null = null;
-
-    for (const line of lines) {
-      if (line.startsWith('worktree ')) {
-        if (current) {worktrees.push(current);}
-        current = { path: line.slice('worktree '.length).trim(), branch: null, bare: false };
-        continue;
-      }
-
-      if (!current) {continue;}
-
-      if (line.startsWith('branch ')) {
-        current.branch = line.slice('branch '.length).trim();
-      } else if (line === 'bare') {
-        current.bare = true;
-      } else if (line === '') {
-        worktrees.push(current);
-        current = null;
-      }
-    }
-
-    if (current) {worktrees.push(current);}
-
-    const primaryWorktree = worktrees.find(wt => !wt.bare && wt.branch === `refs/heads/${primaryBranch}`);
+    const primaryWorktree = parseWorktreeTopology(lines.join('\n'))
+      .find(wt => !wt.bare && wt.branch === `refs/heads/${primaryBranch}`);
     return primaryWorktree?.path ?? null;
 }
 
@@ -268,22 +245,8 @@ export function resolveMissionBaseBranch(slug: string, rootDir: string = process
 /** @param {string} branchRef @param {GitReader} runner @param {string} mainRepo */
 function findWorktreeForBranch(branchRef: string, runner: GitReader, mainRepo: string): string | null {
   const result = runner(['-C', mainRepo, 'worktree', 'list', '--porcelain']);
-  const lines = ((result && result.stdout) || '').split('\n');
-  let current: { path: string; branch: string | null } | null = null;
-  for (const line of lines) {
-    if (line.startsWith('worktree ')) {
-      current = { path: line.slice('worktree '.length).trim(), branch: null };
-    } else if (!current) {
-      continue;
-    } else if (line.startsWith('branch ')) {
-      current.branch = line.slice('branch '.length).trim();
-    } else if (line === '') {
-      if (current.branch === branchRef) {return current.path;}
-      current = null;
-    }
-  }
-  if (current && current.branch === branchRef) {return current.path;}
-  return null;
+  return parseWorktreeTopology((result && result.stdout) || '')
+    .find(entry => entry.branch === branchRef && !entry.prunable)?.path ?? null;
 }
 
 /**
@@ -312,15 +275,27 @@ export function resolveBaseWorktree(slug: string, options: { rootDir?: string; g
 
   const existing = findWorktreeForBranch(baseRef, runner, mainRepo);
   if (existing) {return existing;}
+  return checkOutBaseWorktree(slug, base, mainRepo, runner);
+}
 
-  const branchExists = runner(['-C', mainRepo, 'show-ref', '--verify', '--quiet', baseRef]);
+/** Read-only: throws the `base branch`-bearing error when the recorded base does not exist locally. */
+export function assertLocalBaseBranch(slug: string, base: string, mainRepo: string, runner: GitReader = gitModule.git): void {
+  const branchExists = runner(['-C', mainRepo, 'show-ref', '--verify', '--quiet', `refs/heads/${base}`]);
   if (!branchExists || branchExists.status !== 0) {
     throw new Error(
       `Mission ${slug} records base branch '${base}' but it does not exist locally. ` +
       `Create or fetch the '${base}' base branch before integrating.`
     );
   }
+}
 
+/**
+ * Check out an existing local base branch at its conventional base worktree
+ * path beside `mainRepo` — the auto-creation step of feature-branch mode.
+ * Throws a `base branch`-bearing error when the branch does not exist locally.
+ */
+export function checkOutBaseWorktree(slug: string, base: string, mainRepo: string, runner: GitReader = gitModule.git): string {
+  assertLocalBaseBranch(slug, base, mainRepo, runner);
   const worktreePath = conventionalBaseWorktreePath(base, mainRepo);
   const addResult = runner(['-C', mainRepo, 'worktree', 'add', worktreePath, base]);
   if (!addResult || addResult.status !== 0) {
@@ -365,16 +340,25 @@ export interface WorktreeTopologySnapshot {
   resolveWorktree(_slug: string, _options?: { cwd?: string }): string | null;
 }
 
-/** Read the worktree list once for one projection build. */
-function parseWorktreeTopology(output: string): WorktreeEntry[] {
+export interface RepositoryWorktree {
+  readonly path: string;
+  readonly branch: string | null;
+  readonly bare: boolean;
+  readonly prunable: boolean;
+}
+
+/** Parse the repository worktree topology once; all worktree consumers share this owner. */
+export function parseWorktreeTopology(output: string): RepositoryWorktree[] {
   const entries: WorktreeEntry[] = [];
-    let current: { path: string; branch: string | null; prunable: boolean } | null = null;
+    let current: WorktreeEntry | null = null;
     for (const line of output.split('\n')) {
       if (line.startsWith('worktree ')) {
         if (current) { entries.push(current); }
-        current = { path: line.slice('worktree '.length).trim(), branch: null, prunable: false };
+        current = { path: line.slice('worktree '.length).trim(), branch: null, bare: false, prunable: false };
       } else if (current && line.startsWith('branch ')) {
         current.branch = line.slice('branch '.length).trim();
+      } else if (current && line === 'bare') {
+        current.bare = true;
       } else if (current && line.startsWith('prunable ')) {
         current.prunable = true;
       } else if (current && line === '') {
@@ -386,6 +370,29 @@ function parseWorktreeTopology(output: string): WorktreeEntry[] {
   return entries;
 }
 
+/** Read only the worktrees registered by the repository that owns `root`. */
+export function readRepositoryWorktrees(root: string, runner: GitReader = gitModule.git): RepositoryWorktree[] {
+  const listed = runner(['-C', root, 'worktree', 'list', '--porcelain']);
+  if (!listed || listed.status !== 0) {
+    throw new Error(String(listed?.stderr || 'git worktree list failed').split('\n')[0]);
+  }
+  return parseWorktreeTopology(String(listed.stdout || ''));
+}
+
+export function worktreeForBranch(entries: readonly RepositoryWorktree[], branch: string): RepositoryWorktree | null {
+  return entries.find(entry => entry.branch === `refs/heads/${branch}`) ?? null;
+}
+
+export function registeredWorktreeAt(entries: readonly RepositoryWorktree[], candidate: string): RepositoryWorktree | null {
+  const resolved = path.resolve(candidate);
+  return entries.find(entry => path.resolve(entry.path) === resolved) ?? null;
+}
+
+/** Git reports the repository's primary checkout first in porcelain topology. */
+export function primaryRepositoryWorktree(entries: readonly RepositoryWorktree[]): RepositoryWorktree | null {
+  return entries.find(entry => !entry.bare && !entry.prunable) ?? null;
+}
+
 export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: GitReader | null; currentBranch?: (_cwd: string) => string } = {}): WorktreeTopologySnapshot {
   const cwd = options.cwd || process.cwd();
   const runGit = options.gitFn || gitModule.git;
@@ -394,7 +401,7 @@ export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: GitRea
   let branchAtCwd: string | null | undefined;
   const entries: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
   try {
-    entries.push(...parseWorktreeTopology(String(runGit(['worktree', 'list', '--porcelain']).stdout || '')));
+    entries.push(...readRepositoryWorktrees(cwd, runGit));
   } catch {
     // The ordinary resolver retains its branch-based cwd fallback below.
   }
@@ -431,7 +438,7 @@ export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: G
   const branchRef = missionBranchRef(slug, cwd);
 
   try {
-    const liveMatches = matchingWorktrees(runGit(['worktree', 'list', '--porcelain']).stdout, branchRef, runGit);
+    const liveMatches = matchingWorktrees(readRepositoryWorktrees(cwd, runGit), branchRef, runGit);
     if (liveMatches.length > 0) {
       const cwdMatch = liveMatches.find(m => cwd === m.path || cwd.startsWith(m.path + '/'));
       if (cwdMatch) {return cwdMatch.path;}
@@ -452,18 +459,9 @@ export function resolveWorktree(slug: string, options: { cwd?: string; gitFn?: G
   return null;
 }
 
-type WorktreeEntry = { path: string; branch: string | null; prunable: boolean };
+type WorktreeEntry = { path: string; branch: string | null; bare: boolean; prunable: boolean };
 
-function matchingWorktrees(output: string, branchRef: string, runGit: GitReader): WorktreeEntry[] {
-  const matches: WorktreeEntry[] = [];
-  let current: WorktreeEntry | null = null;
-  for (const line of output.split('\n')) {
-    if (line.startsWith('worktree ')) { current = { path: line.slice('worktree '.length).trim(), branch: null, prunable: false }; continue; }
-    if (!current) { continue; }
-    if (line.startsWith('branch ')) { current.branch = line.slice('branch '.length).trim(); }
-    else if (line.startsWith('prunable ')) { current.prunable = true; }
-    else if (line === '') { if (current.branch === branchRef) { matches.push(current); } current = null; }
-  }
-  if (current?.branch === branchRef) { matches.push(current); }
-  return matches.filter((entry) => !entry.prunable).map((entry) => ({ ...entry, path: workTreeRootFor(entry.path, runGit) }));
+function matchingWorktrees(entries: readonly RepositoryWorktree[], branchRef: string, runGit: GitReader): WorktreeEntry[] {
+  return entries.filter(entry => entry.branch === branchRef && !entry.prunable)
+    .map(entry => ({ ...entry, path: workTreeRootFor(entry.path, runGit) }));
 }

@@ -1,5 +1,5 @@
 import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../src/application/ports/operation-history.js';
-import type { UsageRecord, UsageRepository } from '../../src/application/ports/mission-measurements.js';
+import type { UsageFilter, UsageFilterField, UsageRecord, UsageRepository } from '../../src/application/ports/mission-measurements.js';
 import { ConcreteMetricsReadAdapter } from '../../src/application/projections/metrics-read-adapter.js';
 import type { RepositoryId } from '../../src/domain/repository.js';
 
@@ -24,6 +24,14 @@ export class FakeLaneEventRepository implements BoardLaneEventRepository {
   async clear(): Promise<void> { /* fixture is immutable */ }
 }
 
+/** Test-double equivalent of the SQL equality conjunction the sqlite adapter issues. */
+export function matchesUsageFilter(record: UsageRecord, filter: UsageFilter): boolean {
+  return (Object.keys(filter) as UsageFilterField[]).every(
+    // Same rule as the adapter: a record never exposes empty text, so an empty-string constraint is unsatisfiable.
+    (field) => filter[field] === undefined || (filter[field] !== '' && record[field] === filter[field]),
+  );
+}
+
 /** In-memory usage telemetry; every write is a no-op so fixtures stay fixed. */
 export class FakeUsageRepository implements UsageRepository {
   private readonly records: readonly UsageRecord[];
@@ -32,8 +40,8 @@ export class FakeUsageRepository implements UsageRepository {
 
   async findAll(): Promise<readonly UsageRecord[]> { return this.records; }
 
-  async findWhere(predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]> {
-    return this.records.filter((record) => predicate(record));
+  async findWhere(filter: UsageFilter): Promise<readonly UsageRecord[]> {
+    return this.records.filter((record) => matchesUsageFilter(record, filter));
   }
 
   async save(): Promise<void> { /* fixture is immutable */ }

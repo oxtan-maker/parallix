@@ -98,23 +98,25 @@ test("execution runtime binds review preparation and repair-review preparation c
   assert.equal(calls, 2);
 });
 
-test('board integration context factory and nested adapter retain configuration', async t => {
+test('board integration observation and nested adapter retain configuration', async t => {
   boundaries(t);
-  let contexts = 0;
+  let observations = 0;
   let integrations = 0;
-  t.mock.method(execution, 'resolveMissionExecutionContext', (_slug: string, _root: string, resolved: unknown) => {
-    assert.strictEqual(resolved, configuration); contexts++;
-    return { ok: true, context: { worktree: '/fixture', configuration } };
+  t.mock.method(execution, 'observeMissionCheckout', (_slug: string, _root: string, resolved: unknown) => {
+    assert.strictEqual(resolved, configuration); observations++;
+    return { ok: true, missionWorktree: '/fixture', baseBranch: 'main' };
   });
-  t.mock.method(integration, 'default', async (_args: string[], options: { configuration?: unknown; executionContext?: unknown }) => {
+  t.mock.method(integration, 'default', async (_args: string[], options: { configuration?: unknown; executionRoot?: unknown; executionContext?: unknown }) => {
     assert.strictEqual(options.configuration, configuration);
-    assert.deepEqual(options.executionContext, { worktree: '/fixture', configuration }); integrations++;
+    // The board only locates the repository; the entry resolves the checkouts under its claim.
+    assert.equal(options.executionRoot, '/fixture');
+    assert.equal(options.executionContext, undefined); integrations++;
   });
   // The adapter is doubled, so the service never loads Mission persistence.
   const mission = {} as Parameters<typeof createBoardIntegrateService>[0];
   const service = createBoardIntegrateService(mission, NO_EXECUTION_ACTIVITY, configuration, '/fixture');
   await service.execute(['task-fixture']);
-  assert.equal(contexts, 1);
+  assert.equal(observations, 1);
   assert.equal(integrations, 1);
 });
 

@@ -832,7 +832,8 @@ describe("integration repair", () => {
     let continued = false;
     const adapter = createReviewWorkflowAdapter({
       missionStore: fixture.store, inferSlugFn: () => slug, resolveWorktreeFn: () => '/fixture',
-      operatorResume: bindReviewOperatorResume(fixture.store, true, {}),
+      operatorResume: bindReviewOperatorResume(fixture.store, true, {}, async () => ({ workflow: null,
+        liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
       readReviewStateFn: async () => ReviewState.from(slug, reviewStateDataFrom(fixture.mission().review!)),
       createEventFn: async () => ({ ok: true, path: null }), run: (() => ({ status: 0, stderr: '', signal: null,  stdout: 'operator' })),
       log: () => {}, error: () => {}, exit: (() => { throw new Error('must resume'); }),

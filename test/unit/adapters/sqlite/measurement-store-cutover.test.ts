@@ -44,6 +44,7 @@ function measurement(overrides: Partial<Parameters<SqliteMeasurementStore['upser
     mission: 'task-9001',
     stage: 'active',
     actorKey: 'codex',
+    runId: 'execute-codex-a1-missionrun',
     date: '2026-07-20',
     classification: 'ai_sdlc',
     implementer: 'codex',
@@ -77,6 +78,7 @@ test('measurement store persists an AgentRunMeasurement and reads it back with n
     const rows = store.listMeasurements();
     assert.equal(rows.length, 1);
     assert.equal(rows[0].mission, 'task-9001');
+    assert.equal(rows[0].runId, 'execute-codex-a1-missionrun');
     assert.equal(rows[0].input_tokens, 100);
     assert.equal(rows[0].cost_usd, 0.5);
 
@@ -87,7 +89,7 @@ test('measurement store persists an AgentRunMeasurement and reads it back with n
   }
 });
 
-test('measurement store keys rows by (repo, mission, stage, actorKey) and never invents a per-run identity', () => {
+test('measurement store keeps run id outside (repo, mission, stage, actorKey) identity (TASK-2846.03)', () => {
   const fixture = createMeasureFixture('identity');
   let store: SqliteMeasurementStore | undefined;
   try {
@@ -97,13 +99,14 @@ test('measurement store keys rows by (repo, mission, stage, actorKey) and never 
     store.upsertMeasurement(measurement({ actorKey: 'claude', implementer_agent: 'claude' }));
     // A second launch of the SAME (repo, mission, stage, actor) replaces the
     // existing row rather than creating a new per-launch record.
-    store.upsertMeasurement(measurement({ input_tokens: 999 }));
+    store.upsertMeasurement(measurement({ runId: 'execute-codex-a2-laterrun', input_tokens: 999 }));
 
     const rows = store.listMeasurements();
     assert.equal(rows.length, 3);
     const active = rows.filter(row => row.stage === 'active' && row.actorKey === 'codex');
     assert.equal(active.length, 1);
     assert.equal(active[0].input_tokens, 999);
+    assert.equal(active[0].runId, 'execute-codex-a2-laterrun');
   } finally {
     disposeMeasureFixture(fixture.dir, store);
   }
@@ -222,6 +225,7 @@ test('measurement store preserves unavailable numeric measurements as undefined,
       implementer: 'codex',
     });
     const [row] = store.listMeasurements();
+    assert.equal(row.runId, undefined);
     assert.equal(row.input_tokens, undefined);
     assert.equal(row.cost_usd, undefined);
   } finally {

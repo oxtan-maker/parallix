@@ -1,12 +1,17 @@
-import type { StageTelemetry } from '../../application/stats-recording-use-case.js';
+import type { ProviderResourceObservation } from '../../application/run-history-types.js';
 import type { spawnAndTee } from '../process/spawn-tee.js';
 
 /** Process output plus metadata attached by the provider launchers. */
 export type AgentProcessResult = Partial<Awaited<ReturnType<typeof spawnAndTee>>> & {
+  /** Durable per-launch identity minted by the run session. */
+  runId?: string;
   failureReason?: unknown;
   stopReason?: string;
   sessionId?: string | null;
-  telemetry?: StageTelemetry | null;
+  /** Adapter-native telemetry retained only until it is normalized. */
+  telemetry?: Record<string, unknown> | null;
+  /** Named per-run owner consumed by history and measurement writers. */
+  providerResources?: ProviderResourceObservation | null;
   model?: string | null;
   provider?: string | null;
   transientRetries?: number;

@@ -37,7 +37,8 @@ import type { RepositoryId } from '../../../src/domain/repository.js';
 import { missionId } from '../../../src/domain/mission.js';
 import type { LaneTransitionEvent } from '../../../src/domain/board-event.js';
 import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
-import type { UsageRecord, UsageRepository } from '../../../src/application/ports/mission-measurements.js';
+import { matchesUsageFilter } from '../../fixtures/metrics-adapter.js';
+import type { UsageFilter, UsageRecord, UsageRepository } from '../../../src/application/ports/mission-measurements.js';
 import type { BoardLaneEventEntry } from '../../../src/application/ports/operation-history.js';
 import {
   createPrimaryAndWorktree, fixedClock, insertUsageRow, laneEvent, withStatisticsDatabase,
@@ -83,8 +84,8 @@ class R2347_01_InMemoryUsageRepository implements UsageRepository {
     return [...this.records];
   }
 
-  async findWhere(predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]> {
-    return this.records.filter(predicate);
+  async findWhere(filter: UsageFilter): Promise<readonly UsageRecord[]> {
+    return this.records.filter((record) => matchesUsageFilter(record, filter));
   }
 
   async save(record: UsageRecord): Promise<void> {

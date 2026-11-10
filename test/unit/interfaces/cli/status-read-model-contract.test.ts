@@ -16,6 +16,7 @@ import { repositoryId } from '../../../../src/domain/repository.js';
 import { type StatusResult } from '../../../../src/application/ports/cli-workflows.js';
 import { renderStatus, statusJson } from '../../../../src/interfaces/cli/status.js';
 import { type CheckpointData } from '../../../../src/domain/checkpoint.js';
+import { type MissionCard, type ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
 
 test('mission status renders concrete orphan recovery and preserves uncertain liveness (TASK-2826)', () => {
   for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
@@ -475,6 +476,45 @@ describe("focused Mission status reads only the selected Mission", () => {
     assert.equal(focused.reviewDisposition, card.reviewDisposition);
     assert.equal(focused.approvalOwed, card.approvalOwed);
     assert.equal(focused.reviewHistory.length, card.reviewHistory.length);
+  });
+
+  // TASK-2846.01: the board's ReviewRoundSummary is the one review-round read
+  // model. The status port used to carry a field-for-field mirror that a
+  // widening map rebuilt round by round, which let the two surfaces disagree.
+  test('status review history is the board ReviewRoundSummary itself, not a mirror (TASK-2846.01)', async () => {
+    const focused = await statusBoardFor(newLedger()).getMissionData(selectedId, '/repo');
+    const card = (await makeFixtureBuilder(newLedger()).build())
+      .stages.flatMap((stage) => stage.cards).find((entry) => entry.id === selectedId);
+    assert.ok(focused && card);
+
+    // The status port's rounds are assignable to the board's own type, and the
+    // two carry the same facts round for round — no field is dropped, defaulted
+    // or renamed on the way through the status adapter.
+    const rounds: readonly ReviewRoundSummary[] = focused.reviewHistory;
+    const cardRounds: readonly ReviewRoundSummary[] = (card as MissionCard).reviewHistory;
+    assert.deepEqual(rounds, cardRounds);
+    assert.equal(rounds[0].phase, 'pending-approval');
+    assert.equal(rounds[0].disposition, 'CHANGES_MADE');
+    assert.equal(rounds[1].phase, 'reviewing');
+    assert.equal(rounds[1].disposition, null);
+    assert.equal(rounds[1].decidedRevision, null);
+
+    // Presentation is unchanged by the type consolidation: an undecided round
+    // still prints as pending, and every conversation field still reaches the
+    // reader.
+    const lines: string[] = [];
+    renderStatus(statusResult({ slug: selectedId, missionData: focused }), (line) => lines.push(line));
+    assert.deepEqual(lines.filter((line) => /^  Round |^    (start revision|comment|finding|fixed|pushback): /.test(line)), [
+      '  Round 1 [codex -> custom]: CHANGES_MADE',
+      '    start revision: revision-one; decided revision: unknown',
+      '    comment: Focus the read',
+      '    finding: Board build used for one mission',
+      '    finding: Unrelated metric work',
+      '    fixed: task-2402-finding: Focused query covers it',
+      '    pushback: task-2402-disputed: Owned by TASK-2400',
+      '  Round 2 [codex -> custom]: pending',
+      '    start revision: revision-two; decided revision: unknown',
+    ]);
   });
 
   // ---------------------------------------------------------------------------

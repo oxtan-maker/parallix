@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import type { ProcessIdentity } from '../../application/ports/process-identity.js';
+export type { ProcessIdentity } from '../../application/ports/process-identity.js';
 
 export const readProcessStat = { sync: (pid: number) => fs.readFileSync(`/proc/${pid}/stat`, 'utf8') };
 export const runNativeStartIdentity = { execFileSync };
@@ -42,10 +44,13 @@ export function probeProcessLiveness(pid: number, identity: string | null): bool
 }
 
 export const processLivenessProbe = probeProcessLiveness;
-export interface ProcessIdentity { pid: number; startId: string | null; }
 export function processIdentity(pid: number): ProcessIdentity | null {
   const startId = processStartIdentity(pid);
   return startId === null ? null : { pid, startId };
+}
+/** Observation records the PID even when the host cannot supply its start token. */
+export function processIdentityForObservation(pid: number): ProcessIdentity {
+  return { pid, startId: processStartIdentity(pid) };
 }
 export function isSameLiveProcess(pid: number, startId: string | null): boolean {
   return probeProcessLiveness(pid, startId) === true;

@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" class="pg-icon" data-state="not-run" data-animate="false" role="img" aria-label="Not run"><style>/* Only the status mark moves; gate geometry and layout never move. */
+.pg-icon { fill:none; stroke:currentColor; stroke-width:1.9;
+  stroke-linecap:round; stroke-linejoin:round; overflow:visible; }
+.pg-icon[data-state="running"] { color:#e8b84b; }
+.pg-icon[data-state="passed"] { color:#5ee08a; }
+.pg-icon[data-state="failed"] { color:#e2604e; }
+.pg-icon[data-state="stale"] { color:#e8b84b; }
+.pg-icon[data-state="dry-run"] { color:#c489e0; }
+.pg-icon[data-state="waiting"], .pg-icon[data-state="not-run"],
+.pg-icon[data-state="cancelled"], .pg-icon[data-state="unconfigured"],
+.pg-icon[data-state="unknown"], .pg-icon[data-state="skipped"] { color:#8b97a1; }
+
+/* Running: only the small spinner arc rotates. */
+.pg-icon[data-animate="true"][data-state="running"] .pg-spin {
+  transform-box:view-box; transform-origin:17.5px 17.5px;
+  animation:pg-spin 1.6s linear infinite;
+}
+@keyframes pg-spin { to { transform:rotate(360deg); } }
+
+/* Waiting: only the small hourglass turns, with pauses. */
+.pg-icon[data-animate="true"][data-state="waiting"] .pg-hourglass {
+  transform-box:view-box; transform-origin:17.5px 17.5px;
+  animation:pg-wait 3.2s ease-in-out infinite;
+}
+@keyframes pg-wait {
+  0%,28% { transform:rotate(0deg); }
+  40%,80% { transform:rotate(180deg); }
+  92%,100% { transform:rotate(360deg); }
+}
+
+/* Dry run: only the small play triangle pulses. */
+.pg-icon[data-animate="true"][data-state="dry-run"] .pg-preview-play {
+  transform-box:view-box; transform-origin:17.75px 17.5px;
+  animation:pg-preview 1.6s ease-in-out infinite;
+}
+@keyframes pg-preview {
+  0%,100% { transform:scale(.94); opacity:.6; }
+  50% { transform:scale(1.06); opacity:1; }
+}
+
+@media (prefers-reduced-motion:reduce) {
+  .pg-spin,.pg-hourglass,.pg-preview-play { animation:none !important; }
+}
+</style><path class="pg-frame" d="M4 20.5V5.5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5M4 20.5h6.5"/><path d="M14 17.5h7"/></svg>

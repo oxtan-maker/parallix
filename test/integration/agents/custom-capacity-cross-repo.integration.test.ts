@@ -7,30 +7,110 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { tryAcquireCustomCapacity, resetCustomCapacity, waitForCustomCapacity, initCustomAdmissionState } from '../../../src/adapters/agents/custom-capacity.js';
+import { activeCustomCapacityCount, tryAcquireCustomCapacity, resetCustomCapacity, waitForCustomCapacity, initCustomAdmissionState } from '../../../src/adapters/agents/custom-capacity.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
 
 test('repositories sharing PARALLIX_HOME share custom capacity', async (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-home-'));
   const roots = ['one', 'two'].map(name => fs.mkdtempSync(path.join(os.tmpdir(), `custom-capacity-${name}-`)));
   for (const root of roots) fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { agents: { maxConcurrentCustom: 1 } } }));
-  const oldHome = process.env.PARALLIX_HOME;
-  process.env.PARALLIX_HOME = home;
+  const configuration = resolveConfiguration({ PARALLIX_HOME: home });
+  let first: Awaited<ReturnType<typeof tryAcquireCustomCapacity>> = null;
   t.after(async () => {
     try {
-      await resetCustomCapacity();
+      first?.release();
+      await clearCustomAdmissionStateCache();
       await clearOperatorStateCache();
     } finally {
-      if (oldHome === undefined) delete process.env.PARALLIX_HOME;
-      else process.env.PARALLIX_HOME = oldHome;
       fs.rmSync(home, { recursive: true, force: true });
       for (const root of roots) fs.rmSync(root, { recursive: true, force: true });
     }
   });
-  const first = await tryAcquireCustomCapacity(roots[0]);
+  first = await tryAcquireCustomCapacity(roots[0], configuration);
   assert.ok(first);
-  assert.equal(await tryAcquireCustomCapacity(roots[1]), null);
+  assert.equal(await tryAcquireCustomCapacity(roots[1], configuration), null);
   first.release();
+});
+
+test('unrelated fixture failure and cleanup preserve a live operator lease (PX-0053)', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'custom-capacity-cleanup-'));
+  const policy = path.join(temp, 'policy');
+  fs.mkdirSync(policy);
+  fs.writeFileSync(path.join(policy, 'workflow.config.json'), JSON.stringify({
+    adapters: { agents: { maxConcurrentCustom: 1 } }
+  }));
+  const operatorUserHome = path.join(temp, 'operator-user');
+  const fixtureUserHome = path.join(temp, 'fixture-user');
+  const fixtureOperatorHome = path.join(temp, 'fixture-operator');
+  const fixtureAdmissionHome = path.join(temp, 'fixture-admission');
+  for (const directory of [operatorUserHome, fixtureUserHome, fixtureOperatorHome, fixtureAdmissionHome]) {
+    fs.mkdirSync(directory);
+  }
+  const operatorConfiguration = resolveConfiguration({
+    HOME: operatorUserHome,
+    PARALLIX_CUSTOM_ADMISSION_REPOSITORY: policy,
+  });
+  const fixtureConfiguration = resolveConfiguration({
+    HOME: fixtureUserHome,
+    PARALLIX_HOME: fixtureOperatorHome,
+    PARALLIX_CUSTOM_ADMISSION_HOME: fixtureAdmissionHome,
+    PARALLIX_CUSTOM_ADMISSION_REPOSITORY: policy,
+  });
+  const originalHome = process.env.HOME;
+  const originalParallixHome = process.env.PARALLIX_HOME;
+  const originalAdmissionHome = process.env.PARALLIX_CUSTOM_ADMISSION_HOME;
+  process.env.HOME = operatorUserHome;
+  process.env.PARALLIX_HOME = fixtureOperatorHome;
+  process.env.PARALLIX_CUSTOM_ADMISSION_HOME = fixtureAdmissionHome;
+
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  const childExit = new Promise<void>(resolve => child.once('exit', () => resolve()));
+  const owner = await tryAcquireCustomCapacity(policy, operatorConfiguration);
+  assert.ok(owner);
+  assert.ok(child.pid);
+  owner.bindChild(child.pid);
+  t.after(async () => {
+    owner.release();
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGKILL');
+      await childExit;
+    }
+    await clearCustomAdmissionStateCache();
+    await clearOperatorStateCache();
+    if (originalHome === undefined) delete process.env.HOME;
+    else process.env.HOME = originalHome;
+    if (originalParallixHome === undefined) delete process.env.PARALLIX_HOME;
+    else process.env.PARALLIX_HOME = originalParallixHome;
+    if (originalAdmissionHome === undefined) delete process.env.PARALLIX_CUSTOM_ADMISSION_HOME;
+    else process.env.PARALLIX_CUSTOM_ADMISSION_HOME = originalAdmissionHome;
+    fs.rmSync(temp, { recursive: true, force: true });
+  });
+
+  assert.equal(await tryAcquireCustomCapacity(policy, operatorConfiguration), null,
+    'the live bound child owns the only operator slot');
+  await assert.rejects(async () => {
+    const unrelated = await tryAcquireCustomCapacity(policy, fixtureConfiguration);
+    assert.ok(unrelated, 'the unrelated fixture owns separate explicit state');
+    try {
+      throw new Error('synthetic unrelated fixture failure');
+    } finally {
+      unrelated.release();
+      try {
+        // Deliberately omitted to retain the regression probe: cleanup without
+        // explicit fixture ownership must fail before resolving any state path.
+        await (resetCustomCapacity as () => Promise<void>)();
+      } catch (error) {
+        assert.match(String(error), /explicit fixture configuration/i);
+      }
+    }
+  }, /synthetic unrelated fixture failure/);
+
+  assert.equal(await activeCustomCapacityCount(operatorConfiguration), 1,
+    'unrelated cleanup must preserve the live operator lease');
+  await assert.rejects((activeCustomCapacityCount as () => Promise<number>)(),
+    /explicit fixture configuration/i);
+  assert.equal(await tryAcquireCustomCapacity(policy, operatorConfiguration), null,
+    'the competitor stays blocked after unrelated setup, failure, and cleanup');
 });
 
 test('default-home custom capacity polls through operator writer contention (TASK-2840)', async t => {

@@ -7,8 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { resolveConfiguredCredentialRedactor } from '../../application/recovery-evidence.js';
-import type { ProcessTreeCpuObservation, ProviderResourceObservation, RunSource } from '../../application/run-history-types.js';
-import type { StageTelemetry } from '../../application/stats-recording-use-case.js';
+import { providerResourceObservation, type ProcessTreeCpuObservation, type ProviderResourceObservation, type RunSource } from '../../application/run-history-types.js';
 import { agentRunId, agentRunIdentity } from '../../domain/agent-run.js';
 import type { AgentRunIdentity } from '../../domain/agent-run.js';
 import { loadAdapterConfig } from '../config/product-config.js';
@@ -74,7 +73,8 @@ export interface RunSession {
     resourceBoundary?: { readonly boundary: string; readonly parent: string | null };
     onProcessTreeCpu?: (_observation: ProcessTreeCpuObservation) => void };
   finish(_result: { status?: number | null; signal?: string | null; sessionId?: string | null;
-    processTreeCpu?: ProcessTreeCpuObservation | null; telemetry?: StageTelemetry | null; provider?: string | null; model?: string | null;
+    processTreeCpu?: ProcessTreeCpuObservation | null; telemetry?: Record<string, unknown> | null;
+    providerResources?: ProviderResourceObservation | null; provider?: string | null; model?: string | null;
     providerExit?: { status: number | null; signal: string | null } | null } | null | undefined): void;
 }
 
@@ -245,28 +245,10 @@ function runTeeOptions(input: RunSessionInput, identity: AgentRunIdentity & { re
 function runIdFor(identity: AgentRunIdentity): string { return agentRunId(identity); }
 
 type RunFinishResult = Parameters<RunSession['finish']>[0];
-type ProviderResourceValue = ProviderResourceObservation['values'][number];
-
-function providerResourceValue(name: string, value: number | null | undefined, unit: ProviderResourceValue['unit']): ProviderResourceValue[] {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? [{ name, value, unit }] : [];
-}
-
-function providerResourceValues(telemetry: StageTelemetry | null | undefined): ProviderResourceObservation['values'] {
-  const candidates = [
-    ['input', telemetry?.inputTokens, 'tokens'], ['output', telemetry?.outputTokens, 'tokens'],
-    ['cached', telemetry?.cachedTokens, 'tokens'], ['reasoning', telemetry?.thoughtsTokens, 'tokens'],
-    ['context', telemetry?.totalTokens, 'tokens'], ['tool-calls', telemetry?.toolCalls, 'count'],
-    ['provider-usage', telemetry?.usagePercent, 'percent'], ['cost', telemetry?.cost_usd, 'usd'],
-  ] as const;
-  return candidates.flatMap(([name, value, unit]) => providerResourceValue(name, value, unit));
-}
-
 function providerResources(result: RunFinishResult): ProviderResourceObservation | null {
-  const telemetry = result?.telemetry;
-  const provider = telemetry?.provider ?? result?.provider ?? null;
-  const model = telemetry?.model ?? result?.model ?? null;
-  const values = providerResourceValues(telemetry);
-  return values.length || provider || model ? { provenance: 'provider-reported', provider, model, values } : null;
+  return result?.providerResources ?? providerResourceObservation(result?.telemetry, {
+    provider: result?.provider, model: result?.model,
+  });
 }
 
 function providerProcessExit(result: RunFinishResult): { exitCode: number | null; signal: string | null } {

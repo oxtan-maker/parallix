@@ -1,4 +1,5 @@
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
+import type { ReviewOperatorResumePermit } from '../review-recovery.js';
 
 export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'rebase' | 'integrate'; readonly args: readonly string[]; readonly interactive?: boolean; }
 /** Transport details remain application state, outside the domain operation. */
@@ -7,6 +8,7 @@ export interface WorkflowOperationRecord extends WorkflowOperation {
   readonly requestedAgent?: string | null;
   readonly pinnedAgent?: boolean;
   readonly invocation?: WorkflowInvocation;
+  readonly reviewOperatorResume?: ReviewOperatorResumePermit;
 }
 
 /** All methods run on the same connection as the supplied Mission authority. */

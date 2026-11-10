@@ -28,7 +28,8 @@ import { agentFamily } from '../../../src/domain/agents.js';
 import type { MissionTransition } from '../../../src/domain/mission-workflow.js';
 import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
 import type { RepositoryId } from '../../../src/domain/repository.js';
-import type { UsageRecord, UsageRepository } from '../../../src/application/ports/mission-measurements.js';
+import { matchesUsageFilter } from '../../fixtures/metrics-adapter.js';
+import type { UsageFilter, UsageRecord, UsageRepository } from '../../../src/application/ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../../src/application/ports/operation-history.js';
 import type { BoardMetrics } from '../../../src/application/projections/board.js';
 import 'react';
@@ -329,8 +330,8 @@ class FakeUsageRepository implements UsageRepository {
   private readonly records: readonly UsageRecord[];
   constructor(records: readonly UsageRecord[]) { this.records = records; }
   async findAll(): Promise<readonly UsageRecord[]> { return this.records; }
-  async findWhere(predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]> {
-    return this.records.filter((record) => predicate(record));
+  async findWhere(filter: UsageFilter): Promise<readonly UsageRecord[]> {
+    return this.records.filter((record) => matchesUsageFilter(record, filter));
   }
   async save(): Promise<void> { /* fixture is immutable */ }
   async saveAll(): Promise<void> { /* fixture is immutable */ }

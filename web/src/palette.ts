@@ -23,7 +23,7 @@
  *
  * Green is a reserved meaning, not a general-purpose accent: it marks only a
  * control the operator can act on now (`action-button.tsx`, the create-mission
- * submit) and a gate the server reports as passed (`GATE_COLOR`). Progress,
+ * submit) and a gate the server reports as passed (the `GateIcon` passed design). Progress,
  * liveness, completion and review outcomes use the other accents, so a green
  * mark on the board always answers the question "what can I do, or did the gate
  * pass?" and never "how far along is this?".

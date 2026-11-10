@@ -6,8 +6,8 @@
  * fallback: an unavailable store raises `MeasurementStoreUnavailableError`
  * rather than resolving, reading, or writing a CSV.
  *
- * Identity: architecture migration excluded `Attempt`, so measurements carry no per-run
- * identity. `MeasurementIdentity` is the grouping the domain already models —
+ * Identity: architecture migration excluded `Attempt`, so a run reference is not part
+ * of measurement identity. `MeasurementIdentity` is the grouping the domain already models —
  * `(repo, mission, stage, actorKey)`. The caller that owns the attribution
  * rule supplies `actorKey`; no adapter derives or invents one.
  *
@@ -15,7 +15,7 @@
  * the SQLite substrate (`node:sqlite` `DatabaseSync`) is natively synchronous.
  */
 
-/** The identity of a stored measurement. No per-run/`Attempt` component. */
+/** The identity of a stored measurement. A run reference is not an identity component. */
 export interface MeasurementIdentity {
   /** Repository the mission belongs to. */
   readonly repo: string;
@@ -35,6 +35,8 @@ export interface MeasurementIdentity {
  * adapter maps `undefined` to SQL NULL.
  */
 export interface MeasurementRecord extends MeasurementIdentity {
+  /** Retained agent run that supplied the latest provider observation, when any. */
+  readonly runId?: string;
   readonly date?: string;
   readonly classification?: string;
   readonly implementer?: string;

@@ -9,6 +9,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
 import { VerificationGateEvidenceReader } from '../../../src/adapters/verification/gate-evidence-reader.js';
 import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { processIdentity, processLivenessProbe } from '../../../src/adapters/process/process-liveness.js';
 import type { ParallixConfiguration } from '../../../src/application/ports/configuration.js';
 import { VerificationGateObserver } from '../../../src/application/projections/gate-observation.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
@@ -45,7 +46,7 @@ function gateBoardObserver(checkout: string): { observer: VerificationGateObserv
   const base = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(checkout, '.git', 'home') });
   const configuration = { ...base, runtime: { ...base.runtime, workflowOperation: GATE_BOARD_ATTEMPT.id, workflowGeneration: GATE_BOARD_ATTEMPT.generation } };
   return { configuration, observer: new VerificationGateObserver(new VerificationGateEvidenceReader({
-    configuration, resolveWorktree: () => checkout, integrationValidation: async () => null,
+    configuration, resolveWorktree: () => checkout, integrationValidation: async () => null, isProcessAlive: processLivenessProbe,
   })) };
 }
 
@@ -67,6 +68,28 @@ test('the integration gate executor is observable on the board from start to res
   } finally { fs.writeFileSync(path.join(checkout, '.git/go'), ''); await running; fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 
+test('an unlimited integration dry-run is observable while its real executor runs (PX-0052)', async t => {
+  const checkout = gateBoardCheckout(['touch .git/started; while [ ! -f .git/go ]; do sleep 0.02; done']);
+  const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(checkout, '.git', 'home') });
+  const owner = processIdentity(process.pid);
+  assert.ok(owner, 'the executor has a stable process identity');
+  let running: ReturnType<typeof runPhaseGates> | undefined;
+  t.after(async () => { fs.writeFileSync(path.join(checkout, '.git/go'), ''); await running; fs.rmSync(checkout, { recursive: true, force: true }); });
+  const observer = new VerificationGateObserver(new VerificationGateEvidenceReader({
+    configuration, resolveWorktree: () => checkout, integrationValidation: async () => null,
+    isProcessAlive: processLivenessProbe,
+  }));
+  assert.equal((JSON.parse(fs.readFileSync(path.join(checkout, 'workflow.config.json'), 'utf8')) as { adapters: { gates: { maxConcurrent?: number } } }).adapters.gates.maxConcurrent,
+    undefined, 'the repository intentionally leaves integration concurrency unlimited');
+  running = runPhaseGates('integration', { slug: 'px-0052', checkoutPath: checkout, log: () => {}, error: () => {},
+    configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration, owner) });
+  for (let waited = 0; waited < 2000 && !fs.existsSync(path.join(checkout, '.git/started')); waited += 20) { await delay(20); }
+  assert.equal(await observer.observeGate({ ...GATE_BOARD_MISSION, id: missionId('px-0052') }, null), 'running',
+    'omitting maxConcurrent must not hide the live dry-run');
+  fs.writeFileSync(path.join(checkout, '.git/go'), '');
+  assert.equal((await running).ok, true);
+});
+
 test('a failing integration gate settles the board run instead of leaving it running (TASK-2775)', async () => {
   const checkout = gateBoardCheckout(['printf ok', 'printf defect >&2; exit 7']);
   try {
@@ -77,7 +100,6 @@ test('a failing integration gate settles the board run instead of leaving it run
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'failed');
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
-
 
 test('cancelled and interrupted integration attempts cannot inherit a prior pass (TASK-2775)', async () => {
   const checkout = gateBoardCheckout(['true']);

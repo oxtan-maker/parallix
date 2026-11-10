@@ -552,5 +552,8 @@ test('operator cancellation finalizes observed run metadata before re-raising th
   assert.equal(finished.providerSessionId, 'worker-session');
   assert.equal(finished.resources.provider?.provider, 'pi');
   assert.equal(finished.resources.provider?.model, 'fixture-model');
+  assert.equal(launched.result.runId, observedRunId, 'the production launch result carries the retained run identity into stage recording');
+  assert.deepEqual(launched.result.providerResources, finished.resources.provider,
+    'run history and stage recording receive the same named provider observation (TASK-2846.03)');
   assert.equal(launched.result.status, 1, 'operator cancellation is not rewritten as provider success');
 });

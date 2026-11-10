@@ -16,7 +16,7 @@ import type { IntegrationReviewSnapshot } from '../ports/integration-records.js'
 import { missionId } from '../../domain/mission.js';
 import { currentIntegrationRepair } from '../integration-repair-review.js';
 import { reportedApprovalStaleness } from '../approval-coverage.js';
-import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
+import { abortWith, projectBacklogTransition, resolveBounceImplementer, type BounceSeams } from './support.js';
 import {
   INTEGRATION_VALIDATION_EVENT_TYPE,
   buildIntegrationValidationMarker,
@@ -333,7 +333,7 @@ class IntegrationGateStep {
     let repairStarted = false;
     const reactivateMission = async (bounceSlug: string) => {
       repairStarted = true;
-      return this.reactivateRepair(bounceSlug, implementer, missionServices, result.failedGate, seams);
+      return this.reactivateRepair(bounceSlug, implementer, missionServices, result.failedGate, context, seams);
     };
     // The rebound kernel owns the transition to active, immediately before it
     // launches an implementer. In particular, a transient verifier retries on
@@ -367,7 +367,7 @@ class IntegrationGateStep {
       realAgent,
       realAgentModel,
       startAgentFn: seams.startAgentFn,
-      transitionTaskFn: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'active'),
+      transitionTaskFn: (bounceSlug: string) => projectBacklogTransition(context.mirrorOwnership, seams.transitionTaskFn, bounceSlug, 'active'),
       reactivateMissionFn: reactivateMission,
       assessRepairFn: () => repairStarted ? this.assessRepair(slug, checkout, context, missionServices) : Promise.resolve('not-pending'),
       applyAgentFallbackFn: async ({ launchResult, original }) => seams.applyAgentFallbackFn({
@@ -402,7 +402,7 @@ class IntegrationGateStep {
   }
 
   private async reactivateRepair(bounceSlug: string, implementer: string, missionServices: IntegrationMissionServices,
-    failedGate: Parameters<typeof integrationGateFailureCause>[0], seams: IntegrateSeams) {
+    failedGate: Parameters<typeof integrationGateFailureCause>[0], context: IntegrationContext, seams: IntegrateSeams) {
     const current = await missionServices.store.load(missionId(bounceSlug));
     if (current.kind !== 'found') { throw new Error(`Mission ${bounceSlug} is unavailable for integration-gate rebound.`); }
     if (current.mission.status === 'active' && currentIntegrationRepair(current.mission)) { return true; }
@@ -418,7 +418,7 @@ class IntegrationGateStep {
       idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
     });
     if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
-    return seams.transitionTaskFn(bounceSlug, 'active');
+    return projectBacklogTransition(context.mirrorOwnership, seams.transitionTaskFn, bounceSlug, 'active');
   }
 
   /** Compare the committed candidate against its actual base, even if the target advanced during repair. */

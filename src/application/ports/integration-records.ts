@@ -5,6 +5,11 @@ import type { MissionIntegrationService } from '../mission-integration-service.j
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
 import type { StatsMissionFlow } from './cli-workflows.js';
 
+/** Composition-bound certification then retention of one pending integration repair. */
+export interface IntegrationRepairContinuationPort {
+  resume(_slug: string): Promise<'none' | 'retained' | 'changed' | 'blocked'>;
+}
+
 /** Review-provider facts consumed by integration; lifecycle authority stays in Mission. */
 export interface IntegrationPullRequest {
   exists: boolean;

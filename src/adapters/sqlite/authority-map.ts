@@ -51,6 +51,7 @@ export const USAGE_STATISTICS_AUTHORITY = {
   implementer_agent: { owner: 'operator-local' } as const,
   reviewer_agent: { owner: 'operator-local' } as const,
   stage: { owner: 'operator-local' } as const,
+  run_id: { owner: 'operator-local' } as const,
   input_tokens: { owner: 'operator-local' } as const,
   output_tokens: { owner: 'operator-local' } as const,
   cached_tokens: { owner: 'operator-local' } as const,

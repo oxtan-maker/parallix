@@ -1,4 +1,7 @@
 import type { ParallixConfiguration } from './configuration.js';
+import type { ProcessIdentity } from './process-identity.js';
+
+export type IntegrationRunOwner = ProcessIdentity;
 
 /** Optional validation evidence produced by an integration gate phase.
  * The gate executor owns execution, including how the phase settled, and the

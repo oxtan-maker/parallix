@@ -101,8 +101,7 @@ test('task-2429: integration authorization exit returns a board failure, not com
         resolved.push(slug);
         assert.equal(hostRoot, root);
         assert.equal(receivedConfiguration, configuration);
-        return { ok: true, context: { missionId: slug, missionBranch: `mission/${slug}`,
-          missionWorktree: '/isolated/mission', baseWorktree: root, baseBranch: 'main' } };
+        return { ok: true, missionWorktree: '/isolated/mission', baseBranch: 'main' };
       }),
   }, undefined, {
     async load() { return { kind: 'found', mission: fixtureMission('task-2429', { status: 'integration' }), version: fixtureVersion(1) }; },

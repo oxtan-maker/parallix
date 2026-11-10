@@ -1,4 +1,5 @@
 import { missionLabels } from '../../../src/domain/mission.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { missionLabels as typedMissionLabels } from '../../../src/domain/mission.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -244,7 +245,9 @@ function integratePreflightPorts(): IntegrateWorkflowPorts {
 
 test('TASK-2601: integration preflight never lets a Backlog label classify a stored Mission', async () => {
   const ports = integratePreflightPorts();
-  const context = await createIntegrationContextBuilder(ports).buildIntegrationContext(slug, { baseBranch: 'main', baseWorktree: '/base' });
+  const context = await createIntegrationContextBuilder(ports).buildIntegrationContext(slug, {
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/mission', baseWorktree: '/base', baseBranch: 'main' }),
+  });
   for (const [missionLabels, failed] of [[[], true], [['bug'], true], [['user_value'], false]] as const) {
     const lines: string[] = [];
     const report = createIntegrationPreflight(ports).printIntegrationPreflight(integrationContext({

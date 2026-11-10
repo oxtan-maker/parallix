@@ -1,12 +1,14 @@
 /** Process facts consumed by the active and draft CLI adapters. */
-import type { StageStatsRequest } from '../../../application/stats-recording-use-case.js';
+import type { ProviderResourceObservation } from '../../../application/run-history-types.js';
 
 export interface CommandAgentResult {
   status?: number | null;
   error?: unknown;
+  runId?: string;
   startedAt?: string;
   endedAt?: string;
-  telemetry?: StageStatsRequest['telemetry'];
+  telemetry?: Record<string, unknown> | ProviderResourceObservation | null;
+  providerResources?: ProviderResourceObservation | null;
 }
 export interface CommandAgentLaunch {
   agent: string;

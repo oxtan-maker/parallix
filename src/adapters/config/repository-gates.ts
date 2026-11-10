@@ -2,8 +2,10 @@ import { failureReasonFromCause } from '../../domain/failure-reason.js';
 import { gateFailureReasonFromProcess } from '../../domain/failure-classification.js';
 import { randomUUID } from 'node:crypto';
 import { verificationObservation, type VerificationMeasurement } from '../../application/ports/verification-observation.js';
-import { normalizeGates, validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
+import type { RepositoryGate } from './repository-gate-schema.js';
 export { validateRepositoryGates, type RepositoryGate, type RepositoryGates } from './repository-gate-schema.js';
+import { loadPhaseGateParallelism, loadPhaseGates, type GatePlanPhase } from './phase-gate-plan.js';
+export { loadPhaseGateParallelism, loadPhaseGates, loadRepositoryGates, loadRequirePreIntegration } from './phase-gate-plan.js';
 import { verificationEnvironment } from './verification-environment.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 // Repository-configured lifecycle gates.
@@ -27,17 +29,12 @@ import { GateDashboard } from './gate-dashboard.js';
 import { blockDependents, evidenceOutcomes, phaseSummary, renderGateOutput, type BlockedGate, type GateRunOutcome, type PhaseGateRunResult } from './phase-gate-outcomes.js';
 import { PhaseGateResources } from './phase-gate-resources.js';
 import * as fmt from '../../application/presentation/cli-format.js';
-import { loadEffectiveConfig, loadWorkflowConfig, resolveCanonicalGateResources, resolveCanonicalMaxConcurrentGates } from './product-config.js';
+import { resolveCanonicalGateResources, resolveCanonicalMaxConcurrentGates } from './product-config.js';
 
 /** Ordered lifecycle phases that may carry configured gates. */
 export const GATE_PHASES = ['handoff', 'review', 'integration'] as const;
 export type GatePhase = (typeof GATE_PHASES)[number];
 export type GateLog = (message: string) => void;
-type ConfigPhase = "preHandoff" | 'preReview' | 'preIntegration';
-interface GateConfiguration {
-  preHandoff?: unknown; preReview?: unknown; preIntegration?: unknown;
-  requirePreIntegration?: unknown; parallel?: Partial<Record<ConfigPhase, number | 'unlimited'>>;
-}
 
 /** Environment keys shared by every configured gate command. */
 export const GATE_ENV = {
@@ -45,57 +42,6 @@ export const GATE_ENV = {
   CHECKOUT: 'PARALLIX_CHECKOUT_PATH',
   PHASE: 'PARALLIX_PHASE',
 } as const;
-
-const EMPTY_GATES: RepositoryGates = {
-  preHandoff: [],
-  preReview: [],
-  preIntegration: [],
-};
-
-/**
- * Read the declared gates for a single phase from the effective workflow
- * configuration. Omitted configuration yields an empty list, so an
- * unconfigured repository runs no gate for that phase.
- */
-/** @param {'preHandoff'|'preReview'|'preIntegration'} phase */
-export function loadPhaseGates(rootDir: string, phase: "preHandoff" | 'preReview' | 'preIntegration'): RepositoryGate[] {
-  const declared = loadWorkflowConfig(rootDir || process.cwd());
-  const gateIssues = validateRepositoryGates((declared.config as { adapters?: unknown } | null)?.adapters);
-  if (gateIssues.length > 0) { throw new Error(gateIssues.join('; ')); }
-  const config = loadEffectiveConfig(rootDir || process.cwd());
-  const gates = (config.adapters as { gates?: GateConfiguration } | undefined)?.gates;
-  if (!gates || typeof gates !== 'object' || !Array.isArray(gates[phase])) {
-    return [];
-  }
-  return normalizeGates(gates[phase]);
-}
-
-/**
- * Whether the repository opts into the TASK-2300 mandatory-gate invariant at
- * the integration boundary. Defaults to false so an unconfigured repository
- * completes the integration path with no lifecycle gate (mission task-2457
- * success criterion 1). A repository that wants fail-closed sets
- * `adapters.gates.requirePreIntegration: true` in its workflow.config.json.
- */
-export function loadRequirePreIntegration(rootDir: string): boolean {
-  const config = loadEffectiveConfig(rootDir || process.cwd());
-  const gates = (config.adapters as { gates?: GateConfiguration } | undefined)?.gates;
-  return typeof gates === 'object' && gates !== null && gates.requirePreIntegration === true;
-}
-
-/** Load all three phase gate lists at once. */
-export function loadRepositoryGates(rootDir: string): RepositoryGates {
-  const config = loadEffectiveConfig(rootDir || process.cwd());
-  const gates = (config.adapters as { gates?: GateConfiguration } | undefined)?.gates;
-  if (!gates || typeof gates !== 'object') {
-    return { ...EMPTY_GATES };
-  }
-  return {
-    preHandoff: Array.isArray(gates.preHandoff) ? normalizeGates(gates.preHandoff) : [],
-    preReview: Array.isArray(gates.preReview) ? normalizeGates(gates.preReview) : [],
-    preIntegration: Array.isArray(gates.preIntegration) ? normalizeGates(gates.preIntegration) : [],
-  };
-}
 
 export type { GateRunOutcome, BlockedGate, PhaseGateRunResult } from './phase-gate-outcomes.js';
 
@@ -105,13 +51,6 @@ export type GateCommandRunner = (
   _args: string[],
   _options: { cwd: string, env: NodeJS.ProcessEnv, stdio: string, signal?: globalThis.AbortSignal, onOutput?: (_chunk: string, _stream: 'stdout' | 'stderr') => void, forwardOutput?: boolean, bindProcessGroup?: (_pid: number) => void },
 ) => { status: number | null, stdout: string, stderr: string, signal?: string | null, cpu?: VerificationMeasurement['cpu'], reused?: boolean } | Promise<{ status: number | null, stdout: string, stderr: string, signal?: string | null, cpu?: VerificationMeasurement['cpu'], reused?: boolean }>;
-
-/** Read a phase's opt-in concurrency limit; serial is the default. */
-export function loadPhaseGateParallelism(rootDir: string, phase: "preHandoff" | 'preReview' | 'preIntegration'): number {
-  const parallel = (loadEffectiveConfig(rootDir || process.cwd()).adapters as { gates?: GateConfiguration } | undefined)?.gates?.parallel?.[phase];
-  if (parallel === 'unlimited') { return Infinity; }
-  return Number.isInteger(parallel) && (parallel as number) >= 2 ? parallel as number : 1;
-}
 
 /**
  * Build the fixed environment every configured gate receives. The three
@@ -495,6 +434,6 @@ function skippedPhaseGateResult(phase: GatePhase, gates: RepositoryGate[], dryRu
 }
 
 /** @param {GatePhase} phase */
-function toConfigPhase(phase: GatePhase): "preHandoff" | 'preReview' | 'preIntegration' {
+function toConfigPhase(phase: GatePhase): GatePlanPhase {
   return ({ handoff: "preHandoff", review: 'preReview', integration: 'preIntegration' } as const)[phase];
 }

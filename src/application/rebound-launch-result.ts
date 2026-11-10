@@ -1,6 +1,6 @@
 import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
 import { describeLaunchFailure, isDeterministicLaunchFailure, launchFailureOf, type LaunchFailure } from '../domain/launch-failure.js';
-import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
+import type { AgentLaunchResult } from './ports/agent-launch-result.js';
 
 /** Outcome of one repair launch, before the failing check is re-run. */
 export interface FixLaunch {
@@ -25,7 +25,7 @@ function reportedRun(result: unknown): { provider: string | null; model: string 
 }
 
 /** Classify one repair launch result; a null/ambiguous exit status is a launch failure. */
-export function launchStatus(launchResult: Awaited<ReturnType<ReboundStartAgent>>, implementer: string): FixLaunch {
+export function launchStatus(launchResult: AgentLaunchResult | null | undefined, implementer: string): FixLaunch {
   const invalidContract = launchResult?.result?.invalidContract;
   if (invalidContract) { return { ok: false, implementer, diagnostic: JSON.stringify(invalidContract), repairAttempted: true, invalidContract, provider: null, model: null }; }
   const status = launchResult?.result?.status;

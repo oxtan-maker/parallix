@@ -52,7 +52,7 @@ async function draftPreflight(root: string, input: string, stored?: { waveParent
     missionServicesFn: async () => ({
       store: {
         load: async () => storeKind === 'found'
-          ? { kind: 'found', mission: stored ? { id: input, waveParentId: stored.waveParentId ?? null } : undefined }
+          ? { kind: 'found', mission: { id: input, waveParentId: stored?.waveParentId ?? null } }
           : { kind: storeKind, reason: 'operator store unavailable' },
       },
     } as never),

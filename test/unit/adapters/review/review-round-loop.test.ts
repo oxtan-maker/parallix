@@ -1,5 +1,7 @@
 import { pollForReview } from '../../../../src/adapters/review/review-polling.js';
 import { providerReviewObservation } from '../../../../src/adapters/review/review-provider-observations.js';
+import { ReviewSubmissionService } from '../../../../src/application/review-submission-service.js';
+import { makePorts, makeRecorder } from '../../../helpers/review-preparation-ports.js';
 import { assessApprovalCoverage } from '../../../../src/domain/approval-coverage.js';
 import { MissionStaleVersion } from '../../../../src/application/domain-ports.js';
 import { createReviewObservationRecorder } from '../../../../src/adapters/review/review-observation-recording.js';
@@ -30,7 +32,7 @@ import {
 } from '../../../../src/adapters/review/review-round.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import { missionId } from '../../../../src/domain/mission.js';
+import { missionId, type Mission } from '../../../../src/domain/mission.js';
 import {
   beginNextReviewRound,
   changeRevision,
@@ -477,3 +479,84 @@ it('does not acknowledge a correction over a resolved round without opening a ne
     comment: 'operator correction', revision: null, decidedAt: '2026-08-16T16:00:00Z' }), /open the next review round/);
   assert.deepEqual(store.mission(), before);
 });
+
+for (const lane of ['active', 'review'] as const) {
+  for (const providerEnabled of [false, true]) {
+    it(`resumes a resolved round from ${lane} through preparation with provider=${providerEnabled}`, async () => {
+      const { store, lifecycle } = await reviewInProgress();
+      await recordRequestedChanges(String(MISSION), { findings: parseReviewFindings('## F1: fix this'), comment: 'fix this',
+        revision: 'rev-1', decidedAt: '2026-08-16T14:00:00Z' }, { missionStore: store, lifecycleService: lifecycle });
+      await recordImplementerResolution(String(MISSION), { resultingRevision: 'rev-2', itemDispositions: [], evidence: 'fixed F1',
+        respondedAt: '2026-08-16T15:00:00Z' }, { missionStore: store });
+      if (lane === 'review') {
+        const loaded = await store.load(MISSION);
+        assert.equal(loaded.kind, 'found');
+        await store.save({ ...loaded.mission, status: 'review' } as Mission, loaded.version);
+      }
+      const resolved = currentReviewRound(store.mission().review!);
+      const effects: string[] = [];
+      const preparationPorts = makePorts(makeRecorder(), {
+        git: { git: () => ({ status: 0, signal: null, stdout: 'rev-2', stderr: '' }) },
+      });
+      const submission = new ReviewSubmissionService(preparationPorts);
+      const recorder = createReviewObservationRecorder(String(MISSION), () => 'rev-2', providerEnabled,
+        { missionStore: store, lifecycleService: lifecycle });
+      const fake = fakeReviewLoopPorts({
+        slug: String(MISSION), missionStore: store, lifecycle,
+        stateport: {
+          read: () => readReviewState(String(MISSION), '/fixture', store),
+          persist: async state => { assertReviewStatePersisted(await writeReviewState(String(MISSION), state,
+            fake.ports.worktree, { missionStore: store }), { slug: String(MISSION) }); },
+          ...recorder,
+          openRound: async state => (await openReviewRound(String(MISSION), state, { worktree: fake.ports.worktree,
+            missionStore: store, lifecycleService: lifecycle, log: () => {}, error: assert.fail })).ok,
+        },
+        reviewPreparation: { reviewPreparation: async implementerName => {
+          effects.push('preparation');
+          const result = await submission.submit(String(MISSION), {
+            rootDir: fake.ports.worktree, branch: `mission/${MISSION}`, missionDirPath: '/fixture', forgejoUser: implementerName,
+            reviewer, submittedPr: null, checkpoint: null, occurredAt: '2026-08-16T16:00:00Z',
+            missionServicesFn: async () => ({ store, lifecycle, checkpoints: { record: async () => assert.fail('no legacy checkpoint') },
+              nel: { recordNel: async () => assert.fail('no NEL update') } }),
+            eligibleAgentsForStepFn: () => [reviewer], selectAgentFn: () => reviewer, log: () => {}, error: assert.fail,
+          });
+          return result ?? { ok: true };
+        } },
+        provider: providerEnabled ? {
+          openPullRequest: () => change,
+          pollReview: async (_agent, since) => {
+            assert.equal(since, '2026-08-16T16:00:00Z', 'probe only the newly opened round');
+            return null;
+          },
+        } : null,
+        preReview: {
+          head: () => 'rev-2',
+          rebase: async () => { effects.push('rebase'); return { ok: true }; },
+          runGate: async () => { effects.push('gate'); return { ok: true }; },
+        },
+        agents: { launch: async launch => {
+          effects.push(launch.role);
+          assert.equal(launch.role, 'reviewer');
+          assert.equal(launch.agent, reviewer);
+          assert.equal(store.mission().status, 'review');
+          assert.equal(currentReviewRound(store.mission().review!).number, 2);
+          assert.equal(currentReviewRound(store.mission().review!).subject.revision, 'rev-2');
+          await recorder.recordApproval((await readReviewState(String(MISSION), '/fixture', store))!, {
+            disposition: 'APPROVED', revision: 'rev-2', decidedAt: '2026-08-16T17:00:00Z', comment: 'verified',
+          });
+          return { agent: launch.agent, result: { status: 0 } };
+        } },
+      });
+      await runReviewLoop({ slug: String(MISSION), isContinue: true }, fake.ports);
+      assert.deepEqual(effects, ['preparation', 'rebase', 'gate', 'reviewer']);
+      assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
+      assert.equal(store.mission().status, 'integration');
+      assert.equal(store.mission().review!.rounds.length, 2);
+      assert.deepEqual(store.mission().review!.rounds[0], resolved);
+      assert.equal(store.events.filter(event => event.to === 'active').length, 1, 'no repeated request-changes lane event');
+      await runReviewLoop({ slug: String(MISSION), isContinue: true }, fake.ports);
+      assert.deepEqual(effects, ['preparation', 'rebase', 'gate', 'reviewer'], 'settled retry launches nothing');
+      assert.equal(store.mission().review!.rounds.length, 2);
+    });
+  }
+}

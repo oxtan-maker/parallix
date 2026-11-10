@@ -21,7 +21,10 @@ test('resolveStageTelemetry returns null when the launcher attached no telemetry
 
 test('resolveStageTelemetry falls back to launcher telemetry when no codex rollout exists', () => {
   // os.tmpdir() has no codex rollout, so extractCodexTelemetry returns null and
-  // the launcher-attached telemetry is used unchanged.
-  const telemetry = { inputTokens: 42, provider: 'anthropic' } satisfies import("../../../../src/application/stats-recording-use-case.js").StageTelemetry;
-  assert.deepEqual(resolveStageTelemetry({ worktree: os.tmpdir(), result: { telemetry }, sinceMs: 0 }), telemetry);
+  // the launcher-attached telemetry is normalized through the named owner.
+  const telemetry = { inputTokens: 42, provider: 'anthropic' };
+  assert.deepEqual(resolveStageTelemetry({ worktree: os.tmpdir(), result: { telemetry }, sinceMs: 0 }), {
+    provenance: 'provider-reported', provider: 'anthropic', model: null,
+    values: [{ name: 'input', value: 42, unit: 'tokens' }],
+  });
 });

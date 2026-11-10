@@ -1,5 +1,6 @@
 import { createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
 import { integrationRepairContinuation } from './integration-repair-continuation.js';
+import { findLandedSquashOnBaseBranch } from '../adapters/cli/commands/landed-squash.js';
 import { SqliteExecutionActivityStore } from '../adapters/sqlite/execution-activity-store.js';
 import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
 import { resolveProcessConfiguration } from './config.js';
@@ -25,7 +26,7 @@ import { UIPreferencesService } from '../application/services/ui-preferences-ser
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
 import { ExecutionActivityRecorder, NO_EXECUTION_ACTIVITY, type ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import { processStartIdentity } from '../adapters/process/process-liveness.js';
-import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
+import { observeMissionCheckout } from '../adapters/git/mission-execution-context.js';
 export { createMissionStore } from './mission-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import { SqliteSessionMarkerRepository } from '../adapters/sqlite/session-marker-repository.js';
@@ -157,14 +158,20 @@ export interface ProductionApplicationServices {
   readonly currentWork: ExecutionActivityPort;
 }
 
-/** Board integration resolves checkouts from the mission identity, not this process's directory; every non-zero exit is a typed failure. */
-export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: ExecutionActivityPort, configuration?: ParallixConfiguration, rootDir = process.cwd(), resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext): IntegrateCommandUseCase {
+/**
+ * Board integration refuses early from a read-only observation of the mission
+ * identity, then lets the integrate entry resolve the checkouts once it holds the
+ * integration claim; every non-zero exit is a typed failure.
+ */
+export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: ExecutionActivityPort, configuration?: ParallixConfiguration, rootDir = process.cwd(),
+  observeCheckout: typeof observeMissionCheckout = (slug, root, config) => observeMissionCheckout(slug, root, config,
+    args => git(args), (baseWorktree, landedSlug) => findLandedSquashOnBaseBranch(baseWorktree, landedSlug))): IntegrateCommandUseCase {
   return new IntegrateCommandUseCase({
     async execute(args) {
-      const execution = resolveContext(args[0], rootDir, configuration ?? resolveProcessConfiguration());
-      if (!execution.ok) { throw new Error(execution.reason); }
+      const observed = observeCheckout(args[0], rootDir, configuration ?? resolveProcessConfiguration());
+      if (!observed.ok) { throw new Error(observed.reason); }
       await integrate(args, {
-        configuration, executionContext: execution.context,
+        configuration, executionRoot: rootDir,
         missionServicesFn: async () => mission,
         exitFn: (code) => { if (code !== 0) { throw new Error(`integration workflow exited with code ${code}`); } },
       });
@@ -287,7 +294,7 @@ export async function createProductionApplicationServices(
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
       ...bindings,
       configuration: options.configuration,
-      integrationRepair: integrationRepairContinuation(mission, options.configuration),
+      integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir),
       classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
       performReviewPreparationFn: reviewPreparationWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
@@ -299,7 +306,7 @@ export async function createProductionApplicationServices(
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
   }, executeRuntime);
-  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? { integrationRepair: integrationRepairContinuation(mission, options.configuration) } : {}) };
+  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? { integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir) } : {}) };
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second execution activity projection.
   const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);

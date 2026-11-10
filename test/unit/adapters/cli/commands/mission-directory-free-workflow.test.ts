@@ -38,7 +38,9 @@ test('a new typed draft does not prepare a retired mission directory', () => {
 function containsRetiredArchiveFile(directory: string): boolean {
   if (!fs.existsSync(directory)) { return false; }
   return fs.readdirSync(directory, { withFileTypes: true }).some(entry => {
-    if (entry.name !== 'tasks' || !entry.isDirectory()) { return true; }
+    if (entry.name !== 'tasks' || !entry.isDirectory()) {
+      return !entry.isDirectory() || containsFile(path.join(directory, entry.name));
+    }
     return fs.readdirSync(path.join(directory, entry.name), { withFileTypes: true }).some(task => {
       // The provider's archive is flat. A task-looking directory must not hide
       // MISSION.md, checkpoints or other retired ledger files.
@@ -67,6 +69,8 @@ test('the retired archive guard permits cancelled task history (TASK-2794)', () 
   try {
     const tasks = path.join(root, 'backlog/archive/tasks');
     fs.mkdirSync(tasks, { recursive: true });
+    fs.mkdirSync(path.join(root, 'backlog/archive/drafts'));
+    fs.mkdirSync(path.join(root, 'backlog/archive/milestones'));
     fs.writeFileSync(path.join(tasks, 'task-1 - cancelled.md'),
       '---\nid: TASK-1\ntitle: Cancelled task\nstatus: active\n---\nPreserved cancellation history.\n');
     assert.equal(containsRetiredWorkflowMetadata(root), false);
@@ -80,6 +84,7 @@ test('the retired archive guard rejects ledgers and malformed task stores (TASK-
   try {
     for (const relative of [
       'backlog/archive/MISSION.md',
+      'backlog/archive/drafts/ledger.md',
       'backlog/archive/missions/CP-1.md',
       'backlog/archive/other/tasks/ledger.md',
       'backlog/archive/tasks',

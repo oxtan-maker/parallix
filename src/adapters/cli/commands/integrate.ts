@@ -2,7 +2,9 @@ import { createIntegrationApprovalEvidence } from '../../review/integration-appr
 import { SqliteIntegrationValidationReader } from '../../sqlite/integration-validation-reader.js';
 import { initOperatorState } from '../../sqlite/adapter-factory.js';
 import { createIntegrationVerificationEvidencePort } from '../../verification/integration-verification-proof.js';
+import { processIdentityForObservation } from '../../process/process-liveness.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
+import { DEFAULT_CONFIGURATION } from '../../../application/ports/configuration.js';
 /**
  * Integrate command adapter (TASK-2512).
  *
@@ -36,6 +38,7 @@ import * as repositoryGates from '../../config/repository-gates.js';
 import * as gates from './integrate-gates.js';
 import * as integrationGateRebound from './integrate-gate-rebound.js';
 import * as conflict from './integrate-conflict.js';
+import * as execution from '../../git/mission-execution-context.js';
 import * as post from './integrate-post.js';
 import type { IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
 
@@ -47,7 +50,7 @@ import type { IntegrateWorkflowPorts } from '../../../application/ports/integrat
  */
 export function createIntegratePorts(configuration?: ParallixConfiguration): IntegrateWorkflowPorts {
   const runIntegrationGates: typeof repositoryGates.runPhaseGates = (phase, options) => repositoryGates.runPhaseGates(phase, {
-    ...options, configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration),
+    ...options, configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration, processIdentityForObservation(process.pid)),
   });
   return {
     process: composeIntegrationProcess(configuration),
@@ -101,6 +104,14 @@ export function createIntegratePorts(configuration?: ParallixConfiguration): Int
       resolveWorktree: (slug, options) => missionUtils.resolveWorktree(slug, options),
       findMissionDocInBranches: (slug, rootDir) => missionUtils.findMissionDocInBranches(slug, rootDir),
       softResetTrailingBacklogNoise: (rootDir, gitRunner) => missionUtils.softResetTrailingBacklogNoise(rootDir, gitRunner),
+    },
+    missionContext: {
+      // One resolution per run: the mission checkout, the branch observed in it,
+      // and the receiving base. A mission checkout that closeout already removed
+      // still resolves, because the squash on the receiving base proves the
+      // landing; a checkout that never existed stays unresolved.
+      resolve: (slug, rootDir) => execution.resolveMissionExecutionContext(slug, rootDir, configuration ?? DEFAULT_CONFIGURATION,
+        args => git.git(args), (baseWorktree, landedSlug) => conflict.findLandedSquashOnBaseBranch(baseWorktree, landedSlug)),
     },
     verification: {
       formatVerificationCommand: (area, rootDir) => verification.formatVerificationCommand(area, rootDir),

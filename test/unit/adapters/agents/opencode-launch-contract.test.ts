@@ -422,9 +422,9 @@ describe("OpenCode launcher telemetry ,", () => {
 
     assert.ok(result.telemetry, 'telemetry must be attached');
     assert.equal(result.telemetry.provider, 'opencode');
-    assert.ok(result.telemetry.inputTokens != null);
+    assert.ok(typeof result.telemetry.inputTokens === 'number');
     assert.ok(result.telemetry.inputTokens > 0);
-    assert.ok(result.telemetry.outputTokens != null);
+    assert.ok(typeof result.telemetry.outputTokens === 'number');
     assert.ok(result.telemetry.outputTokens > 0);
     assert.equal(result.telemetry.toolCalls, 59);
   });
@@ -452,9 +452,9 @@ describe("OpenCode launcher telemetry ,", () => {
     assert.equal(result.sessionId, 'ses_132f470d8ffexge85esdX0nzCs');
     assert.equal(exportedSessionId.value, 'ses_132f470d8ffexge85esdX0nzCs', 'export must be called with the recovered id');
     assert.ok(result.telemetry, 'telemetry must be attached from JSON-stdout session id');
-    assert.ok(result.telemetry.inputTokens != null);
+    assert.ok(typeof result.telemetry.inputTokens === 'number');
     assert.ok(result.telemetry.inputTokens > 0);
-    assert.ok(result.telemetry.outputTokens != null);
+    assert.ok(typeof result.telemetry.outputTokens === 'number');
     assert.ok(result.telemetry.outputTokens > 0);
   });
 

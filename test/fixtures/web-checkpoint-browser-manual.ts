@@ -106,7 +106,8 @@ try {
   const partial = fixture.page.locator('[data-board-card="task-checkpoint-partial"]');
   assert.match(await partial.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /1\/3 completed · Current: CP-2/);
   assert.equal(await partial.locator('[data-checkpoint-summary]').count(), 0, 'the original bar has no added progress label');
-  assert.match(await partial.textContent() ?? '', /gate · running.*PR #47/s);
+  assert.equal(await partial.locator('[data-gate="running"] svg[aria-label="Running"]').count(), 1);
+  assert.match(await partial.textContent() ?? '', /PR #47/);
   assert.equal(await partial.locator('[data-review-attempt]').count(), 3, 'multiple review attempts remain in the progression row');
   const disclosure = partial.getByRole('button', { name: /View checkpoint evidence/ });
   await disclosure.focus();
@@ -124,13 +125,14 @@ try {
 
   const complete = fixture.page.locator('[data-board-card="task-checkpoint-complete"]');
   assert.match(await complete.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /3\/3 completed/);
-  assert.match(await complete.textContent() ?? '', /gate ✓/);
+  assert.equal(await complete.locator('[data-gate="passed"] svg[aria-label="Passed"]').count(), 1);
   const unknown = fixture.page.locator('[data-board-card="task-checkpoint-unknown"]');
-  assert.match(await unknown.textContent() ?? '', /checkpoints · completion unknown.*gate ✗ FAIL/s);
+  assert.match(await unknown.textContent() ?? '', /checkpoints · completion unknown/);
+  assert.equal(await unknown.locator('[data-gate="failed"] svg[aria-label="Not passing"]').count(), 1);
   assert.equal(await unknown.locator('[data-checkpoint-track]').count(), 0, 'unknown state has no invented progress track');
   const long = fixture.page.locator('[data-board-card="task-checkpoint-long"]');
   assert.match(await long.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /99\/100 completed · Current: CP-100/);
-  assert.match(await long.textContent() ?? '', /gate · unknown/);
+  assert.equal(await long.locator('[data-gate="unavailable"] svg[aria-label="Unknown"]').count(), 1);
   assert.equal(await long.locator('[data-review-attempt]').count(), 5, 'ordinary review history stays intact');
   assert.equal(await long.locator('[data-review-window-allowance], [data-repair-budget]').count(), 0);
   const repair = fixture.page.locator('[data-board-card="task-checkpoint-repair"]');

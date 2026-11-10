@@ -8,7 +8,6 @@ import type { ParallixConfiguration } from "../ports/configuration.js";
  */
 import path from 'node:path';
 import * as fmt from '../presentation/cli-format.js';
-import { isDbOwnedPxIdentity } from '../../domain/mission.js';
 import { evaluateTaskStatusForIntegration, type TaskStatusCheck } from './approval.js';
 import { checkReviewProvider } from './preflight-review.js';
 import { checkIntegrationCheckout } from './preflight-checkout.js';
@@ -126,12 +125,13 @@ class IntegrationPreflight {
       if (context.task.matches) {
         context.task.matches.forEach((match: string) => report.log(`  - ${match}`));
       }
-    } else if (isDbOwnedPxIdentity(context.slug)) {
-      // An adhoc mission has no Backlog task to find: the Mission store carries
+    } else if (context.mirrorOwnership.kind === 'none') {
+      // A DB-owned mission has no Backlog task to find: the Mission store carries
       // its status and labels (ADR 0053), so read them there rather than warning
       // about the absence of a file this intake never creates in the base
       // checkout.
-      report.detail(`Backlog task: none — adhoc mission, Mission store is authoritative`);
+      const mirrorKind = context.mirrorOwnership.reason === 'db-owned-px' ? 'adhoc mission' : 'wave child';
+      report.detail(`Backlog task: none — ${mirrorKind}, Mission store is authoritative`);
       const classification = this.backlog.classificationFromLabels(context.missionLabels || []);
       if (classification) {
         report.detail(`Mission classification: ${classification}`);
@@ -177,11 +177,10 @@ class IntegrationPreflight {
       detail: (text: string) => { if (options.configuration?.runtime.debug) { log(fmt.status('DEBUG', text)); } },
     };
 
-    // The integration "checkout" is the mission's base worktree on its base branch.
-    // For legacy missions these fall back to the primary worktree/branch, so the
-    // preflight output and checks are byte-identical to today.
-    const baseWorktree = context.baseWorktree || this.missionPaths.getPrimaryWorktree();
-    const baseBranch = context.baseBranch || this.missionPaths.getPrimaryBranch();
+    // The integration "checkout" is the mission's base worktree on its base
+    // branch, both resolved from Mission identity before the run started.
+    const baseWorktree = context.baseWorktree;
+    const baseBranch = context.baseBranch;
 
     report.detail(`Integration preflight for ${context.slug}`);
 

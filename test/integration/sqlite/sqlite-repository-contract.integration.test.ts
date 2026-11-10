@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
+import { SqliteDatabaseAdapter, type SqlParameter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
 import { SqliteBlocklistRepository } from '../../../src/adapters/sqlite/blocklist-repository.js';
 import { SqliteUsageRepository } from '../../../src/adapters/sqlite/usage-repository.js';
@@ -284,8 +284,59 @@ describe("SQLite repository contract", () => {
         { date: '2026-07-22', repo: 'parallix', stage: 'review' },
       ]);
 
-      const filtered = await repo.findWhere((r) => r.repo === 'parallix');
-      assert.equal(filtered.length, 2);
+      const filtered = await repo.findWhere({ repo: 'parallix' });
+      assert.deepEqual(filtered.map((r) => r.stage), ['draft', 'review']);
+
+      const narrowed = await repo.findWhere({ repo: 'parallix', stage: 'review' });
+      assert.deepEqual(narrowed.map((r) => r.date), ['2026-07-22']);
+
+      assert.equal((await repo.findWhere({ repo: 'absent' })).length, 0);
+      assert.equal((await repo.findWhere({})).length, 3);
+
+      const issued: { sql: string; params: readonly unknown[] | undefined }[] = [];
+      const originalQuery = db.query.bind(db);
+      db.query = (async (sql: string, params?: readonly SqlParameter[]) => {
+        issued.push({ sql, params });
+        return originalQuery(sql, params);
+      }) as typeof db.query;
+      await repo.findWhere({ repo: 'parallix', stage: 'review' });
+      assert.equal(issued.length, 1);
+      assert.match(issued[0].sql, /WHERE repo = \? AND stage = \?/);
+      assert.deepEqual(issued[0].params, ['parallix', 'review']);
+    } finally {
+      await db.close();
+      cleanupTempDir(dir);
+    }
+  });
+
+  // TASK-2846.04 regression: the schema defaults repo/mission to '' and recordFromRow
+  // exposes that empty text as undefined, so SQL must not let an empty-string
+  // constraint match a row whose exposed field is undefined.
+  it('usage: findWhere leaves persisted empty text unmatched by an empty-string filter', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      const repo = new SqliteUsageRepository(db);
+      await seedUsage(db, [{ date: '2026-07-20', repo: '', mission: '', stage: 'draft' }]);
+      await seedUsage(db, [{ date: '2026-07-21', repo: 'parallix', mission: 'task-2846', stage: 'review' }]);
+
+      const persisted = await repo.findAll();
+      assert.strictEqual(persisted[0].repo, undefined, 'stored empty text is exposed as unavailable');
+      assert.strictEqual(persisted[0].mission, undefined);
+
+      const issued: { sql: string; params: readonly unknown[] | undefined }[] = [];
+      const originalQuery = db.query.bind(db);
+      db.query = (async (sql: string, params?: readonly SqlParameter[]) => {
+        issued.push({ sql, params });
+        return originalQuery(sql, params);
+      }) as typeof db.query;
+
+      assert.equal((await repo.findWhere({ mission: '' })).length, 0);
+      assert.equal((await repo.findWhere({ repo: '', stage: 'draft' })).length, 0);
+      assert.equal(issued.length, 2, 'unsatisfiable constraints stay in SQL, not JavaScript');
+      assert.match(issued[0].sql, /WHERE 1 = 0/);
+      assert.deepEqual(issued[0].params, []);
+
+      assert.deepEqual((await repo.findWhere({ mission: 'task-2846' })).map((r) => r.date), ['2026-07-21']);
     } finally {
       await db.close();
       cleanupTempDir(dir);
@@ -556,7 +607,7 @@ describe("SQLite repository contract", () => {
       assert.ok(blocklist.clear() instanceof Promise);
 
       assert.ok(usage.findAll() instanceof Promise);
-      assert.ok(usage.findWhere(() => true) instanceof Promise);
+      assert.ok(usage.findWhere({}) instanceof Promise);
 
       assert.ok(repos.findAll() instanceof Promise);
       assert.ok(repos.findById('x') instanceof Promise);

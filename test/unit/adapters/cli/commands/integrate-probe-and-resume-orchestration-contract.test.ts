@@ -1,6 +1,7 @@
 import { missionLabels } from '../../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../../src/domain/agents.js';
 import { fixtureMission, approvedReview as fixtureApprovedReview } from '../../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 import { changeRevision } from '../../../../../src/domain/review.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 // Historical regression provenance: TASK-1039, TASK-2243, TASK-2520, TASK-2506.
@@ -27,6 +28,7 @@ mockModule('../../../../../src/adapters/cli/commands/stats.js', import.meta.url)
 mockModule('../../../../../src/adapters/verification/verification.js', import.meta.url);
 mockModule('../../../../../src/composition/application-services.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/integrate-conflict.js', import.meta.url);
+mockModule('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 mockModule('../../../../../src/adapters/config/repository-gates.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/integrate-gates.js', import.meta.url);
@@ -53,6 +55,7 @@ describe("integrate orchestration and gates", () => {
   // to the real primary worktree and make unrelated preflight tests non-hermetic.
   const integrateGatesModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate-gates.js')>(
     '../../../../../src/adapters/cli/commands/integrate-gates.js', import.meta.url);
+  const executionContext = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 
   const { mock } = test;
 
@@ -83,7 +86,13 @@ describe("integrate orchestration and gates", () => {
     mock.method(missionUtils, 'findMissionDir', (_slug: Parameters<(typeof missionUtils)["findMissionDir"]>[0], rootDir: Parameters<(typeof missionUtils)["findMissionDir"]>[1] = FAKE_ROOT) => path.join(rootDir, 'docs/missions/2026', TEST_SLUG));
     mock.method(missionUtils, 'findMissionArea', () => 'docs');
     mock.method(missionUtils, 'getPrimaryWorktree', () => FAKE_ROOT);
-    mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
+    mock.method(missionUtils, 'conventionalWorktreePath', () => WORKTREE);
+    // Composition resolves the checkouts once from Mission identity; these cases pin
+    // them to the same layout the mocked worktree helpers describe.
+    mock.method(executionContext, 'resolveMissionExecutionContext', (slug: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: slug, missionWorktree: missionUtils.resolveWorktree(slug) ?? WORKTREE, baseWorktree: FAKE_ROOT, baseBranch: 'main' }),
+    }));
     mock.method(git, 'getCurrentBranch', () => 'mission/' + TEST_SLUG);
     mock.method(git, 'git', () => ({ signal: null,  status: 0, stdout: 'main', stderr: '' }));
     mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(FAKE_ROOT, 'backlog/tasks/task.md') }));
@@ -459,6 +468,7 @@ describe("probe abort without promotion", () => {
   const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const composition = mockModule<typeof import('../../../../../src/composition/application-services.js')>('../../../../../src/composition/application-services.js', import.meta.url);
   const integrateModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
+  const executionContext = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 
   const TEST_SLUG = 'task-2243-probe-abort';
 
@@ -500,6 +510,10 @@ describe("probe abort without promotion", () => {
       mock.method(missionUtils, 'findMissionArea', () => 'runtime');
       mock.method(missionUtils, 'getPrimaryWorktree', () => root);
       mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(root, '..', TEST_SLUG));
+      mock.method(executionContext, 'resolveMissionExecutionContext', (slug: string) => ({
+        ok: true as const,
+        context: missionExecutionContext({ missionId: slug, missionWorktree: path.join(root, '..', TEST_SLUG), baseWorktree: root, baseBranch: 'main' }),
+      }));
       mock.method(missionUtils, 'resolveMainRepo', () => root);
       mock.method(missionUtils, 'missionTitle', () => 'Task 2243 probe abort fixture');
       mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
@@ -583,6 +597,7 @@ describe("resume landing closeout", () => {
   const conflict = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate-conflict.js')>('../../../../../src/adapters/cli/commands/integrate-conflict.js', import.meta.url);
   const integrateModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
+  const executionContext = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
   const integrate = integrateModule.default;
 
   const SLUG = 'task-2520-resume';
@@ -636,6 +651,10 @@ describe("resume landing closeout", () => {
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
     mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
     mock.method(missionUtils, 'resolveWorktree', () => ROOT);
+    mock.method(executionContext, 'resolveMissionExecutionContext', (slug: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: slug, missionWorktree: ROOT, baseWorktree: ROOT, baseBranch: 'main' }),
+    }));
     mock.method(missionUtils, 'missionBranchName', (_slug: string) => BRANCH);
 
     mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(ROOT, 'backlog', 'tasks', 'task.md') }));
@@ -707,6 +726,7 @@ describe("behind-primary integrate", () => {
   const integrateModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
   const repositoryGates = mockModule<typeof import('../../../../../src/adapters/config/repository-gates.js')>('../../../../../src/adapters/config/repository-gates.js', import.meta.url);
 
+  const executionContext = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
   const integrate = integrateModule.default;
 
   const SLUG = 'task-2506-intreg';
@@ -777,6 +797,10 @@ describe("behind-primary integrate", () => {
     // ADR 0043 target the integration rebase rebases onto.
     mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
     mock.method(missionUtils, 'resolveWorktree', () => ROOT);
+    mock.method(executionContext, 'resolveMissionExecutionContext', (slug: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: slug, missionWorktree: ROOT, baseWorktree: ROOT, baseBranch: 'main' }),
+    }));
     mock.method(missionUtils, 'missionBranchName', (_slug: string) => `mission/${SLUG}`);
 
     mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(ROOT, 'backlog', 'tasks', 'task.md') }));

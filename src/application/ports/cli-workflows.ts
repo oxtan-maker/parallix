@@ -3,6 +3,7 @@ import type { ReviewStatistics } from '../services/review-statistics.js';
  * are supplied only by the composition root. */
 
 import type { MissionActivity } from '../projections/mission-activity.js';
+import type { ReviewRoundSummary } from '../projections/mission-board.js';
 import type { AgentBlock } from '../../domain/agents.js';
 
 // ---------------------------------------------------------------------------
@@ -43,33 +44,6 @@ export interface StatusAgentEntry {
   readonly block: AgentBlock;
 }
 
-/** Review round from mission card history. */
-export interface StatusReviewRound {
-  readonly startRevision?: string;
-  readonly decidedRevision?: string | null;
-  readonly integrationRepairAssessment?: import('../../domain/integration-approval-retention.js').IntegrationRepairAssessment;
-  /** Round number. */
-  readonly number: number;
-  /** Reviewer agent. */
-  readonly reviewer: string;
-  /** Implementer agent. */
-  readonly implementer: string;
-  /** Disposition verdict. */
-  readonly disposition: string;
-  /** Review comment. */
-  readonly comment?: string | null;
-  /** Finding summaries. */
-  readonly findingSummaries: readonly string[];
-  /** Fixes applied. */
-  readonly fixes: readonly string[];
-  /** Pushbacks raised. */
-  readonly pushbacks: readonly string[];
-  /** Operator withdrawal of this round's approval, if any. */
-  readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string } | null;
-  /** The branch move that superseded this round's approval, if any. */
-  readonly supersession?: { readonly revision: string; readonly by: string; readonly at: string } | null;
-}
-
 /** Mission-specific data returned by status projection. */
 export interface StatusMissionData {
   /** Stored Mission classification; null means unset, never inferred from a card. */
@@ -99,8 +73,12 @@ export interface StatusMissionData {
   readonly approvalCoverage?: import('../../domain/approval-coverage.js').ApprovalCoverage | null;
   /** The latest integration repair: failed gate, repair range, re-review outcome (TASK-2620). */
   readonly integrationRepair?: import('../integration-repair-review.js').IntegrationRepairFacts | null;
-  /** Review history rounds. */
-  readonly reviewHistory: readonly StatusReviewRound[];
+  /**
+   * Review history rounds. The board projection's `ReviewRoundSummary` is the
+   * one review-round read model: status carries it unchanged, so `px status`
+   * and the board cannot report different facts about the same round (TASK-2846).
+   */
+  readonly reviewHistory: readonly ReviewRoundSummary[];
   /**
    * The mission's activity in the shared read model the TUI renders from.
    * Absent or `null` when the board projection could not supply one, in which

@@ -204,8 +204,8 @@ export async function runToExit(command: string, args: string[], options: GitOpt
   }
 }
 
-export function getCurrentBranch(cwd: string = process.cwd()): string {
-  const result = git(['-C', cwd, 'branch', '--show-current']);
+export function getCurrentBranch(cwd: string = process.cwd(), runner: (args: string[]) => Pick<GitResult, 'stdout'> = git): string {
+  const result = runner(['-C', cwd, 'branch', '--show-current']);
   return result.stdout.trim();
 }
 

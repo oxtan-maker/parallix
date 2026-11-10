@@ -1,4 +1,9 @@
+import { missionId, type MissionId } from '../domain/mission.js';
+import { currentReviewRound } from '../domain/review.js';
+import type { MissionLoadResult } from './domain-ports.js';
+import type { MissionVersion } from './domain-ports.js';
 import type { ReviewLivenessFacts, ReviewWorkflowFact } from './projections/review-liveness.js';
+import type { ReviewLivenessReader } from './projections/review-liveness.js';
 
 /**
  * Recovery for an orphaned or human-stopped Review: one decision that CLI
@@ -26,6 +31,22 @@ export interface ReviewRecovery {
   readonly evidence: readonly string[];
   readonly guidance: string;
 }
+
+/** A settled admission observation, bound to the exact Mission revision it authorized. */
+export interface ReviewOperatorResumePermit {
+  readonly missionId: MissionId;
+  readonly missionVersion: MissionVersion;
+  readonly recovery: ReviewRecovery;
+}
+
+export type ReviewOperatorResumeAssessment =
+  | { readonly outcome: 'not-required' }
+  | { readonly outcome: 'permitted'; readonly recovery: ReviewRecovery }
+  | { readonly outcome: 'refused'; readonly recovery: ReviewRecovery | null; readonly reason: string }
+  | { readonly outcome: 'missing' }
+  | { readonly outcome: 'unavailable'; readonly reason: string };
+
+type FoundMission = Extract<MissionLoadResult, { readonly kind: 'found' }>;
 
 const PROBES = ['workflow', 'coordinator', 'execution', 'reviewer'] as const;
 
@@ -88,6 +109,76 @@ export function decideReviewRecovery(slug: string, facts: ReviewRecoveryFacts): 
   return { action: 'acknowledge-and-resume', humanStop, evidence, guidance: humanStop
     ? `Review stopped for human review (${humanStop}) and owned work has settled, so no further stop is required. Acknowledge the stop and resume with px review ${slug} or the board's Resume review action.`
     : `Review round is orphaned and owned work has settled, so no further stop is required. Resume with px review ${slug} or the board's Resume review action.` };
+}
+
+/**
+ * Read authoritative Mission and liveness facts before an operator resume can
+ * acknowledge or clear a Review stop. Both CLI and browser admission use this
+ * assessment; presentation activity is never an authorization fact.
+ */
+export async function assessReviewOperatorResume(
+  slug: string,
+  load: () => Promise<MissionLoadResult>,
+  read?: ReviewLivenessReader,
+  permit?: ReviewOperatorResumePermit | null,
+): Promise<ReviewOperatorResumeAssessment> {
+  const authority = await loadReviewAuthority(slug, load);
+  if ('outcome' in authority) { return authority; }
+  const loaded = authority;
+  const phase = loaded.mission.review ? currentReviewRound(loaded.mission.review).phase : null;
+  const humanStop = loaded.mission.review?.intervention?.reason ?? null;
+  if (!reviewRecoveryApplies(phase, humanStop)) { return { outcome: 'not-required' }; }
+  const admitted = assessRecoveryPermit(slug, loaded, permit);
+  if (admitted) { return admitted; }
+  const observation = await observeReviewLiveness(slug, read);
+  const recovery = decideReviewRecovery(slug, {
+    phase,
+    humanStop,
+    workflow: observation?.workflow,
+    liveness: observation?.liveness,
+  });
+  if (recovery?.action === 'acknowledge-and-resume') { return { outcome: 'permitted', recovery }; }
+  return {
+    outcome: 'refused',
+    recovery,
+    reason: recovery?.guidance ?? 'Review recovery is not awaiting operator acknowledgment',
+  };
+}
+
+async function loadReviewAuthority(
+  slug: string,
+  load: () => Promise<MissionLoadResult>,
+): Promise<FoundMission | ReviewOperatorResumeAssessment> {
+  let loaded: MissionLoadResult;
+  try {
+    loaded = await load();
+  } catch (error) {
+    return { outcome: 'unavailable', reason: error instanceof Error ? error.message : 'Mission authority is unavailable' };
+  }
+  if (loaded.kind === 'unavailable') { return { outcome: 'unavailable', reason: loaded.reason }; }
+  if (loaded.kind === 'missing' || loaded.mission.id !== missionId(slug)) { return { outcome: 'missing' }; }
+  return loaded;
+}
+
+function assessRecoveryPermit(
+  slug: string,
+  loaded: FoundMission,
+  permit?: ReviewOperatorResumePermit | null,
+): ReviewOperatorResumeAssessment | null {
+  if (!permit) { return null; }
+  if (permit.missionId !== loaded.mission.id || permit.missionVersion !== loaded.version
+    || permit.recovery.action !== 'acknowledge-and-resume') {
+    return { outcome: 'refused', recovery: null, reason: `Review recovery authority changed; rerun px review ${slug}` };
+  }
+  return { outcome: 'permitted', recovery: permit.recovery };
+}
+
+async function observeReviewLiveness(
+  slug: string,
+  read?: ReviewLivenessReader,
+): Promise<Awaited<ReturnType<ReviewLivenessReader>> | undefined> {
+  try { return await read?.(slug); }
+  catch { return undefined; } // Missing observation remains unknown and fails closed.
 }
 
 function refuse(humanStop: string | null, evidence: readonly string[], guidance: string): ReviewRecovery {

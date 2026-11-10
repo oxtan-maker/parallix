@@ -848,7 +848,7 @@ test('Pi output-token-limit stop reaches the review launch caller (TASK-2827)', 
     prompt: async () => { listener?.({ type: 'agent_end', messages: [{ role: 'assistant', stopReason: 'length' }] }); },
     getLastAssistantText: () => 'unfinished verdict',
   } }));
-  const launch: import('../../../../src/application/ports/review-round.js').ReviewAgentLaunchResult = {
+  const launch: import('../../../../src/application/ports/agent-launch-result.js').AgentLaunchResult = {
     agent: 'pi', result: await pi.startPiAgent({ prompt: 'Review', worktree: '/tmp/pi-stop' }).resultPromise,
   };
   assert.equal(launch.result?.stopReason, 'output-token-limit');

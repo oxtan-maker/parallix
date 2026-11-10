@@ -31,9 +31,7 @@ export interface DomainConceptInvariant {
   readonly invariant: string;
   /** Repo-relative file where the invariant is enforced. */
   readonly fileLocation: string;
-  /** 1-indexed line in `fileLocation`. */
-  readonly line: number;
-  /** Substring that must appear on `fileLocation:line`. */
+  /** Substring that must appear in `fileLocation`. */
   readonly anchor: string;
 }
 
@@ -45,13 +43,12 @@ export interface DomainConceptInvariant {
 export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
   Record<DomainConceptName, DomainConceptInvariant>
 > = {
-  WorkflowOperation: { concept: 'WorkflowOperation', invariant: 'Only an open operation with the current fencing generation can authorize workflow writes.', fileLocation: 'src/domain/workflow-operation.ts', line: 35, anchor: 'export function requireWorkflowOwner' },
+  WorkflowOperation: { concept: 'WorkflowOperation', invariant: 'Only an open operation with the current fencing generation can authorize workflow writes.', fileLocation: 'src/domain/workflow-operation.ts', anchor: 'export function requireWorkflowOwner' },
   Mission: {
     concept: 'Mission',
     invariant:
       'A mission cannot close before integration reports `done`, cannot close twice, and cannot close without an actual closure time; each violation throws MissionRuleViolation.',
     fileLocation: 'src/domain/mission.ts',
-    line: 311,
     anchor: 'export function closeMission',
   },
   CheckpointData: {
@@ -59,7 +56,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       "Checkpoint evidence from another mission is rejected, and a checkpoint that is not review-preparation-ready cannot be recorded; a same-named checkpoint replaces the latest-state projection while durable storage retains recorded versions.",
     fileLocation: 'src/domain/checkpoint.ts',
-    line: 113,
     anchor: 'export function recordCheckpoint',
   },
   Review: {
@@ -67,7 +63,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A reviewer decision is rejected unless the review is awaiting one, and request-changes is rejected without at least one identified finding carrying an id and summary.',
     fileLocation: 'src/domain/review.ts',
-    line: 745,
     anchor: 'export function applyReviewerCommand',
   },
   MissionOutcome: {
@@ -75,7 +70,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Completed statistics require a validated ClosedMission whose identity matches the outcome and whose NEL is recorded; a mismatch or missing NEL throws StatisticsRuleViolation.',
     fileLocation: 'src/domain/usage.ts',
-    line: 200,
     anchor: 'export function completedMissionStatistics',
   },
   AgentRunMeasurement: {
@@ -83,7 +77,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Every measured dimension is a Measurement: a provider that cannot report a value yields `unavailable` with a reason, which must not be substituted with zero or an agent-family label.',
     fileLocation: 'src/domain/usage.ts',
-    line: 5,
     anchor: 'export type Measurement',
   },
   KnownRepository: {
@@ -91,7 +84,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A repository identity is a non-empty trimmed RepositoryId; constructing one from blank input throws.',
     fileLocation: 'src/domain/repository.ts',
-    line: 3,
     anchor: 'export function repositoryId',
   },
   SessionMarker: {
@@ -99,7 +91,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'Resume is permitted only when mission, role, and agent family all match the recorded marker; a fallback to another family invalidates it.',
     fileLocation: 'src/domain/session.ts',
-    line: 42,
     anchor: 'export function shouldResume',
   },
   LaneTransitionEvent: {
@@ -107,7 +98,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A lane transition is only recorded for a status pair the mission state machine owns; an unmodelled pair yields no trigger rather than a synthesised one.',
     fileLocation: 'src/domain/board-event.ts',
-    line: 92,
     anchor: 'export function triggerFromTransition',
   },
   AgentBlock: {
@@ -115,7 +105,6 @@ export const DOMAIN_CONCEPT_INVARIANTS: Readonly<
     invariant:
       'A block is time-bounded, indefinite, or absent; an expired `until` block yields zero remaining time and therefore stops excluding its family from selection.',
     fileLocation: 'src/domain/agents.ts',
-    line: 67,
     anchor: 'export function blockedForMs',
   },
 } as const;
@@ -138,7 +127,6 @@ export interface TechnicalPersistenceMetadata {
   readonly id: string;
   readonly kind: TechnicalMetadataKind;
   readonly fileLocation: string;
-  readonly line: number;
   readonly anchor: string;
   readonly whyNotDomain: string;
 }
@@ -148,7 +136,6 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'sqlite-migration-identity',
     kind: 'schema-or-migration-identity',
     fileLocation: 'src/adapters/sqlite/migration-runner.ts',
-    line: 27,
     anchor: 'export class SqliteMigrationRunner',
     whyNotDomain:
       'Ordered migration ids and their SHA-256 checksums describe the schema ledger. They have no mission, agent, or review meaning and no application command reads them as domain facts.',
@@ -157,7 +144,6 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'sqlite-import-identity',
     kind: 'import-identity',
     fileLocation: 'src/adapters/sqlite/importer.ts',
-    line: 44,
     anchor: 'export class SqliteImporter',
     whyNotDomain:
       'Source path plus content digest exist to make an import idempotent. They identify a file that was read, not a domain entity, and are never surfaced to a consumer.',
@@ -166,7 +152,6 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'stage-launch-fingerprint',
     kind: 'idempotency-key',
     fileLocation: 'src/adapters/review/review-agent-fallback.ts',
-    line: 42,
     anchor: 'function stageLaunchFingerprint',
     whyNotDomain:
       'An opaque token kept in review-state metadata, bounded to the last 20 per stage window, whose only use is refusing to accumulate the same measurement twice. Nothing resolves it back to a launch, so it is not an Attempt identity (see PER_LAUNCH_IDENTITY_DECISION).',
@@ -175,7 +160,6 @@ export const TECHNICAL_PERSISTENCE_METADATA: readonly TechnicalPersistenceMetada
     id: 'ui-preferences-key-value',
     kind: 'opaque-operator-setting',
     fileLocation: 'src/adapters/sqlite/ui-preferences-repository.ts',
-    line: 12,
     anchor: 'export class SqliteUIPreferencesRepository',
     whyNotDomain:
       'An opaque (key, value, updatedAt) settings store with no validation, no relationship to Mission, and no production consumer outside the adapter itself. It carries an operator display choice, not a domain rule.',

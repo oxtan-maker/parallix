@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import { launchRecoveryAction } from '../../../src/domain/rebound-policy.js';
+import type { AgentLaunchResult } from '../../../src/application/ports/agent-launch-result.js';
+import { launchStatus } from '../../../src/application/rebound-launch-result.js';
 import { describeLaunchFailure, isDeterministicLaunchFailure, launchFailureOf } from '../../../src/domain/launch-failure.js';
 
 /**
@@ -51,6 +53,30 @@ export function launchFailureCases(): void {
     assert.equal(ambiguous.launchFailure, undefined);
     assert.match(ambiguous.diagnostic, /ambiguous exit status \(null\)/);
     assert.equal(null2, 2);
+  });
+
+  test('one AgentLaunchResult drives fallback adoption, invalid-contract blocking and launch-failure classification (TASK-2846.02)', async () => {
+    const adopted: Array<AgentLaunchResult | null | undefined> = [];
+    const fallbackLaunch: AgentLaunchResult = { agent: 'claude', result: { status: 0, provider: 'anthropic', model: 'sonnet' } };
+    const fixed = await rebound(reason, context({
+      startAgent: async () => fallbackLaunch,
+      applyAgentFallback: ({ launchResult }) => { adopted.push(launchResult); return launchResult?.agent ?? 'codex'; },
+    }));
+    assert.equal(fixed.outcome, 'fixed');
+    assert.equal(fixed.implementer, 'claude', 'the fallback family from the launch result is adopted');
+    assert.deepEqual(adopted, [fallbackLaunch], 'the fallback hook receives the launch result unchanged');
+
+    const invalidContract = { command: 'npm test', diagnostic: 'unrunnable', authorityReason: 'locked', proposedCorrection: 'select owner' };
+    const blocked = launchStatus({ agent: 'codex', result: { status: 0, invalidContract } }, 'codex');
+    assert.equal(blocked.ok, false);
+    assert.deepEqual(blocked.invalidContract, invalidContract);
+
+    const spawnFailure: AgentLaunchResult = { agent: 'codex', result: { status: null, error: e2big } };
+    const failed = launchStatus(spawnFailure, 'codex');
+    assert.equal(failed.ok, false);
+    assert.equal(failed.repairAttempted, false);
+    assert.equal(failed.deterministic, true);
+    assert.equal(launchStatus(null, 'codex').ok, false, 'a missing launch result stays a failure');
   });
 
   test('launch failure policy classifies only spawn evidence and stops deterministic launches (TASK-2760)', () => {

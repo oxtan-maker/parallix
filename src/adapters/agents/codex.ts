@@ -305,7 +305,8 @@ function isSpuriousCodexExit(result: AgentProcessResult) {
   if (!result || result.status !== 1 || result.signal || result.error) {return false;}
   const t = result.telemetry as (AgentProcessResult['telemetry'] & Partial<Pick<CodexRolloutTelemetry, 'terminalError'>>) | null | undefined;
   if (t?.terminalError) {return false;}
-  return Boolean(t && ((t.totalTokens || 0) > 0 || (t.inputTokens || 0) > 0 || (t.outputTokens || 0) > 0));
+  const positive = (key: string) => typeof t?.[key] === 'number' && t[key] > 0;
+  return positive('totalTokens') || positive('inputTokens') || positive('outputTokens');
 }
 
 export {

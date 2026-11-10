@@ -5,6 +5,7 @@ import * as fmt from "../../application/presentation/cli-format.js";
 import { DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS, DRAFT_NO_OUTPUT_INITIAL_DELAY_MS } from "./launcher-selection.js";
 import { withSandboxProfile } from "../process/bubblewrap.js";
 import { openRunSession } from "./run-session.js";
+import { providerResourceObservation } from '../../application/run-history-types.js';
 import type { SupervisedChild } from '../process/spawn-tee.js';
 import type { PreparedLaunch, StartAgentLoopDeps } from './agent-launch-context.js';
 import { sessionMissionId } from './agent-launch-authority.js';
@@ -208,6 +209,8 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
     result = resultPromise
       ? await awaitAgentResult(resultPromise, deps.authoritativeCompletion, launchedChild, log)
       : launchResult.result!;
+    const providerResources = providerResourceObservation(result.telemetry, { provider: result.provider, model: result.model });
+    result = { ...result, ...(runSession ? { runId: runSession.runId } : {}), providerResources };
   } finally {
     customReservation?.release();
     runSession?.finish(result);

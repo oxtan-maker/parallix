@@ -11,7 +11,7 @@ import { resumeIntegrationAssessment } from './integration-assessment.js';
  * in `../ports/review-round.ts`.
  */
 import { recordHumanCorrection } from './human-correction.js';
-import { isDbOwnedPxIdentity, missionId } from '../../domain/mission.js';
+import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { rebaseImplementer, recordImplementerLaunch } from '../rebase-identity.js';
@@ -56,12 +56,16 @@ async function resolveImplementer(slug: string, requested: string | undefined, p
 }
 
 /**
- * A missing Backlog task file stops the loop, except for a DB-owned adhoc
- * identity whose lifecycle is DB-authoritative.
+ * A missing Backlog task file stops the loop, except for a DB-owned Mission
+ * whose lifecycle is DB-authoritative.
  */
-function stopsOnMissingTaskFile(slug: string, ports: ReviewLoopPorts, out: Output): boolean {
+async function stopsOnMissingTaskFile(slug: string, ports: ReviewLoopPorts, out: Output): Promise<boolean> {
   if (ports.task.task.ok) { return false; }
-  if (isDbOwnedPxIdentity(slug)) {
+  const stored = ports.missionStore ? await ports.missionStore.load(missionId(slug)) : null;
+  const ownership = stored?.kind === 'found'
+    ? backlogMirrorOwnership(stored.mission)
+    : backlogMirrorOwnership({ id: missionId(slug), waveParentId: null });
+  if (ownership.kind === 'none') {
     out.emit({ kind: 'adhoc-without-task', slug: slug });
     return false;
   }
@@ -130,7 +134,7 @@ async function performStartReviewPreparation(start: Start, implementer: string, 
 /**
  * Decide whether this start runs the review preparation. An open PR alone does not prove
  * the review preparation finished writing the Review; a continuation re-runs it only when
- * the Mission is still active with a review awaiting its next round.
+ * the Mission has a resolved round or unfinished review preparation.
  */
 async function prepareStart(start: Start, skipReviewPreparation: boolean, implementer: string, ports: ReviewLoopPorts, out: Output): Promise<{ reviewPreparationRan: boolean; pullRequest: PullRequestReference | null } | null> {
   const { dryRun, isContinue } = start;
@@ -140,7 +144,7 @@ async function prepareStart(start: Start, skipReviewPreparation: boolean, implem
   pullRequest = providerStart.pullRequest;
   if (pullRequest) { skipReviewPreparation = true; }
   skipReviewPreparation = await recordedReviewPreparationCanBeSkipped(start, skipReviewPreparation, ports);
-  const continueReviewPreparation = await continuesActiveReviewPreparation(start, ports);
+  const continueReviewPreparation = await continuesReviewPreparation(start, ports);
   if (continueReviewPreparation) { skipReviewPreparation = false; }
   if (dryRun || skipReviewPreparation || (isContinue && !continueReviewPreparation)) { return { reviewPreparationRan: false, pullRequest }; }
   const handedOff = await performStartReviewPreparation(start, implementer, ports, out);
@@ -248,7 +252,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   }
   persisted = await resetAtEntry(request, persisted, ports, out);
   const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
-  if (stopsOnMissingTaskFile(slug, ports, out)) { return; }
+  if (await stopsOnMissingTaskFile(slug, ports, out)) { return; }
   if (await resumeIntegrationAssessment(start, ports)) { return; }
   if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
   persisted = await ports.state.read();
@@ -341,17 +345,19 @@ async function prepareProviderStart(start: Start, ports: ReviewLoopPorts, out: O
   return { pullRequest };
 }
 
-async function continuesActiveReviewPreparation(start: Start, ports: ReviewLoopPorts): Promise<boolean> {
+async function continuesReviewPreparation(start: Start, ports: ReviewLoopPorts): Promise<boolean> {
   const { slug, dryRun, isContinue } = start;
   const store = ports.missionStore;
-  let continueReviewPreparation = false;
-  if (store && isContinue && !dryRun) {
-    const loaded = await store.load(missionId(slug));
-    continueReviewPreparation = loaded.kind === 'found' && (loaded.mission.status === 'active' || loaded.mission.status === 'review' && (loaded.mission.reviewPreparationPending === true
-      || integrationRepairNeedsReview(loaded.mission) && currentReviewRound(loaded.mission.review!).subject.revision !== ports.preReview.head()))
-      && Boolean(loaded.mission.review && ['awaiting-review', 'ready-for-next-round'].includes(reviewStatus(loaded.mission.review)));
-  }
-  return continueReviewPreparation;
+  if (!store || !isContinue || dryRun) { return false; }
+  const loaded = await store.load(missionId(slug));
+  if (loaded.kind !== 'found' || !['active', 'review'].includes(loaded.mission.status)) { return false; }
+  const mission = loaded.mission, review = mission.review;
+  if (!review) { return false; }
+  const status = reviewStatus(review);
+  // A recorded response needs the next round even if preparation already entered review.
+  if (status === 'ready-for-next-round') { return true; }
+  return status === 'awaiting-review' && (mission.status === 'active' || mission.reviewPreparationPending === true
+    || integrationRepairNeedsReview(mission) && currentReviewRound(review).subject.revision !== ports.preReview.head());
 }
 
 async function resumePendingRepair(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null, implementer: string, ports: ReviewLoopPorts): Promise<boolean> {

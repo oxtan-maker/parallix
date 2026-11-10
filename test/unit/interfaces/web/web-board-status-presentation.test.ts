@@ -67,10 +67,12 @@ test('recovery and unknown gates disclose explicit facts while failed gates and 
       assert.match(card.getAttribute('style')!, /border-style:solid/);
       assert.match(card.getAttribute('style')!, /border-top-color:#e2604e/);
     }
-    const unknown = Array.from(cards[0].querySelectorAll('details')).find(detail => detail.textContent.includes('gate · unknown'))!;
-    assert.match(unknown.textContent, /gate · unavailable/);
+    const unknown = cards[0].querySelector('[data-gate="unavailable"]')!;
+    assert.equal(unknown.querySelector('svg')!.getAttribute('aria-label'), 'Unknown');
+    assert.equal(unknown.getAttribute('title'), 'Gate evidence could not be observed');
+    assert.match(unknown.textContent, /Gate evidence could not be observed/);
     assert.doesNotMatch(unknown.textContent, /✓|passed/);
-    assert.match(cards[1].textContent, /gate ✗ FAIL/);
+    assert.equal(cards[1].querySelector('[data-gate="failed"] svg')!.getAttribute('aria-label'), 'Not passing');
     assert.match(html, /repeating-linear-gradient/);
   } finally { await window.happyDOM.close(); }
 });

@@ -198,7 +198,8 @@ async function seedRoot(review: Review): Promise<Harness> {
 async function invokeResume(store: SqliteMissionStore, root: string, actor: string | null, direct = true): Promise<{ cleared: boolean; outcome: string | null }> {
   const adapter = createReviewWorkflowAdapter({
     missionStore: store,
-    operatorResume: bindReviewOperatorResume(store, direct, {}),
+    operatorResume: bindReviewOperatorResume(store, direct, {}, async () => ({ workflow: null,
+      liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
     readReviewStateFn: async () => {
       const loaded = await store.load(missionId(SLUG));
       if (loaded.kind !== 'found' || !loaded.mission.review) { return null; }
@@ -551,7 +552,8 @@ it('retries a persisted operator correction after failed revocation and a databa
       } },
     };
     await new ReviewCommandUseCase(createReviewWorkflowAdapter({
-      missionStore: store, operatorResume: bindReviewOperatorResume(store, true, {}),
+      missionStore: store, operatorResume: bindReviewOperatorResume(store, true, {}, async () => ({ workflow: null,
+        liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
       inferSlugFn: () => SLUG, resolveWorktreeFn: () => root,
       readReviewStateFn: async () => readReviewState(SLUG, root, store), reviewLoopMechanisms: () => ports,
       log: () => {}, error: message => { errors.push(message); }, exit: code => { entryExits.push(code); },

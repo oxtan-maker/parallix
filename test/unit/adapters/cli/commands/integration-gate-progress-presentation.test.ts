@@ -7,6 +7,7 @@ import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import { runPhaseGates } from '../../../../../src/adapters/config/repository-gates.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 
 const git = mockModule<typeof import('../../../../../src/adapters/git/git.js')>('../../../../../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../../../../../src/adapters/filesystem/mission-utils.js')>('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -16,6 +17,7 @@ const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands
 const verification = mockModule<typeof import('../../../../../src/adapters/verification/verification.js')>('../../../../../src/adapters/verification/verification.js', import.meta.url);
 const composition = mockModule<typeof import('../../../../../src/composition/application-services.js')>('../../../../../src/composition/application-services.js', import.meta.url);
 const post = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate-post.js')>('../../../../../src/adapters/cli/commands/integrate-post.js', import.meta.url);
+const executionContext = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 const integrateModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 const integrate = integrateModule.default;
@@ -99,6 +101,12 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
   mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);
   mock.method(missionUtils, 'resolveMissionBaseBranch', () => 'main');
   mock.method(missionUtils, 'resolveWorktree', () => root);
+  // Composition resolves the checkouts from Mission identity; this fixture keeps the
+  // mission checkout and receiving base on the same temporary root.
+  mock.method(executionContext, 'resolveMissionExecutionContext', (id: string) => ({
+    ok: true as const,
+    context: missionExecutionContext({ missionId: id, missionWorktree: root, baseWorktree: root, baseBranch: 'main' }),
+  }));
   mock.method(missionUtils, 'missionBranchName', () => `mission/${slug}`);
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: path.join(root, 'backlog', 'tasks', 'task.md') }));
   mock.method(backlog, 'getTaskClassification', () => 'ai_sdlc');

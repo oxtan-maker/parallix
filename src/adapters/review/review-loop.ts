@@ -55,7 +55,7 @@ import { openReviewRound } from './review-round-open.js';
 import { createEvent } from './review-events.js';
 import { RevokeReviewDecisionUseCase } from '../../application/revoke-review-decision-use-case.js';
 import { createGitChangeIdentity } from '../git/change-identity.js';
-import { missionId } from '../../domain/mission.js';
+import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import { dismissProviderApproval } from './review-adapter.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -346,6 +346,13 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
   const { log, error, exit, missionStore, lifecycleService, readState, writeState, fetchComments, tokenFor, recordHumanNote } = reviewLoopBindingsForRequest(bindings);
   const { worktree, branch, missionPath, artifactDir, task, key, verbose } = reviewLoopWorkspace(slug, target, log);
   const providerEnabled = (bindings.isProviderEnabled ?? isProviderEnabled)(worktree);
+  const hasNoBacklogMirror = async () => {
+    if (missionStore) {
+      const loaded = await missionStore.load(missionId(slug));
+      if (loaded.kind === 'found') { return backlogMirrorOwnership(loaded.mission).kind === 'none'; }
+    }
+    return backlogMirrorOwnership({ id: missionId(slug), waveParentId: null }).kind === 'none';
+  };
   const artifactOptions = (state?: ReviewLoopState) => ({ worktree, tmpDir: artifactDir, buildMetadataFooterFn: buildMetadataFooter, forgejoEnabled: providerEnabled, log, error, ...(state ? { currentState: state } : {}) });
   return {
     branch,
@@ -376,8 +383,12 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       implementer: () => (task.ok ? getTaskImplementer(task.taskFile!) || null : null),
       status: () => (task.ok ? getTaskStatus(task.taskFile!) : null),
       reportUnresolved: () => reportTaskResolution(task, slug, error),
-      mirror: async (lane, implementer) => { await transitionTask(slug, lane, { ...(implementer ? { implementer } : {}), rootDir: worktree, log }); },
-      mirrorApproved: async () => { await transitionVirtual(transitionTask, slug, 'approved', { log }); },
+      mirror: async (lane, implementer) => {
+        if (!await hasNoBacklogMirror()) { await transitionTask(slug, lane, { ...(implementer ? { implementer } : {}), rootDir: worktree, log }); }
+      },
+      mirrorApproved: async () => {
+        if (!await hasNoBacklogMirror()) { await transitionVirtual(transitionTask, slug, 'approved', { log }); }
+      },
       assign: implementer => Boolean(task.ok && enforceTaskAssignee(task.taskFile!, implementer)),
     },
     reviewPreparation: bindings.performReviewPreparationFn

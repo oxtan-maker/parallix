@@ -10,6 +10,7 @@ import type {
   IntegrationGateEvidence,
   IntegrationGateOutcome,
   MissionGateEvidence,
+  RunningIntegrationGate,
 } from '../../application/ports/gate-evidence.js';
 import { listRecoveryEvidence } from '../../application/recovery-evidence.js';
 import type { RecoveryFileSystem } from '../../application/recovery-evidence-types.js';
@@ -36,6 +37,8 @@ export interface VerificationGateEvidenceOptions {
   readonly resolveWorktree: (_missionId: MissionId) => string | null;
   /** Integration validation history; null when no operator database is open. */
   readonly integrationValidation: IntegrationValidationRead | null;
+  /** Composition-owned process liveness for process-owned integration dry-runs. */
+  readonly isProcessAlive?: (_pid: number, _startId: string | null) => boolean | null;
   readonly recoveryFileSystem?: RecoveryFileSystem;
 }
 
@@ -88,12 +91,20 @@ function outcomeOfRun(gate: { key: string; command: string }, checkout: Extract<
     failure: observed.exitCode !== 0 ? { ...result, exitCode: observed.exitCode } : null };
 }
 
+/**
+ * Workflow-owned runs belong to their executing operation. A process-owned
+ * `px integrate --dry-run` has no operation, so its recorded executor identity
+ * must still be live. Neither path depends on an optional concurrency lease.
+ */
 function runningAttempt(run: IntegrationGateRun | null, operation: Pick<WorkflowOperation, 'id' | 'generation' | 'phase'> | null,
-  checkout: Extract<GateCheckout, { kind: 'present' }>) {
+  checkout: Extract<GateCheckout, { kind: 'present' }>, isProcessAlive?: VerificationGateEvidenceOptions['isProcessAlive']): RunningIntegrationGate | null {
+  if (!run || !run.current || run.status !== 'running' || !checkout.clean || run.revision !== checkout.revision) { return null; }
   const attemptKey = operation?.phase === 'executing' ? `${operation.id}:${operation.generation}` : null;
-  return run && run.current && run.status === 'running' && attemptKey !== null && run.attempt === attemptKey
-    && checkout.clean && run.revision === checkout.revision
-    ? { attempt: run.attempt as string, startedAt: run.startedAt } : null;
+  if (run.attempt !== null) { return attemptKey === run.attempt ? { attempt: run.attempt, startedAt: run.startedAt } : null; }
+  if (!run.owner) { return null; }
+  const live = isProcessAlive?.(run.owner.pid, run.owner.startId);
+  if (live === null || live === undefined) { throw new Error('Integration gate executor liveness is unavailable'); }
+  return live ? { attempt: null, startedAt: run.startedAt } : null;
 }
 
 /**
@@ -114,6 +125,12 @@ export class VerificationGateEvidenceReader implements GateEvidenceReader {
     return this._snapshot
       ? this._snapshot.memo(JSON.stringify(['checkout', worktree]), () => readCheckout(worktree, this._snapshot!.git))
       : readCheckout(worktree, this._options.gitRunner);
+  }
+
+  private integrationPlan(worktree: string) {
+    return this._snapshot
+      ? this._snapshot.memo(JSON.stringify(['integration-plan', worktree]), () => loadPhaseGates(worktree, 'preIntegration'))
+      : loadPhaseGates(worktree, 'preIntegration');
   }
 
   async readDeclaredGates(scope: GateEvidenceScope, commands: readonly string[]): Promise<MissionGateEvidence> {
@@ -158,7 +175,9 @@ export class VerificationGateEvidenceReader implements GateEvidenceReader {
     const worktree = this._options.resolveWorktree(scope.missionId);
     if (!worktree) { return { checkout: { kind: 'absent' }, configured: [], gates: [], running: null }; }
     const checkout = this.checkout(worktree);
-    const configured = loadPhaseGates(worktree, 'preIntegration');
+    // One validated read: a configuration that cannot be read has no observable
+    // plan, and it must not fall back to the empty plan of the built-in defaults.
+    const configured = this.integrationPlan(worktree);
     if (configured.length === 0) { return { checkout, configured: [], gates: [], running: null }; }
     if (!this._options.integrationValidation) { throw new Error('Integration validation history is unavailable'); }
     const run = readIntegrationGateRun(worktree, this._options.configuration, this._snapshot);
@@ -170,7 +189,7 @@ export class VerificationGateEvidenceReader implements GateEvidenceReader {
     const markerCarried = Boolean(marker && checkout.clean && marker.sha !== checkout.revision
       && completedRebaseLineageForCheckout(worktree, marker.sha, checkout.revision, this._snapshot?.git ?? this._options.gitRunner));
     const gates = configured.map(gate => integrationOutcome(gate, checkout, run, marker, markerCarried));
-    const running = runningAttempt(run, operation, checkout);
+    const running = runningAttempt(run, operation, checkout, this._options.isProcessAlive);
     return { checkout, configured: configured.map(gate => gate.key), gates, running };
   }
 }

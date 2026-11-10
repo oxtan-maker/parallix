@@ -1,4 +1,5 @@
 import { classifyRecoveryReason as classifyReboundReason } from './rebound-classification.js';
+import type { AgentLaunchResult } from './ports/agent-launch-result.js';
 import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
 export type { ReboundLaunchOptions, ReboundStartAgent } from './ports/repair-agent-launch.js';
 import { prepareRepairPrompt, readRepairCheckpointBlocker, recordConsumedRepairAttempts, runCheckpointVerification } from './rebound-checkpoints.js';
@@ -114,7 +115,7 @@ export interface ReboundContext {
   /** Moves the task back to the implementer phase before a launch. */
   transitionToImplementer?: (_slug: string) => Promise<unknown> | unknown;
   /** Resolves the agent actually launched (fallback selection). */
-  applyAgentFallback?: (_options: { launchResult: Awaited<ReturnType<ReboundStartAgent>>; original: string }) => Promise<string> | string;
+  applyAgentFallback?: (_options: { launchResult: AgentLaunchResult | null | undefined; original: string }) => Promise<string> | string;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
 }
@@ -477,7 +478,7 @@ async function launchFixAttempt(options: {
   const { startAgent, applyAgentFallback, fixPrompt, slug, worktree, step = 'act-on-review', role = 'implementer', exclude = [], sessionPolicy } = options;
   let implementer = options.implementer;
   const none = { provider: null, model: null };
-  let launchResult: Awaited<ReturnType<ReboundStartAgent>>;
+  let launchResult: AgentLaunchResult | null | undefined;
   try {
     launchResult = await startAgent(step, {
       agent: implementer,

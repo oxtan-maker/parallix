@@ -352,7 +352,7 @@ describe("Consumer-to-domain requirements", () => {
   //
   // These tests fail if a consumer family disappears from the mapping, if a
   // mapping entry names a concept that `src/domain` does not export, if a cited
-  // `file:line` no longer exists or no longer contains the cited anchor, or if
+  // file no longer exists or no longer contains the cited anchor, or if
   // the recorded `Attempt` branch decision stops matching its own evidence.
   //
   // Everything here reads checked source from disk. No Forgejo call, no agent
@@ -373,11 +373,13 @@ describe("Consumer-to-domain requirements", () => {
     return names;
   }
 
-  function sourceLine(fileLocation: string, line: number): string | null {
+  function citationDrift(label: string, fileLocation: string, anchor: string): string | null {
     const full = path.join(ROOT, fileLocation);
-    if (!fs.existsSync(full)) { return null; }
-    const lines = fs.readFileSync(full, 'utf8').split('\n');
-    return line >= 1 && line <= lines.length ? (lines[line - 1] as string) : null;
+    if (!fs.existsSync(full)) { return `${label}: ${fileLocation} does not exist`; }
+    const source = fs.readFileSync(full, 'utf8');
+    return source.includes(anchor)
+      ? null
+      : `${label}: ${fileLocation} no longer contains ${JSON.stringify(anchor)}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -442,7 +444,7 @@ describe("Consumer-to-domain requirements", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // SC3: every cited file:line resolves, and the cited line still matches
+  // SC3: every cited file resolves, and the anchor still matches
   // ---------------------------------------------------------------------------
 
   test('SC3: every consumer fileLocation resolves to an existing file', () => {
@@ -456,29 +458,21 @@ describe("Consumer-to-domain requirements", () => {
     );
   });
 
-  test('SC3: every consumer citation points at a line containing its anchor', () => {
+  test('SC3: every consumer citation names a file containing its anchor', () => {
     const drifted: string[] = [];
     for (const entry of CONSUMER_DOMAIN_REQUIREMENTS) {
-      const line = sourceLine(entry.fileLocation, entry.line);
-      if (line === null) {
-        drifted.push(`${entry.id}: ${entry.fileLocation}:${entry.line} is out of range`);
-        continue;
-      }
-      if (!line.includes(entry.anchor)) {
-        drifted.push(
-          `${entry.id}: ${entry.fileLocation}:${entry.line} no longer contains ${JSON.stringify(entry.anchor)}; found ${JSON.stringify(line.trim())}`,
-        );
-      }
+      const issue = citationDrift(entry.id, entry.fileLocation, entry.anchor);
+      if (issue !== null) { drifted.push(issue); }
     }
     assert.deepEqual(drifted, [], `Stale consumer citations:\n${drifted.join('\n')}`);
   });
 
-  test('SC3 detector bites: a wrong line number is reported as drift', () => {
+  test('SC3 detector bites: a missing citation anchor is reported (TASK-2846.05)', () => {
     const entry = CONSUMER_DOMAIN_REQUIREMENTS[0];
-    const wrongLine = sourceLine(entry.fileLocation, entry.line + 1);
-    assert.ok(
-      wrongLine === null || !wrongLine.includes(entry.anchor),
-      'The anchor check must not pass for a neighbouring line, or it proves nothing',
+    const missingAnchor = `${entry.anchor}__missing`;
+    assert.equal(
+      citationDrift(entry.id, entry.fileLocation, missingAnchor),
+      `${entry.id}: ${entry.fileLocation} no longer contains ${JSON.stringify(missingAnchor)}`,
     );
   });
 

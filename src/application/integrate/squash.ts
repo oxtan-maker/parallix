@@ -10,7 +10,7 @@ import type { ParallixConfiguration } from '../ports/configuration.js';
 import path from 'node:path';
 import * as fmt from '../presentation/cli-format.js';
 import { rebound } from '../rebound-kernel.js';
-import { abortWith, resolveBounceImplementer, type BounceSeams } from './support.js';
+import { abortWith, projectBacklogTransition, resolveBounceImplementer, type BounceSeams } from './support.js';
 import { missionId } from '../../domain/mission.js';
 import { prepareBacklogPayload } from './backlog-payload.js';
 import { completeLandedCloseout } from './landed-closeout.js';
@@ -227,7 +227,7 @@ class SquashLanding {
         },
         // This repair completes the pending integration commit; it does not
         // return the reviewed mission to implementation.
-        transitionToImplementer: (bounceSlug: string) => seams.transitionTaskFn(bounceSlug, 'ready-for-integration'),
+        transitionToImplementer: (bounceSlug: string) => projectBacklogTransition(context.mirrorOwnership, seams.transitionTaskFn, bounceSlug, 'ready-for-integration'),
         applyAgentFallback: ({ launchResult, original }) => seams.applyAgentFallbackFn({
           launchResult,
           original,
@@ -253,7 +253,7 @@ class SquashLanding {
   }
 
   async squashAndLand(run: LandingRun, { branch, summary, landedFromSha, mainTaskFile }: { branch: string, summary: string, landedFromSha: string, mainTaskFile: string }) {
-    const { slug, baseWorktree, baseBranch } = run;
+    const { slug, baseWorktree, baseBranch, context } = run;
     // A rejected candidate has not crossed the commit boundary.  Reset only the
     // merge state back to HEAD: `--merge` removes the squash-owned index and
     // worktree entries while preserving unrelated local edits in the primary
@@ -300,7 +300,11 @@ class SquashLanding {
         .filter(Boolean),
     );
     let removedStalePaths: Set<string>;
-    try { removedStalePaths = prepareBacklogPayload(this.dependencies.ports, baseWorktree, 'HEAD'); }
+    try {
+      removedStalePaths = context.mirrorOwnership.kind === 'none'
+        ? new Set()
+        : prepareBacklogPayload(this.dependencies.ports, baseWorktree, 'HEAD');
+    }
     catch (error) {
       rejectSquash(`Could not prepare backlog payload: ${(error as Error).message}`, capturePayloadPaths());
       return;

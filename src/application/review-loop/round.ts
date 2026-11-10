@@ -11,8 +11,9 @@ import type { ReviewLoopEvent } from '../ports/review-loop-output.js';
 import { recordImplementerLaunch } from '../rebase-identity.js';
 import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { agentFamily } from '../../domain/agents.js';
+import type { AgentLaunchResult } from '../ports/agent-launch-result.js';
 import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent } from '../rebound-kernel.js';
-import type { ProviderApproval, ReviewAgentLaunchResult, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
+import type { ProviderApproval, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
 
 /** Default per-round relaunch cap. */
 export const DEFAULT_REBOUNDS_PER_ROUND = 6;
@@ -44,7 +45,7 @@ export interface LoopContext {
 /** Round-local scratch; nothing here is persisted. */
 export class ReviewRound {
   used = 0;
-  reviewerLaunch: ReviewAgentLaunchResult | null | undefined;
+  reviewerLaunch: AgentLaunchResult | null | undefined;
   providerApproval: ProviderApproval | undefined;
   reviewBaseline: string | undefined;
   /** True when a repair's verification already re-ran the rebase and gate this round. */
@@ -98,7 +99,7 @@ export class ReviewRound {
  * role's identity for the rest of the loop, so it is persisted before any poll
  * keyed on that identity, and an implementer fallback becomes the task assignee.
  */
-export async function adoptLaunchedAgent(context: LoopContext, role: ReviewRole, original: string, launch: ReviewAgentLaunchResult | null | undefined): Promise<string> {
+export async function adoptLaunchedAgent(context: LoopContext, role: ReviewRole, original: string, launch: AgentLaunchResult | null | undefined): Promise<string> {
   const fallback = launch?.agent;
   if (role === 'implementer' && fallback && fallback !== original && context.ports.missionStore) {
     await recordImplementerLaunch(context.slug, fallback, context.ports.missionStore, context.ports.lifecycle);
@@ -142,7 +143,7 @@ export function reboundCollaborators(context: LoopContext, role: ReviewRole, pro
     slug: context.slug,
     worktree: context.ports.worktree,
     startAgent,
-    applyAgentFallback: async ({ launchResult, original }) => await adoptLaunchedAgent(context, role, original, launchResult as ReviewAgentLaunchResult),
+    applyAgentFallback: async ({ launchResult, original }) => await adoptLaunchedAgent(context, role, original, launchResult),
     readHead: () => context.ports.preReview.head(),
     log: diagnostic => context.emit({ kind: 'recovery-progress', channel: 'log', diagnostic }),
     error: diagnostic => context.emit({ kind: 'recovery-progress', channel: 'error', diagnostic }),

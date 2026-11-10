@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { StatsCommandUseCase } from '../../../src/application/stats-command-use-case.js';
 import { verificationStatistics } from '../../../src/application/projections/verification-statistics.js';
+import { providerResourceObservation } from '../../../src/application/run-history-types.js';
 
 function port(rows: StatsRow[] = [], overrides: Partial<StatsWorkflowPort<StatsRow>> = {}): StatsWorkflowPort<StatsRow> {
   return {
@@ -157,8 +158,8 @@ test('stage accumulation sequences classification, read, merge and write without
   }));
   const result = useCase.accumulateStage({
     slug: 'task-1', stage: 'active', date: '2026-06-23', implementer: 'codex',
-    telemetry: { provider: 'openai', model: 'gpt-old', inputTokens: 20, outputTokens: 7,
-      cachedTokens: 3, thoughtsTokens: 2, totalTokens: 27, toolCalls: 2, usagePercent: 40, cost_usd: 0.3 },
+    telemetry: providerResourceObservation({ provider: 'openai', model: 'gpt-old', inputTokens: 20, outputTokens: 7,
+      cachedTokens: 3, thoughtsTokens: 2, totalTokens: 27, toolCalls: 2, usagePercent: 40, cost_usd: 0.3 }),
     durationMinutes: 3,
   });
   assert.deepEqual(calls, ['classification', 'read', 'write']);
@@ -187,12 +188,12 @@ test('a same-stage model switch keeps both models as separate measurements, neve
       return { changed: true, row, data: { headers: [], rows: stored } }; },
   }));
   const run = (model: string, cost: number, reviewer = 'claude') => useCase.accumulateStage({ slug: 'task-1', stage: 'review', date: '2026-06-23',
-    implementer: 'codex', reviewer, telemetry: { provider: 'anthropic', model, inputTokens: 1, outputTokens: 1, cost_usd: cost } });
+    implementer: 'codex', reviewer, telemetry: providerResourceObservation({ provider: 'anthropic', model, inputTokens: 1, outputTokens: 1, cost_usd: cost }) });
   run('claude-sonnet-5-5', 1); run('claude-opus-5-5', 2); run('claude-opus-5-5', 0.5);
   assert.deepEqual(stored.map(row => [row.model, row.cost_usd]), [['claude-sonnet-5-5', '1'], ['claude-opus-5-5', '2.5']]);
   // A different reviewer on the same stage is a different actor, never merged into the first.
   const other = useCase.accumulateStage({ slug: 'task-1', stage: 'review', date: '2026-06-23', implementer: 'codex', reviewer: 'vibe',
-    telemetry: { provider: 'mistral', model: 'devstral', inputTokens: 1, outputTokens: 1, cost_usd: 4 } });
+    telemetry: providerResourceObservation({ provider: 'mistral', model: 'devstral', inputTokens: 1, outputTokens: 1, cost_usd: 4 }) });
   assert.equal(other.row.reviewer_agent, 'vibe');
   assert.equal(other.row.cost_usd, '4');
   assert.ok(stored.every(row => row.implementer_agent === 'codex'), 'reviewer resources never overwrite the implementer');
@@ -227,7 +228,7 @@ test('stage recording leaves unavailable review measurements unknown (TASK-2818)
 test('missing quota telemetry stays unavailable while recorded zero stays zero (TASK-2818 F1)', () => {
   const useCase = new StatsRecordingUseCase(recordingPort());
   for (const usagePercent of [undefined, NaN, Infinity, -1, 101, 0, 25]) {
-    const result = useCase.recordActive({ slug: 'task-quota', date: '2026-06-23', implementer: 'codex', telemetry: { usagePercent } });
+    const result = useCase.recordActive({ slug: 'task-quota', date: '2026-06-23', implementer: 'codex', telemetry: providerResourceObservation({ usagePercent }) });
     assert.equal(result.row.openai_usage_after, usagePercent === 0 || usagePercent === 25 ? String(usagePercent) : '');
   }
 });

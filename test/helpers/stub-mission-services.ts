@@ -7,6 +7,7 @@ import { missionVersion } from '../../src/application/domain-ports.js';
 import type { ReviewPreparationMissionServices, ReviewPreparationMissionServicesPort } from '../../src/application/ports/review-preparation-workflow.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import { fixtureMission } from '../fixtures/mission-builders.js';
+import { reviewPreparationTransitionValue } from './review-preparation-ports.js';
 
 export function stubMissionServices(overrides: Partial<ReviewPreparationMissionServices> = {}): ReviewPreparationMissionServicesPort {
   return async () => {
@@ -20,7 +21,8 @@ export function stubMissionServices(overrides: Partial<ReviewPreparationMissionS
       },
     },
     checkpoints: { async record() { return { status: 'completed' as const, durableEvidence: [] }; } },
-    lifecycle: { async transition() { return { status: 'completed' as const, durableEvidence: [] }; } },
+    lifecycle: { async transition(request) { return { status: 'completed' as const, durableEvidence: [],
+      value: reviewPreparationTransitionValue(missionVersion((request.expectedVersion ?? 0) + 1), fixtureMission(request.missionId, { status: 'review' })) }; } },
     nel: { async recordNel() { return { status: 'completed' as const, durableEvidence: [] }; } },
     ...overrides,
     };

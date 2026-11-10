@@ -199,9 +199,12 @@ function cpuCost(attempts: readonly VerificationMeasurement[], unknowns?: Set<st
 
 function agentResources(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined, unknowns: Set<string>): VerificationStatistics['agentResources'] {
   const retained = uniqueAgentRuns(input, missions, unknowns);
-  const runs = retained.map(run => ({ runId: run.runId, missionId: run.missionId, role: run.role, family: run.family,
-    model: run.configuredModel ?? run.resources?.provider?.model ?? null,
-    cpu: run.resources?.localProcessTreeCpu ?? null, provider: run.resources?.provider ?? null }));
+  const runs = retained.map(run => {
+    const provider: ProviderResourceObservation | null = run.resources?.provider ?? null;
+    return { runId: run.runId, missionId: run.missionId, role: run.role, family: run.family,
+      model: run.configuredModel ?? provider?.model ?? null,
+      cpu: run.resources?.localProcessTreeCpu ?? null, provider };
+  });
   if (input.runs !== undefined) { diagnoseAgentRuns(retained, unknowns); }
   const cpu = observedCpuCost(runs.flatMap(run => run.cpu ? [run.cpu] : []), unknowns);
   return { ...cpu, runs };

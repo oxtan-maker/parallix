@@ -19,7 +19,7 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 // A plain import keeps the single production-graph instance; declaring it
 // via mockModule would re-link a second instance and split its capacity
 // count from the selectAgent path (task-2431 integration gate).
-import { activeCustomCapacityCount, resetCustomCapacity, tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
+import { activeCustomCapacityCount, tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
 import { FRESH_SESSION_MARKER_PORT } from '../../../src/application/recovery-supervisor.js';
 import { AgentPoolExhaustedError } from '../../../src/domain/agents.js';
 const buildClaudeInvocationModule = mockModule<typeof import('../../../src/adapters/agents/claude.js')>('../../../src/adapters/agents/claude.js', import.meta.url);
@@ -139,7 +139,6 @@ test.after(() => {
 });
 
 test.beforeEach(async () => {
-  await resetCustomCapacity();
   if (process.env.PARALLIX_HOME) {
     fs.writeFileSync(path.join(process.env.PARALLIX_HOME, 'agents.local.json'), '{"blocklist":{}}\n');
   }
@@ -156,13 +155,18 @@ test('custom capacity saturation reports at launch while selection remains eligi
       review: { eligible: ['custom'], selection: 'random' }
     }
   } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
-  const reservation = await tryAcquireCustomCapacity(worktree);
+  const configuration = resolveConfiguration({ ...process.env,
+    PARALLIX_HOME: path.join(worktree, 'operator'),
+    PARALLIX_CUSTOM_ADMISSION_HOME: path.join(worktree, 'admission'),
+    PARALLIX_CUSTOM_ADMISSION_REPOSITORY: worktree });
+  const reservation = await tryAcquireCustomCapacity(worktree, configuration);
   assert.ok(reservation, 'the first custom reservation should acquire the default capacity');
   try {
-    assert.equal(selectAgent('draft', { configuration: resolveConfiguration(process.env), config, worktree }), 'custom');
-    assert.equal(selectAgent('review', { configuration: resolveConfiguration(process.env), config, worktree }), 'custom');
+    assert.equal(selectAgent('draft', { configuration, config, worktree }), 'custom');
+    assert.equal(selectAgent('review', { configuration, config, worktree }), 'custom');
   } finally {
     reservation.release();
+    await clearCustomAdmissionStateCache();
     fs.rmSync(worktree, { recursive: true, force: true });
   }
 });

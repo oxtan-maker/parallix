@@ -1,6 +1,7 @@
 import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import type { Mission } from '../../../src/domain/mission.js';
-import { missionLabels } from '../../../src/domain/mission.js';
+import { missionId, missionLabels } from '../../../src/domain/mission.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 import { fixtureMission, integrateCommandMission, approvedReview, pendingReview, requestedChangesReview } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
@@ -356,8 +357,7 @@ test('buildIntegrationContext reads task file and status from the mission worktr
   });
 
   const context = await buildIntegrationContext('task-2200', {
-    baseBranch: 'main',
-    baseWorktree,
+    executionContext: missionExecutionContext({ missionId: 'task-2200', missionWorktree: worktree, baseWorktree, baseBranch: 'main' }),
     isForgejoReviewEnabledFn: () => false
   });
 
@@ -408,13 +408,39 @@ test('buildIntegrationContext uses Mission lifecycle status, not task-file statu
   });
 
   const context = await buildIntegrationContext('task-2244', {
-    baseBranch: 'main',
-    baseWorktree,
+    executionContext: missionExecutionContext({ missionId: 'task-2244', missionWorktree: worktree, baseWorktree, baseBranch: 'main' }),
     isForgejoReviewEnabledFn: () => false
   });
 
   assert.equal(context.task.taskFile, worktreeTask, 'context.task.taskFile must be the mission worktree task file');
   assert.equal(context.taskStatus, undefined, 'integration must use Mission lifecycle status');
+});
+
+test('buildIntegrationContext treats a persisted wave child as DB-owned without resolving a Backlog mirror (TASK-2847)', async (t) => {
+  const worktree = '/tmp/project-task-2846.02';
+  const baseWorktree = '/tmp/project-main-2846';
+  const child = fixtureMission('task-2846.02', { waveParentId: missionId('task-2846') });
+  const resolveTask = mock.method(backlog, 'resolveTaskFile', () => assert.fail('a DB-owned wave child must not resolve a Backlog task'));
+  const findMissionDir = mock.method(missionUtils, 'findMissionDir', () => null);
+  const currentBranch = mock.method(__mm2, 'getCurrentBranch', () => 'mission/task-2846.02');
+  const git = mock.method(__mm2, 'git', (args: string[]) => ({ signal: null, status: 0,
+    stdout: args.includes('branch') ? 'main\n' : '', stderr: '' }));
+  t.after(() => [resolveTask, findMissionDir, currentBranch, git].forEach(method => method.mock.restore()));
+
+  const context = await buildIntegrationContext('task-2846.02', {
+    executionContext: missionExecutionContext({
+      missionId: 'task-2846.02', missionWorktree: worktree, baseWorktree, baseBranch: 'main',
+    }),
+    isForgejoReviewEnabledFn: () => false,
+    missionStore: {
+      load: async () => ({ kind: 'found' as const, mission: child, version: fixtureVersion(1) }),
+      save: async () => assert.fail('integration context must not write the Mission store'),
+    },
+  });
+
+  assert.deepEqual(context.mirrorOwnership, { kind: 'none', authority: 'mission', reason: 'wave-child' });
+  assert.equal(context.task.ok, false);
+  assert.equal(context.task.reason, 'adhoc mission has no Backlog task');
 });
 
 test('printIntegrationPreflight reads classification from the selected task file, not by re-resolving in the base checkout', (t) => {
@@ -2247,6 +2273,17 @@ test('promoteTaskForIntegrationIfNeeded updates the task file on a real integrat
   } finally {
     fs.rmSync(baseWorktree, { recursive: true, force: true });
   }
+});
+
+test('promoteTaskForIntegrationIfNeeded emits no Backlog write for a DB-owned wave child (TASK-2847)', async () => {
+  const result = await promoteTaskForIntegrationIfNeeded(integrationContext({
+    slug: 'task-2846.02', missionStatus: 'review', promoteBacklogOnCloseout: true,
+    mirrorOwnership: { kind: 'none', authority: 'mission', reason: 'wave-child' },
+    task: { ok: false, reason: 'adhoc mission has no Backlog task', matches: [] },
+  }), {
+    missionServicesFn: async () => assert.fail('no lifecycle reload is needed for an absent mirror'),
+  });
+  assert.deepEqual(result, { changed: false, dryRun: false });
 });
 
 // TASK-2322.07: after the cutover a Mission that has no SQLite aggregate is not

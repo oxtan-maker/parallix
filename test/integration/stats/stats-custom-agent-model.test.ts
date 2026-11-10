@@ -12,6 +12,7 @@ import { stripAnsi } from '../../../src/application/presentation/cli-format.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { loadDefaultMigrations, SqliteMigrationRunner } from '../../../src/adapters/sqlite/migration-runner.js';
 import { closeMeasurementStores } from '../../../src/adapters/sqlite/measurement-store.js';
+import { providerResourceObservation } from '../../../src/application/run-history-types.js';
 
 function createRepoFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2337-fixture-'));
@@ -86,7 +87,7 @@ test('task-2337: recordStageStats records model for custom agent', async () => {
         rootDir: root,
         implementer: 'custom',
         model: 'qwen3.6-27b-q8',
-        telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 },
+        telemetry: providerResourceObservation({ inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }),
         durationMinutes: 5,
       });
       assert.equal(row.model, 'qwen3.6-27b-q8', 'recorded row should have the actual model name, not "custom"');
@@ -129,8 +130,8 @@ test('task-2337: accumulateStageStats preserves model for custom agent', async (
   const dbPath = path.join(root, 'parallix.db');
   try {
     await withStoredClassification(async () => {
-      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }, durationMinutes: 5, dbPath });
-      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: { inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }, durationMinutes: 8, dbPath });
+      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: providerResourceObservation({ inputTokens: 100, outputTokens: 50, cachedTokens: 0, totalTokens: 150, toolCalls: 3, usagePercent: 10 }), durationMinutes: 5, dbPath });
+      stats.accumulateStageStats({ configuration: resolveConfiguration(process.env), slug: 'task-2337', stage: 'active', rootDir: root, implementer: 'custom', model: 'qwen3.6-27b-q8', telemetry: providerResourceObservation({ inputTokens: 200, outputTokens: 100, cachedTokens: 0, totalTokens: 300, toolCalls: 5, usagePercent: 20 }), durationMinutes: 8, dbPath });
       const data = stats.loadMeasurementRows({ configuration: resolveConfiguration(process.env), rootDir: root, dbPath });
       assert.equal(data.rows.length, 1, 'should have exactly one accumulated row');
       assert.equal(data.rows[0].model, 'qwen3.6-27b-q8', 'accumulated row should preserve model name');

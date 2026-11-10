@@ -11,7 +11,7 @@ import { projectActivityPublications } from '../../../fixtures/execution-activit
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test, { mock, describe } from 'node:test';
-import { processStartIdentity, probeProcessLiveness, runNativeStartIdentity, readProcessStat } from '../../../../src/adapters/process/process-liveness.js';
+import { processIdentityForObservation, processStartIdentity, probeProcessLiveness, runNativeStartIdentity, readProcessStat } from '../../../../src/adapters/process/process-liveness.js';
 import type { ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -156,6 +156,13 @@ test('Linux: /proc/<pid>/stat field 22 is the one-pid start identity source', ()
   const stat = '1234 (test) S 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 777';
   mock.method(readProcessStat, 'sync', () => stat);
   assert.equal(processStartIdentity(1234), '777');
+});
+
+test('gate observation retains the executor pid when its start identity is unavailable (PX-0052)', () => {
+  withPlatform('linux', () => {
+    mock.method(readProcessStat, 'sync', () => { throw new Error('unreadable'); });
+    assert.deepEqual(processIdentityForObservation(1234), { pid: 1234, startId: null });
+  });
 });
 
 test('WSL keeps the /proc path rather than the native Windows path', () => {

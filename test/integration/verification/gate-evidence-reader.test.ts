@@ -9,9 +9,10 @@ import { recoveryEvidenceFileSystem } from '../../../src/adapters/filesystem/rec
 import { writeActiveVerificationProof } from '../../../src/adapters/verification/active-verification-proof.js';
 import { VerificationGateEvidenceReader } from '../../../src/adapters/verification/gate-evidence-reader.js';
 import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { VerificationGateObserver } from '../../../src/application/projections/gate-observation.js';
 import { captureRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import { missionId } from '../../../src/domain/mission.js';
+import { intakeMission, missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { initCommittedRepository } from '../../fixtures/git-repository.js';
 
@@ -80,7 +81,8 @@ test('gate evidence reader scopes integration execution to its owning attempt (T
     // The executor's own run record is the only authority for a running plan,
     // and it belongs to the attempt that started it.
     const runConfiguration = { ...configuration, runtime: { ...configuration.runtime, workflowOperation: 'op-9', workflowGeneration: 2 } };
-    const runReader = new VerificationGateEvidenceReader({ configuration: runConfiguration, resolveWorktree: () => root, integrationValidation: async () => marker });
+    const runReader = new VerificationGateEvidenceReader({ configuration: runConfiguration, resolveWorktree: () => root,
+      integrationValidation: async () => marker });
     const runGates = [{ key: 'unit', command: 'true' }, { key: 'docs', command: 'true' }];
     const run = createIntegrationVerificationEvidencePort(runConfiguration).start(root, runGates);
     if (!run) { throw new Error('a configured plan with a matching run must start observable'); }
@@ -99,6 +101,42 @@ test('gate evidence reader scopes integration execution to its owning attempt (T
     fs.writeFileSync(path.join(root, '.git', 'integration-verification-proof.json'), '{malformed');
     await assert.rejects(runReader.readIntegrationGates(scope, null), /evidence is unreadable/);
 
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('a dry-run uses its recorded executor identity as its running authority (PX-0052)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-dry-run-evidence-'));
+  try {
+    initCommittedRepository(root, { 'workflow.config.json': JSON.stringify({ adapters: { gates: { preIntegration: [
+      { key: 'unit', command: 'true', order: 0 },
+    ] } } }) });
+    const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(root, '.git', 'home') });
+    const scope = { repositoryId: repositoryId('px-0052-repository'), missionId: missionId('px-0052-gate') };
+    const gates = [{ key: 'unit', command: 'true' }];
+    const owner = { pid: 42, startId: 'executor-start' };
+    const run = createIntegrationVerificationEvidencePort(configuration, owner).start(root, gates);
+    assert.ok(run, 'the dry-run record starts without a workflow operation');
+    const reader = (active: boolean) => new VerificationGateEvidenceReader({
+      configuration, resolveWorktree: () => root, integrationValidation: async () => null,
+      isProcessAlive: (pid, startId) => pid === owner.pid && startId === owner.startId && active,
+    });
+    const running = await reader(true).readIntegrationGates(scope, null);
+    assert.ok(running.running?.startedAt, 'the live recorded executor makes an unsettled dry-run visible');
+    assert.equal(running.running.attempt, null, 'a dry-run is not mislabeled as a workflow attempt');
+    assert.equal((await reader(false).readIntegrationGates(scope, null)).running, null,
+      'an unsettled record without its live executor is not running');
+    const unknownOwner = { pid: 43, startId: null };
+    const unknown = createIntegrationVerificationEvidencePort(configuration, unknownOwner).start(root, gates);
+    assert.ok(unknown, 'a dry-run still records its executor when the start identity is unavailable');
+    const unreadable = new VerificationGateEvidenceReader({
+      configuration, resolveWorktree: () => root, integrationValidation: async () => null,
+      isProcessAlive: () => null,
+    });
+    await assert.rejects(unreadable.readIntegrationGates(scope, null), /executor liveness is unavailable/,
+      'unknown process identity is unavailable, never silently not-run');
+    unknown.complete([{ ...gates[0], exitCode: 0 }], 'passed');
+    run.complete([{ ...gates[0], exitCode: 0 }], 'passed');
+    assert.equal((await reader(true).readIntegrationGates(scope, null)).running, null, 'a settled run is never running');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -181,7 +219,11 @@ test('board gate inputs are shared per build and refreshed on the next read (TAS
   const originalSpawn = childProcess.spawnSync;
   const originalRead = fs.readFileSync;
   try {
-    const repo = initCommittedRepository(root, { 'src/input.ts': 'export const value = 1;\n' });
+    const configFile = path.join(root, 'workflow.config.json');
+    const repo = initCommittedRepository(root, {
+      'src/input.ts': 'export const value = 1;\n',
+      'workflow.config.json': JSON.stringify({ adapters: { gates: { preIntegration: [{ key: 'unit', command: 'true' }] } } }),
+    });
     const bin = path.join(root, '.git', 'bin');
     fs.mkdirSync(bin);
     const npm = path.join(bin, 'npm');
@@ -190,18 +232,20 @@ test('board gate inputs are shared per build and refreshed on the next read (TAS
     assert.equal(writeActiveVerificationProof('true', root, { configuration }).ok, true);
     let calls: string[][] = [];
     let launcherReads = 0;
+    let configReads = 0;
     t.mock.method(childProcess, 'spawnSync', (...args: Parameters<typeof originalSpawn>) => {
       if (args[0] === 'git') { calls.push(args[1] as string[]); }
       return originalSpawn(...args);
     });
     t.mock.method(fs, 'readFileSync', (...args: Parameters<typeof originalRead>) => {
       if (args[0] === npm) { launcherReads++; }
+      if (args[0] === configFile) { configReads++; }
       return originalRead(...args);
     });
     syncBuiltinESMExports();
     const second = path.join(root, '.git', 'second-checkout');
     repo.git('worktree', 'add', '-b', 'mission/second', second);
-    calls = []; launcherReads = 0;
+    calls = []; launcherReads = 0; configReads = 0;
     const reader = new VerificationGateEvidenceReader({ configuration, resolveWorktree: id => id === 'task-second' ? second : root, integrationValidation: async () => null });
     const beginRead = () => (reader as import('../../../src/application/ports/gate-evidence.js').GateEvidenceReader).beginRead?.();
     const scope = { repositoryId: repositoryId('fixture'), missionId: missionId('task-fixture') };
@@ -214,11 +258,20 @@ test('board gate inputs are shared per build and refreshed on the next read (TAS
     assert.ok(calls.length <= 6, `one input snapshot, not one per mission or command: ${calls.length} Git spawns`);
     assert.equal(calls.filter(args => args.includes('--porcelain')).length, 1, 'checkout and proof identity share status');
     assert.equal(launcherReads, 1, 'one toolchain hash per build');
+    const declaredConfigReads = configReads;
+    const observer = new VerificationGateObserver(reader);
+    for (let index = 0; index < 40; index++) {
+      const mission = { ...intakeMission({ id: missionId(`active-${index}`), repositoryId: scope.repositoryId, title: `Active ${index}` }),
+        status: 'active' as const, declaredGates: ['true'] };
+      await observer.observeGate(mission, null);
+    }
+    assert.equal(configReads - declaredConfigReads, 1,
+      'forty active-card integration observations add one plan read per worktree and build');
     t.diagnostic(`40 mission reads, 2 commands, 1 worktree: ${calls.length} Git spawns and ${launcherReads} npm launcher hash`);
     assert.equal((await reader.readDeclaredGates({ ...scope, missionId: missionId('task-second') }, ['true'])).gates[0].proof.state, 'absent', 'another worktree has a separate input and proof scope');
     assert.equal(launcherReads, 1, 'the toolchain is shared across worktrees within a build');
     fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 2;\n');
-    calls = []; launcherReads = 0;
+    calls = []; launcherReads = 0; configReads = 0;
     beginRead();
     assert.equal((await read()).gates[0].proof.state, 'stale', 'a new build observes dirty inputs');
     assert.equal(calls.filter(args => args.includes('--porcelain')).length, 1);
@@ -251,5 +304,15 @@ test('runtime board benchmark counts the real gate read boundary (TASK-2775)', a
     const forty = await boardBuild(40, root);
     assert.ok(one > 0, 'the benchmark must execute Git instead of stubbing observeGate');
     assert.equal(forty, one, 'shared-checkout gate work is bounded per build');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('an unreadable workflow configuration is unavailable, never an unconfigured plan (PX-0052)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-config-evidence-'));
+  try {
+    initCommittedRepository(root, { 'workflow.config.json': '<<<<<<< HEAD\n{ "adapters": {} }' });
+    const scope = { repositoryId: repositoryId('px-0052-repository'), missionId: missionId('px-0052-gate') };
+    const reader = new VerificationGateEvidenceReader({ resolveWorktree: () => root, integrationValidation: async () => null });
+    await assert.rejects(reader.readIntegrationGates(scope, null), /Workflow configuration .* is unreadable/);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

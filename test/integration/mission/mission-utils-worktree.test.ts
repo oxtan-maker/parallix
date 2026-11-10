@@ -289,7 +289,10 @@ test('resolveWorktree walks up when git reports the git dir as the main worktree
   const resolved = resolveWorktree('task-132', {
     cwd: '/tmp/repo-task-132',
     gitFn: args => {
-      if (args[0] === 'worktree') {return { signal: null,  status: 0, stdout: worktreeList, stderr: '' };}
+      if (args[2] === 'worktree') {
+        assert.deepEqual(args, ['-C', '/tmp/repo-task-132', 'worktree', 'list', '--porcelain']);
+        return { signal: null,  status: 0, stdout: worktreeList, stderr: '' };
+      }
       assert.deepEqual(args.slice(2), ['rev-parse', '--is-inside-work-tree']);
       const dir = args[1];
       return { signal: null,  status: 0, stdout: `${dir === '/tmp/repo-task-132'}\n`, stderr: '' };

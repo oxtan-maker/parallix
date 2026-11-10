@@ -326,7 +326,8 @@ function isSpuriousVibeExit(result: AgentProcessResult) {
   if (!result || result.status !== 1 || result.signal || result.error) {return false;}
   if (!result.telemetryFresh) {return false;}
   const t = result.telemetry;
-  return Boolean(t && ((t.totalTokens || 0) > 0 || (t.inputTokens || 0) > 0 || (t.outputTokens || 0) > 0));
+  const positive = (key: string) => typeof t?.[key] === 'number' && t[key] > 0;
+  return positive('totalTokens') || positive('inputTokens') || positive('outputTokens');
 }
 
 export {

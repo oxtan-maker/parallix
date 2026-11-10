@@ -219,7 +219,7 @@ function persistedReviewerOutcome(state: LoopContext['state'], persisted: Awaite
 }
 
 /** A retried child can close readiness by submitting its accepted verdict. */
-async function reviewerRecoveryOutput(context: LoopContext, launch?: import('../ports/review-round.js').ReviewAgentLaunchResult | null) {
+async function reviewerRecoveryOutput(context: LoopContext, launch?: import('../ports/agent-launch-result.js').AgentLaunchResult | null) {
   const accepted = persistedReviewerOutcome(context.state, await context.ports.state.read());
   if (accepted) {
     return { artifacts: { consumed: true, ok: true, reviewState: accepted } satisfies ReviewerArtifactFacts };

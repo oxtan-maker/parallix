@@ -1,6 +1,7 @@
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 // Historical regression provenance: TASK-2500.
 // Behavior-owned suite (TASK-2622.09): integration mode capability dispatch (local, github-publish,
@@ -33,6 +34,7 @@ mockModule('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 mockModule('../../../src/adapters/github/github-pr.js', import.meta.url);
 mockModule('../../../src/adapters/verification/verification.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
+mockModule('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 await installModuleMocks();
 const { INTEGRATION_OPERATIONS } = await import('../../../src/application/ports/integration-strategy.js');
 const { createIntegrationStrategy } = await import('../../../src/application/services/integration-dispatch.js');
@@ -236,7 +238,7 @@ describe("integration recorded contract", () => {
     test(`integration ${recorded ? 'accepts a recorded brief without files' : 'explains how to recover a missing historical contract'}`, async () => {
       const { ports, searches } = fixture();
       const context = await createIntegrationContextBuilder(ports).buildIntegrationContext('task-2543', {
-        baseBranch: 'main', baseWorktree: '/base',
+        executionContext: missionExecutionContext({ missionId: 'task-2543', baseBranch: 'main', baseWorktree: '/base', missionWorktree: '/mission' }),
       });
       assert.equal(context.area, 'all', 'missing mission files must not narrow verification to docs');
       const lines: string[] = [];
@@ -409,6 +411,7 @@ describe("integrate mode dispatch", () => {
   const github = mockModule<typeof import('../../../src/adapters/github/github-pr.js')>('../../../src/adapters/github/github-pr.js', import.meta.url);
   const verification = mockModule<typeof import('../../../src/adapters/verification/verification.js')>('../../../src/adapters/verification/verification.js', import.meta.url);
   const integrate = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
+  const executionContext = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 
   const SLUG = 'task-2500-mode';
   const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
@@ -496,6 +499,12 @@ describe("integrate mode dispatch", () => {
     mock.method(github, 'submitOrObserveGithubPr', () => ({ kind: 'pending' as const, number: 1, base: 'main' }));
     mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root } }));
     mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
+    // The fixture root is a stand-in repository, not a registered git worktree, so
+    // the resolver is doubled: this root is both the Mission checkout and the receiving base.
+    mock.method(executionContext, 'resolveMissionExecutionContext', (id: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: id, missionWorktree: root, baseWorktree: root, baseBranch: 'main' }),
+    }));
     mock.method(process, 'cwd', () => root);
     let exitCode: number | undefined;
     mock.method(process, 'exit', (code?: number) => { exitCode = code; });

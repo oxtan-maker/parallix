@@ -428,6 +428,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   await operations.insert({ id: 'fixture-review', repositoryId: repositoryId('repo'), missionId: missionId(slug),
     requestKey: 'fixture-review', command: 'review:submit', generation: 1, phase: 'executing', providerStarted: false,
     agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
+    operatorInvocation: true, invocation: { command: 'review', args: [slug], interactive: false },
     owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
   const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
   pinChildCli(entry, { nodeArgs: [...pxNodeArgs({ entry, loader }, []).slice(0, -1), ...(loader ? [

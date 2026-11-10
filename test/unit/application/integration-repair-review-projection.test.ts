@@ -1,4 +1,5 @@
 import { workflowEligible } from '../../../src/domain/workflow-command-policy.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { replaceCurrentRound } from '../../../src/domain/review.js';
 import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 /**
@@ -390,7 +391,7 @@ for (const fault of ['missing', 'other-baseline', 'missing-baseline'] as const) 
     } };
     const seams = { ...integrationBounceSeams({ transitionTaskFn: () => { mirrors++; } }),
       routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair launch'); } };
-    await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports, seams,
+    await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports, missionExecutionContext({ missionId: 'task-2620' }), seams,
       { realAgent: 'codex', realAgentModel: 'operator-model' }), { name: 'IntegrationStopsForHuman' });
     assert.equal(runs, 1); assert.equal(mirrors, 1); assert.equal(s.store.mission().status, 'integration');
   });
@@ -429,7 +430,8 @@ test('restart resumes rebased validated repair without rerunning its gates (PX-0
   const services = { ...s.services, operationalHistory: { loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async () => { recorded++; } } };
   const seams = { ...integrationBounceSeams({ transitionTaskFn: () => { mirrors++; } }),
     routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair launch'); } };
-  await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports, seams,
+  await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports,
+    missionExecutionContext({ missionId: 'task-2620' }), seams,
     { realAgent: null, realAgentModel: null }), { name: 'IntegrationStopsForHuman' });
   assert.deepEqual({ runs, recorded, mirrors }, { runs: 0, recorded: 0, mirrors: 1 }, 'reuse is neither a gate execution nor a new validation record');
   assert.equal(s.store.mission().status, 'integration');
@@ -477,7 +479,7 @@ for (const fault of ['missing-evidence', 'blocker'] as const) {
         authorizedGates: [], authorizedCriteria: [], attempt: 1, verified: false, evidenceRecorded: fault !== 'missing-evidence',
         ...(fault === 'blocker' ? { blocker: { command: 'verify', diagnostic: 'locked contract needs correction', authorityReason: 'operator owns the contract', proposedCorrection: 'operator corrects the contract' } } : {}) } }] });
     const seams = { ...integrationBounceSeams(), routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
-    await assert.rejects(resumePendingIntegrationRepair('task-2620', s.services, stubIntegrateWorkflowPorts(), seams,
+    await assert.rejects(resumePendingIntegrationRepair('task-2620', s.services, stubIntegrateWorkflowPorts(), missionExecutionContext({ missionId: 'task-2620' }), seams,
       { realAgent: null, realAgentModel: null }), fault === 'blocker' ? /locked contract/ : /checkpoint evidence is missing/);
     assert.equal(s.store.events.length, 0);
   });
@@ -663,7 +665,7 @@ for (const status of ['active', 'review'] as const) {
     const { ports: execution } = makeExecutePorts({ missionTransitions: s.store,
       agentExecution: { select: unexpected, prepare: unexpected, launch: unexpected },
       reviewPreparationExecution: { run: unexpected, repairHygiene: unexpected }, autonomousReview: { start: unexpected },
-      integrationRepair: { resume: async slug => { const result = await certifyPendingIntegrationRepair(slug, services, ports); return result?.outcome === 'retained' ? 'retained' : 'blocked'; } },
+      integrationRepair: { resume: async slug => { const result = await certifyPendingIntegrationRepair(slug, services, ports, missionExecutionContext({ missionId: slug })); return result?.outcome === 'retained' ? 'retained' : 'blocked'; } },
     });
     const before = s.store.mission();
     const card = projectMissionCard(before, { latestGate: 'unconfigured', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
@@ -693,3 +695,221 @@ test('post-execute continuation settles retained approval before begin-review-pr
     continueIntegrationRepair: async () => true, beginReviewPreparation: unexpected });
   assert.equal(result, true);
 });
+
+import type { IntegrationRepairContinuationPort } from '../../../src/application/ports/integration-records.js';
+
+async function pendingExecution(options: { samePatch?: boolean } = {}) {
+  const s = retentionScenario();
+  const marker = (await s.evidence.validation('task-2620'))!;
+  s.evidence.validation = async () => null;
+  if (options.samePatch === false) { s.evidence.samePatch = async () => false; }
+  const effects: string[] = [];
+  const integration = stubIntegrateWorkflowPorts({
+    process: { cwd: () => '/fixture' },
+    missionPaths: { resolveWorktree: () => '/fixture', resolveMissionBaseBranch: () => 'main', resolveBaseWorktree: () => '/fixture', missionBranchName: () => 'mission/task-2620' },
+    git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
+    gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
+      loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { effects.push('verify'); return { ok: true }; } },
+  });
+  const services = { ...s.services, operationalHistory: { loadLatestByTypeForMission: async () => null,
+    recordIntegrationValidation: async () => { s.evidence.validation = async () => marker; } } };
+  // Same outcome mapping as src/composition/integration-repair-continuation.ts.
+  const resume = async (slug: string) => { const result = await certifyPendingIntegrationRepair(slug, services, integration,
+    missionExecutionContext({ missionId: slug, missionWorktree: '/fixture', baseWorktree: '/fixture' }));
+    return !result || result.outcome === 'not-pending' ? 'none' as const : result.outcome; };
+  return { s, effects, resume };
+}
+
+function reviewOnlyPorts(resume: IntegrationRepairContinuationPort['resume'] | undefined, calls: string[], logs?: string[]) {
+  const unexpected = async () => assert.fail('a pending repair never launches another execute agent');
+  return makeExecutePorts({
+    agentExecution: { select: unexpected, prepare: unexpected, launch: unexpected },
+    checkpointValidation: { validateBeforeReviewPreparation: async () => { calls.push('checkpoints'); return { ok: true as const }; } },
+    reviewPreparationExecution: { run: async request => { calls.push(`review-preparation:${request.agent}`); return { ok: true as const }; }, repairHygiene: unexpected },
+    autonomousReview: { start: async request => { calls.push(`review:${request.implementer}`); } },
+    ...(logs ? { output: { log: (message: string) => { logs.push(message); } } } : {}),
+    ...(resume ? { integrationRepair: { resume } } : {}),
+  }).ports;
+}
+
+test('execute sends a changed integration repair to fresh review without an execute agent (PX-0041.02)', async () => {
+  const { s, effects, resume } = await pendingExecution({ samePatch: false });
+  const calls: string[] = [];
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(resume, calls), missionTransitions: s.store })
+    .execute({ operationId: 'changed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.equal(result.value?.agent, IMPLEMENTER, 'the recorded implementer answers the fresh review');
+  assert.deepEqual(effects, ['verify'], 'certification runs once before review entry');
+  assert.deepEqual(calls, ['checkpoints', `review-preparation:${IMPLEMENTER}`, `review:${IMPLEMENTER}`]);
+  const after = s.store.mission();
+  assert.equal(after.review!.rounds[0].decision?.kind === 'approved' && after.review!.rounds[0].decision.revocation?.cause?.kind, 'integration-gate-failure');
+  assert.equal(currentReviewRound(after.review!).decision, null, 'the changed code waits for a fresh decision');
+});
+
+test('execute keeps the recorded implementer for a changed repair when the caller named another family (PX-0041.02)', async () => {
+  const { s, resume } = await pendingExecution({ samePatch: false });
+  const calls: string[] = [];
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(resume, calls), missionTransitions: s.store })
+    .execute({ operationId: 'changed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']), agent: agentFamily('claude') });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.equal(result.value?.agent, IMPLEMENTER, 'the continuation, not the requested family, decides who answers');
+  assert.deepEqual(calls, ['checkpoints', `review-preparation:${IMPLEMENTER}`, `review:${IMPLEMENTER}`], 'the requested family never prepares or reviews');
+  assert.equal(currentReviewRound(s.store.mission().review!).decision, null);
+});
+
+test('execute observes cancellation after a changed repair before review entry (PX-0041.02)', async () => {
+  const { s, resume } = await pendingExecution({ samePatch: false });
+  const calls: string[] = [];
+  const cancellation = { requested: false };
+  const ports = reviewOnlyPorts(async slug => { const outcome = await resume(slug); cancellation.requested = true; return outcome; }, calls);
+  const result = await new ExecuteMissionService({ ...ports, missionTransitions: s.store })
+    .execute({ operationId: 'changed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']), cancellation });
+  assert.equal(result.status, 'cancelled');
+  assert.deepEqual(result.durableEvidence.map(item => item.id), ['task-2620:approval-retention'], 'the accepted revocation is reported, not rolled back');
+  assert.deepEqual(calls, []);
+  assert.equal(currentReviewRound(s.store.mission().review!).decision, null);
+});
+
+test('execute hands off a repair a concurrent controller settled without selecting an agent (PX-0041.02)', async () => {
+  const { s } = await pendingExecution();
+  const calls: string[] = [];
+  // Another controller retained the approval and left the repair lane while this caller certified.
+  const settledByOther = async (id: string) => {
+    const loaded = await s.store.load(missionId(id));
+    if (loaded.kind !== 'found') { assert.fail('the pending repair must exist before the concurrent retention'); }
+    await s.store.save({ ...loaded.mission, status: 'integration' } as Mission);
+    return 'none' as const;
+  };
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(settledByOther, calls), missionTransitions: s.store })
+    .execute({ operationId: 'settled-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(calls, [], 'a settled repair launches no execute agent and enters no review');
+  assert.equal(s.store.mission().status, 'integration');
+  assert.deepEqual(currentReviewRound(s.store.mission().review!).decision, currentReviewRound(s.active.review!).decision,
+    'the retained judgment is not revoked again');
+});
+
+test('execute answers the fresh round a concurrent controller opened for changed repair code (PX-0041.02)', async () => {
+  const { s, effects, resume } = await pendingExecution({ samePatch: false });
+  const calls: string[] = [];
+  // The other controller certified first: the approval is revoked and the round is undecided, so
+  // this caller sees none while the post-effect state still owes a fresh review.
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(async id => { await resume(id); return 'none' as const; }, calls), missionTransitions: s.store })
+    .execute({ operationId: 'concurrent-changed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(effects, ['verify'], 'certification runs once, by the controller that settled it');
+  assert.deepEqual(calls, ['checkpoints', `review-preparation:${IMPLEMENTER}`, `review:${IMPLEMENTER}`], 'the opened round is answered by the recorded implementer');
+  assert.equal(currentReviewRound(s.store.mission().review!).decision, null);
+});
+
+test('execute treats a repair obligation a concurrent controller closed as ordinary work, not a handoff (PX-0041.02)', async () => {
+  const { s } = await pendingExecution();
+  const calls: string[] = [];
+  // The other controller settled the repair and the operator returned the mission to refined, so
+  // the post-effect state owes neither a retained handoff nor a fresh review.
+  const settledByOther = async (id: string) => {
+    const loaded = await s.store.load(missionId(id));
+    if (loaded.kind !== 'found') { assert.fail('the pending repair must exist before the concurrent retention'); }
+    await s.store.save({ ...loaded.mission, status: 'refined' } as Mission);
+    return 'none' as const;
+  };
+  const ports = makeExecutePorts({
+    agentExecution: { select: async () => { calls.push('select'); return null; } },
+    integrationRepair: { resume: settledByOther },
+  }).ports;
+  const result = await new ExecuteMissionService({ ...ports, missionTransitions: s.store })
+    .execute({ operationId: 'closed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.deepEqual(calls, ['select'], 'a closed repair obligation reaches normal agent selection');
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.message, 'Could not select an execute agent.',
+    'the closed obligation is not reported as a retained approval or as a blocker');
+  assert.deepEqual(result.durableEvidence, [], 'no approval-retention evidence is invented for a closed obligation');
+});
+
+test('execute hands off when the continuation lost the CAS but another controller retained the approval (PX-0041.02)', async () => {
+  const { s, effects, resume } = await pendingExecution();
+  const calls: string[] = [];
+  const logs: string[] = [];
+  // The competing controller won the CAS and wrote its retention; this caller only reports its own loss.
+  const settledByOther = async (id: string) => { await resume(id); return 'blocked' as const; };
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(settledByOther, calls, logs), missionTransitions: s.store })
+    .execute({ operationId: 'cas-loser-settled-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(effects, ['verify'], 'certification ran once, by the controller that settled the repair');
+  assert.deepEqual(calls, [], 'a CAS loser launches no execute agent for a repair another controller settled');
+  assert.match(logs.join('\n'), /Original approval retained .* human px integrate .* is required to land/);
+  assert.equal(s.store.mission().status, 'integration');
+});
+
+test('execute reports a repair a competing controller already landed without a second px integrate (PX-0041.02)', async () => {
+  const { s } = await pendingExecution();
+  const calls: string[] = [];
+  const logs: string[] = [];
+  const landedByOther = async (id: string) => {
+    const loaded = await s.store.load(missionId(id));
+    if (loaded.kind !== 'found') { assert.fail('the pending repair must exist before the competing landing'); }
+    await s.store.save({ ...loaded.mission, status: 'done', closedAt: '2026-09-20T12:00:00Z' });
+    return 'none' as const;
+  };
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(landedByOther, calls, logs), missionTransitions: s.store })
+    .execute({ operationId: 'landed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(calls, [], 'a landed Mission owes no execute agent and no fresh review');
+  assert.match(logs.join('\n'), /already landed; no review, launch or px integrate is owed/);
+  assert.doesNotMatch(logs.join('\n'), /human px integrate .* is required to land/, 'a landed Mission is not told to land again');
+  assert.deepEqual(result.durableEvidence.map(item => item.id), ['task-2620:integration-repair-landed']);
+  assert.equal(s.store.mission().status, 'done');
+});
+
+test('execute answers the fresh review a competing controller opened when this caller lost the CAS (PX-0041.02)', async () => {
+  const { s, effects, resume } = await pendingExecution({ samePatch: false });
+  const calls: string[] = [];
+  // The winner revoked the approval and opened the round; this caller only reports its own CAS loss.
+  const loser = async (id: string) => { await resume(id); return 'blocked' as const; };
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(loser, calls), missionTransitions: s.store })
+    .execute({ operationId: 'cas-loser-changed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(effects, ['verify'], 'certification ran once, by the controller that revoked the approval');
+  assert.deepEqual(calls, ['checkpoints', `review-preparation:${IMPLEMENTER}`, `review:${IMPLEMENTER}`],
+    'the opened round is answered by the recorded implementer, not reported as an unproven blocker');
+  assert.equal(currentReviewRound(s.store.mission().review!).decision, null, 'the fresh review stays undecided for the reviewer');
+});
+
+test('execute reports a repair a competing controller landed during a retained continuation (PX-0041.02)', async () => {
+  const { s, effects, resume } = await pendingExecution();
+  const calls: string[] = [];
+  const logs: string[] = [];
+  const landedDuringRetention = async (id: string) => {
+    const outcome = await resume(id);
+    const loaded = await s.store.load(missionId(id));
+    if (loaded.kind !== 'found') { assert.fail('the retained repair must exist before the competing landing'); }
+    await s.store.save({ ...loaded.mission, status: 'done', closedAt: '2026-09-20T12:00:00Z' });
+    return outcome;
+  };
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(landedDuringRetention, calls, logs), missionTransitions: s.store })
+    .execute({ operationId: 'landed-during-retention', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'completed', JSON.stringify(result));
+  assert.deepEqual(effects, ['verify'], 'certification ran once and certified the retention');
+  assert.deepEqual(calls, [], 'a landed Mission owes no execute agent and no fresh review');
+  assert.match(logs.join('\n'), /already landed; no review, launch or px integrate is owed/);
+  assert.doesNotMatch(logs.join('\n'), /human px integrate .* is required to land/, 'the operator is not told to land it again');
+  assert.equal(s.store.mission().status, 'done');
+});
+
+for (const fault of ['unavailable', 'blocked'] as const) {
+  test(`execute keeps a ${fault} pending repair as an explicit stop with no agent or review (PX-0041.02)`, async () => {
+    const { s, effects, resume } = await pendingExecution();
+    if (fault === 'blocked') { s.evidence.reconcileHumanFeedback = async () => false; }
+    const calls: string[] = [];
+    const result = await new ExecuteMissionService({ ...reviewOnlyPorts(fault === 'blocked' ? resume : undefined, calls), missionTransitions: s.store })
+      .execute({ operationId: 'pending-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+    assert.equal(result.status, 'failed');
+    assert.equal(result.error?.kind, fault === 'unavailable' ? 'unavailable' : 'validation');
+    assert.equal(result.error?.failureReason?.code, 'approval-retention-pending');
+    assert.match(result.error!.message, fault === 'unavailable' ? /certification is unavailable/ : /remains unproven; resume certification with px integrate task-2620/);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(effects, fault === 'unavailable' ? [] : ['verify']);
+    assert.deepEqual(currentReviewRound(s.store.mission().review!).decision, currentReviewRound(s.active.review!).decision, 'the original judgment survives');
+    assert.equal(s.store.mission().status, 'active');
+  });
+}

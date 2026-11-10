@@ -4,18 +4,21 @@
  * provider state, and the integration checkout's branch and dirty entries.
  */
 import type { IntegrationReviewSnapshot, IntegrationPullRequest, IntegrationApproval, IntegrationMissionFacts } from '../ports/integration-records.js';
-import { isDbOwnedPxIdentity } from '../../domain/mission.js';
+import { backlogMirrorOwnership, missionId, type BacklogMirrorOwnership } from '../../domain/mission.js';
 import { baseTaskSlug } from './support.js';
 import type { MissionStore } from '../domain-ports.js';
+import type { MissionExecutionContext } from '../ports/mission-execution-context.js';
 import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
 export interface IntegrationContext extends IntegrationMissionFacts {
   slug: string; branch: string; currentBranch: string; missionDir: string | null; area: string;
   task: ReturnType<IntegrateWorkflowPorts['backlog']['resolveTaskFile']>;
+  /** Whether Backlog Markdown is a required lifecycle mirror for this persisted Mission. */
+  mirrorOwnership: BacklogMirrorOwnership;
   reviewState: IntegrationReviewSnapshot | null;
   missionWorktree: string;
-  /** The checkout the operation runs from: the resolved mission worktree, else the working directory. */
-  executionCheckout?: string;
+  /** The checkout the operation runs from: the mission checkout resolved from Mission identity. */
+  executionCheckout: string;
   promoteBacklogOnCloseout: boolean; taskAssignee: string | null;
   taskStatus?: string;
   forgejoUser: string | null; forgejoToken: string | null; configuredReviewer: string | null; taskAssigneeWarning: string | null;
@@ -26,10 +29,12 @@ export interface IntegrationContext extends IntegrationMissionFacts {
 }
 
 export interface IntegrationContextOptions {
-  baseBranch?: string | null;
-  baseWorktree?: string | null;
-  /** An explicitly resolved mission checkout replaces the process working directory. */
-  missionWorktree?: string | null;
+  /**
+   * Required. The checkouts resolved from Mission identity; the builder never
+   * re-derives a base branch, base worktree or mission checkout from the
+   * working directory of the process that admitted the run.
+   */
+  executionContext: MissionExecutionContext & { missionWorktree: string };
   isForgejoReviewEnabledFn?: (_rootDir: string) => boolean;
   getCurrentBranchFn?: () => string;
   readTokenFn?: (_user: string) => string | null;
@@ -54,19 +59,7 @@ class IntegrationContextBuilder {
   private readonly dependencies: ReturnType<typeof composeIntegrationContextBuilderDependencies>;
   constructor(ports: IntegrateWorkflowPorts) { this.dependencies = composeIntegrationContextBuilderDependencies(ports); }
 
-  resolveIntegrationBase(slug: string, baseBranch: string | null, baseWorktree: string | null, checkout: string = process.cwd()) {
-    let branch = baseBranch;
-    if (!branch) {
-      try { branch = this.dependencies.missionPaths.resolveMissionBaseBranch(slug, checkout); } catch { branch = this.dependencies.missionPaths.getPrimaryBranch(); }
-    }
-    let worktree = baseWorktree;
-    if (!worktree) {
-      try { worktree = this.dependencies.missionPaths.resolveBaseWorktree(slug, { rootDir: checkout }); } catch { worktree = this.dependencies.missionPaths.getPrimaryWorktree(); }
-    }
-    return { branch, worktree };
-  }
-
-  async forgejoContext(enabled: boolean, taskAssignee: string | null, slug: string, branch: string, integrationRoot: string, reviewState: IntegrationReviewSnapshot | null, readTokenFn: IntegrateWorkflowPorts['forgejo']['readToken'], getPrStatusFn: IntegrateWorkflowPorts['forgejo']['getPrStatus'], getLatestReviewDecisionFn: IntegrateWorkflowPorts['forgejo']['getLatestReviewDecision'], checkout: string = process.cwd()) {
+  async forgejoContext(enabled: boolean, taskAssignee: string | null, slug: string, branch: string, reviewState: IntegrationReviewSnapshot | null, readTokenFn: IntegrateWorkflowPorts['forgejo']['readToken'], getPrStatusFn: IntegrateWorkflowPorts['forgejo']['getPrStatus'], getLatestReviewDecisionFn: IntegrateWorkflowPorts['forgejo']['getLatestReviewDecision'], checkout: string) {
     const absent = { forgejoIdentity: { forgejoUser: null, warning: null }, forgejoToken: null, configuredReviewer: null, pr: { exists: false } as IntegrationPullRequest, siblingPrs: [] as ReturnType<IntegrateWorkflowPorts['forgejo']['listOpenPrsForSlug']>, approval: { ok: false, error: 'forgejo-off', reviewState: null } };
     if (!enabled) { return absent; }
     const forgejoIdentity = this.dependencies.landing.resolveForgejoUserForIntegration(taskAssignee);
@@ -86,15 +79,9 @@ class IntegrationContextBuilder {
     return { forgejoIdentity, forgejoToken, configuredReviewer, pr, siblingPrs, approval };
   }
 
-  inferMissionWorktree(slug: string, checkout: string, baseWorktree: string | null): string {
-    return this.dependencies.missionPaths.resolveWorktree(slug, { cwd: checkout }) || baseWorktree || checkout;
-  }
-
   private resolvedOptions(options: IntegrationContextOptions) {
     const {
-    baseBranch = null,
-    baseWorktree = null,
-    missionWorktree = null,
+    executionContext,
     isForgejoReviewEnabledFn = this.dependencies.ports.productConfig.isForgejoReviewEnabled,
     getCurrentBranchFn = this.dependencies.ports.git.getCurrentBranch,
     readTokenFn = this.dependencies.forgejo.readToken,
@@ -104,47 +91,60 @@ class IntegrationContextBuilder {
     missionStore = null,
     gitFn = this.dependencies.ports.git.git,
   } = options;
-    return { baseBranch, baseWorktree, missionWorktree, checkout: missionWorktree ?? process.cwd(), isForgejoReviewEnabledFn, getCurrentBranchFn, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, readReviewStateFn, missionStore, gitFn };
+    return { executionContext, isForgejoReviewEnabledFn, getCurrentBranchFn, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, readReviewStateFn, missionStore, gitFn };
   }
 
-  async buildIntegrationContext(slug: string, options: IntegrationContextOptions = {}): Promise<IntegrationContext> {
-    const { baseBranch, baseWorktree, missionWorktree: explicitWorktree, checkout, isForgejoReviewEnabledFn, getCurrentBranchFn, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, readReviewStateFn, missionStore, gitFn } = this.resolvedOptions(options);
+  private async resolveMirrorOwnership(slug: string, missionStore: MissionStore | null): Promise<BacklogMirrorOwnership> {
+    const fallback = backlogMirrorOwnership({ id: missionId(slug), waveParentId: null });
+    if (!missionStore) { return fallback; }
+    const loaded = await missionStore.load(missionId(slug));
+    return loaded.kind === 'found' ? backlogMirrorOwnership(loaded.mission) : fallback;
+  }
+
+  async buildIntegrationContext(slug: string, options: IntegrationContextOptions): Promise<IntegrationContext> {
     if (!slug) {
       throw new Error('buildIntegrationContext requires a non-null mission slug.');
     }
+    if (!options?.executionContext) {
+      throw new Error(`buildIntegrationContext requires the execution context resolved for mission ${slug}.`);
+    }
+    const { executionContext, isForgejoReviewEnabledFn, getCurrentBranchFn, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, readReviewStateFn, missionStore, gitFn } = this.resolvedOptions(options);
+    if (executionContext.missionId !== slug) {
+      throw new Error(`Execution context for ${executionContext.missionId} cannot integrate mission ${slug}.`);
+    }
+    const { missionWorktree, baseWorktree: resolvedBaseWorktree, baseBranch: resolvedBaseBranch } = executionContext;
+    const checkout = missionWorktree;
     const branch = `mission/${slug}`;
     const currentBranch = getCurrentBranchFn();
     const missionDir = this.dependencies.missionPaths.findMissionDir(slug);
     const area = missionDir ? this.dependencies.missionPaths.findMissionArea(missionDir) : 'all';
 
-    const { branch: resolvedBaseBranch, worktree: resolvedBaseWorktree } = this.resolveIntegrationBase(slug, baseBranch, baseWorktree, checkout);
-    const integrationRoot = resolvedBaseWorktree as string;
     // The mission branch owns the task payload that is about to be integrated.
     // Read task metadata there so integration remains independent of uncommitted
     // or stale files in the primary checkout.
-    const missionWorktree = explicitWorktree ?? this.inferMissionWorktree(slug, checkout, resolvedBaseWorktree);
-    const task = isDbOwnedPxIdentity(slug)
+    const mirrorOwnership = await this.resolveMirrorOwnership(slug, missionStore);
+    const task = mirrorOwnership.kind === 'none'
       ? { ok: false, matches: [], reason: 'adhoc mission has no Backlog task' }
       : this.dependencies.backlog.resolveTaskFile(slug, missionWorktree);
     const taskAssignee = task.ok ? this.dependencies.backlog.getTaskAssignee(task.taskFile as string) : null;
-    const forgejoEnabled = isForgejoReviewEnabledFn(integrationRoot);
+    const forgejoEnabled = isForgejoReviewEnabledFn(resolvedBaseWorktree);
 
     // Lightweight integration-context consumers that have Forgejo disabled do
     // not compose the review reader. Production composition always does; keep
     // the former context-only path compatible while a rebound simply receives
     // an empty state when no review authority is available.
     const reviewState = typeof readReviewStateFn === 'function'
-      ? await Promise.resolve(readReviewStateFn(slug, integrationRoot, missionStore))
+      ? await Promise.resolve(readReviewStateFn(slug, resolvedBaseWorktree, missionStore))
       : null;
-    const forgejoState = await this.forgejoContext(forgejoEnabled, taskAssignee, slug, branch, integrationRoot, reviewState, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, checkout);
+    const forgejoState = await this.forgejoContext(forgejoEnabled, taskAssignee, slug, branch, reviewState, readTokenFn, getPrStatusFn, getLatestReviewDecisionFn, checkout);
     const approval = !forgejoEnabled || forgejoState.approval.ok
       ? forgejoState.approval
       : reviewState?.phase === 'approved' && reviewState.disposition === 'APPROVED'
         ? { ok: true, reviewState: 'APPROVED', source: 'local-review-state' }
         : forgejoState.approval;
 
-    const mainBranch = gitFn(['-C', integrationRoot, 'branch', '--show-current']).stdout.trim();
-    const mainStatus = gitFn(['-C', integrationRoot, 'status', '--short']).stdout.trim();
+    const mainBranch = gitFn(['-C', resolvedBaseWorktree, 'branch', '--show-current']).stdout.trim();
+    const mainStatus = gitFn(['-C', resolvedBaseWorktree, 'status', '--short']).stdout.trim();
 
     return {
       slug,
@@ -153,6 +153,7 @@ class IntegrationContextBuilder {
       missionDir,
       area,
       task,
+      mirrorOwnership,
       reviewState,
       missionWorktree,
       executionCheckout: checkout,

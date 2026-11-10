@@ -16,7 +16,7 @@ export const reviewPreparationOutputRenderers = {
     return;
   }),
   'adhoc-without-task': reviewEventRenderer('adhoc-without-task', (event, output) => {
-    output.log(fmt.status('WARN', `No Backlog task file for DB-owned adhoc identity ${event.slug}; identity and lifecycle are DB-authoritative.`));
+    output.log(fmt.status('INFO', `No Backlog task file for DB-owned Mission ${event.slug}; identity and lifecycle are DB-authoritative.`));
     return;
   }),
   "review-preparation-validation-failed": reviewEventRenderer("review-preparation-validation-failed", (event, output) => {

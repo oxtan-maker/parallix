@@ -58,6 +58,45 @@ export interface ProviderResourceObservation {
   readonly values: readonly { readonly name: string; readonly value: number; readonly unit: 'tokens' | 'count' | 'percent' | 'usd' }[];
 }
 
+type ProviderResourceValue = ProviderResourceObservation['values'][number];
+
+function reportedValue(record: Record<string, unknown>, name: string, keys: readonly string[], unit: ProviderResourceValue['unit']): ProviderResourceValue[] {
+  const value = keys.map(key => record[key]).find(candidate => typeof candidate === 'number');
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? [{ name, value, unit }] : [];
+}
+
+function reportedText(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+/**
+ * Normalize provider adapter telemetry into the single per-run resource-fact owner.
+ * Already-normalized observations pass through unchanged, so run history and
+ * measurement writers can share one value without redeclaring its fields.
+ */
+export function providerResourceObservation(
+  telemetry: unknown,
+  fallback: { readonly provider?: string | null; readonly model?: string | null } = {},
+): ProviderResourceObservation | null {
+  if (telemetry && typeof telemetry === 'object' && (telemetry as { provenance?: unknown }).provenance === 'provider-reported') {
+    return telemetry as ProviderResourceObservation;
+  }
+  const record = telemetry && typeof telemetry === 'object' ? telemetry as Record<string, unknown> : {};
+  const provider = reportedText(record.provider) ?? fallback.provider ?? null;
+  const model = reportedText(record.model) ?? fallback.model ?? null;
+  const values = [
+    ...reportedValue(record, 'input', ['inputTokens'], 'tokens'),
+    ...reportedValue(record, 'output', ['outputTokens'], 'tokens'),
+    ...reportedValue(record, 'cached', ['cachedTokens'], 'tokens'),
+    ...reportedValue(record, 'reasoning', ['thoughtsTokens'], 'tokens'),
+    ...reportedValue(record, 'context', ['totalTokens'], 'tokens'),
+    ...reportedValue(record, 'tool-calls', ['toolCalls'], 'count'),
+    ...reportedValue(record, 'provider-usage', ['usagePercent'], 'percent'),
+    ...reportedValue(record, 'cost', ['cost_usd'], 'usd'),
+  ];
+  return provider || model || values.length ? { provenance: 'provider-reported', provider, model, values } : null;
+}
+
 /**
  * Where a piece of history came from. Terminal bytes are what the process
  * wrote; they are not a rendered screen and they do not contain model

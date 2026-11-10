@@ -1,4 +1,4 @@
-import type { InvalidContractBlocker } from '../../domain/rebound-policy.js';
+import type { AgentLaunchResult } from './agent-launch-result.js';
 
 /** The repair kernel's agent-launch boundary, supplied by composition. */
 export interface ReboundLaunchOptions extends Record<string, unknown> {
@@ -16,7 +16,7 @@ export interface ReboundLaunchOptions extends Record<string, unknown> {
 export type ReboundStartAgent = (
   _step: string,
   _options: ReboundLaunchOptions,
-) => Promise<{ agent?: string | null; result?: { status?: number | null; invalidContract?: InvalidContractBlocker } | null } | null | undefined>;
+) => Promise<AgentLaunchResult | null | undefined>;
 
 /** Rechecked after preparation/capacity waits, immediately before a provider launch. */
 export interface AgentLaunchAdmission { assert(): Promise<void> }

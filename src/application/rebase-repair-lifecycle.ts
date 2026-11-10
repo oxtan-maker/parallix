@@ -1,6 +1,6 @@
 import type { RebaseMissionServices, RebaseWorkflowPort } from './ports/rebase-workflow.js';
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
-import { missionId } from '../domain/mission.js';
+import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import type { ConfiguredReviewerEligibility } from '../domain/review.js';
 
 /** Effects used by application-owned rebase repair lifecycle decisions. */
@@ -18,14 +18,17 @@ export async function transitionRebaseRepair(slug: string, status: string, trans
     const services = await bindings.missionServices(root);
     const loaded = await services.store.load(missionId(slug));
     if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable for rebase repair`); }
+    const project = (projectedStatus: string) => backlogMirrorOwnership(loaded.mission).kind === 'none'
+      ? true
+      : bindings.transitionTask(slug, projectedStatus, transitionOptions);
     // Integration rebase repair is part of integration completion.
     if (loaded.mission.status === 'integration') {
-      return bindings.transitionTask(slug, 'ready-for-integration', transitionOptions);
+      return project('ready-for-integration');
     }
     const implementer = loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer;
     if (!implementer) { throw new Error(`Mission ${slug} has no implementer for rebase repair`); }
     await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle, undefined, { kind: 'rebase-repair' });
-    await bindings.transitionTask(slug, 'active', transitionOptions);
+    await project('active');
     return; // Project the committed lane through the existing optional Backlog adapter.
   }
   return bindings.transitionTask(slug, status, transitionOptions);
@@ -43,7 +46,9 @@ export async function resumeRebaseReview(slug: string, root: string, implementer
     // of THIS mission's worktree, never from the prior round's reviewer.
     const reviewerEligibility = bindings.reviewerEligibility(root);
     await transitionReviewRepair(slug, 'review', implementer, services.store, services.lifecycle, reviewerEligibility);
-    await bindings.transitionTask(slug, 'review', { rootDir: root });
+    if (backlogMirrorOwnership(loaded.mission).kind === 'required') {
+      await bindings.transitionTask(slug, 'review', { rootDir: root });
+    }
   }
 
 }

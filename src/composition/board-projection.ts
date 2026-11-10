@@ -198,6 +198,20 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
   return { historyRepo, laneEventRepo, reset: () => { historyRows = null; laneRows = null; historyByMission = null; } };
 }
 
+function createBoardGateEvidence(
+  deps: BoardProjectionCompositionDeps,
+  resolveWorktree: (missionId: Mission['id']) => string | null,
+): GateEvidenceReader {
+  if (deps.gateEvidence) { return deps.gateEvidence; }
+  const validations = deps.database ? new SqliteIntegrationValidationReader(deps.database) : null;
+  return new VerificationGateEvidenceReader({
+    configuration: deps.configuration,
+    resolveWorktree,
+    integrationValidation: validations ? mission => validations.read(mission) : null,
+    isProcessAlive: processLivenessProbe,
+  });
+}
+
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const catalog = createRepositoryMissionCatalog(deps);
@@ -211,12 +225,8 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
   const metricsSession = createMetricsReadSession(deps);
   let topology: ReturnType<typeof snapshotWorktreeTopology> | null = null;
-  const validations = deps.database ? new SqliteIntegrationValidationReader(deps.database) : null;
-  const gateEvidence = deps.gateEvidence ?? new VerificationGateEvidenceReader({
-    configuration: deps.configuration,
-    resolveWorktree: mission => topology?.resolveWorktree(mission, { cwd: deps.rootDir }) ?? null,
-    integrationValidation: validations ? mission => validations.read(mission) : null,
-  });
+  const gateEvidence = createBoardGateEvidence(deps,
+    mission => topology?.resolveWorktree(mission, { cwd: deps.rootDir }) ?? null);
   const gates = new VerificationGateObserver(gateEvidence);
   let terminal: ReturnType<typeof createMissionTerminalCapability> | undefined;
   const builder = new BoardProjectionBuilder(

@@ -1,4 +1,5 @@
 import { agentFamily } from '../../../src/domain/agents.js';
+import { missionId } from '../../../src/domain/mission.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
 import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
@@ -141,6 +142,65 @@ test("performReviewPreparation uses provided worktree and fails hard on Backlog 
   assert.match(result.error, /Backlog task file for task-098 not found or ambiguous/);
 
   fs.rmSync(missionMdPath, { force: true });
+});
+
+test("performReviewPreparation continues for a persisted no-mirror wave child (TASK-2847)", async () => {
+  const slug = 'task-2846.02';
+  const worktree = path.join(reviewPreparationRoot, 'wave-child-worktree');
+  const missionDir = path.join(worktree, 'docs/missions/2026', slug);
+  const checkpoint = path.join(missionDir, 'CP-1.md');
+  let backlogTransitions = 0;
+
+  fs.mkdirSync(missionDir, { recursive: true });
+  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), '# MISSION.md\n\nWave child mission.\n');
+  fs.writeFileSync(checkpoint, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| wave child review | `npm test -- test/integration/mission/review-preparation.test.ts` | PASS |\n');
+
+  mock.method(missionUtils, 'findMissionDir', () => missionDir);
+  mock.method(missionUtils, 'findMissionArea', () => 'docs');
+  mock.method(missionUtils, 'findCheckpoints', () => [checkpoint]);
+  mock.method(git, 'getCurrentBranch', () => `mission/${slug}`);
+  mock.method(git, 'getWorktreeStatus', () => []);
+  mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '', status: 0 }));
+  mock.method(git, 'git', (args: Parameters<(typeof git)['git']>[0]) => {
+    if (args.includes('rev-parse') && args.includes('HEAD')) {
+      return { signal: null, status: 0, stdout: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n', stderr: '' };
+    }
+    if (args.includes('origin')) return assert.fail('Review preparation must not push a no-mirror wave child to origin');
+    return { signal: null, status: 0, stdout: '', stderr: '' };
+  });
+  mock.method(backlog, 'resolveTaskFile', () => ({ ok: false as const, reason: 'missing' as const, matches: [] }));
+  mock.method(backlog, 'transitionTask', () => {
+    backlogTransitions += 1;
+    return false;
+  });
+  mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
+
+  const missionServicesFn = stubMissionServices({
+    store: {
+      async load(id) {
+        return {
+          kind: 'found' as const,
+          mission: fixtureMission(id, {
+            assignee: agentFamily('claude'),
+            status: 'review',
+            waveParentId: missionId('task-2846'),
+            checkpoints: [],
+          }),
+          version: missionVersion(1),
+        };
+      },
+    },
+  });
+  const result = await performReviewPreparation(slug, {
+    worktree,
+    skipGate: true,
+    isForgejoReviewEnabledFn: () => false,
+    rebaseFn: async () => ({ ok: true as const, sharedFileConflicts: false }),
+    missionServicesFn,
+  });
+
+  assert.equal(result.ok, true, result.error ?? 'review preparation should succeed for a DB-owned wave child');
+  assert.equal(backlogTransitions, 0, 'a DB-owned wave child must not attempt a Backlog lifecycle transition');
 });
 
 test("performReviewPreparation skips commit in Step 4 when Backlog transition already committed", async (t) => {

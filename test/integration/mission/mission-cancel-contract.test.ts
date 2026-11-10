@@ -447,7 +447,7 @@ describe('Cancel surfaces', () => {
     // The builder may only *read* git state; a mutating verb here would mean
     // cancellation touched the worktree it merely reports on.
     for (const call of gitCalls) {
-      assert.deepEqual(call, ['worktree', 'list', '--porcelain']);
+      assert.deepEqual(call, ['-C', '/fixture/parallix', 'worktree', 'list', '--porcelain']);
     }
   });
 

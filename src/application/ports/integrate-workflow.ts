@@ -24,6 +24,7 @@
  * | `rebase`           | `adapters/rebase/rebase-workflow-adapter` — the shared `px rebase` port     |
  * | `gates`            | `adapters/config/repository-gates`, `integrate-gates`, `integrate-gate-rebound` |
  * | `checkout`         | `integrate-conflict` — stash, noise patch, conflict and squash helpers      |
+ * | `missionContext`   | `adapters/git/mission-execution-context` — mission/base checkout identity  |
  * | `landing`          | `integrate-post` — abort signal, hooks, stats, closeout, worktree cleanup   |
  */
 import type { IntegrationPullRequest, IntegrationApproval, IntegrationReviewSnapshot, GithubIntegrationObservation, IntegrationMissionServices, IntegrationMissionServicesFactory, IntegrationGateDefinition, IntegrationFailedGate, IntegrationStash } from './integration-records.js';
@@ -31,6 +32,7 @@ import type { IntegrationMode } from '../../domain/integration.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { ReboundContext } from '../rebound-kernel.js';
 import type { RebaseWorkflowPort } from './rebase-workflow.js';
+import type { MissionExecutionContextResolution } from './mission-execution-context.js';
 
 export interface IntegrateCommandResult {
   failureReason?: import('../../domain/failure-reason.js').FailureReason;
@@ -266,7 +268,19 @@ export interface IntegrateLandingPort {
   cleanupMissionWorktree(_slug: string): boolean;
 }
 
+/**
+ * The Mission-identity owner of the checkouts a mutation runs against. The
+ * entry resolves once, after it wins the integration claim and before any
+ * nested step, because resolution may add the receiving-base worktree. Every
+ * nested step receives that result as a required fact and never re-derives a
+ * checkout from the working directory of the process that admitted the run.
+ */
+export interface IntegrateMissionContextPort {
+  resolve(_slug: string, _rootDir: string): MissionExecutionContextResolution;
+}
+
 export interface IntegrateWorkflowPorts {
+  readonly missionContext: IntegrateMissionContextPort;
   readonly process: IntegrateProcessPort;
   readonly fileSystem: IntegrateFileSystemPort;
   readonly git: IntegrateGitPort;

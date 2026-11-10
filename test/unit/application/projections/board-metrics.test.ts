@@ -27,7 +27,8 @@ import { missionOutcome } from '../../../fixtures/mission-outcome.js';
 import { weeklyDecisionWindows } from '../../../../src/application/services/decision-window.js';
 import { ConcreteMetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
-import type { UsageRecord, UsageRepository } from '../../../../src/application/ports/mission-measurements.js';
+import { matchesUsageFilter } from '../../../fixtures/metrics-adapter.js';
+import type { UsageFilter, UsageRecord, UsageRepository } from '../../../../src/application/ports/mission-measurements.js';
 import type { BoardLaneEventRepository } from '../../../../src/application/ports/operation-history.js';
 import type { MissionOutcome } from '../../../../src/domain/usage.js';
 import type { MetricSeries } from '../../../../src/application/projections/board.js';
@@ -760,8 +761,8 @@ class ThroughputInMemoryUsageRepository implements UsageRepository {
   constructor(records: readonly UsageRecord[]) { this.records = records; }
 
   async findAll(): Promise<readonly UsageRecord[]> { return this.records; }
-  async findWhere(predicate: (_record: UsageRecord) => boolean): Promise<readonly UsageRecord[]> {
-    return this.records.filter(predicate);
+  async findWhere(filter: UsageFilter): Promise<readonly UsageRecord[]> {
+    return this.records.filter((record) => matchesUsageFilter(record, filter));
   }
   async save(): Promise<void> {}
   async saveAll(): Promise<void> {}

@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 const git = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -29,6 +30,8 @@ const backlog = mockModule<typeof import('../../../src/adapters/backlog/backlog.
 const forgejo = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 const verification = mockModule<typeof import('../../../src/adapters/verification/verification.js')>('../../../src/adapters/verification/verification.js', import.meta.url);
 const repositoryGates = mockModule<typeof import('../../../src/adapters/config/repository-gates.js')>('../../../src/adapters/config/repository-gates.js', import.meta.url);
+mockModule('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
+const executionContext = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 const integrate = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 
@@ -111,6 +114,10 @@ async function runIntegrate(scenario: Scenario) {
   mock.method(missionUtils, 'findMissionDir', () => path.join(root, 'missions', SLUG));
   mock.method(missionUtils, 'findMissionArea', () => 'all');
   mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(root, '..', SLUG));
+  mock.method(executionContext, 'resolveMissionExecutionContext', (id: string) => ({
+    ok: true as const,
+    context: missionExecutionContext({ missionId: id, missionWorktree: root, baseWorktree: root, baseBranch: 'main' }),
+  }));
   mock.method(missionUtils, 'resolveMainRepo', () => root);
   mock.method(missionUtils, 'missionTitle', () => 'fixture');
   mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);

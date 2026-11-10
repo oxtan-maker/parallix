@@ -1,10 +1,12 @@
 // Review start owns the handoff prerequisite, its failure boundaries, and dry-run.
 import test from 'node:test';
 import { agentFamily } from '../../../../src/domain/agents.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { fakeProvider, fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { missionId } from '../../../../src/domain/mission.js';
 
 const slug = 'review-start-contract';
 
@@ -82,6 +84,30 @@ test('review preparation launches without a lifecycle Graphify refresh (TASK-272
   await runReviewLoop({ slug, implementer: 'claude', reviewer: 'codex' }, fake.ports);
 
   assert.deepEqual(calls, ['rebase', 'gate', 'launch:reviewer']);
+});
+
+test('a persisted no-mirror wave child enters the autonomous review loop without a task file (TASK-2847)', async () => {
+  const childSlug = 'task-2846.02';
+  const mission = fixtureMission(childSlug, {
+    assignee: agentFamily('claude'),
+    waveParentId: missionId('task-2846'),
+  });
+  const store = inMemoryTransitionStore(mission);
+  let preparations = 0;
+  const fake = fakeReviewLoopPorts({
+    slug: childSlug,
+    missionStore: store,
+    task: { task: { ok: false, reason: 'missing', matches: [] } },
+    reviewPreparation: { reviewPreparation: async () => {
+      preparations += 1;
+      return { ok: true, gatekeeperPushedBack: true };
+    } },
+  });
+
+  await runReviewLoop({ slug: childSlug, maxAttempts: 1 }, fake.ports);
+
+  assert.equal(preparations, 1, 'the missing mirror must not stop the loop before review preparation');
+  assert.doesNotMatch(fake.errors.join('\n'), /unresolved task|not found|ambiguous/i);
 });
 
 
@@ -218,6 +244,41 @@ test('start fails closed when the Mission store cannot load the assignee (TASK-2
 
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { pendingReview } from '../../../fixtures/mission-builders.js';
+import { requestedChangesReview } from '../../../fixtures/mission-builders.js';
+import { applyImplementerCommand, changeRevision, reviewFindingId } from '../../../../src/domain/review.js';
+import { reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
+
+for (const dryRun of [false, true]) {
+  test(`resolved review continuation ${dryRun ? 'previews without writes' : 'stops if next-round preparation fails'}`, async () => {
+    const review = applyImplementerCommand(requestedChangesReview(slug, {
+      startedAt: '2026-11-09T07:25:00Z', decidedAt: '2026-11-09T07:32:00Z',
+    }), {
+      type: 'submit-resolution', respondedAt: '2026-11-09T07:44:00Z', resultingRevision: changeRevision('fixed-revision'),
+      resolutions: [{ findingId: reviewFindingId('fixture-finding'), kind: 'fixed', evidence: 'committed fix' }],
+    });
+    const mission = fixtureMission(slug, { status: 'review', assignee: agentFamily('codex'), review });
+    const store = inMemoryTransitionStore(mission);
+    let preparations = 0;
+    const fake = fakeReviewLoopPorts({ slug, missionStore: store, lifecycle: new MissionLifecycleService(store),
+      state: new ReviewState(slug, reviewStateDataFrom(review)), provider: {},
+      reviewPreparation: { reviewPreparation: async () => {
+        preparations++;
+        return { ok: false, error: 'verification unavailable' };
+      } },
+      preReview: {
+        rebase: async () => assert.fail('preparation must finish before reviewer setup'),
+        runGate: async () => assert.fail('preparation must finish before reviewer setup'),
+      },
+    });
+    await runReviewLoop({ slug, isContinue: true, dryRun }, fake.ports);
+    assert.equal(preparations, dryRun ? 0 : 1);
+    assert.deepEqual(fake.exits, dryRun ? [] : [1]);
+    assert.deepEqual(fake.launches, []);
+    assert.deepEqual(fake.writes, []);
+    assert.deepEqual(store.mission(), mission, 'keep the decision and completed response for retry');
+    assert.deepEqual(store.events, []);
+  });
+}
 
 for (const dryRun of [false, true]) {
   test(`explicit continue implementer overrides database assignment${dryRun ? ' without dry-run writes' : " before review preparation"}`, async () => {
@@ -356,19 +417,19 @@ for (const outcome of ['completed', 'failed', 'cancelled'] as const) {
   });
 }
 
-import { changeRevision, currentReviewRound, replaceCurrentRound } from '../../../../src/domain/review.js';
+import { currentReviewRound, replaceCurrentRound, type ChangeRevision } from '../../../../src/domain/review.js';
 import { readReviewState, persistReviewStateOrThrow, writeReviewState } from '../../../../src/adapters/review/review-state.js';
 import { recordApproval } from '../../../../src/adapters/review/review-round.js';
 import { ReviewSubmissionService } from '../../../../src/application/review-submission-service.js';
 import { makePorts, makeRecorder } from '../../../helpers/review-preparation-ports.js';
 
-function changedRepairScenario(status: 'active' | 'review' = 'active') {
+function changedRepairScenario(status: 'active' | 'review' = 'active', approvedRevision: ChangeRevision | null = changeRevision('fixture-revision')) {
   const approved = approvedReview(slug);
   const original = currentReviewRound(approved);
   const cause = { kind: 'integration-gate-failure' as const, gate: 'unit', command: 'npm test' };
   const review = { ...approved, rounds: replaceCurrentRound(approved, { ...original,
     subject: { ...original.subject, baseline: changeRevision('base') },
-    decision: { ...original.decision!, revision: changeRevision('fixture-revision') },
+    decision: { ...original.decision!, revision: approvedRevision },
     integrationRepairAssessment: { assessedAt: '2026-10-01T12:00:00Z', approvedRevision: 'fixture-revision',
       candidateRevision: 'fixture-revision', failedGate: 'unit', outcome: 'pending' as const,
       repair: { startedAt: '2026-10-01T12:00:00Z', cause } },
@@ -425,6 +486,19 @@ function changedRepairScenario(status: 'active' | 'review' = 'active') {
     samePatch: async () => false, validation: async () => null,
     reconcileHumanFeedback: async () => true, now: () => '2026-10-02T10:00:00Z',
   } });
+  // Production review reaches retention only through the composed certification owner.
+  const integration = stubIntegrateWorkflowPorts({
+    process: { cwd: () => fake.ports.worktree },
+    missionPaths: { resolveWorktree: () => fake.ports.worktree, resolveMissionBaseBranch: () => 'main', resolveBaseWorktree: () => fake.ports.worktree, missionBranchName: () => `mission/${slug}` },
+    git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
+    landing: { createAbort: () => new Error('integration repair aborted') },
+    gates: { approvalEvidence: () => fake.ports.integrationApprovalEvidence!,
+      captureFinalIntegrationTree: () => { const commit = fake.ports.preReview.head(); return commit ? { ok: true, commit } : { ok: false }; },
+      loadPhaseGates: () => [{ key: 'unit', command: 'npm test', order: 1 }], runPhaseGates: async () => ({ ok: true }) },
+  });
+  const services = integrationServices({ store, lifecycle });
+  Object.assign(fake.ports, { integrationRepair: { resume: async () => (await certifyPendingIntegrationRepair(slug, services, integration,
+    missionExecutionContext({ missionId: slug, missionWorktree: fake.ports.worktree, baseWorktree: fake.ports.worktree })))?.outcome ?? 'none' } });
   return { fake, store, mission, decisions };
 }
 
@@ -472,8 +546,9 @@ for (const fault of ['comparison', 'revision', 'authority', 'newer decision', 'd
     const { fake, store } = changedRepairScenario();
     const initial = structuredClone(store.mission());
     if (fault === 'comparison') { fake.ports.integrationApprovalEvidence!.samePatch = async () => { throw new Error('unreadable git'); }; }
+    // An uncommitted candidate or a missing certification owner fails closed with a typed stop.
     if (fault === 'revision') { fake.ports.preReview.head = () => null; }
-    if (fault === 'authority') { Object.assign(fake.ports, { lifecycle: null }); }
+    if (fault === 'authority') { Object.assign(fake.ports, { integrationRepair: undefined }); }
     if (fault === 'newer decision') {
       fake.ports.integrationApprovalEvidence!.samePatch = async () => {
         const current = store.mission();
@@ -484,13 +559,18 @@ for (const fault of ['comparison', 'revision', 'authority', 'newer decision', 'd
         return false;
       };
     }
-    await runReviewLoop({ slug, isContinue: true, dryRun: fault === 'dry-run' }, fake.ports);
+    const typedStop = fault === 'revision' || fault === 'authority';
+    const run = runReviewLoop({ slug, isContinue: true, dryRun: fault === 'dry-run' }, fake.ports);
+    if (typedStop) {
+      await assert.rejects(run, error => fault === 'revision' ? /integration repair aborted/.test(String(error))
+        : (error as { failureReason?: FailureReason }).failureReason?.code === 'approval-retention-pending');
+    } else { await run; }
     assert.deepEqual(fake.launches, []);
     assert.equal(store.mission().review!.rounds.length, 1);
     assert.deepEqual(store.mission().review!.rounds[0].decision, fault === 'newer decision'
       ? { ...initial.review!.rounds[0].decision!, comment: 'newer independent judgment' } : initial.review!.rounds[0].decision);
     assert.deepEqual(store.mission().checkpoints, initial.checkpoints);
-    assert.deepEqual(fake.exits, fault === 'dry-run' ? [] : [1]);
+    assert.deepEqual(fake.exits, fault === 'dry-run' || typedStop ? [] : [1]);
   });
 }
 
@@ -570,7 +650,7 @@ async function approvedRepairScenario() {
     read: async () => ({ evidence: { incidentId: 'original', attempt: 1, command: 'npm test', cwd: fake.ports.worktree,
       exitCode: 1, captureComplete: true, stdoutPath: '/original/out', stderrPath: '/original/err' }, stdout: 'failed', stderr: '' }),
     verify: async (command: string, worktree: string) => { calls.push('exact'); return { ok: true, command, exactExecution: { command, worktree, exitCode: 0 as const } }; }, checkpoints: new RepairCheckpointService(store),
-  }, integrationRepair: { resume: async () => (await certifyPendingIntegrationRepair(slug, services, integration, undefined, fake.ports.retainedRepair))?.outcome ?? 'none' } });
+  }, integrationRepair: { resume: async () => (await certifyPendingIntegrationRepair(slug, services, integration, missionExecutionContext({ missionId: slug, missionWorktree: fake.ports.worktree, baseWorktree: fake.ports.worktree }), undefined, fake.ports.retainedRepair))?.outcome ?? 'none' } });
   return { fake, store, original, calls, integration, evidence };
 }
 
@@ -637,6 +717,119 @@ for (const fault of ['failed', 'missing-evidence', 'missing-receipt', 'incomplet
     assert.deepEqual(s.calls, [], 'neither phase verification nor retention runs on unproven exact evidence');
   });
 }
+
+test('dry-run previews pending certification before the generic retained repair (PX-0041.02)', async () => {
+  const s = await approvedRepairScenario();
+  const before = structuredClone(s.store.mission());
+  await runReviewLoop({ slug, isContinue: true, dryRun: true }, s.fake.ports);
+  assert.match(s.fake.logs.join('\n'), /certification and approval retention run before any generic repair; dry run certified nothing/);
+  assert.doesNotMatch(s.fake.logs.join('\n'), /Retained repair:/, 'the generic retained repair is not the route of a pending approval');
+  assert.deepEqual(s.calls, []);
+  assert.deepEqual(s.fake.launches, []);
+  assert.deepEqual(s.fake.exits, []);
+  assert.deepEqual(s.store.mission(), before);
+});
+
+test('a repair settled by a concurrent controller hands off idempotently, not as a blocker (PX-0041.02)', async () => {
+  const s = await approvedRepairScenario();
+  const certify = s.fake.ports.integrationRepair!.resume;
+  Object.assign(s.fake.ports, { integrationRepair: { resume: async (id: string) => { await certify(id); return 'none' as const; } } });
+  await runReviewLoop({ slug, isContinue: true }, s.fake.ports);
+  assert.deepEqual(s.fake.errors, [], 'an already settled repair is not reported as unproven');
+  assert.deepEqual(s.fake.exits, []);
+  assert.deepEqual(s.fake.launches, []);
+  assert.match(s.fake.logs.join('\n'), /Original approval retained .* human px integrate is required to land/, 'the post-effect state routes the settled repair to the operator');
+  assert.equal(s.store.mission().status, 'integration');
+  assert.deepEqual(currentReviewRound(s.store.mission().review!).decision, currentReviewRound(s.original).decision);
+});
+
+test('a legacy withdrawal with no decided revision needs fresh review without a fabricated provider revision (PX-0041.02)', async () => {
+  const { fake, store, decisions } = changedRepairScenario('active', null);
+  const dismissed: string[] = [];
+  // A competing controller settled the obligation on a legacy record whose approval never
+  // recorded a decided revision; the withdrawal stays valid and its revision stays unknown.
+  Object.assign(fake.ports, { provider: fakeProvider({ dismissApproval: async revision => { dismissed.push(revision); } }),
+    integrationRepair: { resume: async () => {
+      const current = store.mission();
+      const review = revokeApprovedDecision(current.review!, currentReviewRound(current.review!).number, {
+        revokedAt: '2026-10-02T10:00:00Z', revokedBy: 'workflow', reason: 'Integration repair changed the approved mission patch.',
+        cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test' },
+      });
+      await store.save({ ...current, review });
+      return 'none' as const;
+    } } });
+  await runReviewLoop({ slug, isContinue: true }, fake.ports);
+  assert.deepEqual(dismissed, [], 'no decided revision exists, so the review must not dismiss a fabricated "null"');
+  assert.match(fake.logs.join('\n'), /withdrew an approval with no recorded revision; no provider dismissal is possible and fresh review is still required/);
+  assert.equal(currentReviewRound(store.mission().review!).number, 2);
+  assert.equal(currentReviewRound(store.mission().review!).decision?.revision, 'repaired-revision',
+    'the undismissable withdrawal still leaves a fresh current-revision review owed and answered');
+  assert.deepEqual(decisions, ['repaired-revision'], 'the opened round still gets a current-revision decision');
+});
+
+test('a continuation that lost the CAS hands off the competing retention instead of blocking (PX-0041.02)', async () => {
+  const s = await approvedRepairScenario();
+  const certify = s.fake.ports.integrationRepair!.resume;
+  // The competing controller won the CAS; this caller only reports that its own retention lost.
+  Object.assign(s.fake.ports, { integrationRepair: { resume: async (id: string) => { await certify(id); return 'blocked' as const; } } });
+  await runReviewLoop({ slug, isContinue: true }, s.fake.ports);
+  assert.deepEqual(s.fake.errors, [], 'a CAS loser does not report a settled repair as unproven');
+  assert.deepEqual(s.fake.exits, []);
+  assert.deepEqual(s.fake.launches, []);
+  assert.match(s.fake.logs.join('\n'), /Original approval retained .* human px integrate is required to land/);
+  assert.equal(s.store.mission().status, 'integration');
+});
+
+test('a repair a competing controller landed owes no second px integrate (PX-0041.02)', async () => {
+  const s = await approvedRepairScenario();
+  const certify = s.fake.ports.integrationRepair!.resume;
+  Object.assign(s.fake.ports, { integrationRepair: { resume: async (id: string) => {
+    await certify(id);
+    const loaded = await s.store.load();
+    await s.store.save({ ...loaded.mission, status: 'done', closedAt: '2026-10-02T12:00:00Z' }, loaded.version);
+    return 'none' as const;
+  } } });
+  await runReviewLoop({ slug, isContinue: true }, s.fake.ports);
+  assert.deepEqual(s.fake.errors, []);
+  assert.deepEqual(s.fake.exits, []);
+  assert.deepEqual(s.fake.launches, [], 'a landed Mission starts no review round');
+  assert.match(s.fake.logs.join('\n'), /already landed; no review, launch or px integrate is owed/);
+  assert.doesNotMatch(s.fake.logs.join('\n'), /human px integrate is required to land/, 'a landed Mission is not told to land again');
+  assert.equal(s.store.mission().status, 'done');
+});
+
+test('a CAS loser answers the fresh review a competing controller opened for changed repair code (PX-0041.02)', async () => {
+  const { fake, store, decisions } = changedRepairScenario();
+  const certify = fake.ports.integrationRepair!.resume;
+  const dismissed: string[] = [];
+  // The winner revoked the approval and opened round 2; this caller only reports its own CAS loss.
+  Object.assign(fake.ports, { provider: fakeProvider({ dismissApproval: async revision => { dismissed.push(revision); } }),
+    integrationRepair: { resume: async (id: string) => { await certify(id); return 'blocked' as const; } } });
+  await runReviewLoop({ slug, isContinue: true }, fake.ports);
+  assert.deepEqual(fake.errors, [], 'a loser must not report an opened fresh review as an unproven blocker');
+  assert.deepEqual(fake.exits, []);
+  assert.deepEqual(dismissed, ['fixture-revision'], "the provider dismisses the approval the winner actually withdrew");
+  assert.equal(currentReviewRound(store.mission().review!).number, 2, 'the round the winner opened is the round this caller answers');
+  assert.deepEqual(decisions, ['repaired-revision'], 'that round is decided at the repaired revision');
+});
+
+test('a concurrent landing during a retained continuation is reported as landed, not as a second integrate (PX-0041.02)', async () => {
+  const s = await approvedRepairScenario();
+  const certify = s.fake.ports.integrationRepair!.resume;
+  Object.assign(s.fake.ports, { integrationRepair: { resume: async (id: string) => {
+    const outcome = await certify(id);
+    const loaded = await s.store.load();
+    await s.store.save({ ...loaded.mission, status: 'done', closedAt: '2026-10-02T12:00:00Z' }, loaded.version);
+    return outcome;
+  } } });
+  await runReviewLoop({ slug, isContinue: true }, s.fake.ports);
+  assert.deepEqual(s.fake.errors, []);
+  assert.deepEqual(s.fake.exits, []);
+  assert.deepEqual(s.fake.launches, [], 'a landed Mission starts no review round');
+  assert.match(s.fake.logs.join('\n'), /already landed; no review, launch or px integrate is owed/);
+  assert.doesNotMatch(s.fake.logs.join('\n'), /human px integrate is required to land/, 'the operator is not told to land it again');
+  assert.equal(s.store.mission().status, 'done');
+});
 
 test('repeated approved direct review does not rerun certification or launch (TASK-2833)', async () => {
   const s = await approvedRepairScenario();
@@ -716,7 +909,7 @@ function approvedIntegrationRepairScenario(options: { verifyOk?: boolean; blocke
     },
     integrationApprovalEvidence: approvalEvidence,
     integrationRepair: { resume: async () => (await certifyPendingIntegrationRepair(slug, services, integration,
-      undefined, fake.ports.retainedRepair))?.outcome ?? 'none' } });
+      missionExecutionContext({ missionId: slug, missionWorktree: worktree, baseWorktree: worktree }), undefined, fake.ports.retainedRepair))?.outcome ?? 'none' } });
   return { fake, store, mission, effects };
 }
 

@@ -13,9 +13,12 @@ import { ReviewCommandUseCase } from '../../../../src/application/review-command
 import { createReviewCommand } from '../../../../src/interfaces/cli/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { bindReviewPersistence } from '../../../../src/composition/review-persistence.js';
-import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { fixtureMission, inMemoryTransitionStore, pendingReview } from '../../../fixtures/mission-builders.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { showReviewStatus } from '../../../../src/adapters/review/review-commands.js';
+import { requestReviewIntervention } from '../../../../src/domain/review.js';
+import { missionVersion } from '../../../../src/application/domain-ports.js';
+import { missionId } from '../../../../src/domain/mission.js';
 
 test('review status prints orphan recovery and distinguishes uncertain, live and completed rounds (TASK-2826)', async () => {
   for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
@@ -258,9 +261,9 @@ test('review automation retains its five-round limit', async () => {
   assert.equal(received.value && received.value.maxAttempts, 5);
 });
 
-// An unknown identity may not begin a review; known missions reach handoff
-// readiness even when their first Review has not been created yet.
-test('bare review rejects an unknown mission without the DB-native Review aggregate', async () => {
+// Unavailable authority cannot be reduced to a missing Mission. Known missions
+// still reach handoff readiness before their first Review is created.
+test('bare review reports unavailable Mission authority distinctly from a missing aggregate (PX-0041.03)', async () => {
   let startReviewLoopCalled = 0;
   const errors: string[] = [];
   const exits: number[] = [];
@@ -275,9 +278,9 @@ test('bare review rejects an unknown mission without the DB-native Review aggreg
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
   });
 
-  assert.equal(startReviewLoopCalled, 0, 'inferred entry must not reintroduce retired file-backed state for an unknown Mission');
+  assert.equal(startReviewLoopCalled, 0, 'inferred entry must not reintroduce retired file-backed state when authority is unavailable');
   assert.equal(errors.length, 1);
-  assert.match(errors[0], /unknown|no valid Review aggregate/i);
+  assert.match(errors[0], /Mission authority is unavailable.*Operator database is unavailable/i);
   assert.deepEqual(exits, [1]);
 });
 
@@ -285,6 +288,7 @@ test('bare review rejects an unknown mission without the DB-native Review aggreg
 test('bare review rejects an unknown mission before loop dispatch', async () => {
   const errors: string[] = [];
   let startReviewLoopCalled = 0;
+  const missing = { ...inMemoryTransitionStore(fixtureMission('other-mission')), load: async () => ({ kind: 'missing' as const }) };
 
   await review(['task-2490'], {
     inferSlugFn: (s) => s || 'task-2490',
@@ -292,6 +296,7 @@ test('bare review rejects an unknown mission before loop dispatch', async () => 
     error: (m) => errors.push(m),
     exit: () => {},
     requireReviewAggregate: true,
+    missionStore: missing,
     readReviewStateFn: async () => null,
     reviewLoopMechanisms: () => { startReviewLoopCalled += 1; return declinedLoop(); },
   });
@@ -396,7 +401,7 @@ for (const prerequisite of ['intervention', 'blocker']) {
     await review(['task-2696-failure'], {
       inferSlugFn: () => 'task-2696-failure', resolveWorktreeFn: () => null,
       log: () => {}, error: message => errors.push(message), exit: code => { exits.push(code); },
-      operatorResume: { acknowledge: async () => {} },
+      operatorResume: { assess: async () => ({ outcome: 'not-required' }), acknowledge: async () => {} },
       missionStore: store, readReviewStateFn: async slug => new ReviewState(slug, { round: 2, startedAt: '2026-01-01T00:00:00Z' }),
       ...(prerequisite === 'blocker' ? { continueReviewClearsInterventionFn: async () => false } : {}),
       reviewLoopMechanisms: () => { effects.push('dispatch'); return declinedLoop(); },
@@ -429,7 +434,7 @@ test('continuation preserves unexpected helper errors (TASK-2696)', async () => 
   await assert.rejects(async () => review(['task-2696-failure'], {
     inferSlugFn: () => 'task-2696-failure', resolveWorktreeFn: () => null,
     readReviewStateFn: async slug => new ReviewState(slug, { round: 2, startedAt: '2026-01-01T00:00:00Z' }),
-    operatorResume: { acknowledge: async () => {} },
+    operatorResume: { assess: async () => ({ outcome: 'not-required' }), acknowledge: async () => {} },
     continueReviewClearsInterventionFn: async () => { throw failure; },
     log: () => {}, error: () => {}, exit: () => {},
     reviewLoopMechanisms: () => { return assert.fail('unexpected errors must stop dispatch'); },
@@ -450,6 +455,28 @@ test('composition grants review acknowledgment only to a direct operator invocat
     });
   });
   withinCliInvocation(false, direct => assert.equal(direct, false, 'forwarded supervisor invocation'));
+
+  const stopped = requestReviewIntervention(pendingReview('task-2759'), {
+    requestedAt: '2026-11-10T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
+  });
+  const recoveryStore = inMemoryTransitionStore(fixtureMission('task-2759', { status: 'review', review: stopped }));
+  const settled = bindReviewOperatorResume(recoveryStore, true, {}, async () => ({ workflow: null,
+    liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } }));
+  const admitted = await settled!.assess('task-2759');
+  assert.equal(admitted.outcome, 'permitted', 'direct CLI reaches the shared settled-work decision');
+  if (admitted.outcome !== 'permitted') { assert.fail('settled recovery must produce an admission permit'); }
+  const owned = bindReviewOperatorResume(recoveryStore, true, {}, async () => ({
+    workflow: { id: 'current-review', phase: 'executing', reason: null },
+    liveness: { workflow: true, coordinator: true, execution: false, reviewer: false },
+  }), { missionId: missionId('task-2759'), missionVersion: missionVersion(1), recovery: admitted.recovery });
+  assert.equal((await owned!.assess('task-2759')).outcome, 'permitted', 'the revision-bound admission survives its own workflow ownership');
+  const staleStore = inMemoryTransitionStore(fixtureMission('task-2759', { status: 'review', review: stopped }), { version: 2 });
+  const stale = bindReviewOperatorResume(staleStore, true, {}, async () => assert.fail('stale permits must not observe liveness'),
+    { missionId: missionId('task-2759'), missionVersion: missionVersion(1), recovery: admitted.recovery });
+  assert.equal((await stale!.assess('task-2759')).outcome, 'refused', 'a newer Mission invalidates the admission permit');
+  const live = bindReviewOperatorResume(recoveryStore, true, {}, async () => ({ workflow: null,
+    liveness: { workflow: false, coordinator: false, execution: false, reviewer: true } }));
+  assert.equal((await live!.assess('task-2759')).outcome, 'refused', 'live owned work cannot authorize recovery');
 });
 
 for (const providerEnabled of [true, false]) {

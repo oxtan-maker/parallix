@@ -277,7 +277,9 @@ test('readiness reports CP-5 and CP-6 together with coverage and every bad refer
   assert.deepEqual(result.findings.filter(item => item.code === 'missing-checkpoint').map(item => item.checkpoint), ['CP-5', 'CP-6']);
   assert.equal(result.findings.filter(item => item.code === 'unverifiable-reference').length, 4);
   assert.deepEqual(result.findings.filter(item => item.code === 'uncovered-criterion').map(item => item.criterion), ['second']);
-  const reviewPreparation = new ReviewPreparationContractVerifier(ports).verifyCheckpointEvidence(SLUG, { ...contract, ok: true }, {
+  const reviewPreparation = new ReviewPreparationContractVerifier(ports).verifyCheckpointEvidence(SLUG, {
+    ...contract, ok: true, mirrorOwnership: { kind: 'required', authority: 'backlog' },
+  }, {
     rootDir: ROOT, missionDirPath: ROOT, log: recorder.log.push.bind(recorder.log), error: recorder.errors.push.bind(recorder.errors),
   });
   assert.equal('error' in reviewPreparation && reviewPreparation.error, result.findings[0].message);

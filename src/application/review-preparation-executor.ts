@@ -17,7 +17,7 @@ import { transitionReviewRepair } from './review-repair-lifecycle.js';
  */
 import { reviewPreparationBudgetExceeded } from "../domain/mission-review-preparation-policy.js";
 import * as fmt from './presentation/cli-format.js';
-import { isDbOwnedPxIdentity } from '../domain/mission.js';
+import type { BacklogMirrorOwnership } from '../domain/mission.js';
 
 import { DeclaredGateRunner } from "./review-preparation-declared-gates.js";
 import { ReviewPreparationContractVerifier, loadRecordedContract } from "./review-preparation-contract.js";
@@ -235,19 +235,17 @@ export class ReviewPreparationExecutor {
     });
     if (reviewOutcome) { return reviewOutcome; }
     const taskImplementer = forgejoUser;
-    if (!await ports.backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log: internalLog })) {
-      // A DB-owned adhoc identity has no Backlog mirror to transition; the
-      // authoritative lifecycle transition above already recorded the review
-      // state. Backlog-backed missions keep the hard failure.
-      if (!isDbOwnedPxIdentity(slug)) {
+    if (prepared.contract.mirrorOwnership.kind === 'required') {
+      if (!await ports.backlog.transitionTask(slug, 'review', { implementer: taskImplementer, rootDir, log: internalLog })) {
         const msg = `Could not transition task ${fmt.slug(slug)} to review.`;
         error(msg);
         return preparationFailure(msg, 'state-machine');
       }
-      log(fmt.status('WARN', `No Backlog mirror to transition for DB-owned adhoc identity ${fmt.slug(slug)}; DB-authoritative lifecycle already recorded the review transition.`));
+    } else {
+      log(fmt.status('INFO', `No Backlog mirror for DB-owned Mission ${fmt.slug(slug)}; DB-authoritative lifecycle recorded the review transition.`));
     }
 
-    if (forgejoEnabled && token) {
+    if (prepared.contract.mirrorOwnership.kind === 'required' && forgejoEnabled && token) {
       const pushOutcome = this.forgejo.pushBacklogTransition(slug, {
         rootDir,
         branch,
@@ -307,13 +305,12 @@ export class ReviewPreparationExecutor {
     if (preGateFailure) { return preGateFailure; }
 
     // Step 0: Resolve Backlog task for identity derivation.
-    // A DB-owned adhoc identity (`px-<NNNN>`) is authoritative in the
-    // operator database; its Backlog task file is a best-effort one-way mirror
-    // only. A missing or deleted mirror must not block review preparation — the identity
+    // A DB-owned Mission is authoritative in the operator database and has no
+    // Backlog mirror. Its absence must not block review preparation — the identity
     // and lifecycle are DB-authoritative. Backlog-backed missions keep the strict
     // contract: a missing task file is still a hard failure.
     const taskResolution = ports.backlog.resolveTaskFile(slug, rootDir);
-    const identityFailure = reviewPreparationTaskFailure(slug, taskResolution, log, error);
+    const identityFailure = reviewPreparationTaskFailure(slug, taskResolution, contract.mirrorOwnership, log, error);
     if (identityFailure) { return identityFailure; }
 
     // Pre-review preparation Content Integrity Check
@@ -456,15 +453,14 @@ async function runPreReviewPreparationGates(slug: string, rootDir: string, bindi
   return null;
 }
 
-function reviewPreparationTaskFailure(slug: string, taskResolution: ReturnType<ReviewPreparationWorkflowPorts['backlog']['resolveTaskFile']>, log: ReviewPreparationBindings['log'], error: ReviewPreparationBindings['error']): ReviewPreparationResult | null {
-  const dbOwnedPxIdentity = isDbOwnedPxIdentity(slug);
-  if (!taskResolution.ok && !dbOwnedPxIdentity) {
+function reviewPreparationTaskFailure(slug: string, taskResolution: ReturnType<ReviewPreparationWorkflowPorts['backlog']['resolveTaskFile']>, ownership: BacklogMirrorOwnership, log: ReviewPreparationBindings['log'], error: ReviewPreparationBindings['error']): ReviewPreparationResult | null {
+  if (!taskResolution.ok && ownership.kind === 'required') {
     const msg = `Backlog task file for ${fmt.slug(slug)} not found or ambiguous: ${taskResolution.reason}.`;
     error(msg);
     return preparationFailure(msg, 'state-machine');
   }
-  if (dbOwnedPxIdentity && !taskResolution.ok) {
-    log(fmt.status('WARN', `No Backlog mirror for DB-owned adhoc identity ${fmt.slug(slug)}; identity and lifecycle are DB-authoritative.`));
+  if (ownership.kind === 'none' && !taskResolution.ok) {
+    log(fmt.status('INFO', `No Backlog mirror for DB-owned Mission ${fmt.slug(slug)}; identity and lifecycle are DB-authoritative.`));
   }
 
   return null;

@@ -286,8 +286,6 @@ class MissionRecovery {
   private promotionTask(context: IntegrationContext) {
     const taskPath = context.task?.taskFile
       ? resolveIntegrationTaskPath(context.task.taskFile, context.missionWorktree, context.baseWorktree)
-        // buildIntegrationContext always supplies a worktree; direct callers may not.
-        || (!context.missionWorktree && context.baseWorktree ? this.dependencies.backlog.resolveTaskFile(context.slug, context.baseWorktree).taskFile : null)
       : '';
     const baseTask = taskPath ? { ok: true, taskFile: taskPath } : context.task?.taskFile ? { ok: false } : context.task;
     return baseTask;
@@ -297,6 +295,9 @@ class MissionRecovery {
     context: IntegrationContext,
     { dryRun = false, missionServicesFn }: { dryRun?: boolean, missionServicesFn?: IntegrationMissionServicesFactory } = {},
   ) {
+    if (context.mirrorOwnership.kind === 'none') {
+      return { changed: false, dryRun: false };
+    }
     const taskStatusCheck = evaluateTaskStatusForIntegration(context, this.dependencies.ports.stateMap);
     const needsPromotion = this.needsTaskPromotion(context, taskStatusCheck);
 
@@ -313,7 +314,7 @@ class MissionRecovery {
     // `integration -> done`. Read the authority first so the Backlog promotion
     // cannot get ahead of the durable lifecycle transition.
     if (typeof missionServicesFn !== 'function') { throw new Error('integration promotion requires injected mission services'); }
-    const missionServices = await missionServicesFn(context.baseWorktree || process.cwd());
+    const missionServices = await missionServicesFn(context.baseWorktree);
     const missionLoad = await missionServices.store.load(missionId(context.slug));
     if (missionLoad.kind === 'unavailable') {
       throw abortWith(this.dependencies.landing, `Mission store unavailable: ${missionLoad.reason}. Refusing to promote the Backlog task.`);

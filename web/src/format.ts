@@ -26,26 +26,6 @@ export function durationText(duration: WebDurationMs): string {
   return `${major}${label}${next && seconds >= next[0] ? ` ${Math.floor(seconds / next[0])}${next[1]}` : ''}`;
 }
 
-export const GATE_TEXT: Record<WebMissionCard['gate'], string> = {
-  passed: 'gate ✓',
-  failed: 'gate ✗ FAIL',
-  running: 'gate · running',
-  stale: 'gate · stale',
-  'not-run': 'gate · not run',
-  unconfigured: 'gate · none configured',
-  unavailable: 'gate · unavailable',
-};
-
-export const GATE_COLOR: Record<WebMissionCard['gate'], string> = {
-  passed: C.green,
-  failed: C.red,
-  running: C.amber,
-  stale: C.amber,
-  'not-run': C.faint,
-  unconfigured: C.faint,
-  unavailable: C.faint,
-};
-
 /**
  * The reference's actor line: one sentence about who is acting, taken from
  * the server's own summary rather than composed here.

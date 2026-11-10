@@ -3,6 +3,7 @@ import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { StatusCommandUseCase } from '../../../src/application/status-command-use-case.js';
 import { type StatusAgentPort, type StatusBoardPort, type StatusGitPort, type StatusMissionData, type StatusPrPort, type StatusResult, type StatusStaleWorktreesPort } from '../../../src/application/ports/cli-workflows.js';
+import { agentFamily } from '../../../src/domain/agents.js';
 import { createStatusCommand, parseStatusCliRequest, renderStatus, statusJson } from '../../../src/interfaces/cli/status.js';
 import { createStatusBoardAdapter } from '../../../src/adapters/cli/commands/status-adapter.js';
 
@@ -73,9 +74,10 @@ describe('StatusCommandUseCase and status rendering', () => {
         reviewDisposition: 'approved',
         reviewHistory: [{
           number: 1,
-          reviewer: 'claude',
-          implementer: 'codex',
-          disposition: 'approved',
+          reviewer: agentFamily('claude'),
+          implementer: agentFamily('codex'),
+          phase: 'approved',
+          disposition: 'APPROVED',
           comment: 'LGTM',
           findingSummaries: [],
           fixes: [],
@@ -94,7 +96,7 @@ describe('StatusCommandUseCase and status rendering', () => {
     assert.ok(lines.some(l => l.includes('Last checkpoint: CP-2.md - Wire status use case')), 'should render checkpoint');
     assert.ok(lines.some(l => l.includes('Forgejo PR: #42 (open)')), 'should render PR');
     assert.ok(lines.some(l => l.includes('Review: round 1, phase review, disposition approved')), 'should render review');
-    assert.ok(lines.some(l => l.includes('Round 1 [claude -> codex]: approved')), 'should render review history');
+    assert.ok(lines.some(l => l.includes('Round 1 [claude -> codex]: APPROVED')), 'should render review history');
     assert.ok(lines.some(l => l.includes('comment: LGTM')), 'should render review comment');
   });
 
@@ -563,7 +565,7 @@ describe("status projection of Mission brief and checkpoint", () => {
       reviewRound: 2,
       reviewDisposition: 'CHANGES_MADE',
       reviewHistory: [{
-        number: 1, reviewer: 'codex', implementer: 'claude', disposition: 'CHANGES_REQUESTED',
+        number: 1, reviewer: agentFamily('codex'), implementer: agentFamily('claude'), phase: 'fixing', disposition: 'REQUEST_CHANGES',
         comment: 'see findings', findingSummaries: ['F1 typed writes missing'], fixes: ['F1 fixed'], pushbacks: [],
       }],
     }))));

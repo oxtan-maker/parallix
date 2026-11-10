@@ -7,6 +7,8 @@ import { statisticsMissionKey, statisticsRowInWindow } from './statistics-servic
 
 export interface StatsRow {
   date?: string; actorKey?: string;
+  /** Internal join to retained run history; omitted from rendered stats headers. */
+  runId?: string;
   repo?: string;
   mission?: string;
   classification?: string | null;
@@ -229,6 +231,7 @@ function canonicalizeStatsRow(row: StatsRow, options: NormalizeStatsRowOptions =
     if (key === 'pr_fix_rounds' && (canonical as Record<string, unknown>)[key] === undefined) { continue; }
     (canonical as Record<string, unknown>)[key] = String(Math.max(0, Number.parseInt(String(value), 10) || 0));
   }
+  if (row.runId) { canonical.runId = row.runId; }
   return canonical;
 }
 

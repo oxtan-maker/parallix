@@ -14,14 +14,14 @@
 // cumulative Codex usage for the execute phase instead of the windowed delta
 // (architecture migration review F1/F6).
 
-import type { StageTelemetry } from '../../application/stats-recording-use-case.js';
+import { providerResourceObservation, type ProviderResourceObservation } from '../../application/run-history-types.js';
 import { codexHomeRoot, extractCodexTelemetry } from './codex.js';
 
 interface StageTelemetryOptions {
   worktree: string;
   // Optional: a launcher that produced no run record still resolves to null
   // through the guard below rather than forcing callers to fabricate one.
-  result?: { telemetry?: StageTelemetry | null } | null;
+  result?: { telemetry?: Record<string, unknown> | null; providerResources?: ProviderResourceObservation | null } | null;
   sinceMs?: number;
 }
 
@@ -31,22 +31,30 @@ const EMPTY_STAGE_OPTIONS: StageTelemetryOptions = Object.freeze({ worktree: '' 
  * @returns normalized telemetry, or null when none is available.
  */
 function resolveStageTelemetry({ worktree, result, sinceMs = 0 }: StageTelemetryOptions = EMPTY_STAGE_OPTIONS) {
-  if (!result || !result.telemetry) {return null;}
+  if (!result || !result.telemetry && !result.providerResources) {return null;}
   try {
     const codexT = extractCodexTelemetry(codexHomeRoot(worktree), { sinceMs: sinceMs || 0 });
     // Guard against stale Codex rollouts bleeding into non-Codex stages:
     // if the launcher attached telemetry with a provider that differs from
     // what Codex would produce (e.g. anthropic vs openai), discard the Codex
     // read and use the launcher-attached telemetry instead.
-    if (codexT && codexT.provider && result.telemetry.provider
-        && codexT.provider.toLowerCase() !== result.telemetry.provider.toLowerCase()) {
-      return result.telemetry;
+    if (providersDiffer(codexT, result.providerResources)) {
+      return result.providerResources;
     }
-    return codexT || result.telemetry;
+    return providerResourceObservation(codexT) ?? result.providerResources ?? providerResourceObservation(result.telemetry);
   } catch (_) {
     // Codex rollout unreadable: fall back to this stage's launcher telemetry.
-    return result.telemetry;
+    return result.providerResources ?? providerResourceObservation(result.telemetry);
   }
+}
+
+function providersDiffer(
+  codexTelemetry: { provider?: string | null } | null,
+  attachedTelemetry: ProviderResourceObservation | null | undefined,
+): attachedTelemetry is ProviderResourceObservation {
+  const codexProvider = codexTelemetry?.provider;
+  const attachedProvider = attachedTelemetry?.provider;
+  return Boolean(codexProvider && attachedProvider && codexProvider.toLowerCase() !== attachedProvider.toLowerCase());
 }
 
 export { resolveStageTelemetry };

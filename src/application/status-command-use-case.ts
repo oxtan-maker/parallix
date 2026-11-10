@@ -134,4 +134,4 @@ export class StatusWorkflowAdapter implements StatusBoardPort, StatusGitPort, St
 }
 
 // Re-export types for consumers
-export type { StatusResult, StatusMissionData, StatusPrInfo, StatusStaleWorktree, StatusAgentEntry, StatusRebaseInfo, StatusReviewRound } from './ports/cli-workflows.js';
+export type { StatusResult, StatusMissionData, StatusPrInfo, StatusStaleWorktree, StatusAgentEntry, StatusRebaseInfo } from './ports/cli-workflows.js';

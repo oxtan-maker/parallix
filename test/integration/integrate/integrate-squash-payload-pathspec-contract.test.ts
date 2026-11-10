@@ -3,6 +3,7 @@ import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.j
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { missionVersion as fixtureVersion } from '../../../src/application/domain-ports.js';
 // Historical regression provenance: TASK-2533, TASK-2534, TASK-2537, TASK-2349.
 // Behavior-owned suite (TASK-2622.09, integration-ci): squash landing payload and backlog noise over
@@ -26,6 +27,7 @@ mockModule('../../../src/adapters/backlog/backlog.js', import.meta.url);
 mockModule('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/stats.js', import.meta.url);
 mockModule('../../../src/composition/application-services.js', import.meta.url);
+mockModule('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
 const { createSquashLanding } = await import('../../../src/application/integrate/squash.js');
@@ -541,6 +543,7 @@ describe("stage/commit race", () => {
   const forgejo = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
   const stats = mockModule<typeof import('../../../src/adapters/cli/commands/stats.js')>('../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const composition = mockModule<typeof import('../../../src/composition/application-services.js')>('../../../src/composition/application-services.js', import.meta.url);
+const executionContext = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
   const integrateModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   const TEST_SLUG = 'task-2349-race';
@@ -558,6 +561,10 @@ describe("stage/commit race", () => {
     mock.method(missionUtils, 'findMissionDir', () => path.join(FAKE_ROOT, 'missions', TEST_SLUG));
     mock.method(missionUtils, 'findMissionArea', () => 'all');
     mock.method(missionUtils, 'conventionalWorktreePath', () => path.join(FAKE_ROOT, '..', TEST_SLUG));
+    mock.method(executionContext, 'resolveMissionExecutionContext', (id: string) => ({
+      ok: true as const,
+      context: missionExecutionContext({ missionId: id, missionWorktree: path.join(FAKE_ROOT, '..', TEST_SLUG), baseWorktree: FAKE_ROOT, baseBranch: 'main' }),
+    }));
     mock.method(missionUtils, 'resolveMainRepo', () => FAKE_ROOT);
     mock.method(missionUtils, 'missionTitle', () => 'Race test');
     mock.method(missionUtils, 'updateGraphifyKnowledgeGraph', () => false);

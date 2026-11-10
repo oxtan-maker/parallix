@@ -351,7 +351,7 @@ function declaredEvidence(checkout: MissionGateEvidence['checkout'], gate: Parti
     async readDeclaredGates(_scope, commands) {
       return { checkout, gates: commands.map(command => ({ command, proof: { state: 'absent' as const }, failure: null, ...gate })) };
     },
-    async readIntegrationGates() { throw new Error('integration evidence is not applicable'); },
+    async readIntegrationGates() { return { checkout, configured: [], gates: [], running: null }; },
   };
 }
 

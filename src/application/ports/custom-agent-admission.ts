@@ -1,13 +1,9 @@
-/** Identity prevents a recycled PID from retaining an admission slot. */
-export interface AdmissionProcessIdentity {
-  readonly pid: number;
-  readonly startId: string | null;
-}
+import type { ProcessIdentity } from './process-identity.js';
 
 /** Shared admission persistence; contains no mission, credential or session state. */
 export interface CustomAgentLeaseRepository {
-  acquire(_repositoryRoot: string, _capacity: number, _launcher: AdmissionProcessIdentity): Promise<string | null>;
-  bindChild(_leaseId: string, _child: AdmissionProcessIdentity): void;
+  acquire(_repositoryRoot: string, _capacity: number, _launcher: ProcessIdentity): Promise<string | null>;
+  bindChild(_leaseId: string, _child: ProcessIdentity): void;
   release(_leaseId: string): void;
 }
 

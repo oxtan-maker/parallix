@@ -620,6 +620,8 @@ not establish the cause of earlier deadline failures or guarantee their absence.
 
 The gate section rejects unknown settings and invalid types; consult the
 [configuration schema](../config/workflow.config.schema.json) for its contract.
+An unreadable or invalid `workflow.config.json` aborts gate-plan loading; it is
+never treated as an empty gate plan.
 
 ```json
 {
