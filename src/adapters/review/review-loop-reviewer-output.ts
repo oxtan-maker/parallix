@@ -156,7 +156,16 @@ export const reviewerOutputRenderers = {
     return;
   }),
   'single-family-review': reviewEventRenderer('single-family-review', (event, output) => {
-    output.log(fmt.status('WARN', `Single-family fallback: reviewer="${event.implementer}" is the PR author family; local review will run, but external formal approval will be required.`));
+    output.log(fmt.status('WARN', `Single-family fallback: reviewer="${event.implementer}" is the PR author family; the same agent reviews in a fresh context. Human inspection through Forgejo or px integrate is optional.`));
+    return;
+  }),
+  'reviewer-policy': reviewEventRenderer('reviewer-policy', (event, output) => {
+    output.log(fmt.status('INFO', `Reviewer policy: ${event.mode}; ${event.required} approval${event.required === 1 ? '' : 's'} required from ${event.selected.join(', ')} (${event.available} independent available).`));
+    if (event.reason) { output.log(fmt.status('WARN', event.reason)); }
+    return;
+  }),
+  'reviewer-next': reviewEventRenderer('reviewer-next', (event, output) => {
+    output.log(fmt.status('INFO', `Approval ${event.approved} of ${event.required} recorded; ${event.reviewer} reviews the same revision next.`));
     return;
   }),
   'reviewer-resumed': reviewEventRenderer('reviewer-resumed', (event, output) => {

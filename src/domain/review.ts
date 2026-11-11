@@ -310,6 +310,8 @@ export interface ReviewRound {
   readonly decision: ReviewerDecision | null;
   /** Immutable per-reviewer publications; absent only on pre-PX-0046 rounds. */
   readonly reviewerResults?: readonly import('./reviewer-result.js').ReviewerResult[];
+  /** Reviewer identities, availability and required approval count decided for this round's revision. */
+  readonly reviewerPolicy?: import('./reviewer-policy.js').ReviewerPolicy;
   readonly response: ImplementerResolution | null;
   /** Workflow phase of this round. Reset to `reviewing` when a round begins. */
   readonly phase: ReviewPhase;
@@ -652,8 +654,7 @@ export function revokeApprovedDecision(
     ...current,
     decision: { ...current.decision, revocation },
     ...(current.reviewerResults ? { reviewerResults: current.reviewerResults.map(result =>
-      result.decision === 'approved' && result.agentFamily === current.reviewer
-        && result.revision === current.decision!.revision
+      result.decision === 'approved' && result.revision === current.decision!.revision
         ? { ...result, revokedAt: revocation.revokedAt } : result) } : {}),
   };
   const superseding = current.decision.supersession?.supersedingRevision;
@@ -674,6 +675,7 @@ export function revokeApprovedDecision(
 }
 
 export { currentRevisionApprovals, recordReviewerResult, validReviewerApprovals } from './reviewer-result.js';
+export type { ReviewerMode, ReviewerPolicy } from './reviewer-policy.js';
 export type { ReviewerResult, ReviewerResultAttribution, ReviewerResultDecision, ReviewerResultOutcome } from './reviewer-result.js';
 
 function requireEligibleReviewer(
@@ -1014,6 +1016,9 @@ export function invalidateBlocker(review: Review, startedAt: string): Review {
     implementerResponseContent: undefined,
     itemDispositions: undefined,
     blockedReason: undefined,
+    // The preserved round keeps its results and policy; the fresh round owes its own reviews and requirement.
+    reviewerResults: round.reviewerResults ? [] : undefined,
+    reviewerPolicy: undefined,
   };
   return { ...review, rounds: [...review.rounds, invalidated], intervention: null, stageLaunches: [] };
 }

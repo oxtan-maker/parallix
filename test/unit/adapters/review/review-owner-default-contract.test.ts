@@ -9,6 +9,7 @@ import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { pushRound } from '../../../../src/adapters/review/review-commands.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import {
   defaultRepoSlug,
   collectSetupAnswers,
@@ -18,6 +19,80 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // Regression provenance: TASK-2364.
 const mockSlug = 'task-2364';
+
+test('review mutation requires a consistent live context while status discovery remains read-only', async () => {
+  const errors: string[] = []; const exits: number[] = []; let resolutions = 0;
+  const adapter = createReviewWorkflowAdapter({ rootDir: '/web-host', resolveExecutionContextFn: () => {
+    resolutions++; return { ok: true, context: { missionId: 'other-task', missionWorktree: '/external/mission', missionBranch: 'mission/other-task', baseWorktree: '/external/base', baseBranch: 'main' } };
+  }, error: message => errors.push(message), exit: code => exits.push(code), inferSlugFn: () => mockSlug });
+  assert.equal(await adapter.preflight([mockSlug, '--push']), null); assert.ok(await adapter.preflight([mockSlug, '--status']));
+  assert.equal(resolutions, 1); assert.deepEqual(exits, [1]); assert.match(errors.join('\n'), /cannot mutate mission/);
+});
+
+test('review mutation consumers retain the preflight checkout and configuration (px-0042.02 F4/F5)', async () => {
+  const configuration = resolveConfiguration({ FORGEJO_HOME: '/configured/forgejo' });
+  const context = missionExecutionContext({ missionId: mockSlug, missionWorktree: '/resolved/mission' });
+  let submitted: Record<string, unknown> | undefined;
+  let pushed: Record<string, unknown> | undefined;
+  let closed: Record<string, unknown> | undefined;
+  const adapter = createReviewWorkflowAdapter({
+    configuration,
+    rootDir: '/web-host',
+    inferSlugFn: () => mockSlug,
+    resolveExecutionContextFn: () => ({ ok: true, context }),
+    log: () => {},
+    error: (message: string) => assert.fail(message),
+    exit: (code: number) => assert.fail(`exit ${code}`),
+  });
+  const common = {
+    resolveWorktreeFn: () => null,
+    readReviewStateFn: () => ({ implementer: 'codex' }),
+  };
+
+  const submit = await adapter.preflight([mockSlug, '--submit'], {
+    ...common,
+    isReviewProviderEnabledFn: () => false,
+    performReviewPreparationFn: async (_slug: string, options: Record<string, unknown>) => {
+      submitted = options as Record<string, unknown>;
+      return { ok: true as const };
+    },
+  });
+  assert.ok(submit);
+  await adapter.submit(submit);
+  const push = await adapter.preflight([mockSlug, '--push'], {
+    ...common,
+    resolveReviewUserFn: (user: string | null | undefined, received: unknown) => {
+      assert.strictEqual(received, configuration);
+      return user;
+    },
+    isReviewProviderEnabledFn: () => true,
+    readTokenFn: () => 'token',
+    transitionTaskFn: async () => true,
+    createPrFn: (_branch: string, _user: string, _token: string, options: Record<string, unknown>) => {
+      pushed = options as Record<string, unknown>;
+      return { ok: true };
+    },
+  });
+  assert.ok(push);
+  await adapter.push(push);
+  const close = await adapter.preflight([mockSlug, '--close'], {
+    ...common,
+    readTokenFn: () => 'token',
+    closePrFn: (_branch: string, _token: string, _user: string, options: Record<string, unknown>) => {
+      closed = options as Record<string, unknown>;
+      return { ok: true };
+    },
+  });
+  assert.ok(close);
+  await adapter.close(close);
+
+  assert.equal(submitted?.worktree, undefined, 'review preparation receives no worktree fallback; the resolved context is the location authority');
+  assert.deepEqual(submitted?.executionContext, context);
+  assert.equal(pushed?.rootDir, context.missionWorktree);
+  assert.strictEqual(pushed?.configuration, configuration);
+  assert.equal(closed?.rootDir, context.missionWorktree);
+  assert.strictEqual(closed?.configuration, configuration);
+});
 
 test('auto-bootstrap fallback owner is human not magnus when repo is empty', async () => {
   let capturedOwner: string | undefined;

@@ -2,6 +2,7 @@ import { readReviewForDecision } from './review-round-read.js';
 import { currentReviewRound } from '../../domain/review.js';
 import type { ReviewStatePort, ReviewLoopState } from '../../application/ports/review-round.js';
 import type { ReviewRoundPorts, ReviewRoundResult } from './review-round.js';
+import { reviewerResultAttribution } from './reviewer-result-attribution.js';
 import { recordApproval, recordRequestedChanges, recordImplementerResolution } from './review-round.js';
 
 /** Bind observed provider facts to the existing decision/resolution owners. */
@@ -22,8 +23,11 @@ export function createReviewObservationRecorder(slug: string, head: () => string
         observation = { disposition: 'APPROVED', revision: decision.revision ?? null, decidedAt: decision.decidedAt, comment: decision.comment };
       }
       const judgment = observation ?? { comment: null, decidedAt: new Date().toISOString(), revision: head() };
+      // A polled approval is the running reviewer's own verdict: it is attributed, so a policy that still owes
+      // another approval holds it instead of deciding the round.
       await requireRecorded(() => recordApproval(slug, {
         ...judgment, observedRound: observedRound(state),
+        result: reviewerResultAttribution(state.reviewer ?? 'reviewer', null),
         source: providerEnabled ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
       }, ports));
     },

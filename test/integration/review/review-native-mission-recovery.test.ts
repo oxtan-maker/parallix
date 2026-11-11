@@ -35,6 +35,7 @@ import { ReviewState, readReviewState } from '../../../src/adapters/review/revie
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+import { withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
 
 const SLUG = 'task-2614-review';
 const REVIEWER = agentFamily('codex');
@@ -115,7 +116,7 @@ interface InvokeStartResult {
 async function invokeStart(store: SqliteMissionStore, root: string, status: 'active' | 'review'): Promise<InvokeStartResult> {
   let launched = false;
   let error: { value: string | null } = { value: null };
-  const adapter = createReviewWorkflowAdapter({
+  const adapter = createReviewWorkflowAdapter(withReviewMutationContext({
     missionStore: store,
     resolveWorktreeFn: () => root,
     log: () => undefined,
@@ -125,7 +126,7 @@ async function invokeStart(store: SqliteMissionStore, root: string, status: 'act
     requireReviewAggregate: true,
     readReviewStateFn: readReviewState,
     reviewLoopMechanisms: () => { launched = true; return fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports; },
-  });
+  }));
   const useCase = new ReviewCommandUseCase(adapter);
   try {
     await useCase.execute([SLUG], {});
@@ -138,14 +139,14 @@ async function invokeStart(store: SqliteMissionStore, root: string, status: 'act
 
 async function invokeReconcile(store: SqliteMissionStore, root: string): Promise<{ outcome: string; error: string | null }> {
   let error: { value: string | null } = { value: null };
-  const adapter = createReviewWorkflowAdapter({
+  const adapter = createReviewWorkflowAdapter(withReviewMutationContext({
     missionStore: store,
     resolveWorktreeFn: () => root,
     log: () => undefined,
     error: (msg: string) => { error.value = msg; },
     exit: (code: number) => { throw new Error(`exit:${code}`); },
     inferSlugFn: () => SLUG,
-  });
+  }));
   const useCase = new ReviewCommandUseCase(adapter);
   try {
     await useCase.execute([

@@ -93,6 +93,8 @@ export type ReviewLoopEvent =
   | { readonly kind: 'reviewer-route-unavailable'; readonly implementer: string }
   | { readonly kind: 'different-family-unavailable'; readonly implementer: string; readonly unavailable: { agent: string; detail: string; }[] }
   | { readonly kind: 'single-family-review'; readonly implementer: string }
+  | { readonly kind: 'reviewer-policy'; readonly mode: 'two-independent' | 'one-independent' | 'same-agent'; readonly required: number; readonly selected: readonly string[]; readonly available: number; readonly reason: string | null }
+  | { readonly kind: 'reviewer-next'; readonly reviewer: string; readonly required: number; readonly approved: number }
   | { readonly kind: 'reviewer-resumed'; readonly reviewer: string; readonly round: number; readonly isContinue: boolean }
   | { readonly kind: 'reviewer-defaulted'; readonly detail: string | null }
   | { readonly kind: 'local-review-surfaces' }

@@ -7,6 +7,7 @@ import { assessApprovalRetention, type IntegrationRepairAssessment, type Retenti
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
 import type { IntegrationMissionServices } from '../ports/integration-records.js';
 import type { MissionLoadResult } from '../domain-ports.js';
+import { recordApprovalSuperseded } from '../../domain/approval-coverage.js';
 
 export type RetentionOutcome = 'retained' | 'changed' | 'blocked' | 'not-pending';
 interface RetentionRequest {
@@ -69,9 +70,13 @@ async function commitAssessment(input: RetentionRequest, loaded: Extract<Mission
     return 'blocked';
   }
   // A changed mission makes the earlier judgment stale even if gates still fail.
-  const proposed = changed ? revokeApprovedDecision(review, currentReviewRound(review).number, {
+  const revisionBound = changed && input.candidate.revision !== String(round.decision!.revision)
+    ? recordApprovalSuperseded(review, { supersededAt: assessment.assessedAt,
+      supersedingRevision: input.candidate.revision, recordedBy: 'parallix integration repair' })
+    : review;
+  const proposed = changed ? revokeApprovedDecision(revisionBound, currentReviewRound(revisionBound).number, {
     revokedAt: assessment.assessedAt, revokedBy: 'workflow', reason: 'Integration repair changed the approved mission patch.', cause: assessment.repair!.cause,
-  }) : review;
+  }) : revisionBound;
   const result = await input.services.lifecycle.transition({
     operationId: `integration-retention:${input.slug}:${loaded.version}`,
     missionId: loaded.mission.id, expectedVersion: loaded.version, capabilities: new Set(['mission:transition']),

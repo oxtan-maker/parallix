@@ -265,6 +265,7 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
   assert.equal(cards.get(ids[2])?.reviewHistory[0].findingSummaries[2], 'Human feedback from operator: Keep the correction.');
   assert.equal(cards.get(ids[2])?.reviewHistory[0].disposition, 'CHANGES_MADE');
   assert.equal(cards.get(ids[2])?.approvalOwed, true);
+  assert.equal(cards.get(ids[2])?.sameAgentReview, false, 'advisory approval debt is not a same-agent round');
   assert.match(cards.get(ids[2])?.reviewHistory[0].fixes[0] ?? '', /Covered by regression/);
   assert.match(cards.get(ids[2])?.reviewHistory[0].pushbacks[0] ?? '', /Tracked separately/);
   assert.equal(cards.get(ids[3])?.pullRequest?.id, '42');

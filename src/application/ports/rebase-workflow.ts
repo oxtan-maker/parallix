@@ -2,6 +2,7 @@ import type { ReviewStateData, ReviewStateWriter, ReviewStatePersistenceResult }
 import type { MissionStore } from '../domain-ports.js';
 import type { ReboundLaunchOptions } from '../rebound-kernel.js';
 import type { GitContentionPort } from './git-contention.js';
+import type { MissionExecutionContextResolution } from './mission-execution-context.js';
 /** Application-owned ports for the rebase workflow (TASK-2332.12).
  *
  * Every external dependency the rebase policy needs — Git, agents, Forgejo,
@@ -138,6 +139,8 @@ export interface RebaseWorkflowPort {
   // --- mission filesystem adapter ---------------------------------------
   /** Working directory the command was launched from. */
   cwd(): string;
+  /** Resolve the mutation checkout/base once from Mission identity. */
+  resolveExecutionContext(_slug: string, _root: string): MissionExecutionContextResolution;
   inferSlug(_explicitSlug?: string): string | null;
   findMissionDir(_slug: string, _root: string): string | null;
   findMissionArea(_missionDir: string): string;

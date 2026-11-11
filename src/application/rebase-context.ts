@@ -1,4 +1,5 @@
 import type { GitRunner, GitCommandResult, RebaseWorkflowPort } from './ports/rebase-workflow.js';
+import { liveMissionExecutionContext } from './ports/mission-execution-context.js';
 
 /** Everything the rebase phases share, resolved once at the command boundary. */
 export interface RebaseContext {
@@ -22,6 +23,16 @@ export interface RebaseContext {
   readonly recordedImplementer: string | null;
   /** Mission HEAD before the rebase, when the port records branch moves. */
   readonly movedFrom: string | null;
+}
+
+/** Resolve once on entry; recursive conflict rounds retain the original pair. */
+export function resolveRebaseLocation(slug: string, launchRoot: string, port: RebaseWorkflowPort,
+  context?: RebaseContext): { ok: true; executionRoot: string; baseBranch: string } | { ok: false; reason: string } {
+  if (context) { return { ok: true, executionRoot: context.executionRoot, baseBranch: context.baseBranch }; }
+  const resolved = liveMissionExecutionContext(slug, port.resolveExecutionContext(slug, launchRoot));
+  return resolved.ok
+    ? { ok: true, executionRoot: resolved.context.missionWorktree, baseBranch: resolved.context.baseBranch }
+    : resolved;
 }
 
 export const combineOutput = (result: GitCommandResult) =>

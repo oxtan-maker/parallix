@@ -54,6 +54,8 @@ import { composeTuiCapabilities } from './board-projection.js';
 import { reviewLoopBindings } from './review-persistence.js';
 import { agentFamily } from '../domain/agents.js';
 import { createReviewLivenessReader } from './review-liveness.js';
+import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
+import { liveMissionExecutionContext } from '../application/ports/mission-execution-context.js';
 
 export interface ProductionBoardRepositories {
   readonly agentBlocklist: AgentBlocklistRepository;
@@ -85,6 +87,7 @@ type BoardDraftAdapterDependencies = DraftAdapterDependencies & { gitFn?: NonNul
 export interface ProductionCompositionOverrides {
   readonly configuration: ParallixConfiguration;
   readonly draftWorkflow?: DraftWorkflowPort;
+  readonly resolveMissionContext?: typeof resolveMissionExecutionContext;
   /** Test-only adapter seams; production always supplies the safe exit boundary. */
   readonly draftAdapterDeps?: BoardDraftAdapterDependencies;
   /**
@@ -176,10 +179,12 @@ export function missionCleanupCommand(slug: string, rootDir: string, gitFn?: Git
 
 /** The browser hands off exactly as the CLI does: it supplies identity only. */
 function createBoardReviewPreparationWorkflow(
+  rootDir: string,
   store: MissionStore & MissionTransitionStore,
   configuration: ParallixConfiguration,
   reviewLoop: typeof runReviewLoop = runReviewLoop,
   database?: SqliteDatabaseAdapter | null,
+  resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext,
 ) {
   const lifecycle = new MissionLifecycleService(store);
   const missionServices = {
@@ -190,12 +195,14 @@ function createBoardReviewPreparationWorkflow(
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     nel: new MissionNelService(store),
   };
-  const reviewReviewPreparation = async (slug: string, options: Record<string, unknown> = {}): Promise<Record<string, unknown>> =>
+  const reviewReviewPreparation = async (slug: string, options: Parameters<typeof performReviewPreparation>[1]): Promise<Record<string, unknown>> =>
     ({ ...await performReviewPreparation(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices }) });
   return {
     /** First review preparation and continuation both enter the round owner `px review` uses. */
     async executeForSlug(slug: string, agent?: ReturnType<typeof agentFamily>): Promise<void> {
-      const worktree = resolveWorktree(slug) ?? process.cwd();
+      const live = liveMissionExecutionContext(slug, resolveContext(slug, rootDir, configuration));
+      if (!live.ok) { throw new Error(live.reason); }
+      const worktree = live.context.missionWorktree;
       // The browser host must never be exited by the loop; a stop is a failed dispatch.
       const exit = (code: number): never => { throw new Error(`review workflow stopped (exit ${code})`); };
       await new ReviewRoundUseCase({
@@ -214,7 +221,7 @@ function createBoardReviewPreparationWorkflow(
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
         missionUnavailable: (_mission, reason) => { throw new Error(`Mission authority is unavailable for ${slug}: ${reason}`); },
         reviewRecoveryRefused: (_mission, reason) => { throw new Error(`Review recovery refused for ${slug}: ${reason}`); },
-        mechanisms: () => createReviewLoopPorts(slug, {}, { integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
+        mechanisms: () => createReviewLoopPorts(slug, { worktree, executionContext: live.context }, { executionContext: live.context, integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
     },
   };
@@ -250,7 +257,7 @@ export function composeProductionCapabilities(
         missionStore,
       ),
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
-      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(missionStore, overrides.configuration, overrides.reviewPreparationReviewLoop, database),
+      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(rootDir, missionStore, overrides.configuration, overrides.reviewPreparationReviewLoop, database, overrides.resolveMissionContext),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

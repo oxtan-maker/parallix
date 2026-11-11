@@ -82,7 +82,9 @@ function subjectFromState(state: ReviewStateData, previous: ReviewRound): Review
 }
 
 function reattributedReviewerResults(reviewer: AgentFamily, previous: ReviewRound) {
-  if (reviewer === previous.reviewer || !previous.reviewerResults) { return previous.reviewerResults; }
+  const selected = previous.reviewerPolicy?.selected;
+  // Two selected identities taking turns are distinct; a previous reviewer the policy dropped was rerouted to the new one.
+  if (reviewer === previous.reviewer || !previous.reviewerResults || (selected?.includes(reviewer) && selected.includes(previous.reviewer))) { return previous.reviewerResults; }
   return previous.reviewerResults.map(result => result.agentFamily === previous.reviewer
     ? { ...result, agentFamily: reviewer }
     : result);

@@ -32,7 +32,7 @@ import type { IntegrationMode } from '../../domain/integration.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { ReboundContext } from '../rebound-kernel.js';
 import type { RebaseWorkflowPort } from './rebase-workflow.js';
-import type { MissionExecutionContextResolution } from './mission-execution-context.js';
+import type { LiveMissionExecutionContext, MissionExecutionContextResolution } from './mission-execution-context.js';
 
 export interface IntegrateCommandResult {
   failureReason?: import('../../domain/failure-reason.js').FailureReason;
@@ -155,13 +155,25 @@ export interface IntegrateProductConfigPort {
 
 export interface IntegrateReviewPort {
   readReviewState(_slug: string, _rootDir: string, _missionStore?: MissionStore | null): Promise<IntegrationReviewSnapshot | null> | IntegrationReviewSnapshot | null;
-  submitForReview(_slug: string, _skipGate: boolean, _options: Record<string, unknown>): Promise<unknown>;
+  submitForReview(_slug: string, _skipGate: boolean, _options: IntegrationReviewSubmissionOptions): Promise<unknown>;
   resolveForgejoUser(_reviewer: string): string | null;
 }
 
+/**
+ * Options for the submit-for-review operation that integration recovery replays.
+ * The resolved execution context is named and required: submit-for-review mutates
+ * the Mission checkout, so recovery hands over the context it already resolved
+ * instead of leaving the command to discover a location (ADR 0051). The remaining
+ * seams stay the command's own optional bindings.
+ */
+export type IntegrationReviewSubmissionOptions = {
+  executionContext: LiveMissionExecutionContext;
+  occurredAt?: string;
+} & Record<string, unknown>;
+
 export interface IntegrateRebasePort {
   createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: IntegrationMissionServicesFactory;
-    rebaseObservationStage?: 'integration-rebase'; exitFn: (_code: number) => void }): RebaseWorkflowPort;
+    executionContext: LiveMissionExecutionContext; rebaseObservationStage?: 'integration-rebase'; exitFn: (_code: number) => void }): RebaseWorkflowPort;
 }
 
 export interface IntegrationGateRunResult {

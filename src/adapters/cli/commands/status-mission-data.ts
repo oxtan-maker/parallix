@@ -144,6 +144,8 @@ function reviewFields({ recorded, card }: StatusSources) {
     reviewRecovery: card?.reviewRecovery,
     reviewDisposition: card?.reviewDisposition,
     approvalOwed: card?.approvalOwed,
+    sameAgentReview: card?.sameAgentReview,
+    awaitingApprovals: card?.awaitingApprovals,
     approvalCoverage: card?.approvalCoverage ?? null,
     integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
     // The board card's rounds are the review-round read model; status carries

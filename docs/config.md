@@ -741,6 +741,12 @@ A pending integration repair whose patch assessment finds a changed mission patc
 requires the normal repository reviewer. This also applies when `px review` resumes
 the assessment after an interruption. Other integration repair rounds use the
 weakening questions rather than that panel.
+Repair status, reviewer context and PR comments keep the validation event bound
+to the candidate it actually checked. If review then requests more changes, the
+timeline reports those later fix and approval revisions separately; it does not
+describe them as validated unless the existing proof-reuse policy covers them.
+Older repair history that lacks validation or assessment provenance says it is
+unrecorded instead of inferring it from a later review or handoff.
 A substantive repair can be classified with or without an admitted green gate
 re-run. A recorded result is admitted only when it names the failed gate, precedes
 the review round, and covers the candidate or an equivalent mission patch.

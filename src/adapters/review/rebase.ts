@@ -113,6 +113,7 @@ type PreReviewRebaseOptions = {
   legacyIsForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   rebaseWorkflowOptions?: RebaseCommandOptions;
+  executionContext?: import('../../application/ports/mission-execution-context.js').LiveMissionExecutionContext;
   missionIdentityServices?: NonNullable<RebaseWorkflowPort['missionServices']>;
   runRebaseWorkflowFn?: RunRebaseWorkflowFn | null;
   createRebaseWorkflowPortFn?: CreateRebaseWorkflowPortFn | null;

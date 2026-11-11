@@ -6,8 +6,9 @@ import { preparationFailure, preparationGateFailure } from './review-preparation
 
 import * as fmt from './presentation/cli-format.js';
 import type { CommandResult, ReviewPreparationLog, ReviewPreparationResult, ReviewPreparationWorkflowPorts } from "./ports/review-preparation-workflow.js";
+import type { LiveMissionExecutionContext } from './ports/mission-execution-context.js';
 
-export type ReviewPreparationFallbackWriter = (_slug: string, _summary: string, _options: { rootDir: string; log: ReviewPreparationLog }) => boolean;
+export type ReviewPreparationFallbackWriter = (_slug: string, _summary: string, _options: { executionContext: LiveMissionExecutionContext; log: ReviewPreparationLog }) => boolean;
 
 /** Credentials the Forgejo PR push uses after implementer bootstrap. */
 interface ReviewPreparationForgejoCredentials {
@@ -34,14 +35,14 @@ interface BacklogPushContext {
 export class ReviewPreparationForgejoPublisher {
   async publishReviewPreparationPr(slug: string, context: ReviewPreparationPublicationContext): Promise<ReviewPreparationPublication | ReviewPreparationResult> {
     const ports = this.ports;
-    const { forgejoEnabled, rootDir, forgejoUser, branch, forceWithLease, area, log, error, internalLog } = context;
+    const { forgejoEnabled, rootDir, forgejoUser, branch, forceWithLease, area, log, error, internalLog, executionContext } = context;
     let token: string | null = null;
     let fallbackUser: string | null = null;
     /** The pull request this review preparation hands to the reviewer, when there is one. */
     let submittedPr: { id: string; url: string | null } | null = null;
     if (forgejoEnabled) {
       internalLog(`Updating/Creating Forgejo PR as user ${fmt.agent(forgejoUser)}...`);
-      const credentials = await this.resolveReviewPreparationForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog });
+      const credentials = await this.resolveReviewPreparationForgejoToken(slug, forgejoUser, { rootDir, log, error, internalLog, executionContext });
       if (!('token' in credentials)) { return credentials; }
       token = credentials.token;
       fallbackUser = credentials.fallbackUser;
@@ -75,10 +76,10 @@ export class ReviewPreparationForgejoPublisher {
    * non-interactively; Parallix credentials may publish when bootstrap fails.
    */
   async resolveReviewPreparationForgejoToken(slug: string, forgejoUser: string, context: {
-    rootDir: string; log: ReviewPreparationLog; error: ReviewPreparationLog; internalLog: ReviewPreparationLog;
+    rootDir: string; log: ReviewPreparationLog; error: ReviewPreparationLog; internalLog: ReviewPreparationLog; executionContext: LiveMissionExecutionContext;
   }): Promise<ReviewPreparationResult | ReviewPreparationForgejoCredentials> {
     const ports = this.ports;
-    const { rootDir, log, error, internalLog } = context;
+    const { rootDir, log, error, internalLog, executionContext } = context;
     const existing = ports.forgejo.readToken(forgejoUser);
     if (existing) { return { token: existing, fallbackUser: null }; }
 
@@ -114,7 +115,7 @@ export class ReviewPreparationForgejoPublisher {
       this.writeFallbackSummary(slug, `## Fallback: PR submitted as ${fallbackUser}
 
 Original user: ${forgejoUser}
-Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { rootDir, log });
+Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { executionContext, log });
       return { token: fallbackToken, fallbackUser };
     }
     const msg = `No Forgejo token found for implementer "${forgejoUser}" after bootstrap (${bootstrapFailureReason || 'token unavailable'}). Publication for ${slug} stopped; configure that implementer's credentials with px setup-review. Parallix publication credentials are also unavailable.`;
@@ -187,4 +188,4 @@ Bootstrap failure reason: ${bootstrapFailureReason || 'token unavailable'}`, { r
 }
 
 export interface ReviewPreparationPublication { token: string | null; fallbackUser: string | null; submittedPr: { id: string; url: string | null } | null }
-interface ReviewPreparationPublicationContext { forgejoEnabled: boolean; rootDir: string; forgejoUser: string; branch: string; forceWithLease: boolean; area: string; log: ReviewPreparationLog; error: ReviewPreparationLog; internalLog: ReviewPreparationLog }
+interface ReviewPreparationPublicationContext { forgejoEnabled: boolean; rootDir: string; forgejoUser: string; branch: string; forceWithLease: boolean; area: string; log: ReviewPreparationLog; error: ReviewPreparationLog; internalLog: ReviewPreparationLog; executionContext: LiveMissionExecutionContext }

@@ -65,6 +65,7 @@ describe("usage-blocked implementer", () => {
       detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
       getCurrentBranch: () => 'mission/task-2494',
       cwd: () => '/repo',
+      resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: '/worktree', missionBranch: `mission/${slug}`, baseWorktree: '/repo', baseBranch: 'main' } }),
       inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2494',
       findMissionDir: () => '/worktree/missions/task-2494',
       findMissionArea: () => 'docs',

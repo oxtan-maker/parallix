@@ -12,6 +12,7 @@ import type { OperatorReviewSource, ReviewDisposition, ReviewFinding, ReviewItem
 import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 import type { ReviewStateData } from './review-persistence.js';
 import type { ReviewLoopEvent } from './review-loop-output.js';
+import type { ReviewerAvailabilityProbe, ReviewerPolicy } from '../../domain/reviewer-policy.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import type { GateFailureReason, HookFailureReason, ReboundReason } from '../rebound-kernel.js';
 import type { MissionStore } from '../domain-ports.js';
@@ -19,6 +20,7 @@ import type { MissionLifecycleService } from '../mission-lifecycle-service.js';
 import type { SessionLaunchPolicy } from '../../domain/session.js';
 import type { AgentLaunchResult } from './agent-launch-result.js';
 import type { ReviewOperatorResumeAssessment } from '../review-recovery.js';
+import type { LiveMissionExecutionContext } from './mission-execution-context.js';
 
 /* ------------------------------------------------------------------ *
  * Entry
@@ -41,6 +43,7 @@ export interface StartReviewRound {
   readonly verbose: boolean;
   readonly pollTimeoutSeconds: number | null;
   readonly missionPath?: string;
+  readonly executionContext?: LiveMissionExecutionContext;
 }
 
 /** Entry facts and effects `ReviewRoundUseCase` needs before the loop runs. */
@@ -94,6 +97,25 @@ export interface ReviewStatePort {
   resume(_persisted: ReviewLoopState): ReviewLoopState;
   /** Persist the round-open boundary; false after the diagnostic was emitted. */
   openRound(_state: ReviewLoopState): Promise<boolean>;
+  /** Record the reviewer identities, availability and required approval count decided for this round. */
+  recordReviewerPolicy(_state: ReviewLoopState, _policy: ReviewerPolicy): Promise<void>;
+  /** Approval progress of the exact revision under the recorded policy; null when none is recorded. */
+  reviewerProgress(_state: ReviewLoopState, _revision: string): Promise<ReviewerProgress | null>;
+  /** Replace a reviewer that cannot run (or that the launcher rerouted), or degrade honestly; null when neither is possible. */
+  replaceReviewer(_state: ReviewLoopState, _revision: string, _failed: string, _reason: string, _probe: ReviewerAvailabilityProbe, _rerouted?: string): Promise<ReviewerPolicy | null>;
+}
+
+export interface ReviewerProgress {
+  readonly policy: ReviewerPolicy;
+  /** Selected reviewers that still owe an approval on the revision, in launch order. */
+  readonly outstanding: readonly string[];
+  /** Distinct reviewers with a valid approval recorded for the revision. */
+  readonly approved: readonly string[];
+  readonly met: boolean;
+  /** The round already carries a decision (for example an operator-directed approval); no reviewer is owed. */
+  readonly decided: boolean;
+  /** A valid negative verdict exists for the revision. */
+  readonly negative: boolean;
 }
 
 /* ------------------------------------------------------------------ *

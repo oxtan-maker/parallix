@@ -1,4 +1,4 @@
-import type { ReviewLoopState } from '../../application/ports/review-round.js';
+import type { ReviewerProgress, ReviewLoopState, ReviewStatePort } from '../../application/ports/review-round.js';
 import type { ReviewStatePersistenceResult, ReviewStateData, ReviewStateWriter } from '../../application/ports/review-persistence.js';
 export type { ReviewStatePersistenceResult, ReviewStateData, ReviewStateWriter } from '../../application/ports/review-persistence.js';
 import { diagnosticFrom, resolveMissionStore } from './review-state-store.js';
@@ -26,7 +26,16 @@ import { missionId } from '../../domain/mission.js';
 
 import { applyReviewStateToReview, reviewStateDataFrom } from './review-state-mapping.js';
 import { isStaleWrite, type MissionStore } from '../../application/domain-ports.js';
-import type { PullRequestReference } from '../../domain/review.js';
+import { agentFamily } from '../../domain/agents.js';
+import {
+  changeRevision, currentReviewRound, currentRevisionApprovals, replaceCurrentRound,
+  type PullRequestReference, type Review,
+} from '../../domain/review.js';
+import {
+  approvalRequirementMet, hasNegativeResult, outstandingReviewers, replaceUnavailableReviewer,
+  type ReviewerPolicy,
+} from '../../domain/reviewer-policy.js';
+import { readReviewForDecision } from './review-round-read.js';
 
 interface ReviewStatePersistenceContext {
   slug: string;
@@ -91,6 +100,79 @@ export async function readReviewState(slug: string, rootDir = process.cwd(), mis
   const result = await store.load(missionId(slug));
   if (result.kind !== 'found' || !result.mission.review) { return null; }
   return new ReviewState(slug, reviewStateDataFrom(result.mission.review), store);
+}
+
+const REVIEWER_POLICY_CAS_ATTEMPTS = 3;
+
+function withReviewerPolicy(review: Review, policy: ReviewerPolicy): Review {
+  return { ...review, rounds: replaceCurrentRound(review, { ...currentReviewRound(review), reviewerPolicy: policy }) };
+}
+
+async function writeReviewerPolicy(
+  slug: string,
+  store: MissionStore,
+  state: { round: number; startedAt: string },
+  decide: (_review: Review) => ReviewerPolicy | null,
+): Promise<ReviewerPolicy | null> {
+  for (let attempt = 0; attempt < REVIEWER_POLICY_CAS_ATTEMPTS; attempt++) {
+    const loaded = await readReviewForDecision(slug, store, undefined, 'decide', { number: state.round, startedAt: state.startedAt });
+    if (loaded.kind === 'failed') {
+      throw new Error(loaded.result.outcome === 'failed' ? loaded.result.diagnostic : 'Cannot read the review round');
+    }
+    const policy = decide(loaded.mission.review);
+    if (!policy) { return null; }
+    try {
+      await store.save({ ...loaded.mission, review: withReviewerPolicy(loaded.mission.review, policy) }, loaded.version);
+      return policy;
+    } catch (error) {
+      if (!isStaleWrite(error) || attempt === REVIEWER_POLICY_CAS_ATTEMPTS - 1) { throw error; }
+    }
+  }
+  return null;
+}
+
+/** Bind reviewer-policy operations to the existing Review aggregate persistence owner. */
+export function createReviewerPolicyStatePort(
+  slug: string,
+  store: MissionStore | null,
+): Pick<ReviewStatePort, 'recordReviewerPolicy' | 'reviewerProgress' | 'replaceReviewer'> {
+  const requireStore = (): MissionStore => {
+    if (!store) { throw new Error(`Operator database unavailable for ${slug}`); }
+    return store;
+  };
+  return {
+    async recordReviewerPolicy(state, policy) {
+      // A recorded policy governs its round; a resumed loop never re-decides it.
+      await writeReviewerPolicy(slug, requireStore(), state, review => currentReviewRound(review).reviewerPolicy ? null : policy);
+    },
+    async reviewerProgress(state, revision): Promise<ReviewerProgress | null> {
+      const loaded = await requireStore().load(missionId(slug));
+      if (loaded.kind !== 'found' || !('review' in loaded.mission) || !loaded.mission.review) { return null; }
+      const review = loaded.mission.review;
+      const round = currentReviewRound(review);
+      if (round.number !== state.round || !round.reviewerPolicy) { return null; }
+      const exact = changeRevision(revision);
+      return {
+        policy: round.reviewerPolicy,
+        outstanding: outstandingReviewers(review, exact),
+        approved: currentRevisionApprovals(review, exact).map(result => result.agentFamily),
+        met: approvalRequirementMet(review, exact),
+        decided: round.decision !== null,
+        negative: hasNegativeResult(review, exact),
+      };
+    },
+    async replaceReviewer(state, revision, failed, reason, probe, rerouted) {
+      return await writeReviewerPolicy(slug, requireStore(), state, review =>
+        replaceUnavailableReviewer(
+          review,
+          changeRevision(revision),
+          agentFamily(failed),
+          reason,
+          probe,
+          rerouted ? agentFamily(rerouted) : undefined,
+        ));
+    },
+  };
 }
 
 /** One completed round, flattened for consumers that need round history. */

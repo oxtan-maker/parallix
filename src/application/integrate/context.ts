@@ -7,7 +7,7 @@ import type { IntegrationReviewSnapshot, IntegrationPullRequest, IntegrationAppr
 import { backlogMirrorOwnership, missionId, type BacklogMirrorOwnership } from '../../domain/mission.js';
 import { baseTaskSlug } from './support.js';
 import type { MissionStore } from '../domain-ports.js';
-import type { MissionExecutionContext } from '../ports/mission-execution-context.js';
+import type { LiveMissionExecutionContext } from '../ports/mission-execution-context.js';
 import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
 export interface IntegrationContext extends IntegrationMissionFacts {
@@ -17,6 +17,8 @@ export interface IntegrationContext extends IntegrationMissionFacts {
   mirrorOwnership: BacklogMirrorOwnership;
   reviewState: IntegrationReviewSnapshot | null;
   missionWorktree: string;
+  /** The resolved checkout identity for this Mission; mutation steps consume it instead of re-deriving one. */
+  executionContext: LiveMissionExecutionContext;
   /** The checkout the operation runs from: the mission checkout resolved from Mission identity. */
   executionCheckout: string;
   promoteBacklogOnCloseout: boolean; taskAssignee: string | null;
@@ -34,7 +36,7 @@ export interface IntegrationContextOptions {
    * re-derives a base branch, base worktree or mission checkout from the
    * working directory of the process that admitted the run.
    */
-  executionContext: MissionExecutionContext & { missionWorktree: string };
+  executionContext: LiveMissionExecutionContext;
   isForgejoReviewEnabledFn?: (_rootDir: string) => boolean;
   getCurrentBranchFn?: () => string;
   readTokenFn?: (_user: string) => string | null;
@@ -156,6 +158,7 @@ class IntegrationContextBuilder {
       mirrorOwnership,
       reviewState,
       missionWorktree,
+      executionContext,
       executionCheckout: checkout,
       missionStatus: undefined,
       promoteBacklogOnCloseout: false,

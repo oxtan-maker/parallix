@@ -5,7 +5,7 @@ import { createIntegrationStrategy } from '../../../../../src/application/servic
 import { integrationBounceSeams } from '../../../../helpers/integration-bounce-seams.js';
 import { fixtureMission, pendingReview } from '../../../../fixtures/mission-builders.js';
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
-import { integrationContext } from '../../../../fixtures/integration-context.js';
+import { integrationContext, landedLiveExecutionContext } from '../../../../fixtures/integration-context.js';
 import { stubIntegrateWorkflowPorts } from '../../../../helpers/stub-integrate-workflow-ports.js';
 import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
 import { missionId as fixtureMissionId } from '../../../../../src/domain/mission.js';
@@ -63,7 +63,7 @@ describe("recovery post-integrate hook", () => {
       cleanupMissionWorktree: () => true,
       runPostIntegrateHookOrAbort: (_slug: string, _options: unknown) => {},
       createAbort: () => new Error('IntegrationAbort'),
-      baseBranch: 'main',
+      baseBranch: 'main', liveExecutionContext: landedLiveExecutionContext('task-2551', '/work/mission', '/work/base'),
       ...overrides,
     };
   }
@@ -99,7 +99,7 @@ describe("recovery post-integrate hook", () => {
     let persistOptions: unknown;
 
     await recoverLandedIntegration(slug, orphaned, '/work/base', baseOptions({
-      recoverMissionForIntegration: async () => { ordinaryRecoveries++; return { status: 'integration' }; },
+      liveExecutionContext: landedLiveExecutionContext(slug, '/work/mission', '/work/base'), recoverMissionForIntegration: async () => { ordinaryRecoveries++; return { status: 'integration' }; },
       persistLandedIntegrationOrAbort: async (_slug: string, _commit: string, _services: unknown, options: unknown) => { persistOptions = options; },
     }));
 
@@ -201,7 +201,7 @@ describe("failed closeout resumes", () => {
       runPostIntegrateHookOrAbort: () => { steps.push('hook'); },
       closeLandedIntegrationOrAbort: async () => { steps.push('closed'); closedAt.value = '2026-09-28T12:00:00Z'; },
       createAbort: () => new Error('closeout aborted'),
-      baseBranch: 'main',
+      baseBranch: 'main', liveExecutionContext: landedLiveExecutionContext('task-2604', '/work/mission', '/work/base'),
       merge: () => { mergeCalls++; },
       runGates: () => { gateCalls++; },
     };
@@ -240,7 +240,7 @@ describe("failed closeout resumes", () => {
       },
       closeLandedIntegrationOrAbort: async () => { steps.push('closed'); closedAt.value = '2026-09-28T12:00:00Z'; },
       createAbort: () => new Error('closeout aborted'),
-      baseBranch: 'main',
+      baseBranch: 'main', liveExecutionContext: landedLiveExecutionContext('task-2604', '/work/mission', '/work/base'),
     };
 
     await assert.rejects(recoverLandedIntegration('task-2604', missionServices, '/tmp/base', options), /hook unavailable/);
@@ -279,7 +279,7 @@ describe("legacy closed Mission recovery", () => {
       hasIntegrationMeasurement: () => hasStats,
       hasCleanupArtifacts: () => hasArtifacts,
       createAbort: () => new Error('aborted'),
-      baseBranch: 'main',
+      baseBranch: 'main', liveExecutionContext: landedLiveExecutionContext('task-2595', '/work/mission', '/work/base'),
     };
 
     await assert.rejects(recoverLandedIntegration('task-2595', missionServices, '/tmp/base', options), /hook unavailable/);
@@ -315,7 +315,7 @@ describe("legacy closed Mission recovery", () => {
         hasIntegrationMeasurement: () => false,
         hasCleanupArtifacts: () => true,
         createAbort: () => new Error('aborted'),
-        baseBranch: 'main',
+        baseBranch: 'main', liveExecutionContext: landedLiveExecutionContext('task-2595', '/tmp/mission', '/tmp/base'),
       }), /aborted/);
     assert.equal(mutations, 0);
   });
@@ -336,7 +336,7 @@ describe("legacy closed Mission recovery", () => {
         hasIntegrationMeasurement: () => false,
         hasCleanupArtifacts: () => true,
         createAbort: () => new Error('aborted'),
-        baseBranch: 'main',
+        baseBranch: 'main', liveExecutionContext: landedLiveExecutionContext('task-2595', '/tmp/mission', '/tmp/base'),
       }), /invalid px classification/);
     assert.deepEqual(steps, []);
   });

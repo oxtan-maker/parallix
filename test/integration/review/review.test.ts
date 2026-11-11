@@ -34,6 +34,8 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../../../src/interfaces/cli/review.js';
+import { withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 const fmt = mockModule<typeof import('../../../src/application/presentation/cli-format.js')>('../../../src/application/presentation/cli-format.js', import.meta.url);
 const verifyReviewModule = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
@@ -59,7 +61,7 @@ await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
 const { verifyReview, readComments, pushRound } = verifyReviewModule;
 const review = (args: string[], options: NonNullable<Parameters<typeof verifyReviewModule.createReviewWorkflowAdapter>[0]> = {}) =>
-  createReviewCommand(new ReviewCommandUseCase(verifyReviewModule.createReviewWorkflowAdapter(options)))(args, options);
+  createReviewCommand(new ReviewCommandUseCase(verifyReviewModule.createReviewWorkflowAdapter(withReviewMutationContext(options))))(args, options);
 const { rebaseBeforeReviewRound } = rebaseBeforeReviewRoundModule;
 const { pollForReview } = pollForReviewModule;
 const { pollForDisposition } = pollForDispositionModule;
@@ -1387,7 +1389,7 @@ test('submitForReview exits when no forgejo user and no task implementer (task-1
     await submitForReview('task-1105', true, {
       resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
       getTaskImplementerFn: () => null,
-      resolveWorktreeFn: () => '/tmp/mission-task-1105',
+      executionContext: missionExecutionContext({ missionId: 'task-1105', missionWorktree: '/tmp/mission-task-1105' }),
       isForgejoReviewEnabledFn: () => true,
       performReviewPreparationFn: async (slug, opts) => {
         calls.push({ slug, opts });
@@ -1412,7 +1414,7 @@ test("submitForReview and closeMissionPr use injected review preparation and clo
     await submitForReview('task-1031', true, {
       resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'gemini',
-      resolveWorktreeFn: () => '/tmp/mission-task-1031',
+      executionContext: missionExecutionContext({ missionId: 'task-1031', missionWorktree: '/tmp/mission-task-1031' }),
       isForgejoReviewEnabledFn: () => false,
       performReviewPreparationFn: async (slug, opts) => {
         calls.push({ slug, opts });

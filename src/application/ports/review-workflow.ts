@@ -1,8 +1,11 @@
+import type { LiveMissionExecutionContext } from './mission-execution-context.js';
+
 /** Application-owned boundary for all review lifecycle operations. */
 export interface ReviewWorkflowContext {
   readonly slug: string;
   readonly args: string[];
   readonly options: Record<string, unknown>;
+  readonly executionContext?: LiveMissionExecutionContext;
 }
 
 export interface ReviewWorkflowPort {

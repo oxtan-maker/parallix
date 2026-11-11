@@ -61,6 +61,10 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   const fixture = await openRepairFixture({ slug: 'task-2620', recordBaseline: true });
   t.after(() => fixture.close());
   t.after(() => { setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null); });
+  // This contract asserts durable state and selected status output below; rendering
+  // the workflow's otherwise-unobserved progress only consumes its finite CPU budget.
+  const originalLogger = setLogger({ log: () => {}, error: () => {} });
+  t.after(() => setLogger(originalLogger));
   const originalMission = await fixture.load();
   const approvedRounds = originalMission.review!.rounds.length;
 

@@ -23,6 +23,7 @@ import { formatVerificationCommand, runVerificationGate } from '../verification/
 import { observeVerificationCommand } from '../../application/recording/verification-command.js';
 import { randomUUID } from 'node:crypto';
 import { performReviewPreparation } from "../cli/commands/review-preparation.js";
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 type ReviewVerdict = { failures: string[]; warnings: string[] };
 
@@ -214,10 +215,11 @@ export async function submitForReview(
   skipGate: boolean,
   options: {
     configuration?: ParallixConfiguration;
+    /** Required resolved checkout identity; submit-for-review is a Mission mutation (ADR 0051). */
+    executionContext: LiveMissionExecutionContext;
     exit?: (_code: number) => void;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
-    resolveWorktreeFn?: typeof resolveWorktree;
     performReviewPreparationFn?: typeof performReviewPreparation;
     readReviewStateFn?: ReviewStateReader;
     transitionTaskFn?: typeof transitionTask;
@@ -231,10 +233,10 @@ export async function submitForReview(
     missionStore?: MissionStore | null;
     lifecycleService?: MissionLifecycleService | null;
     log?: (_msg: string) => void;
-  } = {}
+}
 ): Promise<void> {
-  const { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performReviewPreparationFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log } = submitForReviewBindings(options);
-  const worktree = resolveWorktreeFn(slug) || process.cwd();
+  const { exit, resolveTaskFileFn, getTaskImplementerFn, performReviewPreparationFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log } = submitForReviewBindings(options);
+  const worktree = options.executionContext.missionWorktree;
   const providerEnabled = isReviewProviderEnabledFn(worktree);
 
   const { identityUser: reviewStateUser } = await resolveReviewIdentity(slug, worktree, {
@@ -262,7 +264,7 @@ export async function submitForReview(
     }
   }
 
-  const result = await performReviewPreparationFn(slug, { configuration: options.configuration, skipGate, reviewIdentity, forgejoUser: reviewIdentity, worktree, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
+  const result = await performReviewPreparationFn(slug, { configuration: options.configuration, skipGate, reviewIdentity, forgejoUser: reviewIdentity, executionContext: options.executionContext, missionServicesFn: options.missionServicesFn, occurredAt: options.occurredAt, recoverGateFailure: true });
   if (!result.ok) {
     const failurePort: ReviewReviewPreparationFailurePort = {
       repairMission: async () => {
@@ -303,14 +305,13 @@ function submitForReviewBindings(options: NonNullable<Parameters<typeof submitFo
   const exit = options.exit || process.exit;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
   const performReviewPreparationFn = options.performReviewPreparationFn || performReviewPreparation;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
   const isReviewProviderEnabledFn = options.isReviewProviderEnabledFn || options.isForgejoReviewEnabledFn || isProviderEnabled;
   const log = options.log || fmt.log.plain;
 
-  return { exit, resolveTaskFileFn, getTaskImplementerFn, resolveWorktreeFn, performReviewPreparationFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log };
+  return { exit, resolveTaskFileFn, getTaskImplementerFn, performReviewPreparationFn, readReviewStateFn, transitionTaskFn, isReviewProviderEnabledFn, log };
 }
 
 function reviewVerificationBindings(options: NonNullable<Parameters<typeof verifyReview>[2]>) {

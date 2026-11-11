@@ -26,6 +26,7 @@ import { consumeReviewerArtifacts } from '../../../../src/adapters/review/review
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { applyReviewStateToReview } from '../../../../src/adapters/review/review-state-mapping.js';
+import { projectMissionCard } from '../../../../src/application/projections/mission-board.js';
 
 // Regression provenance: TASK-2339.
 describe("self review forbidden", { concurrency: false }, () => {
@@ -275,7 +276,7 @@ describe('current-role reviewer independence', { concurrency: false }, () => {
 
 // Regression provenance: TASK-2384.
 describe("reviewer self review approval owed", { concurrency: false }, () => {
-  test('exhausted reviewer pool launches the PR author, retains its verdict, and marks formal approval owed', async () => {
+  test('exhausted reviewer pool launches the PR author, retains its verdict, and records no approval debt (PX-0046.03)', async () => {
     const selectionLogs: string[] = [];
     const selected = selectReviewer({
       implementer: 'custom',
@@ -297,8 +298,8 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
 
     assert.equal(selected?.reviewer, 'custom', 'the single-family escape hatch must still select the author');
     assert.ok(
-      selectionLogs.some((message) => /PR author|external formal approval/i.test(message)),
-      `selection must announce the approval requirement before launch: ${selectionLogs.join(' | ')}`,
+      selectionLogs.some((message) => /PR author/i.test(message) && /optional/i.test(message) && !/will be required/i.test(message)),
+      `selection must announce the same-agent fallback with optional human inspection before launch: ${selectionLogs.join(' | ')}`,
     );
     assert.ok(
       selectionLogs.some((message) => /claude: blocked: stale session.*codex: launcher unavailable: review sandbox/i.test(message)),
@@ -335,26 +336,33 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
     assert.ok(writtenState.value);
     assert.equal(outcome.ok, true);
     assert.equal(writtenState.value.disposition, 'APPROVED', 'single-family local approval is allowed by corrected SC9 (TASK-2778)');
-    assert.equal(writtenState.value.metadata?.approvalOwed, true, 'self-review must persist that external formal approval is owed');
+    assert.equal(writtenState.value.metadata?.approvalOwed, false, 'a same-agent review leaves no approval debt (PX-0046.03)');
     assert.deepEqual(events, [{
       type: 'reviewer_outcome',
-      params: { verdict: 'approve', content: 'Single-family self-author verdict: approve', blockedReason: 'external-formal-approval-owed' },
-    }], 'the local aggregate event must durably identify the approval-owed outcome');
+      params: { verdict: 'approve', content: 'Single-family self-author verdict: approve' },
+    }], 'the same-agent verdict records no approval-owed marker');
+
+    const card = projectMissionCard(singleStore.mission(), {
+      latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+    });
+    assert.equal(card.approvalOwed, false);
+    assert.equal(card.sameAgentReview, true, 'the board projects the actual current-round identity relationship');
 
     const statusLines: string[] = [];
     renderStatus({
       branch: 'mission/task-2384', worktree: '/tmp/task-2384', rebaseInfo: null, slug: 'task-2384',
       missionData: {
-        backlogStatus: 'review', reviewPhase: 'approved', reviewRound: 1, reviewDisposition: 'APPROVED',
-        approvalOwed: true,
+        backlogStatus: card.rawStatus, reviewPhase: card.reviewPhase, reviewRound: card.reviewRound,
+        reviewDisposition: card.reviewDisposition, approvalOwed: card.approvalOwed,
+        sameAgentReview: card.sameAgentReview, awaitingApprovals: card.awaitingApprovals,
         reviewHistory: [],
       },
       prInfo: { exists: true, number: 2384, state: 'open' }, staleWorktrees: [], staleWorktreeRebase: {},
       agents: [], lastThreeCommits: [], uncommittedCount: 0,
     }, (message) => statusLines.push(message));
     assert.ok(
-      statusLines.some((message) => /approval owed|external formal approval/i.test(message)),
-      `px status must expose the approval requirement: ${statusLines.join(' | ')}`,
+      statusLines.some((message) => /optional human inspection/i.test(message) && !/required|owed/i.test(message)),
+      `px status must present human inspection as optional, never as a requirement: ${statusLines.join(' | ')}`,
     );
   });
 });

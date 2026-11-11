@@ -475,6 +475,8 @@ describe("focused Mission status reads only the selected Mission", () => {
     assert.equal(focused.reviewRound, card.reviewRound);
     assert.equal(focused.reviewDisposition, card.reviewDisposition);
     assert.equal(focused.approvalOwed, card.approvalOwed);
+    assert.equal(focused.sameAgentReview, card.sameAgentReview);
+    assert.equal(focused.awaitingApprovals, card.awaitingApprovals);
     assert.equal(focused.reviewHistory.length, card.reviewHistory.length);
   });
 

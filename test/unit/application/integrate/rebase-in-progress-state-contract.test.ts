@@ -36,18 +36,24 @@ test('integration shared conflicts use the fresh shared resolver and resolved ba
       stdout: '', stderr: args.at(-1) === 'local-base' && args.includes('rebase') ? 'CONFLICT (content): Merge conflict in shared.ts' : '' }) });
   const defaults = stubIntegrateWorkflowPorts();
   const observedRoots: Array<string | undefined> = [];
+  const completionRoots: string[] = [];
+  const executionContext = missionExecutionContext({ missionId: 'task-2503', missionWorktree: '/worktree', baseWorktree: '/base', baseBranch: 'local-base' });
   const ports = stubIntegrateWorkflowPorts({
-    missionPaths: { ...defaults.missionPaths, missionBranchName: () => 'mission/task-2503', conventionalWorktreePath: () => '/worktree' },
+    missionPaths: { ...defaults.missionPaths, missionBranchName: () => 'mission/task-2503', conventionalWorktreePath: () => '/configured/default' },
     rebase: { createRebaseWorkflowPort: options => {
       assert.equal(options.rebaseObservationStage, 'integration-rebase');
+      assert.deepEqual(options.executionContext, executionContext);
+      h.port.resolveExecutionContext = () => ({ ok: true, context: options.executionContext });
       h.port.exit = options.exitFn!; return h.port;
     } },
-    git: { ...defaults.git, getCurrentBranch: root => { observedRoots.push(root); return 'mission/task-2503'; }, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }) },
+    git: { ...defaults.git, getCurrentBranch: root => { observedRoots.push(root); return 'mission/task-2503'; }, detectRebaseState: root => { completionRoots.push(root); return { inProgress: false, unmergedFiles: [] }; } },
   });
   const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
   try {
     await createIntegrationRebase(ports).runIntegrationRebase('task-2503', { baseWorktree: '/base', baseBranch: 'local-base',
+      executionContext,
       git: args => ({ status: 0, stdout: args.includes('rev-parse') ? 'sha' : '', stderr: '', signal: null }) });
+    assert.deepEqual(completionRoots, ['/worktree'], 'completion observes the resolved mission checkout, not a reconstructed conventional path (px-0042.02 F6)');
     assert.ok(observedRoots.length >= 2, 'entry and completion both observe the checkout (TASK-2830)');
     assert.deepEqual([...new Set(observedRoots)], ['/worktree'], 'every branch check observes the mission worktree');
     assert.equal(h.agentLaunches.length, 1, h.lines.join('\n'));
@@ -55,6 +61,54 @@ test('integration shared conflicts use the fresh shared resolver and resolved ba
     assert.match(String(h.agentLaunches[0].options.prompt), /Integration intent/);
     assert.match(String(h.agentLaunches[0].options.prompt), /Resolved local rebase base: local-base/);
   } finally { setLogger(previous); }
+});
+
+test('integration rebase uses the shared exact-tree suffix boundary (TASK-2849)', async () => {
+  const { createIntegrationRebase } = await importFresh<typeof import('../../../../src/application/integrate/rebase.js')>('../../../../src/application/integrate/rebase.js', import.meta.url);
+  const hash = (digit: string) => digit.repeat(40);
+  const [target, tip, boundary, root, targetTree, tipTree, rebasedTip] =
+    ['1', '2', '3', '4', '5', '6', '8'].map(hash);
+  const slug = 'task-2849'; const branch = `mission/${slug}`;
+  const executionContext = missionExecutionContext({ missionId: slug, missionWorktree: '/mission', baseWorktree: '/base', baseBranch: 'main' });
+  const ontoCalls: string[][] = [];
+  const subcommand = (args: string[]) => {
+    let index = 0;
+    while (index + 1 < args.length && (args[index] === '-C' || args[index] === '-c')) { index += 2; }
+    return args.slice(index);
+  };
+  const git = (args: string[]) => {
+    const tail = subcommand(args); const joined = tail.join(' ');
+    if (joined === 'rev-parse --verify main') return { status: 0, stdout: `${target}\n`, stderr: '' };
+    if (joined === 'rev-parse --is-shallow-repository') return { status: 0, stdout: 'false\n', stderr: '' };
+    if (joined === `rev-parse --verify ${target}^{tree}`) return { status: 0, stdout: `${targetTree}\n`, stderr: '' };
+    if (joined === 'rev-parse --verify HEAD^{commit}') return { status: 0, stdout: `${tip}\n`, stderr: '' };
+    if (tail[0] === 'log') return { status: 0, stdout: `${tip}\t${boundary}\t${tipTree}\n${boundary}\t${root}\t${targetTree}\n`, stderr: '' };
+    if (joined === `rev-list --parents --max-count=1 ${target}`) return { status: 0, stdout: `${target} ${root}\n`, stderr: '' };
+    if (joined === `merge-base --is-ancestor ${root} ${tip}`) return { status: 0, stdout: '', stderr: '' };
+    if (joined === `merge-base ${target} ${boundary}`) return { status: 0, stdout: `${root}\n`, stderr: '' };
+    if (joined === `merge-base --is-ancestor ${target} ${tip}`) return { status: 1, stdout: '', stderr: '' };
+    if (joined === `merge-base --is-ancestor ${boundary} ${tip}` || joined === 'merge-base --is-ancestor main HEAD') return { status: 0, stdout: '', stderr: '' };
+    if (tail[0] === 'rebase' && tail[1] === '--onto') { ontoCalls.push(tail); return { status: 0, stdout: '', stderr: '' }; }
+    if (joined === `rev-parse ${branch}` || joined === 'rev-parse HEAD') return { status: 0, stdout: `${rebasedTip}\n`, stderr: '' };
+    if (joined === 'rev-parse main') return { status: 0, stdout: `${target}\n`, stderr: '' };
+    if (joined === `merge-base --is-ancestor ${target} ${rebasedTip}`) return { status: 0, stdout: '', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  const h = sharedConflictHarness({ git, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
+    getCurrentBranch: () => branch, findMissionDir: () => null, findMissionArea: () => 'workflow',
+    missionBranchName: () => branch, resolveMissionBaseBranch: () => 'main' });
+  const defaults = stubIntegrateWorkflowPorts();
+  const ports = stubIntegrateWorkflowPorts({
+    missionPaths: { ...defaults.missionPaths, missionBranchName: () => branch },
+    rebase: { createRebaseWorkflowPort: options => {
+      h.port.resolveExecutionContext = () => ({ ok: true, context: options.executionContext });
+      h.port.exit = options.exitFn; return h.port;
+    } },
+    git: { git, getCurrentBranch: () => branch, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }) },
+  });
+  await createIntegrationRebase(ports).runIntegrationRebase(slug, { baseWorktree: '/base', baseBranch: 'main', git, executionContext });
+  assert.deepEqual(ontoCalls, [['rebase', '--onto', target, boundary]]);
+  assert.equal(h.agentLaunches.length, 0);
 });
 
 // ---- task-2520 integration rebase state (consolidated from test/task-2520-integrate-rebase-state.test.ts, TASK-2622.09) ----
@@ -132,7 +186,8 @@ describe("integration rebase state", async () => {
     const ports = buildPorts({ missionRebaseInProgress: true });
     let aborted = false;
     try {
-      await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git });
+      await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git,
+        executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: MISSION_WORKTREE, baseWorktree: BASE_WORKTREE }) });
     } catch (error) {
       aborted = (error as { isAbort?: boolean })?.isAbort === true;
     }
@@ -162,7 +217,8 @@ describe("integration rebase state", async () => {
     };
     let aborted = false;
     try {
-      await createIntegrationRebase(stubIntegrateWorkflowPorts({ ...ports, git: { ...ports.git, git } })).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git });
+      await createIntegrationRebase(stubIntegrateWorkflowPorts({ ...ports, git: { ...ports.git, git } })).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git,
+        executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: MISSION_WORKTREE, baseWorktree: BASE_WORKTREE }) });
     } catch (error) {
       aborted = (error as { isAbort?: boolean })?.isAbort === true;
     }
@@ -259,7 +315,8 @@ describe("integration rebase state", async () => {
     mock.method(console, 'error', () => true);
     const ports = buildPorts({ missionRebaseInProgress: false });
 
-    await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git });
+    await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git,
+      executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: MISSION_WORKTREE, baseWorktree: BASE_WORKTREE }) });
 
     const probes = ports.git.git.mock.calls.map((call: { arguments: [string[]] }) => call.arguments[0].join(' '));
     assert.ok(probes.length > 0, 'the integration rebase still probes git state');
@@ -271,7 +328,8 @@ describe("integration rebase state", async () => {
     const ports = buildPorts({ missionRebaseInProgress: false });
     // A clean-start round exits 0 with no active rebase and an ancestor base, so
     // the integration rebase resolves without throwing.
-    await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git });
+    await createIntegrationRebase(ports).runIntegrationRebase(SLUG, { baseWorktree: BASE_WORKTREE, baseBranch: 'main', git: ports.git.git,
+      executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: MISSION_WORKTREE, baseWorktree: BASE_WORKTREE }) });
     assert.ok(ports.git.git.mock.callCount() > 0, 'the clean rebase still probes the mission worktree state');
   });
 });

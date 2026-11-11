@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 import { stubRecordedMissionServices } from '../../../helpers/stub-mission-services.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
@@ -177,7 +178,7 @@ test("performReviewPreparation follows the sequence: createPr -> gatekeeper -> t
     const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
     await performReviewPreparation(slug, {
       skipGate: true,
-      worktree: _tmpHome,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: _tmpHome }),
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
       missionServicesFn: stubRecordedMissionServices(),

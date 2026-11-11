@@ -62,22 +62,13 @@ function parentPrompt(stage: string): string {
     .replace('Do not refresh Graphify after ordinary edits: the next autonomous-review boundary refreshes the final verified tree immediately before reviewer launch.', GRAPHIFY_GUIDANCE);
 }
 
-// The parent fixture still owns the mandatory split baseline. This repository's
-// draft, execute and review opinions are now deliberately newer than that
-// baseline: draft and execute carry their existing-owner policies, while review
-// carries the local counterexample policy and retains the prior coverage guidance. This
-// source-owner suite must expect those checked-in opinions without weakening
-// the byte-for-byte reconstruction check for the mandatory core.
+// The fixture owns the shipped assembled baseline, including draft and
+// execute's existing-owner opinions. Review is deliberately repository-local
+// and newer than that baseline, so only review needs its checked-in opinion
+// overlaid here. This keeps the byte-for-byte reconstruction check authoritative
+// without counting an opinion twice after the fixture itself is refreshed.
 function expectedSourcePrompt(stage: string): string {
   const parent = parentPrompt(stage);
-  if (stage === 'draft' || stage === 'execute') {
-    const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', `${stage}.md`), 'utf8');
-    const retainedPolicy = stage === 'draft'
-      ? /Before defining the Mission's implementation scope, investigate whether the requested behavior already exists/
-      : /<existing_owner_first>/;
-    assert.match(repositoryOpinion, retainedPolicy, `repository ${stage} opinion must retain the existing-owner policy`);
-    return `${parent.replace(/\n+$/, '')}\n\n${repositoryOpinion.replace(/^\n+/, '')}`;
-  }
   if (stage !== 'review') {return parent;}
   const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', 'review.md'), 'utf8');
   assert.ok(repositoryOpinion.includes(REVIEW_COVERAGE_GUIDANCE), 'repository review opinion must retain the prior coverage guidance');

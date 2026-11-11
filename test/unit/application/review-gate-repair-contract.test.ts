@@ -25,6 +25,7 @@ import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { rebound } from '../../../src/application/rebound-kernel.js';
 import { submitForReview } from '../../../src/adapters/review/review-commands.js';
 import { listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 test('review repair fixtures isolate retained evidence across occurrences (TASK-2770)', async () => {
   const first = fakeReviewLoopPorts({ slug: 'task-1385' });
@@ -567,9 +568,9 @@ describe("rebounce review submit repro", { concurrency: false }, () => {
   });
 
   test("task-2439 review-submit enables declared-gate recovery at the review preparation seam", async () => {
-    let reviewPreparationOptions: Parameters<NonNullable<NonNullable<Parameters<typeof submitForReview>[2]>["performReviewPreparationFn"]>>[1];
+    let reviewPreparationOptions: Parameters<NonNullable<NonNullable<Parameters<typeof submitForReview>[2]>["performReviewPreparationFn"]>>[1] | undefined;
     await submitForReview('task-2439', false, {
-      resolveWorktreeFn: () => '/worktree',
+      executionContext: missionExecutionContext({ missionId: 'task-2439', missionWorktree: '/worktree' }),
       readReviewStateFn: () => null,
       resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/worktree/task.md', matches: [] }),
       getTaskImplementerFn: () => 'codex',

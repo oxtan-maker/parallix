@@ -31,7 +31,6 @@ import { MissionLifecycleService } from '../../../../../src/application/mission-
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 import { fakeReviewLoopPorts } from '../../../../helpers/review-loop-ports.js';
 import { IntegrationGateRouteOptions } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
-
 mockModule('../../../../../src/adapters/cli/commands/repair-review-preparation.js', import.meta.url);
 mockModule('../../../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 mockModule('../../../../../src/adapters/verification/verification.js', import.meta.url);
@@ -832,6 +831,7 @@ describe("integration repair", () => {
     let continued = false;
     const adapter = createReviewWorkflowAdapter({
       missionStore: fixture.store, inferSlugFn: () => slug, resolveWorktreeFn: () => '/fixture',
+      resolveExecutionContextFn: id => ({ ok: true, context: { missionId: id, missionWorktree: '/fixture', missionBranch: `mission/${id}`, baseWorktree: '/fixture/main', baseBranch: 'main' } }),
       operatorResume: bindReviewOperatorResume(fixture.store, true, {}, async () => ({ workflow: null,
         liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
       readReviewStateFn: async () => ReviewState.from(slug, reviewStateDataFrom(fixture.mission().review!)),

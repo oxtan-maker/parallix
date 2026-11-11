@@ -13,12 +13,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-import { autoResolveMissionConflicts } from '../../../src/application/rebase-continuation.js';
+import { autoResolveMissionConflicts, startRebaseRound } from '../../../src/application/rebase-continuation.js';
 import type { RebaseContext } from '../../../src/application/rebase-context.js';
 import type { RebaseWorkflowPort } from '../../../src/application/ports/rebase-workflow.js';
+import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
 const rebaseModule = mockModule<typeof import('../../../src/adapters/cli/commands/rebase.js')>('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
 await installModuleMocks();
-const rebase = rebaseModule.default;
+const rawRebase = rebaseModule.default;
+const rebase = Object.assign(
+  (args: Parameters<typeof rawRebase>[0], options: Parameters<typeof rawRebase>[1] = {}) => rawRebase(args, withRebaseMutationContext(options)),
+  rawRebase,
+);
 function gitSubcommandArgs(args: string[]): string[] {
   let i = 0;
   while (i + 1 < args.length && (args[i] === '-C' || args[i] === '-c')) {
@@ -81,6 +86,106 @@ test('buildRebasePrompt omits mission-specific section when empty', () => {
 
   assert.match(prompt, /none — all conflicts are shared files/i);
   assert.match(prompt, /some-file\.js/);
+});
+
+test('buildRebasePrompt orders proven inherited-replay recovery before normal conflict repair (TASK-2849)', () => {
+  const prompt = rebase.buildRebasePrompt({
+    slug: 'task-2849', area: 'workflow', worktreePath: '/tmp/wt',
+    missionSpecificFiles: [], sharedFiles: ['shared.ts'],
+  });
+  assert.ok(prompt.indexOf('First — Diagnose unexpected inherited replay') < prompt.indexOf('Step 1 — Resolve mission-specific conflicts'));
+  assert.match(prompt, /establish boundary\.\.original-tip as the complete intended suffix/);
+  assert.match(prompt, /Record and preserve the original tip SHA before aborting or restarting/);
+  assert.match(prompt, /git rebase --onto <target-sha> <boundary-sha> <mission-branch>/);
+  assert.match(prompt, /Otherwise continue the normal conflict flow below or stop with evidence/);
+  assert.match(prompt, /A rebase pause on a new conflict is an expected stop/);
+  assert.match(prompt, /Review shared conflicts semantically; never apply blanket ours\/theirs/);
+});
+
+test('startRebaseRound selects an exact linear tree boundary with bounded proof (TASK-2849)', () => {
+  const hash = (digit: string) => digit.repeat(40);
+  const [target, tip, boundary, root, targetTree, tipTree] =
+    ['1', '2', '3', '4', '5', '6'].map(hash);
+  const calls: Array<{ args: string[]; options?: Record<string, unknown> }> = [];
+  const git = (args: string[], options?: Record<string, unknown>) => {
+    calls.push({ args, options });
+    const tail = gitSubcommandArgs(args);
+    if (tail.join(' ') === 'rev-parse --verify main') return { status: 0, stdout: `${target}\n`, stderr: '' };
+    if (tail.join(' ') === 'rev-parse --is-shallow-repository') return { status: 0, stdout: 'false\n', stderr: '' };
+    if (tail.join(' ') === `rev-parse --verify ${target}^{tree}`) return { status: 0, stdout: `${targetTree}\n`, stderr: '' };
+    if (tail.join(' ') === 'rev-parse --verify HEAD^{commit}') return { status: 0, stdout: `${tip}\n`, stderr: '' };
+    if (tail[0] === 'log') return { status: 0, stdout: `${tip}\t${boundary}\t${tipTree}\n${boundary}\t${root}\t${targetTree}\n`, stderr: '' };
+    if (tail.join(' ') === `rev-list --parents --max-count=1 ${target}`) return { status: 0, stdout: `${target} ${root}\n`, stderr: '' };
+    if (tail.join(' ') === `merge-base --is-ancestor ${root} ${tip}`) return { status: 0, stdout: '', stderr: '' };
+    if (tail.join(' ') === `merge-base ${target} ${boundary}`) return { status: 0, stdout: `${root}\n`, stderr: '' };
+    if (tail.join(' ') === `merge-base --is-ancestor ${target} ${tip}`) return { status: 1, stdout: '', stderr: '' };
+    if (tail.join(' ') === `merge-base --is-ancestor ${boundary} ${tip}`) return { status: 0, stdout: '', stderr: '' };
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  const ctx = { gitFn: git, executionRoot: '/worktree', baseBranch: 'main', branch: 'mission/task-2849' } as unknown as RebaseContext;
+  startRebaseRound(ctx, false, { inProgress: false, unmergedFiles: [] });
+  const rebaseCall = calls.find(call => gitSubcommandArgs(call.args)[0] === 'rebase');
+  assert.deepEqual(gitSubcommandArgs(rebaseCall?.args ?? []), ['rebase', '--onto', target, boundary]);
+  const historyCall = calls.find(call => gitSubcommandArgs(call.args)[0] === 'log');
+  assert.match(gitSubcommandArgs(historyCall?.args ?? []).join(' '), /--max-count=257/);
+  assert.equal(gitSubcommandArgs(historyCall?.args ?? []).at(-1), `${root}..${tip}`);
+  assert.equal(historyCall?.options?.maxBuffer, 64 * 1024);
+});
+
+test('startRebaseRound falls back without dropping commits when exact-tree proof is incomplete or ambiguous (TASK-2849)', () => {
+  const sha = (value: number) => value.toString(16).padStart(40, '0');
+  const target = sha(1); const tip = sha(2); const boundary = sha(3); const root = sha(4);
+  const targetTree = sha(5); const tipTree = sha(6); const older = sha(7); const olderTree = sha(8); const otherParent = sha(9);
+  const complete = `${tip}\t${boundary}\t${tipTree}\n${boundary}\t${older}\t${targetTree}\n${older}\t${root}\t${olderTree}\n`;
+  const truncated = Array.from({ length: 257 }, (_, index) => {
+    const commit = sha(1000 + index); const parent = index === 256 ? '' : sha(1001 + index);
+    return `${commit}\t${parent}\t${index === 1 ? targetTree : sha(2000 + index)}`;
+  }).join('\n');
+  const cases = [
+    ['different target tree', complete.replace(targetTree, sha(10)), 0, target, tip, 'false'],
+    ['repeated matching snapshot', complete.replace(olderTree, targetTree), 0, target, tip, 'false'],
+    ['merge topology', complete.replace(`${tip}\t${boundary}`, `${tip}\t${boundary} ${sha(10)}`), 0, target, tip, 'false'],
+    ['target merge topology', complete, 0, target, tip, 'false'],
+    ['target does not share boundary parent', complete, 0, target, tip, 'false'],
+    ['target parent outside mission ancestry', complete, 0, target, tip, 'false'],
+    ['truncated history', truncated, 0, target, sha(1000), 'false'],
+    ['failed history read', complete, 128, target, tip, 'false'],
+    ['shallow history', complete, 0, target, tip, 'true'],
+    ['target already ancestor', complete, 0, target, tip, 'false'],
+    ['target moved during proof', complete, 0, sha(11), tip, 'false'],
+  ] as const;
+  for (const [name, history, historyStatus, rereadTarget, observedTip, shallow] of cases) {
+    const rebases: string[][] = [];
+    let targetReads = 0;
+    const git = (args: string[]) => {
+      const tail = gitSubcommandArgs(args);
+      if (tail.join(' ') === 'rev-parse --verify main') {
+        targetReads += 1;
+        return { status: 0, stdout: `${targetReads === 1 ? target : rereadTarget}\n`, stderr: '' };
+      }
+      if (tail.join(' ') === 'rev-parse --is-shallow-repository') return { status: 0, stdout: `${shallow}\n`, stderr: '' };
+      if (tail.join(' ') === `rev-parse --verify ${target}^{tree}`) return { status: 0, stdout: `${targetTree}\n`, stderr: '' };
+      if (tail.join(' ') === 'rev-parse --verify HEAD^{commit}') return { status: 0, stdout: `${observedTip}\n`, stderr: '' };
+      if (tail[0] === 'log') return { status: historyStatus, stdout: history, stderr: historyStatus ? 'failed' : '' };
+      if (tail.join(' ') === `rev-list --parents --max-count=1 ${target}`) {
+        const parents = name === 'target merge topology' ? `${root} ${otherParent}`
+          : name === 'target does not share boundary parent' ? otherParent : root;
+        return { status: 0, stdout: `${target} ${parents}\n`, stderr: '' };
+      }
+      if (tail.join(' ') === `merge-base --is-ancestor ${root} ${observedTip}`) {
+        return { status: name === 'target parent outside mission ancestry' ? 1 : 0, stdout: '', stderr: '' };
+      }
+      if (tail.join(' ') === `merge-base --is-ancestor ${otherParent} ${observedTip}`) return { status: 0, stdout: '', stderr: '' };
+      if (tail.join(' ') === `merge-base ${target} ${boundary}`) return { status: 0, stdout: `${root}\n`, stderr: '' };
+      if (tail.join(' ') === `merge-base --is-ancestor ${target} ${tip}`) return { status: name === 'target already ancestor' ? 0 : 1, stdout: '', stderr: '' };
+      if (tail.join(' ') === `merge-base --is-ancestor ${boundary} ${tip}`) return { status: 0, stdout: '', stderr: '' };
+      if (tail[0] === 'rebase') rebases.push(tail);
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const ctx = { gitFn: git, executionRoot: '/worktree', baseBranch: 'main', branch: 'mission/task-2849' } as unknown as RebaseContext;
+    startRebaseRound(ctx, false, { inProgress: false, unmergedFiles: [] });
+    assert.deepEqual(rebases, [['rebase', 'main']], name);
+  }
 });
 
 // ---------------------------------------------------------------------------

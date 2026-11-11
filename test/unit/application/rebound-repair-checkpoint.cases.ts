@@ -1,6 +1,6 @@
 import { ReviewPreparationGateRecovery } from '../../../src/application/review-preparation-gate-recovery.js';
 import { DeclaredGateRunner } from '../../../src/application/review-preparation-declared-gates.js';
-import { makePorts, makeRecorder } from "../../helpers/review-preparation-ports.js";
+import { makePorts, makeRecorder, EXECUTION_CONTEXT } from "../../helpers/review-preparation-ports.js";
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
 import fs from 'node:fs';
@@ -328,7 +328,7 @@ export function repairCheckpointCases(): void {
     const verification = { ...ports.verification, formatVerificationCommand: () => command } satisfies import("../../../src/application/ports/review-preparation-workflow.js").ReviewPreparationVerificationPort;
     const recovery = new ReviewPreparationGateRecovery({ ...ports, verification }, new DeclaredGateRunner(ports));
     const result = await recovery.verifyRepository('fixture', {
-      rootDir: '', transitionToImplementer: async () => {}, forgejoUser: 'codex', log() {}, error() {}, recoverGateFailure: true, options: {},
+      rootDir: '', transitionToImplementer: async () => {}, forgejoUser: 'codex', log() {}, error() {}, recoverGateFailure: true, options: { executionContext: EXECUTION_CONTEXT },
       skipGate: false, area: 'docs', runVerificationGateFn: () => ({ status: 1, stderr: 'failure' }),
       startAgentFn: async () => { launches++; command = 'npm run typecheck'; return { result: { status: 0 } }; },
       retryReviewPreparation: async () => { return assert.fail('must not certify a replacement command'); },

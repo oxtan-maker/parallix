@@ -37,10 +37,17 @@ import { agentFamily } from '../../domain/agents.js';
 import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { CONFIG_PATH } from '../agents/agent-config.js';
 import { rebaseObservation } from '../../application/ports/rebase-workflow.js';
+import type { MissionExecutionContext, MissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
+import { resolveMissionExecutionContext } from '../git/mission-execution-context.js';
 
 /** Legacy `*Fn` seam accepted by `px rebase` and by its tests. */
 export interface RebaseCommandOptions {
   configuration?: ParallixConfiguration;
+  /** Repository locator owned by composition; never substituted for a mutation checkout. */
+  rootDir?: string;
+  /** Already-resolved context from an outer review/handoff/repair workflow. */
+  executionContext?: MissionExecutionContext;
+  resolveExecutionContextFn?: (_slug: string, _root: string) => MissionExecutionContextResolution;
   inferSlugFn?: typeof inferSlug;
   findMissionDirFn?: typeof findMissionDir;
   findMissionAreaFn?: typeof findMissionArea;
@@ -106,7 +113,7 @@ function launchIdentityOptions(options: RebaseCommandOptions, launch: NonNullabl
     invocation: import('../agents/agent-process-types.js').AgentInvocation | null | undefined; startedAtMs: number }) => {
     const services = options.missionIdentityServices ?? options.missionServicesFn;
     if (services) {
-      const authority = await services(launch.worktree || process.cwd());
+      const authority = await services(launch.worktree || options.executionContext?.missionWorktree || options.rootDir || process.cwd());
       await recordImplementerLaunch(String(launch.slug), event.agent, authority.store, authority.lifecycle);
     }
     await launch.onLaunch?.(event);
@@ -150,10 +157,10 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
 
   const repairBindings = {
     missionServices: missionServicesFn,
-    cwd: () => process.cwd(),
+    cwd: () => options.executionContext?.missionWorktree || options.rootDir || process.cwd(),
     transitionTask,
     reviewerEligibility: (root: string) => ConfiguredReviewerEligibility.fromReviewStep({
-      eligible: eligibleAgentsForStep('review', { configPath: path.join(root, CONFIG_PATH) }).map(agentFamily),
+      eligible: eligibleAgentsForStep('review', { configPath: path.join(root, CONFIG_PATH), configuration: options.configuration }).map(agentFamily),
       strategy: 'random',
     }),
   };
@@ -167,7 +174,15 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     detectRebaseState: detectRebaseStateFn,
     getCurrentBranch: getCurrentBranchFn,
 
-    cwd: () => process.cwd(),
+    cwd: () => options.rootDir || options.executionContext?.missionWorktree || process.cwd(),
+    resolveExecutionContext: (slug, root) => {
+      if (options.executionContext) { return { ok: true, context: options.executionContext }; }
+      if (options.resolveExecutionContextFn) { return options.resolveExecutionContextFn(slug, root); }
+      if (!options.configuration) {
+        return { ok: false, reason: `Mission ${slug}: mutation configuration is unavailable; composition must resolve the execution context.` };
+      }
+      return resolveMissionExecutionContext(slug, options.rootDir || root, options.configuration, gitFn);
+    },
     inferSlug: inferSlugFn,
     findMissionDir: findMissionDirFn,
     findMissionArea: findMissionAreaFn,

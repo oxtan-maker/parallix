@@ -12,6 +12,7 @@ import { phaseGateResult } from './phase-gate-result.js';
  */
 import { isTransientVerificationFailure } from '../../src/adapters/verification/verification.js';
 import type { ReviewPreparationWorkflowPorts } from '../../src/application/ports/review-preparation-workflow.js';
+import { missionExecutionContext } from '../fixtures/mission-execution-context.js';
 
 export const SLUG = 'task-2332.09';
 export const ROOT = '/root';
@@ -102,7 +103,6 @@ export function makePorts(recorder: Recorder, overrides: ReviewPreparationOverri
     },
     missionUtils: {
       inferSlug: (explicit?: string) => explicit,
-      resolveWorktree: () => ROOT,
       findMissionDir: () => MISSION_DIR,
       findMissionArea: () => 'docs',
       missionBranchName: () => BRANCH,
@@ -193,9 +193,12 @@ export function makePorts(recorder: Recorder, overrides: ReviewPreparationOverri
   };
 }
 
+/** The resolved checkout every review-preparation mutation consumes (ADR 0051). */
+export const EXECUTION_CONTEXT = missionExecutionContext({ missionId: SLUG, missionWorktree: ROOT, missionBranch: BRANCH });
+
 export function runOptions(recorder: Recorder, extra: Record<string, unknown> = {}) {
   return {
-    worktree: ROOT,
+    executionContext: EXECUTION_CONTEXT,
     log: (line: string) => recorder.log.push(String(line)),
     error: (line: string) => recorder.errors.push(String(line)),
     ...extra,

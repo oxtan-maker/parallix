@@ -13,18 +13,19 @@ import { createEvent, VALID_EVENT_TYPES } from './review-events.js';
 import { recordApproval } from './review-round.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { buildMetadataFooter, type CreateEventFn, type ReviewStateReader } from './review-artifact-files.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import { reviewerResultAttribution } from './reviewer-result-attribution.js';
 
-// ============================================================================
+// =====================================================================
 // Workflow Comment/Review Posting
-// ============================================================================
-
+// =====================================================================
 export async function postWorkflowComment(
   slug: string,
   message: string,
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    readTokenFn?: (_user: string, _opts: { rootDir?: string }) => string | null;
+    readTokenFn?: (_user: string, _opts: { rootDir?: string; configuration?: ParallixConfiguration }) => string | null;
     postCommentFn?: typeof postComment;
     buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
     readReviewStateFn?: ReviewStateReader;
@@ -32,6 +33,7 @@ export async function postWorkflowComment(
     reviewIdentity?: string;
     forgejoUser?: string;
     missionStore?: MissionStore | null;
+    configuration?: ParallixConfiguration;
   } = {}
 ): Promise<{ ok: boolean; error?: string }> {
   const { log, error, readTokenFn, postCommentFn, buildMetadataFooterFn, readReviewStateFn } = postWorkflowCommentBindings(options);
@@ -42,7 +44,7 @@ export async function postWorkflowComment(
     || (await resolveReviewIdentity(slug, rootDir, { readReviewStateFn: readReviewStateFn })).commentIdentityUser
     || 'human';
   const reviewIdentity = identityResolved;
-  const token = readTokenFn(reviewIdentity, { rootDir });
+  const token = readTokenFn(reviewIdentity, { rootDir, configuration: options.configuration });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}". Cannot post comment.`));
     return { ok: false };
@@ -50,7 +52,7 @@ export async function postWorkflowComment(
 
   const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, rootDir, options.missionStore ?? null));
   log(fmt.status('INFO', `Posting PR comment on ${branch} as ${reviewIdentity}...`));
-  const result = postCommentFn(branch, token, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity });
+  const result = postCommentFn(branch, token, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity, rootDir, configuration: options.configuration });
   if (!result.ok) {
     error(fmt.status('FAIL', `Could not post comment: ${providerError(result) || 'API error'}`));
     return { ok: false, error: providerError(result) || 'API error' };
@@ -71,6 +73,19 @@ function describeProviderFailure(result: unknown): string {
   if (body) { parts.push(body); }
   if (parts.length) { return parts.join(' '); }
   return (r.error as string) || (r.raw as string) || 'API error';
+}
+
+/** Only an advisory approve owes an independent approval; a same-agent review is a complete agent review. */
+function advisoryApprovalOwed(outcome: string, selfReviewAllowed: boolean): boolean {
+  return outcome === 'approve' && !selfReviewAllowed;
+}
+
+function localReviewOutcomeEvent(outcome: string, selfReviewAllowed: boolean) {
+  return {
+    verdict: selfReviewAllowed ? outcome : 'comment',
+    content: selfReviewAllowed ? `Single-family self-author verdict: ${outcome}` : `Advisory self-author verdict: ${outcome}`,
+    ...(advisoryApprovalOwed(outcome, selfReviewAllowed) ? { blockedReason: 'external-formal-approval-owed' } : {}),
+  };
 }
 
 /**
@@ -107,22 +122,30 @@ async function recordLocalReviewVerdict(
   const state = existing instanceof ReviewState
     ? existing
     : new ReviewState(slug, existing);
-  state.metadata = { ...state.metadata, approvalOwed: outcome === 'approve' };
+  // A same-agent review is a complete agent review; it leaves no approval debt. Only an advisory (non-authoritative) verdict owes one.
+  state.metadata = { ...state.metadata, approvalOwed: advisoryApprovalOwed(outcome, selfReviewAllowed) };
   if (selfReviewAllowed) {
     state.disposition = outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
     if (outcome === 'approve') {
       assertReviewPhaseTransition(state.phase, 'approved');
-      const decision = await (options.recordApprovalFn ?? recordApproval)(slug, { comment: null, decidedAt: new Date().toISOString(), revision: options.revision, observedRound: { number: state.round, startedAt: state.startedAt } }, { missionStore, lifecycleService: options.lifecycleService });
+      const decision = await (options.recordApprovalFn ?? recordApproval)(slug, {
+        comment: null,
+        decidedAt: new Date().toISOString(),
+        revision: options.revision,
+        observedRound: { number: state.round, startedAt: state.startedAt },
+        result: reviewerResultAttribution(existing.reviewer ?? 'reviewer', null),
+      }, { missionStore, lifecycleService: options.lifecycleService });
       if (decision.outcome === 'failed') { throw new Error(decision.diagnostic); }
       state.phase = 'approved';
     }
   }
   await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
-  const outcomeResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
-    verdict: selfReviewAllowed ? outcome : 'comment',
-    content: selfReviewAllowed ? `Single-family self-author verdict: ${outcome}` : `Advisory self-author verdict: ${outcome}`,
-    ...(outcome === 'approve' ? { blockedReason: 'external-formal-approval-owed' } : {}),
-  }, { worktree, log: log, error, missionStore });
+  const outcomeResult = await createEventFn(
+    slug,
+    VALID_EVENT_TYPES.REVIEWER_OUTCOME,
+    localReviewOutcomeEvent(outcome, selfReviewAllowed),
+    { worktree, log: log, error, missionStore },
+  );
   if (!outcomeResult.ok) {
     throw new Error(`Cannot store review event for "${slug}": the operator database rejected the write.`);
   }
@@ -139,7 +162,7 @@ export async function postWorkflowReview(
   options: {
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
-    readTokenFn?: (_user: string, _opts: { rootDir?: string }) => string | null;
+    readTokenFn?: (_user: string, _opts: { rootDir?: string; configuration?: ParallixConfiguration }) => string | null;
     postReviewFn?: typeof postReview;
     buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
     readReviewStateFn?: ReviewStateReader;
@@ -153,6 +176,7 @@ export async function postWorkflowReview(
     missionStore?: MissionStore | null;
     lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
     recordApprovalFn?: typeof recordApproval;
+    configuration?: ParallixConfiguration;
   } = {}
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown }> {
   const { log, error, readTokenFn, postReviewFn, buildMetadataFooterFn, readReviewStateFn } = postWorkflowReviewBindings(options);
@@ -164,22 +188,16 @@ export async function postWorkflowReview(
     || 'human';
   const reviewIdentity = identityResolved;
   const missionStore = options.missionStore ?? null;
-  const token = readTokenFn(reviewIdentity, { rootDir: worktree });
+  const token = readTokenFn(reviewIdentity, { rootDir: worktree, configuration: options.configuration });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}". Cannot submit review.`));
     return { ok: false };
   }
 
   const getPrAuthorFn = options.getPrAuthorFn || getPrAuthor;
-  let prAuthor: ReturnType<typeof getPrAuthor> = null;
-  try {
-    prAuthor = getPrAuthorFn(branch, token, { forgejoUser: reviewIdentity, reviewIdentity, rootDir: worktree });
-  } catch {
-    prAuthor = null;
-  }
+  const prAuthor = providerPrAuthor(getPrAuthorFn, branch, token, reviewIdentity, worktree, options.configuration);
   if (prAuthor && prAuthor === reviewIdentity) {
     const diagnostic = `Reviewer "${reviewIdentity}" is the PR author for ${branch}; independent review is required. Self-author verdict "${outcome}" is advisory and cannot approve the Mission or advance integration.`;
-    log(fmt.status('WARN', `Provider self-approval POST skipped; single-family review may be recorded locally. A different agent or a human can supply formal approval.`));
     const allowed = await recordLocalReviewVerdict(slug, outcome, {
       worktree,
       writeReviewStateFn: options.writeReviewStateFn,
@@ -192,12 +210,15 @@ export async function postWorkflowReview(
       recordApprovalFn: options.recordApprovalFn,
       revision: options.revision,
     });
+    log(fmt.status('WARN', allowed
+      ? `Provider self-approval POST skipped; the same-agent review was recorded locally for the exact revision. Human inspection remains optional.`
+      : `Provider self-approval POST skipped; a different agent or a human must supply formal approval.`));
     return { ok: allowed, skipped: true, reason: 'self-author', prAuthor, ...(allowed ? {} : { error: diagnostic }) };
   }
 
   const taggedMessage = message + await Promise.resolve(buildMetadataFooterFn(slug, worktree, missionStore));
   log(fmt.status('INFO', `Submitting review outcome "${outcome}" on ${branch} as ${reviewIdentity}...`));
-  const result = postReviewFn(branch, token, outcome, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity });
+  const result = postReviewFn(branch, token, outcome, taggedMessage, { forgejoUser: reviewIdentity, reviewIdentity, rootDir: worktree, configuration: options.configuration });
   if (!result.ok) {
     const failureDetail = describeProviderFailure(result);
     error(fmt.status('FAIL', `Could not submit review: ${failureDetail}`));
@@ -206,6 +227,21 @@ export async function postWorkflowReview(
 
   log(fmt.status('PASS', `Review outcome "${outcome}" posted on PR for ${branch}.`));
   return { ok: true };
+}
+
+function providerPrAuthor(
+  getPrAuthorFn: typeof getPrAuthor,
+  branch: string,
+  token: string,
+  reviewIdentity: string,
+  worktree: string,
+  configuration?: ParallixConfiguration,
+): ReturnType<typeof getPrAuthor> {
+  try {
+    return getPrAuthorFn(branch, token, { forgejoUser: reviewIdentity, reviewIdentity, rootDir: worktree, configuration });
+  } catch {
+    return null;
+  }
 }
 
 

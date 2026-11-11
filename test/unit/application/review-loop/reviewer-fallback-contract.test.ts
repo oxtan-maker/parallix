@@ -9,7 +9,19 @@ import { selectReviewer, type ReviewerSelectionRequest } from '../../../../src/a
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import type { ReviewerRoutingPort } from '../../../../src/application/ports/review-round.js';
 import { agentFamily, selectAgent, type AgentSelectionSnapshot } from '../../../../src/domain/agents.js';
+import { createReviewObservationRecorder } from '../../../../src/adapters/review/review-observation-recording.js';
+import { applyReviewStateToReview } from '../../../../src/adapters/review/review-state-mapping.js';
+import { createReviewerPolicyStatePort, ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
+import { recordApproval, recordRequestedChanges } from '../../../../src/adapters/review/review-round.js';
+import { reviewerResultAttribution } from '../../../../src/adapters/review/reviewer-result-attribution.js';
+import { ConfiguredReviewerEligibility, changeRevision, currentReviewRound, reviewFindingId, reviewStatus, startReview } from '../../../../src/domain/review.js';
+import { planReviewerPolicy } from '../../../../src/domain/reviewer-policy.js';
+import { runReviewerPhase } from '../../../../src/application/review-loop/reviewer-phase.js';
+import { ReviewRound } from '../../../../src/application/review-loop/round.js';
+import { scenario as reviewClassificationScenario } from '../../../helpers/review-classification.js';
 
 function routing(eligible: string[], supported: (_agent: string) => boolean, nominate: (_excluded: ReadonlySet<string>) => string): ReviewerRoutingPort {
   return { eligibleFamilies: () => eligible, launcherStatus: agent => ({ supported: supported(agent), detail: agent }), nominate, runtimeMatrix: () => [] };
@@ -242,4 +254,251 @@ test('weighted exclusion exhaustion retains single-family review recovery (TASK-
     assert.equal(result.selected?.reviewer, 'codex');
     assert.equal(result.selected?.reviewerSource, 'single-family-fallback');
   }
+});
+
+// PX-0046.03: availability-aware 2/1/0 reviewer policy through the existing selection and loop owners.
+describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false }, () => {
+  const implementer = agentFamily('codex');
+  const probe = (eligible: string[], unsupported: ReadonlySet<string>, detail = (family: string) => `${family} unavailable`) => {
+    const port = routing(eligible, family => !unsupported.has(family), excluded => {
+      const nominee = eligible.find(family => !excluded.has(family));
+      if (!nominee) { throw new Error('no eligible reviewer'); }
+      return nominee;
+    });
+    return { eligible: () => eligible, nominate: (excluded: ReadonlySet<string>) => { try { return port.nominate(excluded); } catch { return null; } },
+      runnable: (family: string) => ({ supported: port.launcherStatus(family).supported, detail: detail(family) }) };
+  };
+
+  test('2/1/0 policy table: required approvals follow actual independent availability', () => {
+    const two = planReviewerPolicy({ revision: changeRevision('head-1'), implementer, primary: agentFamily('claude'), probe: probe(['codex', 'claude', 'vibe', 'qwen'], new Set()) });
+    assert.deepEqual([two.mode, two.requiredApprovals, two.selected, two.independentAvailable, two.fallbackReason], ['two-independent', 2, ['claude', 'vibe'], 2, null]);
+    assert.equal(two.revision, 'head-1');
+
+    const one = planReviewerPolicy({ revision: changeRevision('head-1'), implementer, primary: agentFamily('claude'), probe: probe(['codex', 'claude', 'vibe'], new Set(['vibe'])) });
+    assert.deepEqual([one.mode, one.requiredApprovals, one.selected, one.independentAvailable], ['one-independent', 1, ['claude'], 1]);
+    assert.match(one.fallbackReason ?? '', /only one independent reviewer is available.*vibe: vibe unavailable/);
+
+    const zero = planReviewerPolicy({ revision: changeRevision('head-1'), implementer, primary: implementer, probe: probe(['codex', 'claude', 'vibe'], new Set(['claude', 'vibe'])) });
+    assert.deepEqual([zero.mode, zero.requiredApprovals, zero.selected, zero.independentAvailable], ['same-agent', 1, ['codex'], 0]);
+    assert.match(zero.fallbackReason ?? '', /same agent reviews in a fresh context/);
+    assert.doesNotMatch(JSON.stringify(zero), /human/i, 'no human verdict or waiting state is part of the policy');
+  });
+
+  test('an unavailable nominee is replaced by the next eligible family before the requirement is lowered', () => {
+    const replaced = planReviewerPolicy({ revision: changeRevision('head-1'), implementer, primary: agentFamily('claude'), probe: probe(['codex', 'claude', 'vibe', 'qwen'], new Set(['vibe'])) });
+    assert.deepEqual([replaced.mode, replaced.selected, replaced.unavailable.map(entry => entry.family)], ['two-independent', ['claude', 'qwen'], ['vibe']]);
+  });
+
+  test('queued capacity, unknown liveness and telemetry failure details are never read as unavailable', () => {
+    for (const detail of ['queued: custom at capacity', 'probe-timeout', 'quota telemetry unreadable', 'silent for 600s']) {
+      const policy = planReviewerPolicy({ revision: changeRevision('head-1'), implementer, primary: agentFamily('claude'), probe: probe(['codex', 'claude', 'vibe'], new Set(), () => detail) });
+      assert.equal(policy.mode, 'two-independent', detail);
+      assert.equal(policy.requiredApprovals, 2, detail);
+    }
+  });
+
+  /** The real Review authority behind the serialized runner; only agent processes are faked. */
+  function serializedRun(options: { eligible: string[]; unsupported?: string[]; launchFails?: string[]; verdicts?: Record<string, 'approve' | 'request-changes'>; operatorApproves?: boolean; reroute?: Record<string, string>; polled?: boolean; verdictDuringLaunch?: boolean }) {
+    const slug = 'task-px-0046-03';
+    const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head-1') },
+      agentFamily('claude'), implementer, '2026-11-09T10:00:00.000Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: options.eligible.map(agentFamily), strategy: 'random' }));
+    const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: implementer, review }));
+    const ports = { missionStore: store, lifecycleService: new MissionLifecycleService(store) };
+    const unsupported = new Set(options.unsupported ?? []);
+    const reviewers: string[] = [];
+    const fake = fakeReviewLoopPorts({
+      slug,
+      missionStore: store, lifecycle: ports.lifecycleService,
+      routing: { eligibleFamilies: () => options.eligible, launcherStatus: family => ({ supported: !unsupported.has(family), detail: `${family} launcher` }),
+        nominate: excluded => { const nominee = options.eligible.find(family => !excluded.has(family) && !unsupported.has(family)); if (!nominee) { throw new Error('none'); } return nominee; } },
+      stateport: { ...createReviewerPolicyStatePort(slug, store),
+        // The loop state mirrors the Review authority: an approved aggregate reads back as an approved round.
+        read: async () => new ReviewState(slug, { round: 1, startedAt: '2026-11-09T10:00:00.000Z', reviewer: currentReviewRound(store.mission().review!).reviewer, implementer: 'codex',
+          ...(reviewStatus(store.mission().review!) === 'approved' ? { phase: 'approved' as const, disposition: 'APPROVED' } : { phase: 'reviewing' as const }) }),
+        ...(options.polled
+          ? createReviewObservationRecorder(slug, () => 'head-1', true, ports)
+          : { recordApproval: async (_state: unknown, observation?: { revision: string | null }) => { await recordApproval(slug, { comment: null, decidedAt: new Date().toISOString(), revision: observation?.revision ?? 'head-1', source: { kind: 'local' } }, ports); } }),
+        persist: async next => {
+          const mission = store.mission(); const round = currentReviewRound(mission.review!);
+          await store.save({ ...mission, review: applyReviewStateToReview(mission.review!, { ...(next as ReviewState).toJSON(), round: round.number }) }, (await store.load()).version);
+        } },
+      agents: { launch: async launch => {
+        if (options.launchFails?.includes(launch.agent)) { throw new Error(`${launch.agent} cannot start`); }
+        const actual = options.reroute?.[launch.agent] ?? launch.agent;
+        // The child's `px verdict` lands while the launch is still running, attributed to the pre-reroute round reviewer.
+        if (options.verdictDuringLaunch) { await recordApproval(slug, { comment: null, decidedAt: new Date().toISOString(), revision: 'head-1', source: { kind: 'local' }, result: reviewerResultAttribution(launch.agent, { status: 0, sessionId: `${actual}-native-1` }) }, ports); }
+        reviewers.push(actual); return { agent: actual, result: { status: 0, sessionId: `${actual}-native-1` } };
+      } },
+      ...(options.polled ? { provider: { pollReview: async () => ({ disposition: 'APPROVED' as const, revision: 'head-1', decidedAt: new Date().toISOString(), comment: null }) } } : {}),
+      artifacts: { consumeReviewer: async (reviewer, _state, launch) => {
+        if (options.polled) { return { consumed: true, ok: true as const, reviewState: null }; }
+        if (options.verdictDuringLaunch) { return { consumed: false }; }
+        if (options.operatorApproves) { await recordApproval(slug, { comment: 'operator inspected', decidedAt: new Date().toISOString(), source: { kind: 'local' } }, ports); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; }
+        const verdict = options.verdicts?.[reviewer] ?? 'approve';
+        const input = { comment: null, decidedAt: new Date().toISOString(), revision: 'head-1', source: { kind: 'local' as const }, result: reviewerResultAttribution(reviewer, launch?.result) };
+        if (verdict === 'approve') { await recordApproval(slug, input, ports); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; }
+        await recordRequestedChanges(slug, { comment: null, decidedAt: input.decidedAt, revision: input.revision, result: input.result, findings: [{ id: reviewFindingId('F1'), summary: 'counterexample', location: null }] }, ports);
+        return { consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES', reviewFindings: [{ id: 'F1', summary: 'counterexample' }] };
+      } },
+    });
+    return { fake, store, reviewers, slug, run: async (isContinue = false) => await runReviewLoop({ slug, implementer: 'codex', maxAttempts: 1, skipReviewPreparation: true, isContinue }, fake.ports) };
+  }
+
+  test('two available independent reviewers run serially and both must approve the same revision', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'] });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['claude', 'vibe']);
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.reviewerPolicy?.requiredApprovals, 2);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision, result.revision]), [['claude', 'approved', 'head-1'], ['vibe', 'approved', 'head-1']]);
+    assert.ok(harness.fake.launches.every(launch => launch.sessionPolicy === 'fresh-ephemeral'));
+  });
+
+  test('one genuinely available independent reviewer requires one approval and records why', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], unsupported: ['vibe'] });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['claude']);
+    const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.independentAvailable], ['one-independent', 1, 1]);
+    assert.match(policy?.fallbackReason ?? '', /vibe/);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.ok(harness.fake.logs.some(line => /Reviewer policy: one-independent; 1 approval required/.test(line)), harness.fake.logs.join(' | '));
+  });
+
+  test('zero independent reviewers run the same agent in a fresh context with no human gate', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], unsupported: ['claude', 'vibe'] });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['codex']);
+    assert.equal(harness.fake.launches[0].sessionPolicy, 'fresh-ephemeral');
+    const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals], ['same-agent', 1]);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.deepEqual(harness.fake.stops, [], 'no waiting-for-human escalation is raised');
+  });
+
+  test('a reviewer that cannot launch is replaced by an eligible family before the requirement drops', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe', 'qwen'], launchFails: ['claude'] });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['vibe', 'qwen']);
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.reviewerPolicy?.requiredApprovals, 2, 'a replacement keeps the two-approval requirement');
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('with no replacement the requirement drops to one only after the lost reviewer was attempted', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], launchFails: ['vibe'] });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['claude']);
+    const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals], ['one-independent', 1]);
+    assert.match(policy?.fallbackReason ?? '', /vibe: vibe cannot start/);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('when both independent launchers fail the fresh same-agent fallback runs instead of escalating (PX-0046.03 H65)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], launchFails: ['claude', 'vibe'] });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['codex']);
+    const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.selected], ['same-agent', 1, ['codex']]);
+    assert.match(policy?.fallbackReason ?? '', /claude: claude cannot start.*vibe: vibe cannot start/);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.deepEqual(harness.fake.stops, []);
+  });
+
+  test('classifier clear cannot bypass the recorded two-reviewer authority (PX-0046.03 H65)', async () => {
+    const s = reviewClassificationScenario();
+    s.context.state.startedAt = currentReviewRound(s.store.mission().review!).startedAt;
+    const policyState = createReviewerPolicyStatePort(s.context.slug, s.store);
+    const context = { ...s.context, ports: { ...s.context.ports, state: { ...s.context.ports.state, ...policyState },
+      routing: routing(['codex', 'claude', 'vibe'], () => true, excluded => excluded.has('claude') ? 'vibe' : 'claude'),
+      artifacts: { ...s.context.ports.artifacts,
+        consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }) } } };
+    const outcome = await runReviewerPhase(context, new ReviewRound(2, context));
+    const policy = currentReviewRound(s.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.selected], ['two-independent', 2, ['claude', 'vibe']]);
+    assert.deepEqual(s.published, [], 'the classifier cannot publish an approval while reviewer approvals are outstanding');
+    assert.equal(s.attempts.at(-1)?.reason, 'reviewer-requirement-unmet');
+    assert.deepEqual(outcome, { reviewState: 'REQUEST_CHANGES' }, 'the normal reviewer path still runs');
+  });
+
+  test('a negative verdict from the first reviewer is decisive and never triggers the second reviewer', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], verdicts: { claude: 'request-changes' } });
+    await harness.run();
+    assert.deepEqual(harness.reviewers.slice(0, 1), ['claude']);
+    assert.ok(!harness.reviewers.includes('vibe'));
+    assert.equal(currentReviewRound(harness.store.mission().review!).decision?.kind, 'changes-requested');
+  });
+
+  test('an operator-directed approval decides the round and owes no further reviewer launch', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], operatorApproves: true });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['claude']);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('a provider-polled approval is attributed and cannot decide a round that still owes a second approval (PX-0046.03)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], polled: true });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['claude', 'vibe']);
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.reviewerPolicy?.requiredApprovals, 2);
+    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision]), [['claude', 'approved'], ['vibe', 'approved']]);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.deepEqual(harness.fake.stops, []);
+  });
+
+  test('a continued provider approval launches the outstanding reviewer before mirroring approval (PX-0046.03 F10)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], polled: true });
+    const state = await harness.fake.ports.state.read();
+    assert.ok(state);
+    await harness.fake.ports.state.recordReviewerPolicy(state, planReviewerPolicy({
+      revision: changeRevision('head-1'), implementer, primary: agentFamily('claude'),
+      probe: probe(['codex', 'claude', 'vibe'], new Set()),
+    }));
+    await recordApproval(harness.slug, {
+      comment: null, decidedAt: new Date().toISOString(), revision: 'head-1', source: { kind: 'local' },
+      result: reviewerResultAttribution('claude', { status: 0, sessionId: 'claude-native-1' }),
+    }, { missionStore: harness.store, lifecycleService: new MissionLifecycleService(harness.store) });
+
+    await harness.run(true);
+
+    assert.deepEqual(harness.reviewers, ['vibe'], 'the already-approved reviewer is not relaunched');
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.deepEqual([...new Set(round.reviewerResults?.map(result => result.agentFamily))].sort(), ['claude', 'vibe']);
+    assert.equal(harness.fake.mirrors.filter(lane => lane === 'approved').length, 1, 'approval is mirrored only after the Review authority decides');
+  });
+
+  test('a launcher reroute to another independent family updates the recorded policy instead of escalating (PX-0046.03)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe', 'qwen'], reroute: { claude: 'qwen' } });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['qwen', 'vibe']);
+    const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.selected], ['two-independent', 2, ['qwen', 'vibe']]);
+    assert.match(policy?.rerouted?.map(entry => entry.reason).join(' ') ?? '', /rerouted claude to qwen/);
+    assert.deepEqual(policy?.unavailable, [], 'capacity rerouting is not unavailability evidence');
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+    assert.deepEqual(harness.fake.stops, []);
+  });
+
+  test('a reroute onto an already selected family cannot lower the two-reviewer requirement (PX-0046.03 H65)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], reroute: { claude: 'vibe' } });
+    await harness.run();
+    const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.selected], ['two-independent', 2, ['claude', 'vibe']]);
+    assert.deepEqual(policy?.unavailable, [], 'busy capacity was never established as unavailable');
+    assert.deepEqual(policy?.rerouted?.map(entry => [entry.family, entry.replacedBy]), [['claude', 'vibe']]);
+    assert.notEqual(reviewStatus(harness.store.mission().review!), 'approved', 'two runs of vibe cannot fabricate two approvals');
+  });
+
+  test('a verdict submitted before a reroute settles is re-attributed to the family that ran, so a replaced family never counts (PX-0046.03 F4)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe', 'qwen'], reroute: { claude: 'qwen' }, verdictDuringLaunch: true });
+    await harness.run();
+    assert.deepEqual(harness.reviewers, ['qwen', 'vibe']);
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.deepEqual([...new Set(round.reviewerResults?.map(result => result.agentFamily))].sort(), ['qwen', 'vibe']);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
 });

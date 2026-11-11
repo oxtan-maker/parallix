@@ -188,6 +188,8 @@ test('task-2620: the latest integration repair reports the gate, range A..B and 
   assert.deepEqual({ gate: pending.gate, approved: pending.approvedRevision, repaired: pending.repairedRevision, reReview: pending.reReview },
     { gate: 'unit', approved: 'a1b2c3', repaired: null, reReview: 'pending' });
   assert.match(integrationRepairSummary(pending), /integration gate unit \(npm test\); repair range a1b2c3\.\.HEAD; re-review pending/);
+  assert.match(integrationRepairSummary(pending), /approval-retention assessment provenance unrecorded; full validation provenance unrecorded; approval a1b2c3 withdrawn/,
+    'legacy history stays explicitly uncertain instead of inventing validation');
 
   const round = currentReviewRound(review);
   review = { ...review, rounds: replaceCurrentRound(review, { ...round, subject: { ...round.subject, revision: changeRevision('d4e5f6') } }) };
@@ -328,6 +330,29 @@ test('changed integration repair withdraws the original judgment and enters exis
   assert.equal(changed.review!.rounds[0].decision?.kind, 'approved');
   assert.equal(changed.review!.rounds[0].decision?.revocation?.cause?.kind, 'integration-gate-failure');
   assert.ok(integrationRepairNeedsReview(changed));
+});
+
+test('validated candidate stays distinct from later review fixes and handoff (PX-0054.03)', async () => {
+  const s = retentionScenario();
+  s.evidence.samePatch = async () => false;
+  assert.equal(await retainIntegrationApproval(s.input), 'changed');
+  let review = s.store.mission().review!;
+  assert.equal(currentReviewRound(review).subject.revision, 'candidate', 'fresh review starts at the validated candidate');
+  review = applyReviewerCommand(review, { type: 'request-changes', revision: changeRevision('candidate'),
+    decidedAt: '2026-09-20T13:00:00Z', comment: null,
+    findings: [{ id: reviewFindingId('F-later'), summary: 'Tighten the repair', location: null }] });
+  review = applyImplementerCommand(review, { type: 'submit-resolution', respondedAt: '2026-09-20T14:00:00Z',
+    resultingRevision: changeRevision('later-fix'), resolutions: [{ findingId: reviewFindingId('F-later'), kind: 'fixed', evidence: 'tightened' }] });
+  review = beginNextReviewRound(review, REVIEWER, IMPLEMENTER, '2026-09-20T15:00:00Z', ELIGIBILITY);
+  review = applyReviewerCommand(review, { type: 'approve', revision: changeRevision('later-fix'),
+    decidedAt: '2026-09-20T16:00:00Z', comment: null, source: { kind: 'local' } });
+  const handedOff: Mission = { ...s.store.mission(), status: 'integration', rawStatus: 'integration', closedAt: null, review };
+  const summary = integrationRepairSummary(latestIntegrationRepair(handedOff)!);
+  assert.match(summary, /validated candidate at 2026-09-20T11:10:00Z by parallix gates/);
+  assert.match(summary, /assessment mission-change-differs for candidate at 2026-09-20T12:00:00Z by parallix/);
+  assert.match(summary, /fix later-fix at 2026-09-20T14:00:00Z by custom/);
+  assert.match(summary, /integration handoff later-fix at 2026-09-20T16:00:00Z by codex/);
+  assert.doesNotMatch(summary, /validated later-fix/, 'the later fix never inherits the candidate validation');
 });
 
 for (const fault of ['missing', 'failed', 'other-mission', 'other-gate', 'old', 'future', 'invalid-time', 'other-sha', 'no-reference', 'comparison', 'baseline', 'other-baseline', 'missing-baseline', 'head', 'dirty', 'human'] as const) {

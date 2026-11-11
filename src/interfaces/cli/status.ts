@@ -126,6 +126,8 @@ function statusReviewJson(result: StatusResult) {
         recovery: md.reviewRecovery ?? null,
         disposition: md.reviewDisposition ?? null,
         approvalOwed: md.approvalOwed ?? false,
+        sameAgentReview: md.sameAgentReview ?? false,
+        awaitingApprovals: md.awaitingApprovals ?? 0,
         approvalCoverage: md.approvalCoverage ?? null,
         integrationRepair: md.integrationRepair ?? null,
         history: md.reviewHistory,
@@ -156,8 +158,11 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   const repair = missionData.integrationRepair ? integrationRepairSummary(missionData.integrationRepair) : null;
   if (!missionData.reviewPhase) { log('Review: not started'); if (repair) { log(repair); } return; }
   log(`Review: round ${missionData.reviewRound ?? 1}, phase ${missionData.reviewPhase}, disposition ${missionData.reviewDisposition ?? 'none'}`);
-  if (missionData.approvalOwed) {
-    log('Formal approval owed: external provider approval is still required after the local self-review.');
+  if (missionData.sameAgentReview) {
+    log('Optional human inspection: the same agent reviewed in a fresh context; approve in Forgejo or run px integrate when satisfied.');
+  }
+  if ((missionData.awaitingApprovals ?? 0) > 0) {
+    log(`Outstanding reviewer approvals: ${missionData.awaitingApprovals} required before integration.`);
   }
   if (repair) { log(repair); }
   const coverage = missionData.approvalCoverage;

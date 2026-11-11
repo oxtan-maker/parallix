@@ -11,6 +11,8 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
+import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';
 import { createReviewPreparationPorts } from '../../../src/adapters/cli/commands/review-preparation.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
@@ -20,6 +22,7 @@ import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import { createRebaseCommand } from '../../../src/interfaces/cli/rebase.js';
 import { rebase } from '../../../src/adapters/cli/commands/rebase.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
+import { rebaseBeforeReviewRound } from '../../../src/adapters/review/rebase.js';
 import { initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { bindWorkflowObservability } from '../../../src/composition/workflow-observability.js';
 import { configureRebaseObservation } from '../../../src/application/ports/rebase-workflow.js';
@@ -78,9 +81,10 @@ describe("pre-review rebase launcher configuration", () => {
         PARALLIX_WORKFLOW_OPERATION: 'review-operation', PARALLIX_WORKFLOW_GENERATION: '2' });
       bindWorkflowObservability(configuration);
       const logs: string[] = [];
+      const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
       const options = {
         isForgejoReviewEnabledFn: () => true,
-        worktree: repo, log: (line: string) => logs.push(line), error: (line: string) => logs.push(line),
+        worktree: repo, executionContext, log: (line: string) => logs.push(line), error: (line: string) => logs.push(line),
         rebaseWorkflowOptions: {
           readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
           createPrFn: () => ({ ok: true as const }),
@@ -131,10 +135,11 @@ describe("pre-review rebase launcher configuration", () => {
       const options = {
         isForgejoReviewEnabledFn: () => true,
         worktree: repo, log: () => {}, error: () => {},
+        executionContext: missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo }),
         createRebaseWorkflowPortFn: (options: Parameters<typeof createRebaseWorkflowPort>[0]) => {
           assert.strictEqual(options?.configuration, configuration);
           assert.equal(options.rebaseObservationStage, 'pre-review-rebase');
-          const port = createRebaseWorkflowPort(options);
+          const port = createRebaseWorkflowPort(withRebaseMutationContext(options));
           const status = port.workflowLauncherStatus('codex', repo);
           assert.equal(status.supported, false);
           assert.equal('health' in status ? status.health : undefined, 'missing');
@@ -164,8 +169,9 @@ describe("pre-review rebase launcher configuration", () => {
       const { repo, binDir, launches, git } = conflictRepo(root);
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_TEST_NO_FORGEJO: '1', FORGEJO_URL: 'http://127.0.0.1:1', PARALLIX_HOME: path.join(root, 'home') });
       const logs: string[] = [];
-      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, verbose: true }, {
-        configuration, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
+      const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
+      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, executionContext, verbose: true }, {
+        configuration, executionContext, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
         rebaseWorkflowOptions: {
           readTokenFn: () => 'fixture-token',
           resolveForgejoUserFn: () => 'fixture-user',
@@ -196,8 +202,9 @@ describe("pre-review rebase launcher configuration", () => {
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_HOME: path.join(root, 'home') });
       const logs: string[] = [];
       let publications = 0;
-      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo }, {
-        configuration, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
+      const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
+      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, executionContext }, {
+        configuration, executionContext, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
         rebaseWorkflowOptions: {
           readTokenFn: () => null,
           resolveForgejoUserFn: () => 'fixture-user',
@@ -225,8 +232,9 @@ describe("pre-review rebase launcher configuration", () => {
       const order = path.join(root, 'order.log');
       const { repo, binDir, launches } = conflictRepo(root, { verification: { command: `echo verify-gate >> '${order}'` } });
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_TEST_NO_FORGEJO: '1', FORGEJO_URL: 'http://127.0.0.1:1', PARALLIX_HOME: path.join(root, 'home') });
-      const real = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, verbose: true }, {
-        configuration, log: () => {}, error: () => {}, exit: () => {},
+      const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
+      const real = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, executionContext, verbose: true }, {
+        configuration, executionContext, log: () => {}, error: () => {}, exit: () => {},
         rebaseWorkflowOptions: { readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user', createPrFn: () => ({ ok: true as const }) },
       });
       const note = (event: string) => fs.appendFileSync(order, `${event}\n`);
@@ -280,7 +288,10 @@ describe("pre-review rebase launcher configuration", () => {
       const configuration = resolveConfiguration({ PATH: `${root}:${process.env.PATH}`, PARALLIX_HOME: path.join(root, 'home'),
         PARALLIX_WORKFLOW_OPERATION: 'integration-operation', PARALLIX_WORKFLOW_GENERATION: '3' });
       bindWorkflowObservability(configuration);
-      const port = createIntegratePorts(configuration).rebase.createRebaseWorkflowPort({ gitFn: (() => ({ status: 0, stdout: '', stderr: '' })), exitFn: () => {} });
+      const port = createIntegratePorts(configuration).rebase.createRebaseWorkflowPort({
+        executionContext: missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: root, baseWorktree: root }),
+        gitFn: (() => ({ status: 0, stdout: '', stderr: '' })), exitFn: () => {},
+      });
       assert.equal(port.workflowLauncherStatus('codex').supported, true, JSON.stringify(port.workflowLauncherStatus('codex')));
       assert.ok(port.observeRebase);
       await port.observeRebase({ id: 'integration-rebase', missionId: 'task-lcfg-iso', root, stage: 'integration-rebase', attempt: 1,
@@ -333,7 +344,7 @@ test('database-only replay preserves squashed work, relocation and completed tas
     const store = inMemoryTransitionStore(fixtureMission('task-replay', { assignee: agentFamily('codex'), review: null }));
     let launches = 0;
     const exits: number[] = [];
-    await rebase(['task-replay'], {
+    await rebase(['task-replay'], withRebaseMutationContext({
       resolveWorktreeFn: () => repo, gitFn: args => {
         assert.equal(args.includes('merge-tree'), false, 'paused path never predicts a merge');
         return runGit(args, { cwd: repo, env: { ...process.env, GIT_EDITOR: 'true' } });
@@ -342,7 +353,9 @@ test('database-only replay preserves squashed work, relocation and completed tas
         launches++;
         assert.equal(options.agent, 'codex');
         assert.match(String(options.prompt), /Review shared conflicts semantically/);
-        assert.match(String(options.prompt), /Before resolving unexpectedly replayed inherited work, inspect the target branch, Git history and actual diffs/);
+        assert.match(String(options.prompt), /Diagnose unexpected inherited replay before editing files/);
+        assert.match(String(options.prompt), /Before dropping any commit or restarting, prove one boundary whose tree exactly equals the pinned target tree/);
+        assert.match(String(options.prompt), /git rebase --onto <target-sha> <boundary-sha> <mission-branch>/);
         assert.match(String(options.prompt), /Preserve intended Mission changes and current base behavior/);
         assert.match(String(options.prompt), /Do not restore obsolete code or task metadata merely to apply an old commit/);
         assert.match(String(options.prompt), /Use ordinary Git rebase tools when the intended range is clear\. If unclear, explain the specific uncertainty with paths and evidence/);
@@ -362,7 +375,7 @@ test('database-only replay preserves squashed work, relocation and completed tas
         }
         return { agent: 'codex', result: { status: 0 } };
       },
-    });
+    }));
     assert.deepEqual(exits, [0]); assert.equal(launches, 1);
     assert.equal(ok('rev-parse', 'main').trim(), baseHead);
     assert.equal(ok('status', '--porcelain').trim(), '');
@@ -373,5 +386,71 @@ test('database-only replay preserves squashed work, relocation and completed tas
     assert.equal(fs.readFileSync(path.join(repo, 'unique.txt'), 'utf8'), 'unique change\n');
     assert.equal(fs.readFileSync(path.join(repo, 'new.txt'), 'utf8'), 'new main behavior\nunique mission intent\n');
     assert.equal(fs.readFileSync(path.join(repo, 'shared.txt'), 'utf8'), 'newer main\nmission intent\n');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('exact squashed target replays only the complete mission suffix (TASK-2849)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-exact-squash-replay-'));
+  const repo = path.join(root, 'repo');
+  fs.mkdirSync(repo);
+  const git = (...args: string[]) => childProcess.spawnSync('git', ['-C', repo, ...args], {
+    encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true' },
+  });
+  const ok = (...args: string[]) => { const result = git(...args); assert.equal(result.status, 0, result.stderr); return result.stdout.trim(); };
+  const write = (file: string, body: string) => fs.writeFileSync(path.join(repo, file), body);
+  try {
+    ok('init', '-b', 'main'); ok('config', 'user.email', 'test@example.com'); ok('config', 'user.name', 'Fixture');
+    const olderHistory = Array.from({ length: 300 }, (_, index) => {
+      const message = `unrelated history ${index}`;
+      return `commit refs/heads/main\ncommitter Fixture <test@example.com> ${1_700_000_000 + index} +0000\ndata ${Buffer.byteLength(message)}\n${message}\n`;
+    }).join('');
+    const imported = childProcess.spawnSync('git', ['-C', repo, 'fast-import', '--quiet'], {
+      input: `${olderHistory}done\n`, encoding: 'utf8', env: { ...process.env, GIT_EDITOR: 'true' },
+    });
+    assert.equal(imported.status, 0, imported.stderr);
+    ok('reset', '--hard', 'main');
+    assert.equal(ok('rev-list', '--count', 'HEAD'), '300', 'fixture must exceed the bounded mission-range proof with unrelated ancestry');
+    write('shared.txt', 'base\n'); ok('add', '.'); ok('commit', '-m', 'base');
+    ok('checkout', '-b', 'mission/task-exact-squash');
+    write('shared.txt', 'inherited step one\n'); ok('commit', '-am', 'inherited one');
+    write('shared.txt', 'inherited final\n'); write('inherited.txt', 'landed together\n');
+    ok('add', '.'); ok('commit', '-m', 'inherited two');
+    const boundary = ok('rev-parse', 'HEAD');
+    write('suffix-one.txt', 'unique one\n'); ok('add', '.'); ok('commit', '-m', 'unique suffix one');
+    write('suffix-two.txt', 'unique two\n'); ok('add', '.'); ok('commit', '-m', 'unique suffix two');
+
+    ok('checkout', 'main'); ok('merge', '--squash', boundary); ok('commit', '-m', 'squashed inherited work');
+    const target = ok('rev-parse', 'main');
+    assert.equal(ok('rev-parse', `${boundary}^{tree}`), ok('rev-parse', `${target}^{tree}`), 'fixture target must exactly match the ancestry boundary tree');
+    ok('checkout', 'mission/task-exact-squash');
+
+    const store = inMemoryTransitionStore(fixtureMission('task-exact-squash', { assignee: agentFamily('codex'), review: null }));
+    let launches = 0;
+    const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(root, 'home'), PATH: process.env.PATH });
+    const result = await rebaseBeforeReviewRound('task-exact-squash', {
+      isForgejoReviewEnabledFn: () => true, worktree: repo,
+      gitFn: args => runGit(args, { cwd: repo, env: { ...process.env, GIT_EDITOR: 'true' } }),
+      log: () => {}, error: () => {},
+      rebaseWorkflowOptions: {
+        configuration,
+        executionContext: missionExecutionContext({ missionId: 'task-exact-squash', missionWorktree: repo, baseWorktree: repo }),
+        missionServicesFn: async () => ({ store }),
+        startAgentFn: async () => { launches += 1; return { agent: 'codex', result: { status: 1 } }; },
+        readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
+        createPrFn: () => ({ ok: true as const }),
+      },
+    });
+
+    assert.equal(launches, 0, 'obsolete inherited commits must not reach the conflict resolver');
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(ok('rev-parse', 'main'), target, 'rebase must not move the pinned target ref');
+    assert.equal(ok('rev-parse', 'main^{tree}'), ok('rev-parse', `${boundary}^{tree}`), 'target tree must remain unchanged');
+    assert.equal(ok('branch', '--show-current'), 'mission/task-exact-squash');
+    assert.deepEqual(ok('log', '--reverse', '--format=%s', 'main..HEAD').split('\n'), ['unique suffix one', 'unique suffix two']);
+    assert.equal(fs.readFileSync(path.join(repo, 'suffix-one.txt'), 'utf8'), 'unique one\n');
+    assert.equal(fs.readFileSync(path.join(repo, 'suffix-two.txt'), 'utf8'), 'unique two\n');
+    assert.equal(ok('status', '--porcelain'), '');
+    assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-merge')), false);
+    assert.equal(fs.existsSync(path.join(repo, '.git', 'rebase-apply')), false);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });

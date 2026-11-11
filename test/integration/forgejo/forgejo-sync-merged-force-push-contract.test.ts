@@ -8,6 +8,7 @@ import test, { mock, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { withRebaseMutationContext, withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -34,9 +35,10 @@ describe("review ref force push", () => {
   const reviewModule = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
 
   const { createPr, pushReviewRef } = createPrModule;
-  const rebase = rebaseModule.default;
+  const rebase = (args: Parameters<typeof rebaseModule.default>[0], options: Parameters<typeof rebaseModule.default>[1] = {}) =>
+    rebaseModule.default(args, withRebaseMutationContext(options));
   const review = (args: string[], options: NonNullable<Parameters<typeof reviewModule.createReviewWorkflowAdapter>[0]> = {}) =>
-    createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(options)))(args, options);
+    createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(withReviewMutationContext(options))))(args, options);
   const { mock } = test;
   const serialTest = (name: string|undefined, fn: test.TestFn|undefined) => test(name, { concurrency: false }, fn);
 

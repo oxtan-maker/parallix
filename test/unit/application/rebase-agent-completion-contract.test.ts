@@ -45,7 +45,14 @@ describe('rebase agent completion', () => {
     for (const prompt of prompts) {
       for (const text of [...Object.values(brief).flat(), 'Preserve current base behavior', 'Mission worktree: /worktree',
         'Captured mission branch: mission/task-2503', 'Resolved local rebase base: local-feature']) { assert.ok(prompt.includes(text), text); }
-      assert.match(prompt, /Before resolving unexpectedly replayed inherited work, inspect the target branch, Git history and actual diffs/);
+      const diagnosis = prompt.indexOf('First — Diagnose unexpected inherited replay before editing files:');
+      const perFileRepair = prompt.indexOf('Step 1 — Resolve mission-specific conflicts');
+      assert.ok(diagnosis >= 0 && (perFileRepair < 0 || diagnosis < perFileRepair), 'inherited replay diagnosis must precede per-file repair');
+      assert.match(prompt, /Before dropping any commit or restarting, prove one boundary whose tree exactly equals the pinned target tree/);
+      assert.match(prompt, /Record and preserve the original tip SHA before aborting or restarting/);
+      assert.match(prompt, /git rebase --onto <target-sha> <boundary-sha> <mission-branch>/);
+      assert.match(prompt, /repeated matching snapshot, merge topology, failed or incomplete read, or unclear range is not proof/);
+      assert.match(prompt, /target ref and tree are unchanged, every suffix commit remains, the mission branch is selected/);
       assert.match(prompt, /Preserve intended Mission changes and current base behavior/);
       assert.match(prompt, /Do not restore obsolete code or task metadata merely to apply an old commit/);
       assert.match(prompt, /never apply blanket ours\/theirs/);

@@ -14,11 +14,13 @@ import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
 import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
+import { outstandingReviewers } from '../../domain/reviewer-policy.js';
 import {
   currentReviewRound,
   reviewApprovalOwed,
   sameReviewedRevision,
   type PullRequestReference,
+  type ChangeRevision,
   type ReviewDisposition,
   type ReviewedRevision,
   type ReviewPhase,
@@ -149,8 +151,12 @@ export interface MissionCard {
   readonly reviewRecovery?: import('../review-recovery.js').ReviewRecovery | null;
   readonly pendingApprovalRetention?: boolean;
   readonly reviewDisposition: ReviewDisposition | null;
-  /** An approved local self-review still needs a formal provider approval. */
+  /** Advisory approval debt recorded by the provider workflow. */
   readonly approvalOwed?: boolean;
+  /** Whether the current round deliberately runs the implementer in a fresh context. */
+  readonly sameAgentReview?: boolean;
+  /** Selected reviewers still owing approval on the current exact revision. */
+  readonly awaitingApprovals?: number;
   /**
    * Whether the effective approval still covers what the branch would land,
    * null when there is no effective approval or it was not observed.
@@ -376,12 +382,30 @@ function reviewedRevisionIsApproved(facts: MissionOperationalFacts, reviewedSubj
     && sameReviewedRevision(reviewedSubject, facts.reviewApproval.subject);
 }
 
+/** Policy revision is authoritative; valid result evidence supports rounds persisted before that field existed. */
+function governedReviewRevision(currentRound: NonNullable<ReturnType<typeof currentReviewRound>>): ChangeRevision {
+  if (currentRound.reviewerPolicy?.revision) { return currentRound.reviewerPolicy.revision; }
+  const latestValidResult = [...(currentRound.reviewerResults ?? [])].reverse().find(result =>
+    result.outcome === 'completed' && result.status === 0 && !result.revokedAt && result.decision !== 'unknown');
+  return latestValidResult?.revision ?? currentRound.subject.revision;
+}
+
+function projectedAwaitingApprovals(
+  mission: Mission,
+  currentRound: ReturnType<typeof currentReviewRound> | null,
+): number {
+  if (!mission.review || !currentRound || currentRound.decision) { return 0; }
+  return outstandingReviewers(mission.review, governedReviewRevision(currentRound)).length;
+}
+
 function cardReviewRound(mission: Mission, currentRound: ReturnType<typeof currentReviewRound> | null) {
   return {
     reviewRound: currentRound?.number ?? null,
     reviewPhase: currentRound?.phase ?? null,
     reviewHumanStop: currentRound?.phase !== 'approved' ? mission.review?.intervention?.reason ?? null : null,
     reviewDisposition: currentRound?.disposition ?? null,
+    sameAgentReview: currentRound ? currentRound.reviewer === currentRound.implementer : false,
+    awaitingApprovals: projectedAwaitingApprovals(mission, currentRound),
   };
 }
 

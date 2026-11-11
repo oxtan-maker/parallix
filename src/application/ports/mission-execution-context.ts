@@ -30,3 +30,23 @@ export type LandedProofReader = (_baseWorktree: string, _slug: string) => string
 export type MissionExecutionContextResolution =
   | { readonly ok: true; readonly context: MissionExecutionContext }
   | { readonly ok: false; readonly reason: string };
+
+/** A mutation requires the live mission checkout, not only a proven landing. */
+export type LiveMissionExecutionContext = MissionExecutionContext & { readonly missionWorktree: string };
+
+export type LiveMissionExecutionContextResolution = { readonly ok: true; readonly context: LiveMissionExecutionContext } | { readonly ok: false; readonly reason: string };
+
+/** Validate a resolved context before any review, rebase, handoff or repair mutation. */
+export function liveMissionExecutionContext(
+  slug: string,
+  resolution: MissionExecutionContextResolution,
+): LiveMissionExecutionContextResolution {
+  if (!resolution.ok) { return resolution; }
+  if (resolution.context.missionId !== slug) {
+    return { ok: false, reason: `Execution context for ${resolution.context.missionId} cannot mutate mission ${slug}.` };
+  }
+  if (!resolution.context.missionWorktree) {
+    return { ok: false, reason: `Mission ${slug}: the mission checkout is unavailable after landing; no mutation is permitted.` };
+  }
+  return { ok: true, context: { ...resolution.context, missionWorktree: resolution.context.missionWorktree } };
+}

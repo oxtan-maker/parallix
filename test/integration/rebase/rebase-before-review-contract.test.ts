@@ -14,6 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -271,7 +272,8 @@ describe("rebase hardening", () => {
   const rebaseModule = mockModule<typeof import('../../../src/adapters/cli/commands/rebase.js')>('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
-  const rebase = rebaseModule.default;
+  const rebase = (args: Parameters<typeof rebaseModule.default>[0], options: Parameters<typeof rebaseModule.default>[1] = {}) =>
+    rebaseModule.default(args, withRebaseMutationContext(options));
   test('rebase applies core.editor=true to initial rebase call', async () => {
     let capturedArgs: { value: string[] | null } = { value: null };
     await rebase(['task-1077'], {
@@ -382,7 +384,8 @@ describe("rebase diagnostics", () => {
   const printIntegrationPreflightModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
-  const rebase = rebaseModule.default;
+  const rebase = (args: Parameters<typeof rebaseModule.default>[0], options: Parameters<typeof rebaseModule.default>[1] = {}) =>
+    rebaseModule.default(args, withRebaseMutationContext(options));
   const { printIntegrationPreflight } = printIntegrationPreflightModule;
   function gitSubcommandArgs(args: string[]): string[] {
     let i = 0;

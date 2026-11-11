@@ -101,6 +101,8 @@ export async function pushRound(
   slug: string,
   options: {
     configuration?: ParallixConfiguration;
+    worktree?: string;
+    rootDir?: string;
     missionStore?: Pick<MissionStore, 'load'> | null;
     implementer?: string;
     log?: (_msg: string) => void;
@@ -124,14 +126,14 @@ export async function pushRound(
   } = {}
 ): Promise<void> {
   const { log, error, exit, resolveWorktreeFn, resolveTaskFileFn, getTaskImplementerFn, transitionTaskFn, resolveReviewUserFn, isReviewProviderEnabledFn, readTokenFn, readReviewStateFn, createPrFn, bootstrapReviewSurfaceFn, resolveReviewAdapterFn, cwdFn, force } = pushRoundBindings(options);
-  const worktree = resolveWorktreeFn(slug);
-  const rootDir = worktree || cwdFn();
+  const worktree = options.worktree || resolveWorktreeFn(slug);
+  const rootDir = worktree || options.rootDir || cwdFn();
   const branch = missionBranchName(slug, rootDir);
   const providerEnabled = isReviewProviderEnabledFn(rootDir);
 
   const reviewIdentity = await resolvePushReviewIdentity(slug, rootDir, providerEnabled, readReviewStateFn, resolveTaskFileFn, getTaskImplementerFn, log, error, exit, options);
   if (!reviewIdentity) { return; }
-  const resolvedIdentity = resolveReviewUserFn(reviewIdentity) || reviewIdentity;
+  const resolvedIdentity = resolveReviewUserFn(reviewIdentity, options.configuration) || reviewIdentity;
   const token = readTokenFn(resolvedIdentity, { rootDir, configuration: options.configuration });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${resolvedIdentity}".`));
@@ -253,6 +255,7 @@ export async function commentRound(
     postCommentFn?: typeof postComment;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
     missionStore?: MissionStore | null;
+    configuration?: ParallixConfiguration;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -273,13 +276,14 @@ export async function commentRound(
     exit(1);
     return;
   }
-  reviewIdentity = resolveReviewUserFn(reviewIdentity);
+  reviewIdentity = resolveReviewUserFn(reviewIdentity, options.configuration);
   const result = await postWorkflowComment(slug, message, {
     rootDir,
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
     postCommentFn: options.postCommentFn,
     buildMetadataFooterFn: options.buildMetadataFooterFn,
+    configuration: options.configuration,
     log,
     error
   });

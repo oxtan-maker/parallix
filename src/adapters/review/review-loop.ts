@@ -10,6 +10,8 @@ import { retainedRepairPort } from './retained-repair.js';
 import { composeHumanFeedback } from './review-loop-human-feedback.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
+import type { ReviewPreparationAdapterOptions } from '../cli/commands/review-preparation.js';
 
 /**
  * Review loop mechanisms.
@@ -33,7 +35,10 @@ import { transitionVirtual } from '../config/state-map.js';
 import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionEvidenceForPr, getComments, providerAvailable, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
-import { ReviewState, readReviewState, writeReviewState, resetReviewState, persistReviewStateOrThrow, assertReviewStatePersisted } from './review-state.js';
+import {
+  ReviewState, assertReviewStatePersisted, createReviewerPolicyStatePort, persistReviewStateOrThrow,
+  readReviewState, resetReviewState, writeReviewState,
+} from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import type {
@@ -65,6 +70,7 @@ export interface ReviewLoopBindings {
   readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
   readonly preferredReviewer?: string;
   readonly configuration?: ParallixConfiguration;
+  readonly executionContext?: LiveMissionExecutionContext;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
   readonly readReviewState?: (_slug: string, _worktree?: string, _store?: MissionStore | null) => Promise<ReviewState | null> | ReviewState | null;
@@ -74,7 +80,7 @@ export interface ReviewLoopBindings {
   readonly consumeImplementerArtifacts?: typeof consumeImplementerArtifacts;
   readonly missionStore?: MissionStore | null;
   readonly lifecycleService?: MissionLifecycleService | null;
-  readonly performReviewPreparationFn?: (_slug: string, _options: Record<string, unknown>) => Promise<ReviewPreparationFacts>;
+  readonly performReviewPreparationFn?: (_slug: string, _options: ReviewPreparationAdapterOptions) => Promise<ReviewPreparationFacts>;
   readonly onAgentLaunched?: (_agent: string, _phase: 'review' | 'review-response', _model?: string | null) => Promise<void> | void;
   readonly onAutonomousStop?: (_reason: string) => Promise<void> | void;
   readonly log?: (_msg: string) => void;
@@ -88,7 +94,7 @@ export interface ReviewLoopBindings {
 }
 
 /** The per-request knobs the mechanisms read. */
-export type ReviewLoopTarget = Partial<Pick<StartReviewRound, 'focus' | 'verbose' | 'pollTimeoutSeconds' | 'missionPath'>> & { readonly worktree?: string };
+export type ReviewLoopTarget = Partial<Pick<StartReviewRound, 'focus' | 'verbose' | 'pollTimeoutSeconds' | 'missionPath' | 'executionContext'>> & { readonly worktree?: string };
 
 /**
  * One Node process can receive overlapping CLI/controller calls for the same
@@ -335,6 +341,21 @@ function approvalRevocationPort(
   };
 }
 
+function reviewerRoutingPort(
+  worktree: string,
+  configuration: ParallixConfiguration | undefined,
+): ReviewLoopPorts['routing'] {
+  return {
+    eligibleFamilies: () => eligibleAgentsForStep('review', { configuration }),
+    launcherStatus: agent => {
+      const status = workflowLauncherStatus(agent, worktree, configuration);
+      return status.supported ? status : { ...status, detail: [status.detail, status.health, status.reason].filter(Boolean).join(' - ') };
+    },
+    nominate: excluded => selectAgent('review', { exclude: new Set(excluded), worktree, configuration }),
+    runtimeMatrix: () => formatMatrixSummary(buildAutonomousReviewMatrix()),
+  };
+}
+
 /**
  * Bind every review-loop mechanism for one Mission. The composition root
  * supplies the review authority; the request supplies the worktree, prompt
@@ -351,7 +372,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     }
     return backlogMirrorOwnership({ id: missionId(slug), waveParentId: null }).kind === 'none';
   };
-  const artifactOptions = (state?: ReviewLoopState) => ({ worktree, tmpDir: artifactDir, buildMetadataFooterFn: buildMetadataFooter, forgejoEnabled: providerEnabled, log, error, ...(state ? { currentState: state } : {}) });
+  const artifactOptions = (state?: ReviewLoopState) => ({ worktree, tmpDir: artifactDir, buildMetadataFooterFn: buildMetadataFooter, forgejoEnabled: providerEnabled, configuration: bindings.configuration, log, error, ...(state ? { currentState: state } : {}) });
   return {
     branch,
     worktree,
@@ -374,6 +395,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       create: identity => new ReviewState(slug, identity),
       resume: persisted => ReviewState.from(slug, persisted),
       verdictBlock: () => reviewVerdictBlock(slug, missionStore),
+      ...createReviewerPolicyStatePort(slug, missionStore),
       openRound: async state => (await openReviewRound(slug, state, { worktree, log, error, writeReviewStateFn: writeState, missionStore, lifecycleService })).ok,
     },
     task: {
@@ -389,18 +411,13 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       },
       assign: implementer => Boolean(task.ok && enforceTaskAssignee(task.taskFile!, implementer)),
     },
-    reviewPreparation: bindings.performReviewPreparationFn
-      ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, worktree, recoverGateFailure: true }) }
+    reviewPreparation: bindings.performReviewPreparationFn && bindings.executionContext
+      ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, executionContext: bindings.executionContext!, recoverGateFailure: true }) }
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
     approvalRevocation: approvalRevocationPort(slug, branch, worktree, missionStore, lifecycleService),
-    humanFeedback: composeHumanFeedback({ slug, branch, worktree, providerEnabled, missionStore, log, error, fetchComments, tokenFor, recordHumanNote }),
-    routing: {
-      eligibleFamilies: () => eligibleAgentsForStep('review', { configuration: bindings.configuration }),
-      launcherStatus: agent => workflowLauncherStatus(agent, worktree, bindings.configuration),
-      nominate: excluded => selectAgent('review', { exclude: new Set(excluded), worktree, configuration: bindings.configuration }),
-      runtimeMatrix: () => formatMatrixSummary(buildAutonomousReviewMatrix()),
-    },
+    humanFeedback: composeHumanFeedback({ slug, branch, worktree, providerEnabled, missionStore, configuration: bindings.configuration, log, error, fetchComments, tokenFor, recordHumanNote }),
+    routing: reviewerRoutingPort(worktree, bindings.configuration),
     agents: agentPort(slug, branch, worktree, missionPath, target, bindings, writeState, log, error),
     artifacts: {
       consumeReviewer: async (reviewer, state, launch) => await (bindings.consumeReviewerArtifacts ?? consumeReviewerArtifacts)(slug, reviewer, {
@@ -415,6 +432,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
         rebaseWorkflowOptions: {
           ...bindings.rebaseWorkflowOptions,
           configuration: bindings.configuration,
+          executionContext: bindings.executionContext,
           ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
         },
       })),

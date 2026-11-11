@@ -28,7 +28,7 @@ import { buildCurrentRebasePrompt } from './rebase-prompt.js';
 export { buildRebasePrompt } from './rebase-prompt.js';
 import { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
 export { parseConflictFilesFromGitStatus } from './rebase-conflict-files.js';
-import { combineOutput, continueSucceeded, hasConflictMarkers, type RebaseContext } from './rebase-context.js';
+import { combineOutput, continueSucceeded, hasConflictMarkers, resolveRebaseLocation, type RebaseContext } from './rebase-context.js';
 import { recoverAgentRebaseCompletion } from './rebase-agent-completion.js';
 import { completedRebaseOutcome, currentRevision, observeRebase } from './rebase-observation.js';
 
@@ -395,9 +395,11 @@ export async function runRebaseWorkflow(
   // Select the mission root exactly once at the command boundary. All later
   // lifecycle, Git, proof, and publication calls use this value explicitly.
   const launchRoot = port.cwd();
-  const executionRoot = port.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+  const location = resolveRebaseLocation(slug, launchRoot, port, opts?.context);
+  if (!location.ok) { fmt.log.fail(location.reason); port.exit(1); return; }
+  const { executionRoot, baseBranch } = location;
   const missionDir = port.findMissionDir(slug, executionRoot);
-  const branch = port.missionBranchName(slug, executionRoot);
+  const branch = opts?.context?.branch ?? port.missionBranchName(slug, executionRoot);
   const existingRebase = port.detectRebaseState(executionRoot);
   // A rebase already in progress is a blocker only on the initial entry: a
   // re-entrant `resumeInPlace` call is resuming the rebase this command started,
@@ -405,7 +407,7 @@ export async function runRebaseWorkflow(
   const resumeRecorded = validateRebaseEntry(port, existingRebase, branch, executionRoot, opts);
   if (resumeRecorded === null) { return; }
 
-  const ctx = opts?.context ?? await prepareRebaseContext(args, port, slug, branch, executionRoot, missionDir, flags, gitFn);
+  const ctx = opts?.context ?? await prepareRebaseContext(args, port, slug, branch, executionRoot, baseBranch, missionDir, flags, gitFn);
   if (!opts?.context) { await observeRebase(ctx, 'running', ctx.movedFrom); }
 
   let rebaseResult = initialRebaseResult(ctx, existingRebase, resumeRecorded, opts);
@@ -465,7 +467,7 @@ async function handleRebaseRound(ctx: RebaseContext, rebaseResult: GitCommandRes
   if (!ctx.rebaseTerminalObserved) { await observeRebase(ctx, 'failed', currentRevision(ctx)); }
 }
 
-async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, slug: string, branch: string, executionRoot: string, missionDir: ReturnType<RebaseWorkflowPort['findMissionDir']>, flags: string[], gitFn: GitRunner): Promise<RebaseContext> {
+async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, slug: string, branch: string, executionRoot: string, baseBranch: string, missionDir: ReturnType<RebaseWorkflowPort['findMissionDir']>, flags: string[], gitFn: GitRunner): Promise<RebaseContext> {
   return {
     args,
     port,
@@ -477,7 +479,7 @@ async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, sl
     // Honor the mission's recorded base branch (a feature-branch mission rebases
     // onto its base, e.g. skunkworks — not the primary branch). Falls back to
     // the primary branch for every mission without a recorded Base-Branch.
-    baseBranch: port.resolveMissionBaseBranch(slug, executionRoot, { gitFn }),
+    baseBranch,
     isPush: flags.includes('--push'),
     recordedImplementer: await resolveRecordedImplementer(slug, executionRoot, port),
     movedFrom: (gitFn(['-C', executionRoot, 'rev-parse', 'HEAD']).stdout || '').trim() || null,

@@ -23,6 +23,11 @@ export function reviewOperation(args: readonly string[]): ReviewOperation {
 
 export function reviewOperationPhase(operation: ReviewOperation): 'review' | undefined { return PUBLISHED_PHASES[operation]; }
 
+/** Read-only discovery stays available without a mutation checkout. */
+export function reviewOperationRequiresMutationContext(operation: ReviewOperation): boolean {
+  return !['status', 'verify', 'readComments'].includes(operation);
+}
+
 export function reviewPushIdentity(identityUser: string | null | undefined, taskImplementer: string | null | undefined, providerEnabled: boolean) {
   const fallback = providerEnabled ? null : 'autonomous';
   const identity = identityUser || taskImplementer || fallback;

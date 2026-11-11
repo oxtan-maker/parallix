@@ -186,7 +186,11 @@ async function resolveRepairExecution(slug: string, services: IntegrationMission
     throw abortWith(ports.landing, `Integration repair requires a rebase onto ${base}${conflict}; dry-run did not mutate the mission branch. Run px integrate ${slug} to resume repair and rebase before verification.`);
   }
   if (prediction.needed) {
-    await rebase.runIntegrationRebase(slug, { ...target, missionServicesFn: async () => services });
+    await rebase.runIntegrationRebase(slug, {
+      ...target,
+      executionContext: { ...context, missionWorktree: worktree },
+      missionServicesFn: async () => services,
+    });
   }
   const tree = ports.gates.captureFinalIntegrationTree(worktree);
   const baseline = ports.git.git(['-C', worktree, 'rev-parse', base]).stdout.trim();

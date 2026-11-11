@@ -82,7 +82,6 @@ export interface ReviewPreparationGitPort {
 
 export interface ReviewPreparationMissionUtilsPort {
   inferSlug(_explicitSlug?: string): string | null | undefined;
-  resolveWorktree(_slug: string, _options?: { cwd?: string }): string | null;
   findMissionDir(_slug: string, _rootDir: string): string | null;
   findMissionArea(_missionDir: string): string | null;
   missionBranchName(_slug: string, _rootDir: string): string;
@@ -157,6 +156,9 @@ export interface ReviewPreparationSetupReviewPort {
 
 export interface ReviewPreparationRebaseOptions {
   readonly missionIdentityServices?: NonNullable<import('./rebase-workflow.js').RebaseWorkflowPort['missionServices']>;
+  /** Required resolved checkout identity; the rebase must not re-derive it (ADR 0051). */
+  readonly executionContext: import('./mission-execution-context.js').LiveMissionExecutionContext;
+  /** Bridge for the not-yet-migrated rebase adapter (TASK-2852); always the context worktree. */
   readonly worktree?: string;
   readonly log: ReviewPreparationLog;
   readonly error: ReviewPreparationLog;
@@ -337,11 +339,15 @@ export type CaptureNelResult =
 /**
  * Per-invocation overrides for `performReviewPreparation`. Each collaborator override
  * defaults to the matching port; the rest steer the bounded recovery recursion.
+ *
+ * `executionContext` is required: review preparation is a Mission mutation, so the
+ * caller supplies the already resolved live checkout instead of letting the workflow
+ * guess it from the ambient working directory (ADR 0051).
  */
 export interface PerformReviewPreparationOptions {
   readonly reviewer?: import('../../domain/agents.js').AgentFamily;
   readonly skipGate?: boolean;
-  readonly worktree?: string | null;
+  readonly executionContext: import('./mission-execution-context.js').LiveMissionExecutionContext;
   readonly force?: boolean;
   readonly forceWithLease?: boolean;
   readonly log?: ReviewPreparationLog;

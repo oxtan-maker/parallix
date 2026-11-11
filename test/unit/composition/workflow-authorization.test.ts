@@ -19,7 +19,7 @@ test('production verdict binding retains fenced output before authority or provi
   t.after(() => { configureMissionWriteAuthorization(null); fs.rmSync(root, { recursive: true, force: true }); });
   const original = fixtureMission('task-fenced', { status: 'review', review: pendingReview('task-fenced') });
   const store = inMemoryTransitionStore(original);
-  const ports = reviewVerbPorts({ mission: { store, lifecycle: new MissionLifecycleService(store) } });
+  const ports = reviewVerbPorts({ configuration: resolveConfiguration({}), mission: { store, lifecycle: new MissionLifecycleService(store) } });
   const bound = { ...ports, resolveSlug: () => original.id, resolveWorktree: () => root };
   configureMissionWriteAuthorization({ operationId: 'old-owner', assert: async () => { throw new WorkflowOwnershipError('Workflow ownership was fenced or stopped'); } });
   await assert.rejects(() => createVerdictCommand(bound)(['approve', '--actor', 'claude', '--comment', 'keep original']), /Verdict rejected:.*retained at/);

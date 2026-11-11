@@ -237,7 +237,7 @@ export interface ExecuteRepairLaunchPort {
     readonly sessionPolicy?: import('../../domain/session.js').SessionLaunchPolicy;
     readonly onAgentChanged?: (_agent: string, _model?: string | null) => Promise<void>;
   }): Promise<import('./agent-launch-result.js').AgentLaunchResult | null | undefined>;
-  available(_agent: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
+  available(_agent: string, _worktree?: string): { readonly supported: boolean; readonly detail?: string; readonly reason?: string };
   readHead(_worktree: string): string | null;
 }
 

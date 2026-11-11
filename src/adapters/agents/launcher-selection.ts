@@ -157,11 +157,12 @@ function availableLaunchers(pool: string[], step: string, options: AgentSelectio
         const suffix = status.reason ? `; ${status.reason}` : '';
         return `${agent} (looked for: ${status.detail}${suffix})`;
       });
-      throw new Error(
-        `No eligible agents have a working launcher for step "${step}". ` +
+      const message = `No eligible agents have a working launcher for step "${step}". ` +
         `Eligible but blocked: ${blockers.join(', ')}. ` +
-        `Set WORKFLOW_AGENT=<name> to override or install a supported agent.`
-      );
+        `Set WORKFLOW_AGENT=<name> to override or install a supported agent.`;
+      // No independent reviewer can run: that is reviewer-pool exhaustion, so review preparation takes the
+      // same-agent fallback instead of failing. Other steps keep the plain configuration error.
+      throw agentPolicyStep(step) === 'review' ? new AgentPoolExhaustedError(step, message) : new Error(message);
     }
   }
 

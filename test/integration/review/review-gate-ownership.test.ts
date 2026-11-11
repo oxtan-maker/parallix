@@ -20,6 +20,7 @@ const REPO_ROOT = path.join(import.meta.dirname, '..', '..', '..');
 const SOURCE_ROOT = path.join(REPO_ROOT, 'src');
 
 import { stubMissionServices } from '../../helpers/stub-mission-services.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 test('task-2273 baseline: no repository-managed review-remote pre-push verifier exists', () => {
   const trackedFiles = fs.readdirSync(SOURCE_ROOT);
@@ -66,7 +67,7 @@ test("review preparation, declared gates and pre-review share candidate verifica
     t.mock.method(backlog, 'transitionTask', () => true);
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree: root,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
       isForgejoReviewEnabledFn: () => false,
       rebaseFn: async () => ({ ok: true as const }),
       captureNelFn: async () => ({ ok: true as const, nel: 1, bucket: 'tiny' }),

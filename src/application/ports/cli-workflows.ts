@@ -67,8 +67,12 @@ export interface StatusMissionData {
   readonly reviewRecovery?: import('../review-recovery.js').ReviewRecovery | null;
   /** Current review disposition. */
   readonly reviewDisposition?: string | null;
-  /** A local self-review awaits an external formal approval. */
+  /** Advisory approval debt recorded by the provider workflow. */
   readonly approvalOwed?: boolean;
+  /** Whether the current round deliberately runs the implementer in a fresh context. */
+  readonly sameAgentReview?: boolean;
+  /** Selected reviewers still owing approval on the current exact revision. */
+  readonly awaitingApprovals?: number;
   /** Whether the effective approval still covers what the branch would land (TASK-2555). */
   readonly approvalCoverage?: import('../../domain/approval-coverage.js').ApprovalCoverage | null;
   /** The latest integration repair: failed gate, repair range, re-review outcome (TASK-2620). */

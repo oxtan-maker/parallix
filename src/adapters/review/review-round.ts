@@ -26,6 +26,7 @@ import type { MissionLifecycleService } from '../../application/mission-lifecycl
 import { missionId, type Mission } from '../../domain/mission.js';
 import { requireReviewIdentity } from '../../domain/mission-workflow.js';
 import { attachReviewerResult } from './reviewer-result-attribution.js';
+import { recordHeldApproval } from './review-approval-count.js';
 import {
   applyImplementerCommand,
   applyReviewerCommand,
@@ -43,17 +44,9 @@ import {
   type ReviewerResultAttribution,
 } from '../../domain/review.js';
 
-/**
- * Reject a write whose caller read an older Mission than the one on disk.
- *
- * The review recorders load-modify-save, so without this an agent that read
- * version N could land a decision after another mutation reached N+1 and never
- * be told. Callers that supply no expected version keep the previous behaviour;
- * the agent-facing verbs always supply one.
- */
-
 export type ReviewRoundResult =
   | { outcome: 'recorded' }
+  | { outcome: 'held'; awaitingApprovals: number }
   /** Already recorded, or nothing to record. Replaying a round is not an error. */
   | { outcome: 'unchanged'; reason: string; noRevisionChange?: boolean }
   | { outcome: 'failed'; diagnostic: string; kind?: 'stale-write'; workflowBlock?: VerdictBlock };
@@ -298,6 +291,8 @@ export async function recordApproval(
         diagnostic: `Approve cannot be recorded for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
       };
     }
+    const held = recordHeldApproval(mission.review, input);
+    if (held) { await store.save({ ...mission, review: held.review }, loaded.version); return { outcome: 'held', awaitingApprovals: held.awaitingApprovals }; }
     let review = applyReviewerCommand(mission.review, {
       type: 'approve',
       decidedAt: input.decidedAt,

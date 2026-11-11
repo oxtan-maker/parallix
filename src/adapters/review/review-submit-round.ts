@@ -16,7 +16,8 @@ import { mirrorReviewOutcome } from '../../application/review-task-mirroring.js'
 import type { ReviewTaskMirror } from '../../application/ports/review-task-mirror.js';
 import { reviewFindingsFromMessage, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { createEvent } from './review-events.js';
-import { buildMetadataFooter, postWorkflowReview } from './review-artifacts.js';
+import { reviewerResultAttribution } from './reviewer-result-attribution.js';
+import { postWorkflowReview } from './review-artifacts.js';
 import { runPhaseGates } from '../config/repository-gates.js';
 import { repairStaleActiveTaskAfterReview } from './review-intervention-commands.js';
 
@@ -40,7 +41,7 @@ type SubmitReviewOptions = {
   postReviewFn?: typeof postReview;
   getPrAuthorFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['getPrAuthorFn'];
   createEventFn?: typeof createEvent;
-  buildMetadataFooterFn?: typeof buildMetadataFooter;
+  buildMetadataFooterFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['buildMetadataFooterFn'];
   missionStore?: MissionStore | null;
   lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
   recordRequestedChangesFn?: typeof recordRequestedChanges;
@@ -86,27 +87,33 @@ async function recordRequestChangesDecision(slug: string, outcome: string, messa
   return false;
 }
 
-/** Record the authoritative approve on the Review aggregate. Returns true when the outcome must stop. */
-async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, providerBacked = false): Promise<boolean> {
+type ApprovalDecisionResult = { stop: boolean; awaitingApprovals: number };
+
+/** Record the authoritative approve on the Review aggregate. */
+async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, providerBacked = false): Promise<ApprovalDecisionResult> {
   if (!options.missionStore) {
     error(fmt.status('FAIL', `No Mission authority bound for ${slug}; the review decision cannot be recorded.`));
-    return true;
+    return { stop: true, awaitingApprovals: 0 };
   }
   const recordApprovalFn = options.recordApprovalFn || recordApproval;
+  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  // The reviewer's own verdict counts toward the round's required approvals; it is attributed, never operator-directed.
+  const identity = (await resolveReviewIdentity(slug, worktree, { readReviewStateFn: options.readReviewStateFn })).identityUser;
   const decision = await recordApprovalFn(slug, {
     comment: message || null,
     decidedAt: new Date().toISOString(),
-    revision: options.revision ?? headRevision(options.worktree || resolveWorktree(slug) || process.cwd()),
+    revision: options.revision ?? headRevision(worktree),
     source: providerBacked ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
+    result: reviewerResultAttribution(identity || 'reviewer', null),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
-    return true;
+    return { stop: true, awaitingApprovals: 0 };
   }
   if (decision.outcome === 'unchanged') {
     log(fmt.status('INFO', `Review outcome "${outcome}" for ${slug} already recorded (${decision.reason}).`));
   }
-  return false;
+  return { stop: false, awaitingApprovals: decision.outcome === 'held' ? decision.awaitingApprovals : 0 };
 }
 
 /** Mirror an already-recorded verdict through the existing task projection owner. */
@@ -198,9 +205,13 @@ async function submitLocalReview(slug: string, outcome: string, message: string,
   // No external POST can fail here, so record the authoritative approve
   // immediately — before the flat review-state write — mirroring the
   // provider-backed post-success recording.
-  if (outcome === 'approve' && await recordApprovalDecision(slug, outcome, message, options, log, error)) {
-    exit(1);
-    return;
+  if (outcome === 'approve') {
+    const decision = await recordApprovalDecision(slug, outcome, message, options, log, error);
+    if (decision.stop) { exit(1); return; }
+    if (decision.awaitingApprovals > 0) {
+      log(fmt.status('INFO', `Approval recorded for ${slug}; ${decision.awaitingApprovals} additional reviewer approval${decision.awaitingApprovals === 1 ? '' : 's'} required before integration.`));
+      return;
+    }
   }
   await mirrorSubmittedReview(slug, outcome, false, worktree, options, log);
   log(fmt.status('PASS', `Review outcome "${outcome}" recorded locally for ${slug}.`));
@@ -227,7 +238,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     exit(1);
     return;
   }
-  reviewIdentity = resolveReviewUserFn(reviewIdentity);
+  reviewIdentity = resolveReviewUserFn(reviewIdentity, options.configuration);
   // An approve is the integration gate itself: check legality *before* the
   // external POST so an illegal approve (for example still in `fixing` after a
   // request-changes) fails loudly without ever posting, and record the
@@ -241,6 +252,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
   }
   const result = await postWorkflowReview(slug, outcome, message, {
     worktree,
+    revision: options.revision ?? headRevision(worktree),
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
     postReviewFn: options.postReviewFn,
@@ -253,6 +265,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     error,
     missionStore: options.missionStore,
     lifecycleService: options.lifecycleService,
+    configuration: options.configuration,
   });
 
   if (result.skipped && result.reason === 'self-author') {
@@ -280,9 +293,13 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
   // went out. Without a bound Mission authority there is nothing to record on
   // the aggregate (the flat review-state write below still mirrors the
   // disposition), matching the no-store WARN taken before the POST.
-  if (outcome === 'approve' && await recordApprovalDecision(slug, outcome, message, options, log, error, true)) {
-    exit(1);
-    return;
+  if (outcome === 'approve') {
+    const decision = await recordApprovalDecision(slug, outcome, message, options, log, error, true);
+    if (decision.stop) { exit(1); return; }
+    if (decision.awaitingApprovals > 0) {
+      log(fmt.status('INFO', `Approval recorded for ${slug}; ${decision.awaitingApprovals} additional reviewer approval${decision.awaitingApprovals === 1 ? '' : 's'} required before integration.`));
+      return;
+    }
   }
 
   await mirrorSubmittedReview(slug, outcome, true, worktree, options, log);
@@ -304,6 +321,7 @@ export async function closeMissionPr(
     resolveForgejoUserFn?: typeof resolveReviewUser;
     closePrFn?: typeof closePr;
     worktree?: string;
+    configuration?: ParallixConfiguration;
   } = {}
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
@@ -325,9 +343,9 @@ export async function closeMissionPr(
     exit(1);
     return;
   }
-  reviewIdentity = resolveReviewUserFn(reviewIdentity);
+  reviewIdentity = resolveReviewUserFn(reviewIdentity, options.configuration);
 
-  const token = readTokenFn(reviewIdentity!, { rootDir: worktree });
+  const token = readTokenFn(reviewIdentity!, { rootDir: worktree, configuration: options.configuration });
   if (!token) {
     error(fmt.status('FAIL', `No Forgejo token found for user "${reviewIdentity}".`));
     exit(1);
@@ -335,7 +353,10 @@ export async function closeMissionPr(
   }
 
   log(fmt.status('INFO', `Closing PR for ${branch} as ${reviewIdentity}...`));
-  const result = await closePrFn(branch, token, reviewIdentity!) as Record<string, unknown>;
+  const result = await closePrFn(branch, token, reviewIdentity!, {
+    rootDir: worktree,
+    configuration: options.configuration,
+  }) as Record<string, unknown>;
 
   if (!result.ok) {
     exit(1);

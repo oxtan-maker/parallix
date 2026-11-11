@@ -25,7 +25,26 @@ export function integrationRepairRange(facts: IntegrationRepairFacts): { readonl
 /** One line for the human: what failed last time, the repair range, and the re-review outcome. */
 export function integrationRepairSummary(facts: IntegrationRepairFacts): string {
   const gate = facts.gate ? `integration gate ${facts.gate}` : 'an integration gate';
-  return `Previous integration failed at ${gate}${facts.command ? ` (${facts.command})` : ''}; ${integrationRepairRange(facts).label}; re-review ${facts.reReview}.`;
+  return `Previous integration failed at ${gate}${facts.command ? ` (${facts.command})` : ''}; ${integrationRepairRange(facts).label}; re-review ${facts.reReview}. Timeline: ${integrationRepairTimeline(facts)}`;
+}
+
+function integrationRepairTimeline(facts: IntegrationRepairFacts): string {
+  const validationKnown = facts.timeline.some(event => event.kind === 'validation');
+  const assessmentKnown = facts.timeline.some(event => event.kind === 'assessment');
+  const events = facts.timeline.map(event => {
+    if (event.kind === 'validation') {
+      return `validated ${event.revision} at ${event.at} by ${event.actor} (${event.reference})${event.carriedTo ? `, carried by completed rebase to ${event.carriedTo}` : ''}`;
+    }
+    if (event.kind === 'assessment') { return `assessment ${event.outcome} for ${event.revision} at ${event.at} by ${event.actor}`; }
+    if (event.kind === 'withdrawal') { return `approval ${event.revision} withdrawn at ${event.at} by ${event.actor}`; }
+    if (event.kind === 'review-handoff') { return `fresh review round ${event.round} handed to ${event.actor} for ${event.revision} at ${event.at}`; }
+    if (event.kind === 'changes-requested') { return `changes requested for ${event.revision} at ${event.at} by ${event.actor}`; }
+    if (event.kind === 'fix') { return `fix ${event.revision} at ${event.at} by ${event.actor}`; }
+    return `integration handoff ${event.revision} at ${event.at} by ${event.actor}`;
+  });
+  if (!validationKnown) { events.unshift('full validation provenance unrecorded'); }
+  if (!assessmentKnown) { events.unshift('approval-retention assessment provenance unrecorded'); }
+  return `${events.join('; ')}.`;
 }
 
 /**
@@ -40,6 +59,7 @@ export function integrationRepairReviewBrief(facts: IntegrationRepairFacts | nul
     `- A previous round approved revision \`${facts.approvedRevision}\`. At \`px integrate\`, ${facts.gate ? `integration gate \`${facts.gate}\`` : 'an integration gate'}${facts.command ? ` (\`${facts.command}\`)` : ''} failed.`,
     `- Parallix withdrew and dismissed that prior approval at ${facts.withdrawnAt}; it no longer authorizes landing. An implementer then repaired the failure.`,
     `- Repair range: ${range.label} (\`${range.command}\`). ${range.note}`,
+    `- Timeline: ${integrationRepairTimeline(facts)}`,
   ];
   if (facts.log) { lines.push('- Failed gate output (tail):', '```', facts.log, '```'); }
   lines.push('- The review scope is yours: review the repair range, the whole mission diff, or both, as the change warrants.');

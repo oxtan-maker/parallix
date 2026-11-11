@@ -8,11 +8,17 @@ import * as fmt from '../presentation/cli-format.js';
 import { runRebaseWorkflow } from '../rebase-workflow.js';
 import { abortWith } from './support.js';
 import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import type { LiveMissionExecutionContext } from '../ports/mission-execution-context.js';
 
 export interface IntegrationRebaseTarget {
   baseWorktree: string;
   baseBranch: string;
   git: IntegrateGitRunner;
+}
+
+interface IntegrationRebaseMutationTarget extends IntegrationRebaseTarget {
+  /** Context already resolved by integration entry; nested rebase must not resolve it again. */
+  executionContext: LiveMissionExecutionContext;
 }
 
 /** True when a rebase conflict prediction is unavailable (e.g. unrelated histories). */
@@ -38,7 +44,7 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
    */
   async function runIntegrationRebase(
     slug: string,
-    { baseWorktree, baseBranch, git, missionServicesFn }: IntegrationRebaseTarget & { missionServicesFn?: IntegrationMissionServicesFactory },
+    { baseWorktree, baseBranch, git, executionContext, missionServicesFn }: IntegrationRebaseMutationTarget & { missionServicesFn?: IntegrationMissionServicesFactory },
   ): Promise<void> {
     let rebaseExitCode: number | null = null;
     const port = rebase.createRebaseWorkflowPort({
@@ -48,6 +54,10 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
       // only installs the rebound hook-failure path when `missionServicesFn` is a
       // function, so the mission's agent-assisted conflict path survives here too.
       missionServicesFn,
+      // Integration entry already resolved the complete mission/base identity.
+      // Carry that value through the nested factory instead of reconstructing it
+      // from this process's cwd or an adapter default.
+      executionContext,
       // Do not terminate the process: a clean rebase (exit 0) must let integrate
       // continue to the gates; only a dead-end (exit 1) aborts.
       exitFn: (code: number) => { rebaseExitCode = code; },
@@ -80,7 +90,7 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
     // workflow resolves the mission worktree internally). Checking the base
     // worktree here always reports clean mid-rebase; check the mission worktree
     // so a paused rebase is caught instead of reported as complete (SC7 / AC8).
-    const missionWorktree = missionPaths.conventionalWorktreePath(slug);
+    const missionWorktree = executionContext.missionWorktree;
     // TASK-2828: the metadata-only rebase-state owner replaces `rebase --show-current`,
     // which git prefix-matches to `--show-current-patch` and buffers the whole current
     // commit patch.

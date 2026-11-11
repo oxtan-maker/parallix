@@ -74,19 +74,17 @@ function observeMission(slug: string, root: string, configuration: ParallixConfi
   catch (error) { return { ok: false, reason: `Mission ${slug}: ${root} is not a readable git checkout: ${(error as Error).message}` }; }
   const located = locateMissionWorktree(slug, root, missionBranch, checkouts, configuration, gitFn);
   if ('fact' in located) {
-    // Read-only until the landing is proven: the probe reads the base branch from
-    // any checkout of this repository, so an unproven removal adds nothing.
-    const observed = observeReceivingBase(slug, root, checkouts, gitFn);
-    if ('fact' in observed) { return { ok: false, reason: `Mission ${slug}: ${located.fact} Also, ${observed.fact}` }; }
-    const landed = landedProof?.(observed.worktree ?? root, slug) ?? null;
-    if (!landed) { return { ok: false, reason: `Mission ${slug}: ${located.fact}` }; }
-    const anchored = baseAnchorFor(slug, root, observed, checkouts, configuration, gitFn);
-    if ('fact' in anchored) { return { ok: false, reason: `Mission ${slug}: ${anchored.fact}` }; }
-    return { ok: true, missionWorktree: null, missionBranch, base: observed, baseAnchor: anchored.anchor };
+    return observeLandedMission(slug, root, missionBranch, located.fact, checkouts, configuration, gitFn, landedProof);
   }
   const missionWorktree = located.path;
   const observedBranch = gitModule.getCurrentBranch(missionWorktree, gitFn);
-  if (observedBranch !== missionBranch) {
+  // Git detaches HEAD while a rebase is paused. The sequencer's head-name is
+  // the authoritative branch identity in that state; accepting only a live
+  // rebase for this exact mission keeps wrong-branch checkouts rejected.
+  const pausedRebase = observedBranch === '' ? gitModule.detectRebaseState(missionWorktree, {
+    gitRunner: args => ({ ...gitFn(args), signal: null }),
+  }) : null;
+  if (observedBranch !== missionBranch && !(pausedRebase?.inProgress && pausedRebase.branch === missionBranch)) {
     return { ok: false, reason: `Mission ${slug}: mission worktree ${missionWorktree} is on ${observedBranch || '(detached HEAD)'}, expected ${missionBranch}.` };
   }
   const base = observeReceivingBase(slug, missionWorktree, checkouts, gitFn);
@@ -96,6 +94,21 @@ function observeMission(slug: string, root: string, configuration: ParallixConfi
   return { ok: true, missionWorktree: path.resolve(missionWorktree), missionBranch, base, baseAnchor: anchored.anchor };
 }
 
+/** Resolve a removed checkout only when durable landing evidence proves that removal is expected. */
+function observeLandedMission(slug: string, root: string, missionBranch: string, missingFact: string,
+  checkouts: RepositoryWorktree[], configuration: ParallixConfiguration, gitFn: GitReader,
+  landedProof?: LandedProofReader): ObservedMission | { ok: false; reason: string } {
+  // Read-only until the landing is proven: the probe reads the base branch from
+  // any checkout of this repository, so an unproven removal adds nothing.
+  const observed = observeReceivingBase(slug, root, checkouts, gitFn);
+  if ('fact' in observed) { return { ok: false, reason: `Mission ${slug}: ${missingFact} Also, ${observed.fact}` }; }
+  const landed = landedProof?.(observed.worktree ?? root, slug) ?? null;
+  if (!landed) { return { ok: false, reason: `Mission ${slug}: ${missingFact}` }; }
+  const anchored = baseAnchorFor(slug, root, observed, checkouts, configuration, gitFn);
+  if ('fact' in anchored) { return { ok: false, reason: `Mission ${slug}: ${anchored.fact}` }; }
+  return { ok: true, missionWorktree: null, missionBranch, base: observed, baseAnchor: anchored.anchor };
+}
+
 /** The live worktree registered on the mission branch, else the conventional path for the wrong-branch diagnosis. */
 function locateMissionWorktree(slug: string, root: string, missionBranch: string, checkouts: RepositoryWorktree[], configuration: ParallixConfiguration, gitFn: GitReader): { path: string } | { fact: string } {
   const listed = worktreeForBranch(checkouts, missionBranch);
@@ -103,6 +116,15 @@ function locateMissionWorktree(slug: string, root: string, missionBranch: string
     return { fact: `mission worktree ${listed.path} for ${missionBranch} is missing; restore it, or run git worktree prune and recreate it, before retrying.` };
   }
   if (listed) { return { path: listed.path }; }
+  // A paused rebase detaches its registered checkout, so porcelain cannot map
+  // it to the mission branch. Admit only the checkout the caller launched from,
+  // and only when the sequencer names this exact mission branch. The ordinary
+  // primary/web-host path therefore keeps the existing missing-checkout result.
+  const launch = registeredLaunchWorktree(checkouts, root, gitFn);
+  if (launch && !launch.prunable && fs.existsSync(launch.path) && gitModule.getCurrentBranch(launch.path, gitFn) === '') {
+    const rebase = gitModule.detectRebaseState(launch.path, { gitRunner: args => ({ ...gitFn(args), signal: null }) });
+    if (rebase.inProgress && rebase.branch === missionBranch) { return { path: launch.path }; }
+  }
   let expected: string;
   try { expected = conventionalWorktreePath(slug, repositoryAnchor(root, checkouts, configuration, gitFn)); }
   catch (error) { return { fact: `mission worktree for ${missionBranch} cannot be located: ${(error as Error).message}` }; }
@@ -111,6 +133,17 @@ function locateMissionWorktree(slug: string, root: string, missionBranch: string
   const registered = registeredWorktreeAt(checkouts, expected);
   if (registered && !registered.prunable && fs.existsSync(registered.path)) { return { path: registered.path }; }
   return { fact: `no worktree is checked out on ${missionBranch} in the repository at ${root} (expected ${expected}).` };
+}
+
+/** The registered checkout that Git says owns the caller's launch path. */
+function registeredLaunchWorktree(checkouts: RepositoryWorktree[], root: string, gitFn: GitReader): RepositoryWorktree | null {
+  try {
+    const topLevel = gitFn(['-C', root, 'rev-parse', '--show-toplevel']);
+    const checkoutRoot = String(topLevel.stdout || '').trim();
+    return topLevel.status === 0 && checkoutRoot ? registeredWorktreeAt(checkouts, checkoutRoot) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The checkout this repository lays its conventional mission path out from. */

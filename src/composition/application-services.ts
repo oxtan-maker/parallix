@@ -200,7 +200,7 @@ export interface ProductionApplicationServiceOptions {
 }
 
 function performReviewPreparationWithMissionServices(mission: MissionApplicationServices, configuration: ParallixConfiguration) {
-  return (slug: string, options: Record<string, unknown>) => performReviewPreparation(slug, {
+  return (slug: string, options: Parameters<typeof performReviewPreparation>[1]) => performReviewPreparation(slug, {
     ...options, configuration,
     missionServicesFn: async () => mission,
   });
@@ -276,7 +276,7 @@ export async function createProductionApplicationServices(
   const reviewPreparationWithMissionServices = mission && performReviewPreparationWithMissionServices(mission, options.configuration);
   const executeRuntime = mission ? {
     ...defaultExecuteRuntime,
-    performReviewPreparation: (slug: string, reviewPreparationOptions: Record<string, unknown> = {}) =>
+    performReviewPreparation: (slug: string, reviewPreparationOptions: Parameters<typeof performReviewPreparation>[1]) =>
       reviewPreparationWithMissionServices!(slug, reviewPreparationOptions),
     validateCheckpointsBeforeReviewPreparation: (slug: string, worktree: string, runtimeOptions: Record<string, unknown> = {}) =>
       defaultExecuteRuntime.validateCheckpointsBeforeReviewPreparation!(slug, worktree, {

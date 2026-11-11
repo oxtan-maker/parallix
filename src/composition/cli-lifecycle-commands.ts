@@ -19,22 +19,19 @@ import { landedMissionIntake } from '../adapters/cli/commands/recover-landed-int
 import type { BoardProgressSink } from '../application/controller/board-command.js';
 
 import { createDraftWorkflowAdapter } from '../adapters/cli/commands/draft.js';
-import { createReviewPreparationPorts } from "../adapters/cli/commands/review-preparation.js";
+import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
 import integrate from '../adapters/cli/commands/integrate.js';
 import { DraftCommandUseCase } from '../application/draft-command-use-case.js';
 import { IntegrateCommandUseCase } from '../application/integrate-command-use-case.js';
 import { ReviewCommandUseCase } from '../application/review-command-use-case.js';
-import { ReviewPreparationCommandUseCase } from "../application/review-preparation-command-use-case.js";
 
 import { createDraftCommand } from '../interfaces/cli/draft.js';
-import type { ReviewPreparationMissionServicesPort } from "../application/ports/review-preparation-workflow.js";
+import type { ReviewPreparationMissionServicesPort, PerformReviewPreparationOptions } from "../application/ports/review-preparation-workflow.js";
 import { createIntegrateCommand } from '../interfaces/cli/integrate.js';
 
 import { createCancelCommand } from '../interfaces/cli/cancel.js';
 
 import { missionId, type Mission } from '../domain/mission.js';
-import { resolveWorktree } from '../adapters/git/worktree.js';
-
 import { createReviewCommand } from '../interfaces/cli/review.js';
 
 import { postComment } from '../adapters/review/review-adapter.js';
@@ -79,8 +76,9 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
       const ownedOperation = configuration.runtime.workflowOperation && services.operatorState.db
         ? await new SqliteWorkflowOperationStore(services.operatorState.db, mission.repositoryId).get(configuration.runtime.workflowOperation) : null;
       const adapter = createReviewWorkflowAdapter({
-        configuration,
         ...options,
+        configuration,
+        rootDir,
         operatorResume: bindReviewOperatorResume(services.mission.store, context.operatorReview ?? false, options ?? {}, reviewLiveness, ownedOperation?.reviewOperatorResume),
         // SC4: refuse to review a mission whose payload already landed.
         payloadLandedFn: (s: string) => findLandedSquashOnBaseBranch(rootDir, s) !== null,
@@ -98,12 +96,15 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         lifecycleService: mission.lifecycle,
         // The composition root binds the review-loop mechanisms; the
         // application review loop decides how they are sequenced.
-        reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, request, {
+        reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, {
+          ...request, worktree: request.executionContext?.missionWorktree,
+        }, {
           ...observers,
           configuration,
+          executionContext: request.executionContext,
           integrationRepair: integrationRepairContinuation(mission, configuration, rootDir),
           integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
-          classification: createReviewClassification(request.slug, resolveWorktree(request.slug) ?? rootDir, configuration.decision, configuration),
+          classification: createReviewClassification(request.slug, request.executionContext?.missionWorktree ?? rootDir, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
           ...reviewLoopBindings(mission.store, mission.lifecycle, reviewerSessionPort),
         }),
@@ -155,7 +156,9 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
       if (!controller) { throw new Error('cancel requires BoardCommandController from presentation capabilities'); }
       return createCancelCommand(controller)(args);
     }),
-    rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, { ...options, missionServicesFn }))),
+    rebase: createRebaseCommand((args, options) => withMissionFactories(missionServicesFn => rebase(args, {
+      ...options, rootDir, configuration, missionServicesFn,
+    }))),
     review: runReview
   };
 }
@@ -239,7 +242,10 @@ function createIntegrationRunner(context: CliCommandContext, runReview: (args: s
   return runIntegrated;
 }
 function performReviewPreparationWithMissionServices(missionServicesFn: ReviewPreparationMissionServicesPort, configuration: ParallixConfiguration) {
-  return (slug: string, options: Record<string, unknown>) => new ReviewPreparationCommandUseCase({
-    ...createReviewPreparationPorts(configuration, missionServicesFn), missionServices: missionServicesFn,
-  }).performReviewPreparation(slug, { ...options, missionServicesFn });
+  // Reuse the adapter's one port-graph construction instead of rebuilding it here:
+  // it binds configuration, Mission services and the invocation's resolved checkout
+  // together, so agent-launch recording cannot lose the checkout (ADR 0051).
+  return (slug: string, options: PerformReviewPreparationOptions) => performReviewPreparation(slug, {
+    ...options, configuration, missionServicesFn,
+  });
 }

@@ -56,7 +56,12 @@ test('durable review checkpoints fail closed with mission phase round stage and 
   );
 });
 
-test('per-reviewer results survive the SQLite mission aggregate round trip unchanged (PX-0046.01)', async () => {
+test('per-reviewer results and the reviewer policy survive the SQLite mission aggregate round trip unchanged (PX-0046.01, PX-0046.03)', async () => {
+  const reviewerPolicy = {
+    revision: changeRevision('rev-1'), mode: 'one-independent' as const, requiredApprovals: 1 as const, selected: [agentFamily('codex')], independentAvailable: 1,
+    unavailable: [{ family: 'vibe', reason: 'launcher missing' }], fallbackReason: 'only one independent reviewer is available (vibe: launcher missing)',
+    rerouted: [{ family: 'claude', replacedBy: 'codex', reason: 'launcher rerouted claude to codex' }],
+  };
   const reviewerResults = [{
     publicationId: 'session-42', reviewerId: 'codex-reviewer', agentFamily: agentFamily('codex'),
     revision: changeRevision('rev-1'), decision: 'changes-requested' as const,
@@ -68,7 +73,7 @@ test('per-reviewer results survive the SQLite mission aggregate round trip uncha
     assert.equal(loaded.kind, 'found');
     if (loaded.kind !== 'found') { return; }
     const round = currentReviewRound(loaded.mission.review!);
-    await store.save({ ...loaded.mission, review: { ...loaded.mission.review!, rounds: [{ ...round, reviewerResults }] } }, loaded.version);
+    await store.save({ ...loaded.mission, review: { ...loaded.mission.review!, rounds: [{ ...round, reviewerResults, reviewerPolicy }] } }, loaded.version);
 
     const reopened = await openStore();
     try {
@@ -76,6 +81,7 @@ test('per-reviewer results survive the SQLite mission aggregate round trip uncha
       assert.equal(reloaded.kind, 'found');
       if (reloaded.kind === 'found') {
         assert.deepEqual(currentReviewRound(reloaded.mission.review!).reviewerResults, reviewerResults);
+        assert.deepEqual(currentReviewRound(reloaded.mission.review!).reviewerPolicy, reviewerPolicy);
       }
     } finally { await reopened.db.close(); }
   });

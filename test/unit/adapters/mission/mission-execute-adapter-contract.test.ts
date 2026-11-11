@@ -2,6 +2,8 @@ import { DEFAULT_CONFIGURATION } from '../../../../src/application/ports/configu
 import { missionId } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+import type { LiveMissionExecutionContext } from '../../../../src/application/ports/mission-execution-context.js';
 import { missionVersion, type MissionTransitionStore } from '../../../../src/application/domain-ports.js';
 import type { ExecuteMissionRuntime } from '../../../../src/adapters/mission/execute-mission-adapters.js';
 import type { ExecuteMissionRequest } from '../../../../src/application/execute-mission-service.js';
@@ -50,6 +52,7 @@ describe('Execute Mission adapters', () => {
       resolveTaskFile() { return { ok: true as const, taskFile: '/worktree/task.md', matches: ['/worktree/task.md'] }; },
       buildCheckpointContext() { return 'CP-5'; },
       async resolveExecutionContext() { return null; },
+      resolveMutationContext(slug, root) { return { ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: root }) }; },
       readAgentConfig() { return { steps: { active: { eligible: ['codex'], selection: 'random' } } }; },
       buildExecutePrompt() { return 'execute prompt'; },
       async selectLaunchAndRecord() { return { agent: 'codex', result: { status: 0 }, rebaseDeferred: false }; },
@@ -311,8 +314,20 @@ describe('Execute Mission adapters', () => {
     const verdict = await ports.reviewPreparationExecution.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex' });
     assert.equal(verdict.ok, false);
     assert.deepEqual(seen[0], [
-      'task-1', { forgejoUser: 'codex', worktree: '/worktree', force: undefined },
+      'task-1', { forgejoUser: 'codex', executionContext: missionExecutionContext({ missionId: 'task-1', missionWorktree: '/worktree' }), force: undefined },
     ]);
+  });
+
+  test('review preparation rejects an inconsistent mutation context before the pipeline', async () => {
+    let called = false;
+    const ports = createExecuteMissionPorts('/repo', { missionTransitionStore: transitionStore }, runtimeStub({
+      resolveMutationContext: () => ({ ok: true, context: missionExecutionContext({ missionId: 'task-other', missionWorktree: '/worktree' }) }),
+      async performReviewPreparation() { called = true; return { ok: true as const }; },
+    }));
+    const verdict = await ports.reviewPreparationExecution.run({ slug: 'task-1', worktree: '/worktree', agent: 'codex' });
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.reason, 'mutation-context-unavailable');
+    assert.equal(called, false);
   });
 });
 
@@ -373,6 +388,7 @@ describe('Execute Mission characterization', () => {
       resolveWorktree() { calls.push('worktree'); return '/worktree'; },
       resolveTaskFile() { calls.push('task'); return { ok: true as const, taskFile: '/worktree/backlog/tasks/task-1.md', matches: ['/worktree/backlog/tasks/task-1.md'] }; },
       async resolveExecutionContext() { return null; },
+      resolveMutationContext(slug, root) { return { ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: root }) }; },
       buildCheckpointContext() { calls.push('checkpoint'); return 'CP-5'; },
       readAgentConfig() { calls.push('config'); return {}; },
       buildExecutePrompt() { calls.push('prompt'); return 'execute prompt'; },
@@ -389,8 +405,8 @@ describe('Execute Mission characterization', () => {
       recordActiveStats(record: { implementer: string }) { calls.push(`stats:${record.implementer}`); },
       resolveStageTelemetry() { calls.push('telemetry'); return null; },
       async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
-      async performReviewPreparation(slug: string, options: { worktree: string; forgejoUser?: string }) {
-        calls.push(`review-preparation:${slug}:${options.worktree}:${options.forgejoUser}`);
+      async performReviewPreparation(slug: string, options: { executionContext: LiveMissionExecutionContext; forgejoUser?: string }) {
+        calls.push(`review-preparation:${slug}:${options.executionContext.missionWorktree}:${options.forgejoUser}`);
         return { ok: true as const };
       },
       async repairReviewPreparation() { return { repaired: false }; },
@@ -440,14 +456,18 @@ describe('Execute Mission characterization', () => {
   // TASK-2723: the explicit reviewer reaches the real review-loop selection.
   async function reviewWithReviewer(reviewer: string | undefined, routing: Record<string, unknown> = {}) {
     const fake = fakeReviewLoopPorts({ slug: 'task-1', routing: routing });
-    const { runtime, transitionStore } = executeFixture({ reviewLoopMechanisms: () => fake.ports });
+    let nested: Parameters<ExecuteMissionRuntime['reviewLoopMechanisms']> | null = null;
+    const { runtime, transitionStore } = executeFixture({ reviewLoopMechanisms: (...args) => { nested = args; return fake.ports; } });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest({ agent: 'claude', reviewer }));
-    return { fake, outcome };
+    return { fake, outcome, nested };
   }
 
   test('execute workflow: an explicit reviewer is the preferred first automatic reviewer (TASK-2837)', async () => {
-    const { fake } = await reviewWithReviewer('qwen', { eligibleFamilies: () => ['claude', 'codex', 'qwen'] });
+    const { fake, nested } = await reviewWithReviewer('qwen', { eligibleFamilies: () => ['claude', 'codex', 'qwen'] });
     assert.equal(fake.launches.find(launch => launch.role === 'reviewer')?.agent, 'qwen', 'automatic selection would have nominated claude');
+    assert.ok(nested, 'execute invokes the nested review factory');
+    const captured = nested as unknown as Parameters<ExecuteMissionRuntime['reviewLoopMechanisms']>;
+    assert.strictEqual(captured[1].executionContext, captured[2]!.executionContext, 'execute threads one resolved context through the nested review factory');
     assert.deepEqual(fake.exits, []);
   });
 
@@ -541,9 +561,9 @@ describe('Execute Mission characterization', () => {
   test("execute workflow: a review preparation relaunch retry that recovers still completes the launch", async () => {
     let reviewPreparationAttempts = 0;
     const { runtime, calls, transitionStore } = executeFixture({
-      async performReviewPreparation(slug: string, options: { worktree: string; forgejoUser?: string }) {
+      async performReviewPreparation(slug: string, options: { executionContext: LiveMissionExecutionContext; forgejoUser?: string }) {
         reviewPreparationAttempts++;
-        calls.push(`review-preparation:${slug}:${options.worktree}:${options.forgejoUser}`);
+        calls.push(`review-preparation:${slug}:${options.executionContext.missionWorktree}:${options.forgejoUser}`);
         // The relaunch/retry loop lives inside the handoff mechanism; the
         // workflow observes only its final boolean verdict.
         assert.ok(reviewPreparationAttempts >= 1);

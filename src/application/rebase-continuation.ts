@@ -9,6 +9,93 @@ import type { GitCommandResult, MissionConflictClassification } from './ports/re
 import type { RebaseWorkflowPort } from './ports/rebase-workflow.js';
 import { failureReason } from '../domain/failure-reason.js';
 
+const REPLAY_PROOF_MAX_COMMITS = 256;
+const REPLAY_PROOF_MAX_BYTES = 64 * 1024;
+const GIT_OBJECT_ID = /^[0-9a-f]{40,64}$/;
+
+type ReplayHistoryRow = [commit: string, parents: string, tree: string];
+type ReplaySnapshot = {
+  targetTree: string;
+  originalTip: string;
+  targetParent: string;
+  rows: ReplayHistoryRow[];
+};
+
+function runReplayProof(ctx: RebaseContext, args: string[]): GitCommandResult {
+  return ctx.gitFn(['-C', ctx.executionRoot, ...args], { maxBuffer: REPLAY_PROOF_MAX_BYTES });
+}
+
+function readReplayProof(ctx: RebaseContext, args: string[]): string {
+  const result = runReplayProof(ctx, args);
+  const value = result.status === 0 ? result.stdout.trim() : '';
+  return value.length <= REPLAY_PROOF_MAX_BYTES ? value : '';
+}
+
+function parseLinearReplayRows(output: string, targetParent: string, originalTip: string): ReplayHistoryRow[] | null {
+  const lines = output.trim().split('\n').filter(Boolean);
+  if (lines.length === 0 || lines.length > REPLAY_PROOF_MAX_COMMITS) { return null; }
+  const rawRows = lines.map(line => line.split('\t'));
+  if (rawRows.some(row => row.length !== 3 || !GIT_OBJECT_ID.test(row[0] ?? '') || !GIT_OBJECT_ID.test(row[2] ?? ''))) {
+    return null;
+  }
+  const rows = rawRows as ReplayHistoryRow[];
+  if (rows[0]?.[0] !== originalTip) { return null; }
+  for (let index = 0; index < rows.length; index++) {
+    const parents = rows[index][1].split(' ').filter(Boolean);
+    const expectedParent = index === rows.length - 1 ? targetParent : rows[index + 1][0];
+    if (parents.length !== 1 || parents[0] !== expectedParent) { return null; }
+  }
+  return rows;
+}
+
+function readReplaySnapshot(ctx: RebaseContext, target: string): ReplaySnapshot | null {
+  if (!GIT_OBJECT_ID.test(target)) { return null; }
+  if (readReplayProof(ctx, ['rev-parse', '--is-shallow-repository']) !== 'false') { return null; }
+  const targetTree = readReplayProof(ctx, ['rev-parse', '--verify', `${target}^{tree}`]);
+  const originalTip = readReplayProof(ctx, ['rev-parse', '--verify', 'HEAD^{commit}']);
+  if (!GIT_OBJECT_ID.test(targetTree) || !GIT_OBJECT_ID.test(originalTip)) { return null; }
+  const targetLine = readReplayProof(ctx, ['rev-list', '--parents', '--max-count=1', target]).split(' ').filter(Boolean);
+  const targetParent = targetLine[1] ?? '';
+  if (targetLine.length !== 2 || targetLine[0] !== target || !GIT_OBJECT_ID.test(targetParent)) { return null; }
+  if (runReplayProof(ctx, ['merge-base', '--is-ancestor', targetParent, originalTip]).status !== 0) { return null; }
+  const historyResult = runReplayProof(ctx, ['log', '--first-parent', '--format=%H%x09%P%x09%T',
+    `--max-count=${REPLAY_PROOF_MAX_COMMITS + 1}`, `${targetParent}..${originalTip}`]);
+  if (historyResult.status !== 0 || historyResult.stdout.length > REPLAY_PROOF_MAX_BYTES) { return null; }
+  const rows = parseLinearReplayRows(historyResult.stdout, targetParent, originalTip);
+  return rows ? { targetTree, originalTip, targetParent, rows } : null;
+}
+
+function replayRefsAreStable(ctx: RebaseContext, target: string, originalTip: string): boolean {
+  return readReplayProof(ctx, ['rev-parse', '--verify', ctx.baseBranch]) === target
+    && readReplayProof(ctx, ['rev-parse', '--verify', 'HEAD^{commit}']) === originalTip;
+}
+
+/**
+ * Find the one supported narrower replay boundary: a complete linear range
+ * from the pinned target's parent to HEAD containing exactly one commit whose
+ * tree equals the pinned target. Unrelated older repository history is outside
+ * that range. Any incomplete, ambiguous or failed observation declines to
+ * select a boundary so the established ordinary rebase remains authoritative.
+ */
+function exactTreeReplayBoundary(ctx: RebaseContext, target: string): string | null {
+  try {
+    const snapshot = readReplaySnapshot(ctx, target);
+    if (!snapshot) { return null; }
+    const { targetTree, originalTip, targetParent, rows } = snapshot;
+    const matches = rows.filter(row => row[2] === targetTree);
+    if (matches.length !== 1 || matches[0][0] === originalTip) { return null; }
+    const boundary = matches[0]?.[0] ?? '';
+    const sharedBase = readReplayProof(ctx, ['merge-base', target, boundary]);
+    if (sharedBase !== targetParent) { return null; }
+    const targetAncestry = runReplayProof(ctx, ['merge-base', '--is-ancestor', target, originalTip]);
+    const boundaryAncestry = runReplayProof(ctx, ['merge-base', '--is-ancestor', boundary, originalTip]);
+    if (targetAncestry.status !== 1 || boundaryAncestry.status !== 0) { return null; }
+    return replayRefsAreStable(ctx, target, originalTip) ? boundary : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Start one initial or resumed rebase round from the context's selected worktree. */
 export function startRebaseRound(ctx: RebaseContext, resumeInPlace: boolean,
   existingRebase: ReturnType<RebaseWorkflowPort['detectRebaseState']>): GitCommandResult {
@@ -17,9 +104,15 @@ export function startRebaseRound(ctx: RebaseContext, resumeInPlace: boolean,
     return { failureReason: failureReason('git-conflict', 'git'), status: 1, stdout: '', stderr: existingRebase.unmergedFiles
       .map(file => `CONFLICT (content): Merge conflict in ${file}`).join('\n') };
   }
-  const base = ctx.gitFn(['-C', ctx.executionRoot, 'rev-parse', ctx.baseBranch]);
+  const base = ctx.gitFn(['-C', ctx.executionRoot, 'rev-parse', '--verify', ctx.baseBranch]);
   ctx.rebaseTargetRevision = base.status === 0 ? base.stdout.trim() || undefined : undefined;
   fmt.log.info(`Rebasing ${fmt.branch(ctx.branch)} onto local ${fmt.branch(ctx.baseBranch)}...`);
+  const target = ctx.rebaseTargetRevision;
+  const boundary = target ? exactTreeReplayBoundary(ctx, target) : null;
+  if (boundary && target) {
+    return ctx.gitFn(['-C', ctx.executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no',
+      'rebase', '--onto', target, boundary]);
+  }
   return ctx.gitFn(['-C', ctx.executionRoot, '-c', 'core.editor=true', '-c', 'merge.autoedit=no', 'rebase', ctx.baseBranch]);
 }
 

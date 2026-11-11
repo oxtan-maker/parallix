@@ -106,6 +106,10 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
     create: identity => new ReviewState(slug, identity),
     resume: persisted => ReviewState.from(slug, persisted as ReviewState),
     openRound: async next => { next.phase = 'reviewing'; await state.persist(next); return true; },
+    // Without a Review authority the policy is a no-op: one reviewer, historical single approval.
+    recordReviewerPolicy: async () => {},
+    reviewerProgress: async () => null,
+    replaceReviewer: async () => null,
     ...overrides.stateport,
   };
   const ports: ReviewLoopPorts = {

@@ -14,6 +14,9 @@ import { flagValue, readTextFlag, type ReadUtf8File } from './review-cli-flags.j
 import { createEvent } from './review-events.js';
 import type { ReviewLoopBindings } from './review-loop.js';
 import { continueReviewClearsIntervention, continueReviewInvalidatesBlocker, closeMissionPr, commentRound, pushRound, readComments, reconcileInterruptedReviewPreparationHandler, showReviewStatus, submitForReview, submitReviewRound, verifyReview } from './review-commands.js';
+import { reviewOperation, reviewOperationRequiresMutationContext } from '../../domain/review-command-policy.js';
+import { liveMissionExecutionContext, type LiveMissionExecutionContext, type MissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
+import { resolveMissionExecutionContext } from '../git/mission-execution-context.js';
 
 /** Command dispatch awaits completion and forwards failures; receipts are owned by each command. */
 type ReviewCommandObserver<Handler extends (...args: never[]) => unknown> = (...args: Parameters<Handler>) => unknown;
@@ -24,9 +27,24 @@ export type ReviewLoopObservers = Pick<ReviewLoopBindings, 'log' | 'error' | 'ex
 /** The prerequisite reports failure through its exit observer or rejection. */
 type ReviewInterventionClearer = (...args: Parameters<typeof continueReviewClearsIntervention>) => Promise<unknown>;
 
+function resolveMutationContext(slug: string, options: {
+  configuration?: import('../../application/ports/configuration.js').ParallixConfiguration;
+  rootDir?: string;
+  resolveExecutionContextFn?: (_slug: string, _root: string) => MissionExecutionContextResolution;
+}): MissionExecutionContextResolution {
+  const root = options.rootDir || process.cwd();
+  if (options.resolveExecutionContextFn) { return options.resolveExecutionContextFn(slug, root); }
+  if (options.configuration) { return resolveMissionExecutionContext(slug, root, options.configuration); }
+  return { ok: false, reason: `Mission ${slug}: mutation configuration is unavailable; composition must resolve the execution context.` };
+}
+
 export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   constructor(private readonly _defaults: {
     configuration?: import('../../application/ports/configuration.js').ParallixConfiguration;
+    rootDir?: string;
+    worktree?: string;
+    executionContext?: LiveMissionExecutionContext;
+    resolveExecutionContextFn?: (_slug: string, _root: string) => MissionExecutionContextResolution;
     readFileSync?: ReadUtf8File;
     inferSlugFn?: typeof inferSlug; log?: (_msg: string) => void; error?: (_msg: string) => void; exit?: (_code: number) => void;
     verifyReviewFn?: ReviewCommandObserver<typeof verifyReview>; submitForReviewFn?: ReviewCommandObserver<typeof submitForReview>; pushRoundFn?: ReviewCommandObserver<typeof pushRound>; readCommentsFn?: ReviewCommandObserver<typeof readComments>; commentRoundFn?: ReviewCommandObserver<typeof commentRound>; submitReviewRoundFn?: ReviewCommandObserver<typeof submitReviewRound>; closeMissionPrFn?: ReviewCommandObserver<typeof closeMissionPr>; readReviewStateFn?: ReviewStateInstanceReader; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedReviewPreparationFn?: typeof reconcileInterruptedReviewPreparation;
@@ -44,13 +62,31 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   } = {}) {}
 
   async preflight(args: string[], suppliedOptions: Record<string, unknown> = {}): Promise<ReviewWorkflowContext | null> {
-    const options = { ...this._defaults, ...suppliedOptions, operatorResume: this._defaults.operatorResume } as typeof this._defaults; const slug = (options.inferSlugFn || inferSlug)(reviewExplicitSlug(args));
+    const options = { ...this._defaults, ...suppliedOptions,
+      configuration: this._defaults.configuration, rootDir: this._defaults.rootDir,
+      resolveExecutionContextFn: this._defaults.resolveExecutionContextFn,
+      operatorResume: this._defaults.operatorResume } as typeof this._defaults; const slug = (options.inferSlugFn || inferSlug)(reviewExplicitSlug(args));
     if (!slug) { (options.error || fmt.log.plainError)(`Usage: ${REVIEW_USAGE}`); (options.exit || process.exit)(1); return null; }
     if (await options.payloadLandedFn?.(slug)) { (options.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} payload already landed on the base branch. Close it out with: px integrate ${slug} --recover-landed`)); (options.exit || process.exit)(1); return null; }
-    return { slug, args, options };
+    if (!reviewOperationRequiresMutationContext(reviewOperation(args))) { return { slug, args, options }; }
+    const resolution = resolveMutationContext(slug, options);
+    const live = liveMissionExecutionContext(slug, resolution);
+    if (!live.ok) {
+      (options.error || fmt.log.plainError)(fmt.status('FAIL', live.reason));
+      (options.exit || process.exit)(1);
+      return null;
+    }
+    const mutationOptions = { ...options, executionContext: live.context, worktree: live.context.missionWorktree, rootDir: live.context.missionWorktree };
+    return { slug, args, options: mutationOptions, executionContext: live.context };
   }
   async verify(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.verifyReviewFn || verifyReview)(context.slug, context.args.includes('--no-gate'), { ...o }); }
-  async submit(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.submitForReviewFn || submitForReview)(context.slug, context.args.includes('--no-gate'), o); }
+  async submit(context: ReviewWorkflowContext): Promise<void> {
+    const o = context.options as typeof this._defaults;
+    // Submit-for-review is a Mission mutation: preflight resolved the live context, and
+    // the command receives it instead of re-deriving a checkout from the process cwd.
+    if (!context.executionContext) { throw new Error(`Review submit for ${context.slug} requires the resolved mission execution context.`); }
+    await (o.submitForReviewFn || submitForReview)(context.slug, context.args.includes('--no-gate'), { ...o, executionContext: context.executionContext });
+  }
   async push(context: ReviewWorkflowContext): Promise<void> { const o = context.options as typeof this._defaults; await (o.pushRoundFn || pushRound)(context.slug, { ...o, implementer: flagValue(context.args, '--implementer') ?? undefined, force: context.args.includes('--force') }); }
   async enter(context: ReviewWorkflowContext): Promise<void> {
     // Helpers historically relied on process.exit. Fence this invocation even
@@ -69,7 +105,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
   private roundRequest(context: ReviewWorkflowContext): Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> {
     const poll = flagValue(context.args, '--poll-timeout-seconds');
-    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null };
+    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, executionContext: context.executionContext };
   }
   private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
   private roundUseCase(context: ReviewWorkflowContext, helperExit?: (_code: number) => never): ReviewRoundUseCase {
@@ -77,7 +113,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     const helperOptions = { ...o, exit: helperExit ?? o.exit, runFn: o.run };
     const port: ReviewRoundEntryPort = {
       operatorResume: o.operatorResume,
-      loadRound: async slug => await Promise.resolve((o.readReviewStateFn || readReviewState)(slug, worktree(slug) || process.cwd(), o.missionStore)),
+      loadRound: async slug => await Promise.resolve((o.readReviewStateFn || readReviewState)(slug, context.executionContext?.missionWorktree || worktree(slug) || process.cwd(), o.missionStore)),
       loadMission: async slug => {
         if (!o.requireReviewAggregate) { return { kind: 'found' as const }; }
         if (!o.missionStore) { return { kind: 'unavailable' as const, reason: 'Operator database is unavailable' }; }

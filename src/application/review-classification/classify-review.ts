@@ -321,6 +321,35 @@ function classifierSource(scope: ReviewScope, decision: Decision, decisionId: st
   };
 }
 
+/**
+ * Whether the round's recorded reviewer requirement still owes an approval for
+ * the revision the classifier is judging.  A classifier verdict is not an
+ * independent reviewer approval, so it can never stand in for one (PX-0046.03).
+ */
+async function reviewerRequirementUnmet(context: LoopContext, scope: ReviewScope): Promise<boolean> {
+  const progress = await context.ports.state.reviewerProgress(context.state, scope.candidateRevision);
+  return Boolean(progress && !progress.met);
+}
+
+type FoundMission = Extract<Loaded, { readonly kind: 'found' }>;
+
+async function classifierCommitSnapshot(
+  context: LoopContext,
+  scope: ReviewScope,
+  selected: Decision['selected'],
+  store: MissionStore,
+): Promise<{ readonly latest: FoundMission; readonly review: Review } | { readonly failure: string }> {
+  const latest = await store.load(scope.mission.id);
+  if (latest.kind !== 'found' || !latest.mission.review) { return { failure: 'review-evidence-unavailable' }; }
+  if (latest.version !== scope.version || context.ports.preReview.head() !== scope.candidateRevision) {
+    return { failure: 'classifier-stale-result' };
+  }
+  if (selected.route === 'clear' && await reviewerRequirementUnmet(context, scope)) {
+    return { failure: 'reviewer-requirement-unmet' };
+  }
+  return { latest, review: latest.mission.review };
+}
+
 /** Publish first, then persist; persistence failure after publication escalates to a human. */
 async function commitDecision(context: LoopContext, round: ReviewRound, scope: ReviewScope, decision: Decision, rows: RoundTelemetry): Promise<Outcome> {
   const ports = context.ports.classification!;
@@ -336,10 +365,10 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
     const source = classifierSource(scope, decision, decisionId, rows.current.findingIds);
     const at = ports.now();
     // Refuse any version or candidate drift before publishing a result.
-    const latest = await store!.load(scope.mission.id);
-    if (latest.kind !== 'found' || !latest.mission.review) { return await fallback('review-evidence-unavailable'); }
-    if (latest.version !== scope.version || context.ports.preReview.head() !== candidateRevision) { return await fallback('classifier-stale-result'); }
-    const updated = applyClassifierReview(latest.mission.review, source, selected.route, at, firstReview ? findings : [], candidateRevision);
+    const snapshot = await classifierCommitSnapshot(context, scope, selected, store!);
+    if ('failure' in snapshot) { return await fallback(snapshot.failure); }
+    const { latest, review } = snapshot;
+    const updated = applyClassifierReview(review, source, selected.route, at, firstReview ? findings : [], candidateRevision);
     const summary = `${updated.rounds.at(-1)!.decision!.comment}\n\nScope: ${source.findingIds.join(', ')}; revision: ${source.candidateRevision}; policy: ${source.policyVersion}; selected score: ${source.score}.\n[classifier-decision:${decisionId}]`;
     if (!(await ports.publish(source, selected.route, summary))) { return await fallback('classifier-publication-failed'); }
     published = true;

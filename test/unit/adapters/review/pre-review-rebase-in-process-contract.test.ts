@@ -161,6 +161,29 @@ describe("02 pre-review rebase in-process", () => {
     assert.deepEqual(workflowArgs, [SLUG, '--push'], 'the workflow runs the mission with --push');
   });
 
+  test('detached paused rebase continues from authoritative metadata (px-0042.02 F1)', async () => {
+    let inProgress = true;
+    const calls: string[][] = [];
+    const port = stubPort({
+      resolveExecutionContext: () => ({ ok: true, context: {
+        missionId: SLUG, missionWorktree: WORKTREE, missionBranch: BRANCH,
+        baseWorktree: '/tmp/base', baseBranch: 'main',
+      } }),
+      detectRebaseState: () => ({ inProgress, branch: BRANCH, unmergedFiles: [] }),
+      getCurrentBranch: () => inProgress ? '' : BRANCH,
+      git: args => {
+        calls.push(args);
+        if (args.includes('rebase') && args.includes('--continue')) { inProgress = false; }
+        return args.includes('rev-parse') ? { ...OK, stdout: 'abc123' } : OK;
+      },
+    });
+
+    await runRebaseWorkflow([SLUG], port);
+
+    assert.ok(calls.some(args => args.includes('rebase') && args.includes('--continue')),
+      'the recorded rebase resumes instead of failing the ordinary branch checkout gate');
+  });
+
   test('completed rebase ancestry refusal reaches fresh repair without old gate attribution (TASK-2796)', async (t) => {
     const root = mkdtemp('rebase-diagnostic-');
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));

@@ -9,6 +9,7 @@ import test, { before } from 'node:test';
 import { prepareMigratedSchema, migratedSchemaPath } from '../../fixtures/migrated-database.js';
 import { openMigratedMissionStore } from '../../fixtures/mission-sqlite-store.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { makePorts, makeRecorder, SLUG } from "../../helpers/review-preparation-ports.js";
 import { ReviewPreparationCommandUseCase } from '../../../src/application/review-preparation-command-use-case.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
@@ -84,8 +85,8 @@ export async function runRepairCheckpointFlow(mode: 'repair' | 'blocker' | 'forc
       } },
     });
     const useCase = new ReviewPreparationCommandUseCase(ports);
-    const reviewPreparation = () => useCase.performReviewPreparation(SLUG, { worktree: root, recoverGateFailure: true, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
-    const missing = await useCase.performReviewPreparation(SLUG, { worktree: root, recoverGateFailure: false, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
+    const reviewPreparation = () => useCase.performReviewPreparation(SLUG, { executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root }), recoverGateFailure: true, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
+    const missing = await useCase.performReviewPreparation(SLUG, { executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root }), recoverGateFailure: false, log: line => recorder.log.push(line), error: line => recorder.errors.push(line) });
     assert.equal(missing.ok, false);
     assert.match(missing.error ?? '', /Planned checkpoint evidence is missing.*CP-2/);
     assert.equal(launches, 0);

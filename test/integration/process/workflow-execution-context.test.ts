@@ -105,6 +105,29 @@ test('a mission worktree on the wrong branch settles the operation before any ex
   assert.match(result.operation().reason!, /^Mission task-97774: mission worktree .*repo-task-97774 is on scratch, expected mission\/task-97774\.$/);
 });
 
+test('a detached paused rebase retains its mission execution identity from a nested launch path (px-0042.02 F1/F13)', t => {
+  const slug = 'task-97774-rebase';
+  const fixture = repository(t, [slug]);
+  const worktree = path.join(path.dirname(fixture.primary), 'arbitrary-mission-checkout');
+  git(fixture.primary, 'worktree', 'move', fixture.worktrees[slug], worktree);
+  fs.writeFileSync(path.join(worktree, 'conflict.txt'), 'mission\n');
+  git(worktree, 'add', 'conflict.txt');
+  git(worktree, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'mission');
+  fs.writeFileSync(path.join(fixture.primary, 'conflict.txt'), 'main\n');
+  git(fixture.primary, 'add', 'conflict.txt');
+  git(fixture.primary, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'commit', '-q', '-m', 'main');
+  assert.throws(() => git(worktree, 'rebase', 'main'));
+  assert.equal(git(worktree, 'branch', '--show-current'), '');
+  const rootResolution = resolveMissionExecutionContext(slug, worktree, fixture.configuration);
+  assert.equal(rootResolution.ok, true);
+  if (rootResolution.ok) { assert.equal(rootResolution.context.missionWorktree, worktree); }
+  const nested = path.join(worktree, 'nested', 'launch-directory');
+  fs.mkdirSync(nested, { recursive: true });
+  const nestedResolution = resolveMissionExecutionContext(slug, nested, fixture.configuration);
+  assert.equal(nestedResolution.ok, true);
+  if (nestedResolution.ok) { assert.equal(nestedResolution.context.missionWorktree, worktree); }
+});
+
 test('an unresolvable receiving base settles the operation before any executor (TASK-2777)', async t => {
   const fixture = repository(t, ['task-97775']);
   git(fixture.primary, 'config', 'branch.mission/task-97775.parallixBase', 'feature/absent');

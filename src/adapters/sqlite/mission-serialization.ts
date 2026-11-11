@@ -158,6 +158,7 @@ export interface MissionReviewRoundRecord {
   readonly item_dispositions: string | null;
   readonly blocked_reason: string | null;
   readonly reviewer_results?: string | null;
+  readonly reviewer_policy?: string | null;
 }
 
 export interface MissionReviewStageLaunchRecord {
@@ -441,26 +442,32 @@ function resolutionsFor(
     });
 }
 
-function reviewRoundFrom(
-  row: MissionReviewRoundRecord,
-  records: MissionReviewRecords,
-): ReviewRound {
-  const change = row.change_kind === 'pull-request'
-    ? {
-      kind: 'pull-request' as const,
+function reviewedChangeFrom(row: MissionReviewRoundRecord): ReviewRound['subject']['change'] {
+  if (row.change_kind === 'pull-request') {
+    return {
+      kind: 'pull-request',
       provider: requiredText(row.provider ?? '', 'review provider'),
       id: requiredText(row.provider_change_id ?? '', 'review provider id'),
       url: row.provider_url,
       sourceBranch: requiredText(row.source_branch, 'review source branch'),
       targetBranch: requiredText(row.target_branch, 'review target branch'),
-    }
-    : row.change_kind === 'local-branch'
-      ? {
-        kind: 'local-branch' as const,
-        sourceBranch: requiredText(row.source_branch, 'review source branch'),
-        targetBranch: requiredText(row.target_branch, 'review target branch'),
-      }
-      : (() => { throw new Error(`Persisted reviewed change is invalid: ${row.change_kind}`); })();
+    };
+  }
+  if (row.change_kind === 'local-branch') {
+    return {
+      kind: 'local-branch',
+      sourceBranch: requiredText(row.source_branch, 'review source branch'),
+      targetBranch: requiredText(row.target_branch, 'review target branch'),
+    };
+  }
+  throw new Error(`Persisted reviewed change is invalid: ${row.change_kind}`);
+}
+
+function reviewRoundFrom(
+  row: MissionReviewRoundRecord,
+  records: MissionReviewRecords,
+): ReviewRound {
+  const change = reviewedChangeFrom(row);
 
   const response = row.responded_at === null
     ? null
@@ -500,6 +507,8 @@ function reviewRoundFrom(
     ...(row.blocked_reason === null ? {} : { blockedReason: row.blocked_reason }),
     ...(row.reviewer_results === null || row.reviewer_results === undefined
       ? {} : { reviewerResults: JSON.parse(row.reviewer_results) as ReviewRound['reviewerResults'] }),
+    ...(row.reviewer_policy === null || row.reviewer_policy === undefined
+      ? {} : { reviewerPolicy: JSON.parse(row.reviewer_policy) as ReviewRound['reviewerPolicy'] }),
   };
 }
 

@@ -18,8 +18,10 @@ import {
   applyReviewerCommand,
   changeRevision,
   ConfiguredReviewerEligibility,
+  currentReviewRound,
   reviewFindingId,
   startReview,
+  type Review,
 } from '../../../../src/domain/review.js';
 
 const id = missionId('task-2294');
@@ -110,6 +112,39 @@ test('mission card contains the board decision inputs without changing lifecycle
   assert.equal(card.currentWork?.phase, 'gates');
   assert.deepEqual(card.labels, ['ai_sdlc', 'bug']);
   assert.equal(card.commands.find(({ command }) => command === 'integrate')?.enabled, true);
+});
+
+test('mission card counts approvals against the post-rebase governed revision (PX-0046.03 F9)', () => {
+  const postRebaseRevision = changeRevision('post-rebase-head');
+  const review = reviewConversation();
+  const round = currentReviewRound(review);
+  const governedReview: Review = {
+    ...review,
+    rounds: [{
+      ...round,
+      reviewerPolicy: {
+        revision: postRebaseRevision,
+        mode: 'two-independent' as const,
+        requiredApprovals: 2 as const,
+        selected: [reviewer, agentFamily('vibe')],
+        independentAvailable: 2,
+        unavailable: [],
+        fallbackReason: null,
+      },
+      reviewerResults: [{
+        publicationId: 'reviewer-post-rebase-head', reviewerId: reviewer, agentFamily: reviewer,
+        revision: postRebaseRevision, decision: 'approved' as const, findings: [], outcome: 'completed' as const,
+        status: 0, publishedAt: '2026-11-09T20:00:00.000Z',
+      }],
+    }],
+  };
+  const card = projectMissionCard(fixtureMission('task-post-rebase-review', {
+    status: 'review', review: governedReview,
+  }), {
+    latestGate: 'passed', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+  });
+
+  assert.equal(card.awaitingApprovals, 1);
 });
 
 test('board lanes are mission statuses, never a vocabulary of their own', () => {

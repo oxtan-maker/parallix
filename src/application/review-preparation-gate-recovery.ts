@@ -137,7 +137,7 @@ export class ReviewPreparationGateRecovery {
                 return { ok: false, diagnostic: 'Authorized required check changed during repair; operator decision required', reason: { kind: 'declared-gate-validation', command: verificationCommand, diagnostic: 'Locked repository verification command changed' } };
               }
               retried = await retryReviewPreparation(slug, {
-                ...options, worktree: rootDir, force: true, recoverGateFailure: false,
+                ...options, force: true, recoverGateFailure: false,
               });
               return {
                 ok: Boolean(retried.ok),
@@ -210,7 +210,7 @@ export class ReviewPreparationGateRecovery {
           return ports.backlog.transitionTask(missionSlug, 'active', { rootDir, log });
         },
         verify: async () => {
-          retried = await retryReviewPreparation(slug, { ...options, worktree: rootDir, force: true, recoverGateFailure: false });
+          retried = await retryReviewPreparation(slug, { ...options, force: true, recoverGateFailure: false });
           return {
             ok: Boolean(retried.ok),
             command: gatesResult.gate,

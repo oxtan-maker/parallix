@@ -29,6 +29,7 @@ import {
   type Review,
 } from '../../../src/domain/review.js';
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
+import { withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
 import {
   continueReviewClearsIntervention,
   createReviewWorkflowAdapter,
@@ -196,7 +197,7 @@ async function seedRoot(review: Review): Promise<Harness> {
 
 /** Invoke the inferred review entry with real SQLite and a held loop fence. */
 async function invokeResume(store: SqliteMissionStore, root: string, actor: string | null, direct = true): Promise<{ cleared: boolean; outcome: string | null }> {
-  const adapter = createReviewWorkflowAdapter({
+  const adapter = createReviewWorkflowAdapter(withReviewMutationContext({
     missionStore: store,
     operatorResume: bindReviewOperatorResume(store, direct, {}, async () => ({ workflow: null,
       liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
@@ -213,7 +214,7 @@ async function invokeResume(store: SqliteMissionStore, root: string, actor: stri
     error: () => undefined,
     exit: (code: number) => { throw new Error(`exit:${code}`); },
     inferSlugFn: () => SLUG,
-  });
+  }));
   const useCase = new ReviewCommandUseCase(adapter);
   const args = actor === null ? [SLUG] : [SLUG, `--actor=${actor}`];
   try {
@@ -551,13 +552,13 @@ it('retries a persisted operator correction after failed revocation and a databa
         return result;
       } },
     };
-    await new ReviewCommandUseCase(createReviewWorkflowAdapter({
+    await new ReviewCommandUseCase(createReviewWorkflowAdapter(withReviewMutationContext({
       missionStore: store, operatorResume: bindReviewOperatorResume(store, true, {}, async () => ({ workflow: null,
         liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
       inferSlugFn: () => SLUG, resolveWorktreeFn: () => root,
       readReviewStateFn: async () => readReviewState(SLUG, root, store), reviewLoopMechanisms: () => ports,
       log: () => {}, error: message => { errors.push(message); }, exit: code => { entryExits.push(code); },
-    })).execute([SLUG, '--actor', 'operator']);
+    }))).execute([SLUG, '--actor', 'operator']);
     return { store, ports, preparations, roles: fake.launches.map(launch => launch.role),
       exits: [...entryExits, ...fake.exits], errors: [...errors, ...fake.errors], stops: fake.stops };
   }

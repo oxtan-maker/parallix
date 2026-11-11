@@ -8,6 +8,7 @@ import type { AgentInvocation } from "../../../src/adapters/agents/agent-process
 
 import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
+import { isReviewerPoolExhausted } from '../../../src/domain/reviewer-assignment-policy.js';
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'fs';
@@ -879,6 +880,22 @@ test('selectAgent throws with a clear message when all eligible agents are unsup
       assert.throws(
         () => selectAgent('draft', { configuration: resolveConfiguration(process.env), config }),
         /No eligible agents have a working launcher/
+      );
+    });
+  } finally {
+    if (previous !== undefined) process.env.WORKFLOW_AGENT = previous;
+  }
+});
+
+test('review selection with no runnable independent launcher is typed reviewer-pool exhaustion, never a configuration error (PX-0046.03)', () => {
+  const previous = process.env.WORKFLOW_AGENT;
+  delete process.env.WORKFLOW_AGENT;
+  try {
+    withCommandPathProbe(['codex'], () => {
+      const config = { steps: { review: { eligible: ['codex', 'claude', 'vibe'], selection: 'random' } } } satisfies import("../../../src/adapters/agents/agent-config.js").AgentConfig;
+      assert.throws(
+        () => selectAgent('review', { configuration: resolveConfiguration(process.env), config, exclude: new Set(['codex']) }),
+        (error: unknown) => isReviewerPoolExhausted(error) && /No eligible agents have a working launcher/.test((error as Error).message),
       );
     });
   } finally {

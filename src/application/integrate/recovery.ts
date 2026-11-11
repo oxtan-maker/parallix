@@ -17,7 +17,10 @@ import { evaluateTaskStatusForIntegration, resolveAuthoritativeApprovalAt } from
 import { abortWith, resolveIntegrationTaskPath } from './support.js';
 import type { IntegrateReviewPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
-export type IntegrationRecoveryContext = Pick<IntegrationContext, 'slug' | 'approval' | 'missionStatus'> & Partial<Pick<IntegrationContext, 'pr'>>;
+export type IntegrationRecoveryContext = Pick<IntegrationContext, 'slug' | 'approval' | 'missionStatus'>
+  // Optional only because a closeout may recover a decided lane after its mission
+  // checkout is gone; the branch that replays review preparation requires it.
+  & Partial<Pick<IntegrationContext, 'pr' | 'executionContext'>>;
 
 export interface MissionRecoveryOptions {
   missionServices: IntegrationMissionServices;
@@ -179,7 +182,13 @@ class MissionRecovery {
     // active → review rules and persists the Review aggregate. The
     // authoritative entry timestamp rides along so the persisted lane event
     // and the Review round both carry it instead of the recovery wall clock.
+    // This is the one recovery branch that mutates the mission checkout, so it
+    // is the one branch that requires the resolved live context (TASK-2850 F2).
+    if (!context.executionContext) {
+      throw abortWith(this.dependencies.landing, `Cannot replay review preparation for ${slugId}: the resolved mission execution context is unavailable.`);
+    }
     await submitForReviewFn(context.slug, false, {
+      executionContext: context.executionContext,
       missionServicesFn: async () => missionServices,
       exit: (code: number) => { throw new Error(`submit-for-review exited ${code}`); },
       occurredAt: reviewEntryAt,

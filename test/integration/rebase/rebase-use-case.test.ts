@@ -280,7 +280,9 @@ test('base advancement during conflict resolution rebases again without another 
     detectRebaseState: () => ({ inProgress: paused, unmergedFiles: paused ? [shared] : [] }),
     git: (args: string[]) => {
       const tail = subcommand(args);
-      if (tail[0] === 'rev-parse' && tail[1] === 'main') { return { ...OK, stdout: `${baseRevision}\n` }; }
+      if (tail[0] === 'rev-parse' && (tail[1] === 'main' || tail.join(' ') === 'rev-parse --verify main')) {
+        return { ...OK, stdout: `${baseRevision}\n` };
+      }
       if (tail[0] === 'rev-parse' && tail[1] === 'HEAD') { return { ...OK, stdout: 'mission-head\n' }; }
       if (tail[0] === 'merge-base' && tail[1] === '--is-ancestor' && tail[2] === 'main') {
         ancestryChecks += 1;

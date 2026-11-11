@@ -5,7 +5,7 @@ Date: 2026-07-20
 Related: ADR 0037 (workflow coordination), ADR 0044 (workflow distribution
 model), ADR 0048 (fail-closed harness), ADR 0053 (persistence authority),
 TASK-2277, TASK-2278
-Last updated: 2026-09-15
+Last updated: 2026-11-11
 
 ## Context
 
@@ -310,9 +310,12 @@ currently an SDK.
 capabilities, and an optional cancellation signal. It returns one terminal
 outcome: `completed`, `rejected`, `failed`, or `cancelled`, plus a typed value
 or error and any durable evidence known at that point. The command owns
-validation and policy before calling a mutation port. The CLI alone maps that
-outcome to its existing text and exit code, so command-specific compatibility
-is retained rather than flattened.
+validation and policy before calling a mutation port. A mutation request also
+names the checkouts it mutates: the inbound adapter resolves the Mission
+execution context once, and application code must not re-derive that location
+from the process working directory or a fallback location lookup. The CLI alone
+maps that outcome to its existing text and exit code, so command-specific
+compatibility is retained rather than flattened.
 
 **Queries and projections.** Queries return immutable, source-labelled
 projections. A projection may combine task, Git, review, and local telemetry

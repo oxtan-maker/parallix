@@ -14,6 +14,7 @@ import { createReviewCommand } from '../../../../src/interfaces/cli/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { bindReviewPersistence } from '../../../../src/composition/review-persistence.js';
 import { fixtureMission, inMemoryTransitionStore, pendingReview } from '../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { showReviewStatus } from '../../../../src/adapters/review/review-commands.js';
 import { requestReviewIntervention } from '../../../../src/domain/review.js';
@@ -59,8 +60,11 @@ const reviewWorkflowAdapter = await import('../../../../src/adapters/review/revi
 test.afterEach(() => mock.restoreAll());
 const { flagValue, readTextFlag, unknownReviewFlags } = reviewCliFlags;
 const { ReviewWorkflowAdapter, createReviewWorkflowAdapter } = reviewWorkflowAdapter;
-const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) =>
-  createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
+const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) => {
+  const composed = { resolveExecutionContextFn: (slug: string, root: string) => ({ ok: true as const,
+    context: missionExecutionContext({ missionId: slug, missionWorktree: `/fixture/${slug}`, baseWorktree: root }) }), ...options };
+  return createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(composed)))(args, composed);
+};
 
 test('createReviewWorkflowAdapter returns a ReviewWorkflowAdapter', () => {
   assert.ok(createReviewWorkflowAdapter() instanceof ReviewWorkflowAdapter);

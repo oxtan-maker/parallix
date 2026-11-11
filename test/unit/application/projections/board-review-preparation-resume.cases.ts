@@ -42,6 +42,7 @@ import {
   type Review,
 } from '../../../../src/domain/review.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 const SLUG = 'task-2436-resume';
 const MISSION = missionId(SLUG);
@@ -160,8 +161,9 @@ function composeWithRecordedLoop(store: FakeMissionStore) {
     null,
     {
       configuration: resolveConfiguration({}),
-      reviewPreparationReviewLoop: (async (request: { slug: string }) => {
-        launches.push({ slug: request.slug, options: request as Record<string, unknown> });
+      resolveMissionContext: slug => ({ ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: '/external/mission' }) }),
+      reviewPreparationReviewLoop: (async (request, mechanisms) => {
+        launches.push({ slug: request.slug, options: { ...request, worktree: mechanisms.worktree } as Record<string, unknown> });
       }),
     },
   );
@@ -195,6 +197,7 @@ test("board review preparation resume enters the shared review round owner witho
   assert.equal(store.events.length, 0, 'composition records no lane event');
   assert.equal(launches.length, 1, 'the review loop is launched exactly once');
   assert.equal(launches[0].slug, SLUG);
+  assert.equal(launches[0].options.worktree, '/external/mission', 'board composition carries the resolved mission checkout into the loop');
   assert.equal(launches[0].options.isContinue, true);
   // Same limit `px review` grants a continuation of persisted round N.
   assert.equal(launches[0].options.maxAttempts, 5, 'the continuation limit is the shared owner contract');

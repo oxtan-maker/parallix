@@ -12,8 +12,10 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { findUnverifiableGoalCheckRow } from '../../../src/application/static-evidence.js';
-import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { mockModule, installModuleMocks, importFresh } from '../../lib/module-mock.js';
 import { stubMissionServices } from '../../helpers/stub-mission-services.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+import { ReviewPreparationCommandUseCase } from '../../../src/application/review-preparation-command-use-case.js';
 const reviewPreparationModule = mockModule<typeof import('../../../src/adapters/cli/commands/review-preparation.js')>('../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
 const git = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../../../src/adapters/filesystem/mission-utils.js')>('../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -28,6 +30,10 @@ const worktree = mockModule<typeof import('../../../src/adapters/git/worktree.js
 await installModuleMocks();
 const { createReviewPreparationPorts, verifyReviewPreparation, performReviewPreparation, _findUnverifiableGoalCheckRow, runDeclaredGates, captureNelAtReviewPreparation, validateDeclaredGates } = reviewPreparationModule;
 const { mock } = test;
+// Fresh, unmocked instances for the one case that must reach the real Git subprocess;
+// loaded once at module load so the case budget measures only its own work.
+const realGitModule = await importFresh<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
+const realBacklogModule = await importFresh<typeof import('../../../src/adapters/backlog/backlog.js')>('../../../src/adapters/backlog/backlog.js', import.meta.url);
 // Each case owns its files, including when another worktree runs this suite.
 let reviewPreparationRoot: string;
 test.beforeEach(() => {
@@ -87,13 +93,13 @@ function writeReviewState(missionDir: fs.PathLike, reviewer: string, implementer
 }
 
 test("verifyReviewPreparation fails when mission directory is not found", () => {
-  const result = verifyReviewPreparation('non-existent-slug-999');
+  const result = verifyReviewPreparation('non-existent-slug-999', { executionContext: missionExecutionContext({ missionId: 'non-existent-slug-999', missionWorktree: '/fixture/missing-checkout' }) });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /Mission directory not found/);
 });
 
-test("performReviewPreparation uses provided worktree and fails hard on Backlog missing", async (t) => {
+test("performReviewPreparation uses the resolved execution context and fails hard on Backlog missing", async (t) => {
   const slug = 'task-098';
   const worktree = `${reviewPreparationRoot}/fake-worktree`;
 
@@ -136,7 +142,7 @@ test("performReviewPreparation uses provided worktree and fails hard on Backlog 
   });
   writeReviewState(`${reviewPreparationRoot}/fake-worktree/docs/missions/2026/task-098`, 'claude', 'claude');
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /Backlog task file for task-098 not found or ambiguous/);
@@ -192,7 +198,7 @@ test("performReviewPreparation continues for a persisted no-mirror wave child (T
     },
   });
   const result = await performReviewPreparation(slug, {
-    worktree,
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
     skipGate: true,
     isForgejoReviewEnabledFn: () => false,
     rebaseFn: async () => ({ ok: true as const, sharedFileConflicts: false }),
@@ -236,11 +242,11 @@ test("performReviewPreparation skips commit in Step 4 when Backlog transition al
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
 
   mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => ({ signal: null,  status: args.includes('rev-parse') ? 1 : 0, stdout: '', stderr: '' }));
-  const missingHead = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const missingHead = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.equal(missingHead.ok, false);
   assert.ok(missingHead.error);
   assert.match(missingHead.error, /Cannot capture the HEAD commit/);
@@ -288,7 +294,7 @@ test("performReviewPreparation refreshes the review tracking ref and lease-updat
   const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
   const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-    worktree,
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
     skipGate: true,
     force: false,
     isForgejoReviewEnabledFn: () => true,
@@ -365,7 +371,7 @@ test("performReviewPreparation falls back to magnus and persists bootstrap failu
     const mockRebase = async () => ({ ok: true as const, sharedFileConflicts: false });
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices({ store: { load: async id => ({ kind: 'found' as const, mission: fixtureMission(id, { assignee: agentFamily('custom'), checkpoints: [] }), version: missionVersion(1) }) } }),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -379,6 +385,62 @@ test("performReviewPreparation falls back to magnus and persists bootstrap failu
     assert.ok(gitCalls.some(args => args.includes('commit') && args.includes(`backlog(${slug}): set fallback summary\n\nParallix-Bookkeeping: backlog-mirror`)));
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
+// TASK-2850 F3: the fallback summary is a Git mutation, so both its stage and its commit
+// must run in the resolved mission checkout. A process admitted from another checkout of
+// the same repository used to write the file there and then fail to stage it (exit 128),
+// leaving a partially written, uncommitted summary.
+test('fallback summary stages and commits in the resolved mission checkout, not the launch checkout', async () => {
+  const slug = 'task-2850-fallback-checkout';
+  const launchCheckout = path.join(reviewPreparationRoot, 'launch-checkout');
+  const missionCheckout = path.join(reviewPreparationRoot, 'mission-checkout');
+  const runGit = (args: string[], cwd: string) => {
+    const result = childProcess.spawnSync('git',
+      ['-c', 'user.email=fixture@parallix.test', '-c', 'user.name=Fixture', ...args],
+      { cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`);
+    return String(result.stdout);
+  };
+
+  fs.mkdirSync(launchCheckout, { recursive: true });
+  runGit(['init', '-b', 'main'], launchCheckout);
+  fs.writeFileSync(path.join(launchCheckout, 'README.md'), '# base checkout\n');
+  runGit(['add', '--all'], launchCheckout);
+  runGit(['commit', '-m', 'base'], launchCheckout);
+  runGit(['worktree', 'add', '-b', `mission/${slug}`, missionCheckout], launchCheckout);
+  const taskFile = path.join(missionCheckout, 'backlog/tasks', `${slug} - fallback checkout probe.md`);
+  fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+  fs.writeFileSync(taskFile, '---\nstatus: review\n---\n\n# fallback checkout probe\n');
+  runGit(['add', '--all'], missionCheckout);
+  runGit(['commit', '-m', 'mission backlog'], missionCheckout);
+
+  const previousCwd = process.cwd();
+  process.chdir(launchCheckout);
+  try {
+    // This case pins the real Git and Backlog adapters: the suite facade bindings are
+    // replaced by other cases, and the regression lives in the actual subprocess call.
+    const ports = createReviewPreparationPorts();
+    ports.git.git = (args, options) => (options === undefined ? realGitModule.git(args) : realGitModule.git(args, options));
+    ports.backlog.resolveTaskFile = (taskSlug, rootDir) => realBacklogModule.resolveTaskFile(taskSlug, rootDir);
+    const useCase = new ReviewPreparationCommandUseCase(ports);
+    const written = useCase.writeFallbackSummary(slug, '## Fallback: PR submitted as human', {
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: missionCheckout }),
+      log: () => {},
+    });
+    assert.equal(written, true, 'the fallback summary is staged and committed in the resolved mission checkout');
+    assert.match(fs.readFileSync(taskFile, 'utf8'), /## Fallback: PR submitted as human/);
+    assert.ok(
+      runGit(['log', '--format=%s'], missionCheckout).includes(`backlog(${slug}): set fallback summary`),
+      'the bookkeeping commit lands on the mission branch',
+    );
+    assert.equal(runGit(['status', '--porcelain', '--untracked-files=all'], missionCheckout).trim(), '',
+      'the mission checkout is clean after its own bookkeeping commit');
+    assert.equal(runGit(['status', '--porcelain', '--untracked-files=all'], launchCheckout).trim(), '',
+      'the launch checkout takes no staged or committed fallback change');
+  } finally {
+    process.chdir(previousCwd);
   }
 });
 
@@ -416,7 +478,7 @@ test("performReviewPreparation fails hard when git commit fails in Step 4", asyn
     fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
     fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
-    const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+    const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, false);
     assert.ok(result.error);
     assert.match(result.error, /Could not transition task task-098 to review/);
@@ -434,7 +496,7 @@ test("verifyReviewPreparation accepts a typed mission without MISSION.md", () =>
   mock.method(missionUtils, 'findMissionArea', () => 'docs');
   mock.method(git, 'getCurrentBranch', () => 'mission/task-098');
 
-  const result = verifyReviewPreparation(slug, { worktree });
+  const result = verifyReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }) });
   assert.strictEqual(result.ok, true);
 });
 
@@ -460,7 +522,7 @@ for (const missing of ['contract', 'checkpoint'] as const) {
     }
     const rebaseFn = t.mock.fn(async () => { throw new Error('Rebase must not run before evidence validation'); });
     const exec = t.mock.method(childProcess, 'spawnSync', () => { throw new Error('No external effects before evidence validation'); });
-    const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices(), rebaseFn });
+    const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices(), rebaseFn });
     assert.strictEqual(result.ok, false);
     assert.ok(result.error);
     assert.match(result.error, missing === 'contract' ? /MISSION\.md not found.*Import the historical contract/ : /CP-1\.md.*was not found/);
@@ -499,7 +561,7 @@ test("performReviewPreparation succeeds with ## Goal Check Table heading variant
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check Table\n\n| Criteria | Evidence | Status |\n|----------|----------|--------|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, true);
 
   fs.rmSync(cpPath, { force: true });
@@ -525,7 +587,7 @@ test("performReviewPreparation fails when MISSION.md is uncommitted", async () =
   fs.writeFileSync(cpPath, '# CP-1\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /MISSION\.md is modified but uncommitted/);
@@ -551,7 +613,7 @@ test("performReviewPreparation fails when no checkpoint documents exist", async 
   fs.writeFileSync(missionMdPath, '# MISSION.md\n\nTest mission.\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /No checkpoint documents found/);
@@ -596,7 +658,7 @@ test("legacy review preparation fails closed without synthesizing or committing 
 
   try {
     writeReviewState(missionDir, 'claude', 'claude');
-    const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+    const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
 
     assert.strictEqual(result.ok, false);
     assert.ok(result.error);
@@ -631,7 +693,7 @@ test("performReviewPreparation fails when the latest checkpoint document is unco
   fs.writeFileSync(cp2Path, '# CP-2\n\n## Goal Check\n\n| Criterion | Evidence | Status |\n|---|---|---|\n| test | `npm test -- test/example.test.ts` | PASS |\n');
   writeReviewState(missionDir, 'claude', 'claude');
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /latest checkpoint document is modified but uncommitted/);
@@ -662,7 +724,7 @@ test("performReviewPreparation fails when final checkpoint is missing Goal Check
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /missing a "## Goal Check" section/);
@@ -692,7 +754,7 @@ test("performReviewPreparation fails when final checkpoint has Goal Check sectio
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /no evidence rows/);
@@ -722,7 +784,7 @@ test("performReviewPreparation fails when final checkpoint has header-only goal-
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /no evidence rows/);
@@ -752,7 +814,7 @@ test("performReviewPreparation fails when final checkpoint has separator-only go
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /no evidence rows/);
@@ -781,7 +843,7 @@ test("performReviewPreparation fails when final checkpoint evidence row is place
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /no evidence rows that cite a verifiable reference/);
@@ -810,7 +872,7 @@ test("performReviewPreparation fails when final checkpoint evidence row is shell
 
   mock.method(backlog, 'resolveTaskFile', () => ({ ok: true as const, taskFile: '/tmp/fake-task' }));
 
-  const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+  const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error);
   assert.match(result.error, /no evidence rows that cite a verifiable reference/);
@@ -849,7 +911,7 @@ test("performReviewPreparation accepts final checkpoint evidence row with a real
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   try {
-    const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+    const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, true);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -886,7 +948,7 @@ test("performReviewPreparation accepts file:line evidence with supporting shell 
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: true as const, missing: [], skipped: false, posted: false }));
 
   try {
-    const result = await performReviewPreparation(slug, { worktree, skipGate: true, missionServicesFn: stubMissionServices() });
+    const result = await performReviewPreparation(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }), skipGate: true, missionServicesFn: stubMissionServices() });
     assert.strictEqual(result.ok, true);
   } finally {
     fs.rmSync(worktree, { recursive: true, force: true });
@@ -943,7 +1005,7 @@ test("performReviewPreparation calls rebaseBeforeReviewRound before Forgejo PR c
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -996,7 +1058,7 @@ test("performReviewPreparation fails when rebase returns ok=false with no shared
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -1048,7 +1110,7 @@ test("performReviewPreparation fails when rebase returns sharedFileConflicts=tru
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -1107,7 +1169,7 @@ test("performReviewPreparation proceeds normally when rebase is a no-op (branch 
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -1430,7 +1492,7 @@ test("performReviewPreparation stops before review transitions when NEL persiste
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
       rebaseFn: async () => ({ ok: true as const }),
@@ -1477,7 +1539,7 @@ test("performReviewPreparation no longer stages or commits a legacy NEL record b
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => false,
       rebaseFn: async () => ({ ok: true as const }),
@@ -1596,7 +1658,7 @@ test("performReviewPreparation captures verification gate stdout/stderr on non-z
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
       runVerificationGateFn: mockVerifyGate,
@@ -1995,7 +2057,7 @@ test("performReviewPreparation attempts agent relaunch when gatekeeper posts pus
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -2063,7 +2125,7 @@ test("performReviewPreparation respects bounded retry limit of 2 for gatekeeper 
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -2128,7 +2190,7 @@ test("performReviewPreparation consumes full retry budget when relaunch succeeds
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -2193,7 +2255,7 @@ test("performReviewPreparation succeeds after successful agent relaunch", async 
   try {
     const result = await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,
@@ -2258,7 +2320,7 @@ test("performReviewPreparation relaunch prompt lists all missing artifact types"
   try {
     await performReviewPreparation(slug, {
       missionServicesFn: stubMissionServices(),
-      worktree,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
       skipGate: true,
       isForgejoReviewEnabledFn: () => true,
       rebaseFn: mockRebase,

@@ -402,6 +402,30 @@ and publishes the branch for the current implementer and selected eligible
 reviewer. A PR author's review remains advisory: independent review is required
 before local approval or integration.
 
+Before a fresh rebase, Parallix pins the selected local target. When a complete,
+bounded inspection proves that the target is a single-parent squash whose tree
+matches exactly one boundary in the complete linear first-parent range from the
+target's parent to the mission tip, it
+replays only the commits after that boundary onto the pinned target. Repeated
+matching snapshots, merge topology, shallow history, changed refs, different
+trees and failed reads all retain the ordinary rebase. The inspected mission
+range is limited to 256 commits and 64 KiB; a larger range also retains the
+ordinary rebase, while unrelated history before the target's parent is outside
+that bound. The same selection is used by standalone, pre-review and integration
+rebases; it does not move the target or silently discard mission commits.
+
+Each reviewed revision owes agent approvals according to which independent
+reviewers can actually run: two distinct reviewers when two can, one when only
+one can, and otherwise the implementer's own agent in a fresh context. Reviewers
+run one after another on the same revision. A reviewer that cannot launch is
+replaced by another eligible agent before the requirement drops to one; a
+reviewer that is busy, queued or silent never lowers it, and a request for
+changes is not outvoted by approvals. The recorded policy, with the reason for
+any fallback, appears in the review output. A classifier may return unresolved
+work to implementation, but its clear result cannot substitute for the required
+reviewer approvals. Human inspection in Forgejo or
+through `px integrate` stays optional and never becomes a required verdict.
+
 When a rebase pauses on shared conflicts, the implementer starts a fresh
 ephemeral session with the authoritative Mission goal, why, scope, out-of-scope
 constraints and success criteria, plus the mission worktree, captured mission

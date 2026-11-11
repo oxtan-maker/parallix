@@ -126,7 +126,10 @@ export async function openRepairFixture(options: {
       },
     },
   }, null, 2));
-  fs.copyFileSync(path.resolve('config/agents.json'), path.join(repo, 'config', 'agents.json'));
+  // One independent reviewer (codex) keeps these repair fixtures on a single review launch; reviewer count is owned by the review-policy suites.
+  const agentConfig = JSON.parse(fs.readFileSync(path.resolve('config/agents.json'), 'utf8')) as { steps: { review: { eligible: string[] } } };
+  agentConfig.steps.review.eligible = ['codex', 'custom'];
+  fs.writeFileSync(path.join(repo, 'config', 'agents.json'), JSON.stringify(agentConfig, null, 2));
   fs.writeFileSync(path.join(repo, 'config', 'state-map.json'), JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
   fs.writeFileSync(path.join(repo, 'backlog', 'tasks', `${slug} - Fixture.md`),
     `---\nid: ${slug.toUpperCase()}\ntitle: Fixture\nstatus: ready-for-integration\nassignee: [custom]\nlabels: []\n---\n`);

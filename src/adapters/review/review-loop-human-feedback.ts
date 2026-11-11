@@ -2,6 +2,7 @@
 import * as crypto from 'node:crypto';
 import type { MissionStore } from '../../application/domain-ports.js';
 import type { HumanFeedbackPort } from '../../application/ports/review-round.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { WORKFLOW_AGENT_NAMES } from '../agents/agent-family-names.js';
 import { CLASSIFIER_FORGEJO_USER } from './setup-review-repository.js';
 import type { getComments, readToken } from './review-adapter.js';
@@ -48,6 +49,7 @@ function isApproval(comment: ForgejoFeedbackComment): boolean {
 interface HumanFeedbackDependencies {
   slug: string; branch: string; worktree: string; providerEnabled: boolean;
   strict?: boolean; readOnly?: boolean;
+  configuration?: ParallixConfiguration;
   missionStore: MissionStore | null; log: (_msg: string) => void; error: (_msg: string) => void;
   fetchComments: typeof getComments; tokenFor: typeof readToken; recordHumanNote: typeof createEvent;
 }
@@ -57,12 +59,13 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
     async reconcile(state) {
       if (!providerEnabled) { return null; }
       const identity = state.reviewer || state.implementer;
-      const token = identity ? tokenFor(identity, { rootDir: worktree }) : null;
+      const providerOptions = { rootDir: worktree, configuration: dependencies.configuration };
+      const token = identity ? tokenFor(identity, providerOptions) : null;
       if (!token) {
         if (dependencies.strict) { throw new Error('Human review feedback token is unavailable'); }
         return null;
       }
-      const comments = await fetchComments(branch, token, { rootDir: worktree });
+      const comments = await fetchComments(branch, token, providerOptions);
       if (!Array.isArray(comments)) {
         if (dependencies.strict) { throw new Error('Human review feedback is unavailable'); }
         return null;

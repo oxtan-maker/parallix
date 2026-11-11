@@ -15,6 +15,7 @@ import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, C
 import { recordImplementerResolution } from './review-round.js';
 import { type ReviewStateReader, reviewArtifactPath, staleReviewWrite, renderResolution, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeDisposition, headRevision } from './review-artifact-files.js';
 import { postWorkflowComment } from './review-workflow-posting.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { resolveProviderEnabled, type RepoEventFn } from './review-reviewer-artifacts.js';
 
 type ImplementerArtifactOptions = {
@@ -27,7 +28,7 @@ type ImplementerArtifactOptions = {
   providerEnabled?: boolean | null;
   forgejoEnabled?: boolean | null;
   readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
-  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+  getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
   postCommentFn?: typeof postComment;
   buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
   createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
@@ -51,6 +52,7 @@ type ImplementerArtifactOptions = {
   };
   /** Mission version the caller read; threaded to the recorder so a stale resolution fails closed. */
   expectedVersion?: number;
+  configuration?: ParallixConfiguration;
 };
 
 type ResolvedImplementerArtifactSet = {
@@ -172,7 +174,7 @@ async function mirrorImplementerArtifacts(slug: string, context: {
   const { resolution, disposition, implementer, worktree, options, log, error } = context;
   const postOptions = {
     rootDir: worktree, reviewIdentity: implementer, readTokenFn: options.readTokenFn,
-    postCommentFn: options.postCommentFn, buildMetadataFooterFn: options.buildMetadataFooterFn, log, error,
+    postCommentFn: options.postCommentFn, buildMetadataFooterFn: options.buildMetadataFooterFn, configuration: options.configuration, log, error,
   };
   for (const [body, label] of [[resolution, 'resolution'], [`Autonomous review disposition: ${disposition}`, 'disposition']] as const) {
     const result = await postWorkflowComment(slug, body, postOptions);
@@ -315,6 +317,7 @@ async function consumeImplementerHumanNotes(slug: string, implementer: string, p
       worktree,
       writeReviewStateFn: options.writeReviewStateFn,
       currentState: options.currentState,
+      configuration: options.configuration,
       log: log,
       error
     });

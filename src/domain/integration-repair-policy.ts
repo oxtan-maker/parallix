@@ -60,7 +60,18 @@ export interface IntegrationRepairFacts {
   readonly repairedRevision: string | null;
   readonly withdrawnAt: string;
   readonly reReview: 'pending' | 'approved' | 'changes-requested';
+  /** Revision-bound events used by every repair presentation. */
+  readonly timeline: readonly IntegrationRepairTimelineEvent[];
 }
+
+export type IntegrationRepairTimelineEvent =
+  | { readonly kind: 'validation'; readonly actor: 'parallix gates'; readonly revision: string; readonly at: string; readonly reference: string; readonly carriedTo?: string }
+  | { readonly kind: 'assessment'; readonly actor: 'parallix'; readonly revision: string; readonly at: string; readonly outcome: string }
+  | { readonly kind: 'withdrawal'; readonly actor: string; readonly revision: string; readonly at: string }
+  | { readonly kind: 'review-handoff'; readonly actor: string; readonly revision: string; readonly at: string; readonly round: number }
+  | { readonly kind: 'changes-requested'; readonly actor: string; readonly revision: string; readonly at: string; readonly round: number }
+  | { readonly kind: 'fix'; readonly actor: string; readonly revision: string; readonly at: string; readonly round: number }
+  | { readonly kind: 'integration-handoff'; readonly actor: string; readonly revision: string; readonly at: string; readonly round: number };
 
 export function latestIntegrationRepair(mission: Mission): IntegrationRepairFacts | null {
   const withdrawn = recordedWithdrawal(mission);
@@ -79,7 +90,41 @@ export function latestIntegrationRepair(mission: Mission): IntegrationRepairFact
     repairedRevision: latest === approvedRevision ? null : latest,
     withdrawnAt: withdrawn.decision.revocation!.revokedAt,
     reReview: repairReviewOutcome(current),
+    timeline: integrationRepairTimeline(mission.review!, withdrawn, current),
   };
+}
+
+function integrationRepairTimeline(review: Review, withdrawn: WithdrawnApproval, through: ReviewRound): IntegrationRepairTimelineEvent[] {
+  const events: IntegrationRepairTimelineEvent[] = [];
+  const assessment = withdrawn.integrationRepairAssessment;
+  if (assessment?.validation) {
+    events.push({ kind: 'validation', actor: 'parallix gates', revision: assessment.validation.sha,
+      at: assessment.validation.createdAt, reference: assessment.validation.reference,
+      ...(assessment.validation.carried ? { carriedTo: assessment.validation.carried.revision } : {}) });
+  }
+  if (assessment) {
+    events.push({ kind: 'assessment', actor: 'parallix', revision: assessment.candidateRevision,
+      at: assessment.assessedAt, outcome: assessment.outcome });
+  }
+  events.push({ kind: 'withdrawal', actor: withdrawn.decision.revocation!.revokedBy,
+    revision: String(withdrawn.decision.revision), at: withdrawn.decision.revocation!.revokedAt });
+  for (const round of review.rounds.filter(item => item.number > withdrawn.number && item.number <= through.number)) {
+    events.push({ kind: 'review-handoff', actor: String(round.reviewer), revision: String(round.subject.revision),
+      at: round.startedAt, round: round.number });
+    if (round.decision?.kind === 'changes-requested') {
+      events.push({ kind: 'changes-requested', actor: String(round.reviewer), revision: repairRevision(round),
+        at: round.decision.decidedAt, round: round.number });
+    }
+    if (round.response) {
+      events.push({ kind: 'fix', actor: String(round.implementer), revision: String(round.response.resultingRevision),
+        at: round.response.respondedAt, round: round.number });
+    }
+    if (round.decision?.kind === 'approved') {
+      events.push({ kind: 'integration-handoff', actor: String(round.reviewer), revision: repairRevision(round),
+        at: round.decision.decidedAt, round: round.number });
+    }
+  }
+  return events;
 }
 
 function repairReviewOutcome(round: ReviewRound): IntegrationRepairFacts['reReview'] {

@@ -1,4 +1,4 @@
-import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { fixtureMission, approvedReview } from '../../fixtures/mission-builders.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 // ---- task-2397 active+approved recovery (consolidated from test/task-2397-integrate-active-approved-recovery.test.ts, TASK-2622.09) ----
 describe("active+approved recovery", async () => {
@@ -391,6 +392,7 @@ describe("CP-3 landed closeout", async () => {
     const hookRan: string[] = [];
     const missionServices = integrationServices({ store, lifecycle, integration: new MissionIntegrationService(store) });
     await recoverLandedIntegration(slug, missionServices, root, {
+      liveExecutionContext: { ok: true as const, context: missionExecutionContext({ missionId: slug, missionWorktree: root, baseWorktree: root }) },
       findSquashCommit: (dir, s) => findExistingSquashCommit(dir, s),
       recoverMissionForIntegration,
       persistLandedIntegrationOrAbort,
@@ -415,6 +417,7 @@ describe("CP-3 landed closeout", async () => {
     const hookCalls: string[] = [];
     await assert.rejects(
       recoverLandedIntegration('task-2517-cleanup', integrationServices({ store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-2517-cleanup'), version: missionVersion(1) }) } }), '.', {
+        liveExecutionContext: { ok: true as const, context: missionExecutionContext({ missionId: 'task-2517-cleanup', missionWorktree: '/fixture/mission', baseWorktree: '.' }) },
         findSquashCommit: () => 'abc123',
         recoverMissionForIntegration: async () => ({ status: 'integration' }),
         persistLandedIntegrationOrAbort: async () => {},
@@ -434,4 +437,5 @@ describe("CP-3 landed closeout", async () => {
       'the post-integrate hook runs before a cleanup failure so the local px refresh is not skipped',
     );
   });
+
 });

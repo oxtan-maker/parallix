@@ -17,7 +17,7 @@ interface GatekeeperRemediationContext {
   log: ReviewPreparationLog;
   error: ReviewPreparationLog;
   startAgentFn: NonNullable<PerformReviewPreparationOptions['startAgentFn']>;
-  worktree: string | null;
+  executionContext: PerformReviewPreparationOptions['executionContext'];
   skipGate: boolean;
   forceWithLease: boolean;
   isForgejoReviewEnabledFn: NonNullable<PerformReviewPreparationOptions['isForgejoReviewEnabledFn']>;
@@ -67,7 +67,7 @@ export class GatekeeperRemediation {
   async remediateGatekeeperPushback(slug: string, context: GatekeeperRemediationContext): Promise<ReviewPreparationResult> {
     const {
       gatekeeperResult, rootDir, forgejoUser, currentAttempt, log, error,
-      startAgentFn, worktree, skipGate, forceWithLease,
+      startAgentFn, executionContext, skipGate, forceWithLease,
       isForgejoReviewEnabledFn, rebaseFn, runVerificationGateFn, runGatekeeperFn, missionServicesFn,
       occurredAt,
     } = context;
@@ -139,7 +139,7 @@ export class GatekeeperRemediation {
         },
         verify: async (attempt: number) => {
           const retryResult = await context.retryReviewPreparation(slug, {
-            worktree,
+            executionContext,
             skipGate,
             force: true,
             forceWithLease,

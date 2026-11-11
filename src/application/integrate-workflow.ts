@@ -9,6 +9,7 @@ import { withBaseMutation } from './integrate/base-mutation.js';
 import { prepareBacklogPayload } from './integrate/backlog-payload.js';
 import type { ParallixConfiguration } from "./ports/configuration.js";
 import type { MissionExecutionContext } from './ports/mission-execution-context.js';
+import { liveMissionExecutionContext } from './ports/mission-execution-context.js';
 /**
  * Integrate workflow use case — the `px integrate` sequence (TASK-2512).
  *
@@ -131,6 +132,9 @@ class IntegrateWorkflow {
           return this.dependencies.ports.fileSystem.existsSync(this.dependencies.missionPaths.conventionalWorktreePath(mission))
             || this.dependencies.ports.git.git(['-C', baseWorktree, 'show-ref', '--verify', '--quiet', `refs/heads/${branch}`]).status === 0;
         },
+        // The closeout itself tolerates a removed checkout; only the lane restore needs
+        // the live one, so it receives the validated resolution rather than a guess.
+        liveExecutionContext: liveMissionExecutionContext(slug, { ok: true, context: execution }),
       },
     );
     return 0;
@@ -206,7 +210,19 @@ class IntegrateWorkflow {
         fmt.log.info(`Landed squash ${existingSquash.slice(0, 12)} already on ${baseBranch}; skipping rebase and resuming landing closeout.`);
         return;
       }
-      await this.dependencies.runIntegrationRebase(slug, { baseWorktree, baseBranch, git, missionServicesFn });
+      await this.dependencies.runIntegrationRebase(slug, {
+        baseWorktree,
+        baseBranch,
+        git,
+        missionServicesFn,
+        executionContext: {
+          missionId: slug,
+          missionWorktree: context.missionWorktree,
+          missionBranch: context.branch,
+          baseWorktree,
+          baseBranch,
+        },
+      });
       const checkout = this.dependencies.ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: String(baseWorktree) });
       const removed = context.mirrorOwnership.kind === 'none'
         ? new Set<string>()

@@ -45,6 +45,8 @@ import type {
 import type { OperatorBlocklistOverlay } from '../sqlite/blocklist-snapshot.js';
 import type { MissionLaunchContext } from '../../application/mission-brief-service.js';
 import { renderLaunchContext } from '../../application/mission-brief-service.js';
+import { liveMissionExecutionContext, type MissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
+import { resolveMissionExecutionContext } from '../git/mission-execution-context.js';
 
 export type { OperatorBlocklistOverlay };
 
@@ -68,6 +70,7 @@ export interface ExecuteMissionRuntime {
    * null when neither exists. The checkpoint keeps the file-backed resume signal
    * alive even when the agent starts from persisted facts. */
   readonly resolveExecutionContext: (_slug: string) => Promise<MissionLaunchContext | null>;
+  readonly resolveMutationContext: (_slug: string, _root: string) => MissionExecutionContextResolution;
   readonly readAgentConfig: typeof readAgentConfig;
   readonly buildExecutePrompt: typeof buildExecutePrompt;
   readonly selectLaunchAndRecord: (...args: Parameters<typeof selectLaunchAndRecord>) => Promise<Pick<Awaited<ReturnType<typeof selectLaunchAndRecord>>, 'agent' | 'result' | 'rebaseDeferred'>>;
@@ -76,7 +79,7 @@ export interface ExecuteMissionRuntime {
   readonly recordActiveStats: (options: NonNullable<Parameters<typeof stats.recordActiveStats>[0]> & { slug: string; rootDir: string; implementer: string }) => void;
   readonly resolveStageTelemetry: (options: NonNullable<Parameters<typeof resolveStageTelemetry>[0]>) => ReturnType<typeof resolveStageTelemetry>;
   /** Individual post-execute mechanisms. The application service owns their ordering. */
-  readonly performReviewPreparation: (slug: string, options: { forgejoUser?: string; worktree: string; force?: boolean }) => ReturnType<typeof performReviewPreparation>;
+  readonly performReviewPreparation: (slug: string, options: { forgejoUser?: string; force?: boolean; executionContext: import('../../application/ports/mission-execution-context.js').LiveMissionExecutionContext }) => ReturnType<typeof performReviewPreparation>;
   /** Binds the review-loop mechanisms; the application review loop sequences them. */
   readonly reviewLoopMechanisms: typeof createReviewLoopPorts;
   readonly repairReviewPreparation: (...args: Parameters<typeof repairReviewPreparation.repairReviewPreparation>) => Promise<{ repaired: boolean; blocker?: string | null }>;
@@ -257,7 +260,9 @@ class CheckpointValidationAdapter implements CheckpointValidationPort {
 class ReviewPreparationExecutionAdapter implements ReviewPreparationExecutionPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
   async run(request: ReviewPreparationRunRequest): Promise<ReviewPreparationRunResult> {
-    const result = await this._runtime.performReviewPreparation(request.slug, { forgejoUser: request.agent, worktree: request.worktree, force: request.force });
+    const live = liveMissionExecutionContext(request.slug, this._runtime.resolveMutationContext(request.slug, request.worktree));
+    if (!live.ok) { return { ok: false, reason: 'mutation-context-unavailable', error: live.reason, recoveryAttempted: true }; }
+    const result = await this._runtime.performReviewPreparation(request.slug, { forgejoUser: request.agent, executionContext: live.context, force: request.force });
     const { gateFailure, ...reviewPreparation } = result;
     return gateFailure
       ? { ...reviewPreparation, gateFailure: { kind: 'gate-failure', ...gateFailure } }
@@ -273,20 +278,24 @@ class ReviewPreparationExecutionAdapter implements ReviewPreparationExecutionPor
 class AutonomousReviewAdapter implements AutonomousReviewPort {
   constructor(private readonly _runtime: ExecuteMissionRuntime) {}
   async start(request: AutonomousReviewRequest): Promise<void> {
-    const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { worktree: request.worktree }, { onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop });
+    const live = liveMissionExecutionContext(request.slug, this._runtime.resolveMutationContext(request.slug, request.worktree));
+    if (!live.ok) { throw new Error(live.reason); }
+    const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { worktree: live.context.missionWorktree, executionContext: live.context }, {
+      executionContext: live.context, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop,
+    });
     await runReviewLoop({ slug: request.slug, implementer: request.implementer, reviewer: request.reviewer, skipReviewPreparation: true }, mechanisms);
   }
 }
 
 class RepairLaunchAdapter implements ExecuteRepairLaunchPort {
   constructor(private readonly _configuration: ParallixConfiguration = DEFAULT_CONFIGURATION) {}
-  available(agent: string) { return agents.workflowLauncherStatus(agent, undefined, this._configuration); }
+  available(agent: string, worktree?: string) { return agents.workflowLauncherStatus(agent, worktree, this._configuration); }
   readHead(worktree: string) {
     const result = awaitableGit(['-C', worktree, 'rev-parse', 'HEAD']);
     return result.status === 0 ? result.stdout.trim() : null;
   }
   async launch(request: Parameters<ExecuteRepairLaunchPort['launch']>[0]) {
-    const status = this.available(request.agent);
+    const status = this.available(request.agent, request.worktree);
     if (!status.supported) { throw new Error(`Agent ${request.agent} is not available for relaunch: ${status.detail || status.reason || 'unknown'}`); }
     return agents.startAgent('active', { configuration: this._configuration,
       prompt: request.prompt, worktree: request.worktree, agent: request.agent, slug: request.slug, role: 'implementer', sessionPolicy: request.sessionPolicy,
@@ -354,9 +363,10 @@ export function createDefaultExecuteMissionRuntime(configuration: ParallixConfig
     recordActiveStats: options => stats.recordActiveStats({ ...options, configuration }),
     resolveStageTelemetry,
     performReviewPreparation: (slug, options) => performReviewPreparation(slug, { ...options, configuration }),
-    reviewLoopMechanisms: createReviewLoopPorts,
+    reviewLoopMechanisms: (slug, target, bindings) => createReviewLoopPorts(slug, target, { ...bindings, configuration }),
     repairReviewPreparation: (slug, worktree, errorMsg, options) => repairReviewPreparation.default(slug, worktree, errorMsg, { ...options, configuration }),
     validateCheckpointsBeforeReviewPreparation,
+    resolveMutationContext: (slug, root) => resolveMissionExecutionContext(slug, root, configuration),
     resolveExecutionContext: async () => null,
   };
 }

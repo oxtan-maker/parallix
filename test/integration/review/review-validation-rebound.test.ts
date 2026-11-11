@@ -17,6 +17,7 @@ const { mock } = test;
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { ReviewPreparationFacts } from '../../../src/application/ports/review-round.js';
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
@@ -251,7 +252,7 @@ function submitHarness(root: string, performReviewPreparationResult: { ok: boole
   const logs: string[] = [];
   const exitCodes: number[] = [];
   const options: NonNullable<Parameters<typeof submitForReview>[2]> = {
-    resolveWorktreeFn: () => root,
+    executionContext: missionExecutionContext({ missionId: 'task-2234', missionWorktree: root }),
     readReviewStateFn: () => null,
     resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }),
     getTaskImplementerFn: () => 'claude',

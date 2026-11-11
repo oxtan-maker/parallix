@@ -38,12 +38,15 @@ export type RetentionAssessmentFacts = Omit<IntegrationRepairAssessment, 'outcom
 export function assessApprovalRetention(facts: RetentionAssessmentFacts, patchEquivalent: boolean | null,
   mission?: string, candidateBaseline?: string): IntegrationRepairAssessment {
   const { validation, ...assessment } = facts;
-  const retained = retentionEvidenceMatches(facts, mission, candidateBaseline);
+  const validatedCandidate = retentionEvidenceMatches(facts, mission, candidateBaseline);
   const outcome = patchEquivalent === null ? 'comparison-error'
     : !patchEquivalent ? 'mission-change-differs'
-    : retained ? 'retained'
+    : validatedCandidate ? 'retained'
     : validation?.failed ? 'gate-failed' : 'gate-evidence-missing';
-  return { ...assessment, outcome, ...(retained && validation ? { validation } : {}) };
+  // Validation and patch equivalence answer different questions. Preserve a
+  // candidate-bound green marker even when the changed patch dismisses the old
+  // approval; later review fixes must not be mistaken for the revision it ran on.
+  return { ...assessment, outcome, ...(validatedCandidate && validation ? { validation } : {}) };
 }
 
 /** A judgment's patch equivalence and a gate's committed-tree evidence are separate facts. The

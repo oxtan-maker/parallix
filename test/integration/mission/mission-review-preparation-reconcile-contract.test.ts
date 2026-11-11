@@ -20,7 +20,8 @@ import { readReviewState, writeReviewState } from '../../../src/adapters/review/
 import { ReviewCommandUseCase } from '../../../src/application/review-command-use-case.js';
 import { createReviewCommand } from '../../../src/interfaces/cli/review.js';
 import { createReviewWorkflowAdapter } from '../../../src/adapters/review/review-commands.js';
-const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(options)))(args, options);
+import { withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
+const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) => createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(withReviewMutationContext(options))))(args, options);
 import { createStatusBoardAdapter } from '../../../src/adapters/cli/commands/status-adapter.js';
 import { renderStatus } from '../../../src/interfaces/cli/status.js';
 import { statusResult } from '../../fixtures/status-result.js';

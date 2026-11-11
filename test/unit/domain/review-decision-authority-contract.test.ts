@@ -24,6 +24,7 @@ import {
   startReview,
 } from '../../../src/domain/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
 
 // Regression provenance: TASK-2398.
 // TASK-2398 — approve on a fixing round.
@@ -439,15 +440,17 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
   it('provider-backed: a successful POST records the authoritative approve', async () => {
     let postCalled = false;
     let recordCalled = false;
-    let order: string[] = [];
+    let order: string[] = []; const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
+      configuration,
       worktree: tempWorktree(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: reviewingState,
       writeReviewStateFn: reviewStateWriterFixture(() => {}),
-      readTokenFn: () => 'token',
+      resolveReviewUserFn: (user, received) => { assert.strictEqual(received, configuration); return user; }, readTokenFn: (_user, options) => { assert.strictEqual(options?.configuration, configuration); return 'token'; },
       getPrAuthorFn: () => 'someone-else',
-      postReviewFn: () => {
+      postReviewFn: (_branch, _token, _outcome, _summary, options) => {
+        assert.strictEqual(options?.configuration, configuration);
         postCalled = true;
         order.push('post');
         return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true };
@@ -623,4 +626,137 @@ it('obligation authority checks the general ancestor and complete obligation set
     assert.throws(() => applyClassifierReview(review, { ...source, ...patch }, 'clear', '2026-10-06T00:00:00Z'));
   }
   assert.throws(() => applyClassifierReview(review, { ...source, label: 'does_not_address' }, 'implementer', '2026-10-06T00:00:00Z'));
+});
+
+describe('availability-aware required approvals (PX-0046.03)', () => {
+  const REV = 'rev-1';
+  const claude = agentFamily('claude');
+  const vibe = agentFamily('vibe');
+  const when = (minute: number) => `2026-08-21T08:0${minute}:00.000Z`;
+  const policy = (mode: 'two-independent' | 'one-independent' | 'same-agent') => ({
+    revision: changeRevision(REV), mode, requiredApprovals: mode === 'two-independent' ? 2 as const : 1 as const,
+    selected: mode === 'two-independent' ? [claude, vibe] : mode === 'one-independent' ? [claude] : [implementer],
+    independentAvailable: mode === 'two-independent' ? 2 : mode === 'one-independent' ? 1 : 0, unavailable: [], fallbackReason: null,
+  });
+
+  async function governed(mode: 'two-independent' | 'one-independent' | 'same-agent') {
+    const { store, lifecycle } = await awaitingReview();
+    const { createReviewerPolicyStatePort } = await import('../../../src/adapters/review/review-state.js');
+    const round = currentReviewRound(store.mission().review!);
+    await createReviewerPolicyStatePort('task-2398', store).recordReviewerPolicy({ round: round.number, startedAt: round.startedAt } as never, {
+      ...policy(mode), selected: mode === 'one-independent' ? [reviewer] : mode === 'two-independent' ? [reviewer, claude] : [implementer],
+    });
+    return { store, lifecycle, ports: { missionStore: store, lifecycleService: lifecycle } };
+  }
+  async function actAs(store: Awaited<ReturnType<typeof awaitingReview>>['store'], family: ReturnType<typeof agentFamily>) {
+    const mission = store.mission();
+    const round = currentReviewRound(mission.review!);
+    await store.save({ ...mission, review: { ...mission.review!, rounds: [{ ...round, reviewer: family }] } }, (await store.load()).version);
+  }
+  const approve = (name: string, minute: number) => ({ comment: null, decidedAt: when(minute), revision: REV, source: { kind: 'local' as const },
+    result: { publicationId: `${name}-run`, reviewerId: name, outcome: 'completed' as const, status: 0 } });
+
+  it('two available independent reviewers need two distinct approvals; one approval holds the round', async () => {
+    const { store, ports } = await governed('two-independent');
+    assert.deepEqual(await recordApproval('task-2398', approve('codex', 1), ports), { outcome: 'held', awaitingApprovals: 1 });
+    assert.equal(reviewStatus(store.mission().review!), 'awaiting-review', 'a single approval cannot stand in for the missing second one');
+    assert.equal(store.mission().status, 'review');
+    assert.equal(currentRevisionApprovals(store.mission().review!, changeRevision(REV)).length, 1);
+
+    await recordApproval('task-2398', approve('codex', 2), ports);
+    assert.equal(reviewStatus(store.mission().review!), 'awaiting-review', 'a retry by the same identity is not a second independent approval');
+
+    await actAs(store, claude);
+    await recordApproval('task-2398', approve('claude', 3), ports);
+    assert.equal(reviewStatus(store.mission().review!), 'approved');
+    assert.equal(store.mission().status, 'integration');
+    assert.equal(currentRevisionApprovals(store.mission().review!, changeRevision(REV)).length, 2);
+  });
+
+  it('one genuinely available independent reviewer needs exactly one approval and never a second', async () => {
+    const { store, ports } = await governed('one-independent');
+    await recordApproval('task-2398', approve('codex', 1), ports);
+    assert.equal(reviewStatus(store.mission().review!), 'approved');
+    assert.equal(store.mission().status, 'integration');
+    assert.equal(currentReviewRound(store.mission().review!).reviewerPolicy?.requiredApprovals, 1);
+  });
+
+  it('the same-agent fallback is satisfied by its own single fresh review, with no human verdict required', async () => {
+    const { store, ports } = await governed('same-agent');
+    await actAs(store, implementer);
+    await recordApproval('task-2398', approve('custom', 1), ports);
+    assert.equal(reviewStatus(store.mission().review!), 'approved');
+    assert.equal(store.mission().status, 'integration');
+  });
+
+  it('an operator-directed approval carries no agent attribution and is never counted against the policy', async () => {
+    const { store, ports } = await governed('two-independent');
+    await recordApproval('task-2398', { comment: 'operator inspected', decidedAt: when(1), source: { kind: 'local' } }, ports);
+    assert.equal(reviewStatus(store.mission().review!), 'approved');
+  });
+
+  it('a negative verdict stays decisive and cannot be outvoted by approvals (replacement keeps findings)', async () => {
+    const { store, ports } = await governed('two-independent');
+    await recordApproval('task-2398', approve('codex', 1), ports);
+    await actAs(store, claude);
+    const result = await recordRequestedChanges('task-2398', { findings: [{ id: 'F1' as never, summary: 'broken', location: null }],
+      comment: 'broken', decidedAt: when(2), revision: REV, result: { publicationId: 'claude-run', reviewerId: 'claude', outcome: 'completed', status: 0 } }, ports);
+    assert.deepEqual(result, { outcome: 'recorded' });
+    assert.equal(reviewStatus(store.mission().review!), 'awaiting-implementation');
+    const { approvalRequirementMet, hasNegativeResult } = await import('../../../src/domain/reviewer-policy.js');
+    assert.equal(hasNegativeResult(store.mission().review!, changeRevision(REV)), true);
+    assert.equal(approvalRequirementMet(store.mission().review!, changeRevision(REV)), false);
+  });
+
+  const result = (family: ReturnType<typeof agentFamily>, decision: 'approved' | 'changes-requested') => ({
+    publicationId: `${family}-${decision}`, reviewerId: family, agentFamily: family, revision: changeRevision(REV), decision,
+    findings: decision === 'approved' ? [] : [{ id: 'F1' as never, summary: 'broken', location: null }],
+    outcome: 'completed' as const, status: 0, publishedAt: when(1),
+  });
+
+  it('only the identities the policy selected can satisfy it; a rerouted-away family never counts (PX-0046.03 F4)', async () => {
+    const { approvalRequirementMet, outstandingReviewers } = await import('../../../src/domain/reviewer-policy.js');
+    const qwen = agentFamily('qwen');
+    const base = startReview({ change, revision: changeRevision(REV) }, reviewer, implementer, when(0), eligibility);
+    const round = { ...currentReviewRound(base), reviewerPolicy: { ...policy('two-independent'), selected: [qwen, vibe] },
+      reviewerResults: [result(claude, 'approved'), result(qwen, 'approved')] };
+    const review = { ...base, rounds: [round] as const };
+    assert.equal(approvalRequirementMet(review, changeRevision(REV)), false, 'claude was replaced, so only qwen approved');
+    assert.deepEqual(outstandingReviewers(review, changeRevision(REV)), [vibe]);
+  });
+
+  it('a same-agent round whose launch the launcher rerouted becomes an evidenced independent review (PX-0046.03 F4)', async () => {
+    const { replaceUnavailableReviewer } = await import('../../../src/domain/reviewer-policy.js');
+    const base = startReview({ change, revision: changeRevision(REV) }, implementer, implementer, when(0), ConfiguredReviewerEligibility.fromReviewStep({ eligible: [implementer], strategy: 'random' }));
+    const review = { ...base, rounds: [{ ...currentReviewRound(base), reviewerPolicy: policy('same-agent') }] as const };
+    const next = replaceUnavailableReviewer(review, changeRevision(REV), implementer, 'rerouted', { eligible: () => [], nominate: () => null, runnable: () => ({ supported: true, detail: '' }) }, claude);
+    assert.deepEqual([next?.mode, next?.requiredApprovals, next?.selected], ['one-independent', 1, [claude]]);
+  });
+
+  it('a capacity reroute preserves two approvals until a later launch failure establishes unavailability (PX-0046.03 H65)', async () => {
+    const { replaceUnavailableReviewer } = await import('../../../src/domain/reviewer-policy.js');
+    const probe = { eligible: () => [], nominate: () => null, runnable: () => ({ supported: true, detail: '' }) };
+    const base = startReview({ change, revision: changeRevision(REV) }, reviewer, implementer, when(0), eligibility);
+    const governed = { ...base, rounds: [{ ...currentReviewRound(base), reviewerPolicy: policy('two-independent') }] as const };
+    const busy = replaceUnavailableReviewer(governed, changeRevision(REV), claude, 'launcher rerouted claude to vibe', probe, vibe);
+    assert.deepEqual([busy?.mode, busy?.requiredApprovals, busy?.selected], ['two-independent', 2, [claude, vibe]]);
+    const retried = { ...governed, rounds: [{ ...currentReviewRound(governed), reviewerPolicy: busy! }] as const };
+    const unavailable = replaceUnavailableReviewer(retried, changeRevision(REV), claude, 'claude cannot start', probe);
+    assert.deepEqual([unavailable?.mode, unavailable?.requiredApprovals, unavailable?.selected], ['one-independent', 1, [vibe]]);
+    assert.match(unavailable?.fallbackReason ?? '', /claude: claude cannot start/);
+  });
+
+  it('blocker invalidation opens a round that owes its own reviews and requirement (PX-0046.03 F5)', async () => {
+    const { invalidateBlocker } = await import('../../../src/domain/review.js');
+    const { approvalRequirementMet, hasNegativeResult } = await import('../../../src/domain/reviewer-policy.js');
+    const base = startReview({ change, revision: changeRevision(REV) }, reviewer, implementer, when(0), eligibility);
+    const blocked = { ...currentReviewRound(base), phase: 'fixing' as const, disposition: 'BLOCKED' as const, reviewerPolicy: policy('two-independent'),
+      reviewerResults: [result(reviewer, 'changes-requested')] };
+    const reopened = invalidateBlocker({ ...base, rounds: [blocked] }, when(5));
+    const round = currentReviewRound(reopened);
+    assert.deepEqual([round.number, round.reviewerPolicy, round.reviewerResults], [2, undefined, []]);
+    assert.equal(hasNegativeResult(reopened, changeRevision(REV)), false, 'the earlier negative stays on its own round');
+    assert.equal(approvalRequirementMet({ ...reopened, rounds: [reopened.rounds[0], { ...round, reviewerPolicy: policy('two-independent'),
+      reviewerResults: [result(claude, 'approved'), result(vibe, 'approved')] }] }, changeRevision(REV)), true);
+  });
 });

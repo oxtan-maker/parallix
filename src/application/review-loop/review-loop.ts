@@ -357,7 +357,9 @@ async function continuesReviewPreparation(start: Start, ports: ReviewLoopPorts):
   // A recorded response needs the next round even if preparation already entered review.
   if (status === 'ready-for-next-round') { return true; }
   return status === 'awaiting-review' && (mission.status === 'active' || mission.reviewPreparationPending === true
-    || integrationRepairNeedsReview(mission) && currentReviewRound(review).subject.revision !== ports.preReview.head());
+    // Retention opens the candidate-bound round before review preparation. A
+    // continuation still owes preparation even when that candidate is HEAD.
+    || integrationRepairNeedsReview(mission));
 }
 
 async function resumePendingRepair(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null, implementer: string, ports: ReviewLoopPorts): Promise<boolean> {

@@ -43,6 +43,7 @@ import {
   findUnverifiableGoalCheckRow as findUnverifiableGoalCheckRowWithPort,
 } from '../../review/review-static-evidence.js';
 import type { CaptureNelOptions, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions, ReviewPreparationMissionServicesPort } from "../../../application/ports/review-preparation-workflow.js";
+import type { LiveMissionExecutionContext } from '../../../application/ports/mission-execution-context.js';
 import { recordImplementerLaunch } from '../../../application/rebase-identity.js';
 import { observeVerificationCommand } from '../../../application/recording/verification-command.js';
 import { randomUUID } from 'node:crypto';
@@ -102,7 +103,23 @@ function createDeclaredGateExecution(configuration?: ParallixConfiguration): Non
   };
 }
 
-export function createReviewPreparationPorts(configuration?: ParallixConfiguration, missionServices?: ReviewPreparationMissionServicesPort): ReviewPreparationWorkflowPorts {
+function createVerificationPorts(configuration?: ParallixConfiguration): ReviewPreparationWorkflowPorts['verification'] {
+  return {
+    resolveEffectiveArea: (area, rootDir, missionDir) => resolveEffectiveArea(area, rootDir, missionDir),
+    formatVerificationCommand: (area, rootDir) => formatVerificationCommand(area, rootDir),
+    createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir, { configuration }),
+    readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
+    writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
+    runVerificationGate: (area, options) => usesAdmittedVerification(options.rootDir)
+      ? runConfiguredVerification(area, options.rootDir, configuration)
+      : observeVerificationCommand({ root: options.rootDir, mission: '', batchId: randomUUID(), gate: 'verification',
+        command: formatVerificationCommand(area, options.rootDir), phase: 'handoff', after: [] },
+        () => runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment })),
+    isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
+  };
+}
+
+export function createReviewPreparationPorts(configuration?: ParallixConfiguration, missionServices?: ReviewPreparationMissionServicesPort, executionContext?: LiveMissionExecutionContext): ReviewPreparationWorkflowPorts {
   return {
     declaredGateExecution: createDeclaredGateExecution(configuration),
     fileSystem: createReviewPreparationFileSystemPorts(),
@@ -115,7 +132,6 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
     },
     missionUtils: {
       inferSlug: (explicitSlug) => missionUtils.inferSlug(explicitSlug),
-      resolveWorktree: (slug, options) => missionUtils.resolveWorktree(slug, options),
       findMissionDir: (slug, rootDir) => missionUtils.findMissionDir(slug, rootDir),
       findMissionArea: (missionDir) => missionUtils.findMissionArea(missionDir),
       missionBranchName: (slug, rootDir) => missionUtils.missionBranchName(slug, rootDir),
@@ -146,7 +162,8 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
         const rebaseOptions = options as Parameters<typeof rebaseBeforeReviewRound>[1];
         return rebaseBeforeReviewRound(slug, {
           ...rebaseOptions,
-          rebaseWorkflowOptions: { ...rebaseOptions?.rebaseWorkflowOptions, configuration },
+          rebaseWorkflowOptions: { ...rebaseOptions?.rebaseWorkflowOptions, configuration,
+            executionContext: rebaseOptions?.executionContext, rootDir: rebaseOptions?.worktree },
         });
       },
     },
@@ -157,19 +174,7 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
       loadPhaseGates: (rootDir, phase) => loadPhaseGates(rootDir, phase),
       runPhaseGates: (phase, options) => runPhaseGates(phase, { ...options, configuration }),
     },
-    verification: {
-      resolveEffectiveArea: (area, rootDir, missionDir) => resolveEffectiveArea(area, rootDir, missionDir),
-      formatVerificationCommand: (area, rootDir) => formatVerificationCommand(area, rootDir),
-      createVerificationProofIdentity: (command, rootDir) => createVerificationProofIdentity(command, rootDir, { configuration }),
-      readReusableVerificationProof: (command, rootDir) => readReusableVerificationProof(command, rootDir, { configuration }),
-      writeReusableVerificationProof: (command, rootDir, options) => writeReusableVerificationProof(command, rootDir, { ...options, configuration }),
-      runVerificationGate: (area, options) => usesAdmittedVerification(options.rootDir ?? process.cwd())
-        ? runConfiguredVerification(area, options.rootDir ?? process.cwd(), configuration)
-        : observeVerificationCommand({ root: options.rootDir, mission: '', batchId: randomUUID(), gate: 'verification',
-          command: formatVerificationCommand(area, options.rootDir), phase: 'handoff', after: [] },
-          () => runVerificationGate(area, { ...options, env: configuration?.forwardedEnvironment })),
-      isTransientVerificationFailure: (output) => isTransientVerificationFailure(output),
-    },
+    verification: createVerificationPorts(configuration),
     nel: {
       computeNELRecord: (range, options) => computeNELRecord(range, options),
     },
@@ -182,8 +187,8 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
     agents: {
       startAgent: (step, options) => startAgent(step, { ...options, configuration,
         onLaunch: async event => {
-          if (missionServices) {
-            const root = String(options.worktree || process.cwd());
+          if (missionServices && executionContext) {
+            const root = executionContext.missionWorktree;
             const services = await missionServices(root, { missionDir: root });
             await recordImplementerLaunch(String(options.slug), event.agent, services.store, services.lifecycle);
           }
@@ -218,14 +223,14 @@ function verifyReviewPreparation(...args: UseCaseArgs<"verifyReviewPreparation">
 }
 
 /** Checked adapter options; lifecycle authority remains in the application use case. */
-type ReviewPreparationAdapterOptions = PerformReviewPreparationOptions & {
+export type ReviewPreparationAdapterOptions = PerformReviewPreparationOptions & {
   configuration?: ParallixConfiguration;
   /** Caller metadata retained for bound review preparation mechanisms; the use case resolves its own authority. */
   forgejoUser?: string | null;
   reviewIdentity?: string | null;
 };
-function performReviewPreparation(slug: string, options: ReviewPreparationAdapterOptions = {}) {
-  return new ReviewPreparationCommandUseCase(createReviewPreparationPorts(options.configuration, options.missionServicesFn)).performReviewPreparation(slug, options);
+function performReviewPreparation(slug: string, options: ReviewPreparationAdapterOptions) {
+  return new ReviewPreparationCommandUseCase(createReviewPreparationPorts(options.configuration, options.missionServicesFn, options.executionContext)).performReviewPreparation(slug, options);
 }
 
 /** @see ReviewPreparationCommandUseCase.resolveReviewPreparationReviewAssignment */

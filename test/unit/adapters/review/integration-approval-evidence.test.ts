@@ -7,18 +7,21 @@ import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { changeRevision as fixtureRevision } from '../../../../src/domain/review.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 // Provider approval retention and read-only corrections, independent of prompt rendering.
 import { composeHumanFeedback } from '../../../../src/adapters/review/review-loop-human-feedback.js';
 
 test('retention reads shared human corrections without consuming them and fails closed when unreadable (TASK-2820)', async () => {
   let writes = 0, token: string | null = 'token';
+  const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
   let comments: NonNullable<Awaited<ReturnType<typeof getComments>>> | null = [
     { kind: 'review', id: 'new-human-decision', user: 'operator', isBot: false, state: 'REQUEST_CHANGES', body: 'Keep the validation.', created: '2026-10-25T10:00:00Z', updated: '2026-10-25T10:00:00Z' },
   ];
   const feedback = composeHumanFeedback({ slug: 'task-retention', branch: 'mission/task-retention', worktree: '/fixture',
-    providerEnabled: true, strict: true, readOnly: true, missionStore: null, log() {}, error() {},
-    fetchComments: async () => comments, tokenFor: () => token,
+    providerEnabled: true, strict: true, readOnly: true, missionStore: null, configuration, log() {}, error() {},
+    fetchComments: async (_branch, _token, options) => { assert.strictEqual(options?.configuration, configuration); return comments; },
+    tokenFor: (_identity, options) => { assert.strictEqual(options?.configuration, configuration); return token; },
     recordHumanNote: async () => { writes++; return { ok: true, path: null }; } });
   const state = new ReviewState('task-retention', { reviewer: 'claude', implementer: 'codex', phase: 'approved', round: 1 });
   assert.equal((await feedback.reconcile(state))?.disposition, 'REQUEST_CHANGES');

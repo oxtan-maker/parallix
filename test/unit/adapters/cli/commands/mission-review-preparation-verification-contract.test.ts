@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import { stubMissionServices, stubRecordedMissionServices } from '../../../../helpers/stub-mission-services.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 const verifyReviewPreparationModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/review-preparation.js')>('../../../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
 const git = mockModule<typeof import('../../../../../src/adapters/git/git.js')>('../../../../../src/adapters/git/git.js', import.meta.url);
 const missionUtils = mockModule<typeof import('../../../../../src/adapters/filesystem/mission-utils.js')>('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -108,7 +109,7 @@ function cleanup() {
 test("verifyReviewPreparation fails when not on mission branch", (t) => {
   setupMocks();
   mock.method(git, 'getCurrentBranch', () => 'main');
-  const result = verifyReviewPreparation(TEST_SLUG, { worktree: WORKTREE });
+  const result = verifyReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }) });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Not on mission branch/);
@@ -131,7 +132,7 @@ test("performReviewPreparation handles gatekeeper pushback", async (t) => {
     throw new Error('skipGate must survive the remediation retry');
   };
   const result = await performReviewPreparation(TEST_SLUG, {
-    worktree: WORKTREE,
+    executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }),
     skipGate: true,
     rebaseFn: mockRebase,
     startAgentFn: mockStartAgent,
@@ -147,7 +148,7 @@ test("performReviewPreparation handles gatekeeper pushback", async (t) => {
 test("performReviewPreparation handles gatekeeper block", async (t) => {
   setupMocks();
   mock.method(gatekeeper, 'runGatekeeper', () => ({ ok: false as const, posted: false, skipped: false, missing: ['A'] }));
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Gatekeeper detected missing artifacts/);
@@ -159,7 +160,7 @@ test("performReviewPreparation fails when forgejoUser is missing", async (t) => 
   mock.method(backlog, 'getTaskImplementer', () => null);
   const originalEnv = environment.FORGEJO_USER;
   delete environment.FORGEJO_USER;
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: recordedMissionServices({ assignee: null }) });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: recordedMissionServices({ assignee: null }) });
   assert.strictEqual(result.ok, false);
   assert.match(result.error ?? '', /no database-assigned implementer/);
   environment.FORGEJO_USER = originalEnv;
@@ -174,7 +175,7 @@ test("performReviewPreparation fails when final verification gate fails", async 
     JSON.stringify({ adapters: { verification: { command: 'npm test' } } })
   );
   mock.method(git, 'run', () => ({ signal: null, stdout: '', stderr: '',  status: 1 }));
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices(), recoverGateFailure: false });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices(), recoverGateFailure: false });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Final verification gate failed/);
@@ -184,7 +185,7 @@ test("performReviewPreparation fails when final verification gate fails", async 
 test("performReviewPreparation fails when PR creation fails", async (t) => {
   setupMocks();
   mock.method(forgejo, 'createPr', () => ({ ok: false as const, error: 'API Error' }));
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Forgejo PR creation\/update failed/);
@@ -194,7 +195,7 @@ test("performReviewPreparation fails when PR creation fails", async (t) => {
 test("performReviewPreparation fails when Backlog transition fails (assignee)", async (t) => {
   setupMocks();
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Could not transition task task-review-preparation-test to review/);
@@ -204,7 +205,7 @@ test("performReviewPreparation fails when Backlog transition fails (assignee)", 
 test("performReviewPreparation fails when Backlog transition fails (status)", async (t) => {
   setupMocks();
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Could not transition task task-review-preparation-test to review/);
@@ -215,7 +216,7 @@ test("performReviewPreparation fails when git add fails", async (t) => {
   setupMocks();
   // transitionTask now handles git add/commit, so we mock it to fail
   mock.method(backlog, 'transitionTask', () => false);
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Could not transition task task-review-preparation-test to review/);
@@ -226,7 +227,7 @@ test("performReviewPreparation fails when git push fails", async (t) => {
   setupMocks();
   mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => args.includes('push') ? { status: 1, stderr: 'fatal: Unable to create .git/index.lock: No space left on device' } : { status: 0, stdout: args.includes('rev-parse') ? 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' : '' });
   mock.method(forgejo, 'authenticatedReviewUrl', () => 'url');
-  const result = await performReviewPreparation(TEST_SLUG, { worktree: WORKTREE, skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
+  const result = await performReviewPreparation(TEST_SLUG, { executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }), skipGate: true, error: () => {}, rebaseFn: mockRebase, missionServicesFn: stubRecordedMissionServices() });
   assert.strictEqual(result.ok, false);
   assert.ok(result.error !== undefined);
   assert.match(result.error, /Failed to push Backlog transition/);
@@ -238,7 +239,7 @@ test("performReviewPreparation fails when git push fails", async (t) => {
 test("performReviewPreparation accepts completed criteria whose rows name each criterion identity (TASK-2631)", async () => {
   setupMocks();
   const result = await performReviewPreparation(TEST_SLUG, {
-    worktree: WORKTREE,
+    executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }),
     skipGate: true,
     error: () => {},
     rebaseFn: mockRebase,
@@ -257,7 +258,7 @@ test("performReviewPreparation accepts completed criteria whose rows name each c
 test("performReviewPreparation rejects incomplete success criteria before review preparation (TASK-2631)", async () => {
   setupMocks();
   const result = await performReviewPreparation(TEST_SLUG, {
-    worktree: WORKTREE,
+    executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }),
     skipGate: true,
     error: () => {},
     rebaseFn: mockRebase,
@@ -272,7 +273,7 @@ test("performReviewPreparation rejects incomplete success criteria before review
 test("performReviewPreparation rejects completed criteria lacking one evidence row each (TASK-2631)", async () => {
   setupMocks();
   const result = await performReviewPreparation(TEST_SLUG, {
-    worktree: WORKTREE,
+    executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: WORKTREE }),
     skipGate: true,
     error: () => {},
     rebaseFn: mockRebase,

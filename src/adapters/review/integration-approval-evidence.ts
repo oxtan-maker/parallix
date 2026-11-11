@@ -31,14 +31,14 @@ export function createIntegrationApprovalEvidence(worktree: string, validation: 
       const providerEnabled = mechanisms.providerEnabled(worktree);
       let approvalValid = !providerEnabled;
       const feedback = composeHumanFeedback({ slug: String(mission.id), branch: missionBranchName(String(mission.id), worktree),
-        worktree, providerEnabled, missionStore: store, strict: true, readOnly: true,
+        worktree, providerEnabled, missionStore: store, strict: true, readOnly: true, configuration,
         log: fmt.log.plain, error: fmt.log.plainError, recordHumanNote: createEvent,
         fetchComments: async (branch, token, options) => {
-          const comments = await mechanisms.fetchComments(branch, token, { ...options, configuration });
+          const comments = await mechanisms.fetchComments(branch, token, options);
           approvalValid = Array.isArray(comments) && providerApprovalStillStanding(comments, judgedRevision);
           return comments;
         },
-        tokenFor: (user, options) => mechanisms.tokenFor(user, { ...options, configuration }) });
+        tokenFor: mechanisms.tokenFor });
       const correction = await feedback.reconcile(new ReviewState(String(mission.id), reviewStateDataFrom(mission.review)));
       return approvalValid && correction === null;
     },

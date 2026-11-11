@@ -27,6 +27,7 @@ import { ReviewPreparationGateRecovery, reviewPreparationRebaseFailure } from ".
 import { ReviewSubmissionService, beginReviewPreparation, recordReviewPreparationFailure } from "./review-submission-service.js";
 import { ReviewPreparationNelCapture } from "./review-preparation-nel-capture.js";
 import type { CaptureNelOptions, ReviewPreparationResult, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions } from "./ports/review-preparation-workflow.js";
+import type { LiveMissionExecutionContext } from './ports/mission-execution-context.js';
 
 /**
  * Application entry point for sequencing a review preparation.
@@ -60,11 +61,11 @@ export class ReviewPreparationExecutor {
    * Execute the full review preparation for a mission slug, sequencing every step and
    * failing closed on the first unrecoverable condition.
    */
-  async performReviewPreparation(slug: string, options: PerformReviewPreparationOptions = {}): Promise<ReviewPreparationResult> {
+  async performReviewPreparation(slug: string, options: PerformReviewPreparationOptions): Promise<ReviewPreparationResult> {
     const bindings = reviewPreparationBindings(this.ports, options, this.nel);
-    const refusal = validateReviewPreparationRequest(slug, options, bindings, this.ports);
+    const refusal = validateReviewPreparationRequest(options, bindings);
     if (refusal) { return refusal; }
-    const root = bindings.worktree || this.ports.missionUtils.resolveWorktree(slug, { cwd: process.cwd() }) || process.cwd();
+    const root = options.executionContext.missionWorktree;
     if (!bindings.missionServicesFn) { return preparationFailure('mission services are not configured. Review preparation fails closed.', 'state-machine', 'lifecycle'); }
     let services: Awaited<ReturnType<NonNullable<ReviewPreparationBindings['missionServicesFn']>>>;
     try {
@@ -98,13 +99,13 @@ export class ReviewPreparationExecutor {
     const ports = this.ports;
     const opts = options;
     const bindings = reviewPreparationBindings(ports, opts, this.nel);
-    const { skipGate, worktree, forceWithLease, log, error, rebaseFn, runVerificationGateFn, startAgentFn, runGatekeeperFn, occurredAt, recoverGateFailure, captureNel } = bindings;
+    const { skipGate, forceWithLease, log, error, rebaseFn, runVerificationGateFn, startAgentFn, runGatekeeperFn, occurredAt, recoverGateFailure, captureNel, executionContext } = bindings;
     const internalLog = log;
 
     // Recursion guard: prevent infinite retry loops when gatekeeper pushback
     // persists across relaunch attempts. Hard limit of 3 total review preparation invocations.
     const { currentAttempt, retriesLeft } = reviewPreparationRetryBudget(bindings);
-    const requestFailure = validateReviewPreparationRequest(slug, opts, bindings, ports);
+    const requestFailure = validateReviewPreparationRequest(opts, bindings);
     if (requestFailure) { error(requestFailure.error); return requestFailure; }
 
     // A recorded contract does not need a directory of legacy Markdown inputs.
@@ -144,7 +145,7 @@ export class ReviewPreparationExecutor {
     }
 
     // Step 2: Forgejo PR Update/Create (optional mirror when Forgejo is enabled)
-    const published = await this.forgejo.publishReviewPreparationPr(slug, { forgejoEnabled, rootDir, forgejoUser, branch, forceWithLease, area, log, error, internalLog });
+    const published = await this.forgejo.publishReviewPreparationPr(slug, { forgejoEnabled, rootDir, forgejoUser, branch, forceWithLease, area, log, error, internalLog, executionContext: bindings.executionContext });
     if (!('token' in published)) { return published; }
 
     // Step 2.5: Gatekeeper pre-review validation
@@ -169,7 +170,7 @@ export class ReviewPreparationExecutor {
         log,
         error,
         startAgentFn,
-        worktree,
+        executionContext,
         skipGate,
         forceWithLease,
         isForgejoReviewEnabledFn,
@@ -196,7 +197,7 @@ export class ReviewPreparationExecutor {
 
   /** Rebase onto the base branch, then re-read the implementer a repair may have replaced. */
   private async rebaseForReviewPreparation(slug: string, bindings: ReviewPreparationBindings, prepared: ReviewPreparationStart, internalLog: ReviewPreparationBindings['log']): Promise<ReviewPreparationResult | { forgejoUser: string }> {
-    const { rebaseFn, worktree, error } = bindings;
+    const { rebaseFn, executionContext, error } = bindings;
     const { verification, isForgejoReviewEnabledFn, missionServicesFn } = prepared;
     const { rootDir, missionDir: missionDirPath } = verification;
     const rebaseResult = await rebaseFn(slug, {
@@ -204,7 +205,8 @@ export class ReviewPreparationExecutor {
         const services = await missionServicesFn(root, { missionDir: missionDirPath });
         return { store: services.store, lifecycle: services.lifecycle };
       },
-      worktree: worktree || undefined,
+      executionContext,
+      worktree: executionContext.missionWorktree,
       log: internalLog,
       error,
       isForgejoReviewEnabledFn,
@@ -276,9 +278,8 @@ export class ReviewPreparationExecutor {
 
   private async prepareStart(slug: string, bindings: ReviewPreparationBindings, opts: PerformReviewPreparationOptions): Promise<ReviewPreparationStart | ReviewPreparationResult> {
     const ports = this.ports;
-    const { worktree, missionServicesFn, log, error } = bindings;
-    const launchRoot = process.cwd();
-    const contractRoot = worktree || ports.missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+    const { missionServicesFn, log, error, executionContext } = bindings;
+    const contractRoot = executionContext.missionWorktree;
     const contractDir = ports.missionUtils.findMissionDir(slug, contractRoot) || contractRoot;
     if (!missionServicesFn) {
       const msg = `Could not read Mission ${slug} from the operator database: mission services are not configured. Review preparation fails closed.`;
@@ -290,7 +291,7 @@ export class ReviewPreparationExecutor {
       error(contract.error);
       return preparationFailure(contract.error, 'state-machine', 'lifecycle');
     }
-    const verification = this.verifyReviewPreparation(slug, { worktree: contractRoot, recordedContract: contract.draftedInDb });
+    const verification = this.verifyReviewPreparation(slug, { executionContext, recordedContract: contract.draftedInDb });
     if (verification.ok === false) {
       error(verification.error);
       return preparationFailure(verification.error, 'state-machine');
@@ -340,12 +341,11 @@ export class ReviewPreparationExecutor {
   /**
    * Verifies that the current environment is ready for review preparation.
    */
-  verifyReviewPreparation(slug: string, options: { worktree?: string; recordedContract?: boolean } = {}):
+  verifyReviewPreparation(slug: string, options: { executionContext: LiveMissionExecutionContext; recordedContract?: boolean }):
     | { ok: false; error: string }
     | { ok: true; missionDir: string; area: string; branch: string; rootDir: string } {
     const { git, missionUtils } = this.ports;
-    const launchRoot = process.cwd();
-    const rootDir = options.worktree || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+    const rootDir = options.executionContext.missionWorktree;
     const missionDir = missionUtils.findMissionDir(slug, rootDir);
     if (!missionDir && !options.recordedContract) {
       return preparationFailure(`Mission directory not found for slug: ${slug}`, 'missing-artifacts');
@@ -386,7 +386,7 @@ export class ReviewPreparationExecutor {
 function reviewPreparationBindings(ports: ReviewPreparationWorkflowPorts, opts: PerformReviewPreparationOptions, nel: ReviewPreparationNelCapture) {
   const {
     skipGate = false,
-    worktree = null,
+    executionContext,
     force = false,
     forceWithLease = true,
     log = fmt.log.info,
@@ -408,7 +408,7 @@ function reviewPreparationBindings(ports: ReviewPreparationWorkflowPorts, opts: 
   } = opts;
   const { eligibleAgentsForStepFn, selectAgentFn } = reviewPreparationSelectionBindings(ports, opts);
   const captureNel = captureNelFn || ((nelSlug: string, nelOptions: CaptureNelOptions) => nel.captureNelAtReviewPreparation(nelSlug, nelOptions));
-  return { skipGate, worktree, force, forceWithLease, log, error, rebaseFn, runVerificationGateFn, maxAttempts, startAgentFn, remainingRetries, runGatekeeperFn, occurredAt, missionServicesFn, eligibleAgentsForStepFn, selectAgentFn, recoverGateFailure, captureNel };
+  return { skipGate, executionContext, force, forceWithLease, log, error, rebaseFn, runVerificationGateFn, maxAttempts, startAgentFn, remainingRetries, runGatekeeperFn, occurredAt, missionServicesFn, eligibleAgentsForStepFn, selectAgentFn, recoverGateFailure, captureNel };
 }
 
 /** Publication credentials come from the database implementer, which must agree with the current review round. */
@@ -475,16 +475,14 @@ function reviewPreparationRetryBudget(bindings: ReviewPreparationBindings) {
 }
 
 /** Refuse invalid retry budgets or explicit reviewers before review preparation effects. */
-function validateReviewPreparationRequest(slug: string, options: PerformReviewPreparationOptions, bindings: ReviewPreparationBindings, ports: ReviewPreparationWorkflowPorts): { ok: false; error: string } | null {
+function validateReviewPreparationRequest(options: PerformReviewPreparationOptions, bindings: ReviewPreparationBindings): { ok: false; error: string } | null {
   if (reviewPreparationBudgetExceeded(reviewPreparationRetryBudget(bindings).currentAttempt)) {
     return { ok: false, error: "Review preparation exceeded maximum attempts (3). Manual intervention required." };
   }
   const reviewer = options.reviewer;
   if (!reviewer) { return null; }
   try {
-    const launchRoot = process.cwd();
-    const worktree = bindings.worktree || ports.missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
-    if (bindings.eligibleAgentsForStepFn('review', { worktree }).includes(reviewer)) { return null; }
+    if (bindings.eligibleAgentsForStepFn('review', { worktree: options.executionContext.missionWorktree }).includes(reviewer)) { return null; }
     return { ok: false, error: `Reviewer ${reviewer} is not eligible for review. Choose a family configured for the review step.` };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

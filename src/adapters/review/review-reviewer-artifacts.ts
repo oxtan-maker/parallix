@@ -20,6 +20,7 @@ import { reviewerResultAttribution, type ReviewerProcessResult } from './reviewe
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { reviewArtifactPath, staleReviewWrite, renderFindings, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeReviewVerdict, headRevision, type ReviewStateReader } from './review-artifact-files.js';
 import { postWorkflowComment, postWorkflowReview } from './review-workflow-posting.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 
 type ReviewerArtifactOptions = {
   log?: (_msg: string) => void;
@@ -32,7 +33,7 @@ type ReviewerArtifactOptions = {
   providerEnabled?: boolean | null;
   forgejoEnabled?: boolean | null;
   readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
-  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+  getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
   postCommentFn?: typeof postComment;
   postReviewFn?: typeof postReview;
   getPrAuthorFn?: typeof getPrAuthor;
@@ -57,6 +58,7 @@ type ReviewerArtifactOptions = {
   expectedVersion?: number;
   /** Present only for agent-produced artifacts; operator verdicts have no child process. */
   processResult?: ReviewerProcessResult | null;
+  configuration?: ParallixConfiguration;
 };
 
 export type RepoEventFn = (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
@@ -162,7 +164,7 @@ async function postReviewerToProvider(
     error: (_msg: string) => void;
     readReviewStateFn: ReviewStateReader;
     readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
-    getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+    getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
     postCommentFn?: typeof postComment;
     postReviewFn?: typeof postReview;
     getPrAuthorFn?: typeof getPrAuthor;
@@ -174,6 +176,7 @@ async function postReviewerToProvider(
     lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
     revision?: string;
     recordApprovalFn?: typeof recordApproval;
+    configuration?: ParallixConfiguration;
   },
 ): Promise<string | null> {
   const { worktree, log, error, readReviewStateFn } = context;
@@ -187,6 +190,7 @@ async function postReviewerToProvider(
       writeReviewStateFn: context.writeReviewStateFn,
       readReviewStateFn,
       currentState: context.currentState,
+      configuration: context.configuration,
       log: log,
       error
     });
@@ -200,6 +204,7 @@ async function postReviewerToProvider(
     buildMetadataFooterFn: context.buildMetadataFooterFn,
     readReviewStateFn,
     missionStore: context.missionStore,
+    configuration: context.configuration,
     log: log,
     error
   });
@@ -226,6 +231,7 @@ async function postReviewerToProvider(
     lifecycleService: context.lifecycleService ?? null,
     recordApprovalFn: context.recordApprovalFn,
     revision: context.revision,
+    configuration: context.configuration,
   });
   if (!reviewResult.ok) {
     return `Reviewer review post failed: ${(reviewResult as { error?: string }).error}`;
@@ -318,6 +324,7 @@ export async function consumeReviewerArtifacts(
       lifecycleService: options.lifecycleService,
       recordApprovalFn: options.recordApprovalFn,
       revision: options.revision,
+      configuration: options.configuration,
     });
 
 

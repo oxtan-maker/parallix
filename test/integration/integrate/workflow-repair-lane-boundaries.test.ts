@@ -73,16 +73,20 @@ import { transitionReviewRepair } from '../../../src/application/review-repair-l
 import { createIntegrationGateStep } from '../../../src/application/integrate/gates.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
+import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
-import { resolvePxEntryLoader, pxNodeArgs } from '../../lib/px-entry.js';
+import { pxNodeArgs } from '../../lib/px-entry.js';
 import { run } from '../../../src/composition/create-cli.js';
-// CLI cold-loading is shared immutable setup; case budgets cover the workflow
-// and its real pinned children, including their source-loader startup.
+// CLI composition is shared immutable setup; focused lanes bundle the current
+// entry once so case budgets cover the workflow rather than repeated transpilation.
 import '../../../src/composition/cli-command-registry.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { installReviewRepairAgent } from '../../fixtures/review-repair-agent-preload.js';
 import { setWorkflowLaunchPort, setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';
 import { clearOperatorStateCache } from '../../../src/adapters/sqlite/adapter-factory.js';
+import { retainIntegrationApproval } from '../../../src/application/integrate/approval-retention.js';
+import { integrationRepairSummary, latestIntegrationRepair } from '../../../src/application/integration-repair-review.js';
+import { resolveFixturePxEntry } from '../../fixtures/source-cli-bundle.js';
 
 const SLUG = 'task-2582-repro';
 const REVIEWER = agentFamily('configured-reviewer');
@@ -273,6 +277,28 @@ test('integration repair retains judgment until a changed patch withdraws it, wi
   } finally { await closeFixture(fixture); }
 });
 
+test('changed validated repair opens and reports review at its candidate revision (PX-0054.03)', async () => {
+  let approved = startReview({ change: PULL_REQUEST, revision: changeRevision('rev-1'), baseline: changeRevision('base') }, REVIEWER, IMPLEMENTER, HANDOFF_AT, REVIEWER_ELIGIBILITY);
+  approved = applyReviewerCommand(approved, { type: 'approve', revision: changeRevision('rev-1'), decidedAt: APPROVED_AT, comment: null, source: { kind: 'local' } });
+  const fixture = await openFixture(seedMission('integration', approved));
+  try {
+    const rebound = await fixture.lifecycle.transition({ operationId: 'validated-repair', missionId: missionId(SLUG), capabilities: new Set(['mission:transition']),
+      command: { type: 'rebound-to-active', agent: IMPLEMENTER, cause: { kind: 'integration-gate-failure', gate: 'unit' }, occurredAt: '2026-09-20T14:05:00Z' },
+      actor: IMPLEMENTER, occurredAt: '2026-09-20T14:05:00Z' });
+    assert.equal(rebound.status, 'completed');
+    const evidence = { reconcileHumanFeedback: async () => true, samePatch: async () => false, now: () => '2026-09-20T15:00:00Z',
+      validation: async () => ({ missionId: SLUG, sha: 'rev-2', baseline: 'base', hooks: ['unit'], createdAt: '2026-09-20T14:30:00Z', reference: 'operational_history:7' }) };
+    assert.equal(await retainIntegrationApproval({ slug: SLUG, services: integrationServices({ store: fixture.store, lifecycle: fixture.lifecycle }), evidence,
+      candidate: { revision: 'rev-2', baseline: 'base' }, head: () => 'rev-2' }), 'changed');
+    const changed = await currentReviewOf(fixture);
+    assert.equal(currentReviewRound(changed).subject.revision, 'rev-2');
+    const summary = integrationRepairSummary(latestIntegrationRepair((await fixture.store.load(missionId(SLUG)) as { kind: 'found'; mission: Mission }).mission)!);
+    assert.match(summary, /validated rev-2 at 2026-09-20T14:30:00Z/);
+    assert.match(summary, /fresh review round 2 handed to configured-reviewer for rev-2 at 2026-09-20T15:00:00Z/);
+    assert.doesNotMatch(summary, /validated rev-1/);
+  } finally { await closeFixture(fixture); }
+});
+
 test('composed rebase conflict repair commits active before its agent and review after verified completion', async () => {
   const slug = 'task-2582';
   const id = missionId(slug);
@@ -302,7 +328,7 @@ test('composed rebase conflict repair commits active before its agent and review
     let exitCode: { value: number | null } = { value: null };
     let launches = 0;
     let rebaseStarted = false;
-    const port = createRebaseWorkflowPort({
+    const port = createRebaseWorkflowPort(withRebaseMutationContext({
       missionServicesFn: async () => ({ store: fixture.store, lifecycle: fixture.lifecycle }),
       inferSlugFn: () => slug, resolveWorktreeFn: () => fixture.root,
       findMissionDirFn: () => fixture.root, findMissionAreaFn: () => 'docs',
@@ -328,7 +354,7 @@ test('composed rebase conflict repair commits active before its agent and review
         return { agent: IMPLEMENTER, result: { status: 0 } };
       },
       exitFn: code => { exitCode.value = code; },
-    });
+    }));
     port.readReviewState = async () => ({ implementer: IMPLEMENTER });
     await runRebaseWorkflow([slug], port);
     assert.equal(launches, 1);
@@ -391,24 +417,28 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
       await clearOperatorStateCache();
     } finally { fs.rmSync(root, { recursive: true, force: true }); }
   });
-  const repo = path.join(root, 'repo');
+  const primaryRepo = path.join(root, 'repo');
+  const repo = path.join(root, 'repo-mission');
   const stateHome = path.join(root, 'state');
-  fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
-  fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
-  fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'parallix' }, adapters: {
+  fs.mkdirSync(path.join(primaryRepo, 'backlog', 'tasks'), { recursive: true });
+  fs.mkdirSync(path.join(primaryRepo, 'config'), { recursive: true });
+  fs.writeFileSync(path.join(primaryRepo, 'workflow.config.json'), JSON.stringify({ product: { name: 'parallix' }, adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     missions: { baseDir: 'missions', branchPrefix: 'mission/' }, review: { provider: 'none' },
     verification: { command: ':' }, agents: { models: { custom: 'fixture' } },
   } }));
-  fs.copyFileSync(path.resolve('config/agents.json'), path.join(repo, 'config', 'agents.json'));
-  fs.writeFileSync(path.join(repo, 'config', 'state-map.json'), JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
-  fs.writeFileSync(path.join(repo, 'backlog', 'tasks', `${slug}.md`), `---\nid: ${slug.toUpperCase()}\ntitle: Fixture\nstatus: review\nassignee: [custom]\nlabels: []\n---\n`);
+  // One independent reviewer keeps this lane-boundary fixture on a single review launch; reviewer count is owned by the review-policy suites.
+  const agentConfig = JSON.parse(fs.readFileSync(path.resolve('config/agents.json'), 'utf8')) as { steps: { review: { eligible: string[] } } };
+  agentConfig.steps.review.eligible = ['codex', 'custom'];
+  fs.writeFileSync(path.join(primaryRepo, 'config', 'agents.json'), JSON.stringify(agentConfig, null, 2));
+  fs.writeFileSync(path.join(primaryRepo, 'config', 'state-map.json'), JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
+  fs.writeFileSync(path.join(primaryRepo, 'backlog', 'tasks', `${slug}.md`), `---\nid: ${slug.toUpperCase()}\ntitle: Fixture\nstatus: review\nassignee: [custom]\nlabels: []\n---\n`);
   const git = (args: string[]) => {
-    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+    const result = spawnSync('git', args, { cwd: primaryRepo, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   };
   git(['init', '-b', 'main']); git(['config', 'user.name', 'Fixture']); git(['config', 'user.email', 'fixture@example.com']);
-  git(['add', '.']); git(['commit', '-m', 'fixture']); git(['checkout', '-b', `mission/${slug}`]);
+  git(['add', '.']); git(['commit', '-m', 'fixture']); git(['worktree', 'add', '-b', `mission/${slug}`, repo]);
   fs.mkdirSync(stateHome, { recursive: true });
   // Eligibility is neutral; legacy blocklist discovery is a separate contract.
   fs.writeFileSync(path.join(stateHome, 'agents.local.json'), '{"blocklist":{}}\n');
@@ -419,8 +449,9 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   const seed = seedMission('review', review);
   await store.save({ ...seed, repositoryId: repositoryId('repo'), id: missionId(slug), checkpoints: seed.checkpoints.map(checkpoint => ({ ...checkpoint, missionId: missionId(slug) })), assignee: implementer }, null);
   // The review executor uses the production registry in-process. Verdict/resolve
-  // still cross real pinned CLI processes, using the canonical bundle in prebuilt lanes.
-  const { entry, loader } = resolvePxEntryLoader();
+  // still cross real pinned CLI processes, using the canonical bundle in prebuilt
+  // lanes and a current-source fixture bundle in focused lanes.
+  const { entry, loader } = fixturePxEntry;
   const trace = path.join(root, 'trace.jsonl');
   // This in-process executor holds a real persisted workflow generation; child
   // writers inherit the same fence, as they do under the production supervisor.
@@ -430,7 +461,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
     agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
     operatorInvocation: true, invocation: { command: 'review', args: [slug], interactive: false },
     owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
-  const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: repo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
+  const environment = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: primaryRepo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
   pinChildCli(entry, { nodeArgs: [...pxNodeArgs({ entry, loader }, []).slice(0, -1), ...(loader ? [
     '--import', path.resolve('test/fixtures/review-repair-agent-preload.ts')] : [])],
   stateHome, env: environment, configuration: resolveConfiguration(environment) });
@@ -461,6 +492,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
 
 const tempDirs: string[] = [];
 let fixtureDatabaseTemplate: string;
+let fixturePxEntry: Awaited<ReturnType<typeof resolveFixturePxEntry>>;
 
 function makeTempRoot(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `parallix-task-2582-repro-`));
@@ -479,6 +511,7 @@ test.before(async () => {
   // migrated schema. Build that schema once and copy the closed database for
   // each fixture instead of replaying migrations for every contract case.
   const templateRoot = makeTempRoot();
+  fixturePxEntry = await resolveFixturePxEntry(templateRoot);
   fixtureDatabaseTemplate = path.join(templateRoot, 'template.db');
   const database = new SqliteDatabaseAdapter();
   await database.open({ path: fixtureDatabaseTemplate });

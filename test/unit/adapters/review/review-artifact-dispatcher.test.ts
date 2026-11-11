@@ -12,6 +12,7 @@ import { isArtifactInfraFailure } from '../../../../src/application/ports/review
 import { DEFAULT_REBOUND_ATTEMPTS, rebound, ReboundContext } from '../../../../src/application/rebound-kernel.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
 
 const ARTIFACT_REBOUND_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
@@ -141,6 +142,56 @@ test('consumeReviewerArtifacts returns diagnostic when persist fails', async () 
   assert.ok(result.diagnostic!.includes('persist'), `diagnostic should mention persist: ${result.diagnostic}`);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('consumeReviewerArtifacts retains composed configuration through provider consumers (px-0042.02 F7)', async () => {
+  const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
+  const consumers: string[] = [];
+  const observe = (consumer: string, received: unknown) => {
+    assert.strictEqual(received, configuration);
+    consumers.push(consumer);
+  };
+
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    worktree: '/isolated/mission',
+    providerEnabled: true,
+    configuration,
+    output: { findings: [], comment: 'reviewed', verdict: 'comment' },
+    readReviewStateFn: () => ({ round: 1, phase: 'reviewing' }),
+    createEventFn: () => ({ ok: true as const, path: null }),
+    readTokenFn: (_user, options) => { observe('token', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return 'token'; },
+    getCommentsFn: async (_branch, _token, options) => { observe('comments', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return []; },
+    postCommentFn: (_branch, _token, _message, options) => { observe('comment', options?.configuration); return { data: null, status: null, statusCode: null, stderr: null, error: null, ok: true }; },
+    getPrAuthorFn: (_branch, _token, options) => { observe('author', options?.configuration); return 'someone-else'; },
+    postReviewFn: (_branch, _token, _outcome, _message, options) => { observe('review', options?.configuration); return { data: null, status: null, statusCode: null, stderr: null, error: null, ok: true }; },
+    log: () => {},
+    error: message => assert.fail(message),
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comment', 'token', 'author', 'review']);
+});
+
+test('consumeImplementerArtifacts retains composed configuration through human-note and provider consumers (px-0042.02 F10)', async () => {
+  const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
+  const consumers: string[] = [];
+  const observe = (consumer: string, received: unknown) => {
+    assert.strictEqual(received, configuration);
+    consumers.push(consumer);
+  };
+  const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
+    worktree: '/isolated/mission', providerEnabled: true, configuration,
+    output: { items: [], evidence: ['fixed'], disposition: 'CHANGES_MADE', resultingRevision: 'revision' },
+    readReviewStateFn: () => ({ round: 1, phase: 'fixing' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
+    createEventFn: () => ({ ok: true as const, path: null }),
+    readTokenFn: (_user, options) => { observe('token', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return 'token'; },
+    getCommentsFn: async (_branch, _token, options) => { observe('comments', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return []; },
+    postCommentFn: (_branch, _token, _message, options) => { observe('comment', options?.configuration); return { data: null, status: null, statusCode: null, stderr: null, error: null, ok: true }; },
+    log: () => {}, error: message => assert.fail(message),
+  });
+  assert.equal(result.ok, true);
+  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comment', 'token', 'comment']);
 });
 
 // ============================================================================

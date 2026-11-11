@@ -12,6 +12,7 @@ import test, { describe, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 
 const repairReviewPreparation = mockModule<typeof import('../../../../../src/adapters/cli/commands/repair-review-preparation.js')>('../../../../../src/adapters/cli/commands/repair-review-preparation.js', import.meta.url);
 const reviewPreparation = mockModule<typeof import('../../../../../src/adapters/cli/commands/review-preparation.js')>('../../../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
@@ -880,6 +881,7 @@ test("nested review preparation preserves configuration and caller rebase seams 
   const options = {
     gitFn, worktree: '/fixture', runRebaseWorkflowFn, rebaseWorkflowOptions: { createPrFn },
     log: () => {}, error: () => {}, isForgejoReviewEnabledFn: () => true,
+    executionContext: missionExecutionContext({ missionId: 'task-2744', missionWorktree: '/fixture' }),
   };
   const result = await reviewPreparation.createReviewPreparationPorts(configuration).rebase.rebaseBeforeReviewRound('task-2744', options);
   assert.equal(result.ok, true);
@@ -892,11 +894,11 @@ test("default execute runtime preserves configuration through review preparation
     assert.equal(slug, 'task-2744');
     assert.ok(options != null);
     assert.strictEqual(options.configuration, configuration);
-    assert.equal(options.worktree, '/fixture');
+    assert.equal(options.executionContext.missionWorktree, '/fixture');
     reviewPreparations += 1;
     return { ok: true as const };
   });
-  assert.equal((await runtime.performReviewPreparation('task-2744', { worktree: '/fixture' })).ok, true);
+  assert.equal((await runtime.performReviewPreparation('task-2744', { executionContext: missionExecutionContext({ missionId: 'task-2744', missionWorktree: '/fixture' }) })).ok, true);
   assert.equal(reviewPreparations, 1);
   const gitCalls: { args: string[]; options: GitOptions | undefined; }[] = [];
   const gitFn: NonNullable<NonNullable<Parameters<typeof runtime.repairReviewPreparation>[3]>["gitFn"]> = (args, options) => { gitCalls.push({ args, options }); return { signal: null, stderr: '',  status: 0, stdout: '' }; };

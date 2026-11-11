@@ -15,6 +15,7 @@
 import * as fmt from './presentation/cli-format.js';
 import { bookkeepingCommitMessage } from '../domain/approval-coverage.js';
 import type { ReviewPreparationLog, ReviewPreparationResult, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions } from "./ports/review-preparation-workflow.js";
+import type { LiveMissionExecutionContext } from './ports/mission-execution-context.js';
 import { ReviewPreparationExecutor } from "./review-preparation-executor.js";
 import { ReviewPreparationNelCapture } from "./review-preparation-nel-capture.js";
 import type { DeclaredGateRunner } from "./review-preparation-declared-gates.js";
@@ -44,10 +45,9 @@ export class ReviewPreparationCommandUseCase {
   /**
    * Write a fallback summary (`## Fallback:` heading) into the backlog task file.
    */
-  writeFallbackSummary(slug: string, summary: string, options: { rootDir?: string; log?: ReviewPreparationLog } = {}): boolean {
-    const { fileSystem, git, backlog, missionUtils } = this.ports;
-    const launchRoot = process.cwd();
-    const rootDir = options.rootDir || missionUtils.resolveWorktree(slug, { cwd: launchRoot }) || launchRoot;
+  writeFallbackSummary(slug: string, summary: string, options: { executionContext: LiveMissionExecutionContext; log?: ReviewPreparationLog }): boolean {
+    const { fileSystem, git, backlog } = this.ports;
+    const rootDir = options.executionContext.missionWorktree;
     const log = options.log || fmt.log.plain;
     const resolution = backlog.resolveTaskFile(slug, rootDir);
     if (!resolution.ok) {
@@ -84,13 +84,15 @@ export class ReviewPreparationCommandUseCase {
 
     fileSystem.writeText(taskFile, content);
 
-    const gitResult = git.git(['add', taskFile]);
+    // Both mutations run against the resolved mission checkout: the process may
+    // have been admitted from a different checkout of the same repository.
+    const gitResult = git.git(['-C', rootDir, 'add', taskFile]);
     if (gitResult.status !== 0) {
       log(fmt.status('WARN', `Failed to stage fallback summary for ${fmt.slug(slug)}`));
       return false;
     }
 
-    const commitResult = git.git(['commit', '-m', bookkeepingCommitMessage(`backlog(${slug}): set fallback summary`, 'backlog-mirror')]);
+    const commitResult = git.git(['-C', rootDir, 'commit', '-m', bookkeepingCommitMessage(`backlog(${slug}): set fallback summary`, 'backlog-mirror')]);
     if (commitResult.status !== 0) {
       log(fmt.status('WARN', `Failed to commit fallback summary for ${fmt.slug(slug)}`));
       return false;
@@ -127,7 +129,7 @@ export class ReviewPreparationCommandUseCase {
   /**
    * Sequences a full review preparation for a mission slug.
    */
-  async performReviewPreparation(slug: string, options: PerformReviewPreparationOptions = {}): Promise<ReviewPreparationResult> {
+  async performReviewPreparation(slug: string, options: PerformReviewPreparationOptions): Promise<ReviewPreparationResult> {
     return this.executor.performReviewPreparation(slug, options);
   }
 
@@ -135,7 +137,7 @@ export class ReviewPreparationCommandUseCase {
    * Application entry point for an already translated CLI request. Argument
    * parsing, exit-code mapping, and usage rendering belong to the CLI interface.
    */
-  async execute(request: { slug?: string; skipGate: boolean; force: boolean }, options: PerformReviewPreparationOptions = {}): Promise<ReviewPreparationResult> {
+  async execute(request: { slug?: string; skipGate: boolean; force: boolean }, options: PerformReviewPreparationOptions): Promise<ReviewPreparationResult> {
     const slug = this.ports.missionUtils.inferSlug(request.slug);
 
     if (!slug) {

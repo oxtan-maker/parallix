@@ -6,6 +6,7 @@ import { hasWorkflowFooter, classifyComment } from './review-event-taxonomy.js';
 import { missionBranchName } from '../filesystem/mission-utils.js';
 import * as crypto from 'node:crypto';
 import * as fmt from '../../application/presentation/cli-format.js';
+import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 
 interface CreatedHumanNote {
   path: string | null;
@@ -21,10 +22,11 @@ export interface ConsumeHumanNotesResult {
 }
 
 export interface ConsumeHumanNotesOptions {
-  getCommentsFn?: (_branch: string, _token: string) => Promise<unknown[]>;
+  getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
   createEventFn?: ReviewEventCreator;
   readReviewStateFn?: ReviewStateReader;
-  readTokenFn?: (_user: string) => string | null;
+  readTokenFn?: (_user: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => string | null;
+  configuration?: ParallixConfiguration;
   reviewIdentity?: string | null;
   forgejoUser?: string | null;
   worktree?: string;
@@ -85,14 +87,16 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
     return { ok: true, created: [], skipped: [] };
   }
 
-  const token = readTokenFn ? readTokenFn(actorIdentity) : null;
+  const rootDir = worktree || process.cwd();
+  const providerOptions = { rootDir, configuration: options.configuration };
+  const token = readTokenFn ? readTokenFn(actorIdentity, providerOptions) : null;
   if (!token) {
     logger(fmt.status('INFO', 'consumeHumanNotes: no provider token found; skipping human note classification.'));
     return { ok: true, created: [], skipped: [] };
   }
 
   const branch = missionBranchName(slug, worktree || process.cwd());
-  const comments = await getCommentsFn(branch, token);
+  const comments = await getCommentsFn(branch, token, providerOptions);
 
   if (!comments || !Array.isArray(comments)) {
     logger(fmt.status('INFO', 'consumeHumanNotes: no comments retrieved; skipping classification.'));
@@ -101,8 +105,6 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
 
   const created: CreatedHumanNote[] = [];
   const skipped: unknown[] = [];
-  const rootDir = worktree || process.cwd();
-
   // Load current state for round/phase and dedup metadata.
   // If caller provides currentState, we merge dedup into it in-place so the
   // caller's subsequent persist includes the updated dedup list (avoids the

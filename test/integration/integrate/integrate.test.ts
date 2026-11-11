@@ -1995,7 +1995,7 @@ test('R5: stale active recovery with human override persists a real ReviewerDeci
     // when nothing is passed — so this test stays red if recovery forgets to
     // forward the entry time.
     const stamp = (options: { occurredAt?: string } | undefined) => options?.occurredAt || new Date().toISOString();
-    const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async (submittedSlug, isContinue, options = {}) => {
+    const submitForReviewFn: NonNullable<NonNullable<Parameters<typeof recoverMissionForIntegration>[1]>["submitForReviewFn"]> = async (submittedSlug, isContinue, options) => {
       calls.push(['submit-for-review', submittedSlug, isContinue, options?.occurredAt ?? null] as const);
       const loaded = await store.load(missionId(submittedSlug));
       const review = startReview(

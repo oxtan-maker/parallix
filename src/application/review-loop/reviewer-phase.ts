@@ -11,6 +11,7 @@ import { missionId } from '../../domain/mission.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
 import { isArtifactInfraFailure, isPollTimeout, POLL_TIMEOUT, type ReviewerArtifactFacts } from '../ports/review-round.js';
 import { pinReviewBaseline } from './pin-baseline.js';
+import { establishReviewerPolicy, nextOutstandingReviewer, reconcileReroutedReviewer, recordedPendingApproval, replaceFailedReviewer } from './reviewer-policy.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
 import { selectReviewer } from './reviewer-selection.js';
@@ -85,8 +86,8 @@ async function stopForVerdictBlock(context: LoopContext): Promise<boolean> {
   return true;
 }
 
-/** Launch the reviewer (skipped for an autonomous local round). */
-async function launchReviewer(context: LoopContext, round: ReviewRound): Promise<RoundStep> {
+/** Launch the reviewer (skipped for an autonomous local round); `replaced` means another selected reviewer takes over. */
+async function launchReviewer(context: LoopContext, round: ReviewRound): Promise<RoundStep | 'replaced' | 'approved'> {
   const { ports, identities } = context;
   if (await stopForVerdictBlock(context)) { return 'stop'; }
   if (identities.reviewer === 'autonomous' && !ports.provider) {
@@ -106,6 +107,8 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   } catch (err: unknown) {
     context.emit({ kind: 'agent-selection', outcome: 'launch-failed', fields: { agent: identities.reviewer, step: 'review', error: (err as Error).message } });
     context.emit({ kind: 'reviewer-launch-failed', reviewer: identities.reviewer, message: (err as Error).message });
+    const replacement = await replaceFailedReviewer(context, round, identities.reviewer, (err as Error).message);
+    if (replacement) { return replacement === 'retry' ? 'replaced' : 'approved'; }
     await context.escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
     return 'stop';
   }
@@ -113,6 +116,7 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
   // the round, so re-read before any identity or telemetry write.
   if (await stopIfControllerSuperseded(context, 'reviewer-launch fallback')) { return 'stop'; }
   round.reviewerLaunch = launch;
+  await reconcileReroutedReviewer(context, round, identities.reviewer, launch?.agent);
   const authoritative = await ports.state.read();
   if (persistedReviewerOutcome(context.state, authoritative)) {
     const actual = launch?.agent;
@@ -163,6 +167,7 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
   const persisted = await ports.state.read();
   const persistedOutcome = persistedReviewerOutcome(state, persisted);
   if (persistedOutcome) { return { step: null, reviewState: persistedOutcome }; }
+  if (await recordedPendingApproval(context, round)) { return { step: null, reviewState: 'APPROVED' }; }
   if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
   let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state, round.reviewerLaunch);
   let reviewState: unknown = null;
@@ -371,6 +376,15 @@ async function resumeFixingPhaseReview(context: LoopContext, round: ReviewRound)
   return reviewState;
 }
 
+/** Resolve reviewer separation, then persist the reviewing-round boundary. */
+async function openReviewerRound(context: LoopContext): Promise<boolean> {
+  if (!routeCollidingReviewer(context)) { return false; }
+  if (context.dryRun) { return true; }
+  if (await context.ports.state.openRound(context.state)) { return true; }
+  context.exit(1);
+  return false;
+}
+
 /** Run the reviewing half; the outcome the implementer answers, or 'stop'. */
 export async function runReviewerPhase(context: LoopContext, round: ReviewRound, dismissedApproval = false): Promise<ReviewOutcome> {
   const { state } = context;
@@ -380,15 +394,12 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
     return { outcome: 'stop' };
   }
   if (state.phase !== 'reviewing') { return { reviewState: await resumeFixingPhaseReview(context, round) }; }
-  if (!routeCollidingReviewer(context)) { return { outcome: 'stop' }; }
   // TASK-2582: the round-open boundary persists the authoritative active →
   // review transition before any destination-state work starts.
-  if (!context.dryRun && !(await context.ports.state.openRound(state))) {
-    context.exit(1);
-    return { outcome: 'stop' };
-  }
+  if (!(await openReviewerRound(context))) { return { outcome: 'stop' }; }
   // A dismissed approval requires a fresh reviewer, never the continuation skip-check.
   let reviewState = dismissedApproval ? null : await existingReviewOnContinue(context, round);
+  const resumedApproval = reviewState === 'APPROVED';
   if (context.dryRun) {
     if (!reviewState) { dryRunReviewerPrompt(context, round); }
     return { outcome: 'stop' };
@@ -397,15 +408,37 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
     const fresh = await runFreshReviewer(context, round);
     if (fresh.action === 'return') { return fresh.value; }
     reviewState = fresh.reviewState;
-
+  }
+  if (resumedApproval) {
+    // Provider polling may rediscover the persisted reviewer's approval while
+    // the Review authority still owes another selected family. Re-enter the
+    // existing serialized policy owner before treating that approval as the
+    // round outcome, so only an authoritative decision reaches task mirroring.
+    const continued = await continueResumedApproval(context, round);
+    if (continued.action === 'return') { return continued.value; }
+    reviewState = continued.reviewState;
   }
   if (await applyReviewerOutcome(context, round, reviewState)) { return { outcome: 'stop' }; }
   return { reviewState };
 }
 
 type FreshReviewerResult = { action: 'return'; value: ReviewOutcome } | { action: 'continue'; reviewState: unknown };
+
+async function continueResumedApproval(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
+  const next = await nextOutstandingReviewer(context, round, new Set([context.identities.reviewer]));
+  if (next === 'next') { return await runSelectedReviewers(context, round); }
+  if (next === 'exhausted') {
+    await context.escalateToHumanReview('REVIEWER_NON_APPROVAL');
+    return { action: 'return', value: { outcome: 'stop' } };
+  }
+  return { action: 'continue', reviewState: 'APPROVED' };
+}
+
 async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
   if (await freshReviewSetup(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }
+  // Record the round's reviewer requirement before anything can decide it, so a
+  // classifier verdict is measured against the same authority the reviewers answer (PX-0046.03).
+  await establishReviewerPolicy(context, round);
   round.integrationRepair = await integrationRepairBrief(context);
   const cycleStarted = context.ports.classification?.clock();
   const classified = await tryClassifyReview(context, round, cycleStarted);
@@ -414,13 +447,34 @@ async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promi
     if (await applyReviewerOutcome(context, round, classified)) { return { action: 'return', value: { outcome: 'stop' } }; }
     return { action: 'return', value: { reviewState: classified } };
   }
-  if (await launchReviewer(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }
-  const consumed = await consumeReviewerOutput(context, round);
-  if (consumed.step) { return { action: 'return', value: { outcome: 'stop' } }; }
-  const recovered = await recoverReviewerTimeout(context, round, consumed.reviewState);
-  if (recovered.step) { return { action: 'return', value: { outcome: 'stop' } }; }
-  const reviewState = recovered.reviewState;
-  return { action: 'continue', reviewState };
+  return await runSelectedReviewers(context, round);
+}
+
+/** Launch the selected reviewers one after another until the Review authority has what the revision owes. */
+async function runSelectedReviewers(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
+  const stop: FreshReviewerResult = { action: 'return', value: { outcome: 'stop' } };
+  const policyApplies = await establishReviewerPolicy(context, round);
+  const launched = new Set<string>();
+  for (;;) {
+    launched.add(context.identities.reviewer);
+    const launch = await launchReviewer(context, round);
+    if (launch === 'approved') { return { action: 'continue', reviewState: 'APPROVED' }; }
+    if (launch === 'replaced') { continue; }
+    if (launch) { return stop; }
+    launched.add(context.identities.reviewer);
+    const consumed = await consumeReviewerOutput(context, round);
+    if (consumed.step) { return stop; }
+    const recovered = await recoverReviewerTimeout(context, round, consumed.reviewState);
+    if (recovered.step) { return stop; }
+    // Only an approval can leave a revision owing another reviewer; a negative verdict is decisive.
+    const next = policyApplies && recovered.reviewState === 'APPROVED' ? await nextOutstandingReviewer(context, round, launched) : 'done';
+    if (next === 'next') { round.reviewerLaunch = undefined; continue; }
+    if (next === 'exhausted') {
+      await context.escalateToHumanReview('REVIEWER_NON_APPROVAL');
+      return stop;
+    }
+    return { action: 'continue', reviewState: recovered.reviewState };
+  }
 }
 
 async function freshReviewSetup(context: LoopContext, round: ReviewRound): Promise<boolean> {

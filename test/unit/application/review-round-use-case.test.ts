@@ -5,6 +5,7 @@ import type { ReviewRoundEntryPort, StartReviewRound } from '../../../src/applic
 import { fakeReviewLoopPorts, type ReviewLoopFakeOverrides } from '../../helpers/review-loop-ports.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import type { ReviewOperatorResumeAssessment } from '../../../src/application/review-recovery.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 function fixture(round: number | null = 2, controllerFree = false, overrides: ReviewLoopFakeOverrides = {}, operator = false, assessment: ReviewOperatorResumeAssessment = { outcome: 'not-required' }) {
   const calls: string[] = [];
@@ -29,6 +30,8 @@ function fixture(round: number | null = 2, controllerFree = false, overrides: Re
 }
 
 const base = { slug: 'task-2637', focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null };
+const resolveExecutionContext = (slug: string, root: string) => ({ ok: true as const,
+  context: missionExecutionContext({ missionId: slug, missionWorktree: `/fixture/${slug}`, baseWorktree: root }) });
 
 test('continuing a review clears intervention, invalidates its blocker, then resumes from the persisted round', async () => {
   const { calls, requests, useCase } = fixture(3, false, {}, true);
@@ -272,6 +275,7 @@ test("inferred entry reaches review preparation after an acknowledged criteria c
   const { ReviewCommandUseCase } = await import('../../../src/application/review-command-use-case.js');
   const { createReviewCommand } = await import('../../../src/interfaces/cli/review.js');
   const options = {
+    resolveExecutionContextFn: resolveExecutionContext,
     operatorResume: bindReviewOperatorResume(store, true, {}),
     missionStore: store, requireReviewAggregate: true,
     inferSlugFn: () => base.slug, resolveWorktreeFn: () => null,
@@ -349,10 +353,10 @@ for (const stopped of [false, true]) {
 test('invocation options cannot grant or replace the composed operator acknowledgment port (TASK-2810)', async () => {
   const { createReviewWorkflowAdapter } = await import('../../../src/adapters/review/review-workflow-adapter.js');
   const forged = { acknowledge: async () => assert.fail('forged authority') };
-  const unbound = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug });
+  const unbound = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug, resolveExecutionContextFn: resolveExecutionContext });
   const nested = await unbound.preflight([], { operatorResume: forged });
   assert.equal(nested?.options.operatorResume, undefined);
   const bound = { assess: async () => ({ outcome: 'not-required' as const }), acknowledge: async () => {} };
-  const direct = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug, operatorResume: bound });
+  const direct = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug, operatorResume: bound, resolveExecutionContextFn: resolveExecutionContext });
   assert.equal((await direct.preflight([], { operatorResume: forged }))?.options.operatorResume, bound);
 });

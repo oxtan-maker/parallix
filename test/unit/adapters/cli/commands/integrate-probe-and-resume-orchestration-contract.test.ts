@@ -68,8 +68,9 @@ describe("integrate orchestration and gates", () => {
   const composition = __mm1;
 
   const TEST_SLUG = 'task-integrate-test';
-  const FAKE_ROOT = '/tmp/integrate-test-root';
-  const WORKTREE = path.join(FAKE_ROOT, '..', TEST_SLUG);
+  const FIXTURE_ROOT = registeredMkdtemp('px-integrate-orchestration-');
+  const FAKE_ROOT = path.join(FIXTURE_ROOT, 'base');
+  const WORKTREE = path.join(FIXTURE_ROOT, TEST_SLUG);
 
   // The integrate module's command entry point is its default export; its
   // helpers are named exports. Expose both through the ESM mock facade so the

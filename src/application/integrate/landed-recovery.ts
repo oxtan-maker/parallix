@@ -15,6 +15,7 @@ import * as fmt from '../presentation/cli-format.js';
 import { missionId } from '../../domain/mission.js';
 import { reviewStatus } from '../../domain/review.js';
 import type { IntegrateLandingPort, IntegrateCheckoutPort } from '../ports/integrate-workflow.js';
+import type { LiveMissionExecutionContextResolution } from '../ports/mission-execution-context.js';
 import { completeLandedCloseout } from './landed-closeout.js';
 
 /** @param {string[]} messages */
@@ -49,9 +50,20 @@ async function restoreApprovedLaneIfRequired(
   missionLoad: Extract<MissionLoadResult, { kind: 'found' }>,
   recoverMissionForIntegration: (_context: IntegrationRecoveryContext, _opts: { missionServices: IntegrationMissionServices; missionLoad: MissionLoadResult }) => Promise<{ status: string }>,
   createAbort: () => Error,
+  liveExecutionContext: LiveMissionExecutionContextResolution,
 ): Promise<void> {
   if (reconcileLanded) { return; }
-  const context = { slug, approval: { ok: true, providerDisabled: true }, missionStatus: undefined };
+  // A landed Mission reaches here only with a decided Review (or an already
+  // promoted lane), so this recovery replays no mission-checkout mutation and a
+  // closeout that already removed the checkout stays recoverable. The one branch
+  // that would replay review preparation stops on its own typed failure inside
+  // the recovery owner (TASK-2850 F2).
+  const context = {
+    slug,
+    approval: { ok: true, providerDisabled: true },
+    missionStatus: undefined,
+    ...(liveExecutionContext.ok ? { executionContext: liveExecutionContext.context } : {}),
+  };
   const restored = await recoverMissionForIntegration(context, { missionServices, missionLoad });
   if (restored.status !== 'integration' && restored.status !== 'done') {
     fail(
@@ -78,6 +90,7 @@ export async function recoverLandedIntegration(
     baseBranch,
     hasIntegrationMeasurement,
     hasCleanupArtifacts,
+    liveExecutionContext,
   }: {
     findSquashCommit: IntegrateCheckoutPort['findExistingSquashCommit'];
     recoverMissionForIntegration: (_context: IntegrationRecoveryContext, _opts: { missionServices: IntegrationMissionServices; missionLoad: MissionLoadResult }) => Promise<{ status: string }>;
@@ -91,6 +104,8 @@ export async function recoverLandedIntegration(
     baseBranch: string;
     hasIntegrationMeasurement?: (_slug: string, _rootDir: string) => boolean;
     hasCleanupArtifacts?: (_slug: string, _rootDir: string) => boolean;
+    /** Resolved live checkout for the Mission; the lane restore is a mutation. */
+    liveExecutionContext: LiveMissionExecutionContextResolution;
   },
 ): Promise<void> {
   const landedCommit = findSquashCommit(rootDir, slug);
@@ -110,7 +125,7 @@ export async function recoverLandedIntegration(
   // A current approval still recovers through the normal lifecycle owner. A
   // later orphaned round cannot undo an already-landed Git fact, so the typed
   // integration decision below reconciles that stranded lane instead.
-  await restoreApprovedLaneIfRequired(strandedWithoutCurrentApproval, slug, missionServices, missionLoad, recoverMissionForIntegration, createAbort);
+  await restoreApprovedLaneIfRequired(strandedWithoutCurrentApproval, slug, missionServices, missionLoad, recoverMissionForIntegration, createAbort, liveExecutionContext);
   await completeLandedCloseout({
     slug, landedCommit, missionServices, baseWorktree: rootDir, baseBranch, variant: 'variant-b-resumed',
     ...(strandedWithoutCurrentApproval ? { landedRecovery: true } : {}),

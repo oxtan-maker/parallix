@@ -1,6 +1,6 @@
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { startReview, ConfiguredReviewerEligibility, changeRevision } from '../../../src/domain/review.js';
+import { startReview, currentReviewRound, ConfiguredReviewerEligibility, changeRevision, type Review } from '../../../src/domain/review.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
@@ -18,13 +18,35 @@ test.after(() => fs.rmSync(mockWorktree, { recursive: true, force: true }));
 const mockSlug = 'test-slug';
 const mockBranch = 'mission/test-slug';
 
-function verdictAuthority(selfReview = false) {
+const isolatedVerificationDependencies = {
+  resolveWorktreeFn: () => mockWorktree,
+  findMissionAreaFn: () => 'workflow',
+  getAcceptanceCriteriaFn: () => [],
+  formatMatrixSummaryFn: () => [],
+  buildAutonomousReviewMatrixFn: () => ({ step: 'review' as const, agents: [], configPath: '', configPresent: false, launchers: {} }),
+  readReviewStateFn: () => null,
+};
+
+function verdictAuthority(selfReview = false, requiredApprovals: 1 | 2 = 1) {
   const reviewer = agentFamily(selfReview ? 'custom' : 'rev');
   const implementer = agentFamily(selfReview ? 'custom' : 'impl');
-  const review = startReview({ change: { kind: 'local-branch', sourceBranch: mockBranch, targetBranch: 'main' }, revision: changeRevision('review-head') },
-    reviewer, implementer, '2026-10-25T00:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' }));
+  const second = agentFamily('second');
+  const base = startReview({ change: { kind: 'local-branch', sourceBranch: mockBranch, targetBranch: 'main' }, revision: changeRevision('review-head') },
+    reviewer, implementer, '2026-10-25T00:00:00Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: requiredApprovals === 2 ? [reviewer, second] : [reviewer], strategy: 'random' }));
+  const round = currentReviewRound(base);
+  const review: Review = selfReview ? { ...base, rounds: [{ ...round, reviewerPolicy: {
+    revision: changeRevision('review-head'), mode: 'same-agent' as const, requiredApprovals: 1 as const, selected: [reviewer],
+    independentAvailable: 0, unavailable: [], fallbackReason: 'no independent reviewer available',
+  }}] } : requiredApprovals === 2 ? { ...base, rounds: [{ ...round, reviewerPolicy: {
+    revision: changeRevision('review-head'), mode: 'two-independent' as const, requiredApprovals: 2 as const, selected: [reviewer, second],
+    independentAvailable: 2, unavailable: [], fallbackReason: null,
+  }}] } : base;
   const store = inMemoryTransitionStore(fixtureMission(mockSlug, { status: 'review', assignee: implementer, review }));
-  return { revision: 'review-head', getPrAuthorFn: () => implementer, missionStore: store, lifecycleService: new MissionLifecycleService(store), currentDisposition: () => store.mission().review?.rounds.at(-1)?.disposition };
+  return { revision: 'review-head', getPrAuthorFn: () => implementer, missionStore: store, lifecycleService: new MissionLifecycleService(store),
+    currentDisposition: () => store.mission().review?.rounds.at(-1)?.disposition,
+    currentDecision: () => store.mission().review?.rounds.at(-1)?.decision,
+    missionStatus: () => store.mission().status,
+    reviewerResults: () => store.mission().review?.rounds.at(-1)?.reviewerResults ?? [] };
 }
 
 // flagValue - basic tests
@@ -54,6 +76,7 @@ test('readTextFlag from inline', () => {
 test('verifyReview exits on missing mission dir', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    ...isolatedVerificationDependencies,
     runVerificationGate: () => ({ status: 0 }),
     findMissionDirFn: () => null,
     getCurrentBranchFn: () => mockBranch,
@@ -70,6 +93,7 @@ test('verifyReview exits on missing mission dir', async () => {
 test('verifyReview exits on branch mismatch', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    ...isolatedVerificationDependencies,
     runVerificationGate: () => ({ status: 0 }),
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => 'wrong-branch',
@@ -86,6 +110,7 @@ test('verifyReview exits on branch mismatch', async () => {
 test('verifyReview exits on task not found', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    ...isolatedVerificationDependencies,
     runVerificationGate: () => ({ status: 0 }),
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
@@ -102,6 +127,7 @@ test('verifyReview exits on task not found', async () => {
 test('verifyReview passes with all green', async () => {
   let exited = false;
   await verifyReview(mockSlug, false, {
+    ...isolatedVerificationDependencies,
     findMissionDirFn: () => '/mock/mission',
     getCurrentBranchFn: () => mockBranch,
     resolveTaskFileFn: () => ({ matches: ['/mock/task.md'],  ok: true as const, taskFile: '/mock/task.md' }),
@@ -269,6 +295,38 @@ test('submitReviewRound handles provider=none', async () => {
   assert.equal(transitioned, true);
 });
 
+test('submitReviewRound holds the first of two approvals without reporting PASS or mirroring an approved task (PX-0046.03 F6)', async () => {
+  for (const providerEnabled of [false, true]) {
+    const authority = verdictAuthority(false, 2);
+    const logs: string[] = [];
+    const transitions: string[] = [];
+    const state = new ReviewState(mockSlug, { round: 1, startedAt: '2026-10-25T00:00:00Z', phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
+    await submitReviewRound(mockSlug, 'approve', 'first approval', {
+      worktree: mockWorktree,
+      isForgejoReviewEnabledFn: () => providerEnabled,
+      readReviewStateFn: () => state,
+      writeReviewStateFn: reviewStateWriterFixture(() => {}),
+      ...authority,
+      resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/backlog/tasks/test-slug.md', matches: [] }),
+      getTaskStatusFn: () => 'review',
+      transitionTaskFn: async (_slug, lane) => { transitions.push(lane); return true; },
+      readTokenFn: () => 'token',
+      postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null, ok: true as const }),
+      createEventFn: async () => ({ ok: true as const, path: '/mock' }),
+      buildMetadataFooterFn: () => '',
+      log: message => logs.push(message),
+      error: message => assert.fail(message),
+      exit: code => assert.fail(`unexpected exit ${code}`),
+    });
+
+    assert.equal(authority.currentDisposition(), null, `${providerEnabled ? 'provider' : 'local'} approval remains held`);
+    assert.equal(authority.reviewerResults().length, 1);
+    assert.deepEqual(transitions, [], 'the Backlog task cannot reach approved while another approval is outstanding');
+    assert.ok(logs.some(message => /1 additional reviewer approval required before integration/i.test(message)));
+    assert.ok(!logs.some(message => /\[PASS\].*recorded locally/i.test(message)), 'a held approval is not reported as a completed local approve');
+  }
+});
+
 test('submitReviewRound cannot fabricate a Review when none exists (TASK-2821)', async () => {
   const store = inMemoryTransitionStore(fixtureMission(mockSlug, { status: 'review', review: null }));
   let exitCode = 0, mirrored = false;
@@ -283,7 +341,7 @@ test('submitReviewRound cannot fabricate a Review when none exists (TASK-2821)',
   assert.equal(mirrored, false);
 });
 
-test('submitReviewRound does not exit when reviewer is the PR author (self-author skip)', async () => {
+test('submitReviewRound records an exact-revision same-agent result when reviewer is the PR author (PX-0046.03 F8)', async () => {
   // task-1255: same-agent-reviewer fallback. postWorkflowReview skips the
   // Forgejo POST (returns ok:true, skipped:true) — submitReviewRound must record
   // locally and warn, NOT exit(1).
@@ -323,8 +381,15 @@ test('submitReviewRound does not exit when reviewer is the PR author (self-autho
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
   assert.deepEqual(transitions, ['review'], 'successful self-author verdict repairs the Backlog intake mirror (H17)');
   assert.equal(authority.currentDisposition(), 'APPROVED', 'verdict recorded to local review-state');
+  assert.equal(authority.currentDecision()?.revision, 'review-head', 'the approval names the exact reviewed revision');
+  assert.equal(authority.missionStatus(), 'integration', 'the satisfied same-agent policy permits integration');
+  assert.deepEqual(authority.reviewerResults().map(result => ({
+    family: result.agentFamily,
+    revision: result.revision,
+    decision: result.decision,
+  })), [{ family: 'custom', revision: 'review-head', decision: 'approved' }], 'the selected same-agent reviewer is attributed before integration');
   assert.equal(recordedVerdict.value, 'approve', 'reviewer_outcome event recorded locally');
-  assert.ok(warnings.some(w => /self-approval POST skipped|different agent or a human/.test(w)), 'must warn that a different agent/human posts the formal approval');
+  assert.ok(warnings.some(w => /same-agent review was recorded locally.*Human inspection remains optional/.test(w)), 'must describe optional human inspection without approval debt');
 });
 
 test('submitReviewRound exits(1) on a genuine review failure (non-author path)', async () => {
