@@ -206,6 +206,8 @@ export interface BoardMetrics {
   readonly flowUnavailable?: string;
   /** Collection health is separate from metric-level missing-history fallbacks. */
   readonly health: StatisticsHealth;
+  /** Whether the historical summary matches the latest durable evidence observed by the board. */
+  readonly analytics?: HistoricalAnalyticsState;
   /** The exact data set used to derive this metrics projection. */
   readonly provenance: MetricsProvenance;
   /**
@@ -251,6 +253,13 @@ export type StatisticsHealthState = 'healthy' | 'partial' | 'unavailable' | 'no-
 
 export interface StatisticsHealth {
   readonly state: StatisticsHealthState;
+}
+
+export interface HistoricalAnalyticsState {
+  readonly freshness: 'fresh' | 'stale' | 'unavailable';
+  readonly revision: string | null;
+  readonly refreshedAt: string | null;
+  readonly reason: string | null;
 }
 
 export interface MetricsProvenance {

@@ -265,6 +265,55 @@ test('history pages are bounded, line-aligned, incremental and report retention 
   } finally { fs.rmSync(repository, { recursive: true, force: true }); }
 });
 
+test('paging a discovered attributed run does not enumerate retained locations or sibling runs again (PX-0058.02)', () => {
+  const repository = mkdtemp('px-history-direct-page-');
+  try {
+    const sibling = open(repository, {}, 'task-9');
+    sibling.write('stdout', Buffer.from('SIBLING-RUN\n'));
+    const siblingRecord = sibling.finish({ exitCode: 0, signal: null });
+    const target = open(repository, {}, 'task-9');
+    target.write('stdout', Buffer.from('TARGET-RUN\n'));
+    const targetRecord = target.finish({ exitCode: 0, signal: null });
+    const base = createRunHistoryStore({ repositoryRoot: repository, repositoryKey: 'abc123' });
+    let locationReads = 0;
+    let directoryReads = 0;
+    let siblingMetadataReads = 0;
+    const countedFs = {
+      ...base.fs,
+      listDirs(targetPath: string) { directoryReads += 1; return base.fs.listDirs(targetPath); },
+      readText(targetPath: string) {
+        if (targetPath.includes(`/${siblingRecord.runId}/`)) { siblingMetadataReads += 1; }
+        return base.fs.readText(targetPath);
+      },
+    };
+    const terminal = createMissionTerminalService({ repositoryId: 'abc123', host: hostDouble().host, store: {
+      ...base,
+      fs: countedFs,
+      locations(identity) { locationReads += 1; return base.locations(identity); },
+    } });
+
+    assert.ok(ok(terminal.overview('task-9')).operations.some(operation => operation.runId === targetRecord.runId));
+    locationReads = 0;
+    directoryReads = 0;
+    siblingMetadataReads = 0;
+
+    const page = ok(terminal.page('task-9', { runId: targetRecord.runId, stream: 'stdout', after: 0 }));
+    assert.equal(page.text, 'TARGET-RUN\n');
+    assert.deepEqual(
+      { locationReads, directoryReads, siblingMetadataReads },
+      { locationReads: 0, directoryReads: 0, siblingMetadataReads: 0 },
+      'a known attributed run is validated and paged directly',
+    );
+
+    const recordFile = path.join(target.dir, 'run.json');
+    fs.writeFileSync(recordFile, JSON.stringify({ ...JSON.parse(fs.readFileSync(recordFile, 'utf8')), missionId: 'task-foreign' }));
+    const replaced = terminal.page('task-9', { runId: targetRecord.runId, stream: 'stdout', after: 0 });
+    assert.equal(replaced.ok, false);
+    if (replaced.ok === false) { assert.equal(replaced.error, 'missing'); }
+    assert.ok(locationReads > 0 && directoryReads > 0, 'a replaced record invalidates its cached attribution and permits one bounded rediscovery');
+  } finally { fs.rmSync(repository, { recursive: true, force: true }); }
+});
+
 test('typed view states keep retained history through probe failures, pipe execution and restart (TASK-2749)', () => {
   const repository = mkdtemp('px-history-states-');
   try {

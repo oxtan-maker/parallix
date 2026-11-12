@@ -1,4 +1,5 @@
 import { integrationContext } from '../../fixtures/integration-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 /**
  * Forgejo-independence tests for the core workflow path.
@@ -199,9 +200,9 @@ test('review loop binds the Forgejo provider only behind isProviderEnabled', asy
   try {
     const quiet = { log: () => {}, error: () => {} } satisfies NonNullable<Parameters<typeof createReviewLoopPorts>[2]>;
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' } } }));
-    assert.equal(createReviewLoopPorts('task-1', { worktree: root }, quiet).provider, null, 'provider=none binds no review provider');
+    assert.equal(createReviewLoopPorts('task-1', { executionContext: missionExecutionContext({ missionId: 'task-1', missionWorktree: root }) }, quiet).provider, null, 'provider=none binds no review provider');
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'forgejo' } } }));
-    assert.notEqual(createReviewLoopPorts('task-1', { worktree: root }, quiet).provider, null, 'provider=forgejo binds the Forgejo review provider');
+    assert.notEqual(createReviewLoopPorts('task-1', { executionContext: missionExecutionContext({ missionId: 'task-1', missionWorktree: root }) }, quiet).provider, null, 'provider=forgejo binds the Forgejo review provider');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -256,7 +257,7 @@ test('consumeReviewerArtifacts does not call Forgejo helpers when forgejoEnabled
   const fresh = reviewArtifactsModule.consumeReviewerArtifacts;
   
   const result = await fresh('task-test', 'codex', {
-    worktree: testWorktree,
+    executionContext: missionExecutionContext({ missionId: 'task-test', missionWorktree: testWorktree }),
     forgejoEnabled: false,
     tmpDir,
     readTokenFn: () => { postCommentCalled = true; throw new Error('readToken called'); },
@@ -322,7 +323,7 @@ test('consumeImplementerArtifacts does not call Forgejo helpers when forgejoEnab
   const fresh = reviewArtifactsModule.consumeImplementerArtifacts;
   
   const result = await fresh('task-test', 'mistral', {
-    worktree: testWorktree,
+    executionContext: missionExecutionContext({ missionId: 'task-test', missionWorktree: testWorktree }),
     forgejoEnabled: false,
     tmpDir,
     readTokenFn: () => { throw new Error('readToken called'); },

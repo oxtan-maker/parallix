@@ -1,9 +1,11 @@
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { ReviewOperatorResumePermit } from '../review-recovery.js';
+import type { ExecutionActivityActor } from '../../domain/execution-activity.js';
 
 export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'rebase' | 'integrate'; readonly args: readonly string[]; readonly interactive?: boolean; }
 /** Transport details remain application state, outside the domain operation. */
 export interface WorkflowOperationRecord extends WorkflowOperation {
+  readonly activityActor?: ExecutionActivityActor;
   readonly operatorInvocation?: boolean;
   readonly requestedAgent?: string | null;
   readonly pinnedAgent?: boolean;
@@ -22,6 +24,8 @@ export interface WorkflowOperationStore {
   open(): Promise<readonly WorkflowOperationRecord[]>;
   latest(_mission: string): Promise<WorkflowOperationRecord | null>;
   latestByMission(): Promise<readonly WorkflowOperationRecord[]>;
+  /** Revision of durable historical operation evidence used by analytics. */
+  analyticsRevision?(): Promise<string>;
   insert(_operation: WorkflowOperationRecord): Promise<void>;
   replace(_operation: WorkflowOperationRecord, _generation: number): Promise<void>;
 }

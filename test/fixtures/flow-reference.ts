@@ -79,7 +79,8 @@ function gateRuns(mission: number, declared: number, declaredFailed: number, int
 }
 
 function rebaseRuns(mission: number, stage: FlowRebaseRun['stage'], outcomes: readonly FlowRebaseRun['outcomes'][]): FlowRebaseRun[] {
-  return outcomes.map((sequence, index) => ({ id: `m${mission}:${stage}:${index}`, stage, outcomes: sequence }));
+  return outcomes.map((sequence, index) => ({ id: `m${mission}:${stage}:${index}`,
+    operationId: `m${mission}:${stage}`, stage, outcomes: sequence }));
 }
 
 /** Rebase outcome sequences for one stage, dealt round-robin over the missions. */
@@ -109,12 +110,20 @@ function currentFacts(): FlowMissionFacts[] {
     const mission = index + 1;
     const closedAt = new Date(Date.parse('2026-10-28T08:00:00Z') + index * 6 * 60 * MINUTE).toISOString();
     const startedAt = new Date(Date.parse(closedAt) - 1235 * MINUTE).toISOString();
+    const preReview = rebaseRuns(mission, 'pre-review-rebase', pre.filter((_, run) => run % missions === index));
+    const integrationRebase = rebaseRuns(mission, 'integration-rebase', post.filter((_, run) => run % missions === index));
     return { repositoryId: 'parallix', missionId: `task-${String(3000 + mission)}`, closedAt,
       implementer: ['claude', 'codex', 'custom'][index % 3]!,
       diagramNodeIds: [], diagramEdgeIds: [], ownership: ownership(), window: { startedAt, finishedAt: closedAt },
       gateRuns: gateRuns(mission, Math.max(declared[index]!, repairs[index]!), repairs[index]!, Math.max(integration[index]!, integrationFailures[index]!), integrationFailures[index]!),
-      rebaseRuns: [...rebaseRuns(mission, 'pre-review-rebase', pre.filter((_, run) => run % missions === index)),
-        ...rebaseRuns(mission, 'integration-rebase', post.filter((_, run) => run % missions === index))],
+      rebaseRuns: [...preReview, ...integrationRebase], rebaseStages: [
+        { stage: 'direct-rebase', state: 'inapplicable', operationId: null, sourceId: null,
+          reason: 'no direct rebase workflow was requested', outcomes: [] },
+        { stage: 'pre-review-rebase', state: 'measured', operationId: `m${mission}:review`, sourceId: preReview[0]!.id,
+          reason: 'retained terminal rebase outcome', outcomes: preReview.flatMap(run => run.outcomes) },
+        { stage: 'integration-rebase', state: 'measured', operationId: `m${mission}:integrate`, sourceId: integrationRebase[0]!.id,
+          reason: 'retained terminal rebase outcome', outcomes: integrationRebase.flatMap(run => run.outcomes) },
+      ], diagnostics: [],
       lead: { queued: 0, recoveries: 0, escalations: 0 }, laneDwellMs: dwell(index),
       actualAgentLaunches: 1 + launches[index]!, agentLaunches: [],
       observedDisqualifiers: index < firstPass ? [] : ['return'], reviewStatistics: review(`m${mission}`, returns[index]!, agentRounds[index]!, humanRounds[index]!),

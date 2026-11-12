@@ -7,6 +7,7 @@ import { preparationFailure } from './review-preparation-failure.js';
 import * as fmt from './presentation/cli-format.js';
 import type { GatekeeperOutcome, ReviewPreparationLog, ReviewPreparationMissionServicesPort, ReviewPreparationResult, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions } from "./ports/review-preparation-workflow.js";
 import { rebound } from './rebound-kernel.js';
+import { DECLARED_GATES_RETURN_STAGE, type WorkflowReturnStage } from '../domain/board-event.js';
 
 interface GatekeeperRemediationContext {
   gatekeeperResult: GatekeeperOutcome;
@@ -27,7 +28,7 @@ interface GatekeeperRemediationContext {
   missionServicesFn: ReviewPreparationMissionServicesPort;
   occurredAt: string;
   reviewer?: PerformReviewPreparationOptions['reviewer'];
-  transitionToImplementer: () => Promise<void>;
+  transitionToImplementer: (_slug: string, _returnStage: WorkflowReturnStage) => Promise<void>;
   retryReviewPreparation: (_slug: string, _options: PerformReviewPreparationOptions) => Promise<ReviewPreparationResult>;
 }
 
@@ -132,6 +133,7 @@ export class GatekeeperRemediation {
         maxAttempts: 1,
         maxLaunchRetries: 0,
         startAgent: startAgentFn,
+        returnStage: DECLARED_GATES_RETURN_STAGE,
         transitionToImplementer: context.transitionToImplementer,
         readHead: () => {
           const result = this.ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);

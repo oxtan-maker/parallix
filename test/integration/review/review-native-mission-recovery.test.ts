@@ -1,5 +1,6 @@
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 // Historical regression provenance: TASK-2614.
 // TASK-2614 — red-to-green reproduction for review and --reconcile-review
 // on a completed native (database-backed) Mission that carries no legacy
@@ -191,7 +192,7 @@ async function driveStartTransition(
   // sees no Review and the Mission-authority reset lets the handoff proceed),
   // then the round-one view the handoff created.
   let reviewed = false;
-  const bound = createReviewLoopPorts(SLUG, { worktree: root }, {
+  const bound = createReviewLoopPorts(SLUG, { executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }, {
     missionStore: store,
     log: () => undefined,
     error: (msg: string) => { error.value = msg; },

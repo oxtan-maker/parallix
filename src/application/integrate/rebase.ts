@@ -6,9 +6,11 @@ import type { IntegrationMissionServicesFactory } from '../ports/integration-rec
  */
 import * as fmt from '../presentation/cli-format.js';
 import { runRebaseWorkflow } from '../rebase-workflow.js';
+import { formatInapplicableRebaseWarning, observeInapplicableRebaseBestEffort } from '../rebase-observation.js';
 import { abortWith } from './support.js';
 import type { IntegrateGitRunner, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 import type { LiveMissionExecutionContext } from '../ports/mission-execution-context.js';
+import { rebaseObservation } from '../ports/rebase-workflow.js';
 
 export interface IntegrationRebaseTarget {
   baseWorktree: string;
@@ -28,6 +30,11 @@ export interface IntegrationRebasePrediction {
 }
 
 export function createIntegrationRebase({ missionPaths, rebase, landing, git: gitPorts }: IntegrateWorkflowPorts) {
+  async function recordIntegrationRebaseInapplicable(slug: string, target: IntegrationRebaseMutationTarget,
+    reason: string): Promise<void> {
+    await observeInapplicableRebaseBestEffort(rebaseObservation(), 'integration-rebase', { missionId: slug, root: target.baseWorktree,
+      baseBranch: target.baseBranch, reason }, cause => fmt.log.warn(formatInapplicableRebaseWarning('integration', slug, cause)));
+  }
   /**
    * Rebase the mission onto its resolved local primary/parent (ADR 0043) before
    * integration gates run and before the probe merge, so gates and the merge see
@@ -135,5 +142,5 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
     return { needed: true, wouldConflict: result.status !== 0 };
   }
 
-  return { runIntegrationRebase, predictIntegrationRebase };
+  return { runIntegrationRebase, predictIntegrationRebase, recordIntegrationRebaseInapplicable };
 }

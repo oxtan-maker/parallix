@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createMissionApplicationServices } from '../../src/composition/application-services.js';
 import { missionId } from '../../src/domain/mission.js';
+import { currentReviewRound } from '../../src/domain/review.js';
 import { recordApproval } from '../../src/adapters/review/review-round.js';
+import { reviewerResultAttribution } from '../../src/adapters/review/reviewer-result-attribution.js';
 
 function services(root = process.cwd()) {
   return createMissionApplicationServices(root);
@@ -35,6 +37,29 @@ async function recordContract(slug: string, root: string): Promise<void> {
   // workflow probe before refinement (TASK-2731), just as a real agent does.
   const classification = await missionServices.brief.setClassification({ ...await request('mission:context'), classification: 'ai_sdlc' });
   if (classification.status !== 'completed') { throw new Error(`fake classification failed: ${classification.error?.message}`); }
+}
+
+async function recordReviewerApproval(slug: string, reviewer: string, root: string): Promise<void> {
+  const missionServices = await services(root);
+  let diagnostic = 'approval did not run';
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const loaded = await missionServices.store.load(missionId(slug));
+    if (loaded.kind !== 'found' || !loaded.mission.review) { throw new Error(`fake agent could not read review for ${slug}`); }
+    const round = currentReviewRound(loaded.mission.review);
+    const revision = String(round.reviewerPolicy?.revision ?? round.subject.revision);
+    const approved = await recordApproval(slug, {
+      comment: 'No blocking findings.',
+      decidedAt: new Date().toISOString(),
+      expectedVersion: Number(loaded.version),
+      revision,
+      result: reviewerResultAttribution(reviewer, { status: 0, sessionId: `ses_fake_${reviewer}_${round.number}` }),
+    }, { missionStore: missionServices.store });
+    if (approved.outcome !== 'failed') { return; }
+    diagnostic = approved.diagnostic;
+    if (approved.kind !== 'stale-write') { break; }
+    await new Promise(resolve => setImmediate(resolve));
+  }
+  throw new Error(`fake approval failed: ${diagnostic}`);
 }
 
 async function runFakeLifecycleAgent(prompt: string, worktree?: string) {
@@ -70,11 +95,8 @@ async function runFakeLifecycleAgent(prompt: string, worktree?: string) {
   }
 
   if (/^Mode: review\./m.test(prompt)) {
-    const missionServices = await services(root);
-    const loaded = await missionServices.store.load(missionId(slug));
-    if (loaded.kind !== 'found') { throw new Error(`fake agent could not read ${slug}`); }
-    const approved = await recordApproval(slug, { comment: 'No blocking findings.', decidedAt: new Date().toISOString(), expectedVersion: Number(loaded.version) }, { missionStore: missionServices.store });
-    if (approved.outcome === 'failed') { throw new Error(`fake approval failed: ${approved.diagnostic}`); }
+    const reviewer = value(prompt, /--actor\s+([a-z][a-z0-9-]*)/i) ?? 'custom';
+    await recordReviewerApproval(slug, reviewer, root);
   }
 
   return { status: 0, stdout: '{"sessionID":"ses_fake"}\n', stderr: '' };

@@ -43,7 +43,7 @@ export interface StartReviewRound {
   readonly verbose: boolean;
   readonly pollTimeoutSeconds: number | null;
   readonly missionPath?: string;
-  readonly executionContext?: LiveMissionExecutionContext;
+  readonly executionContext: LiveMissionExecutionContext;
 }
 
 /** Entry facts and effects `ReviewRoundUseCase` needs before the loop runs. */
@@ -268,6 +268,8 @@ export interface LauncherStatus { supported: boolean; detail: string }
 export interface ReviewerRoutingPort {
   eligibleFamilies(): string[];
   launcherStatus(_agent: string): LauncherStatus;
+  /** Authoritative runtime/config block, separate from launcher health or capacity. */
+  isBlocked?(_agent: string): Promise<boolean>;
   /** The configured selector's nominee outside `excluded`; throws when none. */
   nominate(_excluded: ReadonlySet<string>): string;
   /** The runtime matrix, one line per route, for a no-route diagnostic. */
@@ -294,6 +296,8 @@ export interface ReviewAgentLaunch {
   readonly exclude: readonly (string | undefined)[];
   /** Native conversation policy for this invocation. */
   readonly sessionPolicy?: SessionLaunchPolicy;
+  /** This family already owns a parallel policy slot; capacity waits instead of rerouting it. */
+  readonly pinnedAgent?: boolean;
   /** The role prompt; absent for a bare repair launch that carries only `recovery`. */
   readonly prompt?: ReviewPromptFacts;
   /** Recovery instructions appended to the role prompt by a rebound. */

@@ -8,6 +8,7 @@
  * final acceptance also starts `px web` so the observer deadline is exercised.
  */
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { chromium } from 'playwright-core';
@@ -43,8 +44,9 @@ const buildMs = Math.round(performance.now() - started);
 const flow = projection.metrics.flow;
 assert.ok(flow, projection.metrics.flowUnavailable ?? 'FLOW projection unavailable');
 if (process.env.FLOW_REQUIRE_UNREADABLE_OPERATION === '1') {
-  assert.ok(flow.current.defects.some(defect => /unreadable workflow operation row excluded from FLOW statistics/.test(defect)),
-    'unreadable workflow history was excluded without a named FLOW collection defect');
+  const unreadable = /unreadable workflow operation row excluded from FLOW statistics/;
+  assert.equal(flow.current.defects.some(diagnostic => unreadable.test(diagnostic)), false,
+    'repository-wide unreadable history must not be copied onto every mission');
 }
 const statsMissions = await createStatsMissionFlowReader({ rootDir: process.cwd(), configuration, dbPath: databasePath })();
 assert.ok(statsMissions, 'px stats Mission flow unavailable');
@@ -87,9 +89,23 @@ const recovered = db.prepare(`
   readonly repositoryId: string;
   readonly closedAt: string;
 }>;
+const rawRebases = db.prepare(`
+  SELECT event_data AS eventData
+  FROM operational_history
+  WHERE event_type = 'flow.rebase'
+    AND json_extract(event_data, '$.repositoryId') = ?
+    AND json_extract(event_data, '$.missionId') = 'task-2845'
+  ORDER BY json_extract(event_data, '$.occurredAt'), id
+`).all(projection.repositoryId) as Array<{ readonly eventData: string }>;
+const parsedRawRebases = rawRebases.map(row => JSON.parse(row.eventData)) as Array<{
+  readonly stage: 'direct-rebase' | 'pre-review-rebase' | 'integration-rebase';
+  readonly outcome: 'running' | 'no-op' | 'clean' | 'conflict' | 'resolved' | 'failed';
+  readonly operationId: string;
+  readonly sourceId: string;
+}>;
 db.close();
 assert.equal(recovered.length, flow.current.completedMissions);
-assert.ok(recovered.some(mission => mission.id === 'task-2830'), 'fresh recovered task-2830 missing');
+assert.ok(recovered.some(mission => mission.id === 'task-2845'), 'rebase outcome fixture task-2845 missing');
 assert.equal(flow.current.graph.nodes.some(node => node.id === 'implement'), true);
 assert.equal(flow.current.graph.edges.some(edge => edge.from === 'pre-review-rebase'
   && edge.to === 'pre-review-resolve' && edge.kind === 'rebase-conflict'), true);
@@ -97,6 +113,51 @@ if (process.env.FLOW_REQUIRE_CONFLICT === '1') {
   assert.ok(flow.current.graph.edges.some(edge => edge.kind === 'rebase-conflict' && edge.count > 0),
     'disposable conflict scenario did not reach the mounted FLOW projection');
 }
+const taskOutcomeObservation = statsMissions.find(mission => mission.mission === 'task-2845')?.flowObservation;
+assert.ok(taskOutcomeObservation, 'production stats reader omitted task-2845 FLOW facts');
+const outcomeStages = taskOutcomeObservation.rebaseStages;
+type StageName = (typeof outcomeStages)[number]['stage'];
+const stageFacts = (name: StageName) => outcomeStages.filter(value => value.stage === name);
+const rejectedRebaseSources = new Set(taskOutcomeObservation.diagnostics
+  .filter(diagnostic => diagnostic.kind === 'identity' && diagnostic.missionId === 'task-2845'
+    && diagnostic.stage.endsWith('-rebase') && diagnostic.sourceId)
+  .map(diagnostic => diagnostic.sourceId!));
+const rawOutcomes = (name: StageName, operationId: string | null) => parsedRawRebases
+  .filter(value => value.stage === name && value.operationId === operationId
+    && value.outcome !== 'running' && !rejectedRebaseSources.has(value.sourceId))
+  .map(value => value.outcome);
+for (const name of ['pre-review-rebase', 'integration-rebase'] as const) {
+  for (const fact of stageFacts(name)) { assert.deepEqual(fact.outcomes, rawOutcomes(name, fact.operationId)); }
+}
+assert.ok(parsedRawRebases.filter(value => value.outcome !== 'running' && rejectedRebaseSources.has(value.sourceId))
+  .every(value => taskOutcomeObservation.diagnostics.some(diagnostic => diagnostic.kind === 'identity'
+    && diagnostic.missionId === 'task-2845' && diagnostic.sourceId === value.sourceId)),
+  'every excluded raw terminal has a scoped identity diagnostic');
+for (const outcome of ['no-op', 'clean', 'conflict', 'resolved'] as const) {
+  assert.ok(stageFacts('pre-review-rebase').flatMap(fact => fact.outcomes).includes(outcome),
+    `pre-review ${outcome} outcome missing`);
+}
+assert.ok(stageFacts('pre-review-rebase').flatMap(fact => fact.outcomes)
+  .filter(outcome => outcome === 'resolved').length >= 2,
+  'repeated conflict resolutions were collapsed');
+assert.ok(stageFacts('integration-rebase').flatMap(fact => fact.outcomes).includes('failed'),
+  'integration failed outcome missing');
+assert.ok(stageFacts('direct-rebase').some(fact => fact.state === 'interrupted'));
+const inapplicableStage = statsMissions.flatMap(mission => mission.flowObservation?.rebaseStages ?? [])
+  .find(value => value.state === 'inapplicable');
+assert.ok(inapplicableStage, 'current projection lacks a typed inapplicable rebase stage');
+
+const publicStats = spawnSync(process.execPath, [path.resolve('build/px.mjs'), 'stats'], {
+  cwd: process.cwd(), env: process.env, encoding: 'utf8', timeout: 180_000, maxBuffer: 64 * 1024 * 1024,
+});
+assert.equal(publicStats.status, 0, publicStats.stdout + publicStats.stderr);
+for (const visible of statsFlow.current.rebaseStages.visible) {
+  assert.ok(publicStats.stdout.includes(`Rebase stage: ${visible.repositoryId}/${visible.missionId} ${visible.stage} ${visible.state}`),
+    `public CLI omitted server-selected stage ${visible.missionId}/${visible.stage}/${visible.state}`);
+}
+assert.ok((publicStats.stdout.match(/^Rebase stage:/gm) ?? []).length <= 24,
+  'public CLI emitted more than the bounded current/previous rebase detail');
+assert.match(publicStats.stdout, /Rebase stages: \d+ additional stage facts not shown; incomplete states are listed first\./);
 
 const host = createWebHost({
   assets: loadWebAssets(path.resolve('build/web')),
@@ -114,6 +175,15 @@ try {
   await page.getByRole('button', { name: 'Flow', exact: true }).click();
   await page.locator('[data-flow-view]').waitFor();
   assert.match(await page.locator('[data-flow-view]').innerText(), new RegExp(`${flow.current.completedMissions} missions landed`));
+  assert.match(await page.locator('[data-flow-view]').innerText(), new RegExp(`${flow.current.observation.complete} of ${flow.current.completedMissions} measured`));
+  const rebaseText = await page.locator('[data-flow-region="rebase-provenance"]').textContent() ?? '';
+  for (const visible of flow.current.rebaseStages.visible) {
+    assert.ok(rebaseText.includes(`${visible.missionId} · ${visible.stage} · ${visible.state}`),
+      `Flow panel omitted server-selected stage ${visible.missionId}/${visible.stage}/${visible.state}`);
+  }
+  if (flow.current.rebaseStages.omitted > 0) {
+    assert.match(rebaseText, new RegExp(`${flow.current.rebaseStages.omitted} additional stage facts not shown`));
+  }
   assert.equal(await page.locator('[data-flow-node]').count(), flow.current.graph.nodes.length);
   assert.ok(await page.locator('[data-flow-edge]').count() >= flow.current.graph.edges.filter(edge => edge.count > 0).length);
   assert.equal(await page.locator('[data-flow-time-row="unobserved"]').count(), 0);
@@ -222,7 +292,7 @@ try {
   await narrow.close();
 
   console.log(JSON.stringify({
-    result: 'PASS',
+    result: 'FLOW DATA PATH PASS',
     interface: 'production projection, transport, public host, packaged assets, Chromium',
     isolatedDatabase: databasePath,
     buildMs,
@@ -230,6 +300,8 @@ try {
     recoveredWindow: { start: flow.current.startDate, end: flow.current.endDate },
     recoveredMissions: recovered.length,
     recoveredIdentities: recovered.slice(-6).map(mission => mission.id),
+    publicCli: { command: 'px stats', rebaseLines: publicStats.stdout.split('\n').filter(line => line.startsWith('Rebase stage:')) },
+    rebaseReconciliation: { stages: outcomeStages, rejectedRawSources: [...rejectedRebaseSources] },
     projected: {
       currentCompleted: flow.current.completedMissions,
       previousCompleted: flow.previous.completedMissions,
@@ -245,7 +317,7 @@ try {
       defects: flow.current.defects,
     },
     controls: ['Board', 'Flow', 'All agents', ...families, 'Compare: previous week', 'Mission order', 'Longest first'],
-    wideGeometry: { routeBlockers, routeLabelBlockers: { current: currentRouteLabelBlockers, previous: previousRouteLabelBlockers },
+    wideGeometry: { routeBlockers, routeLabelChecks: { current: currentRouteLabelBlockers, previous: previousRouteLabelBlockers },
       tip, implement, labelBlockers: wideGeometry.blockers,
       unrecordedOrigin: wideGeometry.unrecordedOrigin },
     narrowOverflow: overflow,

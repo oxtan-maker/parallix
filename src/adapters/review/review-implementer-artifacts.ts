@@ -7,7 +7,6 @@ import type { postComment } from './review-adapter.js';
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { parseResolutionDispositions, type ReviewItemDisposition } from '../../domain/review.js';
@@ -17,14 +16,15 @@ import { type ReviewStateReader, reviewArtifactPath, staleReviewWrite, renderRes
 import { postWorkflowComment } from './review-workflow-posting.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { resolveProviderEnabled, type RepoEventFn } from './review-reviewer-artifacts.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 type ImplementerArtifactOptions = {
+  executionContext: LiveMissionExecutionContext;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
   readArtifactFn?: typeof readArtifactFile;
   deleteArtifactFn?: typeof deleteArtifactFile;
   tmpDir?: string | null;
-  worktree?: string;
   providerEnabled?: boolean | null;
   forgejoEnabled?: boolean | null;
   readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
@@ -168,12 +168,12 @@ async function closeImplementerRound(slug: string, context: {
 
 /** Mirror the round resolution and its disposition onto the pull request. */
 async function mirrorImplementerArtifacts(slug: string, context: {
-  resolution: string; disposition: string; implementer: string; worktree: string;
+  resolution: string; disposition: string; implementer: string;
   options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
-  const { resolution, disposition, implementer, worktree, options, log, error } = context;
+  const { resolution, disposition, implementer, options, log, error } = context;
   const postOptions = {
-    rootDir: worktree, reviewIdentity: implementer, readTokenFn: options.readTokenFn,
+    executionContext: options.executionContext, reviewIdentity: implementer, readTokenFn: options.readTokenFn,
     postCommentFn: options.postCommentFn, buildMetadataFooterFn: options.buildMetadataFooterFn, configuration: options.configuration, log, error,
   };
   for (const [body, label] of [[resolution, 'resolution'], [`Autonomous review disposition: ${disposition}`, 'disposition']] as const) {
@@ -232,7 +232,7 @@ function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactO
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
   const deleteArtifactFn = options.deleteArtifactFn || deleteArtifactFile;
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
   const providerEnabled = resolveProviderEnabled(options, worktree);
 
@@ -248,7 +248,7 @@ function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactO
 export async function consumeImplementerArtifacts(
   slug: string,
   implementer: string,
-  options: ImplementerArtifactOptions = {}
+  options: ImplementerArtifactOptions
 ): Promise<{ consumed: boolean; failureReason?: FailureReason; ok?: boolean; disposition?: string | null; diagnostic?: string | null }> {
   const { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, disposition, hasAny } = prepareImplementerArtifacts(slug, options);
 
@@ -293,7 +293,7 @@ export async function consumeImplementerArtifacts(
   await consumeImplementerHumanNotes(slug, implementer, providerEnabled, worktree, options, log, error);
 
   if (providerEnabled) {
-    const mirrored = await mirrorImplementerArtifacts(slug, { resolution: artifacts.resolution, disposition, implementer, worktree, options, log, error });
+    const mirrored = await mirrorImplementerArtifacts(slug, { resolution: artifacts.resolution, disposition, implementer, options, log, error });
     if (mirrored) { return mirrored; }
   } else {
     log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
@@ -314,7 +314,7 @@ async function consumeImplementerHumanNotes(slug: string, implementer: string, p
       createEventFn: options.createEventFn || createEvent,
       readTokenFn: options.readTokenFn,
       reviewIdentity: implementer,
-      worktree,
+      executionContext: options.executionContext,
       writeReviewStateFn: options.writeReviewStateFn,
       currentState: options.currentState,
       configuration: options.configuration,

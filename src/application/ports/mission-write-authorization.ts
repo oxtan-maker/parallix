@@ -1,5 +1,6 @@
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { ExecutionActivity } from '../../domain/execution-activity.js';
+import type { WorkflowReturnIdentity, WorkflowReturnStage } from '../../domain/board-event.js';
 export type WorkflowOwnerRead = (_id: string) => Promise<WorkflowOperation | null>;
 
 /** Composition installs the process owner's authorization before workflow effects. */
@@ -27,6 +28,15 @@ export function inheritedMissionWrite(): boolean { return authorization?.inherit
 export function hasMissionWriteAuthorization(): boolean { return authorization !== null; }
 export function authorizedOperationId(): string | null { return authorization?.operationId ?? null; }
 export function authorizedOperationGeneration(): number | null { return authorization?.generation ?? null; }
+
+/** Bind a return to the ambient operation fence, or keep both authority fields null. */
+export function bindReturnIdentity(stage: WorkflowReturnStage): WorkflowReturnIdentity {
+  const operationId = authorizedOperationId();
+  const operationGeneration = authorizedOperationGeneration();
+  const authorized = operationId !== null && operationGeneration !== null;
+  return { stage, operationId: authorized ? operationId : null,
+    operationGeneration: authorized ? operationGeneration : null };
+}
 
 export async function reportWorkflowProviderStarted(agent: string): Promise<void> { await authorization?.providerStarted?.(agent); }
 

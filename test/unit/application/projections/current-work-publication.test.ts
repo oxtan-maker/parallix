@@ -51,6 +51,9 @@ import { repositoryId } from '../../../../src/domain/repository.js';
 import { makeCard } from '../../../fixtures/board-projection.js';
 import { inMemoryOperationalHistory } from '../../../fixtures/operational-history.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+
+const reviewExecutionContext = missionExecutionContext({ missionId: 'task-2370', missionWorktree: '/worktree' });
 
 // ── Current-work publication ──
 
@@ -281,7 +284,9 @@ test('publishing current work remains isolated from the activation write', async
 function makeReviewWorkflow(ran: string[]) {
   const operation = (name: string) => async () => { ran.push(name); };
   return {
-    preflight: (args: string[]) => ({ slug: 'task-2370', args, options: {} }),
+    preflight: (args: string[]) => args.includes('--status')
+      ? ({ kind: 'read-only' as const, slug: 'task-2370', args, options: {} })
+      : ({ kind: 'mutation' as const, executionContext: reviewExecutionContext, slug: 'task-2370', args, options: {} }),
     verify: operation('verify'),
     submit: operation('submit'),
     push: operation('push'),
@@ -400,7 +405,7 @@ for (const phase of ['review', 'integrate'] as const) {
       };
       const useCase = phase === 'integrate' ? new IntegrateCommandUseCase({ execute }, recorder)
         : new ReviewCommandUseCase({ ...makeReviewWorkflow([]),
-          preflight: (args, options = {}) => ({ slug: 'task-2370', args, options }),
+          preflight: (args, options = {}) => ({ kind: 'mutation' as const, executionContext: reviewExecutionContext, slug: 'task-2370', args, options }),
           enter: context => execute(context.args, context.options) }, recorder);
       const invoke = commandInvocation(exitFn => useCase.execute(['task-2370'], { exitFn }));
       if (scenario === 'cleanup') { await assert.rejects(invoke, /cleanup after exit failed/); }
@@ -592,7 +597,7 @@ describe("Workflow current work follows launches —", () => {
     const viaReview = inMemoryOperationalHistory({ assignIds: true });
     const operation = () => async () => {};
     await new ReviewCommandUseCase({
-      preflight: (args: string[]) => ({ slug: SLUG, args, options: {} }),
+      preflight: (args: string[]) => ({ kind: 'mutation' as const, executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/worktree' }), slug: SLUG, args, options: {} }),
       verify: operation(), submit: operation(), push: operation(),
       enter: async (context: ReviewWorkflowContext) => {
         await (context.options.onAgentLaunched as (_agent: string, _phase: AgentLaunchPhase) => Promise<void>)('qwen', 'review');

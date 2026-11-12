@@ -1,3 +1,6 @@
+import { recordReviewerResult } from '../../../../src/domain/reviewer-result.js';
+import { failureReason, StructuredFailure } from '../../../../src/domain/failure-reason.js';
+import { runParallelReviewerBatch } from '../../../../src/application/review-loop/parallel-reviewers.js';
 import { renderReviewLoopEvent, reviewLoopReporter } from '../../../../src/adapters/review/review-loop-presentation.js';
 // reviewer fallback contract.
 // Reviewer routing policy lives in src/application/review-loop/reviewer-selection.ts;
@@ -14,10 +17,11 @@ import { applyReviewStateToReview } from '../../../../src/adapters/review/review
 import { createReviewerPolicyStatePort, ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { MissionStaleVersion, missionVersion } from '../../../../src/application/domain-ports.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { recordApproval, recordRequestedChanges } from '../../../../src/adapters/review/review-round.js';
 import { reviewerResultAttribution } from '../../../../src/adapters/review/reviewer-result-attribution.js';
-import { ConfiguredReviewerEligibility, changeRevision, currentReviewRound, reviewFindingId, reviewStatus, startReview } from '../../../../src/domain/review.js';
+import { ConfiguredReviewerEligibility, changeRevision, currentReviewRound, reviewFindingId, reviewStatus, resumeReview, startReview } from '../../../../src/domain/review.js';
 import { planReviewerPolicy } from '../../../../src/domain/reviewer-policy.js';
 import { runReviewerPhase } from '../../../../src/application/review-loop/reviewer-phase.js';
 import { ReviewRound } from '../../../../src/application/review-loop/round.js';
@@ -53,6 +57,12 @@ test('reviewer presentation distinguishes initial selection from continued and l
       assert.deepEqual(lines, [`[INFO] Resuming persisted reviewer: claude (round ${round})`, '[INFO] Selected reviewer: claude (persisted)']);
     }
   }
+});
+
+test('a failed approval transition directs the operator back through review before integration (PX-0046.03)', () => {
+  const errors: string[] = [];
+  renderReviewLoopEvent({ kind: 'approval-recovery-guidance', slug: 'px-0058.01' }, { log: () => {}, error: line => errors.push(line) });
+  assert.match(errors.join('\n'), /Recovery: px review px-0058\.01; after approval completes, run px integrate px-0058\.01/);
 });
 
 test('explicit reviewer keeps its historical precedence when review resumes (TASK-2837)', () => {
@@ -297,62 +307,219 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
     }
   });
 
-  /** The real Review authority behind the serialized runner; only agent processes are faked. */
-  function serializedRun(options: { eligible: string[]; unsupported?: string[]; launchFails?: string[]; verdicts?: Record<string, 'approve' | 'request-changes'>; operatorApproves?: boolean; reroute?: Record<string, string>; polled?: boolean; verdictDuringLaunch?: boolean }) {
+  /** The real Review authority behind the runner; only agent processes are faked. */
+  function serializedRun(options: { eligible: string[]; blocked?: string[]; unsupported?: string[]; launchFails?: string[]; launchErrors?: Record<string, Error>; verdicts?: Record<string, 'approve' | 'request-changes'>; operatorApproves?: boolean; reroute?: Record<string, string>; polled?: boolean; verdictDuringLaunch?: boolean; providerEnabled?: boolean; nativePublication?: boolean; launchWait?: (_reviewer: string) => Promise<void> }) {
     const slug = 'task-px-0046-03';
     const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head-1') },
       agentFamily('claude'), implementer, '2026-11-09T10:00:00.000Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: options.eligible.map(agentFamily), strategy: 'random' }));
-    const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: implementer, review }));
+    const memory = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: implementer, review }));
+    let version = missionVersion(1);
+    const checkVersion = (expected: typeof version | null | undefined) => {
+      if (expected !== version) { throw new MissionStaleVersion(memory.mission().id, expected ?? null, version); }
+      version = missionVersion(version + 1);
+    };
+    // Concurrent verdicts must observe the same stale-write fence as SQLite.
+    const store: typeof memory = { ...memory,
+      save: async (next, expected) => { checkVersion(expected); return await memory.save(next, expected); },
+      saveWithTransition: async (next, expected, event) => { checkVersion(expected); return await memory.saveWithTransition(next, expected, event); },
+    };
     const ports = { missionStore: store, lifecycleService: new MissionLifecycleService(store) };
     const unsupported = new Set(options.unsupported ?? []);
     const reviewers: string[] = [];
+    const approvalWrites: unknown[] = [];
+    const verdictWrites: unknown[] = [];
+    const observationRecorder = createReviewObservationRecorder(slug, () => 'head-1', Boolean(options.polled || options.providerEnabled), ports);
+    const policyState = createReviewerPolicyStatePort(slug, store);
+    let releaseReroute!: () => void;
+    const rerouteRecorded = new Promise<void>(resolve => { releaseReroute = resolve; });
+    let decisionTail = Promise.resolve();
+    const conflictSafe = async (write: () => Promise<Awaited<ReturnType<typeof recordApproval>>>) => {
+      const current = decisionTail.then(async () => {
+        let result = await write();
+        for (let attempt = 1; attempt < 3 && result.outcome === 'failed' && result.kind === 'stale-write'; attempt += 1) { result = await write(); }
+        return result;
+      });
+      decisionTail = current.then(() => {}, () => {});
+      return await current;
+    };
     const fake = fakeReviewLoopPorts({
       slug,
       missionStore: store, lifecycle: ports.lifecycleService,
       routing: { eligibleFamilies: () => options.eligible, launcherStatus: family => ({ supported: !unsupported.has(family), detail: `${family} launcher` }),
+        isBlocked: async family => Boolean(options.blocked?.includes(family)),
         nominate: excluded => { const nominee = options.eligible.find(family => !excluded.has(family) && !unsupported.has(family)); if (!nominee) { throw new Error('none'); } return nominee; } },
-      stateport: { ...createReviewerPolicyStatePort(slug, store),
+      stateport: { ...policyState,
+        replaceReviewer: async (...args) => {
+          const policy = await policyState.replaceReviewer(...args);
+          if (args[5]) { releaseReroute(); }
+          return policy;
+        },
         // The loop state mirrors the Review authority: an approved aggregate reads back as an approved round.
         read: async () => new ReviewState(slug, { round: 1, startedAt: '2026-11-09T10:00:00.000Z', reviewer: currentReviewRound(store.mission().review!).reviewer, implementer: 'codex',
           ...(reviewStatus(store.mission().review!) === 'approved' ? { phase: 'approved' as const, disposition: 'APPROVED' } : { phase: 'reviewing' as const }) }),
-        ...(options.polled
-          ? createReviewObservationRecorder(slug, () => 'head-1', true, ports)
-          : { recordApproval: async (_state: unknown, observation?: { revision: string | null }) => { await recordApproval(slug, { comment: null, decidedAt: new Date().toISOString(), revision: observation?.revision ?? 'head-1', source: { kind: 'local' } }, ports); } }),
+        ...observationRecorder, recordApproval: async (state: Parameters<typeof observationRecorder.recordApproval>[0], observation: Parameters<typeof observationRecorder.recordApproval>[1]) => {
+            approvalWrites.push({ reviewer: state.reviewer, observation });
+            await observationRecorder.recordApproval(state, observation);
+          },
         persist: async next => {
           const mission = store.mission(); const round = currentReviewRound(mission.review!);
           await store.save({ ...mission, review: applyReviewStateToReview(mission.review!, { ...(next as ReviewState).toJSON(), round: round.number }) }, (await store.load()).version);
         } },
       agents: { launch: async launch => {
+        if (launch.role !== 'reviewer') { return { agent: launch.agent, result: { status: 0, sessionId: `${launch.agent}-native-1` } }; }
+        if (options.launchErrors?.[launch.agent]) { throw options.launchErrors[launch.agent]; }
         if (options.launchFails?.includes(launch.agent)) { throw new Error(`${launch.agent} cannot start`); }
         const actual = options.reroute?.[launch.agent] ?? launch.agent;
+        reviewers.push(actual);
+        await options.launchWait?.(actual);
+        // These fallback cases publish the fallback child's verdict first,
+        // reconcile its identity, then publish the other selected slot.
+        if (options.verdictDuringLaunch && Object.values(options.reroute ?? {}).includes(launch.agent)
+          && !options.reroute?.[launch.agent]) { await rerouteRecorded; }
         // The child's `px verdict` lands while the launch is still running, attributed to the pre-reroute round reviewer.
-        if (options.verdictDuringLaunch) { await recordApproval(slug, { comment: null, decidedAt: new Date().toISOString(), revision: 'head-1', source: { kind: 'local' }, result: reviewerResultAttribution(launch.agent, { status: 0, sessionId: `${actual}-native-1` }) }, ports); }
-        reviewers.push(actual); return { agent: actual, result: { status: 0, sessionId: `${actual}-native-1` } };
+        if (options.verdictDuringLaunch) { verdictWrites.push({ requested: launch.agent, actual, result: await conflictSafe(() => recordApproval(slug, { comment: null, decidedAt: new Date().toISOString(), revision: 'head-1', source: { kind: 'local' }, result: reviewerResultAttribution(launch.agent, { status: 0, sessionId: options.nativePublication === false ? undefined : `${actual}-native-1` }) }, ports)) }); }
+        return { agent: actual, result: { status: 0, sessionId: `${actual}-native-1` } };
       } },
-      ...(options.polled ? { provider: { pollReview: async () => ({ disposition: 'APPROVED' as const, revision: 'head-1', decidedAt: new Date().toISOString(), comment: null }) } } : {}),
+      ...(options.polled || options.providerEnabled ? { provider: { pollReview: async () => ({ disposition: 'APPROVED' as const, revision: 'head-1', decidedAt: new Date().toISOString(), comment: null }) } } : {}),
       artifacts: { consumeReviewer: async (reviewer, _state, launch) => {
         if (options.polled) { return { consumed: true, ok: true as const, reviewState: null }; }
         if (options.verdictDuringLaunch) { return { consumed: false }; }
-        if (options.operatorApproves) { await recordApproval(slug, { comment: 'operator inspected', decidedAt: new Date().toISOString(), source: { kind: 'local' } }, ports); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; }
+        if (options.operatorApproves) { await conflictSafe(() => recordApproval(slug, { comment: 'operator inspected', decidedAt: new Date().toISOString(), source: { kind: 'local' } }, ports)); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; }
         const verdict = options.verdicts?.[reviewer] ?? 'approve';
         const input = { comment: null, decidedAt: new Date().toISOString(), revision: 'head-1', source: { kind: 'local' as const }, result: reviewerResultAttribution(reviewer, launch?.result) };
-        if (verdict === 'approve') { await recordApproval(slug, input, ports); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; }
-        await recordRequestedChanges(slug, { comment: null, decidedAt: input.decidedAt, revision: input.revision, result: input.result, findings: [{ id: reviewFindingId('F1'), summary: 'counterexample', location: null }] }, ports);
+        if (verdict === 'approve') { await conflictSafe(() => recordApproval(slug, input, ports)); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; }
+        await conflictSafe(() => recordRequestedChanges(slug, { comment: null, decidedAt: input.decidedAt, revision: input.revision, result: input.result, findings: [{ id: reviewFindingId('F1'), summary: 'counterexample', location: null }] }, ports));
         return { consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES', reviewFindings: [{ id: 'F1', summary: 'counterexample' }] };
       } },
     });
-    return { fake, store, reviewers, slug, run: async (isContinue = false) => await runReviewLoop({ slug, implementer: 'codex', maxAttempts: 1, skipReviewPreparation: true, isContinue }, fake.ports) };
+    return { fake, store, reviewers, approvalWrites, verdictWrites, slug, run: async (isContinue = false) => await runReviewLoop({ slug, implementer: 'codex', maxAttempts: 1, skipReviewPreparation: true, isContinue }, fake.ports) };
   }
 
-  test('two available independent reviewers run serially and both must approve the same revision', async () => {
+  test('a usage-blocked independent reviewer leaves one required approval without a failed launch (PX-0046.03)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'custom'], blocked: ['claude'] });
+    await harness.run();
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.deepEqual(harness.reviewers, ['custom']);
+    assert.deepEqual([round.reviewerPolicy?.requiredApprovals, round.reviewerPolicy?.selected], [1, ['custom']]);
+    assert.equal(harness.store.mission().status, 'integration', harness.fake.errors.join('\n'));
+  });
+
+  test('resume reduces a saved two-reviewer requirement when the other reviewer becomes usage blocked (PX-0046.03)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'custom'], blocked: ['claude'] });
+    const state = await harness.fake.ports.state.read();
+    assert.ok(state);
+    await harness.fake.ports.state.recordReviewerPolicy(state, planReviewerPolicy({ revision: changeRevision('head-1'),
+      implementer, primary: agentFamily('claude'), probe: probe(['codex', 'claude', 'custom'], new Set()) }));
+    await recordApproval(harness.slug, { comment: null, decidedAt: '2026-11-09T10:01:00.000Z', revision: 'head-1',
+      source: { kind: 'local' }, result: reviewerResultAttribution('custom', { sessionId: 'saved-custom', status: 0 }) },
+    { missionStore: harness.store, lifecycleService: new MissionLifecycleService(harness.store) });
+    await harness.run(true);
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(harness.store.mission().status, 'integration', harness.fake.errors.join('\n'));
+    assert.deepEqual(harness.reviewers, []);
+    assert.deepEqual(round.reviewerResults?.map(result => result.publicationId), ['saved-custom']);
+    assert.deepEqual([round.reviewerPolicy?.requiredApprovals, round.reviewerPolicy?.selected], [1, ['custom']]);
+  });
+
+  test('two available independent reviewers both approve the same revision', async () => {
     const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'] });
     await harness.run();
     assert.deepEqual(harness.reviewers, ['claude', 'vibe']);
     const round = currentReviewRound(harness.store.mission().review!);
     assert.equal(round.reviewerPolicy?.requiredApprovals, 2);
     assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
-    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision, result.revision]), [['claude', 'approved', 'head-1'], ['vibe', 'approved', 'head-1']]);
+    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision, result.revision]).sort(), [['claude', 'approved', 'head-1'], ['vibe', 'approved', 'head-1']]);
     assert.ok(harness.fake.launches.every(launch => launch.sessionPolicy === 'fresh-ephemeral'));
+  });
+
+  test('two admitted reviewers overlap against one verified revision in fresh isolated sessions (PX-0046.04)', async () => {
+    const releases = new Map<string, () => void>();
+    let releaseImmediately = false;
+    let entered = 0;
+    let releaseEntered!: () => void;
+    const bothEntered = new Promise<void>(resolve => { releaseEntered = resolve; });
+    const harness = serializedRun({
+      eligible: ['codex', 'claude', 'vibe'],
+      launchWait: async reviewer => {
+        entered += 1;
+        if (entered === 2) { releaseEntered(); }
+        if (releaseImmediately) { return; }
+        await new Promise<void>(resolve => { releases.set(reviewer, resolve); });
+      },
+    });
+    const running = harness.run();
+    const overlapped = await Promise.race([
+      bothEntered.then(() => true),
+      new Promise<false>(resolve => { setTimeout(() => resolve(false), 40); }),
+    ]);
+    releaseImmediately = true;
+    for (const release of releases.values()) { release(); }
+    await running;
+
+    assert.equal(overlapped, true, 'the second admitted reviewer starts before the first one completes');
+    assert.deepEqual([...harness.reviewers].sort(), ['claude', 'vibe']);
+    assert.ok(harness.fake.launches.every(launch => launch.pinnedAgent), 'selected parallel slots queue instead of launcher rerouting');
+    assert.ok(harness.fake.launches.every(launch => launch.sessionPolicy === 'fresh-ephemeral'));
+    assert.ok(harness.fake.launches.every(launch => launch.prompt?.reviewBaseline === 'baseline'));
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.reviewerPolicy?.revision, 'head-1');
+    assert.deepEqual(round.reviewerResults?.map(result => result.revision), ['head-1', 'head-1']);
+  });
+
+  test('queued reviewer capacity remains required and joins the active same-revision review when admitted (PX-0046.04)', async () => {
+    let releaseQueued!: () => void;
+    const queued = new Promise<void>(resolve => { releaseQueued = resolve; });
+    let firstFinished = false;
+    const harness = serializedRun({
+      eligible: ['codex', 'claude', 'vibe'],
+      launchWait: async reviewer => {
+        if (reviewer === 'vibe') { await queued; }
+        if (reviewer === 'claude') { firstFinished = true; }
+      },
+    });
+    const running = harness.run();
+    await new Promise<void>(resolve => { setImmediate(resolve); });
+    assert.equal(firstFinished, true, 'the admitted reviewer can finish while the other reviewer remains queued');
+    const pending = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
+    assert.deepEqual([pending?.mode, pending?.requiredApprovals, pending?.selected], ['two-independent', 2, ['claude', 'vibe']]);
+    releaseQueued();
+    await running;
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('out-of-order conflicting completions retain blockers and separately attributed results (PX-0046.04)', async () => {
+    const harness = serializedRun({
+      eligible: ['codex', 'claude', 'vibe'],
+      verdicts: { claude: 'approve', vibe: 'request-changes' },
+      launchWait: async reviewer => {
+        if (reviewer === 'claude') { await new Promise<void>(resolve => { setTimeout(resolve, 20); }); }
+      },
+    });
+    await harness.run();
+
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.decision?.kind, 'changes-requested', JSON.stringify({ round, status: harness.store.mission().status, errors: harness.fake.errors, stops: harness.fake.stops }));
+    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision]), [
+      ['vibe', 'changes-requested'],
+      ['claude', 'approved'],
+    ]);
+    assert.deepEqual(round.decision?.kind === 'changes-requested' ? round.decision.findings.map(finding => finding.summary) : [], ['counterexample']);
+    assert.notEqual(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('concurrent reviewers with colliding local finding ids publish distinct deterministic blockers (PX-0046.04)', async () => {
+    const harness = serializedRun({
+      eligible: ['codex', 'claude', 'vibe'],
+      verdicts: { claude: 'request-changes', vibe: 'request-changes' },
+    });
+    await harness.run();
+
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.decision?.kind, 'changes-requested', JSON.stringify({ round, status: harness.store.mission().status, errors: harness.fake.errors, stops: harness.fake.stops }));
+    const findings = round.decision?.kind === 'changes-requested' ? round.decision.findings : [];
+    assert.equal(findings.length, 2);
+    assert.equal(new Set(findings.map(finding => finding.id)).size, 2);
+    assert.deepEqual(round.reviewerResults?.map(result => result.agentFamily).sort(), ['claude', 'vibe']);
   });
 
   test('one genuinely available independent reviewer requires one approval and records why', async () => {
@@ -402,7 +569,8 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
     assert.deepEqual(harness.reviewers, ['codex']);
     const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
     assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.selected], ['same-agent', 1, ['codex']]);
-    assert.match(policy?.fallbackReason ?? '', /claude: claude cannot start.*vibe: vibe cannot start/);
+    assert.match(policy?.fallbackReason ?? '', /claude: claude cannot start/);
+    assert.match(policy?.fallbackReason ?? '', /vibe: vibe cannot start/);
     assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
     assert.deepEqual(harness.fake.stops, []);
   });
@@ -423,18 +591,17 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
     assert.deepEqual(outcome, { reviewState: 'REQUEST_CHANGES' }, 'the normal reviewer path still runs');
   });
 
-  test('a negative verdict from the first reviewer is decisive and never triggers the second reviewer', async () => {
+  test('a negative verdict is decisive after every admitted reviewer settles', async () => {
     const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], verdicts: { claude: 'request-changes' } });
     await harness.run();
-    assert.deepEqual(harness.reviewers.slice(0, 1), ['claude']);
-    assert.ok(!harness.reviewers.includes('vibe'));
+    assert.deepEqual([...harness.reviewers].sort(), ['claude', 'vibe']);
     assert.equal(currentReviewRound(harness.store.mission().review!).decision?.kind, 'changes-requested');
   });
 
-  test('an operator-directed approval decides the round and owes no further reviewer launch', async () => {
+  test('an operator-directed approval decides the round after admitted launches settle', async () => {
     const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], operatorApproves: true });
     await harness.run();
-    assert.deepEqual(harness.reviewers, ['claude']);
+    assert.deepEqual([...harness.reviewers].sort(), ['claude', 'vibe']);
     assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
   });
 
@@ -444,7 +611,7 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
     assert.deepEqual(harness.reviewers, ['claude', 'vibe']);
     const round = currentReviewRound(harness.store.mission().review!);
     assert.equal(round.reviewerPolicy?.requiredApprovals, 2);
-    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision]), [['claude', 'approved'], ['vibe', 'approved']]);
+    assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision]), [['claude', 'approved'], ['vibe', 'approved']], JSON.stringify({ round, approvalWrites: harness.approvalWrites, errors: harness.fake.errors, logs: harness.fake.logs, stops: harness.fake.stops }));
     assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
     assert.deepEqual(harness.fake.stops, []);
   });
@@ -474,7 +641,7 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
   test('a launcher reroute to another independent family updates the recorded policy instead of escalating (PX-0046.03)', async () => {
     const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe', 'qwen'], reroute: { claude: 'qwen' } });
     await harness.run();
-    assert.deepEqual(harness.reviewers, ['qwen', 'vibe']);
+    assert.deepEqual(harness.reviewers, ['qwen', 'vibe'], JSON.stringify({ round: currentReviewRound(harness.store.mission().review!), verdictWrites: harness.verdictWrites, launches: harness.fake.launches, errors: harness.fake.errors, logs: harness.fake.logs, stops: harness.fake.stops }));
     const policy = currentReviewRound(harness.store.mission().review!).reviewerPolicy;
     assert.deepEqual([policy?.mode, policy?.requiredApprovals, policy?.selected], ['two-independent', 2, ['qwen', 'vibe']]);
     assert.match(policy?.rerouted?.map(entry => entry.reason).join(' ') ?? '', /rerouted claude to qwen/);
@@ -496,9 +663,156 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
   test('a verdict submitted before a reroute settles is re-attributed to the family that ran, so a replaced family never counts (PX-0046.03 F4)', async () => {
     const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe', 'qwen'], reroute: { claude: 'qwen' }, verdictDuringLaunch: true });
     await harness.run();
-    assert.deepEqual(harness.reviewers, ['qwen', 'vibe']);
+    assert.deepEqual(harness.reviewers, ['qwen', 'vibe'], JSON.stringify({ round: currentReviewRound(harness.store.mission().review!), verdictWrites: harness.verdictWrites, launches: harness.fake.launches, errors: harness.fake.errors, logs: harness.fake.logs, stops: harness.fake.stops }));
     const round = currentReviewRound(harness.store.mission().review!);
     assert.deepEqual([...new Set(round.reviewerResults?.map(result => result.agentFamily))].sort(), ['qwen', 'vibe']);
     assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('a child verdict rerouted onto the other selected reviewer never counts as the requested family (PX-0046.03)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'custom'], reroute: { claude: 'custom' }, verdictDuringLaunch: true, providerEnabled: true });
+    await harness.run();
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.deepEqual(round.reviewerResults?.map(result => [result.reviewerId, result.agentFamily]), [['custom', 'custom']], JSON.stringify({ round, verdicts: harness.verdictWrites, errors: harness.fake.errors, logs: harness.fake.logs }));
+    assert.equal(round.reviewerPolicy?.requiredApprovals, 2, 'capacity rerouting cannot remove the distinct approval requirement');
+    assert.equal(round.decision, null);
+    assert.equal(harness.store.mission().status, 'review');
+    assert.ok(!harness.fake.errors.some(line => line.includes('Provider approval requires')), harness.fake.errors.join('\n'));
+  });
+
+  for (const nativePublication of [true, false]) {
+    test(`resuming a capacity-rerouted round preserves both approvals, native publication=${nativePublication} (PX-0046.03)`, async () => {
+      const reroute: Record<string, string> = { claude: 'custom' };
+      const harness = serializedRun({ eligible: ['codex', 'claude', 'custom'], reroute, verdictDuringLaunch: true, providerEnabled: true, nativePublication });
+      await harness.run();
+      delete reroute.claude;
+      const stopped = harness.store.mission();
+      assert.ok(stopped.review!.intervention, JSON.stringify({ round: currentReviewRound(stopped.review!), verdicts: harness.verdictWrites, errors: harness.fake.errors, logs: harness.fake.logs }));
+      await harness.store.save({ ...stopped, review: resumeReview(stopped.review!) }, (await harness.store.load()).version);
+      await harness.run(true);
+      const round = currentReviewRound(harness.store.mission().review!);
+      assert.equal(harness.store.mission().status, 'integration', harness.fake.errors.join('\n'));
+      assert.equal(round.reviewerPolicy?.requiredApprovals, 2);
+      assert.deepEqual([...new Set(round.reviewerResults?.map(result => result.agentFamily))].sort(), ['claude', 'custom']);
+      assert.equal(harness.fake.mirrors.filter(lane => lane === 'approved').length, 1);
+    });
+  }
+
+  test('restart settles a satisfied held requirement without launching another reviewer (PX-0046.03)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'] });
+    const state = await harness.fake.ports.state.read();
+    assert.ok(state);
+    await harness.fake.ports.state.recordReviewerPolicy(state, planReviewerPolicy({
+      revision: changeRevision('head-1'), implementer, primary: agentFamily('claude'), probe: probe(['codex', 'claude', 'vibe'], new Set()),
+    }));
+    await recordApproval(harness.slug, {
+      comment: null, decidedAt: '2026-11-09T10:01:00.000Z', revision: 'head-1', source: { kind: 'local' },
+      result: reviewerResultAttribution('claude', { status: 0, sessionId: 'saved-before-restart' }),
+    }, { missionStore: harness.store, lifecycleService: new MissionLifecycleService(harness.store) });
+    await harness.fake.ports.state.replaceReviewer(state, 'head-1', 'vibe', 'launcher failed before restart', probe(['codex', 'claude', 'vibe'], new Set(['vibe'])));
+    await harness.run(true);
+    assert.equal(harness.store.mission().status, 'integration', harness.fake.errors.join('\n'));
+    assert.deepEqual(harness.reviewers, []);
+    assert.deepEqual(currentReviewRound(harness.store.mission().review!).reviewerResults?.map(result => result.publicationId), ['saved-before-restart']);
+  });
+
+  for (const providerEnabled of [true, false]) {
+    test(`a held approval completes integration after the other reviewer cannot launch, provider=${providerEnabled} (PX-0046.03)`, async () => {
+      const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'], launchFails: ['vibe'], verdictDuringLaunch: true, providerEnabled });
+      await harness.run();
+      const round = currentReviewRound(harness.store.mission().review!);
+      assert.equal(harness.store.mission().status, 'integration', harness.fake.errors.join('\n'));
+      assert.equal(round.decision?.kind, 'approved');
+      assert.equal(round.reviewerPolicy?.requiredApprovals, 1);
+      assert.deepEqual(round.reviewerResults?.map(result => [result.publicationId, result.agentFamily]), [['claude-native-1', 'claude']], 'settlement reuses the original publication without attributing an approval to the failed reviewer');
+      assert.equal(round.decision?.decidedAt, round.reviewerResults?.[0].publishedAt);
+      assert.equal(harness.fake.mirrors.filter(lane => lane === 'approved').length, 1);
+      assert.deepEqual(harness.fake.exits, []);
+      const beforeReplay = harness.store.mission();
+      const state = await harness.fake.ports.state.read();
+      assert.ok(state);
+      await harness.fake.ports.state.recordApproval(state);
+      assert.deepEqual(harness.store.mission(), beforeReplay, 'settlement replay is idempotent');
+    });
+  }
+  test('revision change replaces the old policy and requires fresh approvals without erasing same-round history (PX-0046.05)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'] });
+    const state = await harness.fake.ports.state.read();
+    assert.ok(state);
+    await harness.fake.ports.state.recordReviewerPolicy(state, planReviewerPolicy({
+      revision: changeRevision('head-old'), implementer, primary: agentFamily('claude'),
+      probe: probe(['codex', 'claude', 'vibe'], new Set()),
+    }));
+    const loaded = await harness.store.load();
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { return; }
+    const reviewWithOldResult = recordReviewerResult(loaded.mission.review!, {
+      publicationId: 'legacy-old-approval', reviewerId: 'claude', agentFamily: agentFamily('claude'),
+      revision: changeRevision('head-old'), decision: 'approved', findings: [], outcome: 'completed', status: 0,
+      publishedAt: '2026-11-09T10:01:00.000Z',
+    });
+    await harness.store.save({ ...loaded.mission, review: reviewWithOldResult }, loaded.version);
+
+    await harness.run(true);
+
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.equal(round.reviewerPolicy?.revision, 'head-1');
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved', JSON.stringify({ round, errors: harness.fake.errors, stops: harness.fake.stops }));
+    assert.deepEqual(round.reviewerResults?.map(result => [result.publicationId, result.revision]), [
+      ['legacy-old-approval', 'head-old'], ['claude-native-1', 'head-1'], ['vibe-native-1', 'head-1'],
+    ]);
+  });
+
+  test('legacy in-flight results are adopted idempotently and one old publication is never counted twice (PX-0046.05)', async () => {
+    const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe'] });
+    const loaded = await harness.store.load();
+    assert.equal(loaded.kind, 'found');
+    if (loaded.kind !== 'found') { return; }
+    const legacyResult = {
+      publicationId: 'legacy-claude', reviewerId: 'claude', agentFamily: agentFamily('claude'),
+      revision: changeRevision('head-1'), decision: 'approved' as const, findings: [], outcome: 'completed' as const,
+      status: 0, publishedAt: '2026-11-09T10:01:00.000Z',
+    };
+    let review = recordReviewerResult(loaded.mission.review!, legacyResult);
+    review = recordReviewerResult(review, legacyResult);
+    await harness.store.save({ ...loaded.mission, review }, loaded.version);
+
+    await harness.run(true);
+
+    const round = currentReviewRound(harness.store.mission().review!);
+    assert.deepEqual(harness.reviewers, ['vibe'], 'the completed same-revision reviewer is not relaunched');
+    assert.equal(round.reviewerResults?.filter(result => result.publicationId === 'legacy-claude').length, 1);
+    assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
+  });
+
+  test('provider and auth launch failures retain the requirement and completed peer result without fabricating unavailability (PX-0046.05)', async () => {
+    for (const code of ['provider-auth', 'agent-quota'] as const) {
+      const harness = serializedRun({ eligible: ['codex', 'claude', 'vibe', 'qwen'], launchErrors: {
+        claude: new StructuredFailure(`${code} rejected launch`, failureReason(code, 'provider')),
+      } });
+      await harness.run();
+      const round = currentReviewRound(harness.store.mission().review!);
+      assert.deepEqual(round.reviewerPolicy?.selected, ['claude', 'vibe'], code);
+      assert.deepEqual(round.reviewerPolicy?.unavailable, [], code);
+      assert.deepEqual(harness.reviewers, ['vibe'], `${code} does not mint a replacement identity`);
+      assert.deepEqual(round.reviewerResults?.map(result => result.agentFamily), ['vibe'], `${code} preserves the completed peer`);
+      assert.notEqual(reviewStatus(harness.store.mission().review!), 'approved', code);
+    }
+  });
+
+  test('a failed parallel settlement cannot mask a same-revision authoritative negative decision (PX-0046.05)', async () => {
+    const scenario = reviewClassificationScenario();
+    const round = new ReviewRound(1, scenario.context);
+    const batch = await runParallelReviewerBatch(scenario.context, round, ['claude', 'vibe'], {
+      launch: async () => null,
+      consume: async isolated => {
+        if (isolated.identities.reviewer === 'vibe') { throw new Error('terminal detached after peer verdict'); }
+        return { step: null, reviewState: 'REQUEST_CHANGES' };
+      },
+      recover: async (_isolated, _localRound, reviewState) => ({ step: null, reviewState }),
+      recordApproval: async () => {},
+      persistedOutcome: async () => 'REQUEST_CHANGES',
+    });
+    assert.deepEqual(batch, { stopped: false, reviewState: 'REQUEST_CHANGES' });
   });
 });

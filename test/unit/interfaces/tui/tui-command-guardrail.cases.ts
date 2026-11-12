@@ -17,4 +17,5 @@ test('TUI command receives application capabilities and imports no composition o
   const source = readFileSync(join(process.cwd(), 'src/interfaces/tui/ui-command.ts'), 'utf8');
   assert.doesNotMatch(source, /from ['"][^'"]*(?:composition|adapters|platform\/runtime)[^'"]*['"]/);
   assert.match(source, /TuiCapabilities/);
+  assert.match(source, /build\(\{ settleHistoricalAnalytics: piped \}\)/, 'the finite piped frame settles its initial historical summary');
 });

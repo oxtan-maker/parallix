@@ -75,7 +75,7 @@ function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
 
   const { recoverMissionForIntegration, promoteTaskForIntegrationIfNeeded } = createMissionRecovery(ports);
 
-  const { runIntegrationRebase, predictIntegrationRebase } = createIntegrationRebase(ports);
+  const { runIntegrationRebase, predictIntegrationRebase, recordIntegrationRebaseInapplicable } = createIntegrationRebase(ports);
 
   const { printIntegrationPreflight } = createIntegrationPreflight(ports);
 
@@ -84,7 +84,9 @@ function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
   const { landThroughGithubPr } = createGithubPrLanding(ports);
 
   const { publishMission } = createMissionLanding(ports, { promoteTaskForIntegrationIfNeeded });
-  return { ports, landing, missionPaths, buildIntegrationContext, recoverMissionForIntegration, promoteTaskForIntegrationIfNeeded, runIntegrationRebase, predictIntegrationRebase, printIntegrationPreflight, runRequiredLocalGates, landThroughGithubPr, publishMission };
+  return { ports, landing, missionPaths, buildIntegrationContext, recoverMissionForIntegration, promoteTaskForIntegrationIfNeeded,
+    runIntegrationRebase, predictIntegrationRebase, recordIntegrationRebaseInapplicable,
+    printIntegrationPreflight, runRequiredLocalGates, landThroughGithubPr, publishMission };
 }
 
 export function createIntegrateWorkflow(ports: IntegrateWorkflowPorts) {
@@ -208,6 +210,10 @@ class IntegrateWorkflow {
       const existingSquash = this.dependencies.ports.checkout.findLandedSquashOnBaseBranch(baseWorktree, slug);
       if (existingSquash) {
         fmt.log.info(`Landed squash ${existingSquash.slice(0, 12)} already on ${baseBranch}; skipping rebase and resuming landing closeout.`);
+        await this.dependencies.recordIntegrationRebaseInapplicable(slug,
+          { baseWorktree, baseBranch, git, executionContext: {
+            missionId: slug, missionWorktree: context.missionWorktree, missionBranch: context.branch, baseWorktree, baseBranch,
+          } }, 'landing-already-present');
         return;
       }
       await this.dependencies.runIntegrationRebase(slug, {

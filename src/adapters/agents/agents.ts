@@ -45,7 +45,7 @@ function resolveLoopOptions(opts: StartAgentOptions) {
   return { agentOverride, exclude, detectLimitHitFn, updateAgentBlockFn, selectAgentFn, resolveAgentModelFn, isAgentBlockedFn, sessionMarkerPort, log, pinnedAgent, runtimeBlockContextFn };
 }
 
-function launchRuntimeInputs(opts: StartAgentOptions): Pick<StartAgentLoopDeps, 'configuration' | 'worktree' | 'slug' | 'role' | 'env' | 'noOutputWatchdog' | 'unrefChild' | 'allowUnsandboxedMutation'> {
+function launchRuntimeInputs(opts: StartAgentOptions): Pick<StartAgentLoopDeps, 'configuration' | 'worktree' | 'slug' | 'role' | 'env' | 'noOutputWatchdog' | 'stdinPolicy' | 'unrefChild' | 'allowUnsandboxedMutation'> {
   return {
     configuration: opts.configuration ?? DEFAULT_CONFIGURATION,
     worktree: opts.worktree,
@@ -53,6 +53,7 @@ function launchRuntimeInputs(opts: StartAgentOptions): Pick<StartAgentLoopDeps, 
     role: opts.role ?? null,
     env: opts.env ?? {},
     noOutputWatchdog: opts.noOutputWatchdog ?? {},
+    stdinPolicy: opts.stdinPolicy ?? 'inherit',
     unrefChild: opts.unrefChild ?? false,
     allowUnsandboxedMutation: opts.allowUnsandboxedMutation ?? false,
   };

@@ -118,18 +118,18 @@ unavailable; retained history stays readable and observation never retires it.
 ## Mission history on the board
 
 Selecting a mission card in `px web` immediately shows its current terminal
-above the retained history. The terminal refreshes every second while the view
-is open, including when browsing older operations. Retained history opens at
-the newest operation, with new output appended while an operation runs. Earlier
-history loads page by page; search covers every retained operation (literal
-text); the operation and stream selectors switch between records; copy copies
-what is shown. Scrolling back keeps the selected operation and position when
-new runs arrive; resume following to return to the newest operation. Failed
-initial history reads retry during polling. Incomplete or malformed history
-responses are reported as read errors; already loaded history stays visible
-until a valid refresh recovers. Terminal refreshes skip ticks while a read is
-pending and keep the displayed output if a refresh fails. Closing the mission
-view cancels its reads.
+above the retained history. Current output refreshes every second while an
+operation is active and every five seconds when idle. Retained history opens at
+the newest operation, then appends only bytes after its current cursor; broader
+operation discovery runs on the bounded idle cadence. Earlier history loads
+page by page; search covers every retained operation (literal text); the
+operation and stream selectors switch between records; copy copies what is
+shown. Scrolling back keeps the selected operation and position when new runs
+arrive; resume following to return to the newest operation. Failed reads retry
+with bounded backoff. Incomplete or malformed history responses are reported as
+read errors; already loaded history stays visible until a valid refresh
+recovers. Each output consumer serializes its own refreshes, and closing the
+mission view cancels every read.
 The view states whether an operation is starting, live, ended, ran without a terminal (pipe),
 has no history, or whether the terminal could not be inspected; a failed or
 timed-out inspection keeps the history on screen and is not reported as "no

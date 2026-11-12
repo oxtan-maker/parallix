@@ -1,6 +1,25 @@
 import type { SqliteDatabaseAdapter } from './database-adapter.js';
 import { parseInstantMs, toCanonicalUtcInstant } from '../../domain/instant.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository } from '../../application/ports/operation-history.js';
+import { parseWorkflowReturnIdentity } from '../../domain/board-event.js';
+
+const BOARD_LANE_EVENT_COLUMNS = `id, repository_id, mission_id, from_status, to_status,
+  trigger, agent, occurred_at, idempotency_key, return_stage, workflow_operation_id, workflow_generation`;
+
+interface BoardLaneEventRow {
+  readonly id: unknown;
+  readonly repository_id: unknown;
+  readonly mission_id: unknown;
+  readonly from_status: unknown;
+  readonly to_status: unknown;
+  readonly trigger: unknown;
+  readonly agent: unknown;
+  readonly occurred_at: unknown;
+  readonly idempotency_key: unknown;
+  readonly return_stage: unknown;
+  readonly workflow_operation_id: unknown;
+  readonly workflow_generation: unknown;
+}
 
 /**
  * SQLite-backed board lane-event repository.
@@ -29,8 +48,9 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
     try {
       await this.db.execute(
         `INSERT INTO board_lane_events
-          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+          (repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key,
+           return_stage, workflow_operation_id, workflow_generation)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           entry.repositoryId,
           entry.missionId,
@@ -40,6 +60,9 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
           entry.agent,
           toCanonicalUtcInstant(entry.occurredAt),
           entry.idempotencyKey,
+          entry.returnIdentity?.stage ?? null,
+          entry.returnIdentity?.operationId ?? null,
+          entry.returnIdentity?.operationGeneration ?? null,
         ],
       );
       return true;
@@ -63,18 +86,8 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
 
   /** Exact persisted history for write-path replay and recovery decisions. */
   async findPersistedByMissionId(missionId: string): Promise<readonly BoardLaneEventEntry[]> {
-    const rows = await this.db.query<{
-      id: unknown;
-      repository_id: unknown;
-      mission_id: unknown;
-      from_status: unknown;
-      to_status: unknown;
-      trigger: unknown;
-      agent: unknown;
-      occurred_at: unknown;
-      idempotency_key: unknown;
-    }>(
-      `SELECT id, repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
+    const rows = await this.db.query<BoardLaneEventRow>(
+      `SELECT ${BOARD_LANE_EVENT_COLUMNS}
        FROM board_lane_events
        WHERE mission_id = ?
        ORDER BY occurred_at ASC;`,
@@ -85,18 +98,8 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
   }
 
   async findAll(): Promise<readonly BoardLaneEventEntry[]> {
-    const rows = await this.db.query<{
-      id: unknown;
-      repository_id: unknown;
-      mission_id: unknown;
-      from_status: unknown;
-      to_status: unknown;
-      trigger: unknown;
-      agent: unknown;
-      occurred_at: unknown;
-      idempotency_key: unknown;
-    }>(
-      `SELECT id, repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
+    const rows = await this.db.query<BoardLaneEventRow>(
+      `SELECT ${BOARD_LANE_EVENT_COLUMNS}
        FROM board_lane_events
        ORDER BY occurred_at ASC;`,
     );
@@ -105,18 +108,8 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
   }
 
   async findByRepositoryId(repositoryId: string): Promise<readonly BoardLaneEventEntry[]> {
-    const rows = await this.db.query<{
-      id: unknown;
-      repository_id: unknown;
-      mission_id: unknown;
-      from_status: unknown;
-      to_status: unknown;
-      trigger: unknown;
-      agent: unknown;
-      occurred_at: unknown;
-      idempotency_key: unknown;
-    }>(
-      `SELECT id, repository_id, mission_id, from_status, to_status, trigger, agent, occurred_at, idempotency_key
+    const rows = await this.db.query<BoardLaneEventRow>(
+      `SELECT ${BOARD_LANE_EVENT_COLUMNS}
        FROM board_lane_events
        WHERE repository_id = ?
        ORDER BY occurred_at ASC;`,
@@ -131,11 +124,17 @@ export class SqliteBoardLaneEventRepository implements BoardLaneEventRepository 
   }
 }
 
-function rowToEntry(row: Record<string, unknown>): BoardLaneEventEntry {
+function rowToEntry(row: BoardLaneEventRow): BoardLaneEventEntry {
+  const retainedReturn = { stage: row.return_stage, operationId: row.workflow_operation_id,
+    operationGeneration: row.workflow_generation };
+  const returnIdentity = parseWorkflowReturnIdentity(retainedReturn);
+  const hasReturnIdentity = Object.values(retainedReturn).some(value => value !== null && value !== undefined);
+  const repositoryId = String(row.repository_id), missionId = String(row.mission_id);
+  const idempotencyKey = String(row.idempotency_key);
   return {
     id: Number(row.id),
-    repositoryId: String(row.repository_id),
-    missionId: String(row.mission_id),
+    repositoryId,
+    missionId,
     fromStatus: row.from_status === null || row.from_status === undefined
       ? null
       : String(row.from_status),
@@ -143,7 +142,10 @@ function rowToEntry(row: Record<string, unknown>): BoardLaneEventEntry {
     trigger: String(row.trigger),
     agent: String(row.agent),
     occurredAt: String(row.occurred_at),
-    idempotencyKey: String(row.idempotency_key),
+    idempotencyKey,
+    ...(returnIdentity ? { returnIdentity } : {}),
+    ...(hasReturnIdentity && !returnIdentity ? { returnIdentityDefect:
+      `Workflow return identity invalid for ${repositoryId}/${missionId} lane event ${idempotencyKey}` } : {}),
   };
 }
 

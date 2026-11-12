@@ -11,11 +11,9 @@
  * workflow rejected it with "A new review round must advance the same pull
  * request or local branch".
  *
- * This module closes that half of the loop with the domain commands that
- * already exist (`applyReviewerCommand`, `applyImplementerCommand`); it adds no
- * domain type and no second state machine.
+ * This module closes that half through the existing domain commands; it adds
+ * no domain type and no second state machine.
  */
-
 import { applyOperatorCorrection } from '../../domain/operator-review-correction.js';
 import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
 import { settleRequestedChanges } from './review-request-changes-transition.js';
@@ -26,13 +24,13 @@ import type { MissionLifecycleService } from '../../application/mission-lifecycl
 import { missionId, type Mission } from '../../domain/mission.js';
 import { requireReviewIdentity } from '../../domain/mission-workflow.js';
 import { attachReviewerResult } from './reviewer-result-attribution.js';
-import { recordHeldApproval } from './review-approval-count.js';
+import { recordLateReviewerPublication, recordReviewerPublication } from './review-approval-count.js';
+export { parseReviewFindings, reviewFindingsFromMessage } from './review-findings.js';
 import {
   applyImplementerCommand,
   applyReviewerCommand,
   changeRevision,
   currentReviewRound,
-  reviewFindingId,
   reviewStatus,
   type FindingResolution,
   type ReviewApprovalSource,
@@ -51,39 +49,7 @@ export type ReviewRoundResult =
   | { outcome: 'unchanged'; reason: string; noRevisionChange?: boolean }
   | { outcome: 'failed'; diagnostic: string; kind?: 'stale-write'; workflowBlock?: VerdictBlock };
 
-/** Reviewer verdicts that carry the `changes-requested` decision kind. */
-const CHANGES_REQUESTED_DISPOSITIONS: readonly ReviewDisposition[] =
-  ['REQUEST_CHANGES', 'COMMENT', 'PUSHBACK_ALL', 'BLOCKED', 'PARKED'];
-
-/**
- * Finding headings in a reviewer findings document.
- *
- * Reviewers write `## F1 (blocking): summary`; the id and the summary are the
- * two parts the domain needs, and the parenthetical severity is dropped rather
- * than modelled — `ReviewFinding` has no severity field.
- */
-const FINDING_HEADING = /^#{2,4}\s*(F\d+[a-z]?)\b\s*(?:\([^)]*\))?\s*[:.—-]?\s*(.*)$/gim;
-
-export function parseReviewFindings(markdown: string): ReviewFinding[] {
-  const findings: ReviewFinding[] = [];
-  const seen = new Set<string>();
-  FINDING_HEADING.lastIndex = 0;
-  for (const match of markdown.matchAll(FINDING_HEADING)) {
-    const id = match[1].toUpperCase();
-    const summary = match[2].replace(/[`*]/g, '').trim();
-    if (!summary || seen.has(id)) { continue; }
-    seen.add(id);
-    findings.push({ id: reviewFindingId(id), summary, location: null });
-  }
-  return findings;
-}
-
-/** Preserve actual findings or a reviewer's plain-text change request. */
-export function reviewFindingsFromMessage(message: string): ReviewFinding[] {
-  const parsed = parseReviewFindings(message);
-  const summary = message.split('\n').find(line => line.trim())?.trim();
-  return parsed.length > 0 || !summary ? parsed : [{ id: reviewFindingId('F1'), summary, location: null }];
-}
+const CHANGES_REQUESTED_DISPOSITIONS: readonly ReviewDisposition[] = ['REQUEST_CHANGES', 'COMMENT', 'PUSHBACK_ALL', 'BLOCKED', 'PARKED'];
 
 function diagnosticFrom(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) { return error.message.trim(); }
@@ -96,6 +62,11 @@ export interface ReviewRoundPorts {
   lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
 }
 
+type RequestedChangesInput = { findings: readonly ReviewFinding[]; source?: OperatorReviewSource; comment: string | null; revision?: string | null; decidedAt: string; disposition?: ReviewDisposition; expectedVersion?: number; observedRound?: ReviewRoundObservation; result?: ReviewerResultAttribution };
+type ApprovalInput = { comment: string | null; revision?: string | null; decidedAt: string; source?: ReviewApprovalSource; expectedVersion?: number; observedRound?: ReviewRoundObservation; result?: ReviewerResultAttribution };
+
+type ChangesRequestedDisposition = Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'>;
+
 /**
  * Record the reviewer's request-changes decision and hand the mission back to
  * the implementer.
@@ -105,18 +76,7 @@ export interface ReviewRoundPorts {
  */
 export async function recordRequestedChanges(
   slug: string,
-  input: {
-    findings: readonly ReviewFinding[];
-    source?: OperatorReviewSource;
-    comment: string | null;
-    revision?: string | null;
-    decidedAt: string;
-    disposition?: ReviewDisposition;
-    /** Mission version the caller read; a mismatch fails closed. */
-    expectedVersion?: number;
-    observedRound?: ReviewRoundObservation;
-    result?: ReviewerResultAttribution;
-  },
+  input: RequestedChangesInput,
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
   const store = ports.missionStore ?? null;
@@ -127,10 +87,11 @@ export async function recordRequestedChanges(
     if (loaded.kind === 'failed') { return loaded.result; }
     const mission = loaded.mission;
     if (input.source) {
-      const review = applyOperatorCorrection(mission.review, { ...input, source: input.source });
-      const version = review === mission.review ? loaded.version : await store.save({ ...mission, review }, loaded.version);
-      return await settleRequestedChanges(slug, { ...mission, review }, version, ports, input.source.author);
+      return await recordOperatorRequestedChanges(slug, input, input.source, mission, loaded.version, store, ports);
     }
+
+    const late = await recordLateRequestedChanges(slug, input, mission, loaded.version, store, ports);
+    if (late) { return late; }
 
     if (!mission.review.intervention && currentReviewRound(mission.review).decision?.kind === 'changes-requested') {
       return await settleRequestedChanges(slug, mission, loaded.version, ports);
@@ -139,21 +100,53 @@ export async function recordRequestedChanges(
     const rejected = requestedChangesRejection(slug, mission.review, input.findings);
     if (rejected) { return rejected; }
 
-    let review = applyReviewerCommand(mission.review, {
-      type: 'request-changes',
-      decidedAt: input.decidedAt,
-      revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
-      comment: input.comment,
-      findings: input.findings,
-      ...(disposition === 'REQUEST_CHANGES' ? {} : { disposition: disposition }),
-    });
-    review = attachReviewerResult(review, 'changes-requested', input, input.findings);
-    const version = await store.save({ ...mission, review }, loaded.version);
-
-    return await settleRequestedChanges(slug, { ...mission, review }, version, ports);
+    return await publishRequestedChanges(slug, input, disposition, mission, loaded.version, store, ports);
   } catch (error) {
     return roundWriteFailure(error, 'Reviewer decision write failed');
   }
+}
+
+async function recordOperatorRequestedChanges(slug: string, input: RequestedChangesInput, source: OperatorReviewSource,
+  mission: Mission & { review: Review }, version: MissionVersion, store: MissionStore, ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult> {
+  const review = applyOperatorCorrection(mission.review, { ...input, source });
+  const savedVersion = review === mission.review ? version : await store.save({ ...mission, review }, version);
+  return await settleRequestedChanges(slug, { ...mission, review }, savedVersion, ports, source.author);
+}
+async function recordLateRequestedChanges(slug: string, input: RequestedChangesInput, mission: Mission & { review: Review },
+  version: MissionVersion, store: MissionStore, ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult | null> {
+  const review = recordLateReviewerPublication(mission.review, 'changes-requested', input, input.findings);
+  if (!review) { return null; }
+  const savedVersion = review === mission.review ? version : await store.save({ ...mission, review }, version);
+  if (currentReviewRound(mission.review).decision?.kind === 'changes-requested') {
+    return await settleRequestedChanges(slug, { ...mission, review }, savedVersion, ports);
+  }
+  return { outcome: 'unchanged', reason: 'the round decision already stands; late reviewer evidence was retained' };
+}
+async function publishRequestedChanges(slug: string, input: RequestedChangesInput, disposition: ChangesRequestedDisposition,
+  mission: Mission & { review: Review }, version: MissionVersion, store: MissionStore, ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult> {
+  const publication = recordReviewerPublication(mission.review, 'changes-requested', input, input.findings);
+  if (publication?.outcome === 'held') {
+    await store.save({ ...mission, review: publication.review }, version);
+    return { outcome: 'held', awaitingApprovals: publication.awaitingApprovals };
+  }
+  if (publication?.outcome === 'approved') {
+    await store.save({ ...mission, review: publication.review }, version);
+    return { outcome: 'unchanged', reason: 'the reviewer identity already published an approval' };
+  }
+  const decidedAt = publication?.decidedAt ?? input.decidedAt;
+  const findings = publication?.findings ?? input.findings;
+  let review = applyReviewerCommand(publication?.review ?? mission.review, {
+    type: 'request-changes', decidedAt,
+    revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
+    comment: input.comment, findings,
+    ...(disposition === 'REQUEST_CHANGES' ? {} : { disposition }),
+  });
+  if (!publication) { review = attachReviewerResult(review, 'changes-requested', input, input.findings); }
+  const savedVersion = await store.save({ ...mission, review }, version);
+  return await settleRequestedChanges(slug, { ...mission, review }, savedVersion, ports);
 }
 
 function requestedChangesRejection(slug: string, review: Review, findings: readonly ReviewFinding[]): ReviewRoundResult | null {
@@ -245,16 +238,7 @@ async function replayRecordedApproval(
  */
 export async function recordApproval(
   slug: string,
-  input: {
-    comment: string | null;
-    revision?: string | null;
-    decidedAt: string;
-    source?: ReviewApprovalSource;
-    /** Mission version the caller read; a mismatch fails closed. */
-    expectedVersion?: number;
-    observedRound?: ReviewRoundObservation;
-    result?: ReviewerResultAttribution;
-  },
+  input: ApprovalInput,
   ports: ReviewRoundPorts = {},
 ): Promise<ReviewRoundResult> {
   const store = ports.missionStore ?? null;
@@ -272,43 +256,63 @@ export async function recordApproval(
       // transition instead of leaving the mission parked in review forever.
       return await replayRecordedApproval(slug, input, mission, loaded.version, store, ports);
     }
-    if (status !== 'awaiting-review') {
-      // The round cannot legally reach `approved` from here (REVIEW_PHASE_TRANSITIONS
-      // allows `fixing -> reviewing | pending-approval` only). Fail loudly instead
-      // of writing `disposition === 'APPROVED'` over a `changes-requested`
-      // decision, which is what leaves the mission permanently unintegratable.
-      // The diagnostic names the documented resolution → new round → approve
-      // sequence, not `px integrate`, which cannot repair a `fixing` round.
-      return blockedApproval(slug, mission.review);
-    }
-    if (!['review', 'integration', 'active'].includes(mission.status)) {
-      // TASK-2582: an approve recorded over a Mission that is not in the review
-      // lane is the TASK-2579 mismatch. Fail before writing the decision
-      // instead of reporting `recorded` over a Mission the boundary cannot
-      // move.
-      return {
-        outcome: 'failed',
-        diagnostic: `Approve cannot be recorded for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
-      };
-    }
-    const held = recordHeldApproval(mission.review, input);
-    if (held) { await store.save({ ...mission, review: held.review }, loaded.version); return { outcome: 'held', awaitingApprovals: held.awaitingApprovals }; }
-    let review = applyReviewerCommand(mission.review, {
-      type: 'approve',
-      decidedAt: input.decidedAt,
-      revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
-      comment: input.comment,
-      source,
-    });
-    review = attachReviewerResult(review, 'approved', input, []);
-    if (mission.status === 'active') {
-      return await approveRepairedActiveLane(slug, input.decidedAt, loaded.version, review, ports);
-    }
-    const version = await store.save({ ...mission, review }, loaded.version);
-    return await transitionApprovedReview(slug, input.decidedAt, mission, version, review, ports) ?? { outcome: 'recorded' };
+    const late = await recordLateApproval(input, mission, loaded.version, store);
+    if (late) { return late; }
+    const rejected = approvalRejection(slug, mission, status);
+    if (rejected) { return rejected; }
+    return await publishApproval(slug, input, source, mission, loaded.version, store, ports);
   } catch (error) {
     return roundWriteFailure(error, 'Approval write failed');
   }
+}
+
+async function recordLateApproval(input: ApprovalInput, mission: Mission & { review: Review }, version: MissionVersion,
+  store: MissionStore,
+): Promise<ReviewRoundResult | null> {
+  const review = recordLateReviewerPublication(mission.review, 'approved', input, []);
+  if (!review) { return null; }
+  if (review !== mission.review) { await store.save({ ...mission, review }, version); }
+  return { outcome: 'unchanged', reason: 'the round decision already stands; late reviewer evidence was retained' };
+}
+
+function approvalRejection(slug: string, mission: Mission & { review: Review }, status: string): ReviewRoundResult | null {
+  if (status !== 'awaiting-review') { return blockedApproval(slug, mission.review); }
+  if (['review', 'integration', 'active'].includes(mission.status)) { return null; }
+  return {
+    outcome: 'failed',
+    diagnostic: `Approve cannot be recorded for ${slug}: ${approvalLaneDiagnostic(slug, mission.status)}`,
+  };
+}
+
+async function publishApproval(slug: string, input: ApprovalInput, source: ReviewApprovalSource,
+  mission: Mission & { review: Review }, version: MissionVersion, store: MissionStore, ports: ReviewRoundPorts,
+): Promise<ReviewRoundResult> {
+  const publication = recordReviewerPublication(mission.review, 'approved', input, []);
+  if (publication?.outcome === 'held') {
+    await store.save({ ...mission, review: publication.review }, version);
+    return { outcome: 'held', awaitingApprovals: publication.awaitingApprovals };
+  }
+  if (publication?.outcome === 'changes-requested') {
+    const review = applyReviewerCommand(publication.review, {
+      type: 'request-changes', decidedAt: publication.decidedAt,
+      revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
+      comment: null, findings: publication.findings,
+    });
+    const savedVersion = await store.save({ ...mission, review }, version);
+    return await settleRequestedChanges(slug, { ...mission, review }, savedVersion, ports);
+  }
+  const decidedAt = publication?.decidedAt ?? input.decidedAt;
+  let review = applyReviewerCommand(publication?.review ?? mission.review, {
+    type: 'approve', decidedAt,
+    revision: typeof input.revision === 'string' ? changeRevision(input.revision) : null,
+    comment: input.comment, source,
+  });
+  if (!publication) { review = attachReviewerResult(review, 'approved', input, []); }
+  if (mission.status === 'active') {
+    return await approveRepairedActiveLane(slug, decidedAt, version, review, ports);
+  }
+  const savedVersion = await store.save({ ...mission, review }, version);
+  return await transitionApprovedReview(slug, decidedAt, mission, savedVersion, review, ports) ?? { outcome: 'recorded' };
 }
 
 /**
@@ -485,7 +489,7 @@ export async function recordImplementerResolution(
 function isChangesRequestedDisposition(value: ReviewDisposition): value is Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'> {
   return CHANGES_REQUESTED_DISPOSITIONS.includes(value);
 }
-function changesRequestedDisposition(value: ReviewDisposition | undefined): Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'> {
+function changesRequestedDisposition(value: ReviewDisposition | undefined): ChangesRequestedDisposition {
   return value && isChangesRequestedDisposition(value) ? value : 'REQUEST_CHANGES';
 }
 

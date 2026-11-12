@@ -157,6 +157,9 @@ export const BOARD_LANE_EVENTS_AUTHORITY = {
   agent: { owner: 'operator-local' } as const,
   occurred_at: { owner: 'operator-local' } as const,
   idempotency_key: { owner: 'operator-local' } as const,
+  return_stage: { owner: 'operator-local' } as const,
+  workflow_operation_id: { owner: 'operator-local' } as const,
+  workflow_generation: { owner: 'operator-local' } as const,
 } as const satisfies Readonly<Record<string, FieldAuthority>>;
 
 /**

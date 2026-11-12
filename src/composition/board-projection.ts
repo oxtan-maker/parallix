@@ -78,6 +78,11 @@ export interface BoardProjectionCompositionDeps {
   readonly gateEvidence?: GateEvidenceReader;
 }
 
+const BOARD_ANALYTICS_HISTORY_TYPES = [
+  'mission.current-work', 'verification.attempt', 'flow.rebase', 'lead.operator-judgment', 'rebound.repair',
+  'stats.recovery.evidence',
+] as const;
+
 /**
  * The process table is read by a child that starts with the build, so it runs
  * beside the build's synchronous reads; one read answers every reader within
@@ -150,14 +155,14 @@ function createCachedMissionReader(deps: BoardProjectionCompositionDeps,
 
 /** One projection build shares its immutable analytical rows across every reader. */
 function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
-  const cachedHistoryTypes = new Set([
-    'mission.current-work', 'verification.attempt', 'flow.rebase', 'lead.operator-judgment',
-  ]);
+  const cachedHistoryTypes = new Set<string>(BOARD_ANALYTICS_HISTORY_TYPES);
   let historyRows: Promise<readonly import('../application/ports/operation-history.js').OperationalHistoryEntry[]> | null = null;
   let laneRows: Promise<readonly import('../application/ports/operation-history.js').BoardLaneEventEntry[]> | null = null;
+  let usageRows: Promise<readonly import('../application/ports/mission-measurements.js').UsageRecord[]> | null = null;
   let historyByMission: Promise<ReadonlyMap<string, readonly import('../application/ports/operation-history.js').OperationalHistoryEntry[]>> | null = null;
   const history = () => historyRows ??= deps.historyRepo.findByTypes?.([...cachedHistoryTypes]) ?? deps.historyRepo.findAll();
   const lanes = () => laneRows ??= deps.laneEventRepo.findByRepositoryId(deps.repositoryId);
+  const usage = () => usageRows ??= deps.usageRepo.findWhere({ repo: deps.repositoryId });
   const indexedHistory = () => historyByMission ??= history().then(rows => {
     const indexed = new Map<string, import('../application/ports/operation-history.js').OperationalHistoryEntry[]>();
     for (const row of rows) {
@@ -180,6 +185,9 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
   const historyRepo: OperationalHistoryRepository = {
     findAll: history,
     findByTypes: types => deps.historyRepo.findByTypes?.(types) ?? deps.historyRepo.findAll().then(rows => rows.filter(row => types.includes(row.eventType))),
+    revisionForTypes: types => deps.historyRepo.revisionForTypes?.(types)
+      ?? (deps.historyRepo.findByTypes?.(types) ?? deps.historyRepo.findAll().then(rows => rows.filter(row => types.includes(row.eventType))))
+        .then(rows => JSON.stringify(rows.map(row => [row.id, row.eventType, row.createdAt, row.eventData]))),
     findEarliestForMissions: deps.historyRepo.findEarliestForMissions?.bind(deps.historyRepo),
     findReboundRepairs: deps.historyRepo.findReboundRepairs?.bind(deps.historyRepo),
     findRecentLogEntries: deps.historyRepo.findRecentLogEntries?.bind(deps.historyRepo),
@@ -195,7 +203,16 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
     append: entry => deps.historyRepo.append(entry),
     clear: () => deps.historyRepo.clear(),
   };
-  return { historyRepo, laneEventRepo, reset: () => { historyRows = null; laneRows = null; historyByMission = null; } };
+  const usageRepo: UsageRepository = {
+    findAll: usage,
+    findWhere: filter => filter.repo !== undefined && filter.repo !== deps.repositoryId
+      ? Promise.resolve([])
+      : Object.keys(filter).every(key => key === 'repo')
+        ? usage()
+        : deps.usageRepo.findWhere({ ...filter, repo: deps.repositoryId }),
+  };
+  return { historyRepo, laneEventRepo, usageRepo,
+    reset: () => { historyRows = null; laneRows = null; usageRows = null; historyByMission = null; } };
 }
 
 function createBoardGateEvidence(
@@ -297,12 +314,16 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
               return retained.ok ? retained.runs.flatMap(run => seen.has(run.record.runId) ? [] : (seen.add(run.record.runId), [run.record])) : [];
             });
           return { repositoryId: deps.repositoryId, history, operations, lifecycle, runs,
-            collectionDefects: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
+            repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
         }),
         laneEventRepo: metricsSession.laneEventRepo,
-        usageRepo: deps.usageRepo,
+        usageRepo: metricsSession.usageRepo,
         repositoryId: deps.repositoryId,
         historyRepo: metricsSession.historyRepo,
+        evidenceRevision: async () => JSON.stringify([
+          await metricsSession.historyRepo.revisionForTypes!(BOARD_ANALYTICS_HISTORY_TYPES),
+          await workflowOperations?.analyticsRevision?.() ?? 'no-workflow-history',
+        ]),
         // Net engineering lines are a mission fact, not telemetry, so the
         // cohort comparison reads them from the same adapter the board does.
         netEngineeringLines: async () => new Map(

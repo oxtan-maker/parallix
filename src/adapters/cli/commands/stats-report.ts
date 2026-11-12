@@ -65,8 +65,8 @@ function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>): str
   const period = (name: string, flow: import('../../../application/projections/flow-statistics.js').FlowWindowStatistics) => {
     const largest = flow.time.largestHolder;
     return [fmt.bold(`${name} — shared FLOW lifecycle (${flow.label})`), formatStatsTable(
-      ['Nodes/edges', 'First-pass yield', 'Extra launches', 'Agent send-backs', 'Human send-backs', 'Largest elapsed holder'],
-      [[`${flow.diagram.nodeCount}/${flow.diagram.edgeCount}`, renderRate(flow.firstPassYield),
+      ['Observed', 'Nodes/edges', 'First-pass yield', 'Extra launches', 'Agent send-backs', 'Human send-backs', 'Largest elapsed holder'],
+      [[`${flow.observation.complete}/${flow.completedMissions} complete`, `${flow.diagram.nodeCount}/${flow.diagram.edgeCount}`, renderRate(flow.firstPassYield),
         flow.extraAgentLaunches.total === null ? `unavailable (n=${flow.extraAgentLaunches.n})`
           : flow.completedMissions === 0 ? 'n/a (no completed missions)'
             : `${flow.extraAgentLaunches.lowerBound ? 'at least ' : ''}${flow.extraAgentLaunches.total} (mean ${flow.extraAgentLaunches.meanPerMission!.toFixed(1)}, n=${flow.extraAgentLaunches.n})`,
@@ -74,10 +74,16 @@ function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>): str
           ? `${largest.step}/${largest.actor}${largest.model ? `/${largest.model}` : ''}/${largest.state} ${largest.totalMs}ms (${(largest.share * 100).toFixed(1)}%)`
           : 'n/a (no elapsed observations)']]),
       ...flow.time.rows.map(row => `${row.step}/${row.actor}${row.model ? `/${row.model}` : ''}/${row.state}: total ${row.totalMs}ms, mean ${row.meanMs.toFixed(1)}ms, p90 ${row.p90Ms}ms, n=${row.n}`),
-      ...flow.defects.map(defect => `Collection defect: ${defect}`)];
+      ...flow.defects.map(diagnostic => `FLOW diagnostic: ${diagnostic}`),
+      ...rebaseStageLines(flow.rebaseStages)];
   };
   return [...period('Current week', selection.flowStatistics.current),
     ...period('Previous week', selection.flowStatistics.previous)];
+}
+
+function rebaseStageLines({ visible, omitted }: import('../../../application/projections/flow-statistics.js').FlowWindowStatistics['rebaseStages']): string[] {
+  return [...visible.map(stage => `Rebase stage: ${stage.repositoryId}/${stage.missionId} ${stage.stage} ${stage.state}; operation=${stage.operationId ?? 'none'}; source=${stage.sourceId ?? 'none'}; outcomes=${stage.outcomes.length ? stage.outcomes.join(' -> ') : 'none'}; ${stage.reason}`),
+    ...(omitted > 0 ? [`Rebase stages: ${omitted} additional stage facts not shown; incomplete states are listed first.`] : [])];
 }
 
 function bugTrendSection(selection: ReturnType<typeof selectStatsReport>) {

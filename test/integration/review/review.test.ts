@@ -1052,7 +1052,7 @@ test('applyAgentFallback returns the original agent when startAgent did not fall
     launchResult: { agent: 'codex' },
     state,
     slug: 'task-test-fallback',
-    worktree: '/tmp/visualBoard-task-test-fallback',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/visualBoard-task-test-fallback' }),
     taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
     writeReviewStateFn,
@@ -1074,7 +1074,7 @@ test('applyAgentFallback rewrites reviewer identity and persists state but does 
     launchResult: { agent: 'codex' },
     state,
     slug: 'task-test-fallback',
-    worktree: '/tmp/visualBoard-task-test-fallback',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/visualBoard-task-test-fallback' }),
     taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
     writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
@@ -1102,7 +1102,7 @@ test('applyAgentFallback rewrites implementer identity on fallback without touch
     launchResult: { agent: 'gemini' },
     state,
     slug: 'task-test-fallback',
-    worktree: '/tmp/visualBoard-task-test-fallback',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/visualBoard-task-test-fallback' }),
     taskResolution: { ok: false, reason: 'missing', matches: [] },
     log: () => {},
     writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
@@ -1127,7 +1127,7 @@ test('applyAgentFallback enforces implementer in backlog when implementer falls 
     launchResult: { agent: 'codex' },
     state,
     slug: 'task-test-fallback',
-    worktree: '/tmp/visualBoard-task-test-fallback',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/visualBoard-task-test-fallback' }),
     taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
     writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
@@ -1148,7 +1148,7 @@ test('applyAgentFallback handles a missing launchResult gracefully (catastrophic
     launchResult: undefined,
     state,
     slug: 'task-test-fallback',
-    worktree: '/tmp/x',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/x' }),
     taskResolution: { ok: false, reason: 'missing', matches: [] },
     log: () => {},
     writeReviewStateFn: () => { throw new Error('should not write'); },
@@ -1164,7 +1164,7 @@ test('applyAgentFallback handles a missing state during an implementer fallback'
     original: 'claude',
     launchResult: { agent: 'codex' },
     slug: 'task-test-fallback',
-    worktree: '/tmp/x',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/x' }),
     log: () => {},
     writeReviewStateFn: reviewStateWriterFixture((_slug, state) => writes.push(state)),
   });
@@ -1187,7 +1187,7 @@ test('applyAgentFallback preserves the original roundStartedAt when rewriting st
     launchResult: { agent: 'codex' },
     state,
     slug: 'task-test-fallback',
-    worktree: '/tmp/visualBoard-task-test-fallback',
+    executionContext: missionExecutionContext({ missionId: 'task-test-fallback', missionWorktree: '/tmp/visualBoard-task-test-fallback' }),
     taskResolution: { ok: true, taskFile: '/tmp/task.md', matches: ['/tmp/task.md'] },
     log: () => {},
     writeReviewStateFn: reviewStateWriterFixture((slug, st, worktree) => writes.push({ slug, state: st, worktree })),
@@ -1331,8 +1331,8 @@ test('pushRound resolves forgejo user from backlog assignee and reports success'
   let exitCode: { value: Parameters<typeof process.exit>[0] } = { value: null };
   try {
     await pushRound('task-1031', {
+      executionContext: missionExecutionContext({ missionId: 'task-1031', missionWorktree: '/tmp/mission-task-1031' }),
       isForgejoReviewEnabledFn: () => false,
-      resolveWorktreeFn: () => '/tmp/mission-task-1031',
       resolveTaskFileFn: () => ({ matches: ['/tmp/task-1031.md'],  ok: true as const, taskFile: '/tmp/task-1031.md' }),
       getTaskImplementerFn: () => 'codex',
       readTokenFn: () => 'token',
@@ -1356,6 +1356,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
   const exits: number[] = [];
   const readReviewStateFn: ReviewStateInstanceReader = (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' }));
   await commentRound('task-1031', 'body', {
+    executionContext: missionExecutionContext({ missionId: 'task-1031', missionWorktree: '/tmp/mission-task-1031' }),
     readTokenFn: () => 'token',
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'boom' }),
     readReviewStateFn,
@@ -1363,6 +1364,7 @@ test('commentRound and submitReviewRound fail loudly on API errors', async () =>
     exit: code => exits.push(code)
   });
   await submitReviewRound('task-1031', 'approve', 'ship it', {
+    executionContext: missionExecutionContext({ missionId: 'task-1031', missionWorktree: '/tmp/mission-task-1031' }),
     ...authority,
     configuration: resolveConfiguration(process.env),
     readTokenFn: () => 'token',
@@ -1424,6 +1426,7 @@ test("submitForReview and closeMissionPr use injected review preparation and clo
       });
 
     await closeMissionPr('task-1031', {
+      executionContext: missionExecutionContext({ missionId: 'task-1031', missionWorktree: '/tmp/mission-task-1031' }),
       readTokenFn: () => 'token',
       readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'gemini' })),
       closePrFn: async (branch, token, user) => {
@@ -1488,12 +1491,12 @@ test('commentRound appends metadata footer to message', async () => {
   const { commentRound } = createEventHandlerModule;
   let posted: { value: string | null } = { value: null };
   await commentRound('task-meta-2', 'Test comment body', {
+    executionContext: missionExecutionContext({ missionId: 'task-meta-2', missionWorktree: '/tmp/visualBoard-task-meta-2' }),
     readTokenFn: () => 'token',
     postCommentFn: (branch, token, message) => { posted.value = message; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     readReviewStateFn: (slug: string) => (new ReviewState(slug, { reviewer: 'codex', implementer: 'codex' })),
     buildMetadataFooterFn: async () => '\n\n---\n`[workflow-round:2, workflow-phase:reviewing]`',
     writeReviewStateFn: persistenceCommitted,
-    rootDir: '/tmp/visualBoard-task-meta-2',
     log: () => {},
     error: () => {},
     exit: () => {}
@@ -1508,6 +1511,7 @@ test('submitReviewRound appends metadata footer to review message', async () => 
   const { submitReviewRound } = createEventHandlerModule;
   let posted: { value: string | null } = { value: null };
   await submitReviewRound('task-meta-3', 'approve', 'Looks good', {
+    executionContext: missionExecutionContext({ missionId: 'task-meta-3', missionWorktree: '/tmp/visualBoard-task-meta-3' }),
     ...reviewVerdictFixture('task-meta-3'),
     getPrAuthorFn: () => 'different-author',
     configuration: resolveConfiguration(process.env),
@@ -1515,7 +1519,6 @@ test('submitReviewRound appends metadata footer to review message', async () => 
     postReviewFn: (branch, token, outcome, message) => { posted.value = message; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     buildMetadataFooterFn: async () => '\n\n---\n`[workflow-round:1, workflow-phase:reviewing]`',
     writeReviewStateFn: persistenceCommitted,
-    worktree: '/tmp/visualBoard-task-meta-3',
     isForgejoReviewEnabledFn: () => true,
     log: () => {},
     error: () => {},
@@ -1573,6 +1576,7 @@ test('commentRound persists review state after successful post', async () => {
 
   try {
     await commentRound('task-persist-1', 'Test body', {
+      executionContext: missionExecutionContext({ missionId: 'task-persist-1', missionWorktree: '/tmp/visualBoard-task-persist-1' }),
       readTokenFn: () => 'token',
       postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
@@ -1580,7 +1584,6 @@ test('commentRound persists review state after successful post', async () => {
         reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
       }),
       writeReviewStateFn: reviewStateWriterFixture((slug, state, worktree) => { stateWritten.value = { slug, state, worktree }; }),
-      rootDir: '/tmp/visualBoard-task-persist-1',
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1602,12 +1605,12 @@ test('commentRound does not persist state when no state exists', async () => {
 
   try {
     await commentRound('task-persist-2', 'Test body', {
+      executionContext: missionExecutionContext({ missionId: 'task-persist-2', missionWorktree: '/tmp/visualBoard-task-persist-2' }),
       readTokenFn: () => 'token',
       postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
       readReviewStateFn: () => null,
       writeReviewStateFn: reviewStateWriterFixture(() => { writeCount++; }),
-      rootDir: '/tmp/visualBoard-task-persist-2',
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1629,6 +1632,7 @@ test('submitReviewRound records REQUEST_CHANGES on the current round after reque
 
   try {
     await submitReviewRound('task-persist-3', 'request-changes', 'Needs work', {
+      executionContext: missionExecutionContext({ missionId: 'task-persist-3', missionWorktree: '/tmp/visualBoard-task-persist-3' }),
       ...authority,
       getPrAuthorFn: () => 'different-author',
       configuration: resolveConfiguration(process.env),
@@ -1640,7 +1644,6 @@ test('submitReviewRound records REQUEST_CHANGES on the current round after reque
         backlogTransitioned.value = { slug, status };
         return true;
       },
-      worktree: '/tmp/visualBoard-task-persist-3',
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1668,6 +1671,7 @@ test('submitReviewRound records APPROVED on the current round after approve', as
 
   try {
     await submitReviewRound('task-persist-4', 'approve', 'LGTM', {
+      executionContext: missionExecutionContext({ missionId: 'task-persist-4', missionWorktree: '/tmp/visualBoard-task-persist-4' }),
       ...authority,
       getPrAuthorFn: () => 'different-author',
       configuration: resolveConfiguration(process.env),
@@ -1679,7 +1683,6 @@ test('submitReviewRound records APPROVED on the current round after approve', as
         backlogTransitioned.value = { slug, status };
         return true;
       },
-      worktree: '/tmp/visualBoard-task-persist-4',
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1700,13 +1703,13 @@ test('submitReviewRound records APPROVED on the current round after approve', as
 
 test('submitReviewRound promotes an active backlog task to review after provider-backed approval', async () => {
   const { submitReviewRound } = createEventHandlerModule;
-  const { ReviewState } = ReviewStateModule;
   let transitioned: { value: { slug: string; status: string; } | null } = { value: null };
   const prev = process.env.FORGEJO_USER;
   process.env.FORGEJO_USER = 'codex';
 
   try {
     await submitReviewRound('task-2197', 'approve', 'LGTM', {
+      executionContext: missionExecutionContext({ missionId: 'task-2197', missionWorktree: '/tmp/visualBoard-task-2197' }),
       ...reviewVerdictFixture('task-2197'),
       getPrAuthorFn: () => 'different-author',
       configuration: resolveConfiguration(process.env),
@@ -1715,16 +1718,12 @@ test('submitReviewRound promotes an active backlog task to review after provider
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
       writeReviewStateFn: persistenceCommitted,
-      readReviewStateFn: () => new ReviewState('task-2197', {
-        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
-      }),
       resolveTaskFileFn: () => ({ matches: ['/tmp/task-2197.md'],  ok: true as const, taskFile: '/tmp/task-2197.md' }),
       getTaskStatusFn: () => 'active',
       transitionTaskFn: async (slug, status) => {
         transitioned.value = { slug, status };
         return true;
       },
-      worktree: '/tmp/visualBoard-task-2197',
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1742,7 +1741,6 @@ test('submitReviewRound promotes an active backlog task to review after provider
 
 test('submitReviewRound keeps YAML and rendered task status aligned when provider-backed approval repairs active', async () => {
   const { submitReviewRound } = createEventHandlerModule;
-  const { ReviewState } = ReviewStateModule;
 
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-review-round-'));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task-2198 - stale-active.md');
@@ -1771,6 +1769,7 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
     runGitOrThrow(['commit', '-m', 'fixture'], { cwd: root });
 
     await submitReviewRound('task-2198', 'approve', 'LGTM', {
+      executionContext: missionExecutionContext({ missionId: 'task-2198', missionWorktree: root }),
       ...reviewVerdictFixture('task-2198'),
       getPrAuthorFn: () => 'different-author',
       configuration: resolveConfiguration(process.env),
@@ -1779,10 +1778,6 @@ test('submitReviewRound keeps YAML and rendered task status aligned when provide
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
       writeReviewStateFn: persistenceCommitted,
-      readReviewStateFn: () => new ReviewState('task-2198', {
-        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
-      }),
-      worktree: root,
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1806,11 +1801,11 @@ test('submitReviewRound with provider=none refuses to fabricate a missing review
   let posted = false;
   let mirrored = false;
   await submitReviewRound('task-test', 'approve', 'Test approval', {
+    executionContext: missionExecutionContext({ missionId: 'task-test', missionWorktree: '/tmp/test-worktree' }),
     ...authority,
     isForgejoReviewEnabledFn: () => false,
     postReviewFn: () => { posted = true; throw new Error('provider must not be called'); },
     transitionTaskFn: async () => { mirrored = true; return true; },
-    worktree: '/tmp/test-worktree',
     log: () => {}, error: message => errors.push(message), exit: code => exits.push(code),
   });
   assert.deepEqual(exits, [1]);
@@ -1831,6 +1826,7 @@ test('submitReviewRound records changes on the current round when provider=none'
 
   try {
     await submitReviewRound('task-exist', 'request-changes', 'Needs work', {
+      executionContext: missionExecutionContext({ missionId: 'task-exist', missionWorktree: '/tmp/test-worktree' }),
       ...authority,
       getPrAuthorFn: () => 'different-author',
       configuration: resolveConfiguration(process.env),
@@ -1839,7 +1835,6 @@ test('submitReviewRound records changes on the current round when provider=none'
         backlogTransitioned.value = { slug, status };
         return true;
       },
-      worktree: '/tmp/test-worktree',
       log: () => {},
       error: () => {},
       exit: () => {}
@@ -1879,6 +1874,7 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
   ]);
 
   const result = consumeImplementerArtifacts('task-089', 'codex', {
+    executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
@@ -1889,7 +1885,6 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
     },
     deleteArtifactFn: (filePath) => deleted.push(filePath),
     buildMetadataFooterFn: async () => '',
-    worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
@@ -1920,6 +1915,7 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
   ]);
 
   const result = await consumeReviewerArtifacts('task-089', 'custom', {
+    executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
@@ -1928,7 +1924,6 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
     postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     deleteArtifactFn: (filePath) => deleted.push(filePath),
     buildMetadataFooterFn: async () => '',
-    worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
@@ -1951,6 +1946,7 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
   ]);
 
   const result = consumeImplementerArtifacts('task-089', 'codex', {
+    executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
@@ -1958,7 +1954,6 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'boom' }),
     deleteArtifactFn: (filePath) => deleted.push(filePath),
     buildMetadataFooterFn: async () => '',
-    worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Mock createEvent to avoid requiring real mission directory
@@ -1982,6 +1977,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
   ]);
 
   const result = await consumeReviewerArtifacts('task-089', 'custom', {
+    executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
@@ -1990,7 +1986,6 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
     postReviewFn: (branch, token, body, options) => { calls.push('postReview'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     deleteArtifactFn: (filePath) => {},
     buildMetadataFooterFn: async () => '',
-    worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Track createEvent calls
@@ -2020,6 +2015,7 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
   ]);
 
   const result = consumeImplementerArtifacts('task-089', 'codex', {
+    executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
@@ -2027,7 +2023,6 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
     postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     deleteArtifactFn: (filePath) => {},
     buildMetadataFooterFn: async () => '',
-    worktree: '/tmp/worktree',
     log: () => {},
     error: () => {},
     // Track createEvent calls

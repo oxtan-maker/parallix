@@ -268,7 +268,7 @@ test('a refused prepared launch settles its reservation without invoking a provi
     customReservation: { bindChild: () => {}, release: () => { releases++; } },
   };
   await assert.rejects(launchPrepared(prepared, { configuration: resolveConfiguration({}), step: 'execute', slug: null,
-    worktree: undefined, role: null, onLaunch: undefined, unrefChild: false, log: () => {},
+    worktree: undefined, role: null, stdinPolicy: 'inherit', onLaunch: undefined, unrefChild: false, log: () => {},
     launchAdmission: { assert: async () => { throw new Error('stale recovery'); } },
   }, 'custom', 1), /stale recovery/);
   assert.equal(launches, 0);
@@ -542,7 +542,7 @@ test('operator cancellation finalizes observed run metadata before re-raising th
   };
 
   const launched = await launchPrepared(prepared, { configuration, step: 'execute', slug: 'task-7', worktree,
-    role: null, onLaunch: undefined, unrefChild: false, log: () => {}, authoritativeCompletion: undefined,
+    role: null, stdinPolicy: 'inherit', onLaunch: undefined, unrefChild: false, log: () => {}, authoritativeCompletion: undefined,
     launchAdmission: undefined }, 'pi', 1);
   await reraised;
 

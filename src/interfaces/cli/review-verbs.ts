@@ -21,6 +21,7 @@
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
 import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
+import type { LiveMissionExecutionContext, LiveMissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
 
 export interface RejectedVerdictInput {
   readonly slug: string;
@@ -35,13 +36,13 @@ export interface RejectedVerdictInput {
 export interface ReviewVerbPorts {
   readonly retainRejectedVerdict?: (_input: RejectedVerdictInput) => Promise<string>;
   readonly resolveSlug: (_explicit?: string) => string | null;
-  readonly resolveWorktree: (_slug: string) => string | null;
+  readonly resolveExecutionContext: (_slug: string) => LiveMissionExecutionContextResolution;
   readonly readReviewState: (_slug: string, _worktree: string) => Promise<{ round: number; phase: string; sourceRound?: number } | null>;
   readonly consumeReviewerOutput: (
     _slug: string,
     _reviewer: string,
     _output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string },
-    _worktree: string,
+    _executionContext: LiveMissionExecutionContext,
     _expectedVersion?: number,
   ) => Promise<{ consumed: boolean; ok?: boolean; diagnostic?: string | null }>;
   readonly consumeImplementerOutput: (
@@ -54,7 +55,7 @@ export interface ReviewVerbPorts {
       disposition: string;
       resultingRevision?: string;
     },
-    _worktree: string,
+    _executionContext: LiveMissionExecutionContext,
     _expectedVersion?: number,
   ) => Promise<{ consumed: boolean; ok?: boolean; diagnostic?: string | null }>;
 }
@@ -173,10 +174,12 @@ with \`px status\`.
 `.trimStart();
 
 /** Same slug convention as the Mission write verbs: `--slug`, else the worktree. */
-function slugOf(args: readonly string[], ports: ReviewVerbPorts): { slug: string; worktree: string } {
+function slugOf(args: readonly string[], ports: ReviewVerbPorts): { slug: string; executionContext: LiveMissionExecutionContext } {
   const slug = ports.resolveSlug(flag(args, '--slug') ?? undefined);
   if (!slug) { fail('no mission slug: run inside the mission worktree or pass --slug <slug>'); }
-  return { slug, worktree: ports.resolveWorktree(slug) ?? process.cwd() };
+  const resolution = ports.resolveExecutionContext(slug);
+  if (!resolution.ok) { fail(resolution.reason); }
+  return { slug, executionContext: resolution.context };
 }
 
 /** `px verdict approve|request-changes` */
@@ -188,7 +191,8 @@ export function createVerdictCommand(ports: ReviewVerbPorts) {
     const actor = required(args, '--actor');
     const comment = flag(args, '--comment');
     const version = expectedVersion(args);
-    const { slug, worktree } = slugOf(args, ports);
+    const { slug, executionContext } = slugOf(args, ports);
+    const worktree = executionContext.missionWorktree;
     const state = await ports.readReviewState(slug, worktree);
     if (!state) {
       fail(`no review state for ${slug}: start a review with \`px review ${slug}\` before recording a verdict`);
@@ -206,7 +210,7 @@ export function createVerdictCommand(ports: ReviewVerbPorts) {
     const result = await (async () => {
       try {
         // Authorization is checked by the consumer before any provider effect.
-        return await ports.consumeReviewerOutput(slug, actor, output, worktree, version);
+        return await ports.consumeReviewerOutput(slug, actor, output, executionContext, version);
       } catch (error) {
         if (!(error instanceof WorkflowOwnershipError) || !ports.retainRejectedVerdict) { throw error; }
         const location = await ports.retainRejectedVerdict({ slug, worktree, round, reviewer: actor, output, reason: error.message });
@@ -228,7 +232,8 @@ export function createResolveCommand(ports: ReviewVerbPorts) {
     const blocked = flag(args, '--blocked');
     const revision = flag(args, '--revision');
     const version = expectedVersion(args);
-    const { slug, worktree } = slugOf(args, ports);
+    const { slug, executionContext } = slugOf(args, ports);
+    const worktree = executionContext.missionWorktree;
     const { items, evidence } = dispositions(args);
     if (!blocked && items.length === 0) { fail('resolve requires at least one --finding with a --fixed or --disputed answer'); }
     if (blocked && items.length > 0) { fail('--blocked cannot be combined with finding resolutions'); }
@@ -241,7 +246,7 @@ export function createResolveCommand(ports: ReviewVerbPorts) {
       blockedReason: blocked,
       disposition: resolutionDisposition(blocked, items),
       ...(revision ? { resultingRevision: revision } : {}),
-    }, worktree, version);
+    }, executionContext, version);
     if (!result.consumed || !result.ok) { fail(`could not record the implementer resolution: ${result.diagnostic ?? 'unknown error'}`); }
     fmt.log.plain(fmt.status('PASS', `Recorded ${items.length} resolution(s) for ${slug} (round ${round}).`));
   };

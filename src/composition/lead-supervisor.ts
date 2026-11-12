@@ -9,7 +9,6 @@ import { findTaskFile } from '../adapters/backlog/backlog.js';
 
 import { leadFinishesParkedApproval, leadInvocation } from '../interfaces/cli/lead.js';
 import { recordApproval } from '../adapters/review/review-round.js';
-import { executionActivityIntent, type ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import type { AttentionAction } from '../application/projections/board.js';
 
 import { observationFromAttention } from '../application/recovery-supervisor.js';
@@ -36,7 +35,6 @@ export function createLeadSupervisorPort(
   const { openWorkflowServices } = context.scope;
   const builder = services.presentationCapabilities?.boardProjection;
   if (!builder) { throw new Error('board projection is unavailable for px lead'); }
-  const currentWork = services.currentWork;
   // The board's own "needs your attention" queue, rebuilt from the
   // authorities every time it is asked for: the supervisor acts on what is
   // true now, never on a snapshot it kept (ADR 0053).
@@ -45,31 +43,15 @@ export function createLeadSupervisorPort(
       const mission = String(item.missionId);
       return observationFromAttention(item, !headFor || mission === headFor ? leadHeadSha(mission) : null);
     });
-  // `px active` and `px review` own long agent loops. Start one
-  // and return to the fleet loop immediately; the current-work fact prevents
-  // the next poll from treating that mission as idle and starting it again.
-  const startForward = async (mission: string, action: AttentionAction, work: () => Promise<unknown>) => {
-    const publication = executionActivityIntent({
-      slug: mission,
-      operationId: `lead-${Date.now()}`,
-      phase: action.kind === 'active:execute' ? 'execute' : 'review',
-      summary: `lead running ${action.display}`,
-      actor: 'lead',
-      timeState: 'working',
-    });
-    if (publication) { await currentWork.running(publication); }
+  // The admitted command owns current-work publication. Lead only keeps its
+  // forwarding promise so it cannot invent a second operation identity.
+  const startForward = (action: AttentionAction, work: () => Promise<unknown>) => {
     fmt.log.info(`[lead] Started ${action.display}; continuing to supervise the fleet.`);
-    const forward: Promise<unknown> = Promise.resolve().then(work)
+    const forward: Promise<unknown> = work()
       .catch((error) => fmt.log.fail(`[lead] ${action.display} stopped: ${error instanceof Error ? error.message : String(error)}`))
-      .finally(() => { finishPublication(publication, currentWork); forwards.delete(forward); });
+      .finally(() => { forwards.delete(forward); });
     forwards.add(forward);
   };
-  // Finishing a publication is fire-and-forget: the board update may reject
-  // after the process is gone, and that is not a step the fleet can act on.
-  const finishPublication = (
-    publication: ReturnType<typeof executionActivityIntent>,
-    currentWork: ExecutionActivityPort,
-  ): void => { if (publication) { void currentWork.ended(publication).catch(() => { }); } }
   const port: SupervisorPort = {
     attention: queue,
     // The operator database holds every sibling worktree's missions; this
@@ -117,7 +99,7 @@ export function createLeadSupervisorPort(
       // Borrow the target's workflow owner, including admission and cancellation.
       if (invocation.command === 'active') {
         const targetServices = await openWorkflowServices(missionWorktree);
-        await startForward(mission, action, () => runBorrowedActive(targetServices, active, missionWorktree, invocation.args, signal));
+        startForward(action, () => runBorrowedActive(targetServices, active, missionWorktree, invocation.args, signal));
         return;
       }
       if (!registry[invocation.command]) { throw new Error(`No runnable px command for ${action.kind}`); }
@@ -125,7 +107,7 @@ export function createLeadSupervisorPort(
       // target is explicit. Calling the cached registry directly inherits
       // the process directory of `px lead`; that is wrong when lead is
       // supervising a sibling worktree and forces callers to mutate cwd.
-      await startForward(mission, action, async () => {
+      startForward(action, async () => {
         if (signal?.aborted) { return; }
         await run([invocation.command, ...invocation.args],
           { baseCwd: missionWorktree, log: fmt.log.plain, error: fmt.log.plainError, operatorInvocation: false });
@@ -150,7 +132,7 @@ async function runBorrowedActive(services: Awaited<ReturnType<typeof createProdu
     const controller = services.presentationCapabilities?.commandController;
     if (!controller) { throw new Error(`No active controller available for ${args[0]}`); }
     await active(args, {
-      controller, rootDir: root,
+      controller, rootDir: root, activityActor: 'lead',
       missionTitleFn: (slug: string) => statusMissionTitle(services, slug, root),
       exitFn: (code: number): never => { throw new Error(`command exited with status ${code}`); },
     });

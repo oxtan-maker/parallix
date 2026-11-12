@@ -509,6 +509,12 @@ export function currentReviewRound(review: Review): ReviewRound {
   return review.rounds[review.rounds.length - 1];
 }
 
+/** The review lane a returned round actually left. */
+export function reviewReturnStage(round: ReviewRound): 'agent-review' | 'human-review' {
+  return round.decision?.kind === 'changes-requested' && round.decision.source?.kind === 'operator'
+    ? 'human-review' : 'agent-review';
+}
+
 const CRITERION_REFERENCE = /(?:success[- ])?criteri(?:on|a)\s+((?:#?\d+(?:\s*(?:,|and|&)\s*)?)+)/gi;
 
 /**
@@ -674,7 +680,7 @@ export function revokeApprovedDecision(
   return { ...review, rounds: [...replaceCurrentRound(review, revokedRound), nextRound], intervention: null };
 }
 
-export { currentRevisionApprovals, recordReviewerResult, validReviewerApprovals } from './reviewer-result.js';
+export { currentRevisionApprovals, effectiveReviewerResults, recordReviewerResult, validReviewerApprovals } from './reviewer-result.js';
 export type { ReviewerMode, ReviewerPolicy } from './reviewer-policy.js';
 export type { ReviewerResult, ReviewerResultAttribution, ReviewerResultDecision, ReviewerResultOutcome } from './reviewer-result.js';
 

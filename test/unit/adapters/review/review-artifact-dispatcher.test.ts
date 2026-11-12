@@ -13,6 +13,8 @@ import { DEFAULT_REBOUND_ATTEMPTS, rebound, ReboundContext } from '../../../../s
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
+import type { MissionStore } from '../../../../src/application/domain-ports.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 const ARTIFACT_REBOUND_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
@@ -38,7 +40,7 @@ test('consumeReviewerArtifacts returns diagnostic when findings are missing', as
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -70,7 +72,7 @@ test('consumeReviewerArtifacts returns diagnostic when outcome is missing', asyn
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -101,7 +103,7 @@ test('consumeReviewerArtifacts returns diagnostic when verdict is missing', asyn
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -128,7 +130,7 @@ test('consumeReviewerArtifacts returns diagnostic when persist fails', async () 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, path: null, ok: false as const, error: 'DB connection failed' }),
     forgejoEnabled: false,
@@ -144,6 +146,27 @@ test('consumeReviewerArtifacts returns diagnostic when persist fails', async () 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+test('concurrent reviewer verdicts retry bounded automatic-version conflicts but preserve explicit pins (PX-0046.04)', async () => {
+  const missionStore = {} as MissionStore;
+  for (const expectedVersion of [undefined, 7] as const) {
+    let attempts = 0;
+    const result = await consumeReviewerArtifacts('parallel-review', 'claude', {
+      executionContext: missionExecutionContext({ missionId: 'parallel-review', missionWorktree: '/isolated/parallel-review' }),
+      providerEnabled: false, missionStore,
+      ...(expectedVersion === undefined ? {} : { expectedVersion }),
+      revision: 'review-head', processResult: { status: 0, sessionId: 'claude-run-1' },
+      output: { findings: [], comment: 'approved', verdict: 'approve' },
+      readReviewStateFn: () => ({ round: 1, phase: 'reviewing' }),
+      recordApprovalFn: async () => ++attempts === 1
+        ? { outcome: 'failed', kind: 'stale-write', diagnostic: 'competing reviewer publication' }
+        : { outcome: 'held', awaitingApprovals: 1 },
+      createEventFn: () => ({ ok: true as const, path: null }), log: () => {}, error: () => {},
+    });
+    assert.equal(attempts, expectedVersion === undefined ? 2 : 1);
+    assert.equal(result.ok, expectedVersion === undefined, 'an explicit stale version is never silently refreshed');
+  }
+});
+
 test('consumeReviewerArtifacts retains composed configuration through provider consumers (px-0042.02 F7)', async () => {
   const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
   const consumers: string[] = [];
@@ -153,7 +176,7 @@ test('consumeReviewerArtifacts retains composed configuration through provider c
   };
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
-    worktree: '/isolated/mission',
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }),
     providerEnabled: true,
     configuration,
     output: { findings: [], comment: 'reviewed', verdict: 'comment' },
@@ -180,7 +203,7 @@ test('consumeImplementerArtifacts retains composed configuration through human-n
     consumers.push(consumer);
   };
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
-    worktree: '/isolated/mission', providerEnabled: true, configuration,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }), providerEnabled: true, configuration,
     output: { items: [], evidence: ['fixed'], disposition: 'CHANGES_MADE', resultingRevision: 'revision' },
     readReviewStateFn: () => ({ round: 1, phase: 'fixing' }),
     recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
@@ -211,7 +234,7 @@ test('consumeImplementerArtifacts returns diagnostic when round-resolution is mi
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -240,7 +263,7 @@ test('consumeImplementerArtifacts returns diagnostic when disposition is missing
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -266,7 +289,7 @@ test('consumeImplementerArtifacts returns diagnostic when persist fails', async 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: tmpDir }),
     readReviewStateFn: () => null,
     createEventFn: () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, path: null, ok: false as const, error: 'DB write failed' }),
     forgejoEnabled: false,
@@ -303,7 +326,7 @@ function dispatcherOptions(overrides: Partial<ReboundContext> = {}): ReboundCont
     log: () => {},
     error: () => {},
     ...overrides,
-  };
+  } as ReboundContext;
 }
 
 /** One artifact-failure occurrence for a role. */
@@ -492,7 +515,9 @@ test('persisted approve output ends reviewer retry as APPROVED (px-0017)', async
       content: 'Approved', disposition: null, verdict: 'approve', itemDispositions: null, blockedReason: null,
       followUpReference: null, createdAt: '2026-10-19T10:01:00Z' }],
   } }));
-  const output = await reviewLoopBindings(store).consumeReviewerArtifacts(slug, 'claude');
+  const output = await reviewLoopBindings(store).consumeReviewerArtifacts(slug, 'claude', {
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/review-retry-verdict' }),
+  });
   assert.equal(output.consumed, true);
   assert.ok('reviewState' in output, 'consumed verdict includes its review state');
   assert.equal(output.reviewState, 'APPROVED');

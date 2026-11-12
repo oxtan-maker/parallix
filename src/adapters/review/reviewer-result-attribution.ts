@@ -13,6 +13,12 @@ export interface ReviewerProcessResult {
   readonly sessionId?: string | null;
 }
 
+type ReviewerResultInput = {
+  revision?: string | null;
+  decidedAt: string;
+  result?: ReviewerResultAttribution;
+};
+
 /** Translate one native agent run into the attribution accepted by Review authority. */
 export function reviewerResultAttribution(
   reviewer: string,
@@ -21,6 +27,7 @@ export function reviewerResultAttribution(
   return {
     ...(processResult?.sessionId ? { publicationId: processResult.sessionId } : {}),
     reviewerId: reviewer,
+    agentFamily: agentFamily(reviewer),
     outcome: 'completed',
     status: processResult?.status ?? 0,
   };
@@ -30,7 +37,7 @@ export function reviewerResultAttribution(
 export function attachReviewerResult(
   review: Review,
   decision: 'approved' | 'changes-requested',
-  input: { revision?: string | null; decidedAt: string; result?: ReviewerResultAttribution },
+  input: ReviewerResultInput,
   findings: readonly ReviewFinding[],
 ): Review {
   if (typeof input.revision !== 'string') { return review; }
@@ -40,18 +47,44 @@ export function attachReviewerResult(
     && round.decision.revision && round.decision.revision !== revision) {
     throw new Error(`Approved replay must target decided revision ${round.decision.revision}; replay revision ${revision} is not reviewed`);
   }
-  // The aggregate owns the authorized reviewer family. Adapter-facing actor
-  // aliases remain attributable identities but cannot mint another family.
-  const family = round.reviewer;
+  // The aggregate owns the authorized reviewer families. A policy-selected
+  // concurrent reviewer may attribute its own result without rewriting the
+  // round's historical primary reviewer; arbitrary actor aliases cannot mint
+  // another family.
+  const family = authorizedReviewerFamily(round, input);
+  const result = attachedResult(input.result, family, round.number, revision, decision);
   return recordReviewerResult(review, {
-    publicationId: input.result?.publicationId ?? `round-${round.number}:${family}:${revision}:${decision}`,
-    reviewerId: input.result?.reviewerId ?? family,
+    // Actor identity survives a launch reroute; the requested family can later
+    // publish its own verdict without colliding with the fallback's result.
+    publicationId: result.publicationId,
+    reviewerId: result.reviewerId,
     agentFamily: agentFamily(family),
     revision,
     decision,
     findings,
-    outcome: input.result?.outcome ?? 'completed',
-    status: input.result?.status === undefined ? 0 : input.result.status,
+    outcome: result.outcome,
+    status: result.status,
     publishedAt: input.decidedAt,
   });
+}
+
+function authorizedReviewerFamily(
+  round: ReturnType<typeof currentReviewRound>,
+  input: ReviewerResultInput,
+): string {
+  const attributed = input.result?.agentFamily;
+  if (!attributed) { return round.reviewer; }
+  if (!round.reviewerPolicy?.selected.includes(attributed)) { return round.reviewer; }
+  return attributed;
+}
+
+function attachedResult(result: ReviewerResultAttribution | undefined, family: string, round: number,
+  revision: ReturnType<typeof changeRevision>, decision: 'approved' | 'changes-requested') {
+  const reviewerId = result?.reviewerId ?? family;
+  return {
+    publicationId: result?.publicationId ?? `round-${round}:${reviewerId}:${revision}:${decision}`,
+    reviewerId,
+    outcome: result?.outcome ?? 'completed',
+    status: result?.status === undefined ? 0 : result.status,
+  };
 }

@@ -2,6 +2,35 @@ import type { MissionId, MissionStatus } from './mission.js';
 import type { MissionCommand } from './mission-workflow.js';
 import type { RepositoryId } from './repository.js';
 
+const WORKFLOW_RETURN_STAGES = [
+  'agent-review', 'human-review', 'declared-gates', 'integration-gates', 'pre-review-rebase',
+] as const;
+export type WorkflowReturnStage = typeof WORKFLOW_RETURN_STAGES[number];
+export const DECLARED_GATES_RETURN_STAGE: WorkflowReturnStage = 'declared-gates';
+/** Facts not already owned by the Review, lane event, or repair record. */
+export interface WorkflowReturnIdentity {
+  readonly stage: WorkflowReturnStage;
+  /** Null together when the operator return had no durable workflow owner. */
+  readonly operationId: string | null;
+  readonly operationGeneration: number | null;
+}
+const RETURN_STAGES: ReadonlySet<string> = new Set(WORKFLOW_RETURN_STAGES);
+
+/** Shared validation for every durable return-history boundary. */
+export function parseWorkflowReturnIdentity(value: unknown): WorkflowReturnIdentity | undefined {
+  if (!value || typeof value !== 'object') { return undefined; }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.stage !== 'string' || !RETURN_STAGES.has(candidate.stage)) { return undefined; }
+  const operationId = candidate.operationId ?? null;
+  const operationGeneration = candidate.operationGeneration ?? null;
+  const unowned = operationId === null && operationGeneration === null;
+  const owned = typeof operationId === 'string' && operationId.trim().length > 0
+    && Number.isSafeInteger(operationGeneration) && Number(operationGeneration) >= 1;
+  return unowned || owned ? { stage: candidate.stage as WorkflowReturnStage,
+    operationId: unowned ? null : operationId as string,
+    operationGeneration: unowned ? null : Number(operationGeneration) } : undefined;
+}
+
 /**
  * Board lane-transition telemetry event.
  *
@@ -43,6 +72,8 @@ export interface LaneTransitionEvent {
    * never produce two rows.
    */
   readonly idempotencyKey: string;
+  /** Return placement and durable operation authority not already represented by this event. */
+  readonly returnIdentity?: WorkflowReturnIdentity;
 }
 
 /** A transition store refused an already-recorded lane-event identity. */

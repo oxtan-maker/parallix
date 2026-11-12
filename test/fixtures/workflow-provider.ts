@@ -29,7 +29,7 @@ export async function fixtureProvider(root: string, slug: string, configuration:
     watchdogConfig: null, customReservation: null, effectiveProfile: null, nativeSandbox: false,
   };
   // All effects consumed by launchPrepared are real; unused loop/selection dependencies are absent.
-  const deps: Parameters<typeof launchPrepared>[1] = { configuration, step: 'execute', slug, worktree: root, role: 'execute', log: console.log, unrefChild: false,
+  const deps: Parameters<typeof launchPrepared>[1] = { configuration, step: 'execute', slug, worktree: root, role: 'execute', stdinPolicy: 'inherit', log: console.log, unrefChild: false,
     onLaunch: () => reportWorkflowProviderStarted(family) };
   return launchPrepared(prepared, deps, family, attempt);
 }

@@ -30,7 +30,7 @@ export function createVerificationStatisticsReader(root: string, configuration?:
     const operations = operationHistory.operations;
     const missions = [...new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)])];
     return { repositoryId, history, operations, lifecycle, runs: retainedRuns(root, configuration, missions),
-      collectionDefects: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
+      repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
   });
 }
 

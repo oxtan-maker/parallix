@@ -18,6 +18,7 @@ import { resolveAgentsLocalPath } from '../../../../src/adapters/storage/storage
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentSelectionPolicyError, AgentPoolExhaustedError, blockedForMs, selectAgent, selectableAgents, type AgentSelectionSnapshot, agentFamily } from '../../../../src/domain/agents.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import type { AgentStepConfig } from '../../../../src/adapters/agents/agent-config.js';
 import { selectAgent as selectLauncherAgent } from '../../../../src/adapters/agents/launcher-selection.js';
 import { startAgent } from '../../../../src/adapters/agents/agents.js';
@@ -860,7 +861,7 @@ test("composed review, review preparation, active and runtime fallback obey the 
   const reviewPreparation = new ReviewSubmissionService(createReviewPreparationPorts(configuration));
   const review = () => selectReviewer({ implementer: 'vibe', isContinue: false, persisted: null,
     maxAttempts: 1, dryRun: false, providerEnabled: false, slug: 'selection-fixture' },
-    createReviewLoopPorts('selection-fixture', { worktree: root }, { configuration, isProviderEnabled: () => false }).routing,
+    createReviewLoopPorts('selection-fixture', { executionContext: missionExecutionContext({ missionId: 'selection-fixture', missionWorktree: root }) }, { configuration, isProviderEnabled: () => false }).routing,
     { emit: () => {} });
   for (const [strategy, value, expected] of [['random', 0.4, 'claude'], ['weighted', 0.75, 'qwen']] as const) {
     policy.selection = strategy; Math.random = () => value; write();

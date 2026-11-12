@@ -12,14 +12,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkflowOperationService } from '../../../src/application/workflow-operation-service.js';
 import type { WorkflowOperationStore, WorkflowProcessPort } from '../../../src/application/ports/workflow-operation.js';
+import type { LaneTransitionEvent } from '../../../src/domain/board-event.js';
 import type { WorkflowOperation } from '../../../src/domain/workflow-operation.js';
 import type { MissionTransitionStore } from '../../../src/application/domain-ports.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 import { completed, failure } from '../../../src/application/contracts.js';
-import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
+import { fixtureMission, pendingReview, requestedChangesReview } from '../../fixtures/mission-builders.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { requestReviewIntervention } from '../../../src/domain/review.js';
+import { requestReviewIntervention, applyReviewerCommand, currentReviewRound, reviewFindingId } from '../../../src/domain/review.js';
 import { bindReviewOperatorResume } from '../../../src/composition/review-operator-resume.js';
 
 function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }, preparation: {
@@ -53,11 +54,12 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   };
   const missions = new Map(['task-one', 'task-two'].map(slug => [slug, fixtureMission(slug, { status: 'refined' })]));
   const events: string[] = [];
+  const laneEvents: LaneTransitionEvent[] = [];
   const versions = new Map<string, number>();
   const store: MissionTransitionStore = {
     async load(id) { const mission = missions.get(id); return mission ? { kind: 'found', mission, version: missionVersion(versions.get(id) ?? 1) } : { kind: 'missing' }; },
     async save(mission) { missions.set(mission.id, mission); const version = (versions.get(mission.id) ?? 1) + 1; versions.set(mission.id, version); return missionVersion(version); },
-    async saveWithTransition(mission, _version, event) { const version = await store.save(mission, _version); events.push(`${event.from}:${event.to}`); return version; },
+    async saveWithTransition(mission, _version, event) { const version = await store.save(mission, _version); events.push(`${event.from}:${event.to}`); laneEvents.push(event); return version; },
   };
   let live: boolean | null = true;
   let stopped = true;
@@ -75,7 +77,7 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   const service = new WorkflowOperationService(operations, store, { canExecute: () => true, async dispatch<T>() { return completed({} as T); } }, processes,
     repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true), undefined,
     preparation.reviewExecution ?? (async () => ({ workflow: null, liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })));
-  return { service, store, operations, activity, missions, events, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
+  return { service, store, operations, activity, missions, events, laneEvents, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
 }
 function request(id = 'request-one', mission = 'task-one'): BoardCommandRequest {
   return { operationId: id, requestKey: id, kind: 'active:execute', missionId: mission, missionStatusAtRequest: 'refined', capabilities: new Set(['active:execute']) };
@@ -325,6 +327,49 @@ test('review continuation is admitted from integration without moving the missio
   assert.deepEqual(f.events, ['integration:review']);
 });
 
+test('active admission resumes review findings without ambient workflow authorization (PX-0055.01)', async t => {
+  configureMissionWriteAuthorization(null);
+  t.after(() => configureMissionWriteAuthorization(null));
+  const f = fixture();
+  f.missions.set('task-one', fixtureMission('task-one', {
+    status: 'review',
+    review: requestedChangesReview('task-one', {
+      startedAt: '2026-11-10T10:00:00.000Z', decidedAt: '2026-11-10T10:30:00.000Z',
+    }),
+  }));
+
+  const admitted = await f.service.admit({ ...request(), missionStatusAtRequest: 'review' });
+
+  assert.equal(admitted.status, 'accepted', JSON.stringify(admitted));
+  assert.equal(f.missions.get('task-one')?.status, 'active');
+  assert.deepEqual(f.events, ['review:active']);
+  assert.deepEqual(f.laneEvents[0]?.returnIdentity,
+    { stage: 'agent-review', operationId: null, operationGeneration: null },
+    'admission retains placement without inventing authority before a durable generation exists');
+});
+
+test('active admission places an operator-sent fixing round at human-review (PX-0055.01)', async t => {
+  configureMissionWriteAuthorization(null);
+  t.after(() => configureMissionWriteAuthorization(null));
+  const f = fixture();
+  // The same fixing round the agent case above holds, sent back by a human operator.
+  const review = applyReviewerCommand(pendingReview('task-one', '2026-11-10T10:00:00.000Z'), {
+    type: 'request-changes', source: { kind: 'operator', author: 'magnus' },
+    decidedAt: '2026-11-10T10:30:00.000Z', comment: null,
+    findings: [{ id: reviewFindingId('operator-finding'), summary: 'Human correction on the round', location: null }],
+  });
+  f.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
+
+  const admitted = await f.service.admit({ ...request(), missionStatusAtRequest: 'review' });
+
+  assert.equal(admitted.status, 'accepted', JSON.stringify(admitted));
+  assert.equal(f.missions.get('task-one')?.status, 'active');
+  assert.equal(currentReviewRound(review).phase, 'fixing');
+  assert.deepEqual(f.laneEvents[0]?.returnIdentity,
+    { stage: 'human-review', operationId: null, operationGeneration: null },
+    'the human who sent the round back owns the stage of its return');
+});
+
 test('browser review resumes through the same operator continuation as px review when sensible (TASK-2839)', async () => {
   const executed: BoardCommandRequest[] = [];
   const admitted: unknown[] = [];
@@ -544,6 +589,9 @@ test('stop refuses unconfirmed replacement and fences delayed writes after a set
     assert.match(pending.error!.message, /rerun px stop task-one/);
     assert.equal((await f.service.admit({ ...request('replacement'), missionStatusAtRequest: 'active' })).status, 'failed');
     f.setStopped(true); assert.equal((await f.service.stop('task-one')).status, 'completed');
+    const stoppedOperation = await f.service.operation('request-one');
+    assert.equal(stoppedOperation?.generation, 2);
+    assert.equal(stoppedOperation?.phase, 'stopped');
     const retainedMission = f.missions.get('task-one');
     const retainedOperation = await f.service.operation('request-one');
     assert.deepEqual(await f.service.stop('task-one'), completed({ stopped: true }), 'a repeated stop is a completed no-op');
@@ -829,7 +877,6 @@ test('prelaunch compensation restores the recorded assignee through the executio
 
 import { approvedReview } from '../../fixtures/mission-builders.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
-import { currentReviewRound } from '../../../src/domain/review.js';
 
 test('pending integration repair admission preserves approval and skips agent selection and activation (TASK-2829)', async () => {
   const f = fixture(false, undefined, { select: async () => assert.fail('retention requires no implementer selection') });

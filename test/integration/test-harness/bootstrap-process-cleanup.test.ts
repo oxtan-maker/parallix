@@ -20,6 +20,15 @@ import { ChildProcessWithoutNullStreams } from 'node:child_process';
 // among any other `parallix-test-*` directories on the host.
 const MARKER_PREFIX = 'parallix-test-2318-leak-';
 
+function hardKillFixtureEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...overrides };
+  // Node's test runner points subprocesses at its raw coverage directory.
+  // A fixture killed with SIGKILL cannot flush that payload and can leave an
+  // empty JSON file that rejects the otherwise-green coverage report.
+  env.NODE_V8_COVERAGE = '';
+  return env;
+}
+
 function getExistingMarkers() {
   const entries = fs.readdirSync(os.tmpdir());
   return entries
@@ -157,12 +166,14 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
       `fs.writeFileSync(marker, JSON.stringify({`,
       `  pid: process.pid,`,
       `  dirs: bootstrap.tempRoots,`,
+      `  coverageDestination: process.env.NODE_V8_COVERAGE || null,`,
       `}));`,
       // Keep the process alive briefly so the parent can read the marker
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
   ], {
     stdio: 'pipe',
+    env: hardKillFixtureEnv(),
   });
 
   await waitFor(() => fs.existsSync(markerPath), 'SIGKILL child marker');
@@ -177,6 +188,8 @@ test('bootstrap temp directories are cleaned up after SIGKILL termination', asyn
   // Read the marker to find which directories the child created
   const data = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
   fs.unlinkSync(markerPath);
+  assert.equal(data.coverageDestination, null,
+    'a fixture that will be SIGKILLed must not register an unflushable raw coverage payload');
 
   // On the fixed bootstrap, SIGKILL should still leave directories because no
   // JavaScript handler can catch SIGKILL. This test documents that limitation.
@@ -223,7 +236,7 @@ test('runner orphan cleanup reclaims SIGKILL temp directories', async () => {
     ].join('\n'),
   ], {
     stdio: 'pipe',
-    env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+    env: hardKillFixtureEnv({ PARALLIX_TEST_MANIFEST_DIR: manifestDir }),
   });
 
   await waitFor(() => manifestEntries(manifestDir).length > 0, 'bootstrap manifest');
@@ -291,7 +304,7 @@ test('runner orphan cleanup is safe with concurrent test runs', async () => {
     [
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
-  ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirA } });
+  ], { stdio: 'pipe', env: hardKillFixtureEnv({ PARALLIX_TEST_MANIFEST_DIR: manifestDirA }) });
 
   const childB = spawn(process.execPath, [
     '--import', 'tsx',
@@ -301,7 +314,7 @@ test('runner orphan cleanup is safe with concurrent test runs', async () => {
     [
       `setTimeout(() => {}, 30000);`,
     ].join('\n'),
-  ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDirB } });
+  ], { stdio: 'pipe', env: hardKillFixtureEnv({ PARALLIX_TEST_MANIFEST_DIR: manifestDirB }) });
 
   await waitFor(
     () => manifestEntries(manifestDirA).length > 0 && manifestEntries(manifestDirB).length > 0,
@@ -378,7 +391,7 @@ test('registerTempRoot adds test-created directories to the manifest', async () 
     ].join('\n'),
   ], {
     stdio: 'pipe',
-    env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+    env: hardKillFixtureEnv({ PARALLIX_TEST_MANIFEST_DIR: manifestDir }),
   });
 
   await waitFor(
@@ -450,7 +463,7 @@ test('test/helpers/temp-dir.ts mkdtemp registers directory with manifest', async
     ].join('\n'),
   ], {
     stdio: 'pipe',
-    env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+    env: hardKillFixtureEnv({ PARALLIX_TEST_MANIFEST_DIR: manifestDir }),
   });
 
   await waitFor(
@@ -504,7 +517,7 @@ test('parallel workers each write their own manifest file in shared directory', 
       [
         `setTimeout(() => {}, 30000);`,
       ].join('\n'),
-    ], { stdio: 'pipe', env: { ...process.env, PARALLIX_TEST_MANIFEST_DIR: manifestDir } }));
+    ], { stdio: 'pipe', env: hardKillFixtureEnv({ PARALLIX_TEST_MANIFEST_DIR: manifestDir }) }));
   }
 
   // Three tsx children start under a shared, possibly heavily loaded host;

@@ -16,6 +16,9 @@ import { parseReviewCliRequest } from '../../../../src/interfaces/cli/review.js'
 import { createRevokeReviewCommand } from '../../../../src/interfaces/cli/revoke-review.js';
 import type { RevokeReviewDecisionRequest } from '../../../../src/application/revoke-review-decision-use-case.js';
 import { WorkflowOwnershipError } from '../../../../src/domain/workflow-operation.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+
+const EXECUTION_CONTEXT = missionExecutionContext({ missionId: 'task-2521.03', missionWorktree: '/tmp/worktree' });
 
 describe('revoke-review CLI version contract', () => {
   test('resolves an omitted version and forwards an explicit pin (TASK-2710)', async () => {
@@ -89,13 +92,13 @@ describe("review verbs", { concurrency: false }, () => {
       recorded,
       ports: {
         resolveSlug: (explicit) => explicit ?? 'task-2521.03',
-        resolveWorktree: () => '/tmp/worktree',
+        resolveExecutionContext: () => ({ ok: true, context: EXECUTION_CONTEXT }),
         readReviewState: async () => ({ round: 2, phase: 'reviewing' as const }),
-        consumeReviewerOutput: async (slug, reviewer, output, _worktree, expectedVersion) => {
+        consumeReviewerOutput: async (slug, reviewer, output, _executionContext, expectedVersion) => {
           recorded.reviewerOutputs.push({ slug, reviewer, output, expectedVersion });
           return { consumed: true, ok: true as const };
         },
-        consumeImplementerOutput: async (slug, implementer, output, _worktree, expectedVersion) => {
+        consumeImplementerOutput: async (slug, implementer, output, _executionContext, expectedVersion) => {
           recorded.implementerOutputs.push({ slug, implementer, output, expectedVersion });
           return { consumed: true, ok: true as const };
         },
@@ -322,7 +325,7 @@ describe("review board characterization", { concurrency: false }, () => {
   function workflow(calls: Operation[]) {
     const record = (operation: Operation) => async () => { calls.push(operation); };
     return {
-      preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2428', args, options }),
+      preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ kind: 'mutation' as const, slug: 'task-2428', args, options, executionContext: EXECUTION_CONTEXT }),
       verify: async () => {}, submit: record('submit'), push: async () => {}, enter: async () => {},
       comment: async () => {}, readComments: async () => {}, submitReview: record('submitReview'),
       close: async () => {}, status: async () => {}, createEvent: async () => {},
@@ -380,7 +383,7 @@ describe("review use case", { concurrency: false }, () => {
   function mockedPort(calls: Array<{ operation: string; args: string[] }>) {
     const record = (operation: string) => async (context: { args: string[] }) => { calls.push({ operation, args: context.args }); };
     return {
-      preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ slug: 'task-2332.14', args, options }),
+      preflight: async (args: string[], options: Record<string, unknown> = {}) => ({ kind: 'mutation' as const, slug: 'task-2332.14', args, options, executionContext: EXECUTION_CONTEXT }),
       verify: record('verify'), submit: record('submit'), push: record('push'), enter: record('enter'),
       comment: record('comment'), readComments: record('readComments'), submitReview: record('submitReview'), consumeArtifacts: record('consumeArtifacts'),
       close: record('close'), status: record('status'), createEvent: record('createEvent'),

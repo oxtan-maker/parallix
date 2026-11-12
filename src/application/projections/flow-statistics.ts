@@ -1,9 +1,15 @@
 import type { DecisionWindows } from '../../domain/decision-window.js';
 import { decisionWindowContains } from '../../domain/decision-window.js';
+import { compareCodeUnits } from '../../domain/comparators.js';
 import type { FlowOwnershipRow } from './flow-elapsed-ownership.js';
-import type { FlowGateRun, FlowLeadEpisodes, FlowRebaseRun } from './flow-mission-facts.js';
+import type { FlowGateRun, FlowLeadEpisodes, FlowRebaseRun,
+  FlowRebaseStage, FlowRebaseStageFact, FlowRebaseStageState, ScopedFlowRebaseStageFact } from './flow-mission-facts.js';
+import { formatObservationDiagnostic, type ObservationDiagnostic } from './verification-diagnostic.js';
+import { scopeFlowRebaseStages } from './flow-mission-facts.js';
 import { flowGraph, type FlowGraph, type FlowLaneId } from './flow-graph.js';
 import type { ReviewStatistics } from '../services/review-statistics.js';
+import { isRebaseObservationStage } from '../ports/rebase-workflow.js';
+import { selectFlowRebaseStageDetails } from '../presentation/flow-rebase-stage-details.js';
 
 export type { FlowEdgeKind, FlowGraph, FlowGraphEdge, FlowGraphNode, FlowLaneId, FlowNodeId } from './flow-graph.js';
 
@@ -23,8 +29,7 @@ export interface FlowMissionFacts {
   readonly window: { readonly startedAt: string; readonly finishedAt: string } | null;
   readonly gateRuns: readonly FlowGateRun[];
   readonly rebaseRuns: readonly FlowRebaseRun[];
-  /** Applicability proven by a fresh workflow reaching its lifecycle boundary after collection became active. */
-  readonly rebaseExpected?: Readonly<Record<'preReview' | 'integration', boolean>>;
+  readonly rebaseStages: readonly FlowRebaseStageFact[];
   readonly lead: FlowLeadEpisodes;
   /** Summed closed lifecycle dwell per state; null when lifecycle transitions were not read. */
   readonly laneDwellMs: Readonly<Partial<Record<FlowDwellState, number>>> | null;
@@ -34,7 +39,7 @@ export interface FlowMissionFacts {
     readonly family: string | null; readonly model: string | null }[];
   readonly observedDisqualifiers: readonly string[] | null;
   /** Named upstream exclusions that make this measured subset incomplete. */
-  readonly collectionDefects?: readonly string[];
+  readonly diagnostics: readonly ObservationDiagnostic[];
   readonly reviewStatistics: ReviewStatistics;
 }
 
@@ -91,8 +96,10 @@ export interface FlowWindowStatistics {
   readonly completedMissions: number;
   /** Current minus previous deliveries for the same cohort; null for the previous window. */
   readonly throughputChange: number | null;
-  /** Missions whose interval observations explain all, part or none of refined-to-first-delivery time. */
+  /** Missions with complete, partial or absent applicable FLOW observations. */
   readonly observation: { readonly complete: number; readonly partial: number; readonly unobserved: number };
+  readonly defects: readonly string[];
+  readonly rebaseStages: { readonly visible: readonly ScopedFlowRebaseStageFact[]; readonly omitted: number };
   readonly diagram: { readonly nodeCount: number; readonly edgeCount: number };
   readonly graph: FlowGraph;
   readonly cycleTime: { readonly meanMs: number; readonly p90Ms: number; readonly n: number } | null;
@@ -124,7 +131,6 @@ export interface FlowWindowStatistics {
     readonly largestLane: FlowLaneId | null;
   };
   readonly stateDwell: readonly { readonly state: FlowDwellState; readonly medianMs: number; readonly p90Ms: number; readonly n: number }[];
-  readonly defects: readonly string[];
 }
 export interface FlowCohortStatistics {
   readonly current: FlowWindowStatistics;
@@ -138,7 +144,7 @@ export interface FlowStatistics extends FlowCohortStatistics {
 /** Shared typed FLOW/px-stats projection. Selection is by first completion; full mission history supplies every metric. */
 export function flowStatistics(facts: readonly FlowMissionFacts[], windows: DecisionWindows): FlowStatistics {
   const families = [...new Set(facts.flatMap(fact => fact.implementer ? [fact.implementer] : []))]
-    .sort((left, right) => left.localeCompare(right));
+    .sort(compareCodeUnits);
   return { ...cohort(facts, windows),
     families: families.map(family => ({ family, ...cohort(facts.filter(fact => fact.implementer === family), windows) })) };
 }
@@ -152,8 +158,10 @@ function cohort(facts: readonly FlowMissionFacts[], windows: DecisionWindows): F
 
 function projectWindow(facts: readonly FlowMissionFacts[], window: DecisionWindows['current'],
   previousCompleted: number | null): FlowWindowStatistics {
-  const defects = new Set<string>(facts.flatMap(fact => fact.collectionDefects ?? []));
-  const { observedFirstPass, launchFacts, timeFacts } = observedFlowFacts(facts, defects);
+  const recordedDiagnostics = uniqueDiagnostics(facts.flatMap(fact => fact.diagnostics ?? []));
+  const derivedDiagnostics = uniqueDiagnostics(facts.flatMap(derivedObservationDiagnostics));
+  const diagnostics = uniqueDiagnostics([...recordedDiagnostics, ...derivedDiagnostics]);
+  const { observedFirstPass, launchFacts, timeFacts } = observedFlowFacts(facts);
   const firstPass = observedFirstPass.filter(fact => fact.observedDisqualifiers!.length === 0
     && fact.reviewStatistics.total === 0).length;
   const extra = launchFacts.map(fact => Math.max(0, fact.actualAgentLaunches! - 1));
@@ -163,14 +171,17 @@ function projectWindow(facts: readonly FlowMissionFacts[], window: DecisionWindo
   const rows = timeRows(timeFacts);
   const totalTime = rows.reduce((sum, row) => sum + row.totalMs, 0);
   const largest = rows.filter(row => laneOf(row.step, row.actor) !== 'external')
-    .sort((a, b) => b.totalMs - a.totalMs || key(a).localeCompare(key(b)))[0];
+    .sort((a, b) => b.totalMs - a.totalMs || compareCodeUnits(key(a), key(b)))[0];
   const elapsed = elapsedSummary(facts);
-  recordElapsedCoverageDefects(timeFacts, defects);
-  recordRebaseCoverageDefects(facts, defects);
+  const observation = observationSummary(facts, diagnostics);
+  const defects = uniqueDiagnostics([...recordedDiagnostics,
+    ...derivedDiagnostics.filter(diagnostic => !isRebaseObservationStage(diagnostic.stage))])
+    .map(formatObservationDiagnostic);
+  const rebaseStages = selectFlowRebaseStageDetails(scopeFlowRebaseStages(facts));
   return {
     label: window.label, startDate: window.startDate, endDate: window.endDate, completedMissions: facts.length,
     throughputChange: previousCompleted === null ? null : facts.length - previousCompleted,
-    observation: elapsed.observation,
+    observation, defects, rebaseStages,
     diagram: { nodeCount: new Set(facts.flatMap(fact => fact.diagramNodeIds)).size,
       edgeCount: new Set(facts.flatMap(fact => fact.diagramEdgeIds)).size },
     graph: flowGraph(facts),
@@ -180,7 +191,7 @@ function projectWindow(facts: readonly FlowMissionFacts[], window: DecisionWindo
       meanPerMission: extraTotal !== null ? extraTotal / launchFacts.length : null, n: launchFacts.length,
       lowerBound: launchFacts.some(fact => fact.agentLaunchesLowerBound === true), reworkJobs,
       reworkMeanPerMission: reworkJobs !== null ? reworkJobs / reworkFacts.length : null, reworkN: reworkFacts.length },
-    sendBacks: { agent: aggregateSendBacks(facts, 'agent', defects), human: aggregateSendBacks(facts, 'human', defects) },
+    sendBacks: { agent: aggregateSendBacks(facts, 'agent'), human: aggregateSendBacks(facts, 'human') },
     returns: facts.flatMap(fact => fact.reviewStatistics.returns.map(item => ({ repositoryId: fact.repositoryId,
       missionId: fact.missionId, identity: item.identity, at: item.at, author: item.author,
       responsibleModel: responsibleModel(fact, item.author, item.at),
@@ -194,47 +205,76 @@ function projectWindow(facts: readonly FlowMissionFacts[], window: DecisionWindo
       measuredMissions: timeFacts.length, table: elapsed.table, totals: elapsed.totals, unobservedMs: elapsed.unobservedMs,
       lanes: elapsed.lanes, largestLane: elapsed.largestLane },
     stateDwell: stateDwell(facts),
-    defects: [...defects],
   };
 }
 
-function observedFlowFacts(facts: readonly FlowMissionFacts[], defects: Set<string>) {
+function uniqueDiagnostics(diagnostics: readonly ObservationDiagnostic[]): ObservationDiagnostic[] {
+  return [...new Map(diagnostics.map(diagnostic => [[diagnostic.kind, diagnostic.state, diagnostic.repositoryId,
+    diagnostic.missionId, diagnostic.operationId, diagnostic.sourceId, diagnostic.stage, diagnostic.message]
+    .join('\0'), diagnostic])).values()];
+}
+
+function observedFlowFacts(facts: readonly FlowMissionFacts[]) {
   const observedFirstPass = facts.filter(fact => fact.observedDisqualifiers !== null && fact.reviewStatistics.total !== null);
-  for (const fact of facts.filter(item => item.observedDisqualifiers === null || item.reviewStatistics.total === null)) {
-    defects.add(`First-pass observations missing for ${fact.repositoryId}/${fact.missionId}; rerun the fresh workflow with FLOW collection enabled`);
-  }
   const launchFacts = facts.filter(fact => fact.actualAgentLaunches !== null);
-  for (const fact of facts.filter(item => item.actualAgentLaunches === null)) {
-    defects.add(`Agent launch observations missing for ${fact.repositoryId}/${fact.missionId}; inspect retained run history and rerun the fresh workflow`);
-  }
   const timeFacts = facts.filter(fact => fact.ownership.length > 0);
-  for (const fact of facts.filter(item => item.ownership.length === 0)) {
-    defects.add(`Elapsed ownership missing for ${fact.repositoryId}/${fact.missionId}; inspect refined-to-first-delivery boundaries`);
-  }
   return { observedFirstPass, launchFacts, timeFacts };
 }
 
-function recordElapsedCoverageDefects(facts: readonly FlowMissionFacts[], defects: Set<string>): void {
-  for (const fact of facts.filter(item => item.window)) {
-    const windowMs = Date.parse(fact.window!.finishedAt) - Date.parse(fact.window!.startedAt);
-    const explained = sum(fact.ownership.map(row => row.durationMs));
-    if (explained < windowMs) {
-      defects.add(`Elapsed ownership explains ${Math.floor(explained / windowMs * 100)}% of refined-to-first-delivery for ${fact.repositoryId}/${fact.missionId}; the remainder is reported as not observed`);
-    }
-  }
+function observationSummary(facts: readonly FlowMissionFacts[], diagnostics: readonly ObservationDiagnostic[]) {
+  const incomplete = new Set(diagnostics.map(diagnostic => `${diagnostic.repositoryId}\0${diagnostic.missionId}`));
+  const complete = facts.filter(fact => !incomplete.has(`${fact.repositoryId}\0${fact.missionId}`)).length;
+  const unobserved = facts.filter(fact => incomplete.has(`${fact.repositoryId}\0${fact.missionId}`)
+    && fact.window === null && fact.ownership.length === 0 && fact.gateRuns.length === 0
+    && fact.rebaseRuns.length === 0 && fact.actualAgentLaunches === null
+    && fact.observedDisqualifiers === null).length;
+  return { complete, partial: facts.length - complete - unobserved, unobserved };
 }
 
-function recordRebaseCoverageDefects(facts: readonly FlowMissionFacts[], defects: Set<string>): void {
-  for (const fact of facts) {
-    for (const [stage, expected, label] of [
-      ['pre-review-rebase', fact.rebaseExpected?.preReview, 'Pre-review'],
-      ['integration-rebase', fact.rebaseExpected?.integration, 'Integration'],
-    ] as const) {
-      if (expected && !fact.rebaseRuns.some(run => run.stage === stage)) {
-        defects.add(`${label} rebase observations missing for ${fact.repositoryId}/${fact.missionId}; inspect flow.rebase workflow collection`);
-      }
-    }
+const REBASE_STAGE_LABELS: Readonly<Record<FlowRebaseStage, string>> = {
+  'direct-rebase': 'Direct', 'pre-review-rebase': 'Pre-review', 'integration-rebase': 'Integration',
+};
+const REBASE_STAGE_DEFECTS: Readonly<Partial<Record<FlowRebaseStageState, {
+  readonly kind: ObservationDiagnostic['kind']; readonly state: ObservationDiagnostic['state']; readonly status: string;
+}>>> = {
+  absent: { kind: 'coverage', state: 'absent', status: 'missing' },
+  running: { kind: 'terminal', state: 'running', status: 'running' },
+  interrupted: { kind: 'terminal', state: 'interrupted', status: 'interrupted' },
+  'historical-unavailable': { kind: 'coverage', state: 'absent', status: 'historically unavailable' },
+};
+
+function derivedObservationDiagnostics(fact: FlowMissionFacts): ObservationDiagnostic[] {
+  const diagnostics: ObservationDiagnostic[] = [];
+  const add = (kind: ObservationDiagnostic['kind'], state: ObservationDiagnostic['state'], stage: string,
+    message: string, recovery: string, operationId: string | null = null, sourceId: string | null = null) => {
+    diagnostics.push({ kind, state, repositoryId: fact.repositoryId, missionId: fact.missionId,
+      operationId, sourceId, stage, message, recovery });
+  };
+  if (fact.observedDisqualifiers === null || fact.reviewStatistics.total === null) {
+    add('coverage', 'absent', 'first-pass', `First-pass observations missing for ${fact.repositoryId}/${fact.missionId}`, 'inspect retained review and verification history');
   }
+  if (fact.actualAgentLaunches === null) {
+    add('coverage', 'absent', 'agent-launch', `Agent launch observations missing for ${fact.repositoryId}/${fact.missionId}`, 'inspect retained run history and rerun the fresh workflow');
+  }
+  if (fact.ownership.length === 0) {
+    add('coverage', 'absent', 'elapsed-ownership', `Elapsed ownership missing for ${fact.repositoryId}/${fact.missionId}`, 'inspect refined-to-first-delivery boundaries');
+  } else if (fact.window) {
+    const windowMs = Date.parse(fact.window.finishedAt) - Date.parse(fact.window.startedAt);
+    const explained = sum(fact.ownership.map(row => row.durationMs));
+    if (explained < windowMs) { add('coverage', 'absent', 'elapsed-ownership',
+      `Elapsed ownership explains ${Math.floor(explained / windowMs * 100)}% of refined-to-first-delivery for ${fact.repositoryId}/${fact.missionId}`, 'inspect refined-to-first-delivery boundaries; the remainder is reported as not observed'); }
+  }
+  for (const stage of fact.rebaseStages ?? []) {
+    const metadata = REBASE_STAGE_DEFECTS[stage.state];
+    if (!metadata) { continue; }
+    add(metadata.kind, metadata.state, stage.stage,
+      `${REBASE_STAGE_LABELS[stage.stage]} rebase observations ${metadata.status} for ${fact.repositoryId}/${fact.missionId}`,
+      'inspect retained flow.rebase observations', stage.operationId, stage.sourceId);
+  }
+  for (const item of fact.reviewStatistics.returns.filter(value => value.origin.actor === null)) {
+    add('provenance', 'absent', 'return', `Return ${item.identity} has unplaced provenance for ${fact.repositoryId}/${fact.missionId}`, 'inspect retained return producer context');
+  }
+  return diagnostics;
 }
 
 /** Observed ownership averages and shares, plus separate wall-time coverage diagnostics. */
@@ -246,9 +286,6 @@ function elapsedSummary(facts: readonly FlowMissionFacts[]) {
   const observed = windowed.filter(({ fact }) => fact.ownership.length > 0);
   const n = observed.length;
   const explained = (fact: FlowMissionFacts) => sum(fact.ownership.map(row => row.durationMs));
-  const observation = { complete: windowed.filter(({ fact, windowMs }) => fact.ownership.length > 0 && explained(fact) >= windowMs).length,
-    partial: windowed.filter(({ fact, windowMs }) => fact.ownership.length > 0 && explained(fact) < windowMs).length, unobserved: 0 };
-  observation.unobserved = facts.length - observation.complete - observation.partial;
   const cycleMean = windowed.length ? sum(windowed.map(value => value.windowMs)) / windowed.length : 0;
   const observedMean = n ? sum(observed.map(({ fact }) => explained(fact))) / n : 0;
   const groups = new Map<string, { step: string; actor: string; waiting: number; working: number; held: number; offsets: number[] }>();
@@ -268,15 +305,15 @@ function elapsedSummary(facts: readonly FlowMissionFacts[]) {
     return { id: id.replace('\0', ':'), step: group.step, actor: group.actor, lane: laneOf(group.step, group.actor),
       waitingMs: perMission(group.waiting), workingMs: perMission(group.working), heldMs: perMission(group.held), totalMs,
       share: share(totalMs), order: group.offsets.length ? mean(group.offsets) : Number.MAX_SAFE_INTEGER };
-  }).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  }).sort((a, b) => a.order - b.order || compareCodeUnits(a.id, b.id));
   const unobservedMs = windowed.length
     ? sum(windowed.map(({ fact, windowMs }) => Math.max(0, windowMs - explained(fact)))) / windowed.length : 0;
   const totals = { waitingMs: sum(table.map(row => row.waitingMs)), workingMs: sum(table.map(row => row.workingMs)),
     heldMs: sum(table.map(row => row.heldMs)), totalMs: observedMean };
   const lanes = laneTimes(table, share);
   const largestLane = [...lanes].filter(lane => lane.totalMs > 0 && lane.lane !== 'external')
-    .sort((a, b) => b.totalMs - a.totalMs || a.lane.localeCompare(b.lane))[0]?.lane ?? null;
-  return { observation, table, totals, unobservedMs, lanes, largestLane,
+    .sort((a, b) => b.totalMs - a.totalMs || compareCodeUnits(a.lane, b.lane))[0]?.lane ?? null;
+  return { table, totals, unobservedMs, lanes, largestLane,
     cycleTime: windowed.length ? { meanMs: cycleMean, p90Ms: percentile(windowed.map(value => value.windowMs), 0.9), n: windowed.length } : null };
 }
 
@@ -298,7 +335,7 @@ function laneTimes(table: readonly FlowTimeTableRow[], share: (value: number) =>
     const rows = table.filter(row => row.lane === lane);
     const totalMs = sum(rows.map(row => row.totalMs));
     return { lane, families: [...new Set(rows.map(row => row.actor).filter(actor => !NON_AGENT_ACTORS.has(actor)))]
-      .sort((left, right) => left.localeCompare(right)),
+      .sort(compareCodeUnits),
       waitingMs: sum(rows.map(row => row.waitingMs)), workingMs: sum(rows.map(row => row.workingMs)),
       heldMs: sum(rows.map(row => row.heldMs)), totalMs, share: share(totalMs) };
   });
@@ -314,15 +351,11 @@ function stateDwell(facts: readonly FlowMissionFacts[]): FlowWindowStatistics['s
   });
 }
 
-function aggregateSendBacks(facts: readonly FlowMissionFacts[], actor: 'agent' | 'human', defects: Set<string>): FlowRate {
+function aggregateSendBacks(facts: readonly FlowMissionFacts[], actor: 'agent' | 'human'): FlowRate {
   const values = facts.map(fact => ({ fact, metric: fact.reviewStatistics.sendBacks?.[actor] ?? {
     numerator: null, eligibleEpisodes: null, coverage: 0,
     rate: { state: 'missing-provenance' as const, value: null },
   } }));
-  const missing = values.filter(({ metric }) => metric.rate.state === 'missing-provenance');
-  for (const { fact } of missing) {
-    defects.add(`${actor} review provenance missing for ${fact.repositoryId}/${fact.missionId}; inspect retained decision and handoff evidence`);
-  }
   const measured = values.filter(({ metric }) => metric.rate.state !== 'missing-provenance');
   if (measured.length === 0 && facts.length > 0) { return { numerator: null, denominator: null, observed: 0, population: facts.length,
     coverage: 0, state: 'missing-observation', value: null }; }
@@ -335,7 +368,7 @@ function aggregateSendBacks(facts: readonly FlowMissionFacts[], actor: 'agent' |
 function responsibleModel(fact: FlowMissionFacts, author: string | null, at: string | null): string | null {
   if (!author || !at) { return null; }
   return [...fact.agentLaunches].filter(launch => launch.family === author && launch.startedAt < at)
-    .sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0]?.model ?? null;
+    .sort((a, b) => compareCodeUnits(b.startedAt, a.startedAt))[0]?.model ?? null;
 }
 
 function rate(numerator: number, denominator: number, population: number): FlowRate {
@@ -355,7 +388,7 @@ function timeRows(facts: readonly FlowMissionFacts[]): FlowTimeSummary[] {
   }
   return [...groups.values()].map(({ row, values }) => ({ step: row.step, actor: row.actor, model: row.model, state: row.state,
     totalMs: sum(values), meanMs: mean(values), p90Ms: percentile(values, 0.9), n: values.length }))
-    .sort((a, b) => key(a).localeCompare(key(b)));
+    .sort((a, b) => compareCodeUnits(key(a), key(b)));
 }
 function key(row: Pick<FlowOwnershipRow, 'step' | 'actor' | 'model' | 'state'>): string {
   return `${row.step}\0${row.actor}\0${row.model ?? ''}\0${row.state}`;

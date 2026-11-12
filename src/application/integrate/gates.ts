@@ -375,7 +375,7 @@ class IntegrationGateStep {
         original,
         role: 'implementer',
         slug,
-        worktree: checkout,
+        executionContext: context.executionContext,
         state: await currentRepairState(missionServices.store, slug, context.reviewState),
         taskResolution: context.task,
         missionStore: missionServices.store,
@@ -416,6 +416,7 @@ class IntegrationGateStep {
       actor: implementer,
       occurredAt,
       idempotencyKey: `integration-gate-rebound:${bounceSlug}:${current.version}`,
+      workflowReturn: 'integration-gates',
     });
     if (transition.status !== 'completed') { throw new Error(transition.error?.message ?? `Mission ${bounceSlug} could not rebound to active.`); }
     return projectBacklogTransition(context.mirrorOwnership, seams.transitionTaskFn, bounceSlug, 'active');

@@ -244,7 +244,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
           reviewer: request.reviewer ?? null, originalStatus: loaded.mission.status,
           previousAssignee: loaded.mission.assignee, owner: null, createdAt: now, updatedAt: now, reason: null,
         }), operatorInvocation: request.operatorInvocation, invocation: request.invocation, requestedAgent: request.agent, pinnedAgent: request.pinnedAgent,
-          reviewOperatorResume: reviewOperatorResume ?? undefined };
+          activityActor: request.activityActor, reviewOperatorResume: reviewOperatorResume ?? undefined };
         if (command === 'active:execute' && agent && !pendingIntegrationApproval(loaded.mission)) {
           const activation = await new ExecutionStartService(this._missions).start(loaded.mission.id, agent, operation.id, loaded.version);
           operation = { ...operation, activationVersion: activation.version };
@@ -293,7 +293,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     const request: BoardCommandRequest = {
       operationId: operation.id, missionId: operation.missionId, kind: operation.command,
       capabilities: new Set([operation.command]), agent: operation.command === 'active:execute' ? operation.agent : operation.requestedAgent ?? null, pinnedAgent: operation.pinnedAgent, reviewer: operation.reviewer,
-      operatorInvocation: operation.operatorInvocation, detached: false,
+      operatorInvocation: operation.operatorInvocation, activityActor: operation.activityActor, detached: false,
     };
     let outcome: ApplicationOutcome<unknown>;
     try { outcome = await (execute ?? (r => this._dispatcher.dispatch(r)))(request); }
@@ -434,7 +434,7 @@ function executionActivity(operation: WorkflowOperation, state: ExecutionActivit
   return { missionId: operation.missionId, operationId: operation.id, operationGeneration: operation.generation,
     revision,
     phase: operationPhase(operation.command),
-    state, summary, actor: activityActor(state), model: null,
+    state, summary, actor: operation.activityActor ?? activityActor(state), model: null,
     timeState: operationTimeState(state, publisher, summary),
     agent: operation.agent ? agentFamily(operation.agent) : null, processId: publisher?.pid ?? null, processIdentity: publisher?.identity ?? null,
     blockedReason: state === 'blocked' ? summary : null, occurredAt: new Date().toISOString() };

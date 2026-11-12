@@ -624,6 +624,16 @@ test('spawnAndTee keeps stdin inherited without input and hands input to the ter
   assert.ok(Buffer.isBuffer(launches[0].input) && launches[0].input.toString('utf8') === 'hosted prompt');
 });
 
+test('spawnAndTee isolates concurrent reviewer input by honoring an ignored stdin policy (PX-0046.04)', async () => {
+  await withMockSpawn({ status: 0 }, async (observed) => {
+    await Promise.all([
+      spawnAndTee('reviewer-a', [], { stdoutSink: noopSink(), stderrSink: noopSink(), stdinPolicy: 'ignore' }),
+      spawnAndTee('reviewer-b', [], { stdoutSink: noopSink(), stderrSink: noopSink(), stdinPolicy: 'ignore' }),
+    ]);
+    assert.deepEqual(observed.map(call => call.options.stdio?.[0]), ['ignore', 'ignore']);
+  });
+});
+
 
 test('failure normalization preserves protocol identity despite rewritten diagnostics (TASK-2829)', async () => {
   const { normalizeProviderFailure, normalizeProcessFailure } = await import('../../../../src/adapters/process/failure-normalization.js');

@@ -19,6 +19,7 @@ import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // Regression provenance: TASK-2364.
 const mockSlug = 'task-2364';
+const mutationContext = missionExecutionContext({ missionId: mockSlug, missionWorktree: '/fixture' });
 
 test('review mutation requires a consistent live context while status discovery remains read-only', async () => {
   const errors: string[] = []; const exits: number[] = []; let resolutions = 0;
@@ -45,7 +46,6 @@ test('review mutation consumers retain the preflight checkout and configuration 
     exit: (code: number) => assert.fail(`exit ${code}`),
   });
   const common = {
-    resolveWorktreeFn: () => null,
     readReviewStateFn: () => ({ implementer: 'codex' }),
   };
 
@@ -57,7 +57,7 @@ test('review mutation consumers retain the preflight checkout and configuration 
       return { ok: true as const };
     },
   });
-  assert.ok(submit);
+  if (submit?.kind !== 'mutation') { assert.fail('submit preflight must resolve a mutation context'); }
   await adapter.submit(submit);
   const push = await adapter.preflight([mockSlug, '--push'], {
     ...common,
@@ -73,7 +73,7 @@ test('review mutation consumers retain the preflight checkout and configuration 
       return { ok: true };
     },
   });
-  assert.ok(push);
+  if (push?.kind !== 'mutation') { assert.fail('push preflight must resolve a mutation context'); }
   await adapter.push(push);
   const close = await adapter.preflight([mockSlug, '--close'], {
     ...common,
@@ -83,7 +83,7 @@ test('review mutation consumers retain the preflight checkout and configuration 
       return { ok: true };
     },
   });
-  assert.ok(close);
+  if (close?.kind !== 'mutation') { assert.fail('close preflight must resolve a mutation context'); }
   await adapter.close(close);
 
   assert.equal(submitted?.worktree, undefined, 'review preparation receives no worktree fallback; the resolved context is the location authority');
@@ -99,6 +99,7 @@ test('auto-bootstrap fallback owner is human not magnus when repo is empty', asy
   let created = 0;
 
   await pushRound(mockSlug, {
+    executionContext: mutationContext,
     readReviewStateFn: () => ({ implementer: 'human' }),
     readTokenFn: () => 'token',
     transitionTaskFn: async () => true,
@@ -131,6 +132,7 @@ test('auto-bootstrap derives owner from repo slug when present', async () => {
   let created = 0;
 
   await pushRound(mockSlug, {
+    executionContext: mutationContext,
     readReviewStateFn: () => ({ implementer: 'human' }),
     readTokenFn: () => 'token',
     transitionTaskFn: async () => true,
@@ -216,9 +218,9 @@ for (const explicit of [false, true]) {
   test(`review push preserves recorded codex authorship with custom reviewer; explicit=${explicit} (px-0016)`, async () => {
     const published: string[] = [];
     const adapter = createReviewWorkflowAdapter();
-    await adapter.push({ slug: mockSlug, args: ['--push', ...(explicit ? ['--implementer', 'codex'] : [])], options: {
+    await adapter.push({ kind: 'mutation', executionContext: mutationContext, slug: mockSlug, args: ['--push', ...(explicit ? ['--implementer', 'codex'] : [])], options: {
       missionStore: { load: async () => ({ kind: 'found', version: missionVersion(1), mission: fixtureMission(mockSlug, { assignee: agentFamily('codex') }) }) },
-      resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+      readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
       resolveReviewUserFn: (user: string) => user, isReviewProviderEnabledFn: () => true,
       readTokenFn: (user: string) => `${user}-token`, transitionTaskFn: async () => true,
       createPrFn: (_branch: string, user: string, token: string) => { published.push(`${user}:${token}`); return { ok: true }; },
@@ -241,9 +243,9 @@ test('review push cannot override recorded implementer with a flag or stale revi
     createPrFn: (_branch: string, user: string) => { publications.push(user); return { ok: true }; },
     log: () => {}, error: (message: string) => errors.push(message), exit: (code: number) => exits.push(code),
   };
-  await adapter.push({ slug: mockSlug, args: ['--push'], options });
+  await adapter.push({ kind: 'mutation', executionContext: mutationContext, slug: mockSlug, args: ['--push'], options });
   assert.deepEqual(publications, ['codex']);
-  await adapter.push({ slug: mockSlug, args: ['--push', '--implementer', 'custom'], options });
+  await adapter.push({ kind: 'mutation', executionContext: mutationContext, slug: mockSlug, args: ['--push', '--implementer', 'custom'], options });
   assert.deepEqual(publications, ['codex'], 'a CLI override cannot authorize a different publisher');
   assert.deepEqual(exits, [1]);
   assert.match(errors.join('\n'), /differs from recorded implementer codex/);
@@ -253,7 +255,7 @@ for (const mode of ['unavailable', 'unassigned']) {
   test(`review push refuses ${mode} Mission identity instead of using reviewer or task (px-0016)`, async () => {
     const errors: string[] = [];
     const exits: number[] = [];
-    await createReviewWorkflowAdapter().push({ slug: mockSlug, args: ['--push', '--implementer', 'codex'], options: {
+    await createReviewWorkflowAdapter().push({ kind: 'mutation', executionContext: mutationContext, slug: mockSlug, args: ['--push', '--implementer', 'codex'], options: {
       missionStore: { load: async () => mode === 'unavailable'
         ? { kind: 'unavailable', reason: 'fixture unavailable' }
         : { kind: 'found', version: missionVersion(1), mission: fixtureMission(mockSlug, { assignee: null }) } },
@@ -271,7 +273,8 @@ for (const mode of ['unavailable', 'unassigned']) {
 test('legacy review push uses the recorded implementer rather than reviewer (px-0016)', async () => {
   const published: string[] = [];
   await pushRound(mockSlug, {
-    resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+    executionContext: mutationContext,
+    readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
     resolveReviewUserFn: user => user, isReviewProviderEnabledFn: () => true,
     readTokenFn: user => `${user}-token`, transitionTaskFn: async () => true,
     createPrFn: (_branch, user) => { published.push(user); return { ok: true }; },
@@ -284,9 +287,9 @@ test('review push retains configured credential home through lookup bootstrap an
   const configuration = resolveConfiguration({ FORGEJO_HOME: '/configured/forgejo' });
   let publications = 0;
   let bootstraps = 0;
-  await createReviewWorkflowAdapter().push({ slug: mockSlug, args: ['--push', '--implementer', 'codex'], options: {
+  await createReviewWorkflowAdapter().push({ kind: 'mutation', executionContext: mutationContext, slug: mockSlug, args: ['--push', '--implementer', 'codex'], options: {
     configuration,
-    resolveWorktreeFn: () => '/fixture', readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
+    readReviewStateFn: () => ({ implementer: 'codex', reviewer: 'custom' }),
     resolveReviewUserFn: (user: string) => user, isReviewProviderEnabledFn: () => true,
     readTokenFn: (user: string, options: { rootDir?: string; configuration?: typeof configuration }) => {
       assert.equal(user, 'codex'); assert.equal(options.rootDir, '/fixture');
@@ -310,7 +313,8 @@ test('review push rejects unreadable recorded implementer (px-0016)', async () =
   const errors: string[] = [];
   const exits: number[] = [];
   await pushRound(mockSlug, {
-    resolveWorktreeFn: () => '/fixture', isReviewProviderEnabledFn: () => true,
+    executionContext: mutationContext,
+    isReviewProviderEnabledFn: () => true,
     readReviewStateFn: () => { throw new Error('state unreadable'); },
     readTokenFn: () => assert.fail('no credential lookup without identity'),
     createPrFn: () => assert.fail('no publication without identity'),
@@ -324,8 +328,9 @@ test('review push rejects requested implementer differing from recorded one (px-
   const errors: string[] = [];
   const exits: number[] = [];
   await pushRound(mockSlug, {
+    executionContext: mutationContext,
     implementer: 'claude',
-    resolveWorktreeFn: () => '/fixture', isReviewProviderEnabledFn: () => true,
+    isReviewProviderEnabledFn: () => true,
     readReviewStateFn: () => ({ implementer: 'codex' }),
     readTokenFn: () => assert.fail('no credential lookup on identity mismatch'),
     createPrFn: () => assert.fail('no publication on identity mismatch'),
@@ -339,7 +344,8 @@ test('review push warns when it defaults the identity to autonomous (px-0016)', 
   const logs: string[] = [];
   const published: string[] = [];
   await pushRound(mockSlug, {
-    resolveWorktreeFn: () => '/fixture', isReviewProviderEnabledFn: () => false,
+    executionContext: mutationContext,
+    isReviewProviderEnabledFn: () => false,
     readReviewStateFn: () => null,
     resolveTaskFileFn: () => ({ ok: false }) as ReturnType<NonNullable<Parameters<typeof pushRound>[1]>['resolveTaskFileFn'] & {}>,
     resolveReviewUserFn: user => user, readTokenFn: user => `${user}-token`, transitionTaskFn: async () => true,

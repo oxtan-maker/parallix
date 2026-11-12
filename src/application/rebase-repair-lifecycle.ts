@@ -27,7 +27,8 @@ export async function transitionRebaseRepair(slug: string, status: string, trans
     }
     const implementer = loaded.mission.assignee ?? loaded.mission.review?.rounds.at(-1)?.implementer;
     if (!implementer) { throw new Error(`Mission ${slug} has no implementer for rebase repair`); }
-    await transitionReviewRepair(slug, 'active', implementer, services.store, services.lifecycle, undefined, { kind: 'rebase-repair' });
+    await transitionReviewRepair(slug,
+      { destination: 'active', sourceStage: 'pre-review-rebase', cause: { kind: 'rebase-repair' } }, implementer, services.store, services.lifecycle);
     await project('active');
     return; // Project the committed lane through the existing optional Backlog adapter.
   }
@@ -45,7 +46,8 @@ export async function resumeRebaseReview(slug: string, root: string, implementer
     // AC12: reviewer eligibility always comes from the configured review step
     // of THIS mission's worktree, never from the prior round's reviewer.
     const reviewerEligibility = bindings.reviewerEligibility(root);
-    await transitionReviewRepair(slug, 'review', implementer, services.store, services.lifecycle, reviewerEligibility);
+    await transitionReviewRepair(slug,
+      { destination: 'review', reviewerEligibility }, implementer, services.store, services.lifecycle);
     if (backlogMirrorOwnership(loaded.mission).kind === 'required') {
       await bindings.transitionTask(slug, 'review', { rootDir: root });
     }

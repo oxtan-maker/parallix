@@ -4,7 +4,22 @@ import type { ProcessIdentity } from '../../application/ports/process-identity.j
 export type { ProcessIdentity } from '../../application/ports/process-identity.js';
 
 export const readProcessStat = { sync: (pid: number) => fs.readFileSync(`/proc/${pid}/stat`, 'utf8') };
+export const readProcessCommand = { sync: (pid: number) => fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8') };
 export const runNativeStartIdentity = { execFileSync };
+
+/** Current parentage and command metadata are kernel observations, never durable state. */
+export function processParentPid(pid: number): number | null {
+  try {
+    const stat = readProcessStat.sync(pid);
+    const parent = Number(stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/)[1]);
+    return Number.isInteger(parent) && parent > 0 ? parent : null;
+  } catch { return null; }
+}
+
+export function processCommandLine(pid: number): string | null {
+  try { return readProcessCommand.sync(pid).replaceAll('\0', ' '); }
+  catch { return null; }
+}
 
 export function processStartIdentity(pid: number): string | null {
   if (!Number.isInteger(pid) || pid <= 0) {

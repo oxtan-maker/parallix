@@ -4,14 +4,15 @@ import type { ParallixConfiguration } from '../application/ports/configuration.j
 import type { Command } from '../interfaces/cli/runtime.js';
 import { createResolveCommand, createVerdictCommand, type ReviewVerbPorts } from '../interfaces/cli/review-verbs.js';
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
-import { resolveWorktree } from '../adapters/git/worktree.js';
+import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
 import { readReviewState } from '../adapters/review/review-state.js';
 import { bindReviewPersistence } from './review-persistence.js';
 import { createMissionAuthority } from './mission-authority.js';
 import { authorizeMissionWrite, authorizedOperationId } from '../application/ports/mission-write-authorization.js';
 import { promptArtifacts } from '../adapters/agents/prompt-artifacts.js';
+import { liveMissionExecutionContext } from '../application/ports/mission-execution-context.js';
 
-export function reviewVerbPorts(services: { configuration: ParallixConfiguration; mission?: { store: MissionStore; lifecycle: MissionLifecycleService } | null; sourceRound?: number }): ReviewVerbPorts {
+export function reviewVerbPorts(services: { rootDir: string; configuration: ParallixConfiguration; mission?: { store: MissionStore; lifecycle: MissionLifecycleService } | null; sourceRound?: number }): ReviewVerbPorts {
   const missionStore = services.mission?.store ?? null;
   const lifecycleService = services.mission?.lifecycle ?? null;
   const persistence = bindReviewPersistence(missionStore, lifecycleService);
@@ -21,17 +22,17 @@ export function reviewVerbPorts(services: { configuration: ParallixConfiguration
       workflowId: authorizedOperationId(), retainedAt: new Date().toISOString(),
     }, null, 2)),
     resolveSlug: (explicit) => inferSlug(explicit),
-    resolveWorktree: (slug) => resolveWorktree(slug),
+    resolveExecutionContext: slug => liveMissionExecutionContext(slug, resolveMissionExecutionContext(slug, services.rootDir, services.configuration)),
     readReviewState: async (slug, worktree) => {
       const state = await Promise.resolve(readReviewState(slug, worktree, missionStore));
       return state ? { round: state.round, phase: state.phase, sourceRound: services.sourceRound } : null;
     },
-    consumeReviewerOutput: async (slug, reviewer, output, worktree, expectedVersion) => {
+    consumeReviewerOutput: async (slug, reviewer, output, executionContext, expectedVersion) => {
       await authorizeMissionWrite(slug);
-      return persistence.consumeReviewerArtifacts(slug, reviewer, { configuration: services.configuration, worktree, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) });
+      return persistence.consumeReviewerArtifacts(slug, reviewer, { configuration: services.configuration, executionContext, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) });
     },
-    consumeImplementerOutput: (slug, implementer, output, worktree, expectedVersion) =>
-      persistence.consumeImplementerArtifacts(slug, implementer, { configuration: services.configuration, worktree, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) }),
+    consumeImplementerOutput: (slug, implementer, output, executionContext, expectedVersion) =>
+      persistence.consumeImplementerArtifacts(slug, implementer, { configuration: services.configuration, executionContext, output, expectedVersion: expectedVersion === undefined ? undefined : missionVersion(expectedVersion) }),
   };
 }
 
@@ -40,7 +41,7 @@ export function createReviewVerbCommands(rootDir: string, configuration: Paralli
   const invoke = async (args: string[], create: typeof createVerdictCommand | typeof createResolveCommand) => {
     const mission = await createMissionAuthority(rootDir, { configuration });
     const sourceRound = Number(configuration.forwardedEnvironment.PARALLIX_REVIEW_SOURCE_ROUND);
-    try { return await create(reviewVerbPorts({ configuration, mission,
+    try { return await create(reviewVerbPorts({ rootDir, configuration, mission,
       sourceRound: Number.isSafeInteger(sourceRound) && sourceRound > 0 ? sourceRound : undefined,
     }))(args); }
     finally { await mission.store.drain?.(); }

@@ -87,7 +87,7 @@ function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
     log: () => {},
     error: () => {},
     ...overrides,
-  };
+  } as ReboundContext;
 }
 // ── Classification (ADR 0048 single table) ───────────────────────────────────
 test('task-2377.03: a declared gate that ran and exited non-zero classifies as GateFailure, not a Git blocker', () => {
@@ -444,14 +444,14 @@ test('task-2377.03: the kernel writes nothing to a state store while spending a 
 });
 
 test('task-2377.03: the kernel returns the fallback-resolved implementer and moves the task to the implementer phase', async () => {
-  const transitions: string[] = [];
+  const transitions: Array<[string, string | undefined]> = [];
   const outcome = await rebound(gateReason, contextFor({
-    transitionToImplementer: (slug: string) => { transitions.push(slug); },
+    returnStage: 'declared-gates', transitionToImplementer: (slug, returnStage) => { transitions.push([slug, returnStage]); },
     applyAgentFallback: () => 'claude',
   }));
   assert.equal(outcome.outcome, 'fixed');
   assert.equal(outcome.implementer, 'claude');
-  assert.deepEqual(transitions, ['task-2377.03-fixture']);
+  assert.deepEqual(transitions, [['task-2377.03-fixture', 'declared-gates']]);
 });
 
 test('task-2377.03: the pre-review gate and hook paths build no prompt of their own', async () => {
@@ -626,7 +626,7 @@ describe("Recovery dossier —", () => {
       log: () => {},
       error: () => {},
       ...overrides,
-    };
+    } as ReboundContext;
   }
 
   test('task-2413: an exhausted recovery retains the structured root-failure dossier', async (t) => {

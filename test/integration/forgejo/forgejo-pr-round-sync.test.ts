@@ -9,6 +9,7 @@ import { runReviewLoop } from '../../../src/application/review-loop/review-loop.
 import type { ReviewAgentLaunch, ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
 import type { PullRequestReference } from '../../../src/domain/review.js';
 import { fakeProvider, fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 const forgejo = mockModule<typeof import('../../../src/adapters/forgejo/forgejo.js')>('../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 const reviewAdapter = mockModule<typeof import('../../../src/adapters/review/review-adapter.js')>('../../../src/adapters/review/review-adapter.js', import.meta.url);
 const reviewLoopModule = mockModule<typeof import('../../../src/adapters/review/review-loop.js')>('../../../src/adapters/review/review-loop.js', import.meta.url);
@@ -124,7 +125,7 @@ for (const disposition of ['BLOCKED', 'PARKED', 'PUSHBACK_ALL']) {
 function boundProvider(worktree: string, providerSlug: string = TEST_SLUG, log: (_line: string) => void = () => {}) {
   mock.method(reviewAdapter, 'isProviderEnabled', () => true);
   mock.method(reviewAdapter, 'readToken', () => 'token');
-  return createReviewLoopPorts(providerSlug, { worktree }, { log, error: () => {} }).provider!;
+  return createReviewLoopPorts(providerSlug, { executionContext: missionExecutionContext({ missionId: providerSlug, missionWorktree: worktree }) }, { log, error: () => {} }).provider!;
 }
 
 test('Forgejo PR round sync: the provider pushes the mission branch to the same review ref with a lease and token', () => {
@@ -262,7 +263,7 @@ function realGitWorktree(slug: string, prefix: string, withRemote: boolean) {
 /** The real provider and branch HEAD over fake ports for everything else. */
 function realGitLoop(slug: string, worktree: string, branch: string, reviews: string[], dispositions: string[], launch: (_launch: ReviewAgentLaunch) => void) {
   const bound = boundProvider(worktree, slug);
-  const headPort = createReviewLoopPorts(slug, { worktree }, { log: () => {}, error: () => {} }).preReview;
+  const headPort = createReviewLoopPorts(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }) }, { log: () => {}, error: () => {} }).preReview;
   const fake = fakeReviewLoopPorts({
     slug,
     worktree,

@@ -81,10 +81,11 @@ function subjectFromState(state: ReviewStateData, previous: ReviewRound): Review
   return { ...previous.subject, change };
 }
 
-function reattributedReviewerResults(reviewer: AgentFamily, previous: ReviewRound) {
-  const selected = previous.reviewerPolicy?.selected;
-  // Two selected identities taking turns are distinct; a previous reviewer the policy dropped was rerouted to the new one.
-  if (reviewer === previous.reviewer || !previous.reviewerResults || (selected?.includes(reviewer) && selected.includes(previous.reviewer))) { return previous.reviewerResults; }
+function reattributedReviewerResults(reviewer: AgentFamily, previous: ReviewRound, reroutedFrom?: AgentFamily) {
+  // Governed rounds reconcile launch evidence explicitly. Ordinary reviewer
+  // switches must never move another family's recorded judgment.
+  if (reviewer === previous.reviewer || !previous.reviewerResults
+    || previous.reviewerPolicy && reroutedFrom !== previous.reviewer) { return previous.reviewerResults; }
   return previous.reviewerResults.map(result => result.agentFamily === previous.reviewer
     ? { ...result, agentFamily: reviewer }
     : result);
@@ -97,7 +98,7 @@ function implementerFromState(state: ReviewStateData, previous: ReviewRound): Ag
   return previous.decision ? previous.implementer : familyFrom(state.implementer, previous.implementer);
 }
 
-function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRound {
+function roundFromState(state: ReviewStateData, previous: ReviewRound, reroutedFrom?: AgentFamily): ReviewRound {
   const phase = state.phase === undefined ? requireReviewPhase(previous.phase) : requireReviewPhase(state.phase);
   const disposition = state.disposition === undefined ? previous.disposition : parseReviewDisposition(state.disposition);
   const reviewer = familyFrom(state.reviewer, previous.reviewer);
@@ -115,7 +116,7 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
   // returns. The verdict initially carries the preferred round family; when
   // the launcher later adopts the family that actually ran, keep the result
   // attribution aligned with that authoritative identity as one state write.
-  const reviewerResults = reattributedReviewerResults(reviewer, previous);
+  const reviewerResults = reattributedReviewerResults(reviewer, previous, reroutedFrom);
   return {
     ...previous,
     reviewer,
@@ -139,7 +140,7 @@ function roundFromState(state: ReviewStateData, previous: ReviewRound): ReviewRo
 }
 
 /** Update loop bookkeeping on an existing round without creating decisions or rounds. */
-export function applyReviewStateToReview(review: Review, state: ReviewStateData): Review {
+export function applyReviewStateToReview(review: Review, state: ReviewStateData, launch: { reroutedFrom?: AgentFamily } = {}): Review {
   const current = review.rounds[review.rounds.length - 1];
   const suppliedRound = typeof state.round === 'number' && state.round > 0
     ? Math.floor(state.round) : null;
@@ -157,7 +158,7 @@ export function applyReviewStateToReview(review: Review, state: ReviewStateData)
     throw new ReviewPhaseViolation(`Cannot apply review state: supplied round ${suppliedRound} differs from current round ${current.number}; open the round through the review workflow`);
   }
   const rounds = [...review.rounds];
-  rounds[rounds.length - 1] = roundFromState(state, current);
+  rounds[rounds.length - 1] = roundFromState(state, current, launch.reroutedFrom);
 
   const metadata = state.metadata && typeof state.metadata === 'object' ? state.metadata : {};
   const recorded = metadata.recordedStageLaunches;

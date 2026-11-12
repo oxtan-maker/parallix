@@ -40,20 +40,40 @@ export function recordReviewerResult(review: Review, result: ReviewerResult): Re
   return { ...review, rounds: rest.length === 0 ? [updated] : [first, ...rest.slice(0, -1), updated] };
 }
 
-/** Latest valid decision per agent family; invalid retries never erase earlier evidence. */
+/** First valid decision per agent family; invalid or later retries never erase it. */
 export function validReviewerApprovals(review: Review): readonly ReviewerResult[] {
-  const results = review.rounds.at(-1)?.reviewerResults ?? [];
+  return effectiveReviewerResults(review).filter(result => result.decision === 'approved');
+}
+
+/**
+ * First valid publication per family, in canonical publication order.
+ *
+ * A later retry or contradictory duplicate remains durable evidence but never
+ * replaces the identity's first completed judgment or contributes a second
+ * vote. This makes the effective result independent of arrival order while
+ * retaining every separately identified native run for diagnosis.
+ */
+export function effectiveReviewerResults(review: Review): readonly ReviewerResult[] {
+  return effectiveResults(review.rounds.at(-1)?.reviewerResults ?? []);
+}
+
+/** First valid publication per family for one exact judged revision. */
+export function currentRevisionReviewerResults(review: Review, revision: ChangeRevision): readonly ReviewerResult[] {
+  return effectiveResults((review.rounds.at(-1)?.reviewerResults ?? []).filter(result => result.revision === revision));
+}
+
+function effectiveResults(results: readonly ReviewerResult[]): readonly ReviewerResult[] {
   const effective = new Map<AgentFamily, ReviewerResult>();
   for (const result of results) {
     if (result.outcome !== 'completed' || result.status !== 0 || result.revokedAt || result.decision === 'unknown') { continue; }
-    effective.set(result.agentFamily, result);
+    if (!effective.has(result.agentFamily)) { effective.set(result.agentFamily, result); }
   }
-  return [...effective.values()].filter(result => result.decision === 'approved');
+  return [...effective.values()];
 }
 
 /** Valid, independently attributable approvals recorded for the exact current revision. */
 export function currentRevisionApprovals(review: Review, revision: ChangeRevision): readonly ReviewerResult[] {
-  return validReviewerApprovals(review).filter(result => result.revision === revision);
+  return currentRevisionReviewerResults(review, revision).filter(result => result.decision === 'approved');
 }
 
 function validateReviewerResult(result: ReviewerResult): void {

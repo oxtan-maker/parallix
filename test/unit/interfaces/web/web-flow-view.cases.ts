@@ -33,6 +33,12 @@ test('Mission Flow renders the reference-native regions from the typed projectio
   const withUnrecorded = { ...base, metrics: { ...base.metrics, flow: { ...base.metrics.flow!, current: { ...current, graph: { ...current.graph,
     edges: current.graph.edges.map(edge => edge.from === null ? { ...edge, count: 1 } : edge) } } } } };
   assert.match(renderFlow(withUnrecorded), /data-flow-edge-origin="unrecorded-&gt;implement:workflow-return"/, 'unrecorded returns have an explicit origin');
+  const withRebaseRepair = { ...base, metrics: { ...base.metrics, flow: { ...base.metrics.flow!, current: { ...current,
+    graph: { ...current.graph, edges: [...current.graph.edges, { id: 'pre-review-rebase->implement:workflow-return',
+      from: 'pre-review-rebase' as const, to: 'implement' as const, kind: 'workflow-return' as const,
+      count: 1, share: null, percentage: null }] } } } } };
+  assert.match(renderFlow(withRebaseRepair), /data-flow-edge="pre-review-rebase-&gt;implement:workflow-return"/,
+    'typed pre-review rebase returns have a visible route back to implementation');
   assert.match(html, /data-flow-edge="integration-gates-&gt;implement:gate-failed"[\s\S]*?points="1195,333 1210,333 1210,190 305,190 305,206"/,
     'the integration return enters the top of Implement to the right of the Refined label');
 });
@@ -66,7 +72,7 @@ test('Mission Flow keeps sparse observations explicit without turning them into 
   assert.match(html, /data-flow-edge-label="integration-rebase-&gt;integration-gates:clean"[\s\S]*?0% · 0<\/span>/);
   assert.match(html, /data-flow-edge-suffix="integration-rebase-&gt;integration-gates:clean"[\s\S]*?>clean<\/span>/);
   assert.match(html, /data-flow-edge-label="declared-gates-&gt;implement:gate-failed"[\s\S]*?0% · 0 returns/);
-  assert.match(html, /Collection gaps account for 1m per delivered mission/);
+  assert.match(html, /Observation gaps account for 1m per delivered mission/);
   assert.doesNotMatch(html, /data-flow-time-row="unobserved"/);
   const withoutGateRuns: WebFlowWindow = { ...sparse, graph: { ...sparse.graph,
     nodes: sparse.graph.nodes.map(node => node.id === 'declared-gates' ? { ...node, observedMissions: 0 } : node),
@@ -76,6 +82,32 @@ test('Mission Flow keeps sparse observations explicit without turning them into 
     flow: { ...base.metrics.flow!, current: withoutGateRuns } } });
   assert.match(withoutGateRunsHtml, /data-flow-edge-label="declared-gates-&gt;implement:gate-failed"[\s\S]*?>11 returns<\/span>/);
   assert.doesNotMatch(withoutGateRunsHtml, /data-flow-edge-label="declared-gates-&gt;implement:gate-failed"[^>]*>[^<]*0%/);
+});
+
+test('Mission Flow bounds rebase provenance with incomplete states first (PX-0055.03)', () => {
+  const base = snapshot(), current = base.metrics.flow!.current;
+  const stages = Array.from({ length: 15 }, (_, index) => ({
+    repositoryId: 'repo', missionId: `task-${String(index).padStart(2, '0')}`,
+    stage: 'pre-review-rebase' as const, state: index < 2 ? 'interrupted' as const : 'measured' as const,
+    operationId: `operation-${index}`, sourceId: `source-${index}`,
+    reason: index < 2 ? 'running observation has no terminal outcome' : 'retained terminal rebase outcome',
+    outcomes: index < 2 ? [] : ['clean' as const],
+  }));
+  const flow: WebFlowWindow = { ...current, rebaseStages: { visible: stages.slice(0, 12), omitted: 3 } };
+  const html = renderFlow({ ...base, metrics: { ...base.metrics, flow: { ...base.metrics.flow!, current: flow } } });
+  assert.equal(occurrences(html, '· pre-review-rebase ·'), 12);
+  assert.match(html, /3 additional stage facts not shown; incomplete states are listed first/);
+  assert.ok(html.indexOf('task-00') < html.indexOf('task-02'), 'interrupted provenance precedes measured rows');
+});
+
+test('Mission Flow renders distinct diagnostics without exposing internal defect records (PX-0055.03)', () => {
+  const base = snapshot(), current = base.metrics.flow!.current;
+  const defects = ['first-pass missing; inspect review history', 'agent-launch missing; inspect run history'];
+  const flow: WebFlowWindow = { ...current, defects };
+  const html = renderFlow({ ...base, metrics: { ...base.metrics, flow: { ...base.metrics.flow!, current: flow } } });
+  assert.match(html, /first-pass missing; inspect review history/);
+  assert.match(html, /agent-launch missing; inspect run history/);
+  assert.doesNotMatch(html, /operationId|sourceId|collectionDefect/);
 });
 
 test('px lead is a minimal optional lane that distinguishes queue, recovery and human escalation (TASK-2836)', () => {

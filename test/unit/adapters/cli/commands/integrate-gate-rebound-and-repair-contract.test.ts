@@ -56,7 +56,6 @@ const { bindReviewOperatorResume } = await import('../../../../../src/compositio
 const { reviewStateDataFrom } = await import('../../../../../src/adapters/review/review-state-mapping.js');
 const { ReviewState } = await import('../../../../../src/adapters/review/review-state.js');
 const { getLatestReviewForPr, getLatestReviewDecision } = await import('../../../../../src/adapters/forgejo/forgejo.js');
-
 // ---- task-2565 gate rebound lifecycle (consolidated from test/task-2565-lifecycle-repro.test.ts, TASK-2622.09) ----
 describe("gate rebound lifecycle", () => {
   test('TASK-2565: integration-gate rebound reactivates through the lifecycle path', async () => {
@@ -78,7 +77,7 @@ describe("gate rebound lifecycle", () => {
       captureFinalTreeFn: () => ({ ok: true as const, rootDir: '/tmp/mission', commit: 'commit', tree: 'tree' }),
       runPhaseGatesFn: async () => ({ ok: true as const, phase: 'integration' as const, gates: [], executed: 0, skipped: false, dryRun: false, failedGate: null, error: null }),
       reboundFn: async (_reason, context) => {
-        await context.transitionToImplementer?.('task-2565-fixture');
+        assert.equal(context.returnStage, 'integration-gates'); await context.transitionToImplementer?.('task-2565-fixture', context.returnStage);
         return { outcome: 'fixed' as const, attempts: 1, diagnostic: '', classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' }, implementer: 'codex' };
       },
     });
@@ -101,7 +100,7 @@ describe("rebound active mission context", () => {
   function assertFallbackContext(options: IntegrationAgentFallbackOptions, worktree: string) {
     assert.equal(options.role, 'implementer');
     assert.equal(options.slug, slug);
-    assert.equal(options.worktree, worktree);
+    assert.equal(options.executionContext.missionWorktree, worktree);
     assert.strictEqual(options.state, reviewState, 'without a live review aggregate, fallback receives the original snapshot unchanged');
     assert.equal(options.missionStore, missionStore);
     assert.equal(options.taskResolution, taskResolution);
@@ -129,7 +128,7 @@ describe("rebound active mission context", () => {
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/mission-worktree'),
+        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/fixture/mission'),
         routeIntegrationGateFailureFn: async (options: IntegrationGateFailureRequest) => {
           assert.ok(options.applyAgentFallbackFn);
           await options.applyAgentFallbackFn({ original: 'claude', launchResult: { agent: 'codex' } });
@@ -232,7 +231,7 @@ describe("rebound active mission context", () => {
       slug, context: integrationContext({ area: 'all', taskAssignee: 'claude', task: taskResolution, reviewState }), missionServices: integrationServices({ store: missionStore }),
       baseWorktree: '/base', baseBranch: 'main', state: { temporaryStash: null, nextActionMessage: null },
       seams: { startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/base') },
+        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/fixture/mission') },
     }, { branch: `mission/${slug}`, summary: 'fixture', landedFromSha: 'before', mainTaskFile: '/missing' }));
     assert.equal(commits, 2, 'the hook repair re-verifies the same squash commit');
   });
@@ -784,8 +783,8 @@ describe("integration repair", () => {
             runPhaseGatesFn: ports.gates.runPhaseGates,
             invalidateApprovalFn: async () => { providerRetracted = true; return { ok: true as const, dismissed: ['custom'], errors: [] }; },
             reboundFn: (async (reason, context) => {
-              assert.ok(context.transitionToImplementer);
-              await context.transitionToImplementer(slug);
+              assert.ok(context.transitionToImplementer); assert.equal(context.returnStage, 'integration-gates');
+              await context.transitionToImplementer(slug, context.returnStage);
               await context.startAgent('execute', { prompt: 'Repair integration gate', worktree: '/fixture' });
               assert.equal((await context.verify(1)).ok, true);
               return { outcome: 'fixed' as const, implementer, attempts: 1, diagnostic: '', classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' } };
@@ -848,7 +847,8 @@ describe("integration repair", () => {
       },
     });
     const context = await adapter.preflight([slug, '--max-attempts', '1']);
-    await adapter.enter(context!);
+    if (context?.kind !== 'mutation') { assert.fail('review entry must resolve a mutation context'); }
+    await adapter.enter(context);
     assert.equal(continued, true);
   });
   test('a repair review cannot consume an old or unassigned provider approval', async () => {

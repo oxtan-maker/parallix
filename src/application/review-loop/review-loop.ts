@@ -14,6 +14,7 @@ import { recordHumanCorrection } from './human-correction.js';
 import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewStatus, type PullRequestReference } from '../../domain/review.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
+import { DECLARED_GATES_RETURN_STAGE } from '../../domain/board-event.js';
 import { rebaseImplementer, recordImplementerLaunch } from '../rebase-identity.js';
 import type { ReviewPreparationFacts, HumanReviewFeedback, ReviewLoopPorts, ReviewLoopRequest, ReviewLoopState } from '../ports/review-round.js';
 import { pendingRetainedRepair, resumeRetainedRepair } from './retained-repair.js';
@@ -82,7 +83,8 @@ async function stopsOnMissingTaskFile(slug: string, ports: ReviewLoopPorts, out:
 async function reportFailedStartReviewPreparation(start: Start, implementer: string, reviewPreparation: ReviewPreparationFacts, ports: ReviewLoopPorts, out: Output): Promise<void> {
   const { slug } = start;
   if (reviewPreparation.reason === 'validation-failed' && !reviewPreparation.recoveryAttempted) {
-    if (ports.missionStore) { await transitionReviewRepair(slug, 'active', implementer, ports.missionStore, ports.lifecycle); }
+    if (ports.missionStore) { await transitionReviewRepair(slug,
+      { destination: 'active', sourceStage: DECLARED_GATES_RETURN_STAGE }, implementer, ports.missionStore, ports.lifecycle); }
     await ports.task.mirror('active');
     out.emit({ kind: "review-preparation-validation-failed", slug: slug });
     const recorded = (await ports.state.read()) ?? ports.state.create({});

@@ -20,6 +20,7 @@ import { selectReviewer } from '../../../../src/application/review-loop/reviewer
 import { postWorkflowReview } from '../../../../src/adapters/review/review-artifacts.js';
 import { renderStatus } from '../../../../src/interfaces/cli/status.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { consumeReviewerArtifacts } from '../../../../src/adapters/review/review-artifacts.js';
@@ -313,6 +314,7 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
     const singleReview = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-2384', targetBranch: 'main' }, revision: changeRevision('head') }, singleReviewer, singleReviewer, singleStartedAt, ConfiguredReviewerEligibility.fromReviewStep({ eligible: [singleReviewer], strategy: 'random' }));
     const singleStore = inMemoryTransitionStore(fixtureMission('task-2384', { status: 'review', assignee: singleReviewer, review: singleReview }));
     const outcome = await postWorkflowReview('task-2384', 'approve', 'looks good', {
+      executionContext: missionExecutionContext({ missionId: 'task-2384', missionWorktree: '/fixture' }),
       missionStore: singleStore, lifecycleService: new MissionLifecycleService(singleStore),
       reviewIdentity: 'custom',
       readTokenFn: () => 'token',
@@ -376,7 +378,7 @@ test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 
   const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: fixtureAgentFamily('claude'), review }));
   const lifecycle = new MissionLifecycleService(store);
   const result = await postWorkflowReview(slug, 'approve', 'looks good', {
-    worktree: '/fixture', revision: 'head', reviewIdentity: 'claude', missionStore: store, lifecycleService: lifecycle,
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }), revision: 'head', reviewIdentity: 'claude', missionStore: store, lifecycleService: lifecycle,
     readTokenFn: () => 'claude-token', getPrAuthorFn: () => 'claude',
     postReviewFn: () => assert.fail('self approval must not reach provider'),
     readReviewStateFn: async () => ReviewState.from(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
@@ -405,7 +407,7 @@ for (const { author, reviewer, implementer } of [
     const lifecycle = new MissionLifecycleService(store);
     let posts = 0;
     const result = await consumeReviewerArtifacts(slug, reviewer, {
-      worktree: '/fixture', revision: 'head', expectedVersion: 1, providerEnabled: true,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }), revision: 'head', expectedVersion: 1, providerEnabled: true,
       output: { verdict: 'approve', findings: [], comment: 'looks good' }, missionStore: store, lifecycleService: lifecycle,
       readTokenFn: () => `${reviewer}-token`, getPrAuthorFn: () => author, getCommentsFn: async () => [],
       postCommentFn: () => ({ ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }), postReviewFn: () => {
@@ -441,7 +443,8 @@ test('self-author approval cannot leave fixing without a decision (TASK-2821 rev
   const before = structuredClone(store.mission());
   const { readReviewState, writeReviewState } = await import('../../../../src/adapters/review/review-state.js');
   await assert.rejects(() => postWorkflowReview(slug, 'approve', 'looks good', {
-    missionStore: store, lifecycleService: new MissionLifecycleService(store), worktree: '/fixture',
+    missionStore: store, lifecycleService: new MissionLifecycleService(store),
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }),
     reviewIdentity: 'custom', readTokenFn: () => 'fake', getPrAuthorFn: () => 'custom',
     readReviewStateFn: () => readReviewState(slug, '/fixture', store),
     writeReviewStateFn: (_slug, state) => writeReviewState(_slug, state, '/fixture', { missionStore: store }),

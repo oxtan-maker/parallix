@@ -26,25 +26,31 @@ export async function runUiCommand(capabilities: TuiCapabilities, _args: string[
   // Ink's `unmount` is a no-op once the app has exited.
   let instance: Instance | null = null;
   let exitRequested = false;
-  // Once a signal-initiated shutdown is under way, every further SIGINT is
-  // absorbed for the rest of the process's life. Without this, a second Ctrl+C
-  // landing after the app has unmounted but before the process has finished
-  // winding down would hit SIGINT's default action and turn an already-clean
-  // shutdown into death by signal.
+  // Once a signal-initiated shutdown is under way, every further termination
+  // signal is absorbed for the rest of the process's life. Without this, a
+  // second signal landing after the app has unmounted but before the process
+  // has finished winding down would turn an already-clean shutdown into death
+  // by signal.
   const absorbRepeatedSignals = () => {};
   const requestExit = () => {
-    if (!exitRequested) { process.on('SIGINT', absorbRepeatedSignals); }
+    if (!exitRequested) {
+      process.on('SIGINT', absorbRepeatedSignals);
+      process.on('SIGTERM', absorbRepeatedSignals);
+    }
     exitRequested = true;
+    capabilities.boardProjection.cancelPendingBuilds();
     instance?.unmount();
   };
   process.on('SIGINT', requestExit);
+  process.on('SIGTERM', requestExit);
   try {
-    const projection = await capabilities.boardProjection.build();
+    const piped = !process.stdin.isTTY && !process.stdout.isTTY;
+    const projection = await capabilities.boardProjection.build({ settleHistoricalAnalytics: piped });
     const refreshProjection = () => capabilities.boardProjection.build();
 
     // A piped CLI invocation has no keyboard source. Render one static frame and
     // return so shipped-artifact/headless callers cannot wait forever for `q`.
-    if (!process.stdin.isTTY && !process.stdout.isTTY) {
+    if (piped) {
       process.stdout.write(renderToString(React.createElement(BoardShell, { projection, commandControllerFactory: capabilities.commandControllerFactory, refreshProjection })));
       return 0;
     }
@@ -78,6 +84,8 @@ export async function runUiCommand(capabilities: TuiCapabilities, _args: string[
     const exitCode = await instance.waitUntilExit();
     return typeof exitCode === 'number' ? exitCode : 0;
   } finally {
+    capabilities.boardProjection.cancelPendingBuilds();
     process.removeListener('SIGINT', requestExit);
+    process.removeListener('SIGTERM', requestExit);
   }
 }

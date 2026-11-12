@@ -6,6 +6,50 @@ import { admitWebWorkflow } from '../../../../src/interfaces/web/workflow-route.
 import type { BoardCommandDispatcher, BoardCommandRequest, BoardCommandResult } from '../../../../src/application/controller/board-command.js';
 import type { WebCommandRequest } from '../../../../src/interfaces/web/transport.js';
 import { completed, failure, rejected } from '../../../../src/application/contracts.js';
+import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
+
+test('production-decorated admission stays durable, idempotent and queryable without foreground dispatch (PX-0058.01)', async () => {
+  const { workflowFailureController } = await import('../../../../src/composition/workflow-cli.js');
+  const { registerWorkflowReads } = await import('../../../../src/interfaces/web/workflow-route.js');
+  const operation = { id: 'durable-operation', repositoryId: 'repo', missionId: 'task-test', requestKey: 'delivery',
+    command: 'active:execute', generation: 0, phase: 'accepted', providerStarted: false, agent: 'codex', reviewer: null,
+    originalStatus: 'refined', previousAssignee: null, owner: null, createdAt: 'start', updatedAt: 'start', reason: null } as WorkflowOperation;
+  let dispatches = 0;
+  let admissions = 0;
+  const durable: BoardCommandDispatcher = {
+    canExecute: () => true,
+    async admit(request) { admissions++; assert.equal(request.requestKey, operation.requestKey); return { status: 'accepted', operation }; },
+    async operation(id) { return id === operation.id ? operation : null; },
+    async current(mission) { return mission === operation.missionId ? operation : null; },
+    async dispatch<T>() { dispatches++; return failure<T>('execution', 'foreground wait path must not run'); },
+  };
+  const controller = workflowFailureController(durable, id => durable.operation!(id), undefined, mission => durable.current!(mission));
+  const replies: Array<{ status: number; body: unknown }> = [];
+  const reply = () => {
+    const captured = { status: 0, body: undefined as unknown };
+    replies.push(captured);
+    return { code(value: number) { captured.status = value; return this; }, type() { return this; },
+      send(value: unknown) { captured.body = value; } } as unknown as FastifyReply;
+  };
+  const command = { kind: 'active:execute', missionId: 'task-test', missionStatusAtRequest: 'refined', requestKey: 'delivery' } as const;
+
+  await admitWebWorkflow(reply(), controller, command, () => {});
+  await admitWebWorkflow(reply(), controller, command, () => {});
+  assert.equal(admissions, 2);
+  assert.equal(dispatches, 0, 'normal web admission never enters the synchronous CLI waiter');
+  for (const accepted of replies) {
+    assert.equal(accepted.status, 202);
+    assert.deepEqual((accepted.body as { value: unknown }).value,
+      { operationId: operation.id, phase: 'accepted', statusUrl: `/api/operations/${operation.id}` });
+  }
+
+  let statusHandler: (request: unknown, reply: unknown) => Promise<unknown> = async () => {};
+  registerWorkflowReads({ get: (_path: string, handler: typeof statusHandler) => { statusHandler = handler; } } as never, () => controller);
+  let statusBody: unknown;
+  await statusHandler({ params: { id: operation.id } }, { code() { return this; }, send(value: unknown) { statusBody = value; } });
+  assert.equal((statusBody as { operation: { id: string; phase: string } }).operation.id, operation.id);
+  assert.equal((statusBody as { operation: { id: string; phase: string } }).operation.phase, 'accepted');
+});
 
 test("workflow admission carries review identity and its stale-status guard without a measurement payload (TASK-2822)", async () => {
   let received: BoardCommandRequest | undefined;

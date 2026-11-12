@@ -467,7 +467,8 @@ describe('Execute Mission characterization', () => {
     assert.equal(fake.launches.find(launch => launch.role === 'reviewer')?.agent, 'qwen', 'automatic selection would have nominated claude');
     assert.ok(nested, 'execute invokes the nested review factory');
     const captured = nested as unknown as Parameters<ExecuteMissionRuntime['reviewLoopMechanisms']>;
-    assert.strictEqual(captured[1].executionContext, captured[2]!.executionContext, 'execute threads one resolved context through the nested review factory');
+    assert.equal(captured[1].executionContext.missionWorktree, '/worktree', 'execute threads the resolved checkout through the nested review target');
+    assert.equal('executionContext' in captured[2]!, false, 'the nested bindings do not retain a second context owner');
     assert.deepEqual(fake.exits, []);
   });
 

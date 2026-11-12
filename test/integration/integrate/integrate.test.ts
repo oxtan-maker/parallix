@@ -1233,7 +1233,6 @@ test('evaluateTaskStatusForIntegration accepts review when the latest formal rev
 
 test('provider-backed approval repair leaves integration preflight with review instead of stale active', async () => {
   const { submitReviewRound } = submitReviewRoundModule;
-  const { ReviewState } = ReviewStateModule;
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'task-1327-integrate-preflight-'));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task-2199 - stale-active.md');
   const previousUser = process.env.FORGEJO_USER;
@@ -1268,10 +1267,7 @@ test('provider-backed approval repair leaves integration preflight with review i
       postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
       buildMetadataFooterFn: async () => '',
       writeReviewStateFn: async () => ({ outcome: 'committed' as const }),
-      readReviewStateFn: () => new ReviewState('task-2199', {
-        reviewer: 'codex', implementer: 'claude', round: 1, phase: 'reviewing'
-      }),
-      worktree: root,
+      executionContext: missionExecutionContext({ missionId: 'task-2199', missionWorktree: root }),
       log: () => {},
       error: () => {},
       exit: () => {}

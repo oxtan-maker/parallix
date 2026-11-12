@@ -51,7 +51,7 @@ export function FlowTimeTable({ flow, sort, onSort }: { readonly flow: WebFlowWi
     </div>
     <p style={{ margin: '13px 0 0', color: FLOW.muted, fontSize: FLOW_TYPE.meta, lineHeight: '14px' }}>
       Average over {flow.time.measuredMissions} missions with ownership observations. Shares are relative to observed work, not unobserved wall time. Light part = waiting in a queue, solid part = working. Human review is shown as one total (striped) until waiting and hands-on time can be measured apart.
-      {unobserved > 0 ? ` Collection gaps account for ${minutesText(unobserved)} per delivered mission and remain listed below.` : ''}
+      {unobserved > 0 ? ` Observation gaps account for ${minutesText(unobserved)} per delivered mission and remain listed below.` : ''}
     </p>
     <div role="table" aria-label="Average time per mission by step" style={{ marginTop: 8, fontSize: FLOW_TYPE.body, overflowX: 'auto' }}>
       <div role="row" style={{ ...rowStyle, color: FLOW.label, fontSize: FLOW_TYPE.micro, letterSpacing: 1, textTransform: 'uppercase', paddingBottom: 9, paddingTop: 0 }}>

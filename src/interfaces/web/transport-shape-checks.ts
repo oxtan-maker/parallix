@@ -1,10 +1,13 @@
 import { checkExecution } from './transport-execution.js';
+import { FLOW_REBASE_STAGE_STATES } from '../../application/projections/flow-mission-facts.js';
+import { isRetainedRebaseOutcome, REBASE_OBSERVATION_STAGES } from '../../application/ports/rebase-workflow.js';
 /**
  * Web transport shape checks: validate each nested wire DTO (cards, work,
  * metrics, evidence) and accumulate its problems.
  */
 
 import { LANES, GATES, ACTION_STATES, CERTAINTIES, ATTENTION_REASONS, COMMAND_KINDS, isPlainObject, checkKeys, checkString, checkNullableString, checkBoolean, checkFiniteNumber, checkNullableFiniteNumber, checkEnum, checkStringArray, checkOptString, checkDuration } from './transport-validation-primitives.js';
+
 
 export function checkCommandAction(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
@@ -358,8 +361,8 @@ function checkFlowTime(value: unknown, path: string, problems: string[]): void {
 
 function checkFlowWindow(value: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
-  const keys = ['label', 'startDate', 'endDate', 'completedMissions', 'throughputChange', 'observation', 'diagram', 'graph',
-    'cycleTime', 'firstPassYield', 'extraAgentLaunches', 'sendBacks', 'returns', 'episodes', 'time', 'stateDwell', 'defects'];
+  const keys = ['label', 'startDate', 'endDate', 'completedMissions', 'throughputChange', 'observation', 'defects', 'rebaseStages', 'diagram', 'graph',
+    'cycleTime', 'firstPassYield', 'extraAgentLaunches', 'sendBacks', 'returns', 'episodes', 'time', 'stateDwell'];
   checkKeys(value, keys, keys, path, problems);
   checkString(value, 'label', path, problems); checkString(value, 'startDate', path, problems);
   checkString(value, 'endDate', path, problems); checkFiniteNumber(value, 'completedMissions', path, problems);
@@ -367,6 +370,25 @@ function checkFlowWindow(value: unknown, path: string, problems: string[]): void
   if (!isPlainObject(value.observation)) { problems.push(`${path}.observation must be an object`); } else {
     checkKeys(value.observation, ['complete', 'partial', 'unobserved'], ['complete', 'partial', 'unobserved'], `${path}.observation`, problems);
     for (const key of ['complete', 'partial', 'unobserved']) { checkFiniteNumber(value.observation, key, `${path}.observation`, problems); }
+  }
+  checkStringArray(value, 'defects', path, problems);
+  if (!isPlainObject(value.rebaseStages)) { problems.push(`${path}.rebaseStages must be an object`); }
+  else {
+    checkKeys(value.rebaseStages, ['visible', 'omitted'], ['visible', 'omitted'], `${path}.rebaseStages`, problems);
+    checkFiniteNumber(value.rebaseStages, 'omitted', `${path}.rebaseStages`, problems);
+    checkObjects(value.rebaseStages.visible, `${path}.rebaseStages.visible`, problems, (stage, stagePath) => {
+      const stageKeys = ['repositoryId', 'missionId', 'stage', 'state', 'operationId', 'sourceId', 'reason', 'outcomes'];
+      checkKeys(stage, stageKeys, stageKeys, stagePath, problems);
+      checkString(stage, 'repositoryId', stagePath, problems); checkString(stage, 'missionId', stagePath, problems);
+      checkEnum(stage, 'stage', REBASE_OBSERVATION_STAGES, stagePath, problems);
+      checkEnum(stage, 'state', FLOW_REBASE_STAGE_STATES, stagePath, problems);
+      checkNullableString(stage, 'operationId', stagePath, problems); checkNullableString(stage, 'sourceId', stagePath, problems);
+      checkString(stage, 'reason', stagePath, problems);
+      checkStringArray(stage, 'outcomes', stagePath, problems);
+      if (Array.isArray(stage.outcomes) && stage.outcomes.some(outcome => !isRetainedRebaseOutcome(outcome))) {
+        problems.push(`${stagePath}.outcomes must contain only retained terminal rebase outcomes`);
+      }
+    });
   }
   if (!isPlainObject(value.diagram)) { problems.push(`${path}.diagram must be an object`); } else {
     checkKeys(value.diagram, ['nodeCount', 'edgeCount'], ['nodeCount', 'edgeCount'], `${path}.diagram`, problems);
@@ -397,7 +419,7 @@ function checkFlowWindow(value: unknown, path: string, problems: string[]): void
     checkFlowRate(value.sendBacks.agent, `${path}.sendBacks.agent`, problems);
     checkFlowRate(value.sendBacks.human, `${path}.sendBacks.human`, problems);
   }
-  for (const key of ['returns', 'episodes', 'defects'] as const) {
+  for (const key of ['returns', 'episodes'] as const) {
     if (!Array.isArray(value[key])) { problems.push(`${path}.${key} must be an array`); }
   }
   checkFlowTime(value.time, `${path}.time`, problems);

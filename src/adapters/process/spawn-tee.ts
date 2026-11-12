@@ -47,6 +47,8 @@ export interface SpawnTeeOptions {
   onProcessTreeCpu?: (_observation: ProcessTreeCpuObservation) => void;
   /** Private input file, owned and cleaned up by the calling adapter. */
   stdinPath?: string;
+  /** No-input launches may explicitly detach from the parent's shared stdin. */
+  stdinPolicy?: 'inherit' | 'ignore';
   configuration?: ParallixConfiguration;
   stdoutSink?: TeeSink;
   stderrSink?: TeeSink;
@@ -231,9 +233,9 @@ function forwardOutput(chunk: Buffer, stream: 'stdout' | 'stderr', tail: TailBuf
   if (sink && typeof sink.write === 'function') { sink.write(chunk); }
 }
 
-function spawnCapturedChild(launch: { command: string; args: string[] }, spawnOptions: SpawnOptions, env: NodeJS.ProcessEnv, detached: boolean, onSpawn: SpawnTeeOptions['onSpawn'], unrefChild: boolean, inputBytes: Buffer | null): ChildProcess {
+function spawnCapturedChild(launch: { command: string; args: string[] }, spawnOptions: SpawnOptions, env: NodeJS.ProcessEnv, detached: boolean, onSpawn: SpawnTeeOptions['onSpawn'], unrefChild: boolean, inputBytes: Buffer | null, stdinPolicy: 'inherit' | 'ignore'): ChildProcess {
   const child = childProcess.spawn(launch.command, launch.args, {
-    ...spawnOptions, env, ...(detached ? { detached: true } : {}), stdio: [inputBytes ? 'pipe' : 'inherit', 'pipe', 'pipe'],
+    ...spawnOptions, env, ...(detached ? { detached: true } : {}), stdio: [inputBytes ? 'pipe' : stdinPolicy, 'pipe', 'pipe'],
   }) as SupervisedChild;
   if (detached) {
     child.terminateTree = signal => {
@@ -304,6 +306,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     hostPresentation,
     input,
     stdinPath,
+    stdinPolicy = 'inherit',
     resourceBoundary,
     onProcessTreeCpu,
     ...spawnOptions
@@ -336,7 +339,7 @@ export function spawnAndTee(command: string, args: string[], options: SpawnTeeOp
     const detached = hasNoOutputDeadline || Boolean(resourceBoundary);
     let child: ChildProcess;
     try {
-      child = spawnCapturedChild(launch, spawnOptions as SpawnOptions, env, detached, onSpawn, unrefChild, hosted ? null : inputBytes);
+      child = spawnCapturedChild(launch, spawnOptions as SpawnOptions, env, detached, onSpawn, unrefChild, hosted ? null : inputBytes, stdinPolicy);
     } catch (err) {
       cpu?.finish();
       hosted?.cleanup();

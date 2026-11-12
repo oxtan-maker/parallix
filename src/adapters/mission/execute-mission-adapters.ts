@@ -280,8 +280,8 @@ class AutonomousReviewAdapter implements AutonomousReviewPort {
   async start(request: AutonomousReviewRequest): Promise<void> {
     const live = liveMissionExecutionContext(request.slug, this._runtime.resolveMutationContext(request.slug, request.worktree));
     if (!live.ok) { throw new Error(live.reason); }
-    const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { worktree: live.context.missionWorktree, executionContext: live.context }, {
-      executionContext: live.context, onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop,
+    const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { executionContext: live.context }, {
+      onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop,
     });
     await runReviewLoop({ slug: request.slug, implementer: request.implementer, reviewer: request.reviewer, skipReviewPreparation: true }, mechanisms);
   }

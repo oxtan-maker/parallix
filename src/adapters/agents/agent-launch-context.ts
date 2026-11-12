@@ -57,6 +57,8 @@ export interface StartAgentOptions {
   sessionPolicy?: SessionLaunchPolicy;
   log?: AgentLog;
   noOutputWatchdog?: {initialDelayMs?: number, intervalMs?: number, maxNoOutputMs?: number} | boolean;
+  /** Detach concurrent non-interactive work from the controller's stdin. */
+  stdinPolicy?: 'inherit' | 'ignore';
   launchAgentFn?: AgentLauncher;
   assertAgentSupportedFn?: typeof assertAgentSupported;
   /**
@@ -114,6 +116,7 @@ export type StartAgentLoopDeps = {
   role: string | null;
   env: Record<string, string>;
   noOutputWatchdog: { initialDelayMs?: number; intervalMs?: number; maxNoOutputMs?: number } | boolean;
+  stdinPolicy: 'inherit' | 'ignore';
   unrefChild: boolean;
   allowUnsandboxedMutation: boolean;
   refuseFallbackWhenPinned: (_detail: string, _reason?: import('../../domain/failure-reason.js').FailureReason) => void;

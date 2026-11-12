@@ -142,9 +142,9 @@ test('review gate repair commits active before launch and review before resuming
     assert.equal(await missionStatus(fixture), 'review');
     assert.deepEqual(fake.mirrors, ['active', 'review']);
     assert.deepEqual((await laneEvents(fixture)).map(event => ({ ...event })), [
-      { from_status: 'review', to_status: 'active', trigger: 'rebound-to-active' },
-      { from_status: 'active', to_status: 'review', trigger: 'submit-for-review' },
-    ]);
+      { from_status: 'review', to_status: 'active', trigger: 'rebound-to-active', return_stage: 'declared-gates' },
+      { from_status: 'active', to_status: 'review', trigger: 'submit-for-review', return_stage: null },
+    ], 'the gate repair places its return where it left the lane, not at agent review');
     assert.equal(currentReviewRound(await currentReviewOf(fixture)).number, 1);
     assert.equal(currentReviewRound(await currentReviewOf(fixture)).decision, null);
   } finally { await closeFixture(fixture); }
@@ -183,7 +183,8 @@ test('repair rebound refuses an approved review rather than fabricating a return
   for (const status of ['review', 'active'] as const) {
     const fixture = await openFixture(seedMission(status, strandedApprovedReview()));
     try {
-      await assert.rejects(transitionReviewRepair(SLUG, 'active', IMPLEMENTER, fixture.store, fixture.lifecycle), /undecided review round/);
+      await assert.rejects(transitionReviewRepair(SLUG,
+        { destination: 'active', sourceStage: 'declared-gates' }, IMPLEMENTER, fixture.store, fixture.lifecycle), /undecided review round/);
       assert.equal(await missionStatus(fixture), status);
       assert.deepEqual(await laneEvents(fixture), []);
     } finally { await closeFixture(fixture); }
@@ -262,7 +263,8 @@ test('integration repair retains judgment until a changed patch withdraws it, wi
     });
     assert.notEqual(rejected.status, 'completed');
     assert.equal(await missionStatus(fixture), 'active');
-    await transitionReviewRepair(SLUG, 'review', IMPLEMENTER, fixture.store, fixture.lifecycle, REVIEWER_ELIGIBILITY);
+    await transitionReviewRepair(SLUG,
+      { destination: 'review', reviewerEligibility: REVIEWER_ELIGIBILITY }, IMPLEMENTER, fixture.store, fixture.lifecycle);
     const approve = () => recordApproval(SLUG, { comment: null, decidedAt: APPROVED_AT, source: { kind: 'local' } }, {
       missionStore: fixture.store, lifecycleService: fixture.lifecycle,
     });
@@ -361,8 +363,8 @@ test('composed rebase conflict repair commits active before its agent and review
     assert.equal(exitCode.value, 0);
     assert.equal((await readMission()).status, 'review');
     assert.match(fs.readFileSync(taskFile, 'utf8'), /status: review/);
-    assert.deepEqual((await fixture.database.query<LaneEventRow>('SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug])).map(event => [event.from_status, event.to_status, event.trigger]), [
-      ['review', 'active', 'rebound-to-active'], ['active', 'review', 'submit-for-review'],
+    assert.deepEqual((await fixture.database.query<LaneEventRow>('SELECT from_status, to_status, trigger, return_stage FROM board_lane_events WHERE mission_id = ? ORDER BY id', [slug])).map(event => [event.from_status, event.to_status, event.trigger, event.return_stage]), [
+      ['review', 'active', 'rebound-to-active', 'pre-review-rebase'], ['active', 'review', 'submit-for-review', null],
     ]);
     assert.deepEqual((await readMission()).review, review);
   } finally { await closeFixture(fixture); }
@@ -394,7 +396,7 @@ test('operator correction of a stranded active approval preserves history and op
     assert.equal(currentReviewRound(corrected).number, 3);
     assert.equal(currentReviewRound(corrected).decision, null);
     assert.deepEqual((await laneEvents(fixture)).map(event => ({ ...event })), [
-      { from_status: 'active', to_status: 'review', trigger: 'revoke-approval' },
+      { from_status: 'active', to_status: 'review', trigger: 'revoke-approval', return_stage: null },
     ]);
     assert.equal((await useCase.execute(request)).status, 'failed', 'replay cannot revoke an undecided round');
     assert.equal((await laneEvents(fixture)).length, 1);
@@ -579,14 +581,15 @@ async function missionStatus(fixture: Fixture): Promise<string | null> {
 }
 
 interface LaneEventRow {
-  from_status: string | null;
-  to_status: string;
-  trigger: string;
+  readonly from_status: string | null;
+  readonly to_status: string;
+  readonly trigger: string;
+  readonly return_stage: string | null;
 }
 
 async function laneEvents(fixture: Fixture): Promise<readonly LaneEventRow[]> {
   return fixture.database.query<LaneEventRow>(
-    'SELECT from_status, to_status, trigger FROM board_lane_events WHERE mission_id = ? ORDER BY id',
+    'SELECT from_status, to_status, trigger, return_stage FROM board_lane_events WHERE mission_id = ? ORDER BY id',
     [SLUG],
   );
 }

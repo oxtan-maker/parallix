@@ -19,7 +19,7 @@ export function repairCheckpointCases(): void {
   const context = (overrides: Partial<ReboundContext>): ReboundContext => ({
     slug: 'repair-fixture', worktree: '', implementer: 'codex', log() {}, error() {},
     startAgent: async () => ({ result: { status: 0 } }), verify: () => ({ ok: true as const, command: reason.command }), ...overrides,
-  });
+  } as ReboundContext);
   const port = (overrides: Partial<RepairCheckpointPort> = {}): RepairCheckpointPort => ({
     open: async () => ({ name: 'CP-2', version: 2 }), readBlocker: async () => undefined, verify: async () => {}, ...overrides,
   });

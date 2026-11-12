@@ -70,8 +70,9 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
       window: { startedAt: new Date(Date.parse(closedAt) - 30).toISOString(), finishedAt: closedAt },
       gateRuns: [{ id: `${mission}:declared`, phase: 'handoff', result: human ? 'failed' : 'passed' },
         { id: `${mission}:integration`, phase: 'integration', result: 'passed' }],
-      rebaseRuns: [{ id: `${mission}:pre`, stage: 'pre-review-rebase', outcomes: human ? ['conflict', 'resolved'] : ['clean'] }, { id: `${mission}:integration`, stage: 'integration-rebase', outcomes: ['clean'] }],
-      lead: { queued: human ? 1 : 0, recoveries: human ? 1 : 0, escalations: 0 },
+      rebaseRuns: [{ id: `${mission}:pre`, operationId: `${mission}:pre-operation`, stage: 'pre-review-rebase', outcomes: human ? ['conflict', 'resolved'] : ['clean'] },
+        { id: `${mission}:integration`, operationId: `${mission}:integration-operation`, stage: 'integration-rebase', outcomes: ['clean'] }],
+      rebaseStages: [], diagnostics: [], lead: { queued: human ? 1 : 0, recoveries: human ? 1 : 0, escalations: 0 },
       laneDwellMs: { active: human ? 30 : 10 },
       actualAgentLaunches: launches, observedDisqualifiers: human ? ['human-return'] : [], reviewStatistics,
       agentLaunches: [{ runId: `${mission}:run`, startedAt: '2026-11-01T00:00:00Z', family: 'codex', model: 'gpt-6.1-sol' }],
@@ -109,7 +110,7 @@ test('gate shares keep one run population while return arrows reconcile to rewor
   const fact = (mission: string, observed: boolean): FlowMissionFacts => ({ repositoryId: 'repo', missionId: mission,
     closedAt: '2026-11-03T12:00:00Z', implementer: 'codex', laneDwellMs: null, diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null,
     gateRuns: observed ? [{ id: 'passed', phase: 'handoff', result: 'passed' }, { id: 'failed', phase: 'handoff', result: 'failed' }] : [],
-    rebaseRuns: [], lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
+    rebaseRuns: [], rebaseStages: [], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
     reviewStatistics: reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [1, ...(observed ? [2] : [])].map(sequence => ({
       identity: `repair:${mission}:${sequence}`, author: 'codex', at: '2026-11-03T11:00:00Z', source: 'repair' })) }) });
   const graph = flowStatistics([fact('observed', true), fact('unobserved', false)], windows).current.graph, pass = graph.edges.find(edge => edge.id === 'declared-gates->agent-review:flow')!,
@@ -128,8 +129,8 @@ test('gate shares keep one run population while return arrows reconcile to rewor
     .filter(edge => edge.from === 'declared-gates');
   assert.deepEqual(uneven.map(edge => [edge.share, edge.percentage]), [[91 / 95, 96], [4 / 95, 4]], 'only terminal siblings divide the displayed 100%');
   const resolving = flowStatistics([{ ...fact('resolve', false), rebaseRuns:
-    [{ id: 'repeat', stage: 'pre-review-rebase', outcomes: ['conflict', 'conflict', 'resolved'] },
-      { id: 'failed', stage: 'pre-review-rebase', outcomes: ['conflict', 'failed'] }] }], windows).current.graph.edges.filter(edge => edge.from === 'pre-review-resolve');
+    [{ id: 'repeat', operationId: 'repeat-operation', stage: 'pre-review-rebase', outcomes: ['conflict', 'conflict', 'resolved'] },
+      { id: 'failed', operationId: 'failed-operation', stage: 'pre-review-rebase', outcomes: ['conflict', 'failed'] }] }], windows).current.graph.edges.filter(edge => edge.from === 'pre-review-resolve');
   assert.deepEqual(resolving.map(edge => [edge.count, edge.percentage]), [[1, 34], [1, 33], [1, 33]], 'Resolve siblings divide one displayed 100%');
 });
 test('live Review observations survive absent telemetry and ignore archived scalar counts (TASK-2818)', async () => {
@@ -329,9 +330,15 @@ test('fresh run resources preserve units and deduplicate nested waited trees on 
   assert.ok(report.dependencyPath?.nodeIds.some(value => value.startsWith('activity:human')));
   assert.equal(report.unknowns.some(value => /Agent .* missing|identity incomplete/.test(value)), false);
   const incomplete = { ...run('agent-codex-execute-2-d', 'execute', 5, 10, 'missing', null), operationGeneration: null };
-  const defective = verificationStatistics({ repositoryId: 'repo', operations: [operation], history: [], lifecycle: [], runs: [incomplete] });
-  assert.ok(defective.unknowns.some(value => value.includes(`Agent run identity incomplete for px-1 source ${incomplete.runId}`)
-    && value.includes('rerun the affected workflow with FLOW collection enabled')));
+  const defective = verificationStatistics({ repositoryId: 'repo', operations: [operation], history: [], lifecycle: [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(40),
+      trigger: 'land', agent: 'codex', idempotencyKey: 'defective-done' },
+  ], runs: [incomplete] });
+  assert.ok(defective.flowMissions[0]?.diagnostics.some(value =>
+    value.message.includes(`Agent run identity incomplete for px-1 source ${incomplete.runId}`)
+    && value.recovery.includes('inspect the retained run history')));
+  assert.equal(defective.unknowns.some(value => value.includes('Agent run identity incomplete')), false,
+    'typed mission defects are not echoed through the legacy verification unknowns surface');
 });
 
 test('ownership retains lead handoffs and bounded partial terminal states (TASK-2835)', () => {
@@ -383,7 +390,7 @@ test('dependency path scopes mission ownership and never sums concurrent cohort 
   assert.equal(one.elapsedOwnership?.totalMs, 10);
   assert.equal(one.dependencyPath?.durationMs, 10);
   assert.ok(one.dependencyPath?.nodeIds.every(id => id.includes('m1')));
-  assert.equal(one.unknowns.some(value => value.includes('m2')), false, 'out-of-cohort missions emit no collection defects');
+  assert.equal(one.unknowns.some(value => value.includes('m2')), false, 'out-of-cohort missions emit no observation diagnostics');
   assert.equal(one.unknowns.some(value => value.includes('Activity identity incomplete')), false,
     'durable generation identity remains valid after the live operation advances or is cleaned up');
 });
@@ -450,8 +457,39 @@ test('shared reader deduplicates rebase snapshots without collapsing repeated cy
   assert.equal(report.unknowns.some(value => value.includes('Rebase workflow join missing')), false);
 });
 
+test('px-0029 generation-1 gate and rebase facts survive an explicit generation-2 fence (PX-0055.01)', () => {
+  const operation = workflowOperation({ id: 'px-0029-op', requestKey: 'px-0029', generation: 2, phase: 'stopped',
+    updatedAt: instant(20) });
+  const gate = (id: string, generation: number, missionId = 'px-1') => ({ eventType: VERIFICATION_MEASUREMENT_EVENT,
+    createdAt: instant(5), eventData: JSON.stringify(attempt(id, 0, 5, { missionId, operationId: 'px-0029-op',
+      operationGeneration: generation, sourceId: `gate:${id}` })) });
+  const rebase = (id: string, generation: number, repositoryId = 'repo') => ({ eventType: 'flow.rebase', createdAt: instant(6),
+    eventData: JSON.stringify({ id, repositoryId, missionId: 'px-1', operationId: 'px-0029-op', generation,
+      sourceId: `rebase:${id}`, stage: 'pre-review-rebase', attempt: 1, outcome: 'clean', revisionBefore: 'a',
+      revisionAfter: 'b', conflicts: [], occurredAt: instant(6) }) });
+  const validRebase = rebase('valid', 1);
+  const activity = (sourceId: string, generation: number, state: string, at: number) => ({ eventType: 'mission.current-work',
+    createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1',
+      operationId: 'px-0029-op', operationGeneration: generation, sourceId, revision: 'rev',
+      phase: 'review-response', state }) });
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [operation], lifecycle: [], history: [
+    gate('valid', 1), gate('forged-fence', 2), gate('foreign-mission', 1, 'foreign'),
+    validRebase, validRebase, rebase('forged-fence', 2), rebase('foreign-repository', 1, 'foreign'),
+    activity('valid-activity', 1, 'running', 7), activity('valid-activity', 1, 'ended', 9),
+    activity('forged-activity', 2, 'running', 10), activity('forged-activity', 2, 'ended', 12),
+  ] });
+
+  assert.deepEqual(report.attempts.map(value => value.id), ['valid']);
+  assert.deepEqual(report.rebases.map(value => value.id), ['valid']);
+  assert.equal(report.repairMs, 2);
+  assert.ok(report.unknowns.some(value => value.includes('Gate workflow generation rejected')));
+  assert.ok(report.unknowns.some(value => value.includes('Attempt workflow identity mismatch excluded')));
+  assert.ok(report.unknowns.some(value => value.includes('Rebase workflow join missing')));
+  assert.ok(report.unknowns.some(value => value.includes('Activity workflow identity rejected')));
+});
+
 test('shared reader retains repeated conflict attempts and their elapsed ownership (TASK-2835 review F9)', () => {
-  const operation = workflowOperation({ id: 'op-1', requestKey: 'rebase', command: 'rebase:run', updatedAt: instant(10) });
+  const operation = workflowOperation({ id: 'op-1', requestKey: 'rebase', command: 'active:execute', updatedAt: instant(10) });
   const observation = (outcome: string, attempt: number, at: number) => ({ eventType: 'flow.rebase', createdAt: instant(at),
     eventData: JSON.stringify({ id: 'resumed-cycle', repositoryId: 'repo', missionId: 'px-1', operationId: 'op-1', generation: 1,
       sourceId: 'resumed-cycle', stage: 'pre-review-rebase', attempt, outcome, revisionBefore: 'before',
@@ -469,10 +507,38 @@ test('shared reader retains repeated conflict attempts and their elapsed ownersh
   assert.deepEqual(report.rebases.map(value => [value.attempt, value.outcome]), [
     [1, 'running'], [1, 'conflict'], [2, 'conflict'], [2, 'resolved'],
   ]);
+  assert.deepEqual(report.flowMissions[0]?.rebaseStages.find(stage => stage.stage === 'pre-review-rebase'), {
+    stage: 'pre-review-rebase', state: 'measured', operationId: 'op-1', sourceId: 'resumed-cycle',
+    reason: 'retained terminal rebase outcome', outcomes: ['conflict', 'conflict', 'resolved'],
+  }, 'typed stage provenance retains repeated conflict/resolution outcomes');
   assert.deepEqual(report.elapsedOwnership?.rows, [
     { step: 'pre-review-rebase', actor: 'parallix', model: null, state: 'working', durationMs: 10 },
   ]);
   assert.equal(report.elapsedOwnership?.unexplainedMs, 0);
+});
+
+test('partial lane return identity remains a scoped FLOW defect (PX-0055.01)', () => {
+  const defect = 'Workflow return identity invalid for repo/px-1 lane event partial-return';
+  const lifecycle: BoardLaneEventEntry[] = [
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'backlog', toStatus: 'refined',
+      occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done',
+      occurredAt: instant(10), trigger: 'integrate', agent: 'codex', idempotencyKey: 'partial-return',
+      returnIdentityDefect: defect },
+    { repositoryId: 'repo', missionId: 'foreign', fromStatus: 'review', toStatus: 'active',
+      occurredAt: instant(5), trigger: 'request-changes', agent: 'codex', idempotencyKey: 'foreign-return',
+      returnIdentityDefect: 'Workflow return identity invalid for repo/foreign lane event foreign-return' },
+  ];
+
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [], history: [], lifecycle }, new Set(['px-1']));
+
+  assert.equal(report.unknowns.includes(defect), false, 'mission defects are not duplicated as repository unknowns');
+  assert.equal(report.unknowns.some(value => value.includes('/foreign ')), false);
+  assert.deepEqual(report.flowMissions[0]?.diagnostics.filter(diagnostic => diagnostic.message === defect), [{
+    kind: 'provenance', state: 'absent', repositoryId: 'repo', missionId: 'px-1', operationId: null,
+    sourceId: 'partial-return', stage: 'return', message: defect, recovery: 'inspect the retained lane return identity',
+  }]);
+  assert.equal(report.flowMissions[0]?.diagnostics.some(diagnostic => diagnostic.message.includes('/foreign ')), false);
 });
 
 test('verification unions overlap, accounts nested CPU once and measures complete dependency paths (px-0025)', () => {

@@ -8,6 +8,7 @@ import { combineOutput, continueSucceeded, hasConflictMarkers, type RebaseContex
 import type { GitCommandResult, MissionConflictClassification } from './ports/rebase-workflow.js';
 import type { RebaseWorkflowPort } from './ports/rebase-workflow.js';
 import { failureReason } from '../domain/failure-reason.js';
+import { liveMissionExecutionContext } from './ports/mission-execution-context.js';
 
 const REPLAY_PROOF_MAX_COMMITS = 256;
 const REPLAY_PROOF_MAX_BYTES = 64 * 1024;
@@ -193,8 +194,10 @@ async function reboundHookFailure(
           await recordImplementerLaunch(slug, actual, services.store, services.lifecycle);
           return actual;
         }
+        const live = liveMissionExecutionContext(slug, port.resolveExecutionContext(slug, executionRoot));
+        if (!live.ok) { throw new Error(live.reason); }
         return await port.applyAgentFallback({
-          role: 'implementer', original, launchResult, state: {}, slug, worktree: executionRoot,
+          role: 'implementer', original, launchResult, state: {}, slug, executionContext: live.context,
           log: fmt.log.plain, writeReviewStateFn: port.writeReviewState,
         }) || original;
       },

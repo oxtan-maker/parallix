@@ -167,6 +167,11 @@ export interface RunRecord {
   readonly omissions: readonly string[];
 }
 
+/** One owner for the concrete model retained for an agent run. */
+export function agentRunModel(run: RunRecord): string | null {
+  return run.configuredModel ?? run.resources?.provider?.model ?? null;
+}
+
 /** A stable, citable reference to bytes inside one run's stream. */
 export interface RunHistoryRef {
   readonly runId: string;

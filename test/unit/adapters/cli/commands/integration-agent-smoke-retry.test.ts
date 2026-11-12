@@ -49,7 +49,7 @@ function contextFor(overrides: Partial<ReboundContext> = {}): ReboundContext {
     log: () => {},
     error: () => {},
     ...overrides,
-  };
+  } as ReboundContext;
 }
 
 test('task-2620: an agent-smoke integration gate is declared transient and environment', () => {

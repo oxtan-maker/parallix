@@ -98,22 +98,32 @@ function route(edge: WebFlowEdge, at: Layout['node']): EdgeRoute | null {
 function routeBeforeIntegration(id: string, b: Layout['node']): EdgeRoute | null {
   const r = b('refine'), i = b('implement'), pr = b('pre-review-rebase'), ps = b('pre-review-resolve'), dg = b('declared-gates');
   const ar = b('agent-review'), hr = b('human-review'), ir = b('integration-rebase');
-  const failedJoin: Point = [894, ps.y + 12];
+  const preReview = routePreReview(id, { i, pr, ps, dg, hr });
+  if (preReview) { return preReview; }
   switch (id) {
     case 'refine->implement:flow': return { points: [[191, r.y + r.h], [191, i.y]], label: [203, r.y + r.h + 17], suffix: 'refined' };
-    case 'implement->pre-review-rebase:flow': return { points: [[i.x + i.w, i.y + 27], [337, i.y + 27], [337, pr.y]], label: [-1, -1] };
-    case 'pre-review-rebase->declared-gates:clean': return { points: [[pr.x + pr.w, pr.y + 24], [dg.x, pr.y + 24]], label: [415, pr.y + 8], suffix: 'clean' };
-    case 'pre-review-rebase->pre-review-resolve:rebase-conflict': return { points: [[364, pr.y], [364, ps.y + 32], [ps.x, ps.y + 32]], label: [375, ps.y + 49] };
-    case 'pre-review-rebase->human-review:rebase-failed': return { points: [[pr.x + 8, pr.y + pr.h], [pr.x + 8, hr.y + 24], [hr.x, hr.y + 24]], label: [pr.x + 14, hr.y + 8] };
-    case 'pre-review-resolve->pre-review-resolve:rebase-repeat': return { points: [[ps.x + 35, ps.y], [ps.x + 35, ps.y - 16], [ps.x + 71, ps.y - 16], [ps.x + 71, ps.y]], label: [ps.x + 77, ps.y - 14], loop: true };
-    case 'pre-review-resolve->declared-gates:flow': return { points: [[ps.x + ps.w, ps.y + 39], [589, ps.y + 39], [589, dg.y]], label: [600, ps.y + 64] };
-    case 'pre-review-resolve->human-review:rebase-failed': return { points: [[ps.x + ps.w, ps.y + 12], failedJoin, [894, hr.y]], label: [648, ps.y - 3] };
     case 'declared-gates->agent-review:flow': return { points: [[dg.x + dg.w, pr.y + 24], [738, pr.y + 24], [738, ar.y]], label: [748, pr.y + 57] };
     case 'declared-gates->implement:gate-failed': return { points: [[589, dg.y + dg.h], [589, dg.y + 60], [245, dg.y + 60], [245, i.y + i.h]], label: [416, dg.y + 46] };
     case 'agent-review->human-review:flow': return { points: [[ar.x + ar.w, ar.y + 25], [863, ar.y + 25], [863, hr.y]], label: [798, ar.y + 63] };
     case 'agent-review->implement:agent-findings': return { points: [[ar.x, ar.y + 25], [218, ar.y + 25], [218, i.y + i.h]], label: [290, ar.y + 7] };
     case 'human-review->integration-rebase:flow': return { points: [[hr.x + hr.w, hr.y + 24], [970, hr.y + 24], [970, ir.y + ir.h]], label: [982, hr.y - 55] };
     case 'human-review->implement:human-changes': return { points: [[hr.x, hr.y + 24], [191, hr.y + 24], [191, i.y + i.h]], label: [290, hr.y + 7] };
+    default: return null;
+  }
+}
+
+function routePreReview(id: string, nodes: { i: Box; pr: Box; ps: Box; dg: Box; hr: Box }): EdgeRoute | null {
+  const { i, pr, ps, dg, hr } = nodes;
+  const failedJoin: Point = [894, ps.y + 12];
+  switch (id) {
+    case 'implement->pre-review-rebase:flow': return { points: [[i.x + i.w, i.y + 27], [337, i.y + 27], [337, pr.y]], label: [-1, -1] };
+    case 'pre-review-rebase->implement:workflow-return': return { points: [[pr.x, pr.y + 38], [275, pr.y + 38], [275, i.y + i.h]], label: [283, pr.y + 22] };
+    case 'pre-review-rebase->declared-gates:clean': return { points: [[pr.x + pr.w, pr.y + 24], [dg.x, pr.y + 24]], label: [415, pr.y + 8], suffix: 'clean' };
+    case 'pre-review-rebase->pre-review-resolve:rebase-conflict': return { points: [[364, pr.y], [364, ps.y + 32], [ps.x, ps.y + 32]], label: [375, ps.y + 49] };
+    case 'pre-review-rebase->human-review:rebase-failed': return { points: [[pr.x + 8, pr.y + pr.h], [pr.x + 8, hr.y + 24], [hr.x, hr.y + 24]], label: [pr.x + 14, hr.y + 8] };
+    case 'pre-review-resolve->pre-review-resolve:rebase-repeat': return { points: [[ps.x + 35, ps.y], [ps.x + 35, ps.y - 16], [ps.x + 71, ps.y - 16], [ps.x + 71, ps.y]], label: [ps.x + 77, ps.y - 14], loop: true };
+    case 'pre-review-resolve->declared-gates:flow': return { points: [[ps.x + ps.w, ps.y + 39], [589, ps.y + 39], [589, dg.y]], label: [600, ps.y + 64] };
+    case 'pre-review-resolve->human-review:rebase-failed': return { points: [[ps.x + ps.w, ps.y + 12], failedJoin, [894, hr.y]], label: [648, ps.y - 3] };
     default: return null;
   }
 }

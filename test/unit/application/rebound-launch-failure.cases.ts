@@ -16,7 +16,7 @@ export function launchFailureCases(): void {
   const context = (overrides: Partial<ReboundContext>, errors: string[] = []): ReboundContext => ({
     slug: 'task-2760-fixture', worktree: '', implementer: 'codex', log() {}, error: (msg) => { errors.push(msg); },
     verify: () => ({ ok: true }), startAgent: async () => ({ agent: 'codex', result: { status: 0 } }), ...overrides,
-  });
+  } as ReboundContext);
 
   test('an E2BIG spawn failure keeps code, message and signal, stays a failure and is not relaunched unchanged (TASK-2760)', async () => {
     let launches = 0;

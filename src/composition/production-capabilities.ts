@@ -221,8 +221,8 @@ function createBoardReviewPreparationWorkflow(
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
         missionUnavailable: (_mission, reason) => { throw new Error(`Mission authority is unavailable for ${slug}: ${reason}`); },
         reviewRecoveryRefused: (_mission, reason) => { throw new Error(`Review recovery refused for ${slug}: ${reason}`); },
-        mechanisms: () => createReviewLoopPorts(slug, { worktree, executionContext: live.context }, { executionContext: live.context, integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
-      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null });
+        mechanisms: () => createReviewLoopPorts(slug, { executionContext: live.context }, { integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
+      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null, executionContext: live.context });
     },
   };
 }

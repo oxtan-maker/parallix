@@ -16,6 +16,7 @@ import { runReviewLoop } from '../../src/application/review-loop/review-loop.js'
 import { classifyReboundReason } from '../../src/application/rebound-kernel.js';
 import { gateFailureReason } from '../../src/adapters/review/review-gate-handling.js';
 import { fakeReviewLoopPorts } from '../helpers/review-loop-ports.js';
+import { missionExecutionContext } from './mission-execution-context.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'explicit-failure-cli-'));
 try {
@@ -55,7 +56,7 @@ try {
     });
     const unexpected = () => { throw new Error('unexpected workflow operation'); };
     const workflow: ReviewWorkflowPort = {
-      preflight: (args, options = {}) => ({ slug: 'disposable-smoke', args, options }),
+      preflight: (args, options = {}) => ({ kind: 'mutation', executionContext: missionExecutionContext({ missionId: 'disposable-smoke', missionWorktree: worktree }), slug: 'disposable-smoke', args, options }),
       enter: async () => runReviewLoop({ slug: 'disposable-smoke', implementer: 'codex', reviewer: 'claude' }, fake.ports),
       verify: unexpected, submit: unexpected, push: unexpected,
       comment: unexpected, readComments: unexpected,

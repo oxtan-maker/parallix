@@ -9,12 +9,15 @@ import type * as agents from '../../agents/agents.js';
 import type { inferSlug } from '../../filesystem/mission-utils.js';
 import type { transitionTask } from '../../backlog/backlog.js';
 import type { SessionMarkerPort } from '../../../application/domain-ports.js';
+import type { ExecutionActivityActor } from '../../../domain/execution-activity.js';
 
 export type Log = (_message: string) => void;
 export type Exit = (_code: number) => void;
 export interface ActiveOptions {
   /** Set only by the direct operator CLI entry; borrowed recovery calls default to false. */
   operatorInvocation?: boolean;
+  /** Trusted composition metadata for a workflow forwarded by px lead. */
+  activityActor?: ExecutionActivityActor;
   inferSlugFn?: typeof inferSlug;
   service?: Pick<ExecuteMissionService, 'execute'>;
   controller?: BoardCommandDispatcher;
@@ -24,7 +27,7 @@ export interface ActiveOptions {
   missionTitleFn?: (_slug: string) => string | null | Promise<string | null>;
   payloadLandedFn?: (_slug: string) => boolean | Promise<boolean>;
 }
-export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'controllerFactory' | 'service' | 'serviceFactory' | 'operatorInvocation'> {
+export interface ActiveExecution extends Pick<ActiveOptions, 'controller' | 'controllerFactory' | 'service' | 'serviceFactory' | 'operatorInvocation' | 'activityActor'> {
   cancellation: import('../../../application/controller/board-command.js').BoardCancellation;
   rootDir: string; renderProgress: (_event: Pick<ProgressEvent, 'phase' | 'agent'>) => void; operationId: string; slug: string; agent: string | null; reviewer: string | null;
 }

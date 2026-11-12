@@ -197,7 +197,10 @@ function composeBoard(fixture: Fixture): BuiltBoard {
 
 async function cardFor(fixture: Fixture) {
   const board = composeBoard(fixture);
+  assert.equal((await board.build()).metrics.analytics?.freshness, 'unavailable');
+  await new Promise<void>(resolve => setImmediate(resolve));
   const projection = await board.build();
+  assert.equal(projection.metrics.analytics?.freshness, 'fresh');
   const card = projection.stages.flatMap(stage => stage.cards).find(c => c.id === MISSION);
   assert.ok(card, `no board card projected for ${SLUG}`);
   return { projection, card: card! };

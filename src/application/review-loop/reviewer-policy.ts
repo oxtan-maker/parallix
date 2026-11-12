@@ -9,23 +9,30 @@
 import { AgentSelectionPolicyError, agentFamily } from '../../domain/agents.js';
 import { changeRevision } from '../../domain/review.js';
 import { planReviewerPolicy, type ReviewerAvailabilityProbe, type ReviewerPolicy } from '../../domain/reviewer-policy.js';
-import type { ReviewerRoutingPort } from '../ports/review-round.js';
+import { recognizedFailureReason } from '../../domain/failure-reason.js';
+import type { ReviewerProgress, ReviewerRoutingPort, ReviewStatePort, ReviewLoopState } from '../ports/review-round.js';
 import type { LoopContext, ReviewRound } from './round.js';
 
-/** Read the routing port as availability facts: only an unsupported launcher is unavailable. */
-export function routingProbe(routing: ReviewerRoutingPort): ReviewerAvailabilityProbe {
+/** Runtime blocks and unavailable launchers are evidence; busy capacity is not. */
+export async function routingProbe(routing: ReviewerRoutingPort, selected: readonly string[] = []): Promise<ReviewerAvailabilityProbe> {
+  const eligible = routing.eligibleFamilies();
+  const families = [...new Set([...eligible, ...selected])];
+  const blocked = new Set((await Promise.all(families.map(async family =>
+    await routing.isBlocked?.(family) ? family : null))).filter((family): family is string => family !== null));
   return {
-    eligible: () => routing.eligibleFamilies(),
+    eligible: () => eligible,
     nominate: excluded => {
       try {
-        const nominee = routing.nominate(excluded);
+        const nominee = routing.nominate(new Set([...excluded, ...blocked]));
         return excluded.has(nominee) ? null : nominee;
       } catch (error) {
         if (error instanceof AgentSelectionPolicyError) { throw error; }
         return null;
       }
     },
-    runnable: family => routing.launcherStatus(family),
+    runnable: family => blocked.has(family)
+      ? { supported: false, detail: `${family} is currently blocked by the block authority` }
+      : routing.launcherStatus(family),
   };
 }
 
@@ -35,6 +42,21 @@ async function switchReviewer(context: LoopContext, family: string): Promise<voi
   context.identities.reviewer = family;
   context.state.reviewer = family;
   await context.ports.state.persist(context.state);
+}
+
+/** Settlement belongs to a selected reviewer whose judgment already exists. */
+async function selectRecordedApprover(context: LoopContext, progress: ReviewerProgress): Promise<void> {
+  const family = progress.approved.find(approved => progress.policy.selected.some(selected => selected === approved));
+  if (family) { await switchReviewer(context, family); }
+}
+
+/** A restart may find the policy write committed before approval settlement. */
+export async function recordedApprovalReady(context: LoopContext, round: ReviewRound): Promise<boolean> {
+  const revision = revisionOf(context, round);
+  const progress = revision ? await context.ports.state.reviewerProgress(context.state, revision) : null;
+  if (!progress?.met) { return false; }
+  await selectRecordedApprover(context, progress);
+  return true;
 }
 
 function revisionOf(context: LoopContext, round: ReviewRound): string | null {
@@ -56,17 +78,60 @@ export async function establishReviewerPolicy(context: LoopContext, round: Revie
   const { ports, identities } = context;
   const revision = revisionOf(context, round);
   if (!revision || identities.reviewer === 'autonomous') { return false; }
-  const progress = await ports.state.reviewerProgress(context.state, revision);
-  if (progress) {
-    await switchReviewer(context, progress.outstanding[0] ?? identities.reviewer);
-    return true;
-  }
-  const policy = planReviewerPolicy({ revision: changeRevision(revision), implementer: agentFamily(identities.implementer),
-    primary: agentFamily(identities.reviewer), probe: routingProbe(ports.routing) });
-  await ports.state.recordReviewerPolicy(context.state, policy);
-  announce(context, policy);
-  await switchReviewer(context, policy.selected[0]);
+  const { progress, policy } = await refreshReviewerAvailability(ports.state, ports.routing, context.state, revision,
+    policy => announce(context, policy), identities);
+  if (!policy) { return false; }
+  await switchReviewer(context, progress?.outstanding[0] ?? policy.selected[0]);
   return true;
+}
+
+/** Provider, quota and uncertain execution failures do not prove a family unavailable. */
+export function launchFailureAllowsReplacement(error: unknown): boolean {
+  const code = recognizedFailureReason((error as { failureReason?: unknown } | null)?.failureReason)?.code;
+  if (!code) { return true; }
+  return !['agent-quota', 'infrastructure', 'process-terminated', 'resource-exhausted', 'unexpected'].includes(code)
+    && !code.startsWith('provider-');
+}
+
+/** A persisted requirement must follow newly evidenced unavailability on resume. */
+export async function refreshReviewerAvailability(state: Pick<ReviewStatePort, 'reviewerProgress' | 'replaceReviewer' | 'recordReviewerPolicy'>,
+  routing: ReviewerRoutingPort, observed: ReviewLoopState, revision: string, changed?: (_policy: ReviewerPolicy) => void,
+  identity: { reviewer?: string; implementer?: string } = observed,
+): Promise<{ progress: ReviewerProgress | null; policy: ReviewerPolicy | null }> {
+  let progress = await state.reviewerProgress(observed, revision);
+  const probe = await routingProbe(routing, progress?.policy.selected);
+  const established = await ensureReviewerPolicy(state, observed, revision, probe, identity, progress, changed);
+  progress = established.progress;
+  const policy = established.policy;
+  if (!progress || progress.decided || progress.negative) { return { progress, policy }; }
+  for (const family of progress.outstanding) {
+    const availability = probe.runnable(family);
+    if (availability.supported) { continue; }
+    const policy = await state.replaceReviewer(observed, revision, family, availability.detail, probe);
+    if (policy) { changed?.(policy); }
+  }
+  progress = await state.reviewerProgress(observed, revision);
+  return { progress, policy: progress?.policy ?? policy };
+}
+
+/** Initial selection and revision changes share one persistence and read-back path. */
+async function ensureReviewerPolicy(state: Pick<ReviewStatePort, 'recordReviewerPolicy' | 'reviewerProgress'>,
+  observed: ReviewLoopState, revision: string, probe: ReviewerAvailabilityProbe,
+  identity: { reviewer?: string; implementer?: string }, progress: ReviewerProgress | null,
+  changed?: (_policy: ReviewerPolicy) => void,
+): Promise<{ progress: ReviewerProgress | null; policy: ReviewerPolicy | null }> {
+  let policy = progress?.policy ?? null;
+  if (!progress && identity.reviewer && identity.implementer && identity.reviewer !== 'autonomous') {
+    policy = planReviewerPolicy({ revision: changeRevision(revision), implementer: agentFamily(identity.implementer),
+      primary: agentFamily(identity.reviewer), probe });
+    await state.recordReviewerPolicy(observed, policy);
+    // A competing controller may have adopted the legacy round first. Both
+    // explicit submission and the loop must read back the authoritative policy.
+    progress = await state.reviewerProgress(observed, revision);
+    policy = progress?.policy ?? policy;
+    changed?.(policy);
+  }
+  return { progress, policy };
 }
 
 /**
@@ -88,7 +153,7 @@ export async function recordedPendingApproval(context: LoopContext, round: Revie
  * observation without its judged revision is never counted: HEAD or the
  * clock cannot stand in for missing evidence.
  */
-async function recordObservedApproval(context: LoopContext, round: ReviewRound, revision: string): Promise<void> {
+export async function recordObservedApproval(context: LoopContext, round: ReviewRound, revision: string): Promise<void> {
   const progress = await context.ports.state.reviewerProgress(context.state, revision);
   if (!progress || progress.decided || progress.negative || progress.approved.includes(context.identities.reviewer) || !round.providerApproval?.revision) { return; }
   await context.ports.state.recordApproval(context.state, round.providerApproval);
@@ -103,24 +168,28 @@ export async function nextOutstandingReviewer(context: LoopContext, round: Revie
   const revision = revisionOf(context, round);
   if (revision) { await recordObservedApproval(context, round, revision); }
   const progress = revision ? await context.ports.state.reviewerProgress(context.state, revision) : null;
+  if (progress?.met && !progress.decided) { await selectRecordedApprover(context, progress); }
   if (!progress || progress.met || progress.negative || progress.decided) { return 'done'; }
   const next = progress.outstanding.find(family => !launched.has(family));
-  if (!next) {
-    const failed = progress.outstanding[0] ?? context.identities.reviewer;
-    if (progress.policy.rerouted?.some(entry => entry.family === failed)) {
-      // A capacity reroute explains the missing distinct approval but does not
-      // establish that the selected family is unavailable. Keep the recorded
-      // requirement until a later launch attempt supplies that evidence.
-      return 'exhausted';
-    }
-    // A selected reviewer that ran without a distinct approval is replaced or the requirement is evidenced down before any escalation.
-    const replaced = await replaceFailedReviewer(context, round, failed, 'ran without recording a distinct approval');
-    return replaced === 'retry' ? 'next' : replaced === 'approved' ? 'done' : 'exhausted';
-  }
+  if (!next) { return recoverMissingReviewer(context, round, progress); }
   context.emit({ kind: 'reviewer-next', reviewer: next, required: progress.policy.requiredApprovals,
     approved: progress.policy.selected.length - progress.outstanding.length });
   await switchReviewer(context, next);
   return 'next';
+}
+
+async function recoverMissingReviewer(context: LoopContext, round: ReviewRound,
+  progress: ReviewerProgress): Promise<'done' | 'next' | 'exhausted'> {
+  const failed = progress.outstanding[0] ?? context.identities.reviewer;
+  if (progress.policy.rerouted?.some(entry => entry.family === failed)) {
+    // A capacity reroute explains the missing distinct approval but does not
+    // establish that the selected family is unavailable. Keep the recorded
+    // requirement until a later launch attempt supplies that evidence.
+    return 'exhausted';
+  }
+  // A selected reviewer that ran without a distinct approval is replaced or the requirement is evidenced down before any escalation.
+  const replaced = await replaceFailedReviewer(context, round, failed, 'ran without recording a distinct approval');
+  return replaced === 'retry' ? 'next' : replaced === 'approved' ? 'done' : 'exhausted';
 }
 
 /**
@@ -133,12 +202,12 @@ export async function nextOutstandingReviewer(context: LoopContext, round: Revie
 export async function replaceFailedReviewer(context: LoopContext, round: ReviewRound, failed: string, reason: string, rerouted?: string): Promise<'retry' | 'approved' | false> {
   const revision = revisionOf(context, round);
   if (!revision || !await context.ports.state.reviewerProgress(context.state, revision)) { return false; }
-  const policy = await context.ports.state.replaceReviewer(context.state, revision, failed, reason, routingProbe(context.ports.routing), rerouted);
+  const policy = await context.ports.state.replaceReviewer(context.state, revision, failed, reason, await routingProbe(context.ports.routing), rerouted);
   if (!policy) { return false; }
   announce(context, policy);
   const progress = await context.ports.state.reviewerProgress(context.state, revision);
   if (!progress) { return false; }
-  if (progress.met || progress.outstanding.length === 0) { return 'approved'; }
+  if (progress.met) { await selectRecordedApprover(context, progress); return 'approved'; }
   await switchReviewer(context, progress.outstanding[0]);
   return 'retry';
 }
@@ -152,6 +221,6 @@ export async function reconcileReroutedReviewer(context: LoopContext, round: Rev
   if (!actual || actual === requested) { return; }
   const revision = revisionOf(context, round);
   if (!revision || !await context.ports.state.reviewerProgress(context.state, revision)) { return; }
-  const policy = await context.ports.state.replaceReviewer(context.state, revision, requested, `launcher rerouted ${requested} to ${actual}`, routingProbe(context.ports.routing), actual);
+  const policy = await context.ports.state.replaceReviewer(context.state, revision, requested, `launcher rerouted ${requested} to ${actual}`, await routingProbe(context.ports.routing), actual);
   if (policy) { announce(context, policy); }
 }

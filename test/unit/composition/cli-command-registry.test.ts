@@ -12,7 +12,9 @@ const cli = mockModule<typeof import('../../../src/interfaces/cli/lead.js')>('..
 const agents = mockModule<typeof import('../../../src/adapters/agents/agents.js')>('../../../src/adapters/agents/agents.js', import.meta.url);
 const stats = mockModule<typeof import('../../../src/adapters/review/review-agent-fallback.js')>('../../../src/adapters/review/review-agent-fallback.js', import.meta.url);
 const config = mockModule<typeof import('../../../src/adapters/config/product-config.js')>('../../../src/adapters/config/product-config.js', import.meta.url);
+const missionContexts = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 await installModuleMocks();
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 const { admittedBootstrapGitSpawn } = await import('../../../src/composition/git-admission.js');
 const { createRuntimeOptions } = await import('../../../src/composition/cli-command-registry.js');
 const request: RecoveryRequest = { missionId: 'task-recovery', lane: 'active', diagnostic: 'stuck', attemptedOperation: 'active', instruction: 'Repair safely' };
@@ -39,6 +41,7 @@ for (const mode of ['empty', 'report', 'failure'] as const) {
       return 0;
     });
     mock.method(config, 'resolveAgentModel', () => 'fixture-model');
+    mock.method(missionContexts, 'resolveMissionExecutionContext', (slug: string) => ({ ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }) }));
     mock.method(stats, 'recordStageStatsSafe', async (_stage: string, options: { stage: string; model?: string }) => {
       assert.equal(options.stage, 'recovery'); assert.equal(options.model, undefined); events.push('usage');
     });
@@ -56,6 +59,28 @@ for (const mode of ['empty', 'report', 'failure'] as const) {
     assert.deepEqual(events, fails ? ['running', 'launch', 'ended'] : ['running', 'launch', 'usage', 'ended']);
   });
 }
+
+test('lead recovery keeps completed work when telemetry context is unresolved (TASK-2851 F2)', async t => {
+  t.after(() => mock.restoreAll());
+  const events: string[] = [];
+  const services = { mission: { store: { load: async () => ({ kind: 'found', mission: { assignee: 'custom' } }) } }, currentWork: {
+    running: async () => { events.push('running'); }, ended: async () => { events.push('ended'); },
+  } } as unknown as ProductionApplicationServices;
+  mock.method(scope, 'createCliServiceScope', () => ({ withGraph: async (invoke: (s: unknown) => unknown) => invoke(services), openServices: async () => services }));
+  mock.method(lead, 'leadRecoveryWorkspace', () => ({ worktree: '/fixture', prompt: request.instruction }));
+  mock.method(lead, 'createLeadSupervisorPort', (_services: unknown, _forwards: unknown, context: { launchRecovery: SupervisorPort['launchRecovery'] }) => ({ launchRecovery: context.launchRecovery }));
+  mock.method(cli, 'createLeadCommand', (port: SupervisorPort) => async () => {
+    assert.equal(await port.launchRecovery(request), 'custom ran in /fixture');
+    return 0;
+  });
+  mock.method(config, 'resolveAgentModel', () => 'fixture-model');
+  mock.method(missionContexts, 'resolveMissionExecutionContext', () => ({ ok: false, reason: 'mission checkout is not resolved' }));
+  mock.method(stats, 'recordStageStatsSafe', async () => { events.push('usage'); });
+  mock.method(agents, 'startAgent', async () => { events.push('launch'); return { agent: 'custom' }; });
+
+  await createRuntimeOptions('/fixture', resolveConfiguration({})).commandFns!.lead!([]);
+  assert.deepEqual(events, ['running', 'launch', 'ended'], 'telemetry is skipped without turning a completed recovery into a launch failure');
+});
 
 
 test('lead interruption returns failure after forwarded settlement (TASK-2792)', async t => {
@@ -102,6 +127,7 @@ for (const race of ['none', 'version', 'operation', 'progress', 'integration'] a
       return 0;
     });
     mock.method(config, 'resolveAgentModel', () => 'fixture-model');
+    mock.method(missionContexts, 'resolveMissionExecutionContext', (slug: string) => ({ ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }) }));
     mock.method(stats, 'recordStageStatsSafe', async () => { events.push('usage'); });
     mock.method(agents, 'startAgent', async (_step: string, options: import('../../../src/adapters/agents/agent-launch-context.js').StartAgentOptions) => {
       // Simulate Mission movement during selection/capacity preparation, after

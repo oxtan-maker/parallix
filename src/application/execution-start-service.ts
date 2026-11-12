@@ -5,6 +5,7 @@ import type { WorkflowOperation } from '../domain/workflow-operation.js';
 import type { MissionTransitionStore } from './domain-ports.js';
 import { missionVersion } from './domain-ports.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
+import { reviewReturnStage } from '../domain/review.js';
 
 export type ExecutionStart = Pick<WorkflowOperation, 'id' | 'missionId' | 'agent' | 'originalStatus' | 'previousAssignee' | 'activationVersion'>;
 
@@ -19,8 +20,13 @@ export class ExecutionStartService {
     const request = { operationId: id, missionId: loaded.mission.id,
       expectedVersion: expectedVersion === undefined ? loaded.version : missionVersion(expectedVersion),
       capabilities: new Set(['mission:transition'] as const), agent: agentFamily(agent), occurredAt: new Date().toISOString(), idempotencyKey: `${id}:activate` };
-    const result = loaded.mission.status === 'review' && loaded.mission.review?.rounds.at(-1)?.phase === 'fixing'
-      ? await lifecycle.transition({ ...request, actor: agent, command: { type: 'rebound-to-active', agent: agentFamily(agent), cause: { kind: 'review-repair' } } })
+    const fixingRound = loaded.mission.status === 'review' ? loaded.mission.review?.rounds.at(-1) : undefined;
+    const result = fixingRound?.phase === 'fixing'
+      ? await lifecycle.transition({ ...request, actor: agent,
+        command: { type: 'rebound-to-active', agent: agentFamily(agent), cause: { kind: 'review-repair' } },
+        // The round that sent the work back owns the return stage: an operator
+        // changes-requested round is a human-review return, as settleRequestedChanges records it.
+        workflowReturn: reviewReturnStage(fixingRound) })
       : await lifecycle.activate(request);
     if (result.status !== 'completed' || !result.value) { throw new ExecutionStartRefusal(result); }
     return result.value;

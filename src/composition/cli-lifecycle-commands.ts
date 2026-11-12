@@ -97,14 +97,13 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         // The composition root binds the review-loop mechanisms; the
         // application review loop decides how they are sequenced.
         reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, {
-          ...request, worktree: request.executionContext?.missionWorktree,
+          ...request,
         }, {
           ...observers,
           configuration,
-          executionContext: request.executionContext,
           integrationRepair: integrationRepairContinuation(mission, configuration, rootDir),
           integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
-          classification: createReviewClassification(request.slug, request.executionContext?.missionWorktree ?? rootDir, configuration.decision, configuration),
+          classification: createReviewClassification(request.slug, request.executionContext.missionWorktree, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
           ...reviewLoopBindings(mission.store, mission.lifecycle, reviewerSessionPort),
         }),

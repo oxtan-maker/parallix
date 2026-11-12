@@ -34,15 +34,51 @@ test('px stats formats the shared typed FLOW projection without recalculating me
     repo: 'repo', mission: 'task-flow', closedAt: '2026-11-03T12:00:00Z', labels: ['ai_sdlc'],
     implementer: 'codex', reviewStatistics, flowObservation: {
       diagramNodeIds: ['implement', 'review'], diagramEdgeIds: ['implement->review'],
-      window: null, gateRuns: [], rebaseRuns: [], lead: { queued: 0, recoveries: 0, escalations: 0 },
+      window: null, gateRuns: [], rebaseRuns: [], rebaseStages: [
+        { stage: 'direct-rebase', state: 'measured', operationId: 'rebase-op', sourceId: 'rebase-source',
+          reason: 'retained terminal rebase outcome', outcomes: ['no-op'] },
+        { stage: 'pre-review-rebase', state: 'inapplicable', operationId: 'review-op', sourceId: 'review-source',
+          reason: 'review-provider-disabled', outcomes: [] },
+        { stage: 'integration-rebase', state: 'historical-unavailable', operationId: null, sourceId: null,
+          reason: 'owning workflow identity is not retained', outcomes: [] },
+      ], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 },
       actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], ownership: [
         { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 25 },
       ],
     },
   }] });
   assert.match(report, /shared FLOW lifecycle/);
+  assert.match(report, /0\/1 complete/);
+  assert.match(report, /direct-rebase measured; operation=rebase-op; source=rebase-source; outcomes=no-op/);
+  assert.match(report, /pre-review-rebase inapplicable; operation=review-op; source=review-source; outcomes=none; review-provider-disabled/);
   assert.match(report, /2\/1\s+100\.0% \(1\/1, coverage 100%\)\s+0 \(mean 0\.0, n=1\)/);
   assert.match(report, /implement\/codex\/gpt-6\.1-sol\/working: total 25ms, mean 25\.0ms, p90 25ms, n=1/);
+});
+
+test('px stats bounds rebase stage detail with incomplete states first (PX-0055.03)', () => {
+  const observed = reviewStatisticsObservation('codex', 0);
+  const missionFlow = Array.from({ length: 5 }, (_, index) => ({
+    repo: 'repo', mission: `task-${index}`, closedAt: '2026-11-03T12:00:00Z', labels: ['ai_sdlc'],
+    implementer: 'codex', reviewStatistics: observed, flowObservation: {
+      diagramNodeIds: [], diagramEdgeIds: [], window: null, gateRuns: [], rebaseRuns: [], diagnostics: [],
+      rebaseStages: [
+        { stage: 'direct-rebase' as const, state: 'measured' as const, operationId: `direct-${index}`,
+          sourceId: `direct-source-${index}`, reason: 'retained terminal rebase outcome', outcomes: ['no-op' as const] },
+        { stage: 'pre-review-rebase' as const, state: 'running' as const, operationId: `review-${index}`,
+          sourceId: null, reason: 'owning workflow is still running', outcomes: [] },
+        { stage: 'integration-rebase' as const, state: 'absent' as const, operationId: `integrate-${index}`,
+          sourceId: null, reason: 'no retained observation', outcomes: [] },
+      ], lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: 1,
+      agentLaunches: [], observedDisqualifiers: [], ownership: [
+        { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working' as const, durationMs: 1 },
+      ],
+    },
+  }));
+  const report = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', missionFlow });
+  assert.equal(report.match(/^Rebase stage:/gm)?.length, 12);
+  assert.match(report, /Rebase stage: repo\/task-0 pre-review-rebase running/);
+  assert.match(report, /Rebase stages: 3 additional stage facts not shown; incomplete states are listed first\./);
+  assert.doesNotMatch(report, /repo\/task-4 direct-rebase measured/);
 });
 
 test('formatStatsTable returns formatted table with bold headers', () => {

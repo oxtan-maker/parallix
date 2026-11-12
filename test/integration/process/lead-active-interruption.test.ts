@@ -34,6 +34,7 @@ test('lead SIGINT settles borrowed active work and stops supervision (TASK-2792)
   );
   const lead = activity.map(row => JSON.parse(row.event_data) as { actor?: string; timeState?: string; state?: string })
     .filter(row => row.actor === 'lead');
-  assert.deepEqual(lead.map(row => [row.state, row.timeState]), [['running', 'working'], ['ended', 'working']],
-    'lead start and stop preserve explicit responsibility instead of inferring it from agent absence');
+  assert.deepEqual(lead.map(row => [row.state, row.timeState]), [
+    ['running', 'waiting'], ['running', 'working'], ['running', 'waiting'], ['cancelled', 'working'],
+  ], 'lead preparation, execution, stop wait, and cancellation preserve explicit responsibility');
 });

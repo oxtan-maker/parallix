@@ -94,6 +94,23 @@ describe("SQLite repository contract", () => {
     }
   });
 
+  it('lane history reports a partial workflow return identity (PX-0055.01)', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      await db.execute(
+        `INSERT INTO board_lane_events (repository_id, mission_id, to_status, trigger, agent, occurred_at,
+          idempotency_key, return_stage, workflow_operation_id)
+          VALUES ('repo', 'mission', 'active', 'request-changes', 'codex',
+          '2026-11-10T10:00:00.000Z', 'partial-return', 'agent-review', 'operation-without-generation')`);
+      const events = await new SqliteBoardLaneEventRepository(db).findByMissionId('mission');
+      assert.equal(events.length, 1);
+      assert.equal(events[0]?.returnIdentity, undefined,
+        'the shared read parser rejects an atomic operation identity whose generation is unavailable');
+      assert.equal(events[0]?.returnIdentityDefect,
+        'Workflow return identity invalid for repo/mission lane event partial-return');
+    } finally { await db.close(); cleanupTempDir(dir); }
+  });
+
   // --- Agent blocklist repository ---
 
   it('blocklist: findAll returns empty array on fresh database', async () => {
@@ -456,14 +473,20 @@ describe("SQLite repository contract", () => {
     try {
       const repo = new SqliteOperationalHistoryRepository(db);
       await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ missionId: 'task-a', occurrenceId: 'repair-1',
-        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', transcript: 'x'.repeat(100_000) }), createdAt: '2026-10-01T10:00:00Z' });
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', transcript: 'x'.repeat(100_000),
+        returnIdentity: { stage: 'declared-gates', operationId: 'repair-operation', operationGeneration: 1 } }),
+      createdAt: '2026-10-01T10:00:00Z' });
       await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ missionId: 'task-a', occurrenceId: 'repair-2',
-        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: 120_000 }), createdAt: '2026-10-01T10:02:00Z' });
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: 120_000,
+        returnIdentity: { stage: 'declared-gates', operationId: '', operationGeneration: 1 } }),
+      createdAt: '2026-10-01T10:02:00Z' });
       await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ missionId: 'task-a' }), createdAt: '2026-10-01T10:01:00Z' });
       assert.deepEqual(await repo.findReboundRepairs(), [{ missionId: 'task-a', occurrenceId: 'repair-1',
-        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: null, occurredAt: '2026-10-01T10:00:00Z' },
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', headBefore: null,
+        durationMs: null, occurredAt: '2026-10-01T10:00:00Z',
+        returnIdentity: { stage: 'declared-gates', operationId: 'repair-operation', operationGeneration: 1 } },
       { missionId: 'task-a', occurrenceId: 'repair-2', reasonKind: 'gate-failure', area: 'unit', agent: 'codex',
-        durationMs: 120_000, occurredAt: '2026-10-01T10:02:00Z' }]);
+        headBefore: null, durationMs: 120_000, occurredAt: '2026-10-01T10:02:00Z' }]);
     } finally { await db.close(); cleanupTempDir(dir); }
   });
 

@@ -9,6 +9,7 @@
  */
 import { DEFAULT_REBOUND_ATTEMPTS, rebound, reboundDiagnostic, type GateFailureReason, type HookFailureReason, type ReboundOutcome, type VerifyResult } from '../rebound-kernel.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
+import { DECLARED_GATES_RETURN_STAGE } from '../../domain/board-event.js';
 import { configuredReviewerEligibility, reboundCollaborators, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
 
 export interface PreReviewRepair {
@@ -53,19 +54,22 @@ export async function repairPreReviewFailure(
   const outcome = await rebound(reason, {
     ...reboundCollaborators(context, 'implementer'),
     implementer: context.identities.implementer,
+    returnStage: DECLARED_GATES_RETURN_STAGE,
     maxAttempts,
     verify: async () => {
       const verified = await verifyPreReviewSetup(context);
       if (verified.ok) { successfulCheck = verified.command; }
       return verified;
     },
-    transitionToImplementer: async () => {
-      if (ports.missionStore) { await transitionReviewRepair(slug, 'active', context.identities.implementer, ports.missionStore, ports.lifecycle); }
+    transitionToImplementer: async (_missionSlug, returnStage) => {
+      if (ports.missionStore) { await transitionReviewRepair(slug,
+        { destination: 'active', sourceStage: returnStage }, context.identities.implementer, ports.missionStore, ports.lifecycle); }
       await ports.task.mirror('active');
     },
   });
   if (outcome.outcome === 'fixed') {
-    if (ports.missionStore) { await transitionReviewRepair(slug, 'review', outcome.implementer, ports.missionStore, ports.lifecycle, configuredReviewerEligibility(context)); }
+    if (ports.missionStore) { await transitionReviewRepair(slug,
+      { destination: 'review', reviewerEligibility: configuredReviewerEligibility(context) }, outcome.implementer, ports.missionStore, ports.lifecycle); }
     await ports.task.mirror('review');
   }
   context.identities.implementer = outcome.implementer || context.identities.implementer;

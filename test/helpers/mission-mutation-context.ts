@@ -6,12 +6,12 @@ type ReviewCommandOptions = NonNullable<Parameters<typeof createReviewWorkflowAd
 
 /** Give direct adapter tests the checked context that production composition supplies. */
 export function withReviewMutationContext(options: ReviewCommandOptions): ReviewCommandOptions {
-  if (options.executionContext || options.resolveExecutionContextFn) { return options; }
+  if (options.resolveExecutionContextFn) { return options; }
   return {
     ...options,
     resolveExecutionContextFn: (slug, root) => ({ ok: true, context: missionExecutionContext({
       missionId: slug,
-      missionWorktree: options.worktree ?? options.resolveWorktreeFn?.(slug, { cwd: root }) ?? options.rootDir ?? root,
+      missionWorktree: options.rootDir ?? root,
       baseWorktree: options.rootDir ?? root,
     }) }),
   };

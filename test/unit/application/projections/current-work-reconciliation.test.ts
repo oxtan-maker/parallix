@@ -29,6 +29,7 @@ import { missionId } from '../../../../src/domain/mission.js';
 import type { MissionId } from '../../../../src/domain/mission.js';
 import { makeCard } from '../../../fixtures/board-projection.js';
 import { inMemoryOperationalHistory } from '../../../fixtures/operational-history.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 // ── Current-work reconciliation ──
 
@@ -338,7 +339,7 @@ describe("Publish-then-reconcile defects —", () => {
   function makeReviewWorkflow(overrides: Partial<ReviewWorkflowPort> = {}): ReviewWorkflowPort {
     const operation = () => async () => {};
     return {
-      preflight: (args: string[]) => ({ slug: 'task-2373', args, options: {} }),
+      preflight: (args: string[]) => ({ kind: 'mutation', slug: 'task-2373', args, options: {}, executionContext: missionExecutionContext({ missionId: 'task-2373', missionWorktree: '/fixture' }) }),
       verify: operation(), submit: operation(), push: operation(), enter: operation(),
       comment: operation(), readComments: operation(),
       submitReview: operation(), close: operation(),

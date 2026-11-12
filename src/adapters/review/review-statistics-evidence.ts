@@ -4,10 +4,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Mission } from '../../domain/mission.js';
 import { missionCohortMetadata } from '../../application/projections/metrics-read-adapter.js';
 import type { Review, ReviewRound } from '../../domain/review.js';
+import type { WorkflowReturnIdentity } from '../../domain/board-event.js';
 import { normalizeImplementer } from '../../application/services/statistics-row.js';
-import type { ReviewEpisode, ReviewStatisticsEvidence, WorkflowReturn } from '../../application/services/review-statistics.js';
+import type { ReviewEpisode, ReviewReturnOrigin, ReviewStatisticsEvidence,
+  WorkflowReturn } from '../../application/services/review-statistics.js';
 import type { StatsRecoveryEvidence } from '../../application/stats-recovery-evidence.js';
-import type { OperationalHistoryRepository } from '../../application/ports/operation-history.js';
+import { parseReboundRepairHistoryEntry, type OperationalHistoryRepository,
+  type ReboundRepairHistoryEntry } from '../../application/ports/operation-history.js';
 import { GitMissionPatchComparison } from './mission-patch-comparison.js';
 
 /** The lane-move facts a return needs; read-only, never a lane write. */
@@ -18,6 +21,8 @@ export interface LaneMove {
   readonly agent: string;
   readonly occurredAt: string;
   readonly idempotencyKey: string;
+  readonly returnIdentity?: WorkflowReturnIdentity;
+  readonly returnIdentityDefect?: string;
 }
 
 /** Read-only proofs through the existing mission-patch comparison owner. */
@@ -42,13 +47,8 @@ export function createReviewStatisticsEvidenceReader(root: string) {
 }
 
 /** One completed rebound occurrence read from operational history; all of its attempts are one return. */
-export interface ReboundRepairMove {
-  readonly occurrenceId: string;
-  readonly reasonKind: string;
-  readonly area: string | null;
-  readonly agent: string;
-  readonly occurredAt: string;
-}
+export type ReboundRepairMove = Pick<ReboundRepairHistoryEntry, 'occurrenceId' | 'reasonKind' | 'area'
+  | 'agent' | 'headBefore' | 'returnIdentity'> & { readonly occurredAt: string };
 
 /** Repair kinds that send delivered work back; relaunches of a launch that produced nothing judgeable are retries. */
 const RETURN_REPAIR_KINDS = new Set(['gate-failure', 'review-preparation-verification', 'handoff-verification']);
@@ -70,7 +70,10 @@ export function workflowReturnsFromHistory(entries: readonly LaneMove[], repairs
   const returns = lane.flatMap((entry, index) => entry.toStatus === 'active' && (entry.fromStatus === 'review' || entry.fromStatus === 'integration')
     ? [{ rebound: entry.trigger === 'rebound-to-active', until: lane[index + 1]?.occurredAt,
       item: { identity: `lane:${entry.idempotencyKey}`, author: normalizeImplementer(launchBefore(entry.occurredAt)?.agent) || null,
-        authorSince: launchBefore(entry.occurredAt)?.occurredAt, at: entry.occurredAt, source: entry.trigger === 'rebound-to-active' ? 'rebound' as const : 'judgment' as const } }]
+        authorSince: launchBefore(entry.occurredAt)?.occurredAt, at: entry.occurredAt,
+        source: entry.trigger === 'rebound-to-active' ? 'rebound' as const : 'judgment' as const,
+        ...(entry.returnIdentity ? { origin: laneReturnOrigin(`lane:${entry.idempotencyKey}`,
+          entry.trigger === 'rebound-to-active' ? 'rebound' : 'judgment', entry.returnIdentity) } : {}) } }]
     : []);
   const standalone: WorkflowReturn[] = [];
   const claimed = new Set<string>();
@@ -81,10 +84,32 @@ export function workflowReturnsFromHistory(entries: readonly LaneMove[], repairs
     // occurrence launched later in the same active interval is an independent return.
     if (incident && !claimed.has(incident.item.identity)) { claimed.add(incident.item.identity); continue; }
     const launch = launchBefore(repair.occurredAt);
+    // A repair row recorded before return provenance existed stores no stage. Leave it
+    // origin-less so the statistics owner still places it by its coarse 'repair' cause at the
+    // declared gates; only a producer-typed row names the lane it left.
     standalone.push({ identity: `repair:${repair.occurrenceId}`, author: normalizeImplementer(launch?.agent) || normalizeImplementer(repair.agent) || null,
-      authorSince: launch?.occurredAt, at: repair.occurredAt, source: 'repair' });
+      authorSince: launch?.occurredAt, at: repair.occurredAt, source: 'repair',
+      ...(repair.returnIdentity ? { origin: { actor: 'workflow', stage: repair.returnIdentity.stage,
+          decisionIdentity: `repair:${repair.occurrenceId}`, revision: repair.headBefore ?? null,
+          sender: normalizeImplementer(repair.agent) || null, cause: repair.reasonKind,
+          ...workflowAuthority(repair.returnIdentity) } } : {}) });
   }
   return [...returns.map(({ item, until }) => ({ ...item, ...(until ? { until } : {}) })), ...standalone];
+}
+
+function workflowAuthority(identity: WorkflowReturnIdentity): Pick<ReviewReturnOrigin,
+  'operationId' | 'operationGeneration'> {
+  return identity.operationId !== null && identity.operationGeneration !== null
+    ? { operationId: identity.operationId, operationGeneration: identity.operationGeneration } : {};
+}
+
+function laneReturnOrigin(identity: string, source: 'judgment' | 'rebound', retained: WorkflowReturnIdentity):
+  ReviewReturnOrigin {
+  return source === 'rebound'
+    ? { actor: 'workflow', stage: retained.stage, decisionIdentity: identity, revision: null,
+      sender: 'parallix', cause: source, ...workflowAuthority(retained) }
+    : { actor: null, stage: retained.stage, decisionIdentity: null, revision: null,
+      sender: null, cause: null, ...workflowAuthority(retained) };
 }
 
 /** One reader of retained workflow history for every consumer; lane moves and rebound repairs are read-only. */
@@ -112,8 +137,7 @@ export function createReboundRepairReader(history: Pick<OperationalHistoryReposi
       for (const row of rows) {
         const mission = row.missionId, occurrenceId = row.occurrenceId;
         const occurrences = first.get(mission) ?? new Map<string, ReboundRepairMove>();
-        if (!occurrences.has(occurrenceId)) { occurrences.set(occurrenceId, { occurrenceId, reasonKind: row.reasonKind,
-          area: row.area, agent: row.agent, occurredAt: attemptStartedAt(row.occurredAt, row.durationMs ?? null) }); }
+        if (!occurrences.has(occurrenceId)) { occurrences.set(occurrenceId, reboundRepairMove(row)); }
         first.set(mission, occurrences);
       }
       return new Map([...first].map(([mission, occurrences]) => [mission, [...occurrences.values()]]));
@@ -128,23 +152,20 @@ type WorkflowHistoryReader = { findByTypeForMission?(_type: string, _missionId: 
 async function readReboundRepairs(history: WorkflowHistoryReader, missionId: string): Promise<ReboundRepairMove[]> {
   const first = new Map<string, ReboundRepairMove>();
   for (const entry of await history?.findByTypeForMission?.('rebound.repair', missionId) ?? []) {
-    const repair = parseReboundRepair(entry);
-    if (!repair) { continue; }
+    let parsed: ReboundRepairHistoryEntry | undefined;
+    try { parsed = parseReboundRepairHistoryEntry({ ...JSON.parse(entry.eventData), missionId }, entry.createdAt); }
+    catch { parsed = undefined; }
+    if (!parsed) { continue; }
+    const repair = reboundRepairMove(parsed);
     const held = first.get(repair.occurrenceId);
     if (!held || repair.occurredAt < held.occurredAt) { first.set(repair.occurrenceId, repair); }
   }
   return [...first.values()];
 }
 
-function parseReboundRepair(entry: { eventData: string; createdAt: string }): ReboundRepairMove | undefined {
-  try {
-    const data = JSON.parse(entry.eventData) as Record<string, unknown>;
-    const occurrenceId = String(data.occurrenceId ?? '');
-    if (!occurrenceId) { return undefined; }
-    return { occurrenceId, reasonKind: String(data.reasonKind ?? ''), area: typeof data.area === 'string' ? data.area : null,
-      agent: String(data.agent ?? ''), occurredAt: attemptStartedAt(entry.createdAt,
-        typeof data.durationMs === 'number' && Number.isFinite(data.durationMs) ? data.durationMs : null) };
-  } catch { return undefined; }
+function reboundRepairMove(row: ReboundRepairHistoryEntry): ReboundRepairMove {
+  const { missionId: _missionId, durationMs: _durationMs, ...move } = row;
+  return { ...move, occurredAt: attemptStartedAt(row.occurredAt, row.durationMs ?? null) };
 }
 
 function attemptStartedAt(completedAt: string, durationMs: number | null): string {

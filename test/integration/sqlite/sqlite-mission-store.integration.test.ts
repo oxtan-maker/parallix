@@ -603,8 +603,7 @@ describe('SQLite Mission aggregate integration', () => {
       await firstDatabase.close();
     }
   });
-
-  it('commits a Mission transition and LaneTransitionEvent atomically', async () => {
+  it('commits a Mission transition and typed LaneTransitionEvent atomically (PX-0055.01)', async () => {
     const database = await migratedDatabase();
     try {
       const store = new SqliteMissionStore(database);
@@ -620,12 +619,11 @@ describe('SQLite Mission aggregate integration', () => {
         agent: 'codex',
         occurredAt: '2026-07-29T12:00:00Z',
         idempotencyKey: 'transition-1',
+        returnIdentity: { stage: 'agent-review' as const, operationId: 'review-operation', operationGeneration: 3 },
       } satisfies Partial<NonNullable<Parameters<typeof store.saveWithTransition>[2]>>;
-
       const nextVersion = await store.saveWithTransition(transitioned, version, event);
       assert.equal(nextVersion, missionVersion(2));
-      assert.equal((await eventStore.findByMissionId(transitioned.id)).length, 1);
-
+      assert.deepEqual((await eventStore.findByMissionId(transitioned.id))[0]?.returnIdentity, event.returnIdentity);
       const secondTransition = {
         ...transitioned,
         title: 'Must roll back',

@@ -6,23 +6,23 @@ import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { GateState } from './gate-observation.js';
 import { projectProviderExecution, readProviderExecution, type ProviderExecutionReader } from './provider-execution.js';
 import { alignDoneCohort } from './done-cohort.js';
-import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
-import type { MissionOutcome } from '../../domain/usage.js';
+import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone, weeklyDecisionWindows } from '../../domain/decision-window.js';
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
-import { isClosedMission, type Mission, type MissionId, type MissionStatus } from '../../domain/mission.js';
+import { isClosedMission, type Mission, type MissionId } from '../../domain/mission.js';
 import { missionApprovalCoverage, recordedApprovalCoverage, type ChangeIdentityPort } from '../approval-coverage.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { Review, ReviewedRevision } from '../../domain/review.js';
 import type { SourceFact } from '../contracts.js';
-import type { BoardProjection, BoardMetrics, MetricsProvenance, StatisticsHealth } from './board.js';
-import { buildBoardMetrics, buildBoardProjection } from './board.js';
+import type { BoardProjection, BoardMetrics } from './board.js';
+import { buildBoardProjection } from './board.js';
 import {
   projectMissionCard,
   type CommandAvailability,
   type MissionCard,
   type MissionOperationalFacts,
 } from './mission-board.js';
-import type { MetricsReadAdapter } from './metrics-read-adapter.js';
+import type { HistoricalDeliveryIdentity, MetricsReadAdapter } from './metrics-read-adapter.js';
+import { HistoricalBoardMetrics } from './historical-board-metrics.js';
 import { projectAgentAvailability, type RunningAgentSession } from './agent-status.js';
 import {
   ACTIVITY_OBSERVATION_TTL_MS,
@@ -139,6 +139,8 @@ export interface BoardProjectionOptions {
   currentWorkTtlMs?: number;
   /** Clock seam; defaults to the wall clock. */
   now?: () => number;
+  /** Finite wait used only by one-frame consumers settling their first historical summary. */
+  historicalRefreshTimeoutMs?: number;
   /** Number of days completed missions remain visible on the board. */
   completedMissionRetentionDays?: number;
   /**
@@ -178,7 +180,7 @@ export function filterCompletedMissions(
  * Git and canonical task/mission documents always win over cached projections.
  */
 export class BoardProjectionBuilder {
-  private metricsCache: { readonly key: string; readonly metrics: BoardMetrics } | null = null;
+  private readonly historicalMetrics: HistoricalBoardMetrics;
   constructor(
     private readonly _missions: MissionReadAdapter,
     private readonly _reviews: ReviewReadAdapter,
@@ -187,13 +189,18 @@ export class BoardProjectionBuilder {
     private readonly _git: GitReadAdapter,
     private readonly _operationLog: OperationLogReadAdapter,
     private readonly _options?: BoardProjectionOptions,
-  ) { }
+  ) { this.historicalMetrics = new HistoricalBoardMetrics(_options); }
+
+  /** Release asynchronous work owned by a closing board host. */
+  cancelPendingBuilds(): void {
+    this.historicalMetrics.cancelPendingRefresh();
+  }
 
   /** Build the full BoardProjection from all authority adapters. */
-  async build(): Promise<BoardProjection> {
+  async build(options: { readonly settleHistoricalAnalytics?: boolean } = {}): Promise<BoardProjection> {
     this._options?.prepareReads?.();
     const nowMs = this.now();
-    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, activitySnapshots, operations] = await Promise.all([
+    const [repositoryId, missions, operationLog, agentAvailability, runningSessions, activitySnapshots, operations, deliveryIdentity] = await Promise.all([
       this._git.loadRepositoryId(),
       this._missions.loadAllMissions(),
       this._operationLog.loadOperationLog(),
@@ -201,13 +208,15 @@ export class BoardProjectionBuilder {
       this.runningSessions(),
       this.activitySnapshots(),
       this.openOperations(),
+      this.readDeliveryIdentity(),
     ]);
 
     const sourceFacts = this._missions.getSourceFacts();
     // Failed history is unknown evidence too. Metrics separately report its
     // unavailable state; retention must not hide cards or break the board.
-    const outcomes = await this._options?.metricsAdapter?.readOutcomes?.().catch((): readonly MissionOutcome[] => []) ?? [];
-    const deliveries = new Map<MissionId, string>(outcomes.map(outcome => [outcome.missionId, outcome.closedAt] as const));
+    const deliveries = new Map<MissionId, string>(
+      (deliveryIdentity?.deliveries ?? []).map(delivery => [delivery.missionId, delivery.closedAt] as const),
+    );
     const visibleMissions = filterCompletedMissions(
       missions,
       this._options?.completedMissionRetentionDays ?? 7,
@@ -244,22 +253,20 @@ export class BoardProjectionBuilder {
     const availableActions = this.deriveAvailableActions(cards);
 
     // Build metrics from event history (or use provided/default)
-    const metrics = await this.buildMetrics(
-      repositoryId,
-      missions,
-      projectAgentAvailability(agentAvailability, nowMs),
-      nowMs,
-      deliveries,
-    );
+    const metrics = await this.historicalMetrics.build({ repositoryId, missions,
+      agentAvailability: projectAgentAvailability(agentAvailability, nowMs), nowMs, deliveries,
+      evidenceRevision: deliveryIdentity?.revision ?? null }, options.settleHistoricalAnalytics);
 
-    const board = alignDoneCohort(buildBoardProjection(
+    const projection = buildBoardProjection(
       repositoryId,
       cards,
       availableActions,
       operationLog,
       metrics,
       sourceFacts,
-    ), deliveries);
+    );
+    const deliveryWindow = this.deliveryWindow(deliveryIdentity, nowMs);
+    const board = alignDoneCohort(projection, deliveries, deliveryWindow);
     return projectReviewRecoveryBoard(this.observeExecution(board, operations), this._options?.reviewExecution);
   }
 
@@ -325,6 +332,26 @@ export class BoardProjectionBuilder {
   private activitySnapshots() { return this._options?.currentWork?.loadCurrentWork() ?? Promise.resolve([]); }
   private missionExecutionActivities(id: MissionId) { return this._options?.currentWork?.loadMissionCurrentWork(id) ?? Promise.resolve([]); }
 
+  private deliveryWindow(identity: HistoricalDeliveryIdentity | null, nowMs: number) {
+    if (!this._options?.metricsAdapter || !identity || identity.deliveries.length === 0) { return undefined; }
+    return weeklyDecisionWindows(new Date(nowMs), localReportingTimeZone()).current;
+  }
+
+  private async readDeliveryIdentity(): Promise<HistoricalDeliveryIdentity | null> {
+    const adapter = this._options?.metricsAdapter;
+    if (!adapter) { return { deliveries: [], revision: 'no-metrics-adapter' }; }
+    try {
+      if (adapter.readDeliveryIdentity) { return await adapter.readDeliveryIdentity(); }
+      const outcomes = await adapter.readOutcomes?.() ?? [];
+      return {
+        deliveries: outcomes.map(({ missionId, closedAt }) => ({ missionId, closedAt })),
+        revision: 'legacy-metrics-adapter',
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /** The single place operational facts become a card, shared by both routes. */
   private composeCard(
     mission: Mission,
@@ -356,67 +383,6 @@ export class BoardProjectionBuilder {
     return projectMissionCard({ ...mission, review: reviewFact.review }, facts);
   }
 
-  /**
-   * Derive metrics from event history, provided metrics, or defaults.
-   * Priority: explicit metrics > MetricsReadAdapter > default fallback.
-   */
-  private async buildMetrics(
-    repositoryId: RepositoryId,
-    missions: readonly Mission[],
-    agentAvailability: BoardMetrics['agentAvailability'],
-    nowMs: number,
-    deliveries: ReadonlyMap<MissionId, string>,
-  ): Promise<BoardMetrics> {
-    // Cache key depends only on facts that actually change slow metrics.
-    // agentAvailability carries volatile fields (blockedForMs) that change
-    // every refresh while an AgentBlock is active — those must not invalidate
-    // expensive historical cycle-time/throughput computation (TASK-2375 AC #23).
-    const timeZone = localReportingTimeZone();
-    const key = JSON.stringify([
-      timeZone, decisionWindowDay(new Date(nowMs), timeZone),
-      missions.map((mission) => [mission.id, mission.status, mission.labels, mission.assignee, deliveries.get(mission.id)]),
-    ]);
-    if (this.metricsCache?.key === key) {
-      // Cache hit: reuse slow metrics, swap in fresh agent availability
-      return { ...this.metricsCache.metrics, agentAvailability };
-    }
-    // Explicit metrics (for testing/fixtures)
-    if (this._options?.metrics) {
-      this.metricsCache = { key, metrics: this._options.metrics };
-      return this._options.metrics;
-    }
-
-    // Derive from event history via MetricsReadAdapter
-    if (this._options?.metricsAdapter) {
-      const initialStates = new Map<MissionId, MissionStatus>();
-      for (const mission of missions) {
-        initialStates.set(mission.id, mission.status);
-      }
-      try {
-        const metrics = await this._options.metricsAdapter.buildMetrics(initialStates, agentAvailability);
-        this.metricsCache = { key, metrics };
-        return metrics;
-      } catch {
-        const metrics = this.metricsWithHealth(this.defaultMetrics(agentAvailability), {
-          state: 'unavailable',
-        }, {
-          repositoryId,
-          evaluatedWindow: { startedAt: null, endedAt: null },
-          sampleSize: 0,
-          newestEventTimestamp: null,
-          rejectedOrMissingIdentityRowCount: 0,
-          adapterSucceeded: false,
-        });
-        this.metricsCache = { key, metrics };
-        return metrics;
-      }
-    }
-
-    const metrics = this.defaultMetrics(agentAvailability);
-    this.metricsCache = { key, metrics };
-    return metrics;
-  }
-
   /** Derive available actions from mission cards' command availability. */
   private deriveAvailableActions(cards: readonly MissionCard[]): readonly CommandAvailability[] {
     // Aggregate command availability across all missions
@@ -439,27 +405,6 @@ export class BoardProjectionBuilder {
     }));
   }
 
-  /** Default metrics with skip fallback (no event history available). */
-  private defaultMetrics(agentAvailability: BoardMetrics['agentAvailability']): BoardMetrics {
-    return buildBoardMetrics({
-      cumulativeFlow: { series: [], missingHistoryFallback: 'skip' },
-      cumulativeFlowByState: { series: [], missingHistoryFallback: 'skip' },
-      medianStateTimes: { series: [], missingHistoryFallback: 'skip' },
-      medianCycleTimeByState: { series: [], missingHistoryFallback: 'skip' },
-      throughput: { series: [], missingHistoryFallback: 'skip' },
-      reviewBounceRate: { series: [], missingHistoryFallback: 'skip' },
-      medianAgeByLane: { series: [], missingHistoryFallback: 'skip' },
-      agentAvailability,
-      bottleneck: {
-        sentence: 'Bottleneck unavailable: history is missing.',
-        inputs: { lane: null, medianAgeMinutes: null, reviewBounceRate: null },
-      },
-    });
-  }
-
-  private metricsWithHealth(metrics: BoardMetrics, health: StatisticsHealth, provenance: MetricsProvenance): BoardMetrics {
-    return { ...metrics, health, provenance };
-  }
 }
 
 // ---------------------------------------------------------------------------

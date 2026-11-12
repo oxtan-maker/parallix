@@ -33,7 +33,7 @@ async function active(args: string[], options: ActiveOptions = {}) {
 }
 
 async function runActive(args: string[], options: ActiveOptions, cancellation: { requested: boolean; stopOwnedWorkflow: boolean }) {
-  const { operatorInvocation = false } = options;
+  const { operatorInvocation = false, activityActor } = options;
   const { inferSlugFn, service, controller, controllerFactory, serviceFactory, rootDir, exitFn, logFn, errorFn, missionTitleFn } = activeCommandBindings(options);
   const explicitSlug = args[0];
   const slug = inferSlugFn(explicitSlug);
@@ -86,16 +86,16 @@ async function runActive(args: string[], options: ActiveOptions, cancellation: {
 
   const renderProgress = (event: Pick<ProgressEvent, 'phase' | 'agent'>) => renderActiveProgress(event, logFn);
   const operationId = `active:${normalizedSlug}:${randomUUID()}`;
-  const outcome = await executeActiveCommand({ cancellation, operatorInvocation, controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug: normalizedSlug, agent: preselectedImplementer, reviewer: requestedReviewer });
+  const outcome = await executeActiveCommand({ cancellation, operatorInvocation, activityActor, controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug: normalizedSlug, agent: preselectedImplementer, reviewer: requestedReviewer });
   if (outcome.status !== 'completed' || !outcome.value) {
     reportActiveFailure(outcome, normalizedSlug, errorFn, exitFn);
     return;
   }
 }
 
-async function executeActiveCommand({ cancellation, operatorInvocation, controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent, reviewer }: ActiveExecution) {
+async function executeActiveCommand({ cancellation, operatorInvocation, activityActor, controller, controllerFactory, service, serviceFactory, rootDir, renderProgress, operationId, slug, agent, reviewer }: ActiveExecution) {
   const dispatcher = controller || (typeof controllerFactory === 'function' ? await controllerFactory(rootDir, renderProgress) : null);
-  if (dispatcher) { return dispatcher.dispatch({ kind: 'active:execute', missionId: slug, operationId, agent, reviewer, capabilities: new Set(['active:execute']), detached: false, operatorInvocation, cancellation }); }
+  if (dispatcher) { return dispatcher.dispatch({ kind: 'active:execute', missionId: slug, operationId, agent, reviewer, activityActor, capabilities: new Set(['active:execute']), detached: false, operatorInvocation, cancellation }); }
   const executeService = service || (typeof serviceFactory === 'function' ? await serviceFactory(rootDir, renderProgress) : null);
   if (!executeService) { throw new Error('active command requires an injected execute-mission service'); }
   return executeService.execute({ cancellation, operatorInvocation, operationId, slug, agent, reviewer: reviewer ?? undefined, capabilities: new Set(['active:execute']) });

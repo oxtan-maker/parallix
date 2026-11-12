@@ -3,7 +3,7 @@ import { listRecoveryEvidence } from '../application/recovery-evidence.js';
 import { REBOUND_OUTCOME_EVENT, type ReboundOutcomeRecord } from '../application/rebound-telemetry.js';
 import { requireWorkflowOwner } from '../domain/workflow-operation.js';
 import { resolveDatabasePath } from '../adapters/sqlite/database-path-resolver.js';
-import type { workflowCliObserver } from './workflow-cli.js';
+import { ACTIVE_WORKFLOW_OBSERVATION_MS, type workflowCliObserver } from './workflow-cli.js';
 import type { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { missionLabels } from '../domain/mission.js';
 import { completed, failure } from '../application/contracts.js';
@@ -68,7 +68,7 @@ export async function composeWorkflowOperations(root: string, configuration: Par
   const operations = new SqliteWorkflowOperationStore(db, repository);
   const observer = observe === false ? undefined : (await import('./workflow-cli.js')).workflowCliObserver;
   const service = new WorkflowOperationService(operations, createMissionStore(db), dispatcher, processes, repository,
-    select, () => new Promise(resolve => setTimeout(resolve, 100)), async slug => {
+    select, () => new Promise(resolve => setTimeout(resolve, ACTIVE_WORKFLOW_OBSERVATION_MS)), async slug => {
       const { findTaskFile, getTaskFrontmatterValue, getTaskLabels, getTaskStatus } = await import('../adapters/backlog/backlog.js');
       const file = findTaskFile(slug, root);
       if (!file) { return null; }
@@ -218,6 +218,8 @@ async function executeWorkflowCommand(id: string, operation: import('../applicat
 }
 
 
+export const workflowAttachmentSystem = { composeWorkflowOperations, startWorkflowRecovery };
+
 /** One shared owner boundary for the CLI, TUI and web graph. */
 export async function attachWorkflowOperations(root: string, configuration: ParallixConfiguration,
   graph: Awaited<ReturnType<typeof createProductionApplicationServices>>, recover = false, progress?: import('../application/controller/board-command.js').BoardProgressSink) {
@@ -225,13 +227,13 @@ export async function attachWorkflowOperations(root: string, configuration: Para
   const capabilities = graph.presentationCapabilities;
   const dbPath = (graph.operatorState.db as SqliteDatabaseAdapter | null)?.getPath();
   if (!capabilities || !dbPath) { return graph; }
-  const owned = await composeWorkflowOperations(root, configuration, capabilities.commandController, dbPath, async () => {
+  const owned = await workflowAttachmentSystem.composeWorkflowOperations(root, configuration, capabilities.commandController, dbPath, async () => {
     const selected = await graph.executePorts.agentExecution.select?.('');
     if (!selected) { throw new Error('No configured execute agent'); } return selected;
   }, undefined, progress, agent => graph.executePorts.agentExecution.eligible(agent));
   const { workflowFailureController } = await import('./workflow-cli.js');
   const controller = workflowFailureController(owned.service, id => owned.service.operation(id), owned.failureEvidence, mission => owned.service.current(mission));
-  const recovery = recover ? startWorkflowRecovery(root, configuration) : null;
+  const recovery = recover ? workflowAttachmentSystem.startWorkflowRecovery(root, configuration) : null;
   return { ...graph,
     presentationCapabilities: { ...capabilities, commandController: controller,
       tui: { ...capabilities.tui, commandController: controller, commandControllerFactory: () => controller } },

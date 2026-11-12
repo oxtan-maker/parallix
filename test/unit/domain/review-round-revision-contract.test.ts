@@ -25,6 +25,7 @@ import { missionId, missionLabels, type Mission } from '../../../src/domain/miss
 import { repositoryId } from '../../../src/domain/repository.js';
 import { ConfiguredReviewerEligibility, changeRevision, currentReviewRound, Review, ReviewRound, startReview, applyImplementerCommand, applyReviewerCommand, beginNextReviewRound, FindingResolution, recordReviewerResult, revokeApprovedDecision, reviewFindingId, reviewStatus } from '../../../src/domain/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import * as os from 'node:os';
 
 // ── Review round revision ──
@@ -172,7 +173,7 @@ describe("stale review round repro", { concurrency: false }, () => {
       let providerReviewCalled = false;
 
       const result = await bindReviewPersistence(store).consumeReviewerArtifacts('task-2385', 'claude', {
-        worktree: tmpDir, revision: 'reviewed-head',
+        executionContext: missionExecutionContext({ missionId: 'task-2385', missionWorktree: tmpDir }), revision: 'reviewed-head',
         processResult: { status: 0, sessionId: 'native-session-42' },
         tmpDir,
         providerEnabled: true,
@@ -185,7 +186,7 @@ describe("stale review round repro", { concurrency: false }, () => {
 
       assert.equal(result.ok, true, 'the bound verdict writer consumes the artifacts');
       assert.equal(providerReviewCalled, true, 'independent approval reaches the provider before local authority');
-      const output = await reviewLoopBindings(store).consumeReviewerArtifacts('task-2385', 'claude', { worktree: tmpDir });
+      const output = await reviewLoopBindings(store).consumeReviewerArtifacts('task-2385', 'claude', { executionContext: missionExecutionContext({ missionId: 'task-2385', missionWorktree: tmpDir }) });
       assert.equal(output.consumed, true, 'the review loop reads the persisted verdict output');
       // The persisted verdict survives on round 2, not a fabricated round 1, and
       // round 1 keeps its number: the stale-round invariant holds end to end.
@@ -210,7 +211,7 @@ describe("stale review round repro", { concurrency: false }, () => {
         'task-2385-review-verdict.txt': 'approve',
       });
       const result = await bindReviewPersistence(store).consumeReviewerArtifacts('task-2385', 'claude', {
-        worktree: tmpDir, tmpDir, revision: 'reviewed-head', processResult: { status: null }, providerEnabled: false,
+        executionContext: missionExecutionContext({ missionId: 'task-2385', missionWorktree: tmpDir }), tmpDir, revision: 'reviewed-head', processResult: { status: null }, providerEnabled: false,
       });
       assert.notEqual(result.ok, true);
       assert.match(result.diagnostic ?? '', /unknown process status/);
@@ -224,6 +225,7 @@ describe("stale review round repro", { concurrency: false }, () => {
       let verdictStateWritten = false;
       await assert.rejects(
         postWorkflowReview('task-2385-verdict', 'approve', 'looks good', {
+          executionContext: missionExecutionContext({ missionId: 'task-2385-verdict', missionWorktree: '/fixture' }),
           forgejoUser: 'reviewer-agent',
           readTokenFn: () => 'mock-token',
           getPrAuthorFn: () => 'reviewer-agent', // self-author => local verdict path
@@ -253,6 +255,7 @@ describe("stale review round repro", { concurrency: false }, () => {
         'approve',
         'looks good',
         {
+          executionContext: missionExecutionContext({ missionId: 'task-2385-persist', missionWorktree: '/fixture' }),
           forgejoUser: 'reviewer-agent',
           readTokenFn: () => 'mock-token',
           getPrAuthorFn: () => 'reviewer-agent', // self-author => local verdict path

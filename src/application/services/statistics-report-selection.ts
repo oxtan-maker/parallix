@@ -5,6 +5,7 @@ import { weeklyDecisionWindows, reportingWindowContains, type ReportingWindow } 
 import { createRangeWindow } from './statistics-row.js';
 import { statisticsMissionKey, statisticsRowInWindow, type StatisticsRow } from './statistics-service.js';
 import { flowStatistics, type FlowStatistics } from '../projections/flow-statistics.js';
+import { EMPTY_FLOW_MISSION_OBSERVATION } from '../projections/flow-mission-facts.js';
 
 export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
   readonly window: ReportingWindow & { readonly label: string };
@@ -23,21 +24,15 @@ export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow>
   readonly flowStatistics?: FlowStatistics;
 }
 
-const EMPTY_FLOW_OBSERVATION: NonNullable<StatsMissionFlow['flowObservation']> = {
-  diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null, gateRuns: [], rebaseRuns: [],
-  lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
-  agentLaunchesLowerBound: false,
-};
-
 function sharedFlowFact(outcome: StatsMissionFlow) {
-  const observation = outcome.flowObservation ?? EMPTY_FLOW_OBSERVATION;
+  const observation = outcome.flowObservation ?? EMPTY_FLOW_MISSION_OBSERVATION;
   return {
     repositoryId: outcome.repo, missionId: outcome.mission, closedAt: outcome.closedAt,
     implementer: outcome.implementer ?? null, laneDwellMs: null,
     diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
     ownership: observation.ownership, window: observation.window,
-    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, lead: observation.lead,
-    collectionDefects: observation.collectionDefects,
+    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseStages: observation.rebaseStages, lead: observation.lead,
+    diagnostics: observation.diagnostics,
     actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
     agentLaunches: observation.agentLaunches,
     observedDisqualifiers: observation.observedDisqualifiers,

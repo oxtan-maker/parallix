@@ -83,7 +83,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'reviewer-timeout-exhausted'; readonly dossier: string | undefined; readonly reviewer: string; readonly attempts: number }
   | { readonly kind: 'human-review-guidance' }
   | { readonly kind: 'approval-transition-failed'; readonly slug: string; readonly diagnostic: string }
-  | { readonly kind: 'integrate-guidance'; readonly slug: string }
+  | { readonly kind: 'approval-recovery-guidance'; readonly slug: string }
   | { readonly kind: 'reviewer-approved' }
   | { readonly kind: 'missing-resumed-review'; readonly providerEnabled: boolean; readonly reviewer: string; readonly startedAt: string }
   | { readonly kind: 'fixing-resumed'; readonly attempt: number; readonly reviewState: unknown }

@@ -6,7 +6,7 @@ import type { ParallixConfiguration } from "../../application/ports/configuratio
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import { resolveWorktree, missionBranchName } from '../filesystem/mission-utils.js';
+import { missionBranchName } from '../filesystem/mission-utils.js';
 import { resolveTaskFile, getTaskStatus, transitionTask } from '../backlog/backlog.js';
 import { readToken, postReview, closePr, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
 import { type ReviewStateInstanceReader, readReviewState, writeReviewState, resolveReviewIdentity } from './review-state.js';
@@ -17,12 +17,20 @@ import type { ReviewTaskMirror } from '../../application/ports/review-task-mirro
 import { reviewFindingsFromMessage, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
 import { createEvent } from './review-events.js';
 import { reviewerResultAttribution } from './reviewer-result-attribution.js';
+import { createReviewerPolicyStatePort, ReviewState } from './review-state.js';
+import type { ReviewStateData } from '../../application/ports/review-persistence.js';
+import { reviewerRoutingPort } from './reviewer-routing.js';
+import { refreshReviewerAvailability } from '../../application/review-loop/reviewer-policy.js';
+import type { ReviewerRoutingPort } from '../../application/ports/review-round.js';
 import { postWorkflowReview } from './review-artifacts.js';
 import { runPhaseGates } from '../config/repository-gates.js';
 import { repairStaleActiveTaskAfterReview } from './review-intervention-commands.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 type SubmitReviewOptions = {
+  executionContext: LiveMissionExecutionContext;
   configuration?: ParallixConfiguration;
+  reviewerRouting?: ReviewerRoutingPort;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
   exit?: (_code: number) => void;
@@ -35,7 +43,6 @@ type SubmitReviewOptions = {
   resolveForgejoUserFn?: typeof resolveReviewUser;
   resolveTaskFileFn?: typeof resolveTaskFile;
   getTaskStatusFn?: typeof getTaskStatus;
-  worktree?: string;
   revision?: string;
   readTokenFn?: typeof readToken;
   postReviewFn?: typeof postReview;
@@ -75,7 +82,7 @@ async function recordRequestChangesDecision(slug: string, outcome: string, messa
     findings: reviewFindingsFromMessage(message || `Changes requested for ${slug}`),
     comment: message || null,
     decidedAt: new Date().toISOString(),
-    revision: options.revision ?? headRevision(options.worktree || resolveWorktree(slug) || process.cwd()),
+    revision: options.revision ?? headRevision(options.executionContext.missionWorktree),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Review outcome "${outcome}" could not be recorded for ${slug}: ${decision.diagnostic}`));
@@ -89,6 +96,13 @@ async function recordRequestChangesDecision(slug: string, outcome: string, messa
 
 type ApprovalDecisionResult = { stop: boolean; awaitingApprovals: number };
 
+async function refreshSubmittedReviewerAvailability(slug: string, worktree: string, revision: string | null,
+  state: ReviewStateData | null, options: SubmitReviewOptions): Promise<void> {
+  if (!state || !revision || !options.missionStore || !(options.configuration || options.reviewerRouting)) { return; }
+  await refreshReviewerAvailability(createReviewerPolicyStatePort(slug, options.missionStore),
+    options.reviewerRouting ?? reviewerRoutingPort(worktree, options.configuration), ReviewState.from(slug, state), revision);
+}
+
 /** Record the authoritative approve on the Review aggregate. */
 async function recordApprovalDecision(slug: string, outcome: string, message: string, options: SubmitReviewOptions, log: (_msg: string) => void, error: (_msg: string) => void, providerBacked = false): Promise<ApprovalDecisionResult> {
   if (!options.missionStore) {
@@ -96,13 +110,15 @@ async function recordApprovalDecision(slug: string, outcome: string, message: st
     return { stop: true, awaitingApprovals: 0 };
   }
   const recordApprovalFn = options.recordApprovalFn || recordApproval;
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   // The reviewer's own verdict counts toward the round's required approvals; it is attributed, never operator-directed.
-  const identity = (await resolveReviewIdentity(slug, worktree, { readReviewStateFn: options.readReviewStateFn })).identityUser;
+  const { identityUser: identity, reviewState } = await resolveReviewIdentity(slug, worktree, { readReviewStateFn: options.readReviewStateFn });
+  const revision = options.revision ?? headRevision(worktree);
+  await refreshSubmittedReviewerAvailability(slug, worktree, revision, reviewState, options);
   const decision = await recordApprovalFn(slug, {
     comment: message || null,
     decidedAt: new Date().toISOString(),
-    revision: options.revision ?? headRevision(worktree),
+    revision,
     source: providerBacked ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
     result: reviewerResultAttribution(identity || 'reviewer', null),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
@@ -148,7 +164,7 @@ export async function submitReviewRound(
   slug: string,
   outcome: string,
   message: string,
-  options: SubmitReviewOptions = {}
+  options: SubmitReviewOptions
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -161,7 +177,7 @@ export async function submitReviewRound(
     return;
   }
 
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   const providerEnabled = isReviewProviderEnabledFn(worktree);
 
   // Repository-configured pre-review gates (TASK-2457). The approve is the
@@ -251,7 +267,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     return;
   }
   const result = await postWorkflowReview(slug, outcome, message, {
-    worktree,
+    executionContext: options.executionContext,
     revision: options.revision ?? headRevision(worktree),
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
@@ -320,9 +336,9 @@ export async function closeMissionPr(
     resolveReviewUserFn?: typeof resolveReviewUser;
     resolveForgejoUserFn?: typeof resolveReviewUser;
     closePrFn?: typeof closePr;
-    worktree?: string;
+    executionContext: LiveMissionExecutionContext;
     configuration?: ParallixConfiguration;
-  } = {}
+  }
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -331,7 +347,7 @@ export async function closeMissionPr(
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
   const closePrFn = options.closePrFn || closePr;
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   const branch = missionBranchName(slug, worktree);
 
   let reviewIdentity = (await resolveReviewIdentity(slug, worktree, {

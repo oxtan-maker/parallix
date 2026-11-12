@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import { configureReboundTelemetry, REBOUND_REPAIR_EVENT } from '../../../src/application/rebound-telemetry.js';
+import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
 
 const gateReason: ReboundReason = { kind: 'gate-failure', area: 'static-analysis', command: 'verify', exitCode: 1, stdout: 'lint error in a.ts', stderr: '' };
@@ -27,10 +28,39 @@ function contextFor(verify: ReboundContext['verify'], overrides: Partial<Rebound
     log: () => {},
     error: () => {},
     ...overrides,
-  };
+  } as ReboundContext;
 }
 
-afterEach(() => configureReboundTelemetry(null));
+afterEach(() => {
+  configureReboundTelemetry(null);
+  configureMissionWriteAuthorization(null);
+});
+
+test('repair accounting survives unavailable workflow authority and enriches authorized returns (PX-0055.01)', async () => {
+  const rows: OperationalHistoryEntry[] = [];
+  const logs: string[] = [];
+  const transitionStages: string[] = [];
+  bind(async entry => { rows.push(entry); });
+  const context = contextFor(() => ({ ok: true as const }), {
+    returnStage: 'declared-gates', transitionToImplementer: async (_slug, stage) => { transitionStages.push(stage); },
+    readHead: () => 'typed-revision', log: message => logs.push(message),
+  });
+  await rebound(gateReason, context);
+  assert.equal(rows.length, 1, 'repair facts remain durable when producer identity is unavailable');
+  const unowned = JSON.parse(rows[0]!.eventData);
+  assert.equal(unowned.outcome, 'rescue');
+  assert.deepEqual(unowned.returnIdentity,
+    { stage: 'declared-gates', operationId: null, operationGeneration: null },
+    'unavailable authority retains placement without fabricating identity');
+  assert.equal(logs.some(message => /workflow authorization is unavailable/.test(message)), false);
+
+  configureMissionWriteAuthorization({ operationId: 'repair-owner', generation: 7, assert: async () => {} });
+  await rebound(gateReason, context);
+  assert.deepEqual(JSON.parse(rows[1]!.eventData).returnIdentity,
+    { stage: 'declared-gates', operationId: 'repair-owner', operationGeneration: 7 });
+  assert.deepEqual(transitionStages, ['declared-gates', 'declared-gates'],
+    'the kernel supplies the same stage to each transition and telemetry row');
+});
 
 test('TASK-2653: a first-attempt pass records one fresh rescue row with agent, provider and model', async () => {
   const rows: OperationalHistoryEntry[] = [];
@@ -93,7 +123,6 @@ test('TASK-2653: a launch that exits non-zero still spends an attempt and record
 });
 
 test('owned workflow records final recovery accounting without inferring exhaustion from escalation (TASK-2772)', async () => {
-  const { configureMissionWriteAuthorization } = await import('../../../src/application/ports/mission-write-authorization.js');
   const { REBOUND_OUTCOME_EVENT } = await import('../../../src/application/rebound-telemetry.js');
   const rows: OperationalHistoryEntry[] = [];
   bind(async entry => { rows.push(entry); });

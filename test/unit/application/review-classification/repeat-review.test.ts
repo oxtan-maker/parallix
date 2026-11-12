@@ -140,6 +140,7 @@ test('unresolved classifier returns preserve original findings without invented 
   s.classifier.decision.decide = async () => ({ provider: 'typesafe', model: 'jev', answers: { resolution: {
     type: 'choice', selected: 'does_not_address', probabilities: distribution('does_not_address', 0.89), confidence: 0.1 } } });
   assert.equal(await tryClassifyReview(s.context, s.round), 'REQUEST_CHANGES');
+  assert.equal(s.store.events.at(-1)?.returnIdentity?.stage, 'agent-review');
   assert.deepEqual(s.published, ['implementer']);
   assert.deepEqual(s.round.blockingFindings, [{ id: 'F1', summary: 'x.java:1 drops output' }]);
   const loaded = await s.store.load(missionId(s.context.slug));

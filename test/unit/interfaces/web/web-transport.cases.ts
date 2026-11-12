@@ -39,6 +39,17 @@ test('web FLOW transport carries shared verification wording without recalculati
   const parsed = validateWebBoardSnapshot(JSON.parse(JSON.stringify(output)));
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.value, output);
+  const stage = { repositoryId: 'repo', missionId: 'px-1', stage: 'direct-rebase', state: 'measured',
+    operationId: 'operation', sourceId: 'source', reason: 'retained terminal rebase outcome', outcomes: ['conflict', 'resolved'] };
+  const withStage = { ...output, metrics: { ...output.metrics, flow: { ...flow,
+    current: { ...flow.current, rebaseStages: { visible: [stage], omitted: 0 } } } } };
+  assert.equal(validateWebBoardSnapshot(withStage).ok, true, 'typed stage outcomes survive web transport');
+  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: { ...flow,
+    current: { ...flow.current, defects: [{ kind: 'coverage' }] },
+  } } } as unknown).ok, false, 'internal diagnostic records are rejected at the web boundary');
+  assert.equal(validateWebBoardSnapshot({ ...withStage, metrics: { ...withStage.metrics, flow: { ...withStage.metrics.flow!,
+    current: { ...withStage.metrics.flow!.current,
+      rebaseStages: { visible: [{ ...stage, outcomes: ['invented'] }], omitted: 0 } } } } }).ok, false);
   assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, verification: [4] } }).ok, false);
   assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: [] } }).ok, false);
   assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: {

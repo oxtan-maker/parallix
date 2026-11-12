@@ -304,7 +304,7 @@ export async function createProductionApplicationServices(
       ...bindings,
       configuration: options.configuration,
       integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir),
-      classification: createReviewClassification(reviewSlug, target.worktree ?? rootDir, options.configuration.decision, options.configuration),
+      classification: createReviewClassification(reviewSlug, target.executionContext.missionWorktree, options.configuration.decision, options.configuration),
       performReviewPreparationFn: reviewPreparationWithMissionServices!,
       ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
     }),

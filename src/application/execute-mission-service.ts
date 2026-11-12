@@ -1,5 +1,7 @@
 import { continuePendingIntegrationRepair } from './integrate/repair-resumption.js';
 import { failureReason, failureReasonFromCause } from '../domain/failure-reason.js';
+import type { ReboundReason } from '../domain/rebound-policy.js';
+import type { WorkflowReturnStage } from '../domain/board-event.js';
 import { beginReviewPreparation, recordReviewPreparationFailure } from "./review-submission-service.js";
 import { ExecutionStartService } from './execution-start-service.js';
 import { assertWorkflowControl, authorizedExecutionStart, reportWorkflowProviderStarted } from './ports/mission-write-authorization.js';
@@ -146,10 +148,11 @@ export class ExecuteMissionService {
         return resumed.status === 'completed';
       },
       beginReviewPreparation: async () => { await beginReviewPreparation(request.slug, { store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions) }); },
-      prepareImplementationRepair: (diagnostic: string, reason?: import('../domain/rebound-policy.js').ReboundReason) => recordReviewPreparationFailure(request.slug, diagnostic, {
+      prepareImplementationRepair: (diagnostic: string, reason: ReboundReason,
+        returnStage: WorkflowReturnStage) => recordReviewPreparationFailure(request.slug, diagnostic, {
         store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions),
         checkpoints: new MissionCheckpointService(this._ports.missionTransitions),
-      }, reason ?? { kind: 'review-preparation-verification', error: diagnostic, failureReason: failureReason('unexpected', 'review-preparation') }),
+      }, reason, returnStage),
       reviewer: request.reviewer,
       taskFile: prepared.taskResolution.ok ? prepared.taskResolution.taskFile ?? null : null,
       onImplementerLaunched: async (agent: string) => {

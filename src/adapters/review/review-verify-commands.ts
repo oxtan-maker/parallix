@@ -19,6 +19,7 @@ import type { MissionLifecycleService } from '../../application/mission-lifecycl
 import { reboundRejectedReviewPreparation } from '../../application/review-task-mirroring.js';
 import type { ReviewReviewPreparationFailurePort } from '../../application/ports/review-task-mirror.js';
 import { transitionReviewRepair } from '../../application/review-repair-lifecycle.js';
+import { DECLARED_GATES_RETURN_STAGE } from '../../domain/board-event.js';
 import { formatVerificationCommand, runVerificationGate } from '../verification/verification.js';
 import { observeVerificationCommand } from '../../application/recording/verification-command.js';
 import { randomUUID } from 'node:crypto';
@@ -268,7 +269,8 @@ export async function submitForReview(
   if (!result.ok) {
     const failurePort: ReviewReviewPreparationFailurePort = {
       repairMission: async () => {
-        if (options.missionStore) { await transitionReviewRepair(slug, 'active', reviewIdentity, options.missionStore, options.lifecycleService ?? null); }
+        if (options.missionStore) { await transitionReviewRepair(slug,
+          { destination: 'active', sourceStage: DECLARED_GATES_RETURN_STAGE }, reviewIdentity, options.missionStore, options.lifecycleService ?? null); }
       },
       transition: status => transitionTaskFn(slug, status, { rootDir: worktree, log }),
       reportBounce: () => log(fmt.status('INFO', `Auto-bounced ${slug} to active: declared-gate validation failure. Fix the gate in MISSION.md and retry.`)),

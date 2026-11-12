@@ -4,7 +4,7 @@
  * concrete implementer family, the current or the previous delivery window —
  * and never recomputes a count, rate, interval or attribution. Missing data
  * stays visible: an unavailable projection, unobserved nodes and the
- * projection's collection defects are shown, never zeroed or hidden.
+ * projection's observation diagnostics are shown, never zeroed or hidden.
  */
 import { useState } from 'react';
 import type { WebBoardSnapshot, WebFlowWindow } from '../../src/interfaces/web/transport.js';
@@ -108,6 +108,71 @@ function Unavailable({ reason }: { readonly reason: string }) {
   </section>;
 }
 
+type FlowStatistics = NonNullable<WebBoardSnapshot['metrics']['flow']>;
+
+function FlowFilters({ statistics, selected, previous, onSelectFamily, onTogglePrevious }: {
+  readonly statistics: FlowStatistics | undefined; readonly selected: string | null; readonly previous: boolean;
+  readonly onSelectFamily: (family: string | null) => void; readonly onTogglePrevious: () => void;
+}) {
+  if (!statistics) { return null; }
+  return <div style={{ display: 'flex', gap: 6, marginTop: 1, flexShrink: 0 }}>
+    <div role="group" aria-label="Agent filter" style={{ display: 'flex', border: `1px solid ${FLOW.controlEdge}`, borderRadius: 8, overflow: 'hidden' }}>
+      <button type="button" aria-pressed={selected === null} onClick={() => onSelectFamily(null)} style={{ ...segment(selected === null), padding: '0 13px' }}>All agents</button>
+      {statistics.families.map(item => <button key={item.family} type="button" aria-pressed={selected === item.family}
+        onClick={() => onSelectFamily(item.family)} style={{ ...segment(selected === item.family), padding: statistics.families.length > 4 ? '0 10px' : '0 13px' }}>{item.family}</button>)}
+    </div>
+    <button type="button" aria-pressed={previous} onClick={onTogglePrevious}
+      style={{ ...segment(previous), padding: '0 7px', border: `1px solid ${FLOW.controlEdge}`, borderRadius: 8, height: 40 }}>Compare: previous week</button>
+  </div>;
+}
+
+function FlowControls({ flow, statistics, selected, previous, onSelectFamily, onTogglePrevious }: {
+  readonly flow: WebFlowWindow | undefined; readonly statistics: FlowStatistics | undefined;
+  readonly selected: string | null; readonly previous: boolean;
+  readonly onSelectFamily: (family: string | null) => void; readonly onTogglePrevious: () => void;
+}) {
+  return <div data-flow-region="controls" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'nowrap', gap: 12,
+    paddingTop: 30, maxWidth: '100%', overflowX: 'auto' }}>
+    <div style={{ minWidth: 0 }}>
+      <h2 style={{ margin: 0, color: FLOW.text, fontSize: FLOW_TYPE.title, fontWeight: 700, lineHeight: '26px' }}>Mission flow</h2>
+      <p style={{ margin: '4px 0 0', color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
+        {flow ? `${flow.completedMissions} missions landed · ${windowText(flow.startDate, flow.endDate)} · every arrow shows how many attempts pass it` : 'no FLOW projection'}
+      </p>
+    </div>
+    <FlowFilters statistics={statistics} selected={selected} previous={previous}
+      onSelectFamily={onSelectFamily} onTogglePrevious={onTogglePrevious} />
+  </div>;
+}
+
+function FlowData({ flow, previous, sort, onSort }: { readonly flow: WebFlowWindow | undefined;
+  readonly previous: boolean; readonly sort: FlowSort; readonly onSort: (sort: FlowSort) => void }) {
+  if (!flow) { return null; }
+  const rebaseProvenance = flow.rebaseStages ?? { visible: [], omitted: 0 };
+  return <>
+    <Kpis flow={flow} previous={previous} />
+    <FlowGraph flow={flow} lanes={flow.time.lanes} />
+    <FlowTimeTable flow={flow} sort={sort} onSort={onSort} />
+    {flow.defects.length > 0 && <details data-flow-region="defects" style={{ marginTop: 16, color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
+      <summary style={{ cursor: 'pointer', color: FLOW.control }}>{flow.defects.length} FLOW data gaps reported for this cohort</summary>
+      <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: '17px' }}>{flow.defects.map(diagnostic =>
+        <li key={diagnostic}>{diagnostic}</li>)}</ul>
+    </details>}
+    {rebaseProvenance.visible.length > 0 && <details data-flow-region="rebase-provenance" style={{ marginTop: 10, color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
+      <summary style={{ cursor: 'pointer', color: FLOW.control }}>{rebaseProvenance.visible.length + rebaseProvenance.omitted} rebase stages with outcomes and provenance</summary>
+      <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: '17px' }}>{rebaseProvenance.visible.map(stage =>
+        <li key={`${stage.repositoryId}:${stage.missionId}:${stage.stage}:${stage.operationId ?? 'none'}:${stage.sourceId ?? 'none'}`}>{stage.repositoryId}/{stage.missionId} · {stage.stage} · {stage.state} · operation {stage.operationId ?? 'none'} · source {stage.sourceId ?? 'none'} · {stage.outcomes.length ? stage.outcomes.join(' → ') : 'no terminal outcomes'}: {stage.reason}</li>)}
+        {rebaseProvenance.omitted > 0 && <li>{rebaseProvenance.omitted} additional stage facts not shown; incomplete states are listed first.</li>}
+      </ul>
+    </details>}
+  </>;
+}
+
+function flowChip(flow: WebFlowWindow | undefined): string {
+  if (!flow) { return 'unavailable'; }
+  if (flow.completedMissions > 0 && flow.observation.complete === flow.completedMissions) { return 'measured'; }
+  return `${flow.observation.complete} of ${flow.completedMissions} measured`;
+}
+
 export function FlowPanel({ snapshot, onNavigate }: { readonly snapshot: WebBoardSnapshot; readonly onNavigate: (view: BoardView) => void }) {
   const [family, setFamily] = useState<string | null>(null);
   const [previous, setPrevious] = useState(false);
@@ -116,40 +181,14 @@ export function FlowPanel({ snapshot, onNavigate }: { readonly snapshot: WebBoar
   const cohort = (family === null ? undefined : statistics?.families.find(item => item.family === family)) ?? statistics;
   const selected = cohort === statistics ? null : family;
   const flow = cohort ? previous ? cohort.previous : cohort.current : undefined;
-  const chip = !flow ? 'unavailable' : flow.completedMissions > 0 && flow.observation.complete === flow.completedMissions ? 'measured'
-    : `${flow.observation.complete} of ${flow.completedMissions} measured`;
   return <div data-flow-view style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', background: FLOW.page, color: FLOW.text }}>
-    <FlowHeader snapshot={snapshot} chip={chip} onNavigate={onNavigate} />
+    <FlowHeader snapshot={snapshot} chip={flowChip(flow)} onNavigate={onNavigate} />
     <div style={{ flex: 1, overflow: 'auto' }}>
       <div role="region" aria-label="Mission flow" style={{ boxSizing: 'border-box', maxWidth: CONTENT_WIDTH + 56, padding: '0 28px 82px' }}>
-        <div data-flow-region="controls" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'nowrap', gap: 12,
-          paddingTop: 30, maxWidth: '100%', overflowX: 'auto' }}>
-          <div style={{ minWidth: 0 }}>
-            <h2 style={{ margin: 0, color: FLOW.text, fontSize: FLOW_TYPE.title, fontWeight: 700, lineHeight: '26px' }}>Mission flow</h2>
-            <p style={{ margin: '4px 0 0', color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
-              {flow ? `${flow.completedMissions} missions landed · ${windowText(flow.startDate, flow.endDate)} · every arrow shows how many attempts pass it` : 'no FLOW projection'}
-            </p>
-          </div>
-          {statistics && <div style={{ display: 'flex', gap: 6, marginTop: 1, flexShrink: 0 }}>
-            <div role="group" aria-label="Agent filter" style={{ display: 'flex', border: `1px solid ${FLOW.controlEdge}`, borderRadius: 8, overflow: 'hidden' }}>
-              <button type="button" aria-pressed={selected === null} onClick={() => setFamily(null)} style={{ ...segment(selected === null), padding: '0 13px' }}>All agents</button>
-              {statistics.families.map(item => <button key={item.family} type="button" aria-pressed={selected === item.family}
-                onClick={() => setFamily(item.family)} style={{ ...segment(selected === item.family), padding: statistics.families.length > 4 ? '0 10px' : '0 13px' }}>{item.family}</button>)}
-            </div>
-            <button type="button" aria-pressed={previous} onClick={() => setPrevious(value => !value)}
-              style={{ ...segment(previous), padding: '0 7px', border: `1px solid ${FLOW.controlEdge}`, borderRadius: 8, height: 40 }}>Compare: previous week</button>
-          </div>}
-        </div>
+        <FlowControls flow={flow} statistics={statistics} selected={selected} previous={previous}
+          onSelectFamily={setFamily} onTogglePrevious={() => setPrevious(value => !value)} />
         {!flow ? <Unavailable reason={snapshot.metrics.flowUnavailable ?? 'The board projection carries no FLOW statistics.'} />
-          : <>
-            <Kpis flow={flow} previous={previous} />
-            <FlowGraph flow={flow} lanes={flow.time.lanes} />
-            <FlowTimeTable flow={flow} sort={sort} onSort={setSort} />
-            {flow.defects.length > 0 && <details data-flow-region="defects" style={{ marginTop: 16, color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
-              <summary style={{ cursor: 'pointer', color: FLOW.control }}>{flow.defects.length} collection gaps reported for this cohort</summary>
-              <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: '17px' }}>{flow.defects.map(defect => <li key={defect}>{defect}</li>)}</ul>
-            </details>}
-          </>}
+          : <FlowData flow={flow} previous={previous} sort={sort} onSort={setSort} />}
       </div>
     </div>
   </div>;

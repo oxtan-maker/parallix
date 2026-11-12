@@ -353,6 +353,7 @@ function integrationReboundContext(opts: IntegrationGateRouteOptions, failedGate
     slug: opts.slug,
     worktree: opts.missionWorktree,
     implementer: opts.implementer,
+    returnStage: 'integration-gates',
     head: opts.testedRevision ?? preRepairRevision ?? undefined,
     readHead: () => committedRevision(captureFinalTreeFn(opts.missionWorktree)),
     ...(opts.testedRevision ? { repairIncidentId: `integration:${opts.testedRevision}` } : {}),

@@ -18,6 +18,7 @@ import { readAllEvents } from './review-events.js';
 import { bootstrapReviewSurface } from './setup-review.js';
 import { resolveReviewAdapter } from '../config/product-config.js';
 import { buildMetadataFooter, postWorkflowComment } from './review-artifacts.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 export { continueReviewClearsIntervention, continueReviewInvalidatesBlocker } from './review-intervention-commands.js';
 export { verifyReview, submitForReview } from './review-verify-commands.js';
 export { submitReviewRound, closeMissionPr } from './review-submit-round.js';
@@ -101,14 +102,12 @@ export async function pushRound(
   slug: string,
   options: {
     configuration?: ParallixConfiguration;
-    worktree?: string;
-    rootDir?: string;
+    executionContext: LiveMissionExecutionContext;
     missionStore?: Pick<MissionStore, 'load'> | null;
     implementer?: string;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => void;
-    resolveWorktreeFn?: typeof resolveWorktree;
     resolveTaskFileFn?: typeof resolveTaskFile;
     getTaskImplementerFn?: typeof getTaskImplementer;
     transitionTaskFn?: typeof transitionTask;
@@ -121,13 +120,11 @@ export async function pushRound(
     createPrFn?: typeof createPr;
     bootstrapReviewSurfaceFn?: typeof bootstrapReviewSurface;
     resolveReviewAdapterFn?: typeof resolveReviewAdapter;
-    cwdFn?: () => string;
     force?: boolean;
-  } = {}
+  }
 ): Promise<void> {
-  const { log, error, exit, resolveWorktreeFn, resolveTaskFileFn, getTaskImplementerFn, transitionTaskFn, resolveReviewUserFn, isReviewProviderEnabledFn, readTokenFn, readReviewStateFn, createPrFn, bootstrapReviewSurfaceFn, resolveReviewAdapterFn, cwdFn, force } = pushRoundBindings(options);
-  const worktree = options.worktree || resolveWorktreeFn(slug);
-  const rootDir = worktree || options.rootDir || cwdFn();
+  const { log, error, exit, resolveTaskFileFn, getTaskImplementerFn, transitionTaskFn, resolveReviewUserFn, isReviewProviderEnabledFn, readTokenFn, readReviewStateFn, createPrFn, bootstrapReviewSurfaceFn, resolveReviewAdapterFn, force } = pushRoundBindings(options);
+  const rootDir = options.executionContext.missionWorktree;
   const branch = missionBranchName(slug, rootDir);
   const providerEnabled = isReviewProviderEnabledFn(rootDir);
 
@@ -145,9 +142,7 @@ export async function pushRound(
   await transitionTaskFn(slug, 'review', { rootDir, log });
 
   log(fmt.status('INFO', `Pushing ${branch} to the review provider as ${resolvedIdentity}...${force ? ' (force-with-lease)' : ''}`));
-  if (worktree) {
-    log(fmt.status('INFO', `Found dedicated worktree: ${worktree}`));
-  }
+  log(fmt.status('INFO', `Found dedicated worktree: ${rootDir}`));
 
   let result = createPrFn(branch, resolvedIdentity, token, { rootDir, forceWithLease: true, configuration: options.configuration });
   result = await bootstrapReviewPr(result, rootDir, branch, resolvedIdentity, token, { bootstrapReviewSurfaceFn, resolveReviewAdapterFn, createPrFn, log, error }, options.configuration);
@@ -243,6 +238,7 @@ export async function commentRound(
   slug: string,
   message: string,
   options: {
+    executionContext: LiveMissionExecutionContext;
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => void;
@@ -250,13 +246,12 @@ export async function commentRound(
     writeReviewStateFn?: typeof writeReviewState;
     resolveReviewUserFn?: typeof resolveReviewUser;
     resolveForgejoUserFn?: typeof resolveReviewUser;
-    rootDir?: string;
     readTokenFn?: typeof readToken;
     postCommentFn?: typeof postComment;
     buildMetadataFooterFn?: typeof buildMetadataFooter;
     missionStore?: MissionStore | null;
     configuration?: ParallixConfiguration;
-  } = {}
+  }
 ): Promise<void> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
@@ -264,7 +259,7 @@ export async function commentRound(
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const resolveReviewUserFn = options.resolveReviewUserFn || options.resolveForgejoUserFn || resolveReviewUser;
-  const rootDir = options.rootDir || resolveWorktree(slug) || process.cwd();
+  const rootDir = options.executionContext.missionWorktree;
   const missionStore = options.missionStore;
 
   let reviewIdentity = (await resolveReviewIdentity(slug, rootDir, {
@@ -278,7 +273,7 @@ export async function commentRound(
   }
   reviewIdentity = resolveReviewUserFn(reviewIdentity, options.configuration);
   const result = await postWorkflowComment(slug, message, {
-    rootDir,
+    executionContext: options.executionContext,
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
     postCommentFn: options.postCommentFn,
@@ -320,7 +315,6 @@ function readCommentsBindings(options: NonNullable<Parameters<typeof readComment
 
 function pushRoundBindings(options: NonNullable<Parameters<typeof pushRound>[1]>) {
   const { log, error, exit } = reviewCommandOutputBindings(options);
-  const resolveWorktreeFn = options.resolveWorktreeFn || resolveWorktree;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const getTaskImplementerFn = options.getTaskImplementerFn || getTaskImplementer;
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
@@ -330,9 +324,8 @@ function pushRoundBindings(options: NonNullable<Parameters<typeof pushRound>[1]>
   const createPrFn = options.createPrFn || createPr;
   const bootstrapReviewSurfaceFn = options.bootstrapReviewSurfaceFn || bootstrapReviewSurface;
   const resolveReviewAdapterFn = options.resolveReviewAdapterFn || resolveReviewAdapter;
-  const cwdFn = options.cwdFn || (() => process.cwd());
   const force = options.force || false;
-  return { log, error, exit, resolveWorktreeFn, resolveTaskFileFn, getTaskImplementerFn, transitionTaskFn, resolveReviewUserFn, isReviewProviderEnabledFn, readTokenFn, readReviewStateFn, createPrFn, bootstrapReviewSurfaceFn, resolveReviewAdapterFn, cwdFn, force };
+  return { log, error, exit, resolveTaskFileFn, getTaskImplementerFn, transitionTaskFn, resolveReviewUserFn, isReviewProviderEnabledFn, readTokenFn, readReviewStateFn, createPrFn, bootstrapReviewSurfaceFn, resolveReviewAdapterFn, force };
 }
 
 function reviewCommandOutputBindings(options: NonNullable<Parameters<typeof pushRound>[1]>) {

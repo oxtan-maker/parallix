@@ -833,6 +833,40 @@ test('lifecycle completion survives absent telemetry and ignores later close (ta
   assert.equal(metrics.decisionWindow?.current.completedMissions, 0);
 });
 
+test('delivery identity uses repository-scoped rows without reconstructing cohort metadata (PX-0058.03)', async () => {
+  let findAllCalls = 0;
+  let findWhereCalls = 0;
+  let cohortCalls = 0;
+  let evidenceRevision = 'history-v1';
+  const laneEventRepo: BoardLaneEventRepository = {
+    ...emptyBoardRepositories().laneEventRepo,
+    async findByRepositoryId() {
+      return [{ repositoryId: 'parallix', missionId: 'task-delivered', fromStatus: 'integration', toStatus: 'done',
+        trigger: 'integrate', agent: 'codex', occurredAt: '2026-11-10T12:00:00Z', idempotencyKey: 'delivered' }];
+    },
+  };
+  const usageRepo: UsageRepository = {
+    async findAll() { findAllCalls += 1; return []; },
+    async findWhere(filter) {
+      findWhereCalls += 1;
+      assert.deepEqual(filter, { repo: repositoryId('parallix') });
+      return [{ repo: 'parallix', mission: 'task-delivered', date: '2026-11-10', duration_minutes: 12 }];
+    },
+  };
+  const adapter = new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: repositoryId('parallix'),
+    cohortMetadata: async () => { cohortCalls += 1; return new Map(); },
+    evidenceRevision: async () => evidenceRevision });
+
+  const first = await adapter.readDeliveryIdentity();
+  evidenceRevision = 'history-v2';
+  const second = await adapter.readDeliveryIdentity();
+  assert.deepEqual(first.deliveries, [{ missionId: missionId('task-delivered'), closedAt: '2026-11-10T12:00:00.000Z' }]);
+  assert.notEqual(first.revision, second.revision);
+  assert.equal(findWhereCalls, 2);
+  assert.equal(findAllCalls, 0);
+  assert.equal(cohortCalls, 0);
+});
+
 test('cohort labels and implementer come from canonical Mission metadata, not telemetry (task-2347.04)', async () => {
   const laneEventRepo: BoardLaneEventRepository = {
     ...emptyBoardRepositories().laneEventRepo,

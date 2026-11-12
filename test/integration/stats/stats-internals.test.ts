@@ -2,6 +2,7 @@ import { fixtureReviewObservations } from '../../fixtures/review-statistics.js';
 import type { ReviewRound, ReviewEventRecord } from '../../../src/domain/review.js';
 import type { StatsRow } from '../../../src/application/services/statistics-row.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 /**
@@ -560,7 +561,7 @@ test('failed approval boundary transition surfaces and blocks Backlog promotion 
 
   try {
     await submitReviewRound(slug, 'approve', 'Looks good', {
-      worktree: fixture.root,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: fixture.root }),
       log: () => {},
       error: (message: string) => { errors.push(message); },
       exit: ((code: number) => { exitCodes.push(code); }),
@@ -659,7 +660,7 @@ test('R5: human px review approval persists ReviewerDecision and lands integrati
     // decision path, provider=none, persistence bound to store + lifecycle
     // exactly like the production wiring.
     await submitReviewRound(slug, 'approve', 'approved by the operator', {
-      worktree: fixture.root,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: fixture.root }),
       log: () => {},
       error: (message: string) => { errors.push(message); },
       exit: ((code: number) => { exitCodes.push(code); }),

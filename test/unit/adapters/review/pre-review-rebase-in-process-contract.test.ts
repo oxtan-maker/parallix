@@ -21,7 +21,8 @@ import { rebaseBeforeReviewRound } from '../../../../src/adapters/review/rebase.
 import { preReviewRebaseFacts } from '../../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
-import type { RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
+import type { RebaseObservationInput, RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
+import { configureRebaseObservation } from '../../../../src/application/ports/rebase-workflow.js';
 
 test('pre-review shared conflicts launch a fresh resolver with database intent (px-0021)', async () => {
   const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex'),
@@ -182,6 +183,40 @@ describe("02 pre-review rebase in-process", () => {
 
     assert.ok(calls.some(args => args.includes('rebase') && args.includes('--continue')),
       'the recorded rebase resumes instead of failing the ordinary branch checkout gate');
+  });
+
+  test('provider-disabled pre-review retains typed inapplicability (PX-0055.03)', async () => {
+    const observations: RebaseObservationInput[] = [];
+    const port = stubPort({ newRebaseObservationId: () => 'pre-review-skip',
+      observeRebase: async observation => { observations.push(observation); } });
+    configureRebaseObservation({ observeRebase: port.observeRebase!,
+      newRebaseObservationId: port.newRebaseObservationId!, rebaseObservationStage: 'direct-rebase' });
+    const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(port, {
+      isForgejoReviewEnabledFn: () => false,
+    })).finally(() => configureRebaseObservation(null));
+    assert.equal(result.ok, true);
+    assert.deepEqual(observations.map(({ stage, outcome, inapplicability }) => ({ stage, outcome, inapplicability })), [
+      { stage: 'pre-review-rebase', outcome: 'inapplicable', inapplicability: 'review-provider-disabled' },
+    ]);
+  });
+
+  test('provider-disabled diagnostic failure does not abort review submission (PX-0055.03)', async () => {
+    let baseResolutions = 0;
+    const errors: string[] = [];
+    const port = stubPort({
+      resolveMissionBaseBranch: () => { baseResolutions++; return 'main'; },
+      newRebaseObservationId: () => 'pre-review-skip',
+      observeRebase: async () => { throw new Error('history unavailable'); },
+    });
+    configureRebaseObservation({ observeRebase: port.observeRebase!,
+      newRebaseObservationId: port.newRebaseObservationId!, rebaseObservationStage: 'direct-rebase' });
+    const result = await rebaseBeforeReviewRound(SLUG, preReviewOptions(port, {
+      error: (message: string) => { errors.push(message); },
+      isForgejoReviewEnabledFn: () => false,
+    })).finally(() => configureRebaseObservation(null));
+    assert.equal(result.ok, true);
+    assert.equal(baseResolutions, 0, 'disabled review does not resolve a rebase target it will not use');
+    assert.match(errors.join('\n'), /Could not retain pre-review rebase inapplicability.*Continuing review submission/);
   });
 
   test('completed rebase ancestry refusal reaches fresh repair without old gate attribution (TASK-2796)', async (t) => {

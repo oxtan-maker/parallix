@@ -13,14 +13,15 @@ import { MissionLifecycleService } from '../../../src/application/mission-lifecy
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp } from '../../helpers/temp-dir.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 test('production verdict binding retains fenced output before authority or provider effects (TASK-2826)', async t => {
   const root = mkdtemp('fenced-verdict-');
   t.after(() => { configureMissionWriteAuthorization(null); fs.rmSync(root, { recursive: true, force: true }); });
   const original = fixtureMission('task-fenced', { status: 'review', review: pendingReview('task-fenced') });
   const store = inMemoryTransitionStore(original);
-  const ports = reviewVerbPorts({ configuration: resolveConfiguration({}), mission: { store, lifecycle: new MissionLifecycleService(store) } });
-  const bound = { ...ports, resolveSlug: () => original.id, resolveWorktree: () => root };
+  const ports = reviewVerbPorts({ rootDir: process.cwd(), configuration: resolveConfiguration({}), mission: { store, lifecycle: new MissionLifecycleService(store) } });
+  const bound = { ...ports, resolveSlug: () => original.id, resolveExecutionContext: () => ({ ok: true as const, context: missionExecutionContext({ missionId: original.id, missionWorktree: root }) }) };
   configureMissionWriteAuthorization({ operationId: 'old-owner', assert: async () => { throw new WorkflowOwnershipError('Workflow ownership was fenced or stopped'); } });
   await assert.rejects(() => createVerdictCommand(bound)(['approve', '--actor', 'claude', '--comment', 'keep original']), /Verdict rejected:.*retained at/);
   const loaded = await store.load(original.id);

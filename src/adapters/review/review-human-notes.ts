@@ -7,6 +7,7 @@ import { missionBranchName } from '../filesystem/mission-utils.js';
 import * as crypto from 'node:crypto';
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 interface CreatedHumanNote {
   path: string | null;
@@ -22,6 +23,7 @@ export interface ConsumeHumanNotesResult {
 }
 
 export interface ConsumeHumanNotesOptions {
+  executionContext: LiveMissionExecutionContext;
   getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
   createEventFn?: ReviewEventCreator;
   readReviewStateFn?: ReviewStateReader;
@@ -29,7 +31,6 @@ export interface ConsumeHumanNotesOptions {
   configuration?: ParallixConfiguration;
   reviewIdentity?: string | null;
   forgejoUser?: string | null;
-  worktree?: string;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
   writeReviewStateFn?: typeof writeReviewState;
@@ -74,7 +75,7 @@ async function persistHumanNoteKeys(slug: string, stateForRound: ReviewStateData
 }
 
 export async function consumeProviderHumanNotes(slug: string, actor: string, options: ConsumeHumanNotesOptions & { createEventFn: ReviewEventCreator }): Promise<ConsumeHumanNotesResult> {
-  const { getCommentsFn, createEventFn, readReviewStateFn, writeReviewStateFn, readTokenFn, reviewIdentity, forgejoUser, worktree, logger, error, currentState } = humanNoteDependencies(options);
+  const { getCommentsFn, createEventFn, readReviewStateFn, writeReviewStateFn, readTokenFn, reviewIdentity, forgejoUser, executionContext, logger, error, currentState } = humanNoteDependencies(options);
 
   const actorIdentity = reviewIdentity || forgejoUser;
   if (!actorIdentity) {
@@ -87,7 +88,7 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
     return { ok: true, created: [], skipped: [] };
   }
 
-  const rootDir = worktree || process.cwd();
+  const rootDir = executionContext.missionWorktree;
   const providerOptions = { rootDir, configuration: options.configuration };
   const token = readTokenFn ? readTokenFn(actorIdentity, providerOptions) : null;
   if (!token) {
@@ -95,7 +96,7 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
     return { ok: true, created: [], skipped: [] };
   }
 
-  const branch = missionBranchName(slug, worktree || process.cwd());
+  const branch = missionBranchName(slug, rootDir);
   const comments = await getCommentsFn(branch, token, providerOptions);
 
   if (!comments || !Array.isArray(comments)) {
@@ -153,10 +154,10 @@ function humanNoteDependencies(options: ConsumeHumanNotesOptions & { createEvent
     readTokenFn,
     reviewIdentity = null,
     forgejoUser = null,
-    worktree,
+    executionContext,
     log: logger = fmt.log.plain,
     error = fmt.log.plainError,
     currentState
   } = options;
-  return { getCommentsFn, createEventFn, readReviewStateFn, writeReviewStateFn, readTokenFn, reviewIdentity, forgejoUser, worktree, logger, error, currentState };
+  return { getCommentsFn, createEventFn, readReviewStateFn, writeReviewStateFn, readTokenFn, reviewIdentity, forgejoUser, executionContext, logger, error, currentState };
 }

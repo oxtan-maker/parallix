@@ -1,5 +1,6 @@
 import type { FlowGateRun, FlowLeadEpisodes, FlowRebaseRun } from './flow-mission-facts.js';
 import type { ReviewStatistics } from '../services/review-statistics.js';
+import { isSuccessfulRebaseOutcome } from '../ports/rebase-workflow.js';
 
 /** Actor swimlanes of the Mission flow: who holds the work at each node and each elapsed row. */
 export type FlowLaneId = 'refine-agent' | 'implement-agent' | 'parallix' | 'review-agent' | 'lead' | 'human' | 'external' | 'main';
@@ -108,6 +109,7 @@ export function flowGraph(facts: readonly FlowGraphFacts[]): FlowGraph {
   const edges: FlowGraphEdge[] = [
     edge('refine', 'implement', 'flow', nodes[0]!.count, null),
     edge('implement', 'pre-review-rebase', 'flow', preRebase.runs, null),
+    edge('pre-review-rebase', 'implement', 'workflow-return', returnsFrom('pre-review-rebase'), null),
     ...rebaseEdges('pre-review-rebase', 'pre-review-resolve', 'declared-gates', preRebase, edge),
     edge('declared-gates', 'agent-review', 'flow', passed(declared), declaredOutcomes[0]!),
     edge('declared-gates', 'implement', 'gate-failed', returnsFrom('declared-gates'), declaredOutcomes[1]!),
@@ -126,8 +128,8 @@ export function flowGraph(facts: readonly FlowGraphFacts[]): FlowGraph {
 
 /** The node a return leaves from: its recorded review actor, or the gate its typed cause names. */
 function returnSource(origin: ReviewStatistics['returns'][number]['origin']): FlowNodeId | null {
-  if (origin.stage === 'agent-review') { return 'agent-review'; }
-  if (origin.stage === 'human-review') { return 'human-review'; }
+  if (origin.stage !== 'workflow') { return origin.stage; }
+  // Historical rows recorded only a coarse cause; fresh producers name the stage above.
   if (origin.cause === 'repair') { return 'declared-gates'; }
   if (origin.cause === 'integration-gate-failure') { return 'integration-gates'; }
   return null;
@@ -148,11 +150,11 @@ function rebaseSummary(runs: readonly FlowRebaseRun[]): RebaseSummary {
   const conflicted = settled.filter(run => run.outcomes[0] === 'conflict');
   const last = (run: FlowRebaseRun) => run.outcomes.at(-1);
   return { runs: settled.length,
-    clean: settled.filter(run => run.outcomes[0] === 'clean' || run.outcomes[0] === 'no-op').length,
+    clean: settled.filter(run => isSuccessfulRebaseOutcome(run.outcomes[0]) && run.outcomes[0] !== 'resolved').length,
     conflicted: conflicted.length,
     failedFirst: settled.filter(run => run.outcomes[0] === 'failed').length,
     repeats: conflicted.reduce((sum, run) => sum + run.outcomes.slice(1).filter(outcome => outcome === 'conflict').length, 0),
-    resolved: conflicted.filter(run => ['resolved', 'clean', 'no-op'].includes(last(run) ?? '')).length,
+    resolved: conflicted.filter(run => isSuccessfulRebaseOutcome(last(run))).length,
     failedAfterConflict: conflicted.filter(run => last(run) === 'failed').length };
 }
 

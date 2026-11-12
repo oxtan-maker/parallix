@@ -170,8 +170,8 @@ describe("pre-review rebase launcher configuration", () => {
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_TEST_NO_FORGEJO: '1', FORGEJO_URL: 'http://127.0.0.1:1', PARALLIX_HOME: path.join(root, 'home') });
       const logs: string[] = [];
       const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
-      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, executionContext, verbose: true }, {
-        configuration, executionContext, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
+      const ports = createReviewLoopPorts('task-lcfg-iso', { executionContext, verbose: true }, {
+        configuration, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
         rebaseWorkflowOptions: {
           readTokenFn: () => 'fixture-token',
           resolveForgejoUserFn: () => 'fixture-user',
@@ -203,8 +203,8 @@ describe("pre-review rebase launcher configuration", () => {
       const logs: string[] = [];
       let publications = 0;
       const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
-      const ports = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, executionContext }, {
-        configuration, executionContext, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
+      const ports = createReviewLoopPorts('task-lcfg-iso', { executionContext }, {
+        configuration, log: line => logs.push(line), error: line => logs.push(line), exit: () => {},
         rebaseWorkflowOptions: {
           readTokenFn: () => null,
           resolveForgejoUserFn: () => 'fixture-user',
@@ -233,8 +233,8 @@ describe("pre-review rebase launcher configuration", () => {
       const { repo, binDir, launches } = conflictRepo(root, { verification: { command: `echo verify-gate >> '${order}'` } });
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_TEST_NO_FORGEJO: '1', FORGEJO_URL: 'http://127.0.0.1:1', PARALLIX_HOME: path.join(root, 'home') });
       const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
-      const real = createReviewLoopPorts('task-lcfg-iso', { worktree: repo, executionContext, verbose: true }, {
-        configuration, executionContext, log: () => {}, error: () => {}, exit: () => {},
+      const real = createReviewLoopPorts('task-lcfg-iso', { executionContext, verbose: true }, {
+        configuration, log: () => {}, error: () => {}, exit: () => {},
         rebaseWorkflowOptions: { readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user', createPrFn: () => ({ ok: true as const }) },
       });
       const note = (event: string) => fs.appendFileSync(order, `${event}\n`);

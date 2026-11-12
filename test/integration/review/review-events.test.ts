@@ -27,6 +27,7 @@ import { seedMissionDatabase } from '../../fixtures/review-state-db.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { classifyComment, hasWorkflowFooter } from '../../../src/adapters/review/review-events.js';
 import { readReviewState, writeReviewState } from '../../../src/adapters/review/review-state.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 // Test slug that is guaranteed not to exist
 const NONEXISTENT_SLUG = 'task-test-review-events-nonexistent';
@@ -409,7 +410,7 @@ test('consumeHumanNotes creates human_note events and skips workflow comments', 
 
     const seen: { branch: string | null; token: string | null } = { branch: null, token: null };
     const result = await consumeHumanNotes(TEST_SLUG, 'claude', {
-      worktree: tempDir,
+      executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: tempDir }),
       forgejoUser: 'claude',
       readTokenFn: () => 'token-123',
       readReviewStateFn: (slug, rootDir) => readReviewState(slug, rootDir, missionStore),

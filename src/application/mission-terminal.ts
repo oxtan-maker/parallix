@@ -47,6 +47,7 @@ export interface MissionTerminalServiceDeps {
 }
 
 interface IndexedRun { readonly run: RunSummary; readonly scope: RunHistoryScope; readonly legacy: boolean }
+type AttributedRuns = Map<string, IndexedRun>;
 
 const RETENTION_NOTICE = `Retention: at most ${MAX_RUNS_PER_MISSION} operations per Mission, each kept up to ${Math.round(RUN_HISTORY_RETENTION_MS / 86_400_000)} days; `
   + `each stream keeps its first and newest bytes up to ${MAX_RUN_STREAM_BYTES / (1024 * 1024)} MiB and reports the dropped middle.`;
@@ -76,8 +77,12 @@ function hostedTerminal(host: MissionTerminalHostPort, identity: MissionTerminal
   return { probe, session: resolved.session, observations: result.sessions.operations };
 }
 
+function attributedRunKey(identity: MissionTerminalScope, runId: string): string {
+  return `${identity.repositoryId}\0${identity.missionId}\0${runId}`;
+}
+
 /** Every retained run the compatibility resolver attributes to this Mission, newest first. */
-function indexHistory(store: MissionHistoryStorePort, identity: MissionTerminalScope): { runs: IndexedRun[]; unattributed: string[] } {
+function indexHistory(store: MissionHistoryStorePort, identity: MissionTerminalScope, attributed?: AttributedRuns): { runs: IndexedRun[]; unattributed: string[] } {
   const runs: IndexedRun[] = [];
   const unattributed: string[] = [];
   const seen = new Set<string>();
@@ -90,10 +95,16 @@ function indexHistory(store: MissionHistoryStorePort, identity: MissionTerminalS
       const attribution = store.attribute(identity, lookup.run.record, location);
       if (attribution.kind === 'unattributed') { unattributed.push(`${runId}: ${attribution.reason}`); continue; }
       seen.add(runId);
-      runs.push({ run: lookup.run, scope, legacy: attribution.legacy });
+      const validatedScope: RunHistoryScope = { ...scope, acceptRecord: record => store.attribute(identity, record, location).kind === 'attributed' };
+      runs.push({ run: lookup.run, scope: validatedScope, legacy: attribution.legacy });
     }
   }
   runs.sort((a, b) => b.run.record.startedAt.localeCompare(a.run.record.startedAt));
+  if (attributed) {
+    const prefix = `${identity.repositoryId}\0${identity.missionId}\0`;
+    for (const key of attributed.keys()) { if (key.startsWith(prefix)) { attributed.delete(key); } }
+    for (const entry of runs) { attributed.set(attributedRunKey(identity, entry.run.record.runId), entry); }
+  }
   return { runs, unattributed };
 }
 
@@ -118,9 +129,9 @@ function viewState(probe: MissionTerminalProbe, newest: IndexedRun | undefined):
   return newest.run.state === 'running' && probe.kind === 'absent' ? 'starting' : 'ended';
 }
 
-function overviewOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalScope): MissionHistoryOverview {
+function overviewOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalScope, attributed?: AttributedRuns): MissionHistoryOverview {
   const { probe, observations = [] } = hostedTerminal(deps.host, identity);
-  const { runs, unattributed } = indexHistory(deps.store, identity);
+  const { runs, unattributed } = indexHistory(deps.store, identity, attributed);
   const notices = [RETENTION_NOTICE];
   if (runs.some(entry => entry.legacy)) { notices.push('Some operations were recorded by an earlier release under a legacy name or in the Mission worktree; they are attributed by their own records.'); }
   if (unattributed.length > 0) { notices.push(`${unattributed.length} retained record(s) could not be attributed to this Mission and are not shown.`); }
@@ -135,12 +146,22 @@ function overviewOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalS
   }), unattributed, notices };
 }
 
-function pageOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalScope, request: MissionHistoryPageRequest): ({ ok: true } & MissionHistoryPage) | MissionHistoryError {
+function pageOf(deps: MissionTerminalServiceDeps, identity: MissionTerminalScope, request: MissionHistoryPageRequest, attributed: AttributedRuns): ({ ok: true } & MissionHistoryPage) | MissionHistoryError {
   if (!isRunHistoryId(request.runId)) { return fail('invalid', 'not a run id'); }
-  const found = indexHistory(deps.store, identity).runs.find(entry => entry.run.record.runId === request.runId);
+  const key = attributedRunKey(identity, request.runId);
+  let found = attributed.get(key);
+  // A cache miss, moved legacy run, missing record or replaced record permits
+  // one bounded rediscovery. The ordinary tail path never enumerates siblings.
+  if (!found) { found = indexHistory(deps.store, identity, attributed).runs.find(entry => entry.run.record.runId === request.runId); }
   if (!found) { return fail('missing', `no retained operation ${request.runId} for ${identity.missionId}`); }
-  const read = readRunPage(found.scope, request);
-  if (read.ok === false) { return fail(read.error, read.detail); }
+  let read = readRunPage(found.scope, request);
+  if (read.ok === false) {
+    attributed.delete(key);
+    found = indexHistory(deps.store, identity, attributed).runs.find(entry => entry.run.record.runId === request.runId);
+    if (!found) { return fail('missing', `no retained operation ${request.runId} for ${identity.missionId}`); }
+    read = readRunPage(found.scope, request);
+    if (read.ok === false) { return fail(read.error, read.detail); }
+  }
   const raw = Buffer.from(read.page.bytes.buffer, read.page.bytes.byteOffset, read.page.bytes.byteLength).toString('utf8');
   const record = read.run.record;
   // Claude stdout is its stream-json; pages are line-aligned, so the provider renderer frames whole records.
@@ -191,6 +212,7 @@ function ownedSession(host: MissionTerminalHostPort, identity: MissionTerminalSc
 }
 
 export function createMissionTerminalService(deps: MissionTerminalServiceDeps): MissionTerminalCapability {
+  const attributed: AttributedRuns = new Map();
   const identify = (mission: string) => identifyMission(deps.repositoryId, mission);
   const withIdentity = <T>(mission: string, run: (_identity: MissionTerminalScope) => T): T | MissionHistoryError => {
     const identified = identify(mission);
@@ -205,10 +227,10 @@ export function createMissionTerminalService(deps: MissionTerminalServiceDeps): 
     identify,
     execution: (mission, currentOperationId) => withIdentity(mission, identity => observeProviderExecution(deps.store, identity, currentOperationId)),
     probe: mission => withIdentity(mission, identity => hostedTerminal(deps.host, identity).probe),
-    overview: mission => withIdentity(mission, identity => overviewOf(deps, identity)),
-    page: (mission, request) => withIdentity(mission, identity => pageOf(deps, identity, request)),
+    overview: mission => withIdentity(mission, identity => overviewOf(deps, identity, attributed)),
+    page: (mission, request) => withIdentity(mission, identity => pageOf(deps, identity, request, attributed)),
     history: mission => withIdentity(mission, identity => {
-      const { runs, unattributed } = indexHistory(deps.store, identity);
+      const { runs, unattributed } = indexHistory(deps.store, identity, attributed);
       return { ok: true as const, runs: runs.map(entry => entry.run), unattributed };
     }),
     show: (mission, ref, context) => withIdentity(mission, identity => {

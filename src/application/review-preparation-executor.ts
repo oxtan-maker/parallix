@@ -28,6 +28,7 @@ import { ReviewSubmissionService, beginReviewPreparation, recordReviewPreparatio
 import { ReviewPreparationNelCapture } from "./review-preparation-nel-capture.js";
 import type { CaptureNelOptions, ReviewPreparationResult, ReviewPreparationWorkflowPorts, PerformReviewPreparationOptions } from "./ports/review-preparation-workflow.js";
 import type { LiveMissionExecutionContext } from './ports/mission-execution-context.js';
+import { DECLARED_GATES_RETURN_STAGE, type WorkflowReturnStage } from '../domain/board-event.js';
 
 /**
  * Application entry point for sequencing a review preparation.
@@ -77,7 +78,7 @@ export class ReviewPreparationExecutor {
       return { ok: false, error, failureReason: reason, recoveryFailure: { kind: 'review-preparation-verification', error, failureReason: reason } };
     }
     const result = await this.prepareReviewSafely(slug, options);
-    if (!result.ok && result.error) { await recordReviewPreparationFailure(slug, result.error, services, preparationRecoveryReason(result)); }
+    if (!result.ok && result.error) { await recordReviewPreparationFailure(slug, result.error, services, preparationRecoveryReason(result), DECLARED_GATES_RETURN_STAGE); }
     return bindings.recoverGateFailure ? this.gateRecovery.repairPreparationFailure(slug, result, { root, services, startAgent: bindings.startAgentFn,
       verify: () => this.performReviewPreparation(slug, { ...options, recoverGateFailure: false }), log: bindings.log, error: bindings.error,
       attempts: reviewPreparationRetryBudget(bindings).retriesLeft }) : result;
@@ -117,10 +118,11 @@ export class ReviewPreparationExecutor {
 
     const gateStage = {
       rootDir, forgejoUser: prepared.forgejoUser, log, error, startAgentFn, recoverGateFailure, options: opts,
-      transitionToImplementer: async () => {
+      transitionToImplementer: async (_missionSlug: string, returnStage: WorkflowReturnStage) => {
         const services = await missionServicesFn(rootDir, { missionDir: missionDirPath });
         const loaded = await services.store.load(missionId(slug));
-        if (loaded.kind === 'found' && loaded.mission.assignee) { await transitionReviewRepair(slug, 'active', loaded.mission.assignee, services.store, services.lifecycle); }
+        if (loaded.kind === 'found' && loaded.mission.assignee) { await transitionReviewRepair(slug,
+          { destination: 'active', sourceStage: returnStage }, loaded.mission.assignee, services.store, services.lifecycle); }
       },
       retryReviewPreparation: (retrySlug: string, retryOptions: PerformReviewPreparationOptions) => this.performReviewPreparation(retrySlug, retryOptions),
     };

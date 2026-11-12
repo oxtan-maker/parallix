@@ -25,7 +25,7 @@ const { createLeadSupervisorPort } = await import('../../../src/composition/lead
 type Context = Parameters<typeof createLeadSupervisorPort>[2];
 
 for (const outcome of ['success', 'cancelled', 'missing-controller', 'exit'] as const) {
-  test(`borrowed active ${outcome} releases only its scope and ends publication (TASK-2792)`, async t => {
+  test(`borrowed active ${outcome} leaves durable publication to its admitted command (TASK-2792)`, async t => {
     t.after(() => mock.restoreAll());
     mock.method(worktrees, 'resolveWorktree', () => '/target');
     const diagnostics: string[] = [];
@@ -55,6 +55,7 @@ for (const outcome of ['success', 'cancelled', 'missing-controller', 'exit'] as 
       assert.deepEqual(args, ['task-borrowed']);
       assert.equal(options?.controller, controller);
       assert.equal(options?.rootDir, '/target');
+      assert.equal(options?.activityActor, 'lead');
       assert.equal(typeof options?.missionTitleFn, 'function');
       if (outcome === 'exit') {
         assert.equal(typeof options?.exitFn, 'function');
@@ -74,13 +75,12 @@ for (const outcome of ['success', 'cancelled', 'missing-controller', 'exit'] as 
     await port.runAction('task-borrowed', { kind: 'active:execute', display: 'px active task-borrowed' }, undefined, signal.signal);
     if (outcome === 'success') {
       assert.equal(forwards.size, 1, 'lead resumes polling while active is running');
-      assert.deepEqual(events, ['opened', 'running', 'active']);
+      assert.deepEqual(events, ['opened', 'active']);
       finishActive();
     }
     await Promise.all(forwards);
     assert.equal(forwards.size, 0, 'settled forwards cannot remain in fleet shutdown');
-    assert.deepEqual(events, ['opened', 'running',
-      ...(['success', 'exit'].includes(outcome) ? ['active'] : []), 'closed', 'ended']);
+    assert.deepEqual(events, ['opened', ...(['success', 'exit'].includes(outcome) ? ['active'] : []), 'closed']);
     assert.deepEqual(diagnostics, outcome === 'missing-controller'
       ? ['[lead] px active task-borrowed stopped: No active controller available for task-borrowed']
       : outcome === 'exit' ? ['[lead] px active task-borrowed stopped: command exited with status 130'] : []);
@@ -177,7 +177,7 @@ for (const diagnostic of ['blocking', 'gate-failed', 'stale-work'] as const) {
     await port.runAction(observed.missionId, observed.action, observed);
     await Promise.all(forwards);
     assert.deepEqual(invocations, [{ args: ['review', card.id], cwd: '/target', operatorInvocation: false }]);
-    assert.deepEqual(publications, ['review', 'ended']);
+    assert.deepEqual(publications, []);
     assert.equal(card.reviewApproved, false);
   });
 }

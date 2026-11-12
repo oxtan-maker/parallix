@@ -105,25 +105,37 @@ export async function readReviewState(slug: string, rootDir = process.cwd(), mis
 const REVIEWER_POLICY_CAS_ATTEMPTS = 3;
 
 function withReviewerPolicy(review: Review, policy: ReviewerPolicy): Review {
-  return { ...review, rounds: replaceCurrentRound(review, { ...currentReviewRound(review), reviewerPolicy: policy }) };
+  const round = currentReviewRound(review);
+  const prior = round.reviewerPolicy?.rerouted ?? [];
+  const additions = (policy.rerouted ?? []).filter(entry => !prior.some(existing => existing.family === entry.family && existing.replacedBy === entry.replacedBy));
+  const reviewerResults = round.reviewerResults?.map(result => {
+    const reroute = additions.find(entry => entry.family === result.agentFamily);
+    if (!reroute) { return result; }
+    const reviewerId = result.reviewerId === result.agentFamily ? reroute.replacedBy : result.reviewerId;
+    const synthesized = `round-${round.number}:${result.reviewerId}:${result.revision}:${result.decision}`;
+    return { ...result, agentFamily: agentFamily(reroute.replacedBy), reviewerId,
+      publicationId: result.publicationId === synthesized
+        ? `round-${round.number}:${reviewerId}:${result.revision}:${result.decision}` : result.publicationId };
+  });
+  return { ...review, rounds: replaceCurrentRound(review, { ...round, reviewerPolicy: policy, ...(reviewerResults ? { reviewerResults } : {}) }) };
 }
 
 async function writeReviewerPolicy(
   slug: string,
   store: MissionStore,
   state: { round: number; startedAt: string },
-  decide: (_review: Review) => ReviewerPolicy | null,
+  decide: (_review: Review) => Review | null,
 ): Promise<ReviewerPolicy | null> {
   for (let attempt = 0; attempt < REVIEWER_POLICY_CAS_ATTEMPTS; attempt++) {
     const loaded = await readReviewForDecision(slug, store, undefined, 'decide', { number: state.round, startedAt: state.startedAt });
     if (loaded.kind === 'failed') {
       throw new Error(loaded.result.outcome === 'failed' ? loaded.result.diagnostic : 'Cannot read the review round');
     }
-    const policy = decide(loaded.mission.review);
-    if (!policy) { return null; }
+    const review = decide(loaded.mission.review);
+    if (!review) { return null; }
     try {
-      await store.save({ ...loaded.mission, review: withReviewerPolicy(loaded.mission.review, policy) }, loaded.version);
-      return policy;
+      await store.save({ ...loaded.mission, review }, loaded.version);
+      return currentReviewRound(review).reviewerPolicy ?? null;
     } catch (error) {
       if (!isStaleWrite(error) || attempt === REVIEWER_POLICY_CAS_ATTEMPTS - 1) { throw error; }
     }
@@ -142,15 +154,21 @@ export function createReviewerPolicyStatePort(
   };
   return {
     async recordReviewerPolicy(state, policy) {
-      // A recorded policy governs its round; a resumed loop never re-decides it.
-      await writeReviewerPolicy(slug, requireStore(), state, review => currentReviewRound(review).reviewerPolicy ? null : policy);
+      // A recorded policy governs only its exact revision. Rebase or repair may
+      // move an undecided round before any reviewer settles; preserve its old
+      // results as history but bind a fresh requirement to the new revision.
+      await writeReviewerPolicy(slug, requireStore(), state, review => {
+        const round = currentReviewRound(review);
+        if (round.decision || round.reviewerPolicy?.revision === policy.revision) { return null; }
+        return withReviewerPolicy(review, policy);
+      });
     },
     async reviewerProgress(state, revision): Promise<ReviewerProgress | null> {
       const loaded = await requireStore().load(missionId(slug));
       if (loaded.kind !== 'found' || !('review' in loaded.mission) || !loaded.mission.review) { return null; }
       const review = loaded.mission.review;
       const round = currentReviewRound(review);
-      if (round.number !== state.round || !round.reviewerPolicy) { return null; }
+      if (round.number !== state.round || !round.reviewerPolicy || round.reviewerPolicy.revision !== revision) { return null; }
       const exact = changeRevision(revision);
       return {
         policy: round.reviewerPolicy,
@@ -162,15 +180,21 @@ export function createReviewerPolicyStatePort(
       };
     },
     async replaceReviewer(state, revision, failed, reason, probe, rerouted) {
-      return await writeReviewerPolicy(slug, requireStore(), state, review =>
-        replaceUnavailableReviewer(
+      return await writeReviewerPolicy(slug, requireStore(), state, review => {
+        const policy = replaceUnavailableReviewer(
           review,
           changeRevision(revision),
           agentFamily(failed),
           reason,
           probe,
           rerouted ? agentFamily(rerouted) : undefined,
-        ));
+        );
+        if (!policy) { return null; }
+        const updated = withReviewerPolicy(review, policy);
+        // The child can publish before launch returns. Correct its family in
+        // the same write as the reroute, including an already-selected target.
+        return rerouted ? applyReviewStateToReview(updated, { reviewer: rerouted }, { reroutedFrom: agentFamily(failed) }) : updated;
+      });
     },
   };
 }

@@ -117,8 +117,8 @@ export const reviewerOutputRenderers = {
     output.error(fmt.status('FAIL', `Reviewer approved ${event.slug} but the review → integration transition failed: ${event.diagnostic}`));
     return;
   }),
-  'integrate-guidance': reviewEventRenderer('integrate-guidance', (event, output) => {
-    output.error(fmt.status('FAIL', `Recovery: px integrate ${event.slug}`));
+  'approval-recovery-guidance': reviewEventRenderer('approval-recovery-guidance', (event, output) => {
+    output.error(fmt.status('FAIL', `Recovery: px review ${event.slug}; after approval completes, run px integrate ${event.slug}`));
     return;
   }),
   'reviewer-approved': reviewEventRenderer('reviewer-approved', (_event, output) => {

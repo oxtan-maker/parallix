@@ -13,6 +13,7 @@ import { execSync } from 'child_process';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
 import type { ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 test.afterEach(() => mock.restoreAll());
 
 /**
@@ -23,7 +24,7 @@ async function startReviewLoop(root: string, request: ReviewLoopRequest) {
   const logs: string[] = [];
   const errors: string[] = [];
   const exits: number[] = [];
-  const ports = createReviewLoopPorts(request.slug, { worktree: root }, { log: line => logs.push(line), error: line => errors.push(line), exit: code => exits.push(code) });
+  const ports = createReviewLoopPorts(request.slug, { executionContext: missionExecutionContext({ missionId: request.slug, missionWorktree: root }) }, { log: line => logs.push(line), error: line => errors.push(line), exit: code => exits.push(code) });
   await runReviewLoop(request, {
     ...ports,
     routing: { ...ports.routing, eligibleFamilies: () => ['codex', 'claude', 'gemini'], launcherStatus: agent => ({ supported: true, detail: agent }), nominate: () => 'claude' },

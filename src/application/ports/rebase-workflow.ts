@@ -2,7 +2,7 @@ import type { ReviewStateData, ReviewStateWriter, ReviewStatePersistenceResult }
 import type { MissionStore } from '../domain-ports.js';
 import type { ReboundLaunchOptions } from '../rebound-kernel.js';
 import type { GitContentionPort } from './git-contention.js';
-import type { MissionExecutionContextResolution } from './mission-execution-context.js';
+import type { LiveMissionExecutionContext, MissionExecutionContextResolution } from './mission-execution-context.js';
 /** Application-owned ports for the rebase workflow (TASK-2332.12).
  *
  * Every external dependency the rebase policy needs — Git, agents, Forgejo,
@@ -43,29 +43,68 @@ export interface AgentLaunchResult {
   result: { status?: number | null };
 }
 
-export type RebaseObservationOutcome = 'running' | 'no-op' | 'clean' | 'conflict' | 'resolved' | 'failed';
-export interface RebaseObservationInput {
+export const REBASE_OBSERVATION_STAGES = ['direct-rebase', 'pre-review-rebase', 'integration-rebase'] as const;
+export type RebaseObservationStage = typeof REBASE_OBSERVATION_STAGES[number];
+const REBASE_OBSERVATION_STAGE_SET: ReadonlySet<string> = new Set(REBASE_OBSERVATION_STAGES);
+export function isRebaseObservationStage(stage: unknown): stage is RebaseObservationStage {
+  return typeof stage === 'string' && REBASE_OBSERVATION_STAGE_SET.has(stage);
+}
+export const REBASE_OBSERVATION_OUTCOMES = ['running', 'no-op', 'clean', 'conflict', 'resolved', 'failed', 'inapplicable'] as const;
+export type RebaseObservationOutcome = typeof REBASE_OBSERVATION_OUTCOMES[number];
+export const RETAINED_REBASE_OUTCOMES = ['no-op', 'clean', 'conflict', 'resolved', 'failed'] as const;
+export type RetainedRebaseOutcome = typeof RETAINED_REBASE_OUTCOMES[number];
+export const TERMINAL_REBASE_OUTCOMES = ['no-op', 'clean', 'resolved', 'failed'] as const;
+export type TerminalRebaseOutcome = typeof TERMINAL_REBASE_OUTCOMES[number];
+const TERMINAL_REBASE_OUTCOME_SET: ReadonlySet<string> = new Set(TERMINAL_REBASE_OUTCOMES);
+export function isTerminalRebaseOutcome(outcome: unknown): outcome is TerminalRebaseOutcome {
+  return typeof outcome === 'string' && TERMINAL_REBASE_OUTCOME_SET.has(outcome);
+}
+const RETAINED_REBASE_OUTCOME_SET: ReadonlySet<string> = new Set(RETAINED_REBASE_OUTCOMES);
+export function isRetainedRebaseOutcome(outcome: unknown): outcome is RetainedRebaseOutcome {
+  return typeof outcome === 'string' && RETAINED_REBASE_OUTCOME_SET.has(outcome);
+}
+export const SUCCESSFUL_REBASE_OUTCOMES = ['no-op', 'clean', 'resolved'] as const;
+export type SuccessfulRebaseOutcome = typeof SUCCESSFUL_REBASE_OUTCOMES[number];
+const SUCCESSFUL_REBASE_OUTCOME_SET: ReadonlySet<string> = new Set(SUCCESSFUL_REBASE_OUTCOMES);
+export function isSuccessfulRebaseOutcome(outcome: unknown): outcome is SuccessfulRebaseOutcome {
+  return typeof outcome === 'string' && SUCCESSFUL_REBASE_OUTCOME_SET.has(outcome);
+}
+interface RebaseObservationBase {
   readonly id: string;
   readonly missionId: string;
   readonly root: string;
-  readonly stage: 'direct-rebase' | 'pre-review-rebase' | 'integration-rebase';
+  readonly stage: RebaseObservationStage;
   readonly attempt: number;
-  readonly outcome: RebaseObservationOutcome;
-  readonly baseBranch: string;
+  readonly baseBranch: string | null;
   readonly revisionBefore: string | null;
   readonly revisionAfter: string | null;
   readonly conflicts: readonly string[];
   readonly dependencies: readonly string[];
   readonly occurredAt: string;
 }
+export type RebaseObservationInput = RebaseObservationBase & (
+  | { readonly outcome: Exclude<RebaseObservationOutcome, 'inapplicable'>; readonly inapplicability?: never }
+  | { readonly outcome: 'inapplicable'; readonly inapplicability: string }
+);
 
 export type RebaseObservationPort = (_observation: RebaseObservationInput) => Promise<void>;
 let configuredRebaseObservation: RebaseObservationPort | null = null;
+let configuredRebaseObservationId: (() => string) | null = null;
+let configuredRebaseObservationStage: RebaseObservationStage | null = null;
+export type RebaseObservationFields = Required<Pick<RebaseWorkflowPort,
+  'observeRebase' | 'newRebaseObservationId' | 'rebaseObservationStage'>>;
 /** Composition binds the installed durable observation owner once per CLI invocation. */
-export function configureRebaseObservation(port: RebaseObservationPort | null): void {
-  configuredRebaseObservation = port;
+export function configureRebaseObservation(fields: RebaseObservationFields | null): void {
+  configuredRebaseObservation = fields?.observeRebase ?? null;
+  configuredRebaseObservationId = fields?.newRebaseObservationId ?? null;
+  configuredRebaseObservationStage = fields?.rebaseObservationStage ?? null;
 }
-export function rebaseObservation(): RebaseObservationPort | null { return configuredRebaseObservation; }
+export function rebaseObservation(): RebaseObservationFields | null {
+  return configuredRebaseObservation && configuredRebaseObservationId
+    ? { observeRebase: configuredRebaseObservation, newRebaseObservationId: configuredRebaseObservationId,
+      rebaseObservationStage: configuredRebaseObservationStage ?? 'direct-rebase' }
+    : null;
+}
 
 // --- pre-review rebase result contract (TASK-2377.02) ---------------------
 // The pre-review rebase runs the workflow in-process and reports *typed*
@@ -169,7 +208,7 @@ export interface RebaseWorkflowPort {
   // Real launcher-status contract: probe a *selected* agent. An absent launcher
   // returns { supported: false }, so only a supported family is launchable.
   workflowLauncherStatus(_agent: string, _worktree?: string): { supported: boolean; agent: string | null };
-  applyAgentFallback(_options: { role: string; original: string; launchResult?: { agent?: string | null } | null; state?: ReviewStateData; slug: string; worktree?: string; log?: (message: string) => void; writeReviewStateFn?: ReviewStateWriter }): Promise<string>;
+  applyAgentFallback(_options: { role: string; original: string; launchResult?: { agent?: string | null } | null; state?: ReviewStateData; slug: string; executionContext: LiveMissionExecutionContext; log?: (message: string) => void; writeReviewStateFn?: ReviewStateWriter }): Promise<string>;
 
   // --- forgejo adapter ---------------------------------------------------
   createPr(_branch: string, _user: string, _token: string, _options: Record<string, unknown>): { ok: boolean; error?: string | null; gateFailure?: Omit<PreReviewRebaseGateEvidence, 'exitCode'> & { exitCode: number | null } };

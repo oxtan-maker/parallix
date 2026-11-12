@@ -38,6 +38,47 @@ export function requireWorkflowOwner(operation: WorkflowOperation, generation: n
   }
 }
 
+/**
+ * The exact generation that produced retained observations. This is a read of
+ * lifecycle history, not current write authority: `requireWorkflowOwner`
+ * admits writes only while executing, whereas settled observations remain
+ * joinable. A settled stop advances its fence once, so its retained producer
+ * is the preceding generation. No earlier or merely-lower generation passes.
+ */
+function historicalObservationGeneration(operation: WorkflowOperation): number | null {
+  if (!Number.isSafeInteger(operation.generation) || operation.generation < 1 || operation.phase === 'accepted') {
+    return null;
+  }
+  if (operation.phase === 'stopped') {
+    return operation.generation > 1 ? operation.generation - 1 : null;
+  }
+  return operation.generation;
+}
+
+export interface WorkflowObservationReference {
+  readonly repositoryId: string | null | undefined;
+  readonly missionId: string | null | undefined;
+  readonly operationId: string | null | undefined;
+  readonly generation: number | null | undefined;
+}
+
+export type WorkflowObservationAuthorization = 'authorized' | 'incomplete' | 'unavailable' | 'rejected';
+
+/** One owner for every current or historical observation-to-operation authorization. */
+export function workflowObservationAuthorization(operation: WorkflowOperation | null | undefined,
+  identity: WorkflowObservationReference): WorkflowObservationAuthorization {
+  if (!identity.repositoryId || !identity.missionId || !identity.operationId
+    || identity.generation === null || identity.generation === undefined) {
+    return 'incomplete';
+  }
+  if (!operation) { return 'unavailable'; }
+  return operation.id === identity.operationId
+    && operation.repositoryId === identity.repositoryId
+    && operation.missionId === identity.missionId
+    && historicalObservationGeneration(operation) === identity.generation
+    ? 'authorized' : 'rejected';
+}
+
 /** Distinguishes ownership rejection from validation or persistence failures. */
 export class WorkflowOwnershipError extends Error {}
 

@@ -1,3 +1,5 @@
+import { parseWorkflowReturnIdentity, type WorkflowReturnIdentity } from '../../domain/board-event.js';
+
 export interface OperationalHistoryEntry {
   readonly id?: number;
   readonly eventType: string;
@@ -24,14 +26,40 @@ export interface ReboundRepairHistoryEntry {
   readonly reasonKind: string;
   readonly area: string | null;
   readonly agent: string;
+  readonly headBefore: string | null;
   readonly durationMs?: number | null;
   readonly occurredAt: string;
+  readonly returnIdentity?: WorkflowReturnIdentity;
+}
+
+/** Decode the one minimal rebound-repair history shape at either storage boundary. */
+export function parseReboundRepairHistoryEntry(value: unknown, occurredAt: string): ReboundRepairHistoryEntry | undefined {
+  if (!value || typeof value !== 'object') { return undefined; }
+  const row = value as Record<string, unknown>;
+  const missionId = String(row.missionId ?? '');
+  const occurrenceId = String(row.occurrenceId ?? '');
+  if (!missionId || !occurrenceId) { return undefined; }
+  const durationMs = typeof row.durationMs === 'number' && Number.isFinite(row.durationMs)
+    ? Math.max(0, row.durationMs) : null;
+  const returnIdentity = parseReturnIdentity(row.returnIdentity);
+  return { missionId, occurrenceId, reasonKind: String(row.reasonKind ?? ''),
+    area: typeof row.area === 'string' ? row.area : null, agent: String(row.agent ?? ''),
+    headBefore: typeof row.headBefore === 'string' ? row.headBefore : null,
+    durationMs, occurredAt, ...(returnIdentity ? { returnIdentity } : {}) };
+}
+
+function parseReturnIdentity(value: unknown): WorkflowReturnIdentity | undefined {
+  if (typeof value !== 'string') { return parseWorkflowReturnIdentity(value); }
+  try { return parseWorkflowReturnIdentity(JSON.parse(value)); }
+  catch { return undefined; }
 }
 
 export interface OperationalHistoryRepository {
   findAll(): Promise<readonly OperationalHistoryEntry[]>;
   /** Selected analytical event families without loading unrelated retained payloads. */
   findByTypes?(_types: readonly string[]): Promise<readonly OperationalHistoryEntry[]>;
+  /** Append-only revision for selected analytical families, without loading their payloads. */
+  revisionForTypes?(_types: readonly string[]): Promise<string>;
   /** Minimal first observation for legacy Missions with no lane-transition history. */
   findEarliestForMissions?(_missionIds: readonly string[], _repositoryId: string): Promise<readonly OperationalHistoryEntry[]>;
   /** Minimal rebound identities for all Missions, without loading retained repair transcripts. */
@@ -59,6 +87,9 @@ export interface BoardLaneEventEntry {
   readonly agent: string;
   readonly occurredAt: string;
   readonly idempotencyKey: string;
+  readonly returnIdentity?: WorkflowReturnIdentity;
+  /** Scoped read defect for a stored return tuple that is neither absent nor valid. */
+  readonly returnIdentityDefect?: string;
 }
 
 /** Read-only lifecycle history shape consumed by application projections. */

@@ -6,6 +6,7 @@ import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { ExternalTaskRef } from '../../domain/external-task.js';
 import type { MissionLabel } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
+import type { ExecutionActivityActor } from '../../domain/execution-activity.js';
 
 // ---------------------------------------------------------------------------
 // BoardCommandRequest — typed request for a board operation
@@ -76,6 +77,8 @@ export interface BoardCommandRequest {
   /** Present for board actions, which capture a status before confirmation. */
   readonly missionStatusAtRequest?: string;
   readonly agent?: string | null;
+  /** Internal forwarding actor retained on the admitted workflow operation. */
+  readonly activityActor?: ExecutionActivityActor;
   /** An explicit web selection must never reroute to another family. */
   readonly pinnedAgent?: boolean;
   /** Explicit automatic-review family for `active:execute`; absent keeps automatic selection. */

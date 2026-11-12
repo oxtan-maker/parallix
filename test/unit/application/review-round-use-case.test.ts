@@ -29,7 +29,11 @@ function fixture(round: number | null = 2, controllerFree = false, overrides: Re
   return { calls, requests, fake, port, useCase: new ReviewRoundUseCase(port) };
 }
 
-const base = { slug: 'task-2637', focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null };
+const base = {
+  slug: 'task-2637',
+  executionContext: missionExecutionContext({ missionId: 'task-2637', missionWorktree: '/fixture/task-2637' }),
+  focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null,
+};
 const resolveExecutionContext = (slug: string, root: string) => ({ ok: true as const,
   context: missionExecutionContext({ missionId: slug, missionWorktree: `/fixture/${slug}`, baseWorktree: root }) });
 

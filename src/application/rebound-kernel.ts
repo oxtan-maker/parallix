@@ -4,9 +4,7 @@ import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
 export type { ReboundLaunchOptions, ReboundStartAgent } from './ports/repair-agent-launch.js';
 import { prepareRepairPrompt, readRepairCheckpointBlocker, recordConsumedRepairAttempts, runCheckpointVerification } from './rebound-checkpoints.js';
 import { elideBounceOutput } from './output-elision.js';
-import { type RepairCheckpointPort } from './ports/repair-checkpoint.js';
 import { DEFAULT_REBOUND_ATTEMPTS, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
-import type { GateFailureReason } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
 export type { ReboundReason, ReboundClassification, GateFailureReason, HookFailureReason, ArtifactIncompleteReason, AgentTimeoutReason, ReviewPreparationVerificationReason, DeclaredGateValidationReason } from '../domain/rebound-policy.js';
 import { recoveryEvidenceRoute } from './rebound-prompts.js';
@@ -40,85 +38,19 @@ export { buildFreshDiagnosticRepairPrompt } from './rebound-prompts.js';
  * consume one attempt budget (the task-2369.13 split-brain bug).
  *
  */
-
 import * as fmt from './presentation/cli-format.js';
-
 import type { RecoveryEvidenceRef } from './recovery-evidence.js';
 import { captureOriginalFailureEvidence, captureRetryEvidence } from './rebound-evidence.js';
 import { recordReboundOutcome, recordReboundRepair, type ReboundRepairOutcome } from './rebound-telemetry.js';
 import { launchStatus, type FixLaunch } from './rebound-launch-result.js';
 import { describeLaunchFailure, type LaunchFailure } from '../domain/launch-failure.js';
 
+import type { ReboundContext, RepairStrategy, VerifyResult } from './rebound-context.js';
+export type { ReboundContext, RepairStrategy, VerifyResult } from './rebound-context.js';
 /** Default per-occurrence attempt budget. */
 export { DEFAULT_REBOUND_ATTEMPTS } from '../domain/rebound-policy.js';
 
-/** Stable recovery strategy identifiers for telemetry and escalation evidence. */
-export type RepairStrategy = 'targeted' | 'fresh-diagnostic';
-
 // ── Reason: structured failure values, never a regex match on combined text ──
-
-/** Result of re-running the failing check after a fix attempt. */
-export interface VerifyResult {
-  ok: boolean;
-  /** Supplied only by an adapter that just executed this exact command successfully. */
-  exactExecution?: { readonly command: string; readonly worktree: string; readonly exitCode: 0 };
-  /** Receipts from one authoritative aggregate rerun, one per repaired gate. */
-  exactExecutions?: readonly { readonly command: string; readonly worktree: string; readonly exitCode: 0 }[];
-  workflowBlock?: import('./review-verdict-readiness.js').VerdictBlock;
-  /** Exact check identity supplied by the verification adapter. */
-  command?: string;
-  /** Fresh diagnostic from the re-run; empty when the check passed. */
-  diagnostic?: string;
-  /**
-   * The check's actual failure, when its adapter has process evidence.  A
-   * caller must not turn this into a wrapper string before handing it back to
-   * the recovery policy.
-   */
-  reason?: ReboundReason;
-}
-
-export interface ReboundContext {
-  /** Exact Git-completion instruction, certified by the stage verifier without a code-repair checkpoint. */
-  repairPrompt?: () => Promise<string>;
-  /** Inspect artifacts even when a completed repair process exits unsuccessfully. */
-  inspectFailedRepair?: boolean;
-  repairCheckpoints?: RepairCheckpointPort;
-  /** Resume the harness-created incident with its original retained evidence. */
-  retainedFailure?: RecoveryEvidenceRef;
-  repairIncidentId?: string;
-  /** Actual failed gates from one aggregate execution; each owns a checkpoint before launch. */
-  repairObligations?: readonly { readonly gateKey: string; readonly reason: GateFailureReason }[];
-  slug: string;
-  worktree: string;
-  implementer: string;
-  /** Re-runs the failing check and returns pass/fail with a fresh diagnostic. */
-  verify: (_attempt: number) => Promise<VerifyResult> | VerifyResult;
-  /** Launch port (the agents adapter's `startAgent`, injected). */
-  startAgent: ReboundStartAgent;
-  /** Per-occurrence attempt budget; defaults to `DEFAULT_REBOUND_ATTEMPTS`. */
-  maxAttempts?: number;
-  /** Bounded no-agent retries for a declared environmental verifier outcome. */
-  maxTransientRetries?: number;
-  /** Launch/session retries are deliberately a different currency. */
-  maxLaunchRetries?: number;
-  /** Revision already known by the stage adapter, for an actionable prompt. */
-  head?: string;
-  /** Reads the mission revision around each repair; absent callers retain `head`. */
-  readHead?: () => Promise<string | null> | string | null;
-  /** Best-effort observer for stable recovery-strategy telemetry. */
-  onRepairTelemetry?: (_event: { strategy: RepairStrategy; outcome: 'pass' | 'advance' | 'rescue' | 'escalate' }) => void;
-  /** Stage adapter chooses the existing launcher step; policy stays here. */
-  step?: string;
-  role?: string;
-  /** Agent identities that fallback selection must not use for this role. */
-  exclude?: string[];
-  /** Moves the task back to the implementer phase before a launch. */
-  transitionToImplementer?: (_slug: string) => Promise<unknown> | unknown;
-  /** Resolves the agent actually launched (fallback selection). */
-  applyAgentFallback?: (_options: { launchResult: AgentLaunchResult | null | undefined; original: string }) => Promise<string> | string;
-  log?: (_msg: string) => void;
-  error?: (_msg: string) => void;
-}
 
 function recordRepairTelemetry(context: ReboundContext, event: { strategy: RepairStrategy; outcome: 'pass' | 'advance' | 'rescue' | 'escalate' }) {
   // Logs are the recovery event sink shared by every rebound consumer. Keep the
@@ -241,7 +173,6 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
     maxAttempts = DEFAULT_REBOUND_ATTEMPTS,
     maxTransientRetries = 1,
     maxLaunchRetries = 1,
-    transitionToImplementer,
     applyAgentFallback,
     log = fmt.log.plain,
     error = fmt.log.plainError,
@@ -263,7 +194,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   // skips the implementer launch. Other transient gates remain fixable and
   // still launch an implementer after their retry.
   if (reboundRequiresHuman(state.reason, state.classification, true)) { return humanOnlyOutcome(state, context, error); }
-  const repairOutcome = await runRepairAttempts(state, { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error });
+  const repairOutcome = await runRepairAttempts(state, { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, applyAgentFallback, log, error });
   if (repairOutcome) { return repairOutcome; }
   const exhaustion = reboundExhaustion(state.classification, state.attempts, maxAttempts);
   const why = exhaustion === 'human'
@@ -318,10 +249,10 @@ function refreshReboundState(state: ReboundState, result: VerifyResult, log: Reb
   if (fingerprint !== previous) { log?.(fmt.status('INFO', `Recovery incident changed; reclassified as ${state.classification.failureClass}.`)); }
 }
 
-type RepairOptions = Pick<ReboundContext, 'slug' | 'worktree' | 'startAgent' | 'transitionToImplementer' | 'applyAgentFallback'> & { context: ReboundContext; maxAttempts: number; maxLaunchRetries: number; log: NonNullable<ReboundContext['log']>; error: NonNullable<ReboundContext['error']> };
+type RepairOptions = Pick<ReboundContext, 'slug' | 'worktree' | 'startAgent' | 'applyAgentFallback'> & { context: ReboundContext; maxAttempts: number; maxLaunchRetries: number; log: NonNullable<ReboundContext['log']>; error: NonNullable<ReboundContext['error']> };
 
 async function runRepairAttempts(state: ReboundState, options: RepairOptions): Promise<ReboundOutcome | null> {
-  const { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, transitionToImplementer, applyAgentFallback, log, error } = options;
+  const { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, applyAgentFallback, log, error } = options;
   // Capture the original failure once, before launch, for fresh-context recovery.
   await captureOriginalFailureEvidence(state, worktree, context, log);
   for (let attempt = 1;repairBudgetAllows(attempt, maxAttempts);attempt++) {
@@ -330,7 +261,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     try { prepared = await prepareRepairPrompt(state, context, attempt, maxAttempts); }
     catch (cause) { return stopRepair(state, context, `Repair checkpoint persistence failed before launch: ${String(cause)}`); }
     const { fixPrompt, repairCheckpoint } = prepared;
-    if (transitionToImplementer) { await transitionToImplementer(slug); }
+    await transitionRepairToImplementer(context, slug);
     log(fmt.status('INFO', `Bouncing to ${context.role ?? 'implementer'} (${state.implementer}) with ${strategy} ${state.classification.failureClass} repair. Attempt ${attempt}/${maxAttempts}.`));
     const startedAt = Date.now();
     const headBefore = await currentHead(context);
@@ -370,6 +301,11 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
   return null;
 }
 
+async function transitionRepairToImplementer(context: ReboundContext, slug: string): Promise<void> {
+  if (context.returnStage) { await context.transitionToImplementer(slug, context.returnStage); }
+  else if (context.transitionToImplementer) { await context.transitionToImplementer(slug); }
+}
+
 async function recordAttemptTelemetry(state: ReboundState, context: ReboundContext, budget: readonly [attempt: number, maxAttempts: number], detail: RepairEvidence, startedAt: number, launch: { provider: string | null; model: string | null }, verified?: VerifyResult): Promise<void> {
   const [attempt, maxAttempts] = budget;
   const canRetry = attempt < maxAttempts && classifyReboundReason(verified ? refreshedReason(state.reason, verified) : state.reason).isRelaunchable;
@@ -377,6 +313,7 @@ async function recordAttemptTelemetry(state: ReboundState, context: ReboundConte
     occurrenceId: state.occurrenceId, missionId: state.slug, reasonKind: state.reason.kind, area: reasonArea(state.reason),
     attempt, maxAttempts, role: context.role ?? 'implementer', ...detail, provider: launch.provider, model: launch.model,
     outcome: attemptOutcome(verified?.ok === true, detail.strategy, canRetry), durationMs: Date.now() - startedAt,
+    ...(context.returnStage ? { workflowReturn: context.returnStage } : {}),
   }, context.log);
 }
 

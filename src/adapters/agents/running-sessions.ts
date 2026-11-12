@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { readlinkSync } from 'node:fs';
+import { processCommandLine, processParentPid } from '../process/process-liveness.js';
 import type { MissionId } from '../../domain/mission.js';
 import type { SessionRole } from '../../domain/session.js';
 
@@ -145,6 +146,22 @@ export interface PxInvocation {
   readonly missionId: MissionId | null;
   /** The family pinned with `--agent`/`--implementer`/`--reviewer`, if any. */
   readonly pinnedAgent: string | null;
+}
+
+/** npm/tsx may wrap one CLI in several processes naming the same invocation. */
+export function currentInvocationProcessIds(): ReadonlySet<number> {
+  const pids = new Set([process.pid]);
+  const invocation = parsePxInvocation(process.argv.join(' '));
+  if (!invocation) { return pids; }
+  let parent = process.ppid;
+  while (parent > 1 && !pids.has(parent)) {
+    const args = processCommandLine(parent);
+    const candidate = args === null ? null : parsePxInvocation(args);
+    if (candidate?.subcommand !== invocation.subcommand || candidate.missionId !== invocation.missionId) { break; }
+    pids.add(parent);
+    parent = processParentPid(parent) ?? 0;
+  }
+  return pids;
 }
 
 /** Flags that pin the family a command launches. */

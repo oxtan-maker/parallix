@@ -1,5 +1,6 @@
 import type { ReviewEventRecord } from '../../../src/domain/review.js';
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 // Lifecycle approval timing and persisted metrics contract (TASK-2376, TASK-2622.13).
 // Real disposable SQLite/Git, controlled provider, no workstation dependencies.
 // TASK-2717 audit: ADR 0057 integration-ci; recorded reviewer decidedAt owns dwell.
@@ -225,7 +226,7 @@ test('R1 production: local approval path transitions Mission to integration befo
 
     // The real supported approval path: px review <slug> --submit-review approve
     await submitReviewRound(slug, 'approve', 'approved for integration', {
-      worktree: root,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
       readReviewStateFn: persistence.readReviewState,
       writeReviewStateFn: persistence.writeReviewState,
       missionStore: store,

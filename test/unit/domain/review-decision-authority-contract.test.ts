@@ -1,4 +1,5 @@
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
+import { createReviewObservationRecorder } from '../../../src/adapters/review/review-observation-recording.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 
 // review decision authority contract.
@@ -12,6 +13,7 @@ import { MissionLifecycleService } from '../../../src/application/mission-lifecy
 import { recordApproval, parseReviewFindings, recordRequestedChanges } from '../../../src/adapters/review/review-round.js';
 import { postWorkflowReview } from '../../../src/adapters/review/review-artifacts.js';
 import { submitReviewRound } from '../../../src/adapters/review/review-commands.js';
+import { hasNegativeResult } from '../../../src/domain/reviewer-policy.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
 import {
@@ -25,6 +27,7 @@ import {
 } from '../../../src/domain/review.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 // Regression provenance: TASK-2398.
 // TASK-2398 — approve on a fixing round.
@@ -63,6 +66,16 @@ const change = {
 } satisfies import("../../../src/domain/review.js").ReviewedChange;
 
 const temporaryDirectories: string[] = [];
+
+function tempWorktree(): string {
+  const dir = registeredMkdtemp('parallix-review-cmds-');
+  temporaryDirectories.push(dir);
+  return dir;
+}
+
+function executionContext() {
+  return missionExecutionContext({ missionId: 'task-2398', missionWorktree: tempWorktree() });
+}
 
 /**
  * A mission submitted for review: round 1 in `reviewing`, `awaiting-review`,
@@ -206,6 +219,41 @@ describe("SC1: approve on an awaiting-review round is authoritative", () => {
     assert.equal(currentReviewRound(recorded).reviewerResults?.[1].reviewerId, 'codex-reviewer',
       'the first immutable publication wins over changed retry metadata');
   });
+
+  it('a repaired revision counts its approval independently of an older held negative verdict (PX-0046.03)', () => {
+    const base = startReview({ change, revision: changeRevision('rev-1') }, reviewer, implementer,
+      '2026-08-21T07:00:00.000Z', eligibility);
+    const negative = { publicationId: 'old-negative', reviewerId: reviewer, agentFamily: reviewer,
+      revision: changeRevision('rev-1'), decision: 'changes-requested' as const, findings: [],
+      outcome: 'completed' as const, status: 0, publishedAt: '2026-08-21T08:00:00.000Z' };
+    const positive = { ...negative, publicationId: 'repaired-approval', revision: changeRevision('rev-2'),
+      decision: 'approved' as const, publishedAt: '2026-08-21T09:00:00.000Z' };
+    const recorded = recordReviewerResult(recordReviewerResult(base, negative), positive);
+    assert.deepEqual(currentRevisionApprovals(recorded, changeRevision('rev-2')).map(result => result.publicationId), ['repaired-approval']);
+    assert.equal(hasNegativeResult(recorded, changeRevision('rev-2')), false);
+    assert.equal(hasNegativeResult(recorded, changeRevision('rev-1')), true);
+    assert.deepEqual(currentRevisionApprovals(recorded, changeRevision('rev-1')), []);
+  });
+  it('counts one family once per revision while retaining its obsolete publication (PX-0046.05)', () => {
+    const base = startReview(
+      { change, revision: changeRevision('rev-2') }, reviewer, implementer,
+      '2026-08-21T07:00:00.000Z', eligibility,
+    );
+    const publication = (id: string, revision: string, publishedAt: string) => ({
+      publicationId: id, reviewerId: 'codex-reviewer', agentFamily: reviewer,
+      revision: changeRevision(revision), decision: 'approved' as const, findings: [],
+      outcome: 'completed' as const, status: 0, publishedAt,
+    });
+    const recorded = recordReviewerResult(
+      recordReviewerResult(base, publication('old-run', 'rev-1', '2026-08-21T08:00:00.000Z')),
+      publication('fresh-run', 'rev-2', '2026-08-21T09:00:00.000Z'),
+    );
+
+    assert.deepEqual(currentRevisionApprovals(recorded, changeRevision('rev-1')).map(result => result.publicationId), ['old-run']);
+    assert.deepEqual(currentRevisionApprovals(recorded, changeRevision('rev-2')).map(result => result.publicationId), ['fresh-run']);
+    assert.deepEqual(currentReviewRound(recorded).reviewerResults?.map(result => result.publicationId), ['old-run', 'fresh-run']);
+  });
+
 });
 
 describe("an approved round stranded in review finishes its transition", () => {
@@ -312,7 +360,8 @@ describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () 
       getPrAuthorFn: () => 'codex',
       buildMetadataFooterFn: () => '',
       missionStore: store,
-      worktree, revision: 'reviewed-head',
+      executionContext: missionExecutionContext({ missionId: 'task-2398', missionWorktree: worktree }),
+      revision: 'reviewed-head',
       createEventFn: (() => ({ ok: true as const, path: null })),
       log: () => {},
       error: () => {},
@@ -352,12 +401,6 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
   // the provider POST via `postReviewFn`, and the operator DB is a throwaway
   // in-memory store. `resolveReviewIdentity` reads the faked review state, so no
   // real mission dir is required.
-  function tempWorktree(): string {
-    const dir = registeredMkdtemp('parallix-review-cmds-');
-    temporaryDirectories.push(dir);
-    return dir;
-  }
-
   const reviewingState: NonNullable<NonNullable<Parameters<typeof submitReviewRound>[3]>["readReviewStateFn"]> = () =>
     new ReviewState('task-2398', { round: 1, phase: 'reviewing', reviewer: 'rev', implementer: 'impl' });
 
@@ -365,7 +408,7 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     let exited: { value: number | null } = { value: null };
     let recordCalled = false;
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(), revision: 'reviewed-head',
+      executionContext: executionContext(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => false,
       missionStore: inMemoryTransitionStore(fixtureMission('task-2398')),
       recordApprovalFn: (async () => {
@@ -387,7 +430,7 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     const errors: string[] = [];
     let exited: { value: number | null } = { value: null };
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(), revision: 'reviewed-head',
+      executionContext: executionContext(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => false,
       // deliberately no missionStore
       readReviewStateFn: () => null,
@@ -408,7 +451,7 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     let recordCalled = false;
     let exited: { value: number | null } = { value: null };
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      worktree: tempWorktree(), revision: 'reviewed-head',
+      executionContext: executionContext(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => true,
       // bound like the three sibling tests so the recording blocks below are
       // reachable — without it recordCalled === false would be true by
@@ -438,14 +481,17 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
   });
 
   it('provider-backed: a successful POST records the authoritative approve', async () => {
+    const { store } = await awaitingReview();
     let postCalled = false;
     let recordCalled = false;
     let order: string[] = []; const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
     await submitReviewRound('task-2398', 'approve', 'LGTM', {
       configuration,
-      worktree: tempWorktree(), revision: 'reviewed-head',
+      executionContext: executionContext(), revision: 'reviewed-head',
       isForgejoReviewEnabledFn: () => true,
-      readReviewStateFn: reviewingState,
+      readReviewStateFn: () => new ReviewState('task-2398', { round: 1, startedAt: '2026-08-21T07:00:00.000Z', reviewer, implementer }),
+      reviewerRouting: { eligibleFamilies: () => [reviewer, implementer], nominate: () => reviewer,
+        launcherStatus: () => ({ supported: true, detail: 'installed' }), runtimeMatrix: () => [] },
       writeReviewStateFn: reviewStateWriterFixture(() => {}),
       resolveReviewUserFn: (user, received) => { assert.strictEqual(received, configuration); return user; }, readTokenFn: (_user, options) => { assert.strictEqual(options?.configuration, configuration); return 'token'; },
       getPrAuthorFn: () => 'someone-else',
@@ -455,7 +501,7 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
         order.push('post');
         return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true };
       },
-      missionStore: inMemoryTransitionStore(fixtureMission('task-2398')),
+      missionStore: store,
       recordApprovalFn: (async () => {
         recordCalled = true;
         order.push('record');
@@ -679,6 +725,58 @@ describe('availability-aware required approvals (PX-0046.03)', () => {
     assert.equal(reviewStatus(store.mission().review!), 'approved');
     assert.equal(store.mission().status, 'integration');
     assert.equal(currentReviewRound(store.mission().review!).reviewerPolicy?.requiredApprovals, 1);
+  });
+
+  for (const revision of [REV, 'rev-2']) it(`explicit review submission refreshes a saved policy for ${revision} against a runtime quota block (PX-0046.03)`, async () => {
+    const { store, lifecycle } = await governed('two-independent');
+    const round = currentReviewRound(store.mission().review!);
+    const errors: string[] = [];
+    await submitReviewRound('task-2398', 'approve', 'Reviewed the repaired change', {
+      missionStore: store, lifecycleService: lifecycle, executionContext: executionContext(), revision,
+      readReviewStateFn: () => new ReviewState('task-2398', { round: round.number, startedAt: round.startedAt, reviewer, implementer }),
+      isReviewProviderEnabledFn: () => false,
+      reviewerRouting: { eligibleFamilies: () => [reviewer, claude, implementer],
+        isBlocked: async family => family === claude, launcherStatus: () => ({ supported: true, detail: 'installed' }),
+        nominate: excluded => [reviewer, claude, implementer].find(family => !excluded.has(family)) ?? '', runtimeMatrix: () => [] },
+      log: () => {}, error: message => errors.push(message), exit: code => assert.fail(`exit ${code}: ${errors.join('\n')}`),
+    });
+    assert.equal(store.mission().status, 'integration', errors.join('\n'));
+    assert.deepEqual(currentReviewRound(store.mission().review!).reviewerPolicy?.selected, [reviewer]);
+    assert.equal(currentReviewRound(store.mission().review!).reviewerPolicy?.requiredApprovals, 1);
+    assert.equal(currentReviewRound(store.mission().review!).reviewerPolicy?.revision, revision);
+  });
+
+  it('settling a held publication cannot invent an approval while another selected reviewer is still owed (PX-0046.03)', async () => {
+    for (const providerEnabled of [true, false]) {
+      const { store, ports } = await governed('two-independent');
+      await recordApproval('task-2398', approve('codex', 1), ports);
+      const before = store.mission();
+      const round = currentReviewRound(before.review!);
+      const state = new ReviewState('task-2398', { round: round.number, startedAt: round.startedAt, reviewer: round.reviewer });
+      const recorder = createReviewObservationRecorder('task-2398', () => REV, providerEnabled, ports);
+      await assert.rejects(recorder.recordApproval(state), /requires the observed revision and submission time/);
+      assert.deepEqual(store.mission(), before);
+      assert.equal(store.mission().status, 'review');
+    }
+  });
+
+  it('settlement rejects stale, revoked, unsuccessful and negative saved results without writing (PX-0046.03)', async () => {
+    for (const providerEnabled of [true, false]) {
+      for (const invalid of [
+        { revision: changeRevision('older-head') }, { revokedAt: when(2) }, { status: 1 },
+        { decision: 'changes-requested' as const }, { outcome: 'missing-output' as const },
+      ]) {
+        const { store, ports } = await governed('one-independent');
+        const mission = store.mission();
+        const round = currentReviewRound(mission.review!);
+        const publication = { ...result(reviewer, 'approved'), ...invalid };
+        await store.save({ ...mission, review: { ...mission.review!, rounds: [{ ...round, reviewerResults: [publication] }] } }, (await store.load()).version);
+        const before = store.mission();
+        const state = new ReviewState('task-2398', { round: round.number, startedAt: round.startedAt, reviewer: round.reviewer });
+        await assert.rejects(createReviewObservationRecorder('task-2398', () => REV, providerEnabled, ports).recordApproval(state), /requires the observed revision and submission time/);
+        assert.deepEqual(store.mission(), before);
+      }
+    }
   });
 
   it('the same-agent fallback is satisfied by its own single fresh review, with no human verdict required', async () => {

@@ -7,6 +7,8 @@ import { integrationServices } from '../../../helpers/stub-integration-services.
 import { integrationBounceSeams } from '../../../helpers/integration-bounce-seams.js';
 import { rebaseWorkflowFixture } from '../../../helpers/rebase-workflow-fixture.js';
 import type { IntegrateWorkflowPorts } from '../../../../src/application/ports/integrate-workflow.js';
+import type { RebaseObservationInput } from '../../../../src/application/ports/rebase-workflow.js';
+import { configureRebaseObservation } from '../../../../src/application/ports/rebase-workflow.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
 import { sharedConflictHarness } from '../../../helpers/rebase-conflict-fixture.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -109,6 +111,45 @@ test('integration rebase uses the shared exact-tree suffix boundary (TASK-2849)'
   await createIntegrationRebase(ports).runIntegrationRebase(slug, { baseWorktree: '/base', baseBranch: 'main', git, executionContext });
   assert.deepEqual(ontoCalls, [['rebase', '--onto', target, boundary]]);
   assert.equal(h.agentLaunches.length, 0);
+});
+
+test('skipped integration rebase retains typed inapplicability (PX-0055.03)', async () => {
+  const { createIntegrationRebase } = await importFresh<typeof import('../../../../src/application/integrate/rebase.js')>('../../../../src/application/integrate/rebase.js', import.meta.url);
+  const observations: RebaseObservationInput[] = [];
+  const port = rebaseWorkflowFixture({ newRebaseObservationId: () => 'integration-skip',
+    observeRebase: async observation => { observations.push(observation); } });
+  const defaults = stubIntegrateWorkflowPorts();
+  const ports = stubIntegrateWorkflowPorts();
+  configureRebaseObservation({ observeRebase: port.observeRebase!,
+    newRebaseObservationId: port.newRebaseObservationId!, rebaseObservationStage: 'direct-rebase' });
+  await createIntegrationRebase(ports).recordIntegrationRebaseInapplicable('task-skipped', {
+    baseWorktree: '/base', baseBranch: 'main', git: defaults.git.git,
+    executionContext: { missionId: 'task-skipped', missionWorktree: '/mission', missionBranch: 'mission/task-skipped',
+      baseWorktree: '/base', baseBranch: 'main' },
+  }, 'landing-already-present').finally(() => configureRebaseObservation(null));
+  assert.deepEqual(observations.map(({ stage, outcome, inapplicability }) => ({ stage, outcome, inapplicability })), [
+    { stage: 'integration-rebase', outcome: 'inapplicable', inapplicability: 'landing-already-present' },
+  ]);
+});
+
+test('skipped integration rebase diagnostic failure does not abort integration (PX-0055.03)', async () => {
+  const { createIntegrationRebase } = await importFresh<typeof import('../../../../src/application/integrate/rebase.js')>('../../../../src/application/integrate/rebase.js', import.meta.url);
+  const port = rebaseWorkflowFixture({ newRebaseObservationId: () => 'integration-skip',
+    observeRebase: async () => { throw new Error('history unavailable'); } });
+  const defaults = stubIntegrateWorkflowPorts();
+  const ports = stubIntegrateWorkflowPorts();
+  const messages: string[] = [];
+  const previous = setLogger({ log: message => { messages.push(String(message)); } });
+  configureRebaseObservation({ observeRebase: port.observeRebase!,
+    newRebaseObservationId: port.newRebaseObservationId!, rebaseObservationStage: 'direct-rebase' });
+  try {
+    await createIntegrationRebase(ports).recordIntegrationRebaseInapplicable('task-skipped', {
+      baseWorktree: '/base', baseBranch: 'main', git: defaults.git.git,
+      executionContext: { missionId: 'task-skipped', missionWorktree: '/mission', missionBranch: 'mission/task-skipped',
+        baseWorktree: '/base', baseBranch: 'main' },
+    }, 'landing-already-present');
+  } finally { configureRebaseObservation(null); setLogger(previous); }
+  assert.match(messages.join('\n'), /Could not retain integration rebase inapplicability.*Continuing integration/);
 });
 
 // ---- task-2520 integration rebase state (consolidated from test/task-2520-integrate-rebase-state.test.ts, TASK-2622.09) ----
@@ -265,6 +306,53 @@ describe("integration rebase state", async () => {
     assert.equal(comparisons, 1); assert.equal(store.mission().status, 'integration');
     assert.equal(store.mission().review!.rounds.length, 1);
     assert.equal(store.mission().review!.rounds[0].decision?.revision, 'approved-A');
+  });
+
+  test('already-current repair leaves integration rebase absent when no rebase ran (PX-0055.03)', async () => {
+    let rebaseRuns = 0;
+    const observations: RebaseObservationInput[] = [];
+    const open = pendingReview(SLUG, '2026-10-25T08:00:00Z');
+    const round = open.rounds[0];
+    const review = applyReviewerCommand(open,
+      { type: 'approve', revision: changeRevision('approved-A'), decidedAt: '2026-10-25T09:00:00Z', comment: null, source: { kind: 'local' } });
+    const active = decideMission(fixtureMission(SLUG, { status: 'integration', review, assignee: round.implementer }), {
+      type: 'rebound-to-active', agent: round.implementer, occurredAt: '2026-10-25T10:00:00Z',
+      cause: { kind: 'integration-gate-failure', gate: 'unit' },
+    });
+    const store = inMemoryTransitionStore(active);
+    const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store), operationalHistory: {
+      loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async () => {},
+    } });
+    const evidence = { now: () => '2026-10-25T12:00:00Z', reconcileHumanFeedback: async () => true,
+      samePatch: async () => true, validation: async () => ({ missionId: SLUG, sha: 'repair-head', baseline: 'new-base',
+        hooks: ['unit'], createdAt: '2026-10-25T11:00:00Z', reference: 'history:1' }) };
+    const defaults = stubIntegrateWorkflowPorts();
+    const ports = stubIntegrateWorkflowPorts({ process: { cwd: () => MISSION_WORKTREE },
+      landing: { createAbort: () => Object.assign(new Error('Integration aborted'), { name: 'IntegrationAbort' }) },
+      missionPaths: { ...defaults.missionPaths, resolveWorktree: () => MISSION_WORKTREE, resolveMissionBaseBranch: () => 'main',
+        resolveBaseWorktree: () => BASE_WORKTREE, missionBranchName: () => `mission/${SLUG}`, conventionalWorktreePath: () => MISSION_WORKTREE },
+      rebase: { createRebaseWorkflowPort: options => rebaseWorkflowFixture({
+        rebaseObservationStage: options.rebaseObservationStage, newRebaseObservationId: () => 'repair-current',
+        observeRebase: async observation => { observations.push(observation); },
+      }) },
+      git: { ...defaults.git, git: args => {
+        if (args.includes('rev-parse')) { return { status: 0, stdout: args.at(-1) === 'main' ? 'new-base' : 'repair-head', stderr: '' }; }
+        if (args.includes('merge-base') && !args.includes('--is-ancestor')) { return { status: 0, stdout: 'new-base', stderr: '' }; }
+        return { status: 0, stdout: '', stderr: '' };
+      } },
+      gates: { ...defaults.gates, approvalEvidence: () => evidence,
+        captureFinalIntegrationTree: () => ({ ok: true, commit: 'repair-head' }),
+        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => ({ ok: true }) },
+    });
+    onRebase = () => { rebaseRuns++; };
+    const seams = { ...integrationBounceSeams({ transitionTaskFn: () => true }),
+      routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
+    await resumePendingIntegrationRepair(SLUG, services, ports, missionExecutionContext({ missionId: SLUG }), seams,
+      { realAgent: null, realAgentModel: null }).catch(error => {
+      if (!['IntegrationStopsForHuman', 'IntegrationAbort'].includes((error as Error).name)) { throw error; }
+    });
+    assert.equal(rebaseRuns, 0, 'an already-current repair does not run the shared rebase workflow');
+    assert.deepEqual(observations, [], 'an already-current repair does not manufacture a rebase observation');
   });
 
   test('dry-run predicts a pending repair rebase without mutating the mission branch (PX-0031)', async () => {

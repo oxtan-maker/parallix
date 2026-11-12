@@ -1,13 +1,16 @@
 import type { OperationalHistoryEntry, BoardLaneEventEntry } from '../ports/operation-history.js';
 import type { VerificationMeasurement } from '../ports/verification-observation.js';
-import type { WorkflowOperation } from '../../domain/workflow-operation.js';
+import { workflowObservationAuthorization, type WorkflowOperation } from '../../domain/workflow-operation.js';
 import { flowElapsedOwnership, type FlowElapsedOwnership } from './flow-elapsed-ownership.js';
-import { firstRebaseCollection, observedFlowMissions, type ObservedFlowMission } from './flow-mission-facts.js';
+import { observedFlowMissions, type ObservedFlowMission } from './flow-mission-facts.js';
+import type { ObservationDiagnostic } from './verification-diagnostic.js';
 import type { ControlledVerificationComparison } from '../ports/verification-profile.js';
-import type { ProcessTreeCpuObservation, ProviderResourceObservation, RunRecord } from '../run-history-types.js';
-import { observedAttempts, observedRebases, type RebaseMeasurement } from './verification-observation-reader.js';
+import { agentRunModel, type ProcessTreeCpuObservation, type ProviderResourceObservation,
+  type RunRecord } from '../run-history-types.js';
+import { observedAttempts, observedRebaseCutovers, observedRebases,
+  type RebaseMeasurement } from './verification-observation-reader.js';
+import { diagnoseAgentRuns } from './verification-agent-diagnostics.js';
 export type { RebaseMeasurement } from './verification-observation-reader.js';
-
 type Interval = readonly [number, number];
 export interface VerificationStatisticsInput {
   readonly repositoryId: string;
@@ -16,7 +19,7 @@ export interface VerificationStatisticsInput {
   readonly lifecycle: readonly BoardLaneEventEntry[];
   readonly runs?: readonly RunRecord[];
   /** Storage rows excluded from the readable measured subset, already named by the owning adapter. */
-  readonly collectionDefects?: readonly string[];
+  readonly repositoryDiagnostics?: readonly string[];
 }
 export interface VerificationCost {
   readonly wallMs: number | null;
@@ -197,15 +200,16 @@ function cpuCost(attempts: readonly VerificationMeasurement[], unknowns?: Set<st
   return observedCpuCost(attempts.flatMap(attempt => attempt.cpu ? [attempt.cpu] : []), unknowns);
 }
 
-function agentResources(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined, unknowns: Set<string>): VerificationStatistics['agentResources'] {
+function agentResources(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined, unknowns: Set<string>,
+  diagnostics: ObservationDiagnostic[]): VerificationStatistics['agentResources'] {
   const retained = uniqueAgentRuns(input, missions, unknowns);
   const runs = retained.map(run => {
     const provider: ProviderResourceObservation | null = run.resources?.provider ?? null;
     return { runId: run.runId, missionId: run.missionId, role: run.role, family: run.family,
-      model: run.configuredModel ?? provider?.model ?? null,
+      model: agentRunModel(run),
       cpu: run.resources?.localProcessTreeCpu ?? null, provider };
   });
-  if (input.runs !== undefined) { diagnoseAgentRuns(retained, unknowns); }
+  if (input.runs !== undefined) { diagnoseAgentRuns(retained, diagnostics, input.repositoryId); }
   const cpu = observedCpuCost(runs.flatMap(run => run.cpu ? [run.cpu] : []), unknowns);
   return { ...cpu, runs };
 }
@@ -221,35 +225,6 @@ function uniqueAgentRuns(input: VerificationStatisticsInput, missions: ReadonlyS
     } else { unique.set(run.runId, run); }
   }
   return [...unique.values()];
-}
-
-function diagnoseAgentRuns(runs: readonly RunRecord[], unknowns: Set<string>): void {
-  for (const run of runs) {
-    if (incompleteAgentRunIdentity(run)) {
-      unknowns.add(`Agent run identity incomplete for ${run.missionId} source ${run.sourceId ?? run.runId}; rerun the affected workflow with FLOW collection enabled`);
-    }
-    if (missingAgentCpu(run)) {
-      unknowns.add(`Agent waited-tree CPU missing for ${run.missionId} run ${run.runId}; rerun the affected workflow with FLOW collection enabled`);
-    }
-    if (missingAgentModel(run)) {
-      unknowns.add(`Concrete model identity missing for ${run.missionId} run ${run.runId}; rerun the affected workflow with FLOW collection enabled`);
-    }
-  }
-}
-
-function incompleteAgentRunIdentity(run: RunRecord): boolean {
-  return !run.operationId || run.operationGeneration === null || run.operationGeneration === undefined
-    || !run.sourceId || !run.revision;
-}
-
-function missingAgentCpu(run: RunRecord): boolean {
-  return run.resources !== undefined && run.state === 'exited' && Boolean(run.execution)
-    && run.family !== 'pi' && !run.resources.localProcessTreeCpu;
-}
-
-function missingAgentModel(run: RunRecord): boolean {
-  return run.resources !== undefined && run.state === 'exited' && run.exitCode === 0
-    && !run.configuredModel && !run.resources.provider?.model;
 }
 
 function cost(attempts: readonly VerificationMeasurement[]): VerificationCost {
@@ -287,7 +262,7 @@ type ActivityEvent = { repositoryId?: string; missionId: string; operationId: st
   phase: string; state: string; purpose?: 'repair' };
 
 class ActivityCosts {
-  readonly sources = new Map<string, { phase: string; start: string }>();
+  readonly sources = new Map<string, { phase: string; start: string; event: ActivityEvent }>();
   readonly repair: Interval[] = [];
   readonly review: Interval[] = [];
   readonly waiting: Interval[] = [];
@@ -298,7 +273,7 @@ class ActivityCosts {
     if (prior) { this.close(prior, at); }
     if (event.state !== 'running') { this.sources.delete(key); return; }
     const phase = this.reviewPhase(event, prior?.phase);
-    this.sources.set(key, { phase, start: at });
+    this.sources.set(key, { phase, start: at, event });
   }
   private close(prior: { phase: string; start: string }, at: string): void {
     const times = interval(prior.start, at);
@@ -316,12 +291,14 @@ class ActivityCosts {
 }
 
 function activityCosts(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined,
-  unknowns: Set<string>): { repairMs: number | null; reReviewMs: number | null; waiting: Interval[] } {
+  attempts: readonly VerificationMeasurement[],
+  unknowns: Set<string>, diagnostics: ObservationDiagnostic[]): { repairMs: number | null; reReviewMs: number | null; waiting: Interval[] } {
   const costs = new ActivityCosts();
+  const operations = new Map(input.operations.map(operation => [operation.id, operation]));
   const publications = new Set<string>();
   for (const entry of input.history) {
     if (entry.eventType !== 'mission.current-work') { continue; }
-    const event = readActivityEvent(entry.eventData, input.repositoryId, missions, unknowns);
+    const event = readActivityEvent(entry.eventData, input.repositoryId, missions, operations, unknowns, diagnostics);
     if (!event?.sourceId) { continue; }
     const publication = JSON.stringify([event.operationId, event.operationGeneration, event.sourceId, event.phase, event.state, entry.createdAt]);
     if (publications.has(publication)) { continue; }
@@ -329,23 +306,63 @@ function activityCosts(input: VerificationStatisticsInput, missions: ReadonlySet
     costs.accept(event, entry.createdAt);
   }
   if (costs.sources.size) { unknowns.add('Open activity intervals excluded'); }
+  for (const { phase, event } of costs.sources.values()) {
+    const ownedByGate = attempts.some(attempt => !attempt.finishedAt && attempt.missionId === event.missionId
+      && attempt.operationId === event.operationId && (attempt.sourceId ?? attempt.id) === event.sourceId);
+    if (ownedByGate) { continue; }
+    diagnostics.push({ kind: 'terminal', state: 'running', repositoryId: input.repositoryId,
+      missionId: event.missionId, operationId: event.operationId, sourceId: event.sourceId ?? null,
+      stage: phase, message: `Activity remains running for ${event.missionId} operation ${event.operationId} source ${event.sourceId}`,
+      recovery: 'retain a terminal activity observation' });
+  }
   return { repairMs: costs.repair.length ? intervalUnionMs(costs.repair) : null,
     reReviewMs: costs.review.length ? intervalUnionMs(costs.review) : null, waiting: costs.waiting };
 }
 
 function readActivityEvent(eventData: string, repositoryId: string, missions: ReadonlySet<string> | undefined,
-  unknowns: Set<string>): ActivityEvent | null {
+  operations: ReadonlyMap<string, WorkflowOperation>,
+  unknowns: Set<string>, diagnostics: ObservationDiagnostic[]): ActivityEvent | null {
   let event: ActivityEvent;
   try { event = JSON.parse(eventData) as ActivityEvent; }
   catch { unknowns.add('Unreadable activity boundaries'); return null; }
-  if (event.repositoryId !== repositoryId || missions && !missions.has(event.missionId)) { return null; }
-  if (!event.sourceId || !event.operationId || event.operationGeneration === null || event.operationGeneration === undefined
-    || event.state === 'running' && !event.revision) {
-    unknowns.add(`Activity identity incomplete for ${event.missionId || 'unknown mission'} operation ${event.operationId || 'unknown'} source ${event.sourceId ?? 'unknown'}; rerun the affected workflow with FLOW collection enabled`);
-  }
+  if (event.repositoryId !== repositoryId) { return null; }
+  if (missions && !missions.has(event.missionId)) { return null; }
+  if (incompleteActivityIdentity(event)
+    && !recordActivityIdentityDiagnostic(event, repositoryId, unknowns, diagnostics)) { return null; }
+  const operation = event.operationId ? operations.get(event.operationId) : undefined;
+  if (!authorizedActivityEvent(event, repositoryId, operation, unknowns)) { return null; }
   return event;
 }
 
+/** An activity boundary belongs to the durable operation it names, and to a generation that operation authorizes. */
+function authorizedActivityEvent(event: ActivityEvent, repositoryId: string, operation: WorkflowOperation | undefined,
+  unknowns: Set<string>): boolean {
+  const authorization = workflowObservationAuthorization(operation, { repositoryId,
+    missionId: event.missionId, operationId: event.operationId, generation: event.operationGeneration });
+  if (operation && authorization !== 'authorized') {
+    unknowns.add(`Activity workflow identity rejected for ${event.missionId || 'unknown mission'} operation ${event.operationId || 'unknown'} source ${event.sourceId ?? 'unknown'}`);
+    return false;
+  }
+  if (authorization === 'unavailable') {
+    unknowns.add(`Activity workflow join unavailable for ${event.missionId || 'unknown mission'} operation ${event.operationId} source ${event.sourceId ?? 'unknown'}`);
+  }
+  return true;
+}
+
+/** A boundary without a source, operation and generation cannot be joined to one workflow run. */
+const incompleteActivityIdentity = (event: ActivityEvent): boolean => !event.sourceId || !event.operationId
+  || event.operationGeneration === null || event.operationGeneration === undefined
+  || event.state === 'running' && !event.revision;
+function recordActivityIdentityDiagnostic(event: ActivityEvent, repositoryId: string, unknowns: Set<string>,
+  diagnostics: ObservationDiagnostic[]): boolean {
+  const message = `Activity identity incomplete for ${event.missionId || 'unknown mission'} operation ${event.operationId || 'unknown'} source ${event.sourceId ?? 'unknown'}`;
+  const recovery = 'inspect the retained activity and workflow identities';
+  if (!event.missionId) { unknowns.add(`${message}; ${recovery}`); return false; }
+  diagnostics.push({ kind: 'identity', state: 'absent', repositoryId,
+    missionId: event.missionId, operationId: event.operationId || null, sourceId: event.sourceId ?? null,
+    stage: event.phase, message, recovery });
+  return true;
+}
 function attemptRecovery(executed: readonly VerificationMeasurement[], unknowns: Set<string>) {
   const seen = new Set<string>(), reruns: VerificationMeasurement[] = [], recoveries: Interval[] = [];
   const failed = new Map<string, string>();
@@ -378,20 +395,25 @@ function lifetimeCosts(input: VerificationStatisticsInput, missions: ReadonlySet
     if (completed) { completedMissions++; }
     const measured = interval(refined?.occurredAt ?? null, completed?.occurredAt ?? null);
     if (measured.length) { measuredMissions++; endToEndMs += measured[0]![1] - measured[0]![0]; }
-    else { unknowns.add(`Refined-to-first-delivery boundary incomplete for ${mission}; rerun the affected fresh workflow with FLOW collection enabled`); }
+    else { unknowns.add(`Refined-to-first-delivery boundary incomplete for ${mission}; inspect retained lifecycle history`); }
   }
   return { endToEndMs: measuredMissions ? endToEndMs : null, completedMissions };
 }
 
-function measurementUnknowns(attempts: readonly VerificationMeasurement[], unknowns: Set<string>): void {
+function measurementUnknowns(attempts: readonly VerificationMeasurement[], unknowns: Set<string>,
+  diagnostics: ObservationDiagnostic[], repositoryId: string): void {
   if (!attempts.length) { unknowns.add('No retained attempts; historical work is unavailable, not zero'); }
-  for (const attempt of attempts.filter(a => !a.operationId || a.operationGeneration === null || a.operationGeneration === undefined || !a.sourceId)) {
-    unknowns.add(`Gate identity incomplete for ${attempt.missionId ?? 'unknown mission'} operation ${attempt.operationId ?? 'unknown'} source ${attempt.sourceId ?? 'unknown'}; rerun the affected workflow with FLOW collection enabled`);
-  }
   if (attempts.some(a => !a.revision)) { unknowns.add('Some attempts have no observed revision'); }
   if (attempts.some(a => !a.missionId)) { unknowns.add('Some attempts have no mission identity'); }
   const executed = attempts.filter(a => a.result !== 'reused');
   if (executed.some(a => !a.finishedAt)) { unknowns.add('Unsettled or interrupted attempts have partial timing only'); }
+  for (const attempt of executed.filter(value => !value.finishedAt && value.missionId)) {
+    const state = attempt.result === 'running' ? 'running' : 'interrupted';
+    diagnostics.push({ kind: 'terminal', state, repositoryId, missionId: attempt.missionId!,
+      operationId: attempt.operationId ?? null, sourceId: attempt.sourceId ?? attempt.id, stage: 'gate',
+      message: `Gate ${attempt.gate} ${state} for ${attempt.missionId}`,
+      recovery: 'retain a terminal gate observation' });
+  }
   if (executed.some(a => !a.cpu)) { unknowns.add('OS CPU missing for some attempts; observed CPU is partial'); }
 }
 
@@ -425,14 +447,15 @@ function controlledComparisons(attempts: readonly VerificationMeasurement[], unk
 
 export function verificationStatistics(input: VerificationStatisticsInput,
   missions?: ReadonlySet<string>): VerificationStatistics {
-  const unknowns = new Set<string>(input.collectionDefects ?? []);
-  const attempts = observedAttempts(input, unknowns).filter(a => !missions || a.missionId !== null && missions.has(a.missionId));
-  const allRebases = observedRebases(input, unknowns);
+  const unknowns = new Set<string>(input.repositoryDiagnostics ?? []);
+  const diagnostics: ObservationDiagnostic[] = [];
+  const attempts = observedAttempts(input, unknowns, diagnostics).filter(a => !missions || a.missionId !== null && missions.has(a.missionId));
+  const allRebases = observedRebases(input, unknowns, diagnostics);
   const rebases = allRebases.filter(value => !missions || missions.has(value.missionId));
   const executed = attempts.filter(a => a.result !== 'reused');
   const intervals = executed.flatMap(execution);
   const { reruns, recoveries } = attemptRecovery(executed, unknowns);
-  const activity = activityCosts(input, missions, unknowns);
+  const activity = activityCosts(input, missions, attempts, unknowns, diagnostics);
   const waiting = [...executed.flatMap(a => interval(a.requestedAt, a.startedAt)), ...activity.waiting];
   // Waiting can overlap a nested command. Count only the portion outside execution.
   const executionMs = intervals.length ? intervalUnionMs(intervals) : null;
@@ -441,17 +464,21 @@ export function verificationStatistics(input: VerificationStatisticsInput,
     criticalPathMs: criticalPath(attempts.filter(a => a.batchId === batchId)) }));
   const lifecycle = lifetimeCosts(input, missions, unknowns);
   const ownership = flowElapsedOwnership(input, unknowns, missions);
-  const resources = agentResources(input, missions, unknowns);
+  const resources = agentResources(input, missions, unknowns, diagnostics);
   const scopedRuns = resources.runs.map(row => (input.runs ?? []).find(run => run.runId === row.runId)!).filter(Boolean);
   const dependencyPath = ownershipDependencyPath(ownership, scopedRuns) ?? observedDagDependencyPath(input, attempts);
   const cpu = cpuCost(executed, unknowns);
-  measurementUnknowns(attempts, unknowns);
+  measurementUnknowns(attempts, unknowns, diagnostics, input.repositoryId);
   if (!dependencyPath && (batches.length !== 1 || batches.some(b => b.criticalPathMs === null))) {
     unknowns.add('End-to-end critical path unknown; only complete observed gate DAGs are measured');
   }
   const recoveryAttempts = executed.filter(a => execution(a).some(([start, end]) => recoveries.some(([a, b]) => start >= a && end <= b)));
   const comparisons = revisionComparisons(executed), controlled = controlledComparisons(attempts, unknowns);
-  const flowMissions = observedFlowMissions(input, ownership, attempts, rebases, firstRebaseCollection(allRebases));
+  const flowMissions = observedFlowMissions(input, ownership, attempts, rebases, observedRebaseCutovers(input), diagnostics);
+  const visibleMissionIds = new Set(flowMissions.map(mission => mission.missionId));
+  for (const diagnostic of diagnostics.filter(value => !visibleMissionIds.has(value.missionId))) {
+    unknowns.add(diagnostic.message);
+  }
   return { attempts, attemptCount: executed.length, failureCount: executed.filter(a => a.result === 'failed').length,
     infrastructureFailureCount: executed.filter(a => a.failureReason?.code === 'infrastructure').length,
     reusedProofCount: attempts.length - executed.length, incompleteCount: executed.filter(a => !a.finishedAt).length,

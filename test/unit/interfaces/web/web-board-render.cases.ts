@@ -722,6 +722,8 @@ test('production browser code imports no Node built-in, concrete adapter, or ser
     for (const forbidden of ["'node:", 'src/adapters/', 'child_process', 'better-sqlite3', 'simple-git', "'fastify'"]) {
       assert.ok(!file.text.includes(forbidden), `${file.name} must not reference ${forbidden}`);
     }
+    assert.doesNotMatch(file.text, /^import(?!\s+type\b).*\/src\/application\//mu,
+      `${file.name} must consume application facts through types or the web transport boundary`);
   }
   const transportImports = browserSources.filter((file) => file.text.includes('/src/interfaces/web/transport.js'));
   assert.ok(transportImports.length > 0, 'the client reuses the shared transport contract');
@@ -733,9 +735,10 @@ test('production browser code uses no browser persistence; history polling is co
       assert.ok(!file.text.includes(forbidden), `${file.name} must not use ${forbidden}`);
     }
   }
-  const pollers = browserSources.filter((file) => /setInterval\(/.test(file.text)).map((file) => file.name);
+  const pollers = browserSources.filter((file) => /setInterval\(|window\.set(?:Interval|Timeout)\(/.test(file.text)).map((file) => file.name);
   assert.deepEqual(pollers, ['mission-history.tsx'], 'only the selected mission history view polls its GET-only reads (TASK-2749)');
-  assert.match(browserSources.find((file) => file.name === 'mission-history.tsx')?.text ?? '', /const POLL_MS = 1000;/);
+  assert.match(browserSources.find((file) => file.name === 'mission-history.tsx')?.text ?? '', /ACTIVE_POLL_MS = 1_000/);
+  assert.match(browserSources.find((file) => file.name === 'mission-history.tsx')?.text ?? '', /IDLE_POLL_MS = 5_000/);
 });
 
 test('production browser code reads snapshots and mission history while keeping one guarded mutation route', () => {

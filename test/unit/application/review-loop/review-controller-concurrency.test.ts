@@ -9,6 +9,7 @@ import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
 import fs from 'node:fs';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 // Regression provenance: TASK-2600.
 const SLUG = 'task-2600';
@@ -98,9 +99,9 @@ test('TASK-2600 controller fence declines a concurrent continue while a start ow
 test('the review-loop controller lock admits one owner per worktree and mission until released', () => {
   const root = mkdtemp('task-2600-lock-');
   try {
-    const first = createReviewLoopPorts(SLUG, { worktree: root }, { log: () => {}, error: () => {} });
-    const second = createReviewLoopPorts(SLUG, { worktree: root }, { log: () => {}, error: () => {} });
-    const other = createReviewLoopPorts('task-2601', { worktree: root }, { log: () => {}, error: () => {} });
+    const first = createReviewLoopPorts(SLUG, { executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }, { log: () => {}, error: () => {} });
+    const second = createReviewLoopPorts(SLUG, { executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }, { log: () => {}, error: () => {} });
+    const other = createReviewLoopPorts('task-2601', { executionContext: missionExecutionContext({ missionId: 'task-2601', missionWorktree: root }) }, { log: () => {}, error: () => {} });
     assert.equal(first.lock.tryAcquire(), true);
     assert.equal(second.lock.tryAcquire(), false, 'a second controller for the same mission worktree is refused');
     assert.equal(other.lock.tryAcquire(), true, 'another mission is independent');

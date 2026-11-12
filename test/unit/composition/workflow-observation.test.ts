@@ -41,6 +41,22 @@ test('orphan observation excludes the querying CLI capture and preserves unknown
   assert.equal((await read('task-one')).liveness.execution, null, 'a retained inconclusive provider probe cannot prove termination');
 });
 
+test('review admission excludes its npm and tsx wrapper processes while retaining competing sessions (PX-0046.03)', async t => {
+  const ownPids = new Set([process.pid, 201, 202]);
+  t.mock.method(reviewLivenessSystem, 'currentInvocationProcessIds', () => ownPids);
+  t.mock.method(reviewLivenessSystem, 'startProcessTableRead', async () => [process.pid, 201, 202, 203].map(pid =>
+    ({ pid, elapsedSeconds: 1, args: 'node tsx src/entry/px.ts review task-one' })));
+  t.mock.method(reviewLivenessSystem, 'detectRunningMissionSessions', (options: Parameters<typeof reviewLivenessSystem.detectRunningMissionSessions>[0]) => {
+    assert.deepEqual(options.listProcesses?.()?.map(entry => entry.pid), [203]);
+    return [];
+  });
+  t.mock.method(reviewLivenessSystem, 'createMissionTerminalCapability', () =>
+    ({ history: () => ({ ok: true, runs: [], unattributed: [] }) }) as unknown as MissionTerminalCapability);
+  const graph = { operatorState: { db: { query: async () => [] } }, mission: { repositoryId: 'repo' } } as unknown as ProductionApplicationServices;
+  const observation = await createReviewLivenessReader(graph, '/unused', resolveConfiguration({}))('task-one');
+  assert.equal(observation.liveness.coordinator, false);
+});
+
 test('review observation excludes its admitted legacy owner but retains other workflow ownership (PX-0041.03 F2)', async t => {
   const operation = { ...workflowOperation({
     id: 'legacy-review', repositoryId: repositoryId('repo'), missionId: missionId('task-one'), requestKey: 'legacy-review',
@@ -299,10 +315,14 @@ test('observer child serializes board and terminal reads and closes its shared g
     return { mission: { repositoryId: 'repo' }, operatorState: { db: { query: async () => [] }, close: async () => { closed = true; } },
       presentationCapabilities: { boardProjection: { build: async () => ({ stages: [], attentionQueue: [] }) } } };
   };
-  const terminalFactory = () => ({
+  let terminalCompositions = 0;
+  const terminalFactory = () => {
+    terminalCompositions++;
+    return {
     overview: (mission: string) => `overview:${mission}`, live: (mission: string) => `live:${mission}`,
     page: (_mission: string, request: unknown) => request, search: (_mission: string, request: unknown) => request,
-  });
+    };
+  };
   runWorkflowObservation('/unused', resolveConfiguration({}), terminalFactory as never, graphFactory as never);
   receive({ id: 1, observation: { kind: 'board' } });
   receive({ id: 2, observation: { kind: 'overview', mission: 'task-test' } });
@@ -314,6 +334,7 @@ test('observer child serializes board and terminal reads and closes its shared g
   assert.equal(exited, true);
   assert.equal(closed, true);
   assert.equal(compositions, 1);
+  assert.equal(terminalCompositions, 1, 'terminal attribution and cursors stay warm across observer IPC messages');
   assert.deepEqual(responses.slice(1), [
     { id: 2, value: 'overview:task-test' }, { id: 3, value: 'live:task-test' },
     { id: 4, value: { runId: 'run' } }, { id: 5, value: { pattern: 'needle' } },

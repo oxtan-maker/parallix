@@ -162,17 +162,18 @@ test('stats and DONE rail share persisted delivery days despite later closure (T
         { loadRepositoryId: async () => repo, loadHeadCommit: async () => '' }, { loadOperationLog: async () => [] },
         { now: () => Date.parse(instant), metricsAdapter: new ConcreteMetricsReadAdapter({ laneEventRepo, usageRepo, repositoryId: repo, clock: () => instant }) },
       );
-      const board = await builder.build();
-      const done = board.stages.find(s => s.lane === 'done')!;
-      assert.deepEqual(done.cards.map(c => c.id).sort(), ['task-delivery', 'task-first', 'task-last']);
-      assert.deepEqual(done.historyCards?.map(c => c.id).sort(), ['task-unclosed', 'task-unknown']);
+      const currentBoard = await builder.build();
+      const currentDone = currentBoard.stages.find(s => s.lane === 'done')!;
+      assert.deepEqual(currentDone.cards.map(c => c.id).sort(), ['task-delivery', 'task-first', 'task-last']);
+      assert.deepEqual(currentDone.historyCards?.map(c => c.id).sort(), ['task-unclosed', 'task-unknown']);
       // Keep the original visibility invariant across both rendered groups.
-      assert.deepEqual([...done.cards, ...done.historyCards ?? []].map(c => c.id).sort(),
+      assert.deepEqual([...currentDone.cards, ...currentDone.historyCards ?? []].map(c => c.id).sort(),
         ['task-delivery', 'task-first', 'task-last', 'task-unclosed', 'task-unknown']);
+      const board = await builder.build({ settleHistoricalAnalytics: true });
       assert.ok(selection.current.flow != null);
-      assert.equal(done.count, selection.current.flow.total);
-      assert.equal(done.count, board.metrics.decisionWindow?.current.completedMissions);
-      assert.equal(done.count, board.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done);
+      assert.equal(currentDone.count, selection.current.flow.total);
+      assert.equal(currentDone.count, board.metrics.decisionWindow?.current.completedMissions);
+      assert.equal(currentDone.count, board.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done);
     }
   });
 });
@@ -210,7 +211,9 @@ test('local CLI and board refresh include a new delivery immediately with stable
     await persist('task-utc', '2026-10-01T22:28:41Z');
     const before = selectStatsReport([], await readFlow(), { mode: 'weekly', today: now });
     assert.equal(before.current.flow?.total, 2);
-    assert.equal((await builder.build()).metrics.decisionWindow?.current.completedMissions, 2);
+    const initialBoard = await builder.build();
+    assert.equal(initialBoard.stages.find(stage => stage.lane === 'done')?.count, 2);
+    assert.equal((await builder.build({ settleHistoricalAnalytics: true })).metrics.decisionWindow?.current.completedMissions, 2);
     now = '2026-10-08T18:00:00+02:00';
     await persist('task-new', '2026-10-08T15:59:59Z');
     const after = selectStatsReport([], await readFlow(), { mode: 'weekly', today: now });
@@ -219,9 +222,10 @@ test('local CLI and board refresh include a new delivery immediately with stable
     assert.deepEqual(after.previous?.flow, before.previous?.flow);
     assert.equal(after.current.flow?.total, 3);
     assert.equal(after.bugTrend?.[0].completed, 3);
-    const board = await builder.build();
+    const currentBoard = await builder.build();
+    assert.equal(currentBoard.stages.find(stage => stage.lane === 'done')?.count, 3);
+    const board = await builder.build({ settleHistoricalAnalytics: true });
     assert.equal(board.metrics.decisionWindow?.current.completedMissions, 3);
-    assert.equal(board.stages.find(stage => stage.lane === 'done')?.count, 3);
     assert.equal(board.metrics.weeklyCumulativeFlow?.series[0]?.counts.done, 2);
     const output: string[] = [];
     await cli(['--today', '2026-10-08'], { log: message => output.push(message), error: assert.fail, exit: code => assert.fail(`unexpected CLI exit: ${code}`) });
@@ -232,9 +236,10 @@ test('local CLI and board refresh include a new delivery immediately with stable
     assert.doesNotMatch(report, /UTC calendar days|UTC days|ISO weeks/);
     // An unchanged mission set must still roll its cached metrics at local midnight.
     now = '2026-10-09T00:00:00+02:00';
-    const nextDay = await builder.build();
+    const currentNextDay = await builder.build();
+    assert.equal(currentNextDay.stages.find(stage => stage.lane === 'done')?.count, 1);
+    const nextDay = await builder.build({ settleHistoricalAnalytics: true });
     assert.equal(nextDay.metrics.decisionWindow?.current.startDate, '2026-10-03');
     assert.equal(nextDay.metrics.decisionWindow?.current.completedMissions, 1);
-    assert.equal(nextDay.stages.find(stage => stage.lane === 'done')?.count, 1);
   });
 });

@@ -4,11 +4,10 @@ import type { ReviewStatePersistenceResult } from './review-state.js';
 
 
 
-import { resolveWorktree } from '../filesystem/mission-utils.js';
-
 import { missionId } from '../../domain/mission.js';
 
 import type { MissionStore, SessionMarkerPort } from '../../application/domain-ports.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 export function diagnosticFrom(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) { return error.message.trim(); }
@@ -42,15 +41,15 @@ export async function resolveMissionStore(_rootDir: string, store?: MissionStore
  * review state" ever meant.
  *
  * @param {string} slug
- * @param {string} [worktree]
  * @returns {Promise<ReviewStatePersistenceResult>}
  */
 export async function resetReviewState(
   slug: string,
-  worktree = resolveWorktree(slug) || process.cwd(),
+  executionContext: LiveMissionExecutionContext,
   missionStore?: MissionStore | null,
   sessionMarkerPort?: SessionMarkerPort | null,
 ): Promise<ReviewStatePersistenceResult> {
+  const worktree = executionContext.missionWorktree;
   try {
     const store = await resolveMissionStore(worktree, missionStore);
     if (!store) {

@@ -76,6 +76,7 @@ export function eventToEntry(event: LaneTransitionEvent): BoardLaneEventEntry {
     agent: event.agent,
     occurredAt: event.occurredAt,
     idempotencyKey: event.idempotencyKey,
+    ...(event.returnIdentity ? { returnIdentity: event.returnIdentity } : {}),
   };
 }
 
@@ -104,6 +105,7 @@ export function entryToEvent(
     agent: entry.agent,
     occurredAt: entry.occurredAt,
     idempotencyKey: entry.idempotencyKey,
+    ...(entry.returnIdentity ? { returnIdentity: entry.returnIdentity } : {}),
   };
 }
 

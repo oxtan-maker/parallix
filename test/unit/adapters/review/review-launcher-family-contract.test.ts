@@ -19,6 +19,41 @@ import type { ReviewerRoutingPort } from '../../../../src/application/ports/revi
 import { resolveReviewPreparationReviewAssignment } from '../../../../src/adapters/cli/commands/review-preparation.js';
 import { AgentPoolExhaustedError } from '../../../../src/domain/agents.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { createReviewLoopPorts } from '../../../../src/adapters/review/review-loop.js';
+import { ReviewState } from '../../../../src/adapters/review/review-state.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+
+test('an implementer response never completes the launched reviewer assignment (PX-0046.03)', async t => {
+  const root = registeredMkdtemp('review-completion-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const slug = 'review-completion';
+  let launched = 0;
+  let current = new ReviewState(slug, { round: 2, phase: 'reviewing', disposition: 'CHANGES_MADE' });
+  const ports = createReviewLoopPorts(slug, { executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }) }, {
+    isProviderEnabled: () => false,
+    readReviewState: async () => current,
+    log: () => {}, error: () => {},
+    startAgent: async (_step, options) => {
+      launched++;
+      assert.ok(options);
+      const completed = options.authoritativeCompletion;
+      assert.ok(completed);
+      assert.equal(await completed(), false, 'CHANGES_MADE belongs to the implementer, so the reviewer must keep running');
+      current = new ReviewState(slug, { round: 2, phase: 'reviewing', disposition: 'APPROVED' });
+      assert.equal(await completed(), false, 'a flat disposition without a reviewer phase transition cannot finish the assignment');
+      current = new ReviewState(slug, { round: 3, phase: 'approved', disposition: 'APPROVED' });
+      assert.equal(await completed(), false, 'another review round cannot complete this assignment');
+      current = new ReviewState(slug, { round: 2, phase: 'approved', disposition: 'APPROVED' });
+      assert.equal(await completed(), true, 'an authoritative approval completes the reviewer');
+      current = new ReviewState(slug, { round: 2, phase: 'fixing', disposition: 'REQUEST_CHANGES' });
+      assert.equal(await completed(), true, 'an authoritative reviewer request for changes also completes the reviewer');
+      return { agent: 'custom', invocation: null, result: { status: 0 } };
+    },
+  });
+  await ports.agents.launch({ role: 'reviewer', agent: 'custom', exclude: ['codex'],
+    prompt: { reviewer: 'custom', implementer: 'codex', attempt: 2, reviewBaseline: undefined, integrationRepair: '' } });
+  assert.equal(launched, 1, 'the production launch must exercise the completion assertions');
+});
 
 // Regression provenance: TASK-2335.
 /**

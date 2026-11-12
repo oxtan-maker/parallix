@@ -4,7 +4,7 @@ import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js'
 import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 import { makeCard as fixtureCard } from '../../../fixtures/board-projection.js';
 import { missionOutcome } from '../../../fixtures/mission-outcome.js';
-import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { fixtureMission, pendingReview } from '../../../fixtures/mission-builders.js';
 import { repositoryId as fixtureRepositoryId } from '../../../../src/domain/repository.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
@@ -82,6 +82,12 @@ function makeOperationLogAdapter(): OperationLogReadAdapter {
     async loadOperationLog() { return []; },
   };
 }
+const skipSeries = () => ({ series: [], missingHistoryFallback: 'skip' as const });
+const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+function historicalMetrics(throughput?: number) { return buildBoardMetrics({
+  cumulativeFlow: skipSeries(), medianStateTimes: skipSeries(), reviewBounceRate: skipSeries(),
+  throughput: throughput === undefined ? skipSeries() : { series: [{ at: '2026-11-12T00:00:00Z', value: throughput }], missingHistoryFallback: 'skip' },
+}); }
 
 // ---------------------------------------------------------------------------
 // BoardProjectionBuilder integration tests
@@ -138,10 +144,7 @@ test('BoardProjectionBuilder applies its configured completed-mission retention 
         async readOutcomes() { return [missionOutcome({ missionId: recent.id, closedAt: '2026-09-28T00:00:00Z' }), missionOutcome({ missionId: old.id, closedAt: '2026-09-20T00:00:00Z' })]; },
         async buildMetrics(states) {
           metricStates = [...states.keys()];
-          return buildBoardMetrics({
-            cumulativeFlow: { series: [], missingHistoryFallback: 'skip' }, medianStateTimes: { series: [], missingHistoryFallback: 'skip' },
-            throughput: { series: [], missingHistoryFallback: 'skip' }, reviewBounceRate: { series: [], missingHistoryFallback: 'skip' },
-          });
+          return historicalMetrics();
         },
       },
     },
@@ -779,6 +782,107 @@ test('DONE cards remain visible when canonical delivery history is unavailable (
   const board = await builder.build();
   assert.deepEqual(board.stages.find(stage => stage.lane === 'done')?.cards.map(card => card.id), [mission.id]);
   assert.equal(board.metrics.health.state, 'unavailable');
+});
+
+test('current cards do not wait for historical reconstruction and declare freshness (PX-0058.03)', async () => {
+  const mission = fixtureMission(String(id1), { id: id1, repositoryId: repo, title: 'Current delivery', labels: missionLabels([]), status: 'active', closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null });
+  let nowMs = Date.parse('2026-11-12T12:00:00Z'); let revision = 'history-v1'; let reconstructions = 0; let aborted = 0;
+  const finishes: Array<(metrics: ReturnType<typeof buildBoardMetrics>) => void> = [];
+  const metricsAdapter = { async readDeliveryIdentity() { return { deliveries: [], revision }; },
+    async buildMetrics(_states: unknown, _availability: unknown, options?: { readonly signal?: AbortSignal }) {
+      reconstructions += 1;
+      return new Promise<ReturnType<typeof buildBoardMetrics>>((resolve, reject) => { finishes.push(resolve);
+        options?.signal?.addEventListener('abort', () => { aborted += 1; reject(options.signal?.reason); }, { once: true }); });
+    }
+  } as MetricsReadAdapter;
+  const builder = new BoardProjectionBuilder(makeMissionAdapter([mission]), makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(),
+    makeGitAdapter(), makeOperationLogAdapter(), { metricsAdapter, now: () => nowMs });
+  const result = await Promise.race([builder.build(), new Promise<'historical-timeout'>(resolve => setTimeout(() => resolve('historical-timeout'), 25))]);
+  assert.notEqual(result, 'historical-timeout', 'current delivery must not wait for cohort or review-history reconstruction');
+  if (result === 'historical-timeout') { return; }
+  assert.deepEqual(result.stages.find(stage => stage.lane === 'active')?.cards.map(card => card.id), [id1]);
+  assert.equal(result.metrics.analytics?.freshness, 'unavailable'); assert.equal((await builder.build()).metrics.analytics?.freshness, 'unavailable');
+  assert.equal(reconstructions, 1, 'an in-budget refresh owns one reconstruction');
+  revision = 'history-v2'; await builder.build(); revision = 'history-v3'; await builder.build();
+  assert.equal(reconstructions, 1, 'moving evidence queues only the newest revision behind one reconstruction');
+  const metrics = historicalMetrics();
+  finishes[0](metrics); await settle(); assert.equal(reconstructions, 2, 'completion starts only the newest queued evidence revision');
+  finishes[1](metrics); await settle();
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
+
+  revision = 'history-v4'; assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
+  assert.equal(reconstructions, 3);
+  nowMs += 30_000;
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale'); await settle();
+  assert.equal(reconstructions, 4, 'a hung refresh is cancelled and the newest revision starts after its finite deadline'); assert.equal(aborted, 1);
+  nowMs += 300_000; finishes[3](metrics); await settle();
+  const fresh = await builder.build(); assert.equal(fresh.metrics.analytics?.freshness, 'fresh');
+  assert.equal(fresh.metrics.analytics?.refreshedAt, new Date(nowMs).toISOString(), 'freshness uses completion time');
+
+  revision = 'history-v5';
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
+  assert.equal(reconstructions, 5, 'changed evidence starts one owned background reconstruction');
+  builder.cancelPendingBuilds(); await settle();
+  assert.equal(aborted, 2, 'closing the projection owner cancels its outstanding historical reconstruction');
+});
+
+test('settled one-shot analytics retain stale cache and bound failed retries (PX-0058.03)', async () => {
+  const mission = fixtureMission(String(id1), { id: id1, repositoryId: repo, status: 'active' });
+  let nowMs = Date.parse('2026-11-12T12:00:00Z'); let revision = 'history-v1'; let identityFails = false; let metricsFail = false; let metricsHang = false; let reconstructions = 0;
+  const metricsAdapter = { async readDeliveryIdentity() { if (identityFails) { throw new Error('identity locked'); } return { deliveries: [], revision }; },
+    async buildMetrics(_states: unknown, _availability: unknown, options?: { readonly signal?: AbortSignal }) { reconstructions += 1;
+      if (metricsHang) { return new Promise<never>((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true })); }
+      if (metricsFail) { throw new Error('history locked'); } return historicalMetrics(reconstructions); } } as MetricsReadAdapter;
+  const builder = new BoardProjectionBuilder(makeMissionAdapter([mission]), makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(),
+    makeGitAdapter(), makeOperationLogAdapter(), { metricsAdapter, now: () => nowMs, historicalRefreshTimeoutMs: 2 });
+  const settled = await builder.build({ settleHistoricalAnalytics: true });
+  assert.equal(settled.metrics.analytics?.freshness, 'fresh'); assert.equal(settled.metrics.throughput.series[0]?.value, 1);
+  identityFails = true; const stale = await builder.build();
+  assert.equal(stale.metrics.analytics?.freshness, 'stale'); assert.equal(stale.metrics.throughput.series[0]?.value, 1); assert.match(stale.metrics.analytics?.reason ?? '', /identity/i);
+  identityFails = false; revision = 'history-v2'; metricsFail = true; await builder.build(); await settle();
+  await builder.build(); await builder.build(); assert.equal(reconstructions, 2, 'one failed evidence key waits for its retry window');
+  nowMs += 30_000; await builder.build(); await settle(); assert.equal(reconstructions, 3, 'the failed key retries after the bounded interval');
+  metricsFail = false; metricsHang = true; revision = 'history-v3'; const timed = await builder.build({ settleHistoricalAnalytics: true });
+  assert.equal(timed.metrics.analytics?.freshness, 'stale'); assert.match(timed.metrics.analytics?.reason ?? '', /deadline/);
+});
+
+test('historical cache invalidates on durable revisions, reviews and checkpoints while warm cards stay independent (PX-0058.03)', async () => {
+  let current = fixtureMission(String(id1), { id: id1, repositoryId: repo, status: 'active', checkpoints: [], review: null });
+  let revision = 'evidence-v1';
+  let reconstructions = 0;
+  const missions: MissionReadAdapter = { async loadAllMissions() { return [current]; },
+    async loadMission(id) { return id === current.id ? current : null; },
+    getSourceFacts() { return []; },
+  };
+  const metricsAdapter: MetricsReadAdapter = {
+    async readDeliveryIdentity() { return { deliveries: [], revision }; },
+    async buildMetrics() { reconstructions += 1; return historicalMetrics(reconstructions); },
+  };
+  const builder = new BoardProjectionBuilder(missions, makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(),
+    makeGitAdapter(), makeOperationLogAdapter(), { metricsAdapter, now: () => Date.parse('2026-11-12T12:00:00Z') });
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'unavailable');
+  await settle();
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
+  assert.equal(reconstructions, 1, 'unchanged warm reads reuse the historical summary');
+
+  current = { ...current, checkpoints: fixtureMission(String(id1)).checkpoints };
+  const checkpointChanged = await builder.build();
+  assert.equal(checkpointChanged.metrics.analytics?.freshness, 'stale');
+  assert.deepEqual(checkpointChanged.stages.find(stage => stage.lane === 'active')?.cards.map(card => card.id), [id1]);
+  assert.equal(reconstructions, 2, 'checkpoint evidence invalidates history without changing mission status');
+  await settle();
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
+
+  current = { ...current, review: pendingReview(String(id1)) };
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
+  assert.equal(reconstructions, 3, 'review evidence invalidates history without changing mission status');
+  await settle();
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
+
+  revision = 'evidence-v2';
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
+  assert.equal(reconstructions, 4, 'the application-port evidence revision invalidates history');
 });
 
 test('board and focused reads pass the current owner into execution while done history stays complete (TASK-2769 F1)', async () => {

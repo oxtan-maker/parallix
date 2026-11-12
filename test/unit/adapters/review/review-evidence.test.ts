@@ -99,7 +99,7 @@ test('gate repairs that moved no lane are returns; a repair answering a lane ret
     move('active', 'review', 'submit-for-review', 'claude', '2026-10-01T11:00:00Z'),
     move('review', 'integration', 'approve', 'claude', '2026-10-01T11:05:00Z'),
     move('integration', 'active', 'rebound-to-active', 'claude', '2026-10-01T12:00:00Z')];
-  const repair = (occurrenceId: string, reasonKind: string, area: string | null, occurredAt: string) => ({ occurrenceId, reasonKind, area, agent: 'codex', occurredAt });
+  const repair = (occurrenceId: string, reasonKind: string, area: string | null, occurredAt: string) => ({ occurrenceId, reasonKind, area, agent: 'codex', headBefore: null, occurredAt });
   const returns = workflowReturnsFromHistory(lane, [
     repair('pre', 'gate-failure', 'declared gate', '2026-10-01T10:30:00Z'),
     repair('answer', 'gate-failure', 'integration gate unit', '2026-10-01T12:20:00Z'),
@@ -120,7 +120,7 @@ test('an independent gate failure shortly after a reviewer return is its own ret
   const { workflowReturnsFromHistory } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
   const lane = [{ fromStatus: 'refined', toStatus: 'active', trigger: 'activate', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z', idempotencyKey: 'a' },
     { fromStatus: 'review', toStatus: 'active', trigger: 'request-changes', agent: 'claude', occurredAt: '2026-10-01T11:00:00Z', idempotencyKey: 'pr' }];
-  const returns = workflowReturnsFromHistory(lane, [{ occurrenceId: 'gate', reasonKind: 'gate-failure', area: 'declared gate', agent: 'codex', occurredAt: '2026-10-01T11:05:00Z' }]);
+  const returns = workflowReturnsFromHistory(lane, [{ occurrenceId: 'gate', reasonKind: 'gate-failure', area: 'declared gate', agent: 'codex', headBefore: null, occurredAt: '2026-10-01T11:05:00Z' }]);
   assert.deepEqual(returns.map(item => item.source).sort(), ['judgment', 'repair']);
 });
 
@@ -130,13 +130,13 @@ test('rebound repair reader indexes minimal history once and deduplicates retry 
   const reader = createReboundRepairReader({ findReboundRepairs: async () => {
     reads += 1;
     return [
-      { missionId: 'task-a', occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z' },
-      { missionId: 'task-a', occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', occurredAt: '2026-10-01T10:01:00Z' },
-      { missionId: 'task-b', occurrenceId: 'other', reasonKind: 'gate-failure', area: null, agent: 'claude', occurredAt: '2026-10-01T11:00:00Z' },
+      { missionId: 'task-a', occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', headBefore: 'rev-a1', occurredAt: '2026-10-01T10:00:00Z' },
+      { missionId: 'task-a', occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', headBefore: 'rev-a1', occurredAt: '2026-10-01T10:01:00Z' },
+      { missionId: 'task-b', occurrenceId: 'other', reasonKind: 'gate-failure', area: null, agent: 'claude', headBefore: null, occurredAt: '2026-10-01T11:00:00Z' },
     ];
   } });
   assert.deepEqual(await reader('task-a'), [
-    { occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z' },
+    { occurrenceId: 'same', reasonKind: 'gate-failure', area: 'unit', agent: 'codex', headBefore: 'rev-a1', occurredAt: '2026-10-01T10:00:00Z' },
   ]);
   assert.equal((await reader('task-b')).length, 1);
   assert.equal(reads, 1);
@@ -145,7 +145,7 @@ test('rebound repair reader indexes minimal history once and deduplicates retry 
 test('a repair is claimed by the rebound active when its attempt started, not when it completed (TASK-2836)', async () => {
   const { createReboundRepairReader, workflowReturnsFromHistory } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
   const reader = createReboundRepairReader({ findReboundRepairs: async () => [{ missionId: 'task-a', occurrenceId: 'repair',
-    reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: 120_000, occurredAt: '2026-10-01T10:11:00Z' }] });
+    reasonKind: 'gate-failure', area: 'unit', agent: 'codex', headBefore: 'rev-a1', durationMs: 120_000, occurredAt: '2026-10-01T10:11:00Z' }] });
   const repairs = await reader('task-a');
   assert.equal(repairs[0]?.occurredAt, '2026-10-01T10:09:00.000Z');
   const returns = workflowReturnsFromHistory([
@@ -202,7 +202,7 @@ test('an integration repair belongs to the rebound that opened it however long i
   const lane = [{ fromStatus: 'refined', toStatus: 'active', trigger: 'activate', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z', idempotencyKey: 'a' },
     { fromStatus: 'integration', toStatus: 'active', trigger: 'rebound-to-active', agent: 'codex', occurredAt: '2026-10-01T11:00:00Z', idempotencyKey: 'rb' },
     { fromStatus: 'active', toStatus: 'review', trigger: 'begin-review-preparation', agent: 'codex', occurredAt: '2026-10-01T15:00:00Z', idempotencyKey: 'next' }];
-  const repair = (occurredAt: string, area: string) => ({ occurrenceId: occurredAt, reasonKind: 'gate-failure', area, agent: 'codex', occurredAt });
+  const repair = (occurredAt: string, area: string) => ({ occurrenceId: occurredAt, reasonKind: 'gate-failure', area, agent: 'codex', headBefore: null, occurredAt });
   const returns = workflowReturnsFromHistory(lane, [repair('2026-10-01T13:30:00Z', 'integration gate unit'), repair('2026-10-01T16:00:00Z', 'integration gate unit')]);
   assert.deepEqual(returns.map(item => item.source).sort(), ['rebound', 'repair'], 'only the repair after the next lane move is a new incident');
   const review = workflowReturnsFromHistory([lane[0], { ...lane[1], fromStatus: 'review' }, lane[2]], [repair('2026-10-01T13:30:00Z', 'declared gate')]);
@@ -213,7 +213,20 @@ test('a second independent repair in a rebound interval is its own return (TASK-
   const { workflowReturnsFromHistory } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
   const lane = [{ fromStatus: 'refined', toStatus: 'active', trigger: 'activate', agent: 'codex', occurredAt: '2026-10-01T09:00:00Z', idempotencyKey: 'a' },
     { fromStatus: 'integration', toStatus: 'active', trigger: 'rebound-to-active', agent: 'codex', occurredAt: '2026-10-01T10:00:00Z', idempotencyKey: 'rb' }];
-  const repair = (occurrenceId: string, occurredAt: string) => ({ occurrenceId, reasonKind: 'gate-failure', area: 'declared gate', agent: 'codex', occurredAt });
+  const repair = (occurrenceId: string, occurredAt: string) => ({ occurrenceId, reasonKind: 'gate-failure', area: 'declared gate', agent: 'codex', headBefore: null, occurredAt });
   const returns = workflowReturnsFromHistory(lane, [repair('own', '2026-10-01T11:00:00Z'), repair('other', '2026-10-01T12:00:00Z')]);
   assert.deepEqual(returns.map(item => item.source).sort(), ['rebound', 'repair']);
+});
+
+test('a repair row without stored return provenance keeps its coarse origin (PX-0055.01)', async () => {
+  const { workflowReturnsFromHistory } = await import('../../../../src/adapters/review/review-statistics-evidence.js');
+  const legacy = { occurrenceId: 'legacy', reasonKind: 'gate-failure', area: 'declared gate', agent: 'codex', headBefore: null, occurredAt: '2026-10-01T10:30:00Z' };
+  const typed = { ...legacy, occurrenceId: 'typed', occurredAt: '2026-10-01T11:30:00Z', headBefore: 'rev-2',
+    returnIdentity: { stage: 'declared-gates' as const, operationId: 'op-2', operationGeneration: 3 } };
+  const returns = workflowReturnsFromHistory([], [legacy, typed]);
+  assert.deepEqual(returns.map(item => [item.identity, item.origin]), [
+    ['repair:legacy', undefined],
+    ['repair:typed', { actor: 'workflow', stage: 'declared-gates', decisionIdentity: 'repair:typed',
+      revision: 'rev-2', sender: 'codex', cause: 'gate-failure', operationId: 'op-2', operationGeneration: 3 }],
+  ], 'only a producer-typed row names its lane; a legacy row keeps the coarse repair cause for placement');
 });

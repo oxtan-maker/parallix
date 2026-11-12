@@ -165,9 +165,10 @@ export function createRebaseWorkflowPort(options: RebaseCommandOptions = {}): Re
     }),
   };
 
+  const observation = rebaseObservation();
   return {
-    observeRebase: options.observeRebaseFn ?? rebaseObservation() ?? undefined,
-    newRebaseObservationId: randomUUID,
+    observeRebase: options.observeRebaseFn ?? observation?.observeRebase,
+    newRebaseObservationId: observation?.newRebaseObservationId ?? randomUUID,
     rebaseObservationStage: options.rebaseObservationStage ?? 'direct-rebase',
     git: gitFn,
     gitContention: createGitContentionPort(),

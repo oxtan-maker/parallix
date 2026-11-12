@@ -8,27 +8,27 @@ import type { postComment, postReview, getPrAuthor } from './review-adapter.js';
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { type ReviewFinding } from '../../domain/review.js';
 import { isEnabled } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, VALID_EVENT_TYPES, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
-import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic } from './review-round.js';
+import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic, type ReviewRoundResult } from './review-round.js';
 import { incompleteReviewerArtifacts, invalidReviewerProcessResult } from './reviewer-artifact-admission.js';
 import { reviewerResultAttribution, type ReviewerProcessResult } from './reviewer-result-attribution.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { reviewArtifactPath, staleReviewWrite, renderFindings, resolveArtifactRead, resolveArtifactDir, readArtifactFile, deleteArtifactFile, normalizeReviewVerdict, headRevision, type ReviewStateReader } from './review-artifact-files.js';
 import { postWorkflowComment, postWorkflowReview } from './review-workflow-posting.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 type ReviewerArtifactOptions = {
+  executionContext: LiveMissionExecutionContext;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
   readArtifactFn?: typeof readArtifactFile;
   deleteArtifactFn?: typeof deleteArtifactFile;
   tmpDir?: string | null;
-  worktree?: string;
   revision?: string;
   providerEnabled?: boolean | null;
   forgejoEnabled?: boolean | null;
@@ -159,7 +159,7 @@ async function postReviewerToProvider(
   reviewFindings: string,
   reviewOutcome: string,
   context: {
-    worktree: string;
+    executionContext: LiveMissionExecutionContext;
     log: (_msg: string) => void;
     error: (_msg: string) => void;
     readReviewStateFn: ReviewStateReader;
@@ -179,14 +179,14 @@ async function postReviewerToProvider(
     configuration?: ParallixConfiguration;
   },
 ): Promise<string | null> {
-  const { worktree, log, error, readReviewStateFn } = context;
+  const { log, error, readReviewStateFn } = context;
   if (context.readTokenFn && context.getCommentsFn) {
     await consumeHumanNotes(slug, reviewer, {
       getCommentsFn: context.getCommentsFn,
       createEventFn: context.createEventFn || createEvent,
       readTokenFn: context.readTokenFn,
       reviewIdentity: reviewer,
-      worktree,
+      executionContext: context.executionContext,
       writeReviewStateFn: context.writeReviewStateFn,
       readReviewStateFn,
       currentState: context.currentState,
@@ -197,7 +197,7 @@ async function postReviewerToProvider(
   }
 
   const commentResult = await postWorkflowComment(slug, reviewFindings, {
-    rootDir: worktree,
+    executionContext: context.executionContext,
     reviewIdentity: reviewer,
     readTokenFn: context.readTokenFn,
     postCommentFn: context.postCommentFn,
@@ -213,7 +213,7 @@ async function postReviewerToProvider(
   }
 
   const reviewResult = await postWorkflowReview(slug, reviewVerdict, reviewOutcome, {
-    worktree,
+    executionContext: context.executionContext,
     reviewIdentity: reviewer,
     readTokenFn: context.readTokenFn,
     postReviewFn: context.postReviewFn,
@@ -244,7 +244,7 @@ function prepareReviewerArtifacts(slug: string, options: ReviewerArtifactOptions
   const error = options.error || fmt.log.plainError;
   const readArtifactFn = options.readArtifactFn || readArtifactFile;
   const deleteArtifactFn = options.deleteArtifactFn || deleteArtifactFile;
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   const tmpDir = options.tmpDir || resolveArtifactDir(worktree);
   const providerEnabled = resolveProviderEnabled(options, worktree);
 
@@ -296,7 +296,7 @@ async function admitReviewerArtifacts(
 export async function consumeReviewerArtifacts(
   slug: string,
   reviewer: string,
-  options: ReviewerArtifactOptions = {}
+  options: ReviewerArtifactOptions,
 ): Promise<{ consumed: boolean; failureReason?: FailureReason; ok?: boolean; reviewState?: string | null; diagnostic?: string | null; reviewFindings?: { id: string; summary: string }[] }> {
   const { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, verdict } = prepareReviewerArtifacts(slug, options);
 
@@ -310,7 +310,7 @@ export async function consumeReviewerArtifacts(
   const { round, phase, readReviewStateFn } = await reviewerArtifactRound(slug, worktree, options);
 
   const mirror = () => postReviewerToProvider(slug, reviewer, reviewVerdict, reviewFindings, reviewOutcome, {
-      worktree, log, error, readReviewStateFn,
+      executionContext: options.executionContext, log, error, readReviewStateFn,
       readTokenFn: options.readTokenFn,
       getCommentsFn: options.getCommentsFn,
       postCommentFn: options.postCommentFn,
@@ -384,7 +384,7 @@ function reviewerVerdictFrom(verdictRaw: string | null, outcomeMessage: string |
  */
 async function recordReviewerChangeRequest(slug: string, reviewer: string, findings: readonly ReviewFinding[], outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
   const recordRequestedChangesFn = options.recordRequestedChangesFn || recordRequestedChanges;
-  const decision = await recordRequestedChangesFn(slug, {
+  const write = () => recordRequestedChangesFn(slug, {
     findings,
     comment: outcomeMessage,
     decidedAt: new Date().toISOString(),
@@ -392,6 +392,7 @@ async function recordReviewerChangeRequest(slug: string, reviewer: string, findi
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
     result: reviewerResultAttribution(reviewer, options.processResult),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+  const decision = await recordConcurrentReviewerDecision(write, options.expectedVersion === undefined);
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the reviewer decision for ${slug}: ${decision.diagnostic}`));
     return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
@@ -404,7 +405,7 @@ async function recordReviewerChangeRequest(slug: string, reviewer: string, findi
 
 async function recordReviewerApproval(slug: string, reviewer: string, outcomeMessage: string, options: ReviewerArtifactOptions, log: (_msg: string) => void, error: (_msg: string) => void) {
   const recordApprovalFn = options.recordApprovalFn || recordApproval;
-  const decision = await recordApprovalFn(slug, {
+  const write = () => recordApprovalFn(slug, {
     comment: outcomeMessage,
     decidedAt: new Date().toISOString(),
     revision: options.revision,
@@ -412,6 +413,7 @@ async function recordReviewerApproval(slug: string, reviewer: string, outcomeMes
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
     result: reviewerResultAttribution(reviewer, options.processResult),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
+  const decision = await recordConcurrentReviewerDecision(write, options.expectedVersion === undefined);
   if (decision.outcome === 'failed') {
     error(fmt.status('FAIL', `Could not record the approve decision for ${slug}: ${decision.diagnostic}`));
     return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true as const, ok: false as const, diagnostic: `Reviewer decision persist failed: ${decision.diagnostic}` };
@@ -420,6 +422,17 @@ async function recordReviewerApproval(slug: string, reviewer: string, outcomeMes
     log(fmt.status('INFO', `Reviewer decision for ${slug} already recorded (${decision.reason}).`));
   }
   return null;
+}
+
+/** Concurrent child verdicts retry only an unpinned compare-and-swap conflict. */
+async function recordConcurrentReviewerDecision(write: () => Promise<ReviewRoundResult>, automaticVersion: boolean): Promise<ReviewRoundResult> {
+  const maxAttempts = automaticVersion ? 3 : 1;
+  let result: ReviewRoundResult = { outcome: 'failed', diagnostic: 'Reviewer decision was not attempted' };
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    result = await write();
+    if (result.outcome !== 'failed' || result.kind !== 'stale-write') { return result; }
+  }
+  return result;
 }
 
 /** The loop-control review state a consumed verdict maps to. */

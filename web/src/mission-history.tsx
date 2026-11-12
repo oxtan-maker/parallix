@@ -8,7 +8,8 @@ import { MODAL, RADIUS, SPACE, TYPE } from './palette.js';
  * History polls read only new bytes; failed reads keep the displayed output.
  */
 
-const POLL_MS = 1000;
+export const ACTIVE_POLL_MS = 1_000;
+export const IDLE_POLL_MS = 5_000;
 
 interface Chunk { readonly from: number; readonly to: number; readonly text: string; readonly gapBefore: number }
 interface Selection { readonly runId: string; readonly stream: 'stdout' | 'stderr' }
@@ -30,18 +31,19 @@ function useTranscript(missionId: string, selection: Selection | null, setReadEr
   const generation = useRef(0);
 
   const pending = useRef<{ selection: Selection; before?: number; generation: number; busy: boolean } | null>(null);
-  const retryInitial = useCallback(async (signal?: AbortSignal) => {
+  const retryInitial = useCallback(async (signal?: AbortSignal): Promise<boolean> => {
     const request = pending.current;
-    if (!request || request.busy) { return; }
+    if (!request || request.busy) { return true; }
     request.busy = true;
     const result = await loadPage(missionId, { ...request.selection, ...(request.before !== undefined ? { before: request.before } : {}) }, signal);
     request.busy = false;
-    if (generation.current !== request.generation) { return; }
-    if (result.ok === false) { setReadError(result.detail); return; }
+    if (generation.current !== request.generation) { return true; }
+    if (result.ok === false) { setReadError(result.detail); return false; }
     pending.current = null;
     setReadError(null);
     setChunks([{ from: result.value.from, to: result.value.to, text: result.value.text, gapBefore: 0 }]);
     setEdges({ hasEarlier: result.value.hasEarlier, atEnd: result.value.atEnd, running: result.value.running });
+    return true;
   }, [missionId, setReadError]);
 
   // A new selection starts from its tail (or an explicit anchor) with a fresh generation.
@@ -72,38 +74,49 @@ function useTranscript(missionId: string, selection: Selection | null, setReadEr
   };
 
   /** Append only the bytes after what is shown; never re-reads shown history. */
-  const appendNewer = async (signal: AbortSignal, operation: HistoryOperation | undefined) => {
-    if (pending.current) { await retryInitial(signal); return; }
+  const appendNewer = async (signal: AbortSignal, operation: HistoryOperation | undefined): Promise<boolean> => {
+    if (pending.current) { return retryInitial(signal); }
     const last = chunks[chunks.length - 1];
-    if (!selection || !last || !(edges.running || !edges.atEnd || operation?.state === 'running')) { return; }
+    if (!selection || !last || !(edges.running || !edges.atEnd || operation?.state === 'running')) { return true; }
     const mine = generation.current;
     const page = await loadPage(missionId, { ...selection, after: last.to }, signal);
-    if (generation.current !== mine) { return; }
-    if (page.ok === false) { setReadError(page.detail); return; }
+    if (generation.current !== mine) { return true; }
+    if (page.ok === false) { setReadError(page.detail); return false; }
+    setReadError(null);
     if (page.value.to > last.to) {
       setChunks(previous => [...previous, { from: page.value.from, to: page.value.to, text: page.value.text, gapBefore: page.value.from > last.to ? page.value.from - last.to : 0 }]);
     }
     setEdges(previous => ({ ...previous, atEnd: page.value.atEnd, running: page.value.running }));
+    return true;
   };
 
   return { chunks, edges, startAt, loadEarlier, appendNewer };
 }
 
-/** Own one cancellable polling generation, skipping ticks until its read settles. */
-function usePolling(missionId: string, tick: (_signal: AbortSignal) => Promise<void>) {
+interface PollObservation { readonly ok: boolean; readonly active?: boolean }
+
+/** Own one cancellable polling generation with serial reads and bounded failure backoff. */
+function usePolling(missionId: string, tick: (_signal: AbortSignal) => Promise<PollObservation>) {
   const latest = useRef(tick);
   latest.current = tick;
   useEffect(() => {
-    let busy = false;
     const controller = new AbortController();
+    let timer: number | undefined;
+    let active = true;
+    let failures = 0;
     const poll = async () => {
-      if (busy) { return; }
-      busy = true;
-      try { await latest.current(controller.signal); } finally { busy = false; }
+      let observed: PollObservation;
+      try { observed = await latest.current(controller.signal); }
+      catch { observed = { ok: false }; }
+      if (controller.signal.aborted) { return; }
+      if (observed.active !== undefined) { active = observed.active; }
+      failures = observed.ok ? 0 : failures + 1;
+      const cadence = active ? ACTIVE_POLL_MS : IDLE_POLL_MS;
+      const delay = observed.ok ? cadence : Math.max(cadence, Math.min(IDLE_POLL_MS, ACTIVE_POLL_MS * 2 ** Math.min(failures, 8)));
+      timer = window.setTimeout(() => { void poll(); }, delay);
     };
     void poll();
-    const interval = window.setInterval(() => { void poll(); }, POLL_MS);
-    return () => { controller.abort(); window.clearInterval(interval); };
+    return () => { controller.abort(); if (timer !== undefined) { window.clearTimeout(timer); } };
   }, [missionId]);
 }
 
@@ -115,20 +128,23 @@ function LivePane({ missionId }: { missionId: string }) {
   }, [live]);
   usePolling(missionId, async signal => {
     const result = await loadLive(missionId, signal);
-    if (signal.aborted || result.ok === false) { return; }
+    if (signal.aborted || result.ok === false) { return { ok: false }; }
     setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${'detail' in result.value.probe ? `: ${result.value.probe.detail}` : ''}).`);
+    return { ok: true, active: result.value.kind === 'live' };
   });
   return <pre ref={pane} aria-label="Live pane" style={{ maxHeight: 200, minHeight: 80, flexShrink: 0, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
 }
 
-function SearchPanel({ missionId, onError, onJump }: { missionId: string; onError: (_detail: string) => void; onJump: (_runId: string, _stream: 'stdout' | 'stderr', _offset: number) => void }) {
+function SearchPanel({ missionId, onError, onJump }: { missionId: string; onError: (_detail: string | null) => void; onJump: (_runId: string, _stream: 'stdout' | 'stderr', _offset: number) => void }) {
   const [results, setResults] = useState<HistorySearch | null>(null);
   const search = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const field = event.currentTarget.elements.namedItem('q');
     const query = field && 'value' in field ? String(field.value).trim() : '';
     if (query === '') { setResults(null); return; }
-    void searchHistory(missionId, query).then(result => { if (result.ok === true) { setResults(result.value); } else { onError(result.detail); } });
+    void searchHistory(missionId, query).then(result => {
+      if (result.ok === true) { setResults(result.value); onError(null); } else { onError(result.detail); }
+    });
   };
   return (
     <>
@@ -221,13 +237,15 @@ function copyChunks(chunks: readonly Chunk[], report: (_message: string) => void
 
 export function MissionHistory({ missionId, onClose }: { missionId: string; onClose: () => void }) {
   const [overview, setOverview] = useState<HistoryOverview | null>(null);
-  const [readError, setReadError] = useState<string | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
   const [pinned, setPinned] = useState<Selection | null>(null);
   const pausedAutomatically = useRef(false);
   const [copied, setCopied] = useState<string | null>(null);
   const selection = selectionFor(pinned, overview);
   const selectionKey = selection ? `${selection.runId}:${selection.stream}` : '';
-  const { chunks, edges, startAt, loadEarlier, appendNewer } = useTranscript(missionId, selection, setReadError);
+  const { chunks, edges, startAt, loadEarlier, appendNewer } = useTranscript(missionId, selection, setHistoryError);
   const { follow, setFollow, transcript, onScroll, holdPosition } = useFollow(chunks);
 
   // A search hit anchors the next selection at its offset instead of the tail.
@@ -239,10 +257,18 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
     setFollow(before === undefined);
   }, [selectionKey, startAt]);
 
-  usePolling(missionId, async signal => {
+  usePolling(`${missionId}:overview`, async signal => {
     const next = await loadOverview(missionId, signal);
-    if (next.ok === true) { setOverview(next.value); setReadError(null); } else { setReadError(next.detail); }
-    await appendNewer(signal, next.ok === true ? next.value.operations.find(entry => entry.runId === selection?.runId) : undefined);
+    if (next.ok === true) { setOverview(next.value); setOverviewError(null); } else { setOverviewError(next.detail); }
+    // Full attribution/status reconciliation is bounded independently from
+    // the one-second direct stream tail below.
+    return next.ok === true ? { ok: true, active: false } : { ok: false, active: false };
+  });
+
+  usePolling(`${missionId}:${selectionKey}`, async signal => {
+    const operation = overview?.operations.find(entry => entry.runId === selection?.runId);
+    const ok = await appendNewer(signal, operation);
+    return { ok, active: operation?.state === 'running' || edges.running || !edges.atEnd };
   });
 
   useEffect(() => {
@@ -260,6 +286,7 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
   };
 
   const coverage = coverageFor(overview, selection);
+  const readError = historyError ?? searchError ?? overviewError;
   return (
     <div role="presentation" onClick={event => { if (event.target === event.currentTarget) { onClose(); } }} style={{ position: 'fixed', inset: 0, zIndex: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', background: MODAL.scrim }}>
       <section role="dialog" aria-modal="true" aria-label={`Mission progress for ${missionId}`} className="modal-panel" style={{ width: 720, maxWidth: '92vw', maxHeight: '80vh', display: 'flex', flexDirection: 'column', gap: SPACE.md, padding: SPACE.xxl, background: MODAL.surface, border: `1px solid ${MODAL.edge}`, borderRadius: RADIUS.panel, color: MODAL.text, fontFamily: 'inherit', fontSize: TYPE.body, boxShadow: MODAL.shadow }}>
@@ -272,7 +299,7 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
         {readError !== null && <p role="status" style={{ margin: 0, color: MODAL.warning }}>Refresh interrupted ({readError}); showing what was already loaded. Retrying…</p>}
         <Toolbar operations={overview?.operations ?? []} selection={selection} pinned={pinned !== null} follow={follow} canCopy={chunks.length > 0}
           onSelect={next => { pausedAutomatically.current = false; setPinned(next); }} onCopy={() => copyChunks(chunks, setCopied)} onFollow={() => { if (pausedAutomatically.current) { setPinned(null); pausedAutomatically.current = false; } setFollow(true); }} />
-        <SearchPanel missionId={missionId} onError={setReadError} onJump={jumpTo} />
+        <SearchPanel missionId={missionId} onError={setSearchError} onJump={jumpTo} />
         {copied !== null && <p role="status" style={{ margin: 0 }}>{copied}</p>}
         {edges.hasEarlier && <button type="button" onClick={() => loadEarlier(holdPosition)} style={{ alignSelf: 'flex-start' }}>load earlier history</button>}
         <pre ref={transcript} aria-label="Retained history" aria-live={follow ? 'polite' : 'off'} onScroll={() => {

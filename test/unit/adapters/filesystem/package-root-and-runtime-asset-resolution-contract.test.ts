@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 const packageRootModule = mockModule<typeof import('../../../../src/adapters/filesystem/package-root.js')>('../../../../src/adapters/filesystem/package-root.js', import.meta.url);
 const reviewPrompts = mockModule<typeof import('../../../../src/adapters/review/review-prompts.js')>('../../../../src/adapters/review/review-prompts.js', import.meta.url);
 const draft = mockModule<typeof import('../../../../src/adapters/cli/commands/draft.js')>('../../../../src/adapters/cli/commands/draft.js', import.meta.url);
@@ -170,7 +171,7 @@ describe("packageRoot asset resolution is independent of the working directory",
         assert.deepEqual(args, [path.join(ROOT, 'scripts', 'bootstrap.sh')]);
         return { status: 1, signal: null, stdout: '', stderr: '' };
       });
-      const ports = reviewLoop.createReviewLoopPorts('task-2225', { worktree: ROOT }, { log: () => {}, error: () => {} });
+      const ports = reviewLoop.createReviewLoopPorts('task-2225', { executionContext: missionExecutionContext({ missionId: 'task-2225', missionWorktree: ROOT }) }, { log: () => {}, error: () => {} });
       assert.equal(await ports.provider!.ensureReachable(), false, 'a failed bootstrap leaves the provider unreachable');
     });
   });

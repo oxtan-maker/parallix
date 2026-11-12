@@ -55,6 +55,18 @@ export class SqliteWorkflowOperationStore implements WorkflowOperationStore {
   latestByMission(): Promise<readonly WorkflowOperation[]> {
     return this.read('rowid IN (SELECT MAX(rowid) FROM workflow_operations WHERE repository_id = ? GROUP BY mission_id)', [this._repository]);
   }
+  async analyticsRevision(): Promise<string> {
+    const rows = await this._db.query<{ row_count: unknown; newest_row: unknown; generations: unknown;
+      newest_update: unknown; content_size: unknown }>(
+      `SELECT COUNT(*) AS row_count, COALESCE(MAX(rowid), 0) AS newest_row,
+              COALESCE(SUM(generation), 0) AS generations,
+              COALESCE(MAX(CASE WHEN json_valid(record_json) THEN json_extract(record_json, '$.updatedAt') ELSE '' END), '') AS newest_update,
+              COALESCE(SUM(LENGTH(record_json)), 0) AS content_size
+       FROM workflow_operations WHERE repository_id = ?`, [this._repository]);
+    const row = rows[0];
+    return [row?.row_count ?? 0, row?.newest_row ?? 0, row?.generations ?? 0,
+      row?.newest_update ?? '', row?.content_size ?? 0].join(':');
+  }
   async insert(operation: WorkflowOperation): Promise<void> {
     await this._db.execute('INSERT INTO workflow_operations (id, repository_id, mission_id, request_key, generation, phase, record_json) VALUES (?,?,?,?,?,?,?)',
       [operation.id, this._repository, operation.missionId, operation.requestKey, operation.generation, operation.phase, JSON.stringify(operation)]);

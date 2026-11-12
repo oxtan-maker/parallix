@@ -114,7 +114,7 @@ test('task-2438 board reads persisted repository missions from a sibling worktre
   try {
     writeCatalog(root, ['backlog', 'refined', 'active']);
     writeTask(root, 'tasks', 'task-2438-sibling', 'active', 'Sibling Markdown title');
-    const projection = await board(root).builder.build();
+    const projection = await board(root).builder.build({ settleHistoricalAnalytics: true });
 
     assert.deepEqual(projection.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);
     assert.equal(projection.metrics.verification?.executionMs, 0);
@@ -139,7 +139,7 @@ test('task-2438 board reads persisted repository missions from the primary workt
     fs.mkdirSync(path.dirname(checkpoint), { recursive: true });
     fs.writeFileSync(checkpoint, '# CP-1: stale file evidence\n');
     const firstBoard = board(root);
-    const projection = await firstBoard.builder.build();
+    const projection = await firstBoard.builder.build({ settleHistoricalAnalytics: true });
     // Metrics must use the board's supplied repository identity and history,
     // even when the worktree has no Git metadata or operator database.
     assert.deepEqual(projection.metrics.verification?.attempts.map(attempt => attempt.id), ['board-attempt']);

@@ -7,6 +7,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import { bindReviewPersistence, reviewLoopBindings } from '../../../src/composition/review-persistence.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { createEvent } from '../../../src/adapters/review/review-events.js';
 import { ConcreteReviewReadAdapter } from '../../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { type MissionStore, missionVersion } from '../../../src/application/domain-ports.js';
@@ -77,7 +78,7 @@ describe("review store bindings", { concurrency: false }, () => {
     ]);
 
     const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }),
     });
 
     assert.equal(result.consumed, true);
@@ -95,7 +96,7 @@ describe("review store bindings", { concurrency: false }, () => {
     ]);
 
     const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }),
     });
 
     assert.equal(result.consumed, false);
@@ -108,7 +109,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'approve', content: 'old approval', createdAt: '2026-08-04T10:00:00.000Z' },
     ]);
 
-    const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', { worktree: '/tmp/worktree' });
+    const result = await reviewLoopBindings(store).consumeReviewerArtifacts('task-9001', 'claude', { executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }) });
     assert.equal(result.consumed, false);
   });
 
@@ -119,7 +120,7 @@ describe("review store bindings", { concurrency: false }, () => {
     ]);
 
     const result = await reviewLoopBindings(store).consumeImplementerArtifacts('task-9001', 'codex', {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }),
     });
 
     assert.equal(result.consumed, true);
@@ -134,7 +135,7 @@ describe("review store bindings", { concurrency: false }, () => {
       { eventType: 'implementer_disposition', roundNumber: 3, actor: 'codex', disposition: 'CHANGES_MADE', content: 'old', createdAt: '2026-08-04T10:00:00.000Z' },
     ]);
 
-    const result = await reviewLoopBindings(store).consumeImplementerArtifacts('task-9001', 'codex', { worktree: '/tmp/worktree' });
+    const result = await reviewLoopBindings(store).consumeImplementerArtifacts('task-9001', 'codex', { executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }) });
     assert.equal(result.consumed, false);
   });
 

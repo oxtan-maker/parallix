@@ -1,6 +1,6 @@
 import type { MissionVersion } from '../../application/domain-ports.js';
 import { missionId, type Mission } from '../../domain/mission.js';
-import { currentReviewRound, type Review } from '../../domain/review.js';
+import { currentReviewRound, reviewReturnStage, type Review } from '../../domain/review.js';
 import type { ReviewRoundPorts, ReviewRoundResult } from './review-round.js';
 
 /** Finish the lane boundary using the stored decision, including after an interrupted write. */
@@ -16,6 +16,7 @@ export async function settleRequestedChanges(slug: string, mission: Mission & { 
     capabilities: new Set(['mission:transition']), command: { type: 'request-changes', review: mission.review },
     actor: operator ?? (round.decision.source?.author || round.reviewer), occurredAt: round.decision.decidedAt,
     idempotencyKey: `request-changes:${slug}:${round.decision.decidedAt}`,
+    workflowReturn: reviewReturnStage(round),
   });
   if (transition.status === 'completed') { return { outcome: 'recorded' }; }
   return { outcome: 'failed', diagnostic: `review → active transition failed for ${slug}: ${transition.error?.message ?? 'unknown failure'}`,

@@ -1,5 +1,7 @@
 import type { BoardProjection } from './board.js';
 import { formatCountdown } from './agent-countdown.js';
+import { agentIsWorking } from './mission-board.js';
+import { isOpenWorkflow } from '../../domain/workflow-operation.js';
 
 /**
  * Re-query the shared board projection when board-relevant state changes.
@@ -24,9 +26,14 @@ import { formatCountdown } from './agent-countdown.js';
 
 /** How often the interactive board re-queries the shared projection. */
 export const BOARD_REFRESH_INTERVAL_MS = 2_000;
+/** Idle boards need only bounded reconciliation for external changes. */
+export const BOARD_IDLE_REFRESH_INTERVAL_MS = 5_000;
 
 export interface BoardSubscriptionOptions {
+  /** Active reconciliation cadence; retained for existing callers. */
   readonly intervalMs?: number;
+  /** Idle reconciliation cadence and maximum failure backoff. */
+  readonly idleIntervalMs?: number;
   /** Timer seam so tests can drive the loop without waiting on a real clock. */
   readonly setTimer?: (_callback: () => void, _ms: number) => unknown;
   readonly clearTimer?: (_handle: unknown) => void;
@@ -50,6 +57,11 @@ export interface BoardSubscriptionOptions {
 
 export type BoardProjectionListener = (_projection: BoardProjection) => void;
 
+function projectionIsActive(projection: BoardProjection): boolean {
+  return projection.stages.some(stage => stage.cards.some(card => agentIsWorking(card)
+    || (card.workflowOperation ? isOpenWorkflow(card.workflowOperation) : false)));
+}
+
 /**
  * Start re-querying. Returns the unsubscribe function; calling it stops the
  * loop and drops any in-flight rebuild's result, so an unmounted TUI cannot be
@@ -61,6 +73,7 @@ export function subscribeToBoardProjection(
   options: BoardSubscriptionOptions = {},
 ): () => void {
   const intervalMs = options.intervalMs ?? BOARD_REFRESH_INTERVAL_MS;
+  const idleIntervalMs = Math.max(options.idleIntervalMs ?? BOARD_IDLE_REFRESH_INTERVAL_MS, intervalMs);
   const setTimer = options.setTimer ?? defaultSetTimer;
   const clearTimer = options.clearTimer ?? defaultClearTimer;
   const displayedCountdown = options.displayedCountdown ?? false;
@@ -68,20 +81,29 @@ export function subscribeToBoardProjection(
   let stopped = false;
   let handle: unknown = null;
   let lastFingerprint: string | null = null;
+  let active = true;
+  let failures = 0;
 
   const tick = async () => {
     try {
       const projection = await build();
       if (stopped) { return; }
+      active = projectionIsActive(projection);
+      failures = 0;
       const fingerprint = boardFingerprint(projection, { displayedCountdown });
       if (fingerprint !== lastFingerprint) {
         lastFingerprint = fingerprint;
         onChange(projection);
       }
     } catch (error) {
+      failures += 1;
       options.onError?.(error);
     } finally {
-      if (!stopped) { handle = setTimer(() => { void tick(); }, intervalMs); }
+      if (!stopped) {
+        const cadence = active ? intervalMs : idleIntervalMs;
+        const delay = failures === 0 ? cadence : Math.max(cadence, Math.min(idleIntervalMs, intervalMs * 2 ** Math.min(failures - 1, 8)));
+        handle = setTimer(() => { void tick(); }, delay);
+      }
     }
   };
 
@@ -97,9 +119,9 @@ export function subscribeToBoardProjection(
 /**
  * A stable digest of everything the board displays as state.
  *
- * Metrics series are deliberately excluded except agent availability: a
- * recomputed timestamp inside a chart must not count as "the board changed"
- * and repaint on every tick.
+ * Metrics series are deliberately excluded except agent availability and the
+ * historical analytics lifecycle: a recomputed chart timestamp must not count
+ * as "the board changed", but a completed historical refresh must repaint.
  *
  * Agent availability defaults to the raw metric, so every poll that moves
  * `blockedForMs` republishes. Interactive consumers whose displayed countdown is
@@ -147,6 +169,7 @@ export function boardFingerprint(
           runningSessions: agent.runningSessions,
         }))
       : projection.metrics.agentAvailability,
+    analytics: projection.metrics.analytics,
     sourceFacts: projection.sourceFacts,
   });
 }

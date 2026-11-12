@@ -2,6 +2,7 @@ import type { ReviewStateWriter } from '../../application/ports/review-persisten
 import type { AgentProcessResult } from '../agents/agent-process-types.js';
 import type { resolveTaskFile } from '../backlog/backlog.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 /**
  * Review Agent Fallback Module
  *
@@ -57,9 +58,9 @@ function recordedLaunches(state: FallbackReviewState): Record<string, unknown> {
 
 export async function markStageLaunchRecorded(
   state: FallbackReviewState | null,
-  opts: { stage: string; agentFamily: string; result?: AgentProcessResult; slug: string; worktree?: string; writeReviewStateFn?: ReviewStateWriter; missionStore?: MissionStore | null }
+  opts: { stage: string; agentFamily: string; result?: AgentProcessResult; slug: string; executionContext: LiveMissionExecutionContext; writeReviewStateFn?: ReviewStateWriter; missionStore?: MissionStore | null }
 ): Promise<boolean> {
-  const { stage, agentFamily, result, slug, worktree, writeReviewStateFn = writeReviewState, missionStore = null } = opts || {};
+  const { stage, agentFamily, result, slug, executionContext, writeReviewStateFn = writeReviewState, missionStore = null } = opts;
   if (!state || !agentFamily) { return true; }
   const key = stageWindowKey(stage, agentFamily);
   const fingerprint = stageLaunchFingerprint(agentFamily, result || null);
@@ -75,16 +76,16 @@ export async function markStageLaunchRecorded(
     ...(state.metadata.recordedStageLaunches as Record<string, unknown> || {}),
     [key]: [...recorded, fingerprint].slice(-20),
   };
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree || process.cwd(), missionStore);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, executionContext.missionWorktree, missionStore);
   return true;
 }
 
-function stageMeasurements({ result, worktree, sinceMs }: Parameters<typeof recordStageStatsSafe>[1]) {
+function stageMeasurements({ result, executionContext, sinceMs }: Parameters<typeof recordStageStatsSafe>[1]) {
   let durationMinutes: number | undefined;
   if (result && result.startedAt && result.endedAt) {
     durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
   }
-  const telemetry = resolveStageTelemetry({ worktree: worktree || '', result: result || {}, sinceMs: sinceMs || 0 });
+  const telemetry = resolveStageTelemetry({ worktree: executionContext.missionWorktree, result: result || {}, sinceMs: sinceMs || 0 });
   return { durationMinutes, telemetry, runId: result?.runId };
 }
 
@@ -92,10 +93,10 @@ export async function recordStageStatsSafe(
   kind: 'review' | 'active',
   opts: {
     configuration?: ParallixConfiguration;
+    executionContext: LiveMissionExecutionContext;
     stage: string;
     slug: string;
     rootDir?: string;
-    worktree?: string;
     implementer?: string;
     reviewer?: string;
     result?: AgentProcessResult;
@@ -107,17 +108,17 @@ export async function recordStageStatsSafe(
     missionStore?: MissionStore | null;
   }
 ): Promise<void> {
-  const { stage, slug, rootDir, worktree, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, missionStore = null } = opts;
+  const { stage, slug, rootDir, executionContext, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, missionStore = null } = opts;
   const { durationMinutes, telemetry, runId } = stageMeasurements(opts);
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
-    const currentState = state && await readReviewState(slug, worktree || process.cwd(), missionStore);
+    const currentState = state && await readReviewState(slug, executionContext.missionWorktree, missionStore);
     if (state && actorFamily && !(await markStageLaunchRecorded(currentState || state, {
       stage,
       agentFamily: actorFamily,
       result,
       slug,
-      worktree,
+      executionContext,
       writeReviewStateFn,
       missionStore
     }))) {
@@ -144,14 +145,14 @@ export async function applyAgentFallback(opts: {
   launchResult?: { agent?: string | null } | null;
   state?: FallbackReviewState;
   slug: string;
-  worktree?: string;
+  executionContext: LiveMissionExecutionContext;
   taskResolution?: ReturnType<typeof resolveTaskFile>;
   log?: (_msg: string) => void;
   writeReviewStateFn?: ReviewStateWriter;
   enforceTaskAssigneeFn?: typeof enforceTaskAssignee;
   missionStore?: MissionStore | null;
 }): Promise<string> {
-  const { role, original, launchResult, state = {}, slug, worktree, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn, missionStore = null } = opts;
+  const { role, original, launchResult, state = {}, slug, executionContext, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn, missionStore = null } = opts;
   if (!launchResult || !launchResult.agent || launchResult.agent === original) {
     return original;
   }
@@ -162,7 +163,7 @@ export async function applyAgentFallback(opts: {
   } else {
     state.implementer = fallback;
   }
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree || process.cwd(), missionStore);
+  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, executionContext.missionWorktree, missionStore);
   if (role === 'implementer' && taskResolution && taskResolution.ok) {
     if (enforceTaskAssigneeFn && !enforceTaskAssigneeFn(taskResolution.taskFile, fallback)) {
       log(fmt.status('WARN', `Could not enforce fallback implementer ${fallback} in backlog task.`));

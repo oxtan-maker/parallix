@@ -34,6 +34,8 @@ export interface LoopContext {
   readonly isContinue: boolean;
   readonly verbose: boolean;
   readonly initialRound: number;
+  /** This private context owns one selected slot in a parallel reviewer batch. */
+  readonly parallelReviewer?: boolean;
   readonly state: ReviewLoopState;
   /** Current identities; a launcher fallback replaces them for every later round. */
   readonly identities: { implementer: string; reviewer: string };
@@ -137,6 +139,7 @@ export function reboundCollaborators(context: LoopContext, role: ReviewRole, pro
     exclude: prompt ? [excludedFor(context, role)] : (launchOptions.exclude as string[] | undefined) ?? [],
     ...(prompt ? { prompt: prompt() } : {}),
     ...(role === 'reviewer' ? { sessionPolicy: 'fresh-ephemeral' as const } : {}),
+    ...(role === 'reviewer' ? { pinnedAgent: true } : {}),
     recovery: { prompt: launchOptions.prompt as (_actual: string) => unknown, sessionPolicy: launchOptions.sessionPolicy },
   }) ?? null;
   return {

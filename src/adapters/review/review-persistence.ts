@@ -13,6 +13,7 @@ import {
   consumeReviewerArtifacts,
 } from './review-artifacts.js';
 import { parseReviewFindings } from './review-round.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 /**
  * Bind every review-state operation to the Mission authority.
@@ -34,7 +35,7 @@ export function bindReviewPersistence(store: MissionStore | null, lifecycleServi
     readReviewState: boundReadReviewState,
     readReviewRounds: (slug: string, rootDir?: string) => readReviewRounds(slug, rootDir, store),
     writeReviewState: boundWriteReviewState,
-    resetReviewState: (slug: string, rootDir?: string) => resetReviewState(slug, rootDir, store, sessionMarkerPort),
+    resetReviewState: (slug: string, executionContext: LiveMissionExecutionContext) => resetReviewState(slug, executionContext, store, sessionMarkerPort),
     createEvent: boundCreateEvent,
     readAllEvents: (slug: string, options: Parameters<typeof readAllEvents>[1] = {}) =>
       readAllEvents(slug, { ...options, missionStore: store }),
@@ -44,7 +45,7 @@ export function bindReviewPersistence(store: MissionStore | null, lifecycleServi
     consumeReviewerArtifacts: (
       slug: string,
       reviewer: string,
-      options: Parameters<typeof consumeReviewerArtifacts>[2] = {},
+      options: Parameters<typeof consumeReviewerArtifacts>[2],
     ) => consumeReviewerArtifacts(slug, reviewer, {
       ...options,
       createEventFn: boundCreateEvent,
@@ -59,7 +60,7 @@ export function bindReviewPersistence(store: MissionStore | null, lifecycleServi
     consumeImplementerArtifacts: (
       slug: string,
       implementer: string,
-      options: Parameters<typeof consumeImplementerArtifacts>[2] = {},
+      options: Parameters<typeof consumeImplementerArtifacts>[2],
     ) => consumeImplementerArtifacts(slug, implementer, {
       ...options,
       createEventFn: boundCreateEvent,
@@ -87,11 +88,12 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
   const reviewerOutput = async (
     slug: string,
     reviewer: string,
-    options: Parameters<typeof consumeReviewerArtifacts>[2] = {},
+    options: Parameters<typeof consumeReviewerArtifacts>[2],
   ) => {
-    const state = await persistence.readReviewState(slug, options.worktree);
+    const worktree = options.executionContext.missionWorktree;
+    const state = await persistence.readReviewState(slug, worktree);
     if (!state) { return { consumed: false }; }
-    const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
+    const events = await persistence.readAllEvents(slug, { rootDir: worktree });
     const outcome = [...events].reverse().find((event) =>
       event.event_type === 'reviewer_outcome' && event.round === state.round && event.actor === reviewer
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
@@ -106,11 +108,12 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
   const implementerOutput = async (
     slug: string,
     implementer: string,
-    options: Parameters<typeof consumeImplementerArtifacts>[2] = {},
+    options: Parameters<typeof consumeImplementerArtifacts>[2],
   ) => {
-    const state = await persistence.readReviewState(slug, options.worktree);
+    const worktree = options.executionContext.missionWorktree;
+    const state = await persistence.readReviewState(slug, worktree);
     if (!state) { return { consumed: false }; }
-    const events = await persistence.readAllEvents(slug, { rootDir: options.worktree });
+    const events = await persistence.readAllEvents(slug, { rootDir: worktree });
     const disposition = [...events].reverse().find((event) =>
       event.event_type === 'implementer_disposition' && event.round === state.round && event.actor === implementer
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),

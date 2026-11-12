@@ -1,6 +1,6 @@
 import type { AgentFamily } from './agents.js';
-import type { ChangeRevision, Review, ReviewRound } from './review.js';
-import { currentRevisionApprovals } from './reviewer-result.js';
+import { reviewFindingId, type ChangeRevision, type Review, type ReviewFinding, type ReviewRound } from './review.js';
+import { currentRevisionApprovals, currentRevisionReviewerResults } from './reviewer-result.js';
 
 /**
  * How many independent agent approvals one exact revision owes.
@@ -148,9 +148,51 @@ function currentRound(review: Review): ReviewRound {
 
 /** True when a valid, non-revoked negative verdict exists for the exact revision. */
 export function hasNegativeResult(review: Review, revision: ChangeRevision): boolean {
-  const results = currentRound(review).reviewerResults ?? [];
-  return results.some(result => result.revision === revision && result.decision === 'changes-requested'
-    && result.outcome === 'completed' && result.status === 0 && !result.revokedAt);
+  return currentRevisionReviewerResults(review, revision).some(result => result.decision === 'changes-requested');
+}
+
+export type ReviewerPublicationResolution =
+  | { readonly kind: 'pending'; readonly awaiting: number }
+  | { readonly kind: 'approved'; readonly decidedAt: string }
+  | { readonly kind: 'changes-requested'; readonly decidedAt: string; readonly findings: readonly ReviewFinding[] };
+
+/** Namespace only colliding local ids, preserving familiar ids when unambiguous. */
+function aggregateFindings(results: readonly import('./reviewer-result.js').ReviewerResult[]): readonly ReviewFinding[] {
+  const counts = new Map<string, number>();
+  for (const result of results) {
+    for (const finding of result.findings) { counts.set(finding.id, (counts.get(finding.id) ?? 0) + 1); }
+  }
+  return [...results]
+    .sort((left, right) => left.agentFamily.localeCompare(right.agentFamily) || left.publicationId.localeCompare(right.publicationId))
+    .flatMap(result => result.findings.map(finding => ({ ...finding,
+      id: counts.get(finding.id) === 1 ? finding.id : reviewFindingId(`${result.agentFamily}:${finding.id}`),
+    })));
+}
+
+/**
+ * Reconcile separately attributed publications for one policy-bound revision.
+ * A selected identity contributes at most its first valid result. The round is
+ * pending until every required identity has published; after that any negative
+ * result wins and its blockers are aggregated deterministically.
+ */
+export function reconcileReviewerPublications(review: Review, revision: ChangeRevision): ReviewerPublicationResolution | null {
+  const policy = currentRound(review).reviewerPolicy;
+  if (!policy || policy.revision !== revision) { return null; }
+  const selected = new Set(policy.selected);
+  const results = currentRevisionReviewerResults(review, revision)
+    .filter(result => selected.has(result.agentFamily));
+  if (results.length < policy.requiredApprovals) {
+    return { kind: 'pending', awaiting: policy.requiredApprovals - results.length };
+  }
+  const negative = results.filter(result => result.decision === 'changes-requested');
+  if (negative.length > 0) {
+    return { kind: 'changes-requested', decidedAt: negative.map(result => result.publishedAt).sort((left, right) => left.localeCompare(right))[0], findings: aggregateFindings(negative) };
+  }
+  const approvals = results.filter(result => result.decision === 'approved');
+  if (approvals.length < policy.requiredApprovals) {
+    return { kind: 'pending', awaiting: policy.requiredApprovals - approvals.length };
+  }
+  return { kind: 'approved', decidedAt: approvals.map(result => result.publishedAt).sort((left, right) => left.localeCompare(right)).at(-1)! };
 }
 
 /**

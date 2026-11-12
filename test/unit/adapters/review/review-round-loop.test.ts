@@ -10,6 +10,7 @@ import { runReviewLoop } from '../../../../src/application/review-loop/review-lo
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { openReviewRound } from '../../../../src/adapters/review/review-round-open.js';
 import { reviewFindingId } from '../../../../src/domain/review.js';
+import { reviewerResultAttribution } from '../../../../src/adapters/review/reviewer-result-attribution.js';
 
 /**
  * The request-changes review contract over an injected MissionTransitionStore.
@@ -21,7 +22,7 @@ import { reviewFindingId } from '../../../../src/domain/review.js';
  * review round must advance the same pull request or local branch".
  */
 import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
-import { describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import {
@@ -33,6 +34,7 @@ import {
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId, type Mission } from '../../../../src/domain/mission.js';
+import { configureMissionWriteAuthorization } from '../../../../src/application/ports/mission-write-authorization.js';
 import {
   beginNextReviewRound,
   changeRevision,
@@ -40,6 +42,7 @@ import {
   currentReviewRound,
   reviewStatus,
   startReview,
+  type Review,
 } from '../../../../src/domain/review.js';
 
 const MISSION = missionId('task-round-loop');
@@ -47,6 +50,11 @@ const CAPABILITIES = new Set(['mission:intake', 'mission:transition', 'checkpoin
 const reviewer = agentFamily('codex');
 const implementer = agentFamily('custom');
 const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
+
+beforeEach(() => configureMissionWriteAuthorization({
+  operationId: 'review-operation', generation: 4, assert: async () => {},
+}));
+afterEach(() => configureMissionWriteAuthorization(null));
 
 const change = {
   kind: 'pull-request' as const,
@@ -84,7 +92,7 @@ describe('review round advancement', () => {
     assert.equal(findings[0].summary, 'px stats runs the import gate');
   });
 
-  it('records the reviewer decision and returns the mission to the implementer', async () => {
+  it('records the reviewer decision and returns the mission with typed workflow provenance (PX-0055.01)', async () => {
     const { store } = await reviewInProgress();
     const result = await recordRequestedChanges(MISSION, {
       findings: parseReviewFindings('## F1 (blocking): the import gate mutates the operator db'),
@@ -100,6 +108,8 @@ describe('review round advancement', () => {
     assert.equal(round.disposition, 'REQUEST_CHANGES');
     assert.equal(loaded.mission.status, 'active');
     assert.equal(reviewStatus(loaded.mission.review!), 'awaiting-implementation');
+    assert.deepEqual(store.events.at(-1)?.returnIdentity,
+      { stage: 'agent-review', operationId: 'review-operation', operationGeneration: 4 });
 
     // Replaying the same consumption is not a second decision.
     const replay = await recordRequestedChanges(MISSION, {
@@ -241,6 +251,43 @@ describe('review round advancement', () => {
     });
     assert.equal(resubmitted.status, 'completed', resubmitted.error?.message ?? '');
   });
+});
+
+it('duplicate, failed and late reviewer publications remain attributable without double-counting or erasing blockers (PX-0046.04)', async () => {
+  const secondReviewer = agentFamily('claude');
+  const base = startReview({ change, revision: changeRevision('rev-1') }, reviewer, implementer,
+    '2026-08-16T13:20:32.869Z', ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer, secondReviewer], strategy: 'random' }));
+  const round = currentReviewRound(base);
+  const review: Review = { ...base, rounds: [{ ...round, reviewerPolicy: {
+    revision: changeRevision('rev-1'), mode: 'two-independent' as const, requiredApprovals: 2 as const,
+    selected: [reviewer, secondReviewer], independentAvailable: 2, unavailable: [], rerouted: [], fallbackReason: null,
+  } }] };
+  const store = inMemoryTransitionStore(fixtureMission(String(MISSION), { status: 'review', assignee: implementer, review }));
+  const ports = { missionStore: store, lifecycleService: new MissionLifecycleService(store) };
+  const approval = { comment: null, revision: 'rev-1', decidedAt: '2026-08-16T13:30:00.000Z',
+    result: reviewerResultAttribution(reviewer, { status: 0, sessionId: 'codex-run-1' }) };
+
+  assert.deepEqual(await recordApproval(String(MISSION), approval, ports), { outcome: 'held', awaitingApprovals: 1 });
+  assert.deepEqual(await recordApproval(String(MISSION), approval, ports), { outcome: 'held', awaitingApprovals: 1 });
+  assert.equal(currentReviewRound(store.mission().review!).reviewerResults?.length, 1, 'one publication identity contributes once');
+
+  const failed = await recordApproval(String(MISSION), { ...approval, decidedAt: '2026-08-16T13:31:00.000Z',
+    result: reviewerResultAttribution(reviewer, { status: 1, sessionId: 'codex-failed-run' }) }, ports);
+  assert.deepEqual(failed, { outcome: 'held', awaitingApprovals: 1 }, 'a failed native run is retained but contributes no approval');
+
+  await recordRequestedChanges(String(MISSION), {
+    findings: [{ id: reviewFindingId('F1'), summary: 'retain this blocker', location: null }], comment: null,
+    revision: 'rev-1', decidedAt: '2026-08-16T13:32:00.000Z',
+    result: reviewerResultAttribution(secondReviewer, { status: 0, sessionId: 'claude-run-1' }),
+  }, ports);
+  const late = await recordApproval(String(MISSION), { ...approval, decidedAt: '2026-08-16T13:33:00.000Z',
+    result: reviewerResultAttribution(reviewer, { status: 0, sessionId: 'codex-late-run' }) }, ports);
+  assert.equal(late.outcome, 'unchanged');
+  const decided = currentReviewRound(store.mission().review!);
+  assert.equal(decided.decision?.kind, 'changes-requested');
+  assert.deepEqual(decided.decision?.kind === 'changes-requested' ? decided.decision.findings.map(finding => finding.summary) : [], ['retain this blocker']);
+  assert.deepEqual(decided.reviewerResults?.map(result => result.publicationId).sort(),
+    ['claude-run-1', 'codex-failed-run', 'codex-late-run', 'codex-run-1']);
 });
 
 it('workflow-rejected verdicts expose cause and supported recovery without clearing stops (px-0017)', async () => {

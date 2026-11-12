@@ -340,12 +340,17 @@ test('board FLOW retains recovered returns outside its cached analytical event f
   const lanes = new MockLaneEventRepo([{ repositoryId: repo, missionId: id, fromStatus: 'integration', toStatus: 'done', trigger: 'land',
     agent: 'human', occurredAt: closedAt, idempotencyKey: 'land' }]);
   try {
-    const projection = await composeBoardProjection({ rootDir, missionStore: store, repositoryId: repo,
+    const builder = composeBoardProjection({ rootDir, missionStore: store, repositoryId: repo,
       blocklistRepo: new MockBlocklistRepo(), historyRepo: history, laneEventRepo: lanes, usageRepo: new MockUsageRepo(), knownAgentFamilies: [],
       launcherProbe: () => ({ available: true, detail: null }), readAgentConfig: () => null, detectRunningSessions: () => null,
       providerExecution: { observe: () => ({ observedAt: closedAt, complete: true, invocations: [], limitations: [] }) },
       gitFn: () => ({ status: 0, stdout: '', stderr: '' }), gateEvidence: { readDeclaredGates: async () => ({ checkout: { kind: 'absent' }, gates: [] }),
-        readIntegrationGates: async () => ({ checkout: { kind: 'absent' }, configured: [], gates: [], running: null }) } }).builder.build();
+        readIntegrationGates: async () => ({ checkout: { kind: 'absent' }, configured: [], gates: [], running: null }) } }).builder;
+    const current = await builder.build();
+    assert.equal(current.metrics.analytics?.freshness, 'unavailable');
+    await new Promise(resolve => setImmediate(resolve));
+    const projection = await builder.build();
+    assert.equal(projection.metrics.analytics?.freshness, 'fresh');
     assert.equal(projection.metrics.flow?.current.graph.nodes.find(node => node.id === 'implement')?.rework, 1);
     assert.equal(projection.metrics.flow?.current.sendBacks.human.numerator, 1);
   } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }

@@ -142,7 +142,7 @@ export interface IntegrationAgentFallbackOptions {
   original: string;
   role: 'implementer';
   slug: string;
-  worktree: string;
+  executionContext: LiveMissionExecutionContext;
   state: IntegrationReviewSnapshot;
   taskResolution?: Record<string, unknown>;
   missionStore: MissionStore;

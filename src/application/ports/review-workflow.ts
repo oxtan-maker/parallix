@@ -1,23 +1,35 @@
 import type { LiveMissionExecutionContext } from './mission-execution-context.js';
 
-/** Application-owned boundary for all review lifecycle operations. */
-export interface ReviewWorkflowContext {
+interface ReviewWorkflowContextBase {
   readonly slug: string;
   readonly args: string[];
   readonly options: Record<string, unknown>;
-  readonly executionContext?: LiveMissionExecutionContext;
 }
+
+/** Discovery operations that cannot mutate Mission or review state. */
+export interface ReviewReadOnlyWorkflowContext extends ReviewWorkflowContextBase {
+  readonly kind: 'read-only';
+}
+
+/** Review mutations always carry the checkout identity resolved at entry. */
+export interface ReviewMutationWorkflowContext extends ReviewWorkflowContextBase {
+  readonly kind: 'mutation';
+  readonly executionContext: LiveMissionExecutionContext;
+}
+
+/** Application-owned boundary for all review lifecycle operations. */
+export type ReviewWorkflowContext = ReviewReadOnlyWorkflowContext | ReviewMutationWorkflowContext;
 
 export interface ReviewWorkflowPort {
   preflight(_args: string[], _options?: Record<string, unknown>): Promise<ReviewWorkflowContext | null> | ReviewWorkflowContext | null;
-  verify(_context: ReviewWorkflowContext): Promise<void> | void;
-  submit(_context: ReviewWorkflowContext): Promise<void> | void;
-  push(_context: ReviewWorkflowContext): Promise<void> | void;
-  enter(_context: ReviewWorkflowContext): Promise<void> | void;
-  comment(_context: ReviewWorkflowContext): Promise<void> | void;
-  readComments(_context: ReviewWorkflowContext): Promise<void> | void;
-  submitReview(_context: ReviewWorkflowContext): Promise<void> | void;
-  close(_context: ReviewWorkflowContext): Promise<void> | void;
-  status(_context: ReviewWorkflowContext): Promise<void> | void;
-  reconcileReview(_context: ReviewWorkflowContext): Promise<void> | void;
+  verify(_context: ReviewReadOnlyWorkflowContext): Promise<void> | void;
+  submit(_context: ReviewMutationWorkflowContext): Promise<void> | void;
+  push(_context: ReviewMutationWorkflowContext): Promise<void> | void;
+  enter(_context: ReviewMutationWorkflowContext): Promise<void> | void;
+  comment(_context: ReviewMutationWorkflowContext): Promise<void> | void;
+  readComments(_context: ReviewReadOnlyWorkflowContext): Promise<void> | void;
+  submitReview(_context: ReviewMutationWorkflowContext): Promise<void> | void;
+  close(_context: ReviewMutationWorkflowContext): Promise<void> | void;
+  status(_context: ReviewReadOnlyWorkflowContext): Promise<void> | void;
+  reconcileReview(_context: ReviewMutationWorkflowContext): Promise<void> | void;
 }

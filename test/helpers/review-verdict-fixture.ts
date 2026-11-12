@@ -15,6 +15,14 @@ export function reviewVerdictFixture(slug: string, reviewerName = 'codex', imple
   const missionStore = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', rawStatus: 'review', assignee: implementer, review }));
   const lifecycleService = new MissionLifecycleService(missionStore);
   const persistence = bindReviewPersistence(missionStore, lifecycleService);
+  // This fixture owns a one-reviewer round. Keep explicit approval refreshes
+  // isolated from workstation agent configuration and availability.
+  const reviewerRouting = {
+    eligibleFamilies: () => [reviewer],
+    launcherStatus: () => ({ supported: true, detail: 'fixture reviewer' }),
+    nominate: () => reviewer,
+    runtimeMatrix: () => [],
+  };
   return { missionStore, lifecycleService, revision, readReviewStateFn: persistence.readReviewState,
-    writeReviewStateFn: persistence.writeReviewState, createEventFn: persistence.createEvent };
+    writeReviewStateFn: persistence.writeReviewState, createEventFn: persistence.createEvent, reviewerRouting };
 }

@@ -5,7 +5,7 @@ import { assertReviewPhaseTransition } from '../../domain/review-phase-policy.js
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
-import { missionBranchName, resolveWorktree } from '../filesystem/mission-utils.js';
+import { missionBranchName } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { readToken, postComment, postReview, getPrAuthor } from './review-adapter.js';
@@ -15,6 +15,7 @@ import type { MissionLifecycleService } from '../../application/mission-lifecycl
 import { buildMetadataFooter, type CreateEventFn, type ReviewStateReader } from './review-artifact-files.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { reviewerResultAttribution } from './reviewer-result-attribution.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 // =====================================================================
 // Workflow Comment/Review Posting
@@ -29,15 +30,15 @@ export async function postWorkflowComment(
     postCommentFn?: typeof postComment;
     buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
     readReviewStateFn?: ReviewStateReader;
-    rootDir?: string;
+    executionContext: LiveMissionExecutionContext;
     reviewIdentity?: string;
     forgejoUser?: string;
     missionStore?: MissionStore | null;
     configuration?: ParallixConfiguration;
-  } = {}
+  }
 ): Promise<{ ok: boolean; error?: string }> {
   const { log, error, readTokenFn, postCommentFn, buildMetadataFooterFn, readReviewStateFn } = postWorkflowCommentBindings(options);
-  const rootDir = options.rootDir || resolveWorktree(slug) || process.cwd();
+  const rootDir = options.executionContext.missionWorktree;
   const branch = missionBranchName(slug, rootDir);
   const identityResolved = options.reviewIdentity
     || options.forgejoUser
@@ -95,7 +96,7 @@ async function recordLocalReviewVerdict(
   slug: string,
   outcome: string,
   options: {
-    worktree?: string;
+    executionContext: LiveMissionExecutionContext;
     writeReviewStateFn?: typeof writeReviewState;
     createEventFn?: CreateEventFn;
     readReviewStateFn?: ReviewStateReader;
@@ -105,9 +106,9 @@ async function recordLocalReviewVerdict(
     revision?: string;
     recordApprovalFn?: typeof recordApproval;
     lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
-  } = {}
+  }
 ): Promise<boolean> {
-  const { missionStore, worktree, writeReviewStateFn, createEventFn, readReviewStateFn, log, error } = recordLocalReviewVerdictBindings(options, slug);
+  const { missionStore, worktree, writeReviewStateFn, createEventFn, readReviewStateFn, log, error } = recordLocalReviewVerdictBindings(options);
   const existing = await Promise.resolve(readReviewStateFn(slug, worktree, missionStore));
   // TASK-2385: a read miss must not fabricate a round-1 verdict. The old
   // `round: 1` fallback silently downgraded the round and fed the stale-round
@@ -166,7 +167,7 @@ export async function postWorkflowReview(
     postReviewFn?: typeof postReview;
     buildMetadataFooterFn?: (_s: string, _r?: string, _store?: MissionStore | null) => string | Promise<string>;
     readReviewStateFn?: ReviewStateReader;
-    worktree?: string;
+    executionContext: LiveMissionExecutionContext;
     revision?: string;
     reviewIdentity?: string;
     forgejoUser?: string;
@@ -177,10 +178,10 @@ export async function postWorkflowReview(
     lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
     recordApprovalFn?: typeof recordApproval;
     configuration?: ParallixConfiguration;
-  } = {}
+  }
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean; reason?: string; prAuthor?: unknown }> {
   const { log, error, readTokenFn, postReviewFn, buildMetadataFooterFn, readReviewStateFn } = postWorkflowReviewBindings(options);
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   const branch = missionBranchName(slug, worktree);
   const identityResolved = options.reviewIdentity
     || options.forgejoUser
@@ -199,7 +200,7 @@ export async function postWorkflowReview(
   if (prAuthor && prAuthor === reviewIdentity) {
     const diagnostic = `Reviewer "${reviewIdentity}" is the PR author for ${branch}; independent review is required. Self-author verdict "${outcome}" is advisory and cannot approve the Mission or advance integration.`;
     const allowed = await recordLocalReviewVerdict(slug, outcome, {
-      worktree,
+      executionContext: options.executionContext,
       writeReviewStateFn: options.writeReviewStateFn,
       createEventFn: options.createEventFn,
       readReviewStateFn: readReviewStateFn,
@@ -257,9 +258,9 @@ function postWorkflowCommentBindings(options: NonNullable<Parameters<typeof post
   return { log, error, readTokenFn, postCommentFn, buildMetadataFooterFn, readReviewStateFn };
 }
 
-function recordLocalReviewVerdictBindings(options: NonNullable<Parameters<typeof recordLocalReviewVerdict>[2]>, slug: string) {
+function recordLocalReviewVerdictBindings(options: NonNullable<Parameters<typeof recordLocalReviewVerdict>[2]>) {
   const missionStore = options.missionStore ?? null;
-  const worktree = options.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = options.executionContext.missionWorktree;
   const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
   const createEventFn = options.createEventFn || createEvent;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;

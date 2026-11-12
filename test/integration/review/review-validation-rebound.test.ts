@@ -16,8 +16,8 @@ const { submitForReview } = reviewCommandsModule;
 const { mock } = test;
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
 import { runReviewLoop } from '../../../src/application/review-loop/review-loop.js';
-import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+import { fakeReviewLoopPorts } from '../../helpers/review-loop-ports.js';
 import { ReviewPreparationFacts } from '../../../src/application/ports/review-round.js';
 
 // Reproduction tests for task-2234 (push-to-reviewer autobounce).
@@ -174,7 +174,7 @@ test("task-2234 repro: review-loop self-heal auto-bounces to active on validatio
 test('task-2234 repro: review-loop self-heal fails closed when validation-failure state cannot commit', async () => {
   await withTempGitRepo(async (root) => {
     // The real review-state mechanism reports the write that did not commit.
-    const bound = createReviewLoopPorts('task-2234', { worktree: root }, {
+    const bound = createReviewLoopPorts('task-2234', { executionContext: missionExecutionContext({ missionId: 'task-2234', missionWorktree: root }) }, {
       log: () => {}, error: () => {},
       readReviewState: () => null,
       writeReviewState: (async () => ({ outcome: 'write-failed' as const, stage: 'write', diagnostic: 'simulated database write failure' })),

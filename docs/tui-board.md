@@ -15,6 +15,8 @@ operational board.
 Set `PARALLIX_NO_TUI=1` to restore the previous interactive no-command behavior:
 `px` prints usage help and exits successfully. Piped, CI, and redirected-output
 no-command invocations already use that same usage-help behavior automatically.
+An explicitly piped `px ui` still emits one finite frame; it waits for the
+initial historical FLOW summary so that frame is complete, then exits.
 
 ## Layout
 
@@ -208,7 +210,7 @@ time: **All agents** or a concrete recorded implementer family, paired with the
 current or previous decision window. **Mission order** preserves the observed
 step sequence; **Longest first** reorders only the elapsed-time rows. The cards,
 actor graph, return paths, timing rows, totals and state cards all come from the
-same selected projection. Missing observations remain named collection gaps,
+same selected projection. Missing observations remain named observation gaps,
 and elapsed time without a recorded owner is shown as not observed rather than
 assigned to an actor or replaced with zero. Wide graph and timing regions scroll
 locally on narrow screens so their labels and return loops keep their desktop

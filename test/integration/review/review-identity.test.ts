@@ -1,6 +1,7 @@
 import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 // review identity.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
 import test, { describe } from 'node:test';
@@ -20,6 +21,7 @@ import { buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from '../../.
 // Regression provenance: TASK-2622.08.
 describe("review identity", { concurrency: false }, () => {
   const TEST_SLUG = 'task-test-identity-fail';
+  const executionContext = missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: process.cwd() });
 
   function reviewStateStub(reviewer = 'claude', implementer = 'mistral') {
     return new ReviewState(TEST_SLUG, {
@@ -88,6 +90,7 @@ describe("review identity", { concurrency: false }, () => {
     try {
       const writes: { slug: string; reviewer: unknown; }[] = [];
       const { exitCode, errors } = await captureExit(() => commentRound(TEST_SLUG, 'test message', {
+        executionContext,
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
         writeReviewStateFn: reviewStateWriterFixture(async (slug, state) => writes.push({ slug, reviewer: state.reviewer })),
         postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -127,8 +130,8 @@ describe("review identity", { concurrency: false }, () => {
     try {
       const authority = reviewVerdictFixture(TEST_SLUG, 'claude', 'mistral');
       const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+        executionContext,
         ...authority,
-        readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
         getPrAuthorFn: () => 'different-author',
         postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         readTokenFn: () => 'token-123',
@@ -149,8 +152,8 @@ describe("review identity", { concurrency: false }, () => {
     try {
       let capturedUser: { value: string | null } = { value: null };
       const { exitCode, errors } = await captureExit(() => submitReviewRound(TEST_SLUG, 'approve', 'test summary', {
+        executionContext,
         ...reviewVerdictFixture(TEST_SLUG, 'state-reviewer', 'state-implementer'),
-        readReviewStateFn: () => reviewStateStub('state-reviewer', 'state-implementer'),
         writeReviewStateFn: reviewStateWriterFixture(async () => {}),
         postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
         readTokenFn: (user) => {
@@ -176,6 +179,7 @@ describe("review identity", { concurrency: false }, () => {
     try {
       const logs: string[] = [];
       const { exitCode, errors } = await captureExit(() => closeMissionPr(TEST_SLUG, {
+        executionContext,
         readReviewStateFn: () => reviewStateStub('claude', 'mistral'),
         readTokenFn: () => 'token-123',
         closePrFn: async () => ({ ok: true as const }),

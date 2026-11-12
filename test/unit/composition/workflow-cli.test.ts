@@ -8,7 +8,7 @@ import type { Command } from '../../../src/interfaces/cli/runtime.js';
 import type { WorkflowOperation } from '../../../src/domain/workflow-operation.js';
 import type { MissionTerminalCapability } from '../../../src/application/ports/mission-terminal.js';
 import { completed, failure } from '../../../src/application/contracts.js';
-import type { BoardCommandRequest } from '../../../src/application/controller/board-command.js';
+import type { BoardCommandDispatcher, BoardCommandRequest } from '../../../src/application/controller/board-command.js';
 
 test('review SIGTERM disconnects without fencing its detached reviewer (TASK-2826)', async () => {
   const before = process.listenerCount('SIGTERM');
@@ -76,7 +76,7 @@ test('public rebase enters durable workflow ownership and the inherited worker r
 });
 
 test('CLI streams only its coordinator bytes incrementally and renders phase changes (TASK-2750 F4)', async () => {
-  const text: string[] = []; const phases: string[] = []; const after: number[] = [];
+  const text: string[] = []; const phases: string[] = []; const after: number[] = []; let now = 0;
   const terminal = { history: () => ({ ok: true, runs: [
     { record: { operationId: 'owned', runId: 'run', captureKind: 'coordinator' } },
     { record: { operationId: 'foreign', runId: 'other', captureKind: 'coordinator' } },
@@ -84,12 +84,65 @@ test('CLI streams only its coordinator bytes incrementally and renders phase cha
     after.push(request.after);
     return { ok: true, text: request.stream === 'stdout' && request.after === 0 ? 'gate failed: detail\n' : '', to: 20, atEnd: true, running: false };
   } } as unknown as MissionTerminalCapability;
-  const observe = workflowCliObserver(terminal, event => phases.push(event.phase), line => text.push(line));
+  const observe = workflowCliObserver(terminal, event => phases.push(event.phase), line => text.push(line), false, undefined,
+    { now: () => now, activeMs: 1000, idleMs: 5000 });
   const operation = { id: 'owned', missionId: 'task-test', phase: 'executing', reason: 'checking gate' } as WorkflowOperation;
-  await observe(operation); await observe(operation);
+  await observe(operation); now = 1000; await observe(operation);
   assert.deepEqual(text, ['gate failed: detail\n']);
   assert.deepEqual(phases, ['executing']);
   assert.deepEqual(after, [0, 0, 20, 20]);
+});
+
+test('CLI observation reconciles at active and idle cadence with cursors, immediate changes and failure backoff (PX-0058.02)', async () => {
+  let now = 0;
+  let histories = 0;
+  let state: 'running' | 'exited' = 'running';
+  let failHistory = false;
+  const after: number[] = [];
+  const progress: string[] = [];
+  const terminal = {
+    history: () => {
+      histories += 1;
+      if (failHistory) { return { ok: false, error: 'missing', detail: 'temporarily unavailable' }; }
+      return { ok: true, unattributed: [], runs: [{ state, record: { operationId: 'owned', runId: 'worker', captureKind: 'coordinator', supervisorPid: process.pid + 1 } }] };
+    },
+    page: (_mission: string, request: { stream: string; after: number }) => {
+      after.push(request.after);
+      const to = request.stream === 'stdout' ? 7 : 0;
+      return { ok: true, text: request.after === 0 && to > 0 ? 'output\n' : '', from: request.after, to, atEnd: true, running: state === 'running' };
+    },
+  } as unknown as MissionTerminalCapability;
+  const timing = { now: () => now, activeMs: 1000, idleMs: 5000 };
+  const observe = workflowCliObserver(terminal, event => progress.push(event.message), () => {}, false, undefined, timing);
+  const active = { id: 'owned', missionId: 'task-test', phase: 'executing', reason: 'working', updatedAt: 'one' } as WorkflowOperation;
+
+  await observe(active);
+  now = 999; await observe(active);
+  assert.deepEqual({ histories, after }, { histories: 1, after: [0, 0] }, 'unchanged active ticks reuse attribution and stream cursors');
+  now = 1000; await observe(active);
+  assert.deepEqual({ histories, after }, { histories: 2, after: [0, 0, 7, 0] });
+
+  state = 'exited';
+  const completed = { ...active, phase: 'completed', reason: 'done', updatedAt: 'two' } as WorkflowOperation;
+  await observe(completed);
+  assert.deepEqual(progress, ['working', 'done'], 'a relevant operation change is reported immediately');
+  now = 5999; await observe(completed);
+  assert.equal(histories, 3, 'idle reconciliation waits the full five seconds');
+  now = 6000; await observe(completed);
+  assert.equal(histories, 4);
+
+  let failures = 0;
+  failHistory = true;
+  const failing = workflowCliObserver({ ...terminal, history: () => { failures += 1; return { ok: false, error: 'missing', detail: 'offline' }; } } as unknown as MissionTerminalCapability,
+    undefined, () => {}, false, undefined, timing);
+  now = 10_000; await failing(active);
+  now = 10_999; await failing(active);
+  now = 11_000; await failing(active);
+  now = 12_999; await failing(active);
+  now = 13_000; await failing(active);
+  now = 16_999; await failing(active);
+  now = 17_000; await failing(active);
+  assert.equal(failures, 4, 'failed discovery backs off at 1s, 2s and 4s without a retry loop');
 });
 
 test('CLI replay reports retention gaps and expiry in order, including after a restart (TASK-2816)', async () => {
@@ -104,16 +157,18 @@ test('CLI replay reports retention gaps and expiry in order, including after a r
     } } as unknown as MissionTerminalCapability;
   const operation = { id: 'owned', missionId: 'task-test', phase: 'executing' } as WorkflowOperation;
   const output: string[] = [];
-  const observe = workflowCliObserver(terminal, undefined, text => output.push(text), true);
-  await observe(operation); await observe(operation);
+  let now = 0;
+  const timing = { now: () => now, activeMs: 1000, idleMs: 5000 };
+  const observe = workflowCliObserver(terminal, undefined, text => output.push(text), true, undefined, timing);
+  await observe(operation); now += 1000; await observe(operation);
   assert.deepEqual(output, ['\n[worker:stdout: bytes 0-100 were not retained]\n', 'retained tail\n'], 'the loss is reported once, before the retained bytes');
   const restarted: string[] = [];
-  await workflowCliObserver(terminal, undefined, text => restarted.push(text), true)(operation);
+  await workflowCliObserver(terminal, undefined, text => restarted.push(text), true, undefined, timing)(operation);
   assert.deepEqual(restarted, output, 'a restarted observer reports the same loss in the same order');
   stage = 'unreadable';
-  await observe(operation); await observe(operation);
+  now += 1000; await observe(operation); now += 1000; await observe(operation);
   stage = 'expired';
-  await observe(operation); await observe(operation);
+  now += 1000; await observe(operation); now += 1000; await observe(operation);
   assert.deepEqual(output.slice(2), [
     '\n[worker:stdout: output from byte 114 is no longer retained (missing)]\n',
     '\n[worker:stderr: output from byte 0 is no longer retained (missing)]\n',
@@ -134,9 +189,12 @@ test('CLI observation excludes its own capture to prevent output feedback and un
     const bytes = request.stream === 'stdout' ? own ? captured : 'worker diagnostic\n' : '';
     return { ok: true, text: bytes.slice(request.after), to: bytes.length, atEnd: true, running: own };
   } } as unknown as MissionTerminalCapability;
-  const observe = workflowCliObserver(terminal, undefined, text => { captured += text; });
+  let now = 0;
+  const observe = workflowCliObserver(terminal, undefined, text => { captured += text; }, false, undefined,
+    { now: () => now, activeMs: 1000, idleMs: 5000 });
   const operation = { id: 'owned', missionId: 'task-test', phase: 'completed', updatedAt: 'now' } as WorkflowOperation;
   assert.equal(await observe(operation), true);
+  now = 5000;
   assert.equal(await observe(operation), true);
   assert.equal(captured, 'worker diagnostic\n');
   assert.deepEqual(pages, ['worker', 'worker', 'worker', 'worker']);
@@ -166,11 +224,13 @@ test('redirected CLI output retains final progress lines without spinner debris 
   const terminal = { history: () => ({ ok: true, runs: [{ record: { operationId: 'owned', runId: 'worker', captureKind: 'coordinator' } }] }),
     page: (_mission: string, request: { after: number; stream: string }) => ({ ok: true, text: request.stream === 'stdout' ? text.slice(request.after) : '',
       to: request.stream === 'stdout' ? text.length : 0, atEnd: true, running }) } as unknown as MissionTerminalCapability;
-  const observe = workflowCliObserver(terminal, undefined, chunk => { output += chunk; }, false);
+  let now = 0;
+  const observe = workflowCliObserver(terminal, undefined, chunk => { output += chunk; }, false, undefined,
+    { now: () => now, activeMs: 1000, idleMs: 5000 });
   const operation = { id: 'owned', missionId: 'task-test', phase: 'executing' } as WorkflowOperation;
   await observe(operation);
   text += '\r⠙ checking\r\x1b[2KPASS gate\nordered message\n';
-  await observe(operation); running = false; await observe(operation); await observe(operation);
+  now += 1000; await observe(operation); running = false; now += 1000; await observe(operation); now += 1000; await observe(operation);
   assert.equal(output, 'PASS gate\nordered message\n');
 });
 
@@ -189,6 +249,32 @@ test('foreground repeated interrupts share cancellation and remain handled throu
   await assert.rejects(async () => registry.draft(['task-test']), /interrupted/);
   assert.equal(requested, true);
   assert.equal(process.listenerCount('SIGINT'), before);
+});
+
+test('production failure decoration retains durable workflow surface and bindings (PX-0058.01)', async () => {
+  const { workflowFailureController } = await import('../../../src/composition/workflow-cli.js');
+  const binding = Symbol('production dispatcher');
+  const operation = { id: 'owned', missionId: 'task-test', command: 'active:execute', phase: 'accepted' } as WorkflowOperation;
+  const calls: string[] = [];
+  const production: BoardCommandDispatcher & { binding: symbol } = {
+    binding,
+    canExecute() { assert.equal(this.binding, binding); return true; },
+    async admit(request) { assert.equal(this.binding, binding); calls.push(`admit:${request.operationId}`); return { status: 'accepted', operation }; },
+    async operation(id) { assert.equal(this.binding, binding); calls.push(`operation:${id}`); return operation; },
+    async current(mission) { assert.equal(this.binding, binding); calls.push(`current:${mission}`); return operation; },
+    async dispatch<T>() { assert.equal(this.binding, binding); return completed(operation) as import('../../../src/application/contracts.js').ApplicationOutcome<T>; },
+  };
+  const controller = workflowFailureController(production, id => production.operation!(id));
+  const request = { kind: 'active:execute', operationId: 'owned', missionId: 'task-test', capabilities: new Set(['active:execute']) } as BoardCommandRequest;
+
+  assert.equal(controller.canExecute(request.kind), true);
+  assert.equal(typeof controller.admit, 'function');
+  assert.equal(typeof controller.operation, 'function');
+  assert.equal(typeof controller.current, 'function');
+  assert.equal((await controller.admit!(request)).status, 'accepted');
+  assert.equal(await controller.operation!('owned'), operation);
+  assert.equal(await controller.current!('task-test'), operation);
+  assert.deepEqual(calls, ['admit:owned', 'operation:owned', 'current:task-test']);
 });
 
 test('owned CLI failure footer follows verbose trailing output and preserves outcome metadata (TASK-2772)', async () => {
@@ -244,10 +330,12 @@ test('retained diagnostics survive long trailing replay before command, signal a
       const to = running ? Math.min(bytes.length, 600) : bytes.length;
       return { ok: true, text: bytes.slice(request.after, to), to, atEnd: to === bytes.length, running };
     } } as unknown as MissionTerminalCapability;
-    const observe = workflowCliObserver(terminal, undefined, text => { output += text; }, false);
+    let now = 0;
+    const observe = workflowCliObserver(terminal, undefined, text => { output += text; }, false, undefined,
+      { now: () => now, activeMs: 1000, idleMs: 5000 });
     const controller = workflowFailureController({ canExecute: () => true, async dispatch<T>() {
       assert.equal(await observe(operation), false);
-      running = false;
+      running = false; now = 1000;
       assert.equal(await observe(operation), true);
       return failure<T>('execution', 'Workflow exited with status 1');
     } }, async () => operation, async op => workflowFailureEvidence(op, [record], [], scenario === 'exhaustion'

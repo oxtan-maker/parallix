@@ -20,6 +20,7 @@ import type { ReviewWorkflowContext } from '../../../src/application/ports/revie
 import { missionId } from '../../../src/domain/mission.js';
 import { projectExecutionActivity } from '../../../src/domain/execution-activity.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 const SLUG = 'task-2620';
 
@@ -54,7 +55,7 @@ function reviewWorkflow(onContinue: (_context: ReviewWorkflowContext) => Promise
   const unused = () => { throw new Error('Unexpected review workflow operation'); };
   return {
     verify: unused, submit: unused, push: unused, comment: unused, readComments: unused, submitReview: unused, close: unused, status: unused, reconcileReview: unused,
-    async preflight(args: string[], options: Record<string, unknown> = {}) { return { slug: SLUG, args, options }; },
+    async preflight(args: string[], options: Record<string, unknown> = {}) { return { kind: 'mutation' as const, executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/worktree' }), slug: SLUG, args, options }; },
     enter: onContinue,
   };
 }

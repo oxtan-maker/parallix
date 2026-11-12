@@ -220,6 +220,7 @@ export class SqliteMissionStore implements MissionStore {
         agent: event.agent,
         occurredAt: event.occurredAt,
         idempotencyKey: event.idempotencyKey,
+        ...(event.returnIdentity ? { returnIdentity: event.returnIdentity } : {}),
       });
       if (!appended) {
         throw new DuplicateLaneEventError(event.idempotencyKey);

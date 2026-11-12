@@ -107,7 +107,7 @@ test('pushRound follows the transition contract: review before createPr', async 
   const logs = [];
 
   const opts = {
-    resolveWorktreeFn: () => '/tmp/worktree',
+    executionContext: missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: '/tmp/worktree' }),
     resolveTaskFileFn: () => ({ matches: ['/tmp/task.md'],  ok: true as const, taskFile: '/tmp/task.md' }),
     getTaskImplementerFn: () => 'gemini',
     readTokenFn: () => 'token',

@@ -417,14 +417,35 @@ rebases; it does not move the target or silently discard mission commits.
 Each reviewed revision owes agent approvals according to which independent
 reviewers can actually run: two distinct reviewers when two can, one when only
 one can, and otherwise the implementer's own agent in a fresh context. Reviewers
-run one after another on the same revision. A reviewer that cannot launch is
-replaced by another eligible agent before the requirement drops to one; a
-reviewer that is busy, queued or silent never lowers it, and a request for
-changes is not outvoted by approvals. The recorded policy, with the reason for
-any fallback, appears in the review output. A classifier may return unresolved
-work to implementation, but its clear result cannot substitute for the required
-reviewer approvals. Human inspection in Forgejo or
-through `px integrate` stays optional and never becomes a required verdict.
+that admission permits start concurrently in fresh contexts against the same
+verified revision. Busy admitted work stays queued and required; no implementer
+repair starts until every admitted reviewer has settled. Each native reviewer
+has private non-interactive stdin and a separately identified durable run history.
+A reviewer proved unavailable is replaced by another eligible agent before the
+requirement drops to one. A provider, quota, authentication or unknown launch
+failure does not by itself prove that unavailability; it preserves the admitted
+slot and stops for retry or operator action. A reviewer that is busy, queued or
+silent never lowers the requirement, and a request for changes is not outvoted
+by approvals. Duplicate and late results are retained by reviewer identity
+without counting twice on one revision or replacing an established blocker.
+When a repair changes the revision, old publications remain as history and the
+same identity must publish a fresh result before it counts again. An implementer's
+`CHANGES_MADE` response returns work for review; it does not complete the
+reviewer's assignment. After a repair, successful preparation returns an undecided
+round to review and retains earlier findings and implementer responses. The
+recorded policy, with the reason for any fallback, appears in the review output. A
+classifier may return unresolved work to implementation, but
+its clear result cannot substitute for the required reviewer approvals. Human
+inspection in Forgejo or through `px integrate` stays optional and never becomes
+a required verdict.
+
+A launcher fallback counts only as the family that actually reviewed the change,
+even when that family already has a reviewer slot. Usage-blocked reviewers are
+unavailable even when their launcher is installed. Resume and explicit approval
+submission recheck availability: when only one independent reviewer remains,
+one approval is enough. A saved approval can complete that reduced requirement
+without another verdict. If the approval transition is interrupted, resume with `px review <slug>`
+before running `px integrate <slug>`.
 
 When a rebase pauses on shared conflicts, the implementer starts a fresh
 ephemeral session with the authoritative Mission goal, why, scope, out-of-scope

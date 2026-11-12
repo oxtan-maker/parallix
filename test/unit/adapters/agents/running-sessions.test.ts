@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { MissionId } from '../../../../src/domain/mission.js';
-import { detectRunningMissionSessions, parsePxInvocation } from '../../../../src/adapters/agents/running-sessions.js';
+import { currentInvocationProcessIds, detectRunningMissionSessions, parsePxInvocation } from '../../../../src/adapters/agents/running-sessions.js';
+import { readProcessCommand, readProcessStat } from '../../../../src/adapters/process/process-liveness.js';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
 import type { AgentBlockEntry, AgentBlocklistRepository } from '../../../../src/application/ports/agent-blocklist.js';
 import type { SessionMarkerEntry, SessionMarkerRepository } from '../../../../src/application/ports/mission-store.js';
@@ -64,6 +65,19 @@ test('parsePxInvocation reads subcommand, mission slug, and pinned family', () =
   assert.deepEqual(parsePxInvocation(DRAFT_FROM_MAIN), { subcommand: 'draft', missionId: 'task-2217', pinnedAgent: 'custom' });
   assert.deepEqual(parsePxInvocation(BOARD), { subcommand: 'board', missionId: null, pinnedAgent: null });
   assert.equal(parsePxInvocation('/usr/bin/node server.js review'), null);
+});
+
+test('the current invocation excludes matching wrappers but retains other missions and unreadable parents (PX-0046.03)', t => {
+  const originalArgv = process.argv;
+  process.argv = ['node', '/repo/src/entry/px.ts', 'review', 'task-one'];
+  t.after(() => { process.argv = originalArgv; });
+  const otherParent = process.ppid + 10_000_000;
+  t.mock.method(readProcessCommand, 'sync', (pid: number) =>
+    `node\0/repo/src/entry/px.ts\0review\0${pid === process.ppid ? 'task-one' : 'task-other'}\0`);
+  t.mock.method(readProcessStat, 'sync', () => `${process.ppid} (tsx wrapper) S ${otherParent} 0 0`);
+  assert.deepEqual([...currentInvocationProcessIds()], [process.pid, process.ppid]);
+  t.mock.method(readProcessCommand, 'sync', () => { throw new Error('process metadata unavailable'); });
+  assert.deepEqual([...currentInvocationProcessIds()], [process.pid], 'unconfirmed parents remain visible');
 });
 
 test('detectRunningMissionSessions identifies a draft launched from the main repository', () => {

@@ -139,7 +139,7 @@ describe("production certification: persisted weekly FLOW decision surface", () 
             ...Array.from({ length: 31 }, (_, index) => ({ mission: `task-current-${index}`, pr_fix_rounds: index === 0 ? 0 : index === 1 ? null : 1 })),
           ].map(row => ({ ...row, repo: REPO, implementer: 'claude', classification: 'ai_sdlc' }))),
         });
-        const projection = await new BoardProjectionBuilder(
+        const builder = new BoardProjectionBuilder(
           missionReader,
           new ConcreteReviewReadAdapter({ missionStore: null }),
           { observeGate: async () => 'not-run' as const },
@@ -152,7 +152,11 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           new ConcreteGitReadAdapter({ rootDir: checkouts.primary, repositoryId: REPO }),
           new ConcreteOperationLogReadAdapter({ historyRepo }),
           { metricsAdapter, now: () => Date.parse(NOW) },
-        ).build();
+        );
+        assert.equal((await builder.build()).metrics.analytics?.freshness, 'unavailable');
+        await new Promise<void>(resolve => setImmediate(resolve));
+        const projection = await builder.build();
+        assert.equal(projection.metrics.analytics?.freshness, 'fresh');
         const done = projection.stages.find(stage => stage.lane === 'done')!;
         assert.equal(done.count, 31, 'DONE uses the same verified delivery week as missions/wk');
         assert.deepEqual(new Set(done.cards.map(card => card.id)),

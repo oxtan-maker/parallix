@@ -1,4 +1,4 @@
-import { decidedRevisionOf } from '../../domain/review.js';
+import { decidedRevisionOf, reviewReturnStage } from '../../domain/review.js';
 import { omissionMeasurements } from './fit-packet.js';
 import { missionId } from '../../domain/mission.js';
 import { applyClassifierReview, classifierPolicyForReview, integrationRepairFinding, successCriteriaFindings, type ClassifierReviewSource } from '../../domain/classifier-review.js';
@@ -354,9 +354,8 @@ async function classifierCommitSnapshot(
 async function commitDecision(context: LoopContext, round: ReviewRound, scope: ReviewScope, decision: Decision, rows: RoundTelemetry): Promise<Outcome> {
   const ports = context.ports.classification!;
   const { missionStore: store, lifecycle } = context.ports;
-  const { prior, candidateRevision, findings } = scope;
+  const { candidateRevision, findings } = scope;
   const { selected } = decision;
-  const firstReview = prior === null;
   const decisionId = rows.current.decisionId;
   const fallback = async (why: string) => { await rows.finish(why); context.emit({ kind: 'reviewer-classification', reason: why }); return null; };
   let published = false;
@@ -368,7 +367,7 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
     const snapshot = await classifierCommitSnapshot(context, scope, selected, store!);
     if ('failure' in snapshot) { return await fallback(snapshot.failure); }
     const { latest, review } = snapshot;
-    const updated = applyClassifierReview(review, source, selected.route, at, firstReview ? findings : [], candidateRevision);
+    const updated = applyClassifierReview(review, source, selected.route, at, findings, candidateRevision);
     const summary = `${updated.rounds.at(-1)!.decision!.comment}\n\nScope: ${source.findingIds.join(', ')}; revision: ${source.candidateRevision}; policy: ${source.policyVersion}; selected score: ${source.score}.\n[classifier-decision:${decisionId}]`;
     if (!(await ports.publish(source, selected.route, summary))) { return await fallback('classifier-publication-failed'); }
     published = true;
@@ -377,12 +376,14 @@ async function commitDecision(context: LoopContext, round: ReviewRound, scope: R
       operationId: `classifier:${decisionId}`, missionId: scope.mission.id, expectedVersion: latest.version,
       capabilities: new Set(['mission:transition']), command: { type: selected.route === 'clear' ? 'approve' : 'request-changes', review: updated },
       actor: 'jev', occurredAt: at,
+      ...(selected.route === 'implementer' ? { workflowReturn: reviewReturnStage(updated.rounds.at(-1)!) } : {}),
     });
     if (transition.status !== 'completed') {
       await context.escalateToHumanReview('CLASSIFIER_REVIEW_PERSIST_FAILURE'); return 'stop';
     }
     committed = selected.route === 'clear' ? 'APPROVED' : 'REQUEST_CHANGES';
-    round.blockingFindings = selected.route === 'implementer' ? findings.map(f => ({ id: String(f.id), summary: f.summary })) : [];
+    round.blockingFindings = selected.route === 'implementer'
+      ? findings.map(f => ({ id: String(f.id), summary: f.summary })) : [];
     context.ports.output.log(`Classifier: ${selected.route === 'clear' ? 'cleared the findings' : 'likely unresolved findings'} (${source.findingIds.join(', ')}).`);
     return committed;
   } catch {

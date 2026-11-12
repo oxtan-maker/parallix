@@ -33,8 +33,11 @@ import type { SupervisorPort } from '../application/recovery-supervisor.js';
 import { missionId } from '../domain/mission.js';
 
 import * as agents from '../adapters/agents/agents.js';
+import type { AgentProcessResult } from '../adapters/agents/agent-process-types.js';
 import { recordStageStatsSafe, stageLaunchSinceMs } from '../adapters/review/review-agent-fallback.js';
 import { resolveAgentModel } from '../adapters/config/product-config.js';
+import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
+import { liveMissionExecutionContext } from '../application/ports/mission-execution-context.js';
 
 import startupPreflight from '../adapters/cli/startup-preflight.js';
 
@@ -92,6 +95,30 @@ function createConfiguredCommands(context: CliCommandContext, commands: {
   };
 }
 
+async function recordRecoveryTelemetry(params: {
+  slug: string;
+  worktree: string;
+  agent: string | undefined;
+  result: AgentProcessResult | undefined;
+  live: ReturnType<typeof liveMissionExecutionContext>;
+}): Promise<void> {
+  const { slug, worktree, agent, result, live } = params;
+  if (!agent) { return; }
+  if (!live.ok) {
+    fmt.log.warn(`[lead] Skipping recovery telemetry for ${fmt.slug(slug)}: ${live.reason}`);
+    return;
+  }
+  await recordStageStatsSafe('active', {
+    executionContext: live.context,
+    stage: 'recovery',
+    slug,
+    rootDir: worktree,
+    implementer: agent,
+    result,
+    sinceMs: stageLaunchSinceMs(result),
+  });
+}
+
 function createCommandRegistry(rootDir: string, configuration: ParallixConfiguration, operatorReview = false, operatorInvocation = false): Record<string, Command> {
   const scope = createCliServiceScope(rootDir, configuration);
   const { withGraph, openServices } = scope;
@@ -128,6 +155,8 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
       };
       try {
         const { worktree, prompt } = leadRecoveryWorkspace(request);
+        const live = liveMissionExecutionContext(request.missionId,
+          resolveMissionExecutionContext(request.missionId, worktree, configuration));
         recoveryWorktree = worktree;
         fmt.log.info(`[lead] Recovery prompt for ${fmt.slug(request.missionId)}:\n---\n${prompt}\n---`);
         const assigned = await services.mission?.store.load(missionId(request.missionId));
@@ -159,17 +188,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
         // A recovery agent spends tokens like any other launch. Recording it
         // on the mission's execute stage is what keeps the mission's usage
         // from under-reporting the work the supervisor caused.
-        if (agent) {
-          await recordStageStatsSafe('active', {
-            stage: 'recovery',
-            slug: request.missionId,
-            rootDir: worktree,
-            worktree,
-            implementer: agent,
-            result: launched?.result,
-            sinceMs: stageLaunchSinceMs(launched?.result),
-          });
-        }
+        await recordRecoveryTelemetry({ slug: request.missionId, worktree, agent, result: launched?.result, live });
         fmt.log.info(`[lead] Recovery agent ${agent ?? 'with no reported family'} finished for ${fmt.slug(request.missionId)}; rechecking the board`);
         const report = retainedRecoveryReport(launched);
         return `${agent ?? 'agent with no reported family'} ran in ${worktree}`

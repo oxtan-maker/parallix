@@ -17,6 +17,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId, type Mission } from '../../../src/domain/mission.js';
@@ -248,8 +249,9 @@ test('an integration-repair round reopened by a revoked approval is not approvab
 });
 
 function submitOptions(fixture: Fixture, exits: number[], errors: string[]) {
+  const missionWorktree = tempDir();
   return {
-    worktree: tempDir(),
+    executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree }),
     // These command fixtures exercise aggregate authority without a Git checkout.
     revision: 'rev-2',
     isReviewProviderEnabledFn: () => false,

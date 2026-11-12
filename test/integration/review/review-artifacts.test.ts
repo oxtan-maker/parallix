@@ -29,6 +29,9 @@ const {
   resolveArtifactDir,
 } = __mm1;
 import { classifyRecoveryReason } from '../../../src/application/rebound-classification.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+
+const artifactContext = (worktree: string, slug = 'test-slug') => missionExecutionContext({ missionId: slug, missionWorktree: worktree });
 
 // ============================================================================
 // buildMetadataFooter tests
@@ -178,7 +181,7 @@ test('normalizeDisposition works', () => {
 test('postWorkflowComment returns ok:false when no forgejoUser can be determined', async () => {
   const result = await postWorkflowComment('test-slug', 'test message', {
     readReviewStateFn: () => null,
-    rootDir: '/nonexistent'
+    executionContext: artifactContext('/nonexistent'),
   });
   assert.equal(result.ok, false);
 });
@@ -187,7 +190,7 @@ test('postWorkflowComment returns ok:false when no token found', async () => {
   const result = await postWorkflowComment('test-slug', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
-    rootDir: '/nonexistent'
+    executionContext: artifactContext('/nonexistent'),
   });
   assert.equal(result.ok, false);
 });
@@ -202,7 +205,7 @@ test('postWorkflowComment infers forgejoUser from review state', async () => {
 
   let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowComment('test-slug', 'test message', {
-    rootDir: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readTokenFn: (user) => {
       capturedUser.value = user;
       return 'mock-token';
@@ -225,6 +228,7 @@ test('postWorkflowComment infers forgejoUser from review state', async () => {
 
 test('postWorkflowComment handles postComment failure', async () => {
   const result = await postWorkflowComment('test-slug', 'test message', {
+    executionContext: artifactContext('/nonexistent'),
     forgejoUser: 'test-user',
     readTokenFn: () => 'mock-token',
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null,  ok: false as const, error: 'API error' }),
@@ -242,7 +246,7 @@ test('postWorkflowComment handles postComment failure', async () => {
 test('postWorkflowReview returns ok:false when no forgejoUser can be determined', async () => {
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     readReviewStateFn: () => null,
-    worktree: '/nonexistent'
+    executionContext: artifactContext('/nonexistent'),
   });
   assert.equal(result.ok, false);
 });
@@ -251,7 +255,7 @@ test('postWorkflowReview returns ok:false when no token found', async () => {
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
     forgejoUser: 'test-user',
     readTokenFn: () => null,
-    worktree: '/nonexistent'
+    executionContext: artifactContext('/nonexistent'),
   });
   assert.equal(result.ok, false);
 });
@@ -267,7 +271,7 @@ test('postWorkflowReview infers forgejoUser from review state (reviewer first)',
 
   let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readTokenFn: (user) => {
       capturedUser.value = user;
       return 'mock-token';
@@ -290,6 +294,7 @@ test('postWorkflowReview infers forgejoUser from review state (reviewer first)',
 
 test('postWorkflowReview handles postReview failure', async () => {
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
+    executionContext: artifactContext('/nonexistent'),
     forgejoUser: 'test-user',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => null,
@@ -309,6 +314,7 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   const warnings: string[] = [];
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     ...reviewVerdictFixture('test-slug', 'custom', 'custom'),
+    executionContext: artifactContext('/fixture'),
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'custom', // reviewer == PR author
     postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
@@ -340,6 +346,7 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
 
 test('postWorkflowReview surfaces real 422 status and body instead of "API error"', async () => {
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
+    executionContext: artifactContext('/nonexistent'),
     forgejoUser: 'reviewer-agent',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'some-other-author', // not self => proceeds to POST
@@ -358,6 +365,7 @@ test('postWorkflowReview surfaces real 422 status and body instead of "API error
 test('postWorkflowReview posts normally when reviewer differs from PR author', async () => {
   let postArgs: { value: { branch: string; outcome: string; } | null } = { value: null };
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
+    executionContext: artifactContext('/nonexistent'),
     forgejoUser: 'reviewer-agent',
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'author-agent', // different => normal path
@@ -378,6 +386,7 @@ test('postWorkflowReview posts normally when reviewer differs from PR author', a
 
 test('consumeReviewerArtifacts returns consumed:false when no artifacts exist', async () => {
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    executionContext: artifactContext('/nonexistent'),
     readArtifactFn: () => null,
     tmpDir: '/nonexistent'
   });
@@ -401,7 +410,7 @@ test('consumeReviewerArtifacts returns ok:false when findings are missing', asyn
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -431,7 +440,7 @@ test('consumeReviewerArtifacts returns ok:false when outcome is missing', async 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -460,7 +469,7 @@ test('consumeReviewerArtifacts returns ok:false when verdict is missing', async 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -485,7 +494,7 @@ test('consumeReviewerArtifacts handles all three artifact files', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -510,7 +519,7 @@ test('consumeReviewerArtifacts treats malformed request-changes findings as repa
       return null;
     },
     tmpDir: '/tmp',
-    worktree: '/tmp',
+    executionContext: artifactContext('/tmp'),
     forgejoEnabled: false,
     log: () => {},
     error: () => {},
@@ -541,7 +550,7 @@ test('consumeReviewerArtifacts does not recover artifacts written to /tmp when t
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: readFromTmpOnly,
     tmpDir: '/var/tmp',
-    worktree: '/var/tmp',
+    executionContext: artifactContext('/var/tmp'),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -567,7 +576,7 @@ test('consumeReviewerArtifacts ignores /tmp artifacts when the artifact dir is e
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: readFromTmpOnly,
     tmpDir: '/var/tmp',
-    worktree: '/var/tmp',
+    executionContext: artifactContext('/var/tmp'),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -592,7 +601,7 @@ test('consumeImplementerArtifacts does not recover artifacts written to /tmp whe
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
     readArtifactFn: readFromTmpOnly,
     tmpDir: '/var/tmp',
-    worktree: '/var/tmp',
+    executionContext: artifactContext('/var/tmp'),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -615,7 +624,7 @@ test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-c
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -640,6 +649,7 @@ test('consumeReviewerArtifacts returns REQUEST_CHANGES reviewState for request-c
 
 test('consumeImplementerArtifacts returns consumed:false when no artifacts exist', async () => {
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
+    executionContext: artifactContext('/nonexistent'),
     readArtifactFn: () => null,
     tmpDir: '/nonexistent'
   });
@@ -659,7 +669,7 @@ test('consumeImplementerArtifacts returns ok:false when resolution is missing', 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -686,7 +696,7 @@ test('consumeImplementerArtifacts returns ok:false when disposition is missing',
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     forgejoEnabled: false,
@@ -716,7 +726,7 @@ test('consumeImplementerArtifacts parses structured resolution content', async (
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
@@ -758,7 +768,7 @@ test('consumeImplementerArtifacts handles BLOCKED disposition with blockedReason
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
@@ -794,7 +804,7 @@ test('postWorkflowComment falls back to human when review-state has no identity'
 
   let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowComment('test-slug', 'test message', {
-    rootDir: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readTokenFn: (user) => {
       capturedUser.value = user;
       return 'mock-token';
@@ -822,7 +832,7 @@ test('postWorkflowReview falls back to human when review-state has no identity',
 
   let capturedUser: { value: string | null } = { value: null };
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readTokenFn: (user) => {
       capturedUser.value = user;
       return 'mock-token';
@@ -853,7 +863,7 @@ test('postWorkflowComment handles forgejoUser from review-state implementer fall
     process.env.FORGEJO_USER = '';
     let capturedUser: { value: string | null } = { value: null };
     const result = await postWorkflowComment('test-slug', 'test message', {
-      rootDir: tmpDir,
+      executionContext: artifactContext(tmpDir),
       forgejoUser: '',
       readTokenFn: (user) => {
         capturedUser.value = user;
@@ -888,7 +898,7 @@ test('postWorkflowReview handles forgejoUser from review-state reviewer fallback
     process.env.FORGEJO_USER = '';
     let capturedUser: { value: string | null } = { value: null };
     const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
-      worktree: tmpDir,
+      executionContext: artifactContext(tmpDir),
       forgejoUser: '',
       readTokenFn: (user) => {
         capturedUser.value = user;
@@ -911,6 +921,7 @@ test('postWorkflowReview handles forgejoUser from review-state reviewer fallback
 
 test('postWorkflowComment fails when token not found', async () => {
   const result = await postWorkflowComment('test-slug', 'test message', {
+    executionContext: artifactContext('/nonexistent'),
     forgejoUser: 'test-user',
     readTokenFn: () => null,
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -925,6 +936,7 @@ test('postWorkflowComment fails when token not found', async () => {
 
 test('postWorkflowReview fails when token not found', async () => {
   const result = await postWorkflowReview('test-slug', 'approve', 'test message', {
+    executionContext: artifactContext('/nonexistent'),
     forgejoUser: 'test-user',
     readTokenFn: () => null,
     postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -948,7 +960,7 @@ test('consumeReviewerArtifacts fails when findings event creation fails', async 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ path: null, ok: false as const, error: 'Event creation failed' }),
     deleteArtifactFn: () => {},
@@ -975,7 +987,7 @@ test('consumeReviewerArtifacts fails when outcome event creation fails', async (
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       callCount++;
@@ -1005,7 +1017,7 @@ test('consumeReviewerArtifacts with non-approve/non-request-changes verdict', as
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1034,7 +1046,7 @@ test('consumeImplementerArtifacts fails when summary event creation fails', asyn
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ path: null, ok: false as const, error: 'Summary event creation failed' }),
     deleteArtifactFn: () => {},
@@ -1060,7 +1072,7 @@ test('consumeImplementerArtifacts fails when disposition event creation fails', 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       callCount++;
@@ -1089,7 +1101,7 @@ test('consumeImplementerArtifacts parses blockedReason from resolution content w
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: (slug, type, payload, opts) => {
       if (type === 'implementer_round_summary') {
@@ -1120,7 +1132,7 @@ test('consumeImplementerArtifacts with PARKED disposition', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1148,7 +1160,7 @@ test('consumeImplementerArtifacts with PUSHBACK_ALL disposition', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1181,7 +1193,7 @@ test('consumeReviewerArtifacts with forgejoEnabled and consumeHumanNotes', async
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1212,7 +1224,7 @@ test('consumeReviewerArtifacts fails when commentResult is not ok', async () => 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1242,7 +1254,7 @@ test('consumeReviewerArtifacts fails when reviewResult is not ok', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1272,7 +1284,7 @@ test('consumeReviewerArtifacts with forgejo disabled', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1297,7 +1309,7 @@ test('consumeImplementerArtifacts with consumeHumanNotes', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1329,7 +1341,7 @@ test('consumeImplementerArtifacts fails when resolution comment fails', async ()
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1358,7 +1370,7 @@ test('consumeImplementerArtifacts fails when disposition comment fails', async (
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1389,7 +1401,7 @@ test('consumeImplementerArtifacts with forgejo disabled', async () => {
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1417,7 +1429,7 @@ test('consumeImplementerArtifacts with invalid JSON in resolution', async () => 
       return null;
     },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     readReviewStateFn: () => null,
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
@@ -1475,7 +1487,7 @@ test('REGRESSION task-1264: os.tmpdir() != /tmp + Forgejo off -> reviewer artifa
     // Consume with the real file reader (no readArtifactFn override).
     const result = await consumeReviewerArtifacts(slug, 'claude', {
       tmpDir: consumerDir,
-      worktree: scratch,
+      executionContext: artifactContext(scratch, slug),
       forgejoEnabled: false,
       readReviewStateFn: () => null,
       createEventFn: () => ({ ok: true as const, path: '/mock/event.md' }),
@@ -1504,7 +1516,7 @@ test('an approve is persisted on the aggregate even with the review provider dis
     output: { findings: [], comment: 'looks good', verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     // This fixture doubles the recorder and has no Git checkout.
     revision: 'reviewed-fixture-revision',
     // AC #10: the consumer compares the caller's version at entry, before it
@@ -1536,7 +1548,7 @@ test('a failed approval persist fails the consumer instead of reporting APPROVED
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     output: { findings: [], comment: null, verdict: 'approve' },
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     // This fixture doubles the recorder and has no Git checkout.
     revision: 'reviewed-fixture-revision',
     missionStore: inMemoryTransitionStore(fixtureMission('test-slug')),
@@ -1568,7 +1580,7 @@ test('a review decision against a stale Mission is refused before anything is wr
     output: { findings: [], comment: null, verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     // This fixture doubles the recorder and has no Git checkout.
     revision: 'reviewed-fixture-revision',
     missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 9 }),
@@ -1603,7 +1615,7 @@ test('the decision is committed with the caller version before any review event'
     output: { findings: [], comment: null, verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     // This fixture doubles the recorder and has no Git checkout.
     revision: 'reviewed-fixture-revision',
     missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 7 }),
@@ -1634,7 +1646,7 @@ test('a refused decision writes no review event at all', async () => {
     output: { findings: [], comment: null, verdict: 'approve' },
     expectedVersion: 7,
     tmpDir,
-    worktree: tmpDir,
+    executionContext: artifactContext(tmpDir),
     // This fixture doubles the recorder and has no Git checkout.
     revision: 'reviewed-fixture-revision',
     missionStore: inMemoryTransitionStore(fixtureMission('test-slug'), { version: 7 }),

@@ -1,4 +1,5 @@
 import type { ReviewArtifactPort, ReviewLoopPorts } from '../../../src/application/ports/review-round.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 /**
  * task-1272 CP-4: full review cycle survives in a standalone (Forgejo-disabled)
@@ -98,7 +99,7 @@ function standalone(root: string, options: { missionPath?: string; reviewer?: Re
     readToken: mock.method(reviewAdapterModule, 'readToken', () => 'should-not-be-read'),
     getLatestReviewForPr: mock.method(reviewAdapterModule, 'getLatestReviewForPr', async () => null),
   };
-  const bound = createReviewLoopPorts('task-1272', { worktree: root, missionPath: options.missionPath }, { log: () => {}, error: () => {} });
+  const bound = createReviewLoopPorts('task-1272', { executionContext: missionExecutionContext({ missionId: 'task-1272', missionWorktree: root }), missionPath: options.missionPath }, { log: () => {}, error: () => {} });
   let head = 0;
   const fake = fakeReviewLoopPorts({
     slug: 'task-1272',

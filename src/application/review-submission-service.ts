@@ -18,6 +18,8 @@ import { agentFamily } from '../domain/agents.js';
 import { missionId } from '../domain/mission.js';
 import type { ReviewPreparationLog, ReviewPreparationMissionServicesPort, ReviewPreparationResult, ReviewPreparationWorkflowPorts } from "./ports/review-preparation-workflow.js";
 import type { VerifiedCheckpointDocument } from "./review-preparation-contract.js";
+import type { WorkflowReturnStage } from '../domain/board-event.js';
+
 
 /**
  * A selection failure that means "no other family is available right now",
@@ -198,12 +200,15 @@ export async function beginReviewPreparation(slug: string, services: Pick<Review
 }
 
 /** Reuse the planned checkpoint owner for concrete implementation/evidence repairs. */
-export async function recordReviewPreparationFailure(slug: string, diagnostic: string, services: Pick<ReviewPreparationMissionServices, 'store' | 'lifecycle' | 'checkpoints'>, reason: ReboundReason): Promise<void> {
+export async function recordReviewPreparationFailure(slug: string, diagnostic: string,
+  services: Pick<ReviewPreparationMissionServices, 'store' | 'lifecycle' | 'checkpoints'>,
+  reason: ReboundReason, returnStage: WorkflowReturnStage): Promise<void> {
   const action = classifyReboundReason(reason).dispatchAction;
   if (action !== 'AutoSendBack') { return; }
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found' || !loaded.mission.assignee) { return; }
-  await transitionReviewRepair(slug, 'active', loaded.mission.assignee, services.store, services.lifecycle);
+  await transitionReviewRepair(slug,
+    { destination: 'active', sourceStage: returnStage }, loaded.mission.assignee, services.store, services.lifecycle);
   if (reason?.kind === 'gate-failure') { return; } // The gate incident already has its own checkpoint owner.
   const current = await services.store.load(missionId(slug));
   if (current.kind !== 'found' || !services.checkpoints.plan) { return; }
@@ -327,6 +332,10 @@ function bindCommittedReviewPreparationRepair(review: import('../domain/review.j
     review = {
       ...review, rounds: replaceCurrentRound(review, {
         ...current, subject: { ...current.subject, revision: changeRevision(reviewHeadSha) },
+        // An undecided legacy projection may still say fixing. Successful
+        // preparation returns this verified revision to its owed reviewer;
+        // retain publications and the implementer's response as evidence.
+        phase: 'reviewing',
         reviewer, implementer, startedAt,
       })
     };

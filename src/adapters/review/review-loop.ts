@@ -10,7 +10,6 @@ import { retainedRepairPort } from './retained-repair.js';
 import { composeHumanFeedback } from './review-loop-human-feedback.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
-import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 import type { ReviewPreparationAdapterOptions } from '../cli/commands/review-preparation.js';
 
 /**
@@ -28,12 +27,12 @@ import { fileURLToPath } from 'node:url';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { renderReviewLoopEvent } from './review-loop-presentation.js';
 import { git, run, runToExit } from '../git/git.js';
-import { findMissionDir, resolveWorktree, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
+import { findMissionDir, missionBranchName, getPrimaryBranch } from '../filesystem/mission-utils.js';
 import type { PullRequestReference } from '../../domain/review.js';
 import { resolveTaskFile, getTaskImplementer, getTaskStatus, enforceTaskAssignee, transitionTask, reportTaskResolution } from '../backlog/backlog.js';
 import { transitionVirtual } from '../config/state-map.js';
 import { getPrStatus, readToken, getLatestReviewForPr, getLatestDispositionEvidenceForPr, getComments, providerAvailable, resolveReviewUser, isProviderEnabled } from './review-adapter.js';
-import { buildAutonomousReviewMatrix, formatMatrixSummary } from '../agents/runtime-matrix.js';
+import { reviewerRoutingPort } from './reviewer-routing.js';
 import { buildReviewPrompt, buildActOnReviewPrompt, buildCompactReviewPrompt, buildCompactActOnReviewPrompt } from './review-prompts.js';
 import {
   ReviewState, assertReviewStatePersisted, createReviewerPolicyStatePort, persistReviewStateOrThrow,
@@ -45,7 +44,7 @@ import type {
   ReviewPreparationFacts, PreReviewGateFacts, PreReviewRebaseFacts, ProviderPollRequest, ReviewAgentLaunch, ReviewAgentPort, ReviewLoopPorts,
   ReviewLoopState, ReviewPromptFacts, ReviewProviderPort, StartReviewRound,
 } from '../../application/ports/review-round.js';
-import { workflowLauncherStatus, startAgent, eligibleAgentsForStep, selectAgent } from '../agents/agents.js';
+import { startAgent } from '../agents/agents.js';
 
 import { rebaseBeforeReviewRound } from './rebase.js';
 import { packageRoot } from '../filesystem/package-root.js';
@@ -61,16 +60,17 @@ import { RevokeReviewDecisionUseCase } from '../../application/revoke-review-dec
 import { createGitChangeIdentity } from '../git/change-identity.js';
 import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import { dismissProviderApproval } from './review-adapter.js';
+import { persistedReviewerOutcome } from '../../application/review-loop/reviewer-outcome.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings {
+  readonly startAgent?: typeof startAgent;
   readonly integrationRepair?: ReviewLoopPorts['integrationRepair'];
   readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
   readonly preferredReviewer?: string;
   readonly configuration?: ParallixConfiguration;
-  readonly executionContext?: LiveMissionExecutionContext;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
   readonly classification?: import('../../application/ports/review-classification.js').ReviewClassificationPorts;
   readonly readReviewState?: (_slug: string, _worktree?: string, _store?: MissionStore | null) => Promise<ReviewState | null> | ReviewState | null;
@@ -94,7 +94,7 @@ export interface ReviewLoopBindings {
 }
 
 /** The per-request knobs the mechanisms read. */
-export type ReviewLoopTarget = Partial<Pick<StartReviewRound, 'focus' | 'verbose' | 'pollTimeoutSeconds' | 'missionPath' | 'executionContext'>> & { readonly worktree?: string };
+export type ReviewLoopTarget = Pick<StartReviewRound, 'executionContext'> & Partial<Pick<StartReviewRound, 'focus' | 'verbose' | 'pollTimeoutSeconds' | 'missionPath'>>;
 
 /**
  * One Node process can receive overlapping CLI/controller calls for the same
@@ -220,20 +220,22 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     ].filter(Boolean).join('\n\n');
   };
   return {
-    async launch({ role, agent, exclude, prompt, recovery, sessionPolicy }) {
+    async launch({ role, agent, exclude, prompt, recovery, sessionPolicy, pinnedAgent }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       const launchSessionPolicy = role === 'reviewer'
         ? 'fresh-ephemeral' as const
         : sessionPolicy ?? recovery?.sessionPolicy;
-      return await startAgent(role === 'reviewer' ? 'review' : 'act-on-review', {
+      return await (bindings.startAgent ?? startAgent)(role === 'reviewer' ? 'review' : 'act-on-review', {
         configuration: reviewerLaunchConfiguration(bindings.configuration, role, prompt),
         agent,
         preferredAgent: role === 'reviewer' && bindings.preferredReviewer !== undefined,
+        pinnedAgent: pinnedAgent ?? false,
         prompt: async (actual: string) => [prompt ? await rolePrompt(role, prompt, actual) : null, recovery ? String(recovery.prompt(actual)) : null].filter(part => part !== null).join('\n\n'),
         worktree, slug, role, exclude: exclude.filter((family): family is string => family !== undefined),
+        stdinPolicy: role === 'reviewer' ? 'ignore' : 'inherit',
         ...(role === 'reviewer' && prompt ? { authoritativeCompletion: async () => {
           const current = await (bindings.readReviewState ?? readReviewState)(slug, worktree, bindings.missionStore);
-          return current?.round === prompt.attempt && current.disposition !== null;
+          return persistedReviewerOutcome({ round: prompt.attempt }, current) !== null;
         } } : {}),
         ...(launchSessionPolicy === undefined ? {} : { sessionPolicy: launchSessionPolicy }),
         // A bare repair launch is not review work the board reports.
@@ -253,8 +255,8 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     async recordStage(role, state, identity, launch) {
       const reviewer = role === 'reviewer';
       await recordStageStatsSafe(reviewer ? 'review' : 'active', {
-        configuration: bindings.configuration,
-        stage: reviewer ? 'review' : 'follow-up', slug, rootDir: worktree, worktree, reviewer: identity.reviewer, implementer: identity.implementer,
+        configuration: bindings.configuration, executionContext: target.executionContext,
+        stage: reviewer ? 'review' : 'follow-up', slug, rootDir: worktree, reviewer: identity.reviewer, implementer: identity.implementer,
         result: launch?.result ?? undefined, sinceMs: stageLaunchSinceMs(launch?.result) || 0, log, error,
         state: state, writeReviewStateFn: writeState,
         missionStore: bindings.missionStore ?? null,
@@ -341,21 +343,6 @@ function approvalRevocationPort(
   };
 }
 
-function reviewerRoutingPort(
-  worktree: string,
-  configuration: ParallixConfiguration | undefined,
-): ReviewLoopPorts['routing'] {
-  return {
-    eligibleFamilies: () => eligibleAgentsForStep('review', { configuration }),
-    launcherStatus: agent => {
-      const status = workflowLauncherStatus(agent, worktree, configuration);
-      return status.supported ? status : { ...status, detail: [status.detail, status.health, status.reason].filter(Boolean).join(' - ') };
-    },
-    nominate: excluded => selectAgent('review', { exclude: new Set(excluded), worktree, configuration }),
-    runtimeMatrix: () => formatMatrixSummary(buildAutonomousReviewMatrix()),
-  };
-}
-
 /**
  * Bind every review-loop mechanism for one Mission. The composition root
  * supplies the review authority; the request supplies the worktree, prompt
@@ -372,7 +359,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     }
     return backlogMirrorOwnership({ id: missionId(slug), waveParentId: null }).kind === 'none';
   };
-  const artifactOptions = (state?: ReviewLoopState) => ({ worktree, tmpDir: artifactDir, buildMetadataFooterFn: buildMetadataFooter, forgejoEnabled: providerEnabled, configuration: bindings.configuration, log, error, ...(state ? { currentState: state } : {}) });
+  const artifactOptions = (state?: ReviewLoopState) => ({ executionContext: target.executionContext, tmpDir: artifactDir, buildMetadataFooterFn: buildMetadataFooter, forgejoEnabled: providerEnabled, configuration: bindings.configuration, log, error, ...(state ? { currentState: state } : {}) });
   return {
     branch,
     worktree,
@@ -388,7 +375,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       persist: async state => { await persistReviewStateOrThrow(writeState, slug, state, worktree, missionStore); },
       ...createReviewObservationRecorder(slug, () => headRevision(worktree), providerEnabled, { missionStore, lifecycleService }),
       async reset() {
-        const result = await (bindings.resetReviewState ?? resetReviewState)(slug, worktree);
+        const result = await (bindings.resetReviewState ?? resetReviewState)(slug, target.executionContext);
         assertReviewStatePersisted(result, { slug, round: null });
         return result.outcome === 'committed';
       },
@@ -411,8 +398,8 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       },
       assign: implementer => Boolean(task.ok && enforceTaskAssignee(task.taskFile!, implementer)),
     },
-    reviewPreparation: bindings.performReviewPreparationFn && bindings.executionContext
-      ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, executionContext: bindings.executionContext!, recoverGateFailure: true }) }
+    reviewPreparation: bindings.performReviewPreparationFn
+      ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, executionContext: target.executionContext, recoverGateFailure: true }) }
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
     approvalRevocation: approvalRevocationPort(slug, branch, worktree, missionStore, lifecycleService),
@@ -432,7 +419,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
         rebaseWorkflowOptions: {
           ...bindings.rebaseWorkflowOptions,
           configuration: bindings.configuration,
-          executionContext: bindings.executionContext,
+          executionContext: target.executionContext,
           ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
         },
       })),
@@ -469,7 +456,7 @@ function reviewLoopBindingsForRequest(bindings: ReviewLoopBindings) {
   return { log, error, exit, missionStore, lifecycleService, readState, writeState, fetchComments, tokenFor, recordHumanNote };
 }
 function reviewLoopWorkspace(slug: string, target: ReviewLoopTarget, log: (_msg: string) => void) {
-  const worktree = target.worktree || resolveWorktree(slug) || process.cwd();
+  const worktree = target.executionContext.missionWorktree;
   const branch = missionBranchName(slug, worktree);
   const missionPath = resolveEffectiveMissionPath(target.missionPath, findMissionDir(slug, worktree, { missionPath: target.missionPath }), log) || undefined;
   const artifactDir = resolveArtifactDir(worktree);

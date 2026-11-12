@@ -106,13 +106,17 @@ try {
   const stopped = page.waitForResponse(response => response.url().endsWith('/api/commands'));
   await page.locator(`[data-board-card="${fixture.slugs[0]}"] [data-action-kind="workflow:stop"]`).click();
   assert.equal((await stopped).status(), 200);
-  assert.equal((await fixture.service.operation(firstOperation))?.phase, 'stopped');
+  const stoppedOperation = await fixture.service.operation(firstOperation);
+  assert.equal(stoppedOperation?.phase, 'stopped');
+  assert.equal(stoppedOperation?.generation, 2);
   assert.equal((await fixture.store.load(fixture.slugs[0] as never)).kind, 'found');
   await page.locator(`[data-board-card="${fixture.slugs[0]}"] [data-action-kind="active:execute"][aria-disabled="false"]`).last().waitFor();
   const restarted = page.waitForResponse(response => response.url().endsWith('/api/commands'));
   await page.locator(`[data-board-card="${fixture.slugs[0]}"] [data-action-kind="active:execute"][aria-disabled="false"]`).last().click();
   const restartedResponse = await restarted; assert.equal(restartedResponse.status(), 202);
   const replacement = (await restartedResponse.json()).value.operationId as string;
+  await until(async () => (await fixture.service.operation(replacement))?.generation === 1, 'replacement generation');
+  const replacementOperation = await fixture.service.operation(replacement);
   for (const slug of fixture.slugs) { fixture.release(slug); }
   for (const id of [...ids.slice(1), replacement]) { await until(async () => (await fixture.service.operation(id))?.phase === 'completed', `completion ${id}`); }
   const retained = await fixture.observation.terminal.search(fixture.slugs[0], { pattern: 'REVIEW-OUTPUT' });
@@ -124,6 +128,10 @@ try {
     dirtyPaths: execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim().split('\n').filter(Boolean),
     isolation: { temporaryRepository: true, temporaryDatabase: true, realModelProviders: false, realHttpHostProcesses: true, chromium: '/usr/bin/chromium' },
     originalHostPid, restartedHostPid: host.processId, ownerBefore,
+    stoppedWorkflow: { id: firstOperation, generation: stoppedOperation.generation,
+      authorizedGeneration: stoppedOperation.generation - 1 },
+    replacementWorkflow: { id: replacement, generation: replacementOperation?.generation,
+      authorizedGeneration: replacementOperation?.generation },
     commitEvents: fixture.hostEvents, initialNotifications, ordering,
     browserRenderLatencyMs: ordering.map(event => event.renderedAt - event.requestedAt),
     firstVisibleMs: visibleAt - requestAt, acknowledgementMs: ack, persistedObservedMs: persisted, visibleMs: visible, events, notifications,

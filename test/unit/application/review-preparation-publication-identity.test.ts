@@ -72,6 +72,7 @@ import { ExecuteMissionService } from '../../../src/application/execute-mission-
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 import { MissionNelService } from '../../../src/application/mission-nel-service.js';
+import { DECLARED_GATES_RETURN_STAGE } from '../../../src/domain/board-event.js';
 import { beginReviewPreparation, recordReviewPreparationFailure } from '../../../src/application/review-submission-service.js';
 import { currentReviewRound, applyReviewerCommand, applyImplementerCommand, reviewFindingId } from '../../../src/domain/review.js';
 
@@ -102,11 +103,11 @@ test('first review enters review before expensive verification without fabricati
 test('actionable first-review failure reuses planned checkpoint work; infrastructure adds none (TASK-2822)', async () => {
   const services = recordedServices();
   await beginReviewPreparation(SLUG, services);
-  await recordReviewPreparationFailure(SLUG, 'Forgejo network error: token unavailable', services, { kind: 'review-preparation-verification', error: 'Forgejo network error: token unavailable', failureReason: { version: 1, code: 'infrastructure' } });
+  await recordReviewPreparationFailure(SLUG, 'Forgejo network error: token unavailable', services, { kind: 'review-preparation-verification', error: 'Forgejo network error: token unavailable', failureReason: { version: 1, code: 'infrastructure' } }, DECLARED_GATES_RETURN_STAGE);
   assert.equal(services.store.mission().status, 'review');
   assert.equal(services.store.mission().checkpoints.length, 1);
   const failure = 'Planned checkpoint evidence is missing before review preparation: CP-2. Record fresh evidence with px checkpoint record';
-  await recordReviewPreparationFailure(SLUG, failure, services, { kind: 'review-preparation-verification', error: failure, failureReason: { version: 1, code: 'incomplete-evidence' } });
+  await recordReviewPreparationFailure(SLUG, failure, services, { kind: 'review-preparation-verification', error: failure, failureReason: { version: 1, code: 'incomplete-evidence' } }, DECLARED_GATES_RETURN_STAGE);
   assert.equal(services.store.mission().status, 'active');
   assert.equal(services.store.mission().review, null);
   const repair = services.store.mission().checkpoints.at(-1)!;
@@ -115,7 +116,7 @@ test('actionable first-review failure reuses planned checkpoint work; infrastruc
   assert.deepEqual(repair.goalCheck, []);
   assert.equal(repair.repair, undefined, 'planned evidence work is not a fake failed gate');
   await beginReviewPreparation(SLUG, services);
-  await recordReviewPreparationFailure(SLUG, failure, services, { kind: 'review-preparation-verification', error: failure, failureReason: { version: 1, code: 'incomplete-evidence' } });
+  await recordReviewPreparationFailure(SLUG, failure, services, { kind: 'review-preparation-verification', error: failure, failureReason: { version: 1, code: 'incomplete-evidence' } }, DECLARED_GATES_RETURN_STAGE);
   assert.equal(services.store.mission().checkpoints.length, 2);
 });
 
@@ -203,10 +204,10 @@ test('typed infrastructure gates preserve review; gate incidents keep their exis
   const services = recordedServices();
   await beginReviewPreparation(SLUG, services);
   const gate = { kind: 'gate-failure' as const, area: 'workflow', command: 'npm test', exitCode: 1, stdout: '', stderr: '' };
-  await recordReviewPreparationFailure(SLUG, 'Verification gate failed', services, { ...gate, failureReason: { version: 1, code: 'infrastructure' } });
+  await recordReviewPreparationFailure(SLUG, 'Verification gate failed', services, { ...gate, failureReason: { version: 1, code: 'infrastructure' } }, DECLARED_GATES_RETURN_STAGE);
   assert.equal(services.store.mission().status, 'review');
   assert.equal(services.store.mission().checkpoints.length, 1);
-  await recordReviewPreparationFailure(SLUG, 'Verification gate failed', services, gate);
+  await recordReviewPreparationFailure(SLUG, 'Verification gate failed', services, gate, DECLARED_GATES_RETURN_STAGE);
   assert.equal(services.store.mission().status, 'active');
   assert.equal(services.store.mission().checkpoints.length, 1, 'the gate-specific repair owner creates its incident, without a duplicate generic plan');
 });
@@ -312,3 +313,31 @@ test('pending binding preserves the existing single-family self-review exception
   assert.equal(current.subject.revision, 'a'.repeat(40));
   assert.equal(services.store.mission().reviewPreparationPending, undefined);
 });
+
+for (const disposition of ['REQUEST_CHANGES', 'CHANGES_MADE'] as const) {
+  test(`verified repair resumes an undecided fixing projection with ${disposition} in review (PX-0058.01)`, async () => {
+    const services = recordedServices();
+    const reviewer = agentFamily('codex');
+    const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' });
+    const original = startReview({ change: { kind: 'local-branch', sourceBranch: BRANCH, targetBranch: 'main' }, revision: changeRevision('old-head') },
+      reviewer, agentFamily('claude'), '2026-10-27T10:00:00Z', eligibility);
+    const publication = { publicationId: 'older-negative', reviewerId: 'codex', agentFamily: reviewer,
+      revision: changeRevision('old-head'), decision: 'changes-requested' as const,
+      findings: [{ id: reviewFindingId('F1'), summary: 'old finding', location: null }],
+      outcome: 'completed' as const, status: 0, publishedAt: '2026-10-27T10:01:00Z' };
+    const review = { ...original, rounds: [{ ...currentReviewRound(original), phase: 'fixing' as const, disposition,
+      implementerResponseContent: 'Fixed the feedback in the repaired revision', reviewerResults: [publication] }] as const };
+    await services.store.save({ ...services.store.mission(), status: 'review', closedAt: null, reviewPreparationPending: true, review });
+    const recorder = makeRecorder();
+    const result = await new ReviewPreparationCommandUseCase(makePorts(recorder, { missionServices: async () => services }))
+      .performReviewPreparation(SLUG, runOptions(recorder));
+    assert.equal(result.ok, true, result.error ?? '');
+    const current = currentReviewRound(services.store.mission().review!);
+    assert.equal(current.phase, 'reviewing', 'a flat fixing marker cannot bypass review of verified HEAD');
+    assert.equal(current.subject.revision, 'a'.repeat(40));
+    assert.equal(current.decision, null, 'preparation cannot invent a reviewer judgment');
+    assert.equal(current.disposition, disposition, 'role-owned response evidence remains intact');
+    assert.equal(current.implementerResponseContent, review.rounds[0].implementerResponseContent);
+    assert.deepEqual(current.reviewerResults, [publication], 'old findings remain immutable history');
+  });
+}

@@ -3,8 +3,8 @@ id: TASK-2851
 title: >-
   Require resolved execution context across review adapters and drop ambient cwd
   fallbacks
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-11 09:58'
 labels:
   - ai_sdlc

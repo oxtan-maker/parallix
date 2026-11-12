@@ -17,11 +17,12 @@ import type { RecordedContract } from "./review-preparation-contract.js";
 import type { DeclaredGateRunner } from "./review-preparation-declared-gates.js";
 import { rebound, type ReboundReason } from './rebound-kernel.js';
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
+import { DECLARED_GATES_RETURN_STAGE, type WorkflowReturnStage } from '../domain/board-event.js';
 import { pendingRetainedRepair } from './review-loop/retained-repair.js';
 
 /** Facts both gate stages share with the surrounding review preparation run. */
 interface GateStageContext {
-  transitionToImplementer: () => Promise<void>;
+  transitionToImplementer: (_slug: string, _returnStage: WorkflowReturnStage) => Promise<void>;
   rootDir: string;
   forgejoUser: string;
   log: ReviewPreparationLog;
@@ -56,7 +57,12 @@ export class ReviewPreparationGateRecovery {
     let result = failure;
     const outcome = await rebound(preparationRecoveryReason(failure), {
       slug, worktree: context.root, implementer: loaded.mission.assignee, maxAttempts: context.attempts,
+      returnStage: DECLARED_GATES_RETURN_STAGE,
       startAgent: context.startAgent,
+      transitionToImplementer: async (missionSlug, returnStage) => {
+        await transitionReviewRepair(missionSlug, { destination: 'active', sourceStage: returnStage },
+          loaded.mission.assignee!, context.services.store, context.services.lifecycle);
+      },
       applyAgentFallback: async ({ launchResult, original }) => {
         const actual = launchResult?.agent ?? original;
         await recordImplementerLaunch(slug, actual, context.services.store, context.services.lifecycle);
@@ -126,6 +132,7 @@ export class ReviewPreparationGateRecovery {
             slug,
             worktree: rootDir,
             implementer: forgejoUser,
+            returnStage: DECLARED_GATES_RETURN_STAGE,
             startAgent: startAgentFn,
             readHead: () => {
               const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
@@ -199,14 +206,16 @@ export class ReviewPreparationGateRecovery {
         slug,
         worktree: rootDir,
         implementer: forgejoUser,
+        returnStage: DECLARED_GATES_RETURN_STAGE,
         startAgent: startAgentFn,
         readHead: () => {
           const result = ports.git.git(['-C', rootDir, 'rev-parse', 'HEAD']);
           return result.status === 0 ? (result.stdout ?? '').trim() : null;
         },
-        transitionToImplementer: async (missionSlug) => {
+        transitionToImplementer: async (missionSlug, returnStage) => {
           const services = await missionServicesFn(rootDir, { missionDir: missionDirPath });
-          await transitionReviewRepair(missionSlug, 'active', forgejoUser, services.store, services.lifecycle);
+          await transitionReviewRepair(missionSlug,
+            { destination: 'active', sourceStage: returnStage }, forgejoUser, services.store, services.lifecycle);
           return ports.backlog.transitionTask(missionSlug, 'active', { rootDir, log });
         },
         verify: async () => {

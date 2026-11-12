@@ -614,11 +614,18 @@ test('a recovery launch is attributed, so mission usage does not under-report it
   // And the launch site records them: the wiring reads the launcher result and
   // hands it to the same stats recorder every other stage launch uses.
   const composition = fs.readFileSync('src/composition/cli-command-registry.ts', 'utf8');
+  const recoveryTelemetry = composition.slice(composition.indexOf('async function recordRecoveryTelemetry'), composition.indexOf('function createCommandRegistry'));
   const launchRecovery = composition.slice(composition.indexOf('const launchRecovery:'), composition.indexOf('try { return await createLeadCommand'));
   const supervisor = fs.readFileSync('src/composition/lead-supervisor.ts', 'utf8');
   assert.match(launchRecovery, /const \{ worktree, prompt \} = leadRecoveryWorkspace\(request\)/, 'the guarded launch uses the composed workspace and prompt');
-  assert.match(launchRecovery, /recordStageStatsSafe\('active', \{\s*\n\s*stage: 'recovery'/,
-    'the recovery launch records its telemetry');
+  assert.match(launchRecovery, /const live = liveMissionExecutionContext\([\s\S]*?agents\.startAgent\('execute'/,
+    'the recovery resolves telemetry identity before launching the agent');
+  assert.match(launchRecovery, /recordRecoveryTelemetry\(\{ slug: request\.missionId, worktree, agent, result: launched\?\.result, live \}\)/,
+    'the launch hands its resolved context and result to the telemetry owner');
+  assert.match(recoveryTelemetry, /recordStageStatsSafe\('active', \{[\s\S]*?executionContext: live\.context,[\s\S]*?stage: 'recovery'/,
+    'a resolved recovery launch records telemetry against its execution context');
+  assert.match(recoveryTelemetry, /if \(!live\.ok\) \{[\s\S]*?Skipping recovery telemetry[\s\S]*?return;/,
+    'unresolved telemetry remains best-effort after a successful recovery launch');
   assert.doesNotMatch(launchRecovery, /unknown agent/,
     'a launch without a reported family is not written as a fictitious implementer');
   assert.match(launchRecovery, /Starting fresh recovery agent/,
@@ -649,17 +656,17 @@ test('lead starts long forward workflows without blocking fleet supervision', ()
   const runAction = supervisor.slice(supervisor.indexOf('runAction: async'));
   assert.match(
     runAction,
-    /openWorkflowServices\(missionWorktree\)[\s\S]*?startForward\(mission, action, \(\) => runBorrowedActive\(targetServices, active, missionWorktree, invocation\.args, signal\)\)/,
+    /openWorkflowServices\(missionWorktree\)[\s\S]*?startForward\(action, \(\) => runBorrowedActive\(targetServices, active, missionWorktree, invocation\.args, signal\)\)/,
     'lead active recovery must use a controller rooted in the mission worktree',
   );
   assert.match(
     supervisor,
-    /const forward: Promise<unknown> = Promise\.resolve\(\)\.then\(work\)[\s\S]*?currentWork\.ended\(publication\)/,
-    'the forward workflow runs in the background and clears its liveness marker when it ends',
+    /const forward: Promise<unknown> = work\(\)[\s\S]*?activityActor: 'lead'/,
+    'the background workflow marks the admitted durable operation as lead-owned',
   );
   assert.match(
     runAction,
-    /startForward\(mission, action, async \(\) => \{[\s\S]*?await run\(\[invocation\.command, \.\.\.invocation\.args\],\s*\{ baseCwd: missionWorktree,/,
+    /startForward\(action, async \(\) => \{[\s\S]*?await run\(\[invocation\.command, \.\.\.invocation\.args\],\s*\{ baseCwd: missionWorktree,/,
     'review work is also started without awaiting its autonomous loop, targeted at the mission worktree',
   );
   assert.match(

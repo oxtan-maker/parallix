@@ -46,9 +46,9 @@ test('child verdict and resolution producers retain composed configuration (px-0
       return { consumed: true, ok: true };
     },
   }));
-  const ports = reviewVerbPorts({ configuration });
-  await ports.consumeReviewerOutput('task-fixture', 'codex', { findings: [], comment: null, verdict: 'comment' }, '/external/mission', 1);
-  await ports.consumeImplementerOutput('task-fixture', 'codex', { items: [], evidence: ['fixed'], blockedReason: null, disposition: 'CHANGES_MADE' }, '/external/mission', 1);
+  const ports = reviewVerbPorts({ rootDir: '/isolated/repo', configuration });
+  await ports.consumeReviewerOutput('task-fixture', 'codex', { findings: [], comment: null, verdict: 'comment' }, executionContext, 1);
+  await ports.consumeImplementerOutput('task-fixture', 'codex', { items: [], evidence: ['fixed'], blockedReason: null, disposition: 'CHANGES_MADE' }, executionContext, 1);
   assert.deepEqual(observed, ['verdict', 'resolve']);
 });
 
@@ -81,7 +81,7 @@ for (const route of ['review', 'handoff'] as const) {
     assert.equal(port.workflowLauncherStatus('codex', executionContext.missionWorktree).supported, true);
   });
   if (route === 'review') {
-    const ports = createReviewLoopPorts('task-fixture', { worktree: executionContext.missionWorktree, executionContext }, { configuration, executionContext, log: () => {}, error: () => {} });
+    const ports = createReviewLoopPorts('task-fixture', { executionContext }, { configuration, log: () => {}, error: () => {} });
     assert.equal((await ports.preReview.rebase()).ok, true);
   } else {
     assert.equal((await reviewPreparation.createReviewPreparationPorts(configuration).rebase.rebaseBeforeReviewRound('task-fixture', {

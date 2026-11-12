@@ -21,7 +21,8 @@ import {
   type MissionCommandRequest,
 } from './mission-command-support.js';
 import type { AgentFamily } from '../domain/agents.js';
-import { triggerFromTransition, type LaneTransitionEvent } from '../domain/board-event.js';
+import { triggerFromTransition, type LaneTransitionEvent, type WorkflowReturnStage } from '../domain/board-event.js';
+import { bindReturnIdentity } from './ports/mission-write-authorization.js';
 import type { Mission, MissionStatus } from '../domain/mission.js';
 import { decideMission, type MissionCommand } from '../domain/mission-workflow.js';
 
@@ -34,6 +35,8 @@ export interface MissionTransitionRequest extends MissionCommandRequest {
   readonly occurredAt: string;
   /** Supplying the same key twice records the transition once. */
   readonly idempotencyKey?: string;
+  /** Return placement; lifecycle binds it to the current durable operation. */
+  readonly workflowReturn?: WorkflowReturnStage;
 }
 
 export interface MissionTransitionResult {
@@ -107,7 +110,6 @@ export class MissionLifecycleService {
     } catch (error) {
       return decisionFailure<MissionTransitionResult>(error);
     }
-
     const event = this.laneEvent(decided, from, request);
     try {
       const nextVersion = event === null
@@ -185,6 +187,7 @@ export class MissionLifecycleService {
       occurredAt: request.occurredAt,
       idempotencyKey: request.idempotencyKey
         ?? `${decided.id}:${trigger}:${request.occurredAt}`,
+      ...(request.workflowReturn ? { returnIdentity: bindReturnIdentity(request.workflowReturn) } : {}),
     };
   }
 

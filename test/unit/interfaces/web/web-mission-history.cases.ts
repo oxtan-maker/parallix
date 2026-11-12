@@ -12,7 +12,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import React from 'react';
 import { Board } from '../../../../web/src/board.js';
-import { MissionHistory } from '../../../../web/src/mission-history.js';
+import { ACTIVE_POLL_MS, IDLE_POLL_MS, MissionHistory } from '../../../../web/src/mission-history.js';
 import { loadOverview, loadLive, loadPage, searchHistory } from '../../../../web/src/mission-history-data.js';
 import { C } from '../../../../web/src/palette.js';
 import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
@@ -50,11 +50,11 @@ async function render(route: Route, context: import('node:test').TestContext, el
     if (body instanceof Error) { throw body; }
     return new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
   };
-  const timers = new Map<number, () => void>();
+  const timers = new Map<number, { callback: () => void; ms: number }>();
   const cadences: number[] = [];
   let timerId = 0;
-  (context.mock.method as (..._args: unknown[]) => unknown)(window, 'setInterval', (callback: () => void, ms: number) => { cadences.push(ms); timers.set(++timerId, callback); return timerId; });
-  (context.mock.method as (..._args: unknown[]) => unknown)(window, 'clearInterval', (id: number) => { timers.delete(id); });
+  (context.mock.method as (..._args: unknown[]) => unknown)(window, 'setTimeout', (callback: () => void, ms: number) => { cadences.push(ms); timers.set(++timerId, { callback, ms }); return timerId; });
+  (context.mock.method as (..._args: unknown[]) => unknown)(window, 'clearTimeout', (id: number) => { timers.delete(id); });
   let closed = 0;
   const mount = window.document.createElement('div');
   window.document.body.append(mount);
@@ -72,14 +72,26 @@ async function render(route: Route, context: import('node:test').TestContext, el
   const settle = async () => { for (let i = 0; i < 4; i += 1) { await act(async () => { await Promise.resolve(); }); } };
   await settle();
   return {
-    window, mount, reads, settle, cadences,
+    window, mount, reads, settle, cadences, timerCount: () => timers.size,
+    scheduledCadences: () => [...timers.values()].map(timer => timer.ms).sort((left, right) => left - right),
     async reopen() { await act(async () => { root.render(null); }); await this.mission(MISSION); },
     async mission(id: string) { await act(async () => { root.render(React.createElement(MissionHistory, { missionId: id, onClose: () => { closed += 1; } })); }); await settle(); },
     closed: () => closed,
     async click(target: string | RegExp) { await act(async () => { (typeof target === 'string' ? mount.querySelector<DomHtmlElement>(target) : this.button(target))!.click(); }); await settle(); },
     text: (label = 'Retained history') => mount.querySelector(`[aria-label="${label}"]`)?.textContent ?? '',
     dialog: () => mount.querySelector('[role="dialog"]')?.textContent ?? '',
-    async poll() { await act(async () => { for (const tick of [...timers.values()]) { tick(); } }); await settle(); },
+    async poll() {
+      const due = [...timers.entries()];
+      for (const [id] of due) { timers.delete(id); }
+      await act(async () => { for (const [, timer] of due) { timer.callback(); } });
+      await settle();
+    },
+    async pollCadence(ms: number) {
+      const due = [...timers.entries()].filter(([, timer]) => timer.ms === ms);
+      for (const [id] of due) { timers.delete(id); }
+      await act(async () => { for (const [, timer] of due) { timer.callback(); } });
+      await settle();
+    },
     button(label: RegExp) { return [...mount.querySelectorAll<DomButton>('button')].find(button => label.test(button.textContent ?? '')); },
     close,
   };
@@ -121,6 +133,53 @@ test('the history view shows the retained tail and appends only output after it 
   assert.deepEqual(historyReads.map(read => new URL(read.path, 'http://x').searchParams.get('after')), [null, '22'], 'each poll reads only bytes after what is shown');
   await view.poll();
   assert.equal(view.text(), 'first line <b>bold</b>\nsecond line\n', 'an empty page appends nothing');
+});
+
+test('active transcript ticks advance by cursor without repeating overview discovery (PX-0058.02)', async context => {
+  let overviewReads = 0;
+  const view = await render(url => {
+    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: 'worker', output: 'ACTIVE\n' }; }
+    if (!url.pathname.endsWith('/history')) {
+      overviewReads += 1;
+      return overview('live', [operation('worker', 'running')], { kind: 'live', operation: 'worker' });
+    }
+    const after = Number(url.searchParams.get('after') ?? 0);
+    return page(after, after + 5, 'bytes', { runId: 'worker', running: true });
+  }, context);
+
+  assert.equal(overviewReads, 1, 'opening performs one bounded discovery');
+  await view.pollCadence(ACTIVE_POLL_MS);
+  await view.pollCadence(ACTIVE_POLL_MS);
+  assert.equal(overviewReads, 1, 'active output ticks page known streams without rediscovery');
+  assert.deepEqual(
+    view.reads.filter(read => read.path.includes('/history')).map(read => new URL(read.path, 'http://x').searchParams.get('after')),
+    [null, '5', '10'],
+    'each active tick resumes from the retained byte cursor',
+  );
+  await view.pollCadence(IDLE_POLL_MS);
+  assert.equal(overviewReads, 2, 'bounded idle reconciliation eventually refreshes discovery');
+});
+
+test('a transcript read error survives unrelated overview success until transcript recovery (PX-0058.02)', async context => {
+  let failTranscript = false;
+  const view = await render(url => {
+    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: 'worker', output: 'ACTIVE\n' }; }
+    if (url.pathname.endsWith('/history')) {
+      if (failTranscript) { return new Error('transcript offline'); }
+      const after = Number(url.searchParams.get('after') ?? 0);
+      return page(after, after + 5, 'bytes', { runId: 'worker', running: true });
+    }
+    return overview('live', [operation('worker', 'running')], { kind: 'live', operation: 'worker' });
+  }, context);
+
+  failTranscript = true;
+  await view.pollCadence(ACTIVE_POLL_MS);
+  assert.match(view.dialog(), /Refresh interrupted \(Mission history is unavailable\.\)/);
+  await view.pollCadence(IDLE_POLL_MS);
+  assert.match(view.dialog(), /Refresh interrupted/, 'successful overview reconciliation cannot clear a transcript failure');
+  failTranscript = false;
+  await view.poll();
+  assert.doesNotMatch(view.dialog(), /Refresh interrupted/, 'a successful transcript retry clears its own error');
 });
 
 test('earlier history loads page by page and marks dropped bytes (TASK-2749)', async context => {
@@ -257,6 +316,41 @@ test('polling skips pending reads and closing cancels them (TASK-2661, TASK-2749
   assert.equal(pending?.aborted, true, 'unmounting cancels the outstanding read');
 });
 
+test('browser output polling uses active and idle cadence, backs off failures and stops without a consumer (PX-0058.02)', async context => {
+  let mode: 'active' | 'idle' | 'failure' = 'active';
+  const view = await render(url => {
+    if (mode === 'failure') { return new Error('offline'); }
+    if (url.pathname.endsWith('/live')) {
+      return mode === 'active' ? { kind: 'live', operation: 'worker', output: 'ACTIVE\n' } : { kind: 'not-live', probe: { kind: 'absent' } };
+    }
+    if (url.pathname.endsWith('/history')) {
+      const after = Number(url.searchParams.get('after') ?? 0);
+      return page(after, after, '', { runId: 'worker', running: mode === 'active' });
+    }
+    return mode === 'active' ? overview('live', [operation('worker', 'running')], { kind: 'live', operation: 'worker' }) : overview('ended', [operation('worker')]);
+  }, context);
+  assert.deepEqual(view.scheduledCadences(), [ACTIVE_POLL_MS, ACTIVE_POLL_MS, IDLE_POLL_MS]);
+  mode = 'idle';
+  await view.poll();
+  await view.poll();
+  assert.deepEqual(view.scheduledCadences(), [IDLE_POLL_MS, IDLE_POLL_MS, IDLE_POLL_MS]);
+  mode = 'active';
+  await view.poll();
+  await view.poll();
+  assert.deepEqual(view.scheduledCadences(), [ACTIVE_POLL_MS, ACTIVE_POLL_MS, IDLE_POLL_MS]);
+  mode = 'failure';
+  await view.poll();
+  assert.deepEqual(view.scheduledCadences(), [2_000, 2_000, IDLE_POLL_MS]);
+  await view.poll();
+  assert.deepEqual(view.scheduledCadences(), [4_000, 4_000, IDLE_POLL_MS]);
+  mode = 'active';
+  await view.poll();
+  assert.deepEqual(view.scheduledCadences(), [ACTIVE_POLL_MS, ACTIVE_POLL_MS, IDLE_POLL_MS], 'a successful read clears backoff');
+  assert.equal(view.timerCount(), 3, 'one serial timer per mounted output consumer');
+  await view.close();
+  assert.equal(view.timerCount(), 0, 'unmount stops periodic reads');
+});
+
 for (const stop of ['close', 'mission change', 'unmount'] as const) {
   test(`live polling serializes, recovers and cancels on ${stop} (TASK-2781)`, async context => {
     const pending: Array<{ resolve: (_body: unknown) => void; signal: AbortSignal; path: string }> = [];
@@ -272,7 +366,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
     assert.equal(pending.length, 1, 'multiple ticks must not overlap a pending live read');
     assert.ok(pending[0]!.signal instanceof AbortSignal);
     assert.equal(pending[0]!.signal.aborted, false);
-    assert.ok(view.cadences.every(ms => ms === 1000));
+    assert.ok(view.cadences.every(ms => ms === ACTIVE_POLL_MS || ms === IDLE_POLL_MS));
     await complete(0, live('FIRST'));
     await view.poll();
     await complete(1, new Error('temporary network failure'));

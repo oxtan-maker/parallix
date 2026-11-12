@@ -5,6 +5,7 @@ import { readReviewState } from '../../../src/adapters/review/review-state.js';
 import { currentReviewRound } from '../../../src/domain/review.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { createReviewLoopPorts } from '../../../src/adapters/review/review-loop.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { describe, afterEach, it } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
@@ -476,7 +477,7 @@ it('retries a persisted operator correction after failed revocation and a databa
     const lifecycle = new MissionLifecycleService(store);
     const errors: string[] = [], entryExits: number[] = [];
     let preparations = 0;
-    const real = createReviewLoopPorts(SLUG, { worktree: root }, {
+    const real = createReviewLoopPorts(SLUG, { executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }, {
       missionStore: store, lifecycleService: lifecycle,
       isProviderEnabled: () => true, readToken: () => 'fixture-token',
       getComments: async () => JSON.parse(fs.readFileSync(providerFile, 'utf8')),

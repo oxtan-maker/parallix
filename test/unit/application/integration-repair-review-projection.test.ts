@@ -569,7 +569,8 @@ test('live repair compares and records the candidate baseline when the base adva
       routeIntegrationGateFailureFn: options => routeIntegrationGateFailure({ ...options, captureFinalTreeFn: capture, runPhaseGatesFn: runGates,
         invalidateApprovalFn: async () => { throw new Error('Equivalent repair must not withdraw provider approval'); },
         reboundFn: async (_reason, context) => {
-          await context.transitionToImplementer!('task-2620'); advanced = true; head = 'candidate';
+          assert.equal(context.returnStage, 'integration-gates');
+          await context.transitionToImplementer!('task-2620', context.returnStage); advanced = true; head = 'candidate';
           assert.equal((await context.verify(1)).ok, true);
           return { outcome: 'fixed', implementer: IMPLEMENTER, attempts: 1, diagnostic: '',
             classification: { failureClass: 'GateFailure', dispatchAction: 'AutoRepair', isRelaunchable: true, label: 'gate' } };

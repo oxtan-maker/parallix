@@ -233,7 +233,7 @@ class SquashLanding {
           original,
           role: 'implementer',
           slug,
-          worktree: baseWorktree,
+          executionContext: context.executionContext,
           state: context.reviewState ?? {},
           taskResolution: context.task,
           missionStore: missionServices.store,

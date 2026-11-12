@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { reviewStatistics, type ReviewStatistics, type ReviewStatisticsEvidence } from '../services/review-statistics.js';
 import { usageRecordsToOutcomes } from './metrics-outcomes.js';
 import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
@@ -18,25 +19,19 @@ import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { utcHourBucket } from '../services/statistics-service.js';
 import { weeklyDecisionWindows } from '../../domain/decision-window.js';
 import { FLOW_DWELL_STATES, flowStatistics, type FlowMissionFacts } from './flow-statistics.js';
+import { EMPTY_FLOW_MISSION_OBSERVATION } from './flow-mission-facts.js';
 import type { VerificationStatistics } from './verification-statistics.js';
-
-const EMPTY_FLOW_OBSERVATION: VerificationStatistics['flowMissions'][number] = {
-  missionId: '', diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null, gateRuns: [], rebaseRuns: [],
-  rebaseExpected: { preReview: false, integration: false },
-  lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
-  agentLaunchesLowerBound: false,
-};
 
 function flowMissionFact(outcome: MissionOutcome, observed: VerificationStatistics['flowMissions'][number] | undefined,
   dwell: ReturnType<typeof closedLaneDwellMinutes>, metadata: ReadonlyMap<MissionId, MissionCohortMetadata>,
   repositoryId: RepositoryId): FlowMissionFacts {
-  const observation = observed ?? EMPTY_FLOW_OBSERVATION;
+  const observation = observed ?? EMPTY_FLOW_MISSION_OBSERVATION;
   return { repositoryId: String(repositoryId), missionId: String(outcome.missionId), closedAt: outcome.closedAt,
     implementer: outcome.implementer === null ? null : String(outcome.implementer),
     diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
     ownership: observation.ownership, window: observation.window,
-    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseExpected: observation.rebaseExpected,
-    collectionDefects: observation.collectionDefects,
+    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseStages: observation.rebaseStages,
+    diagnostics: observation.diagnostics,
     lead: observation.lead,
     laneDwellMs: Object.fromEntries(FLOW_DWELL_STATES.flatMap(state => {
       const minutes = dwell.get(state)?.get(outcome.missionId);
@@ -64,6 +59,35 @@ function cohortReturns(info: NonNullable<MissionCohortMetadata['reviewStatistics
       : info.byImplementer };
 }
 
+function statisticsHealth(
+  timestamps: readonly string[],
+  completedMissions: number,
+  outcomes: readonly MissionOutcome[],
+  rejectedOrMissingIdentityRowCount: number,
+): StatisticsHealth {
+  if (rejectedOrMissingIdentityRowCount > 0) { return { state: 'partial' }; }
+  if (timestamps.length === 0 && completedMissions > 0) { return { state: 'pre-lifecycle' }; }
+  if (timestamps.length === 0) { return { state: 'no-telemetry' }; }
+  if (outcomes.length === 0) { return { state: 'no-completions' }; }
+  return { state: 'healthy' };
+}
+
+function metricsProvenance(
+  repositoryId: RepositoryId,
+  timestamps: readonly string[],
+  outcomes: readonly MissionOutcome[],
+  rejectedOrMissingIdentityRowCount: number,
+): MetricsProvenance {
+  return {
+    repositoryId,
+    evaluatedWindow: { startedAt: timestamps[0] ?? null, endedAt: timestamps.at(-1) ?? null },
+    sampleSize: outcomes.length,
+    newestEventTimestamp: timestamps.at(-1) ?? null,
+    rejectedOrMissingIdentityRowCount,
+    adapterSucceeded: true,
+  };
+}
+
 export function missionCohortMetadata(missions: readonly Mission[], evidence: ReadonlyMap<string, ReviewStatisticsEvidence> = new Map()) {
   return new Map(missions.map(mission => {
     const finalImplementer = mission.review?.rounds.at(-1)?.implementer;
@@ -85,13 +109,23 @@ export function missionCohortMetadata(missions: readonly Mission[], evidence: Re
  * computed from actual data rather than falling back to empty defaults.
  */
 export interface MetricsReadAdapter {
+  /**
+   * Minimal current-board dependency: canonical delivery identity/time plus a
+   * revision of the durable evidence that feeds historical analytics.
+   */
+  readDeliveryIdentity?(): Promise<HistoricalDeliveryIdentity>;
   /** Canonical first-DONE delivery outcomes; absent means history is unavailable. */
   readOutcomes?(): Promise<readonly MissionOutcome[]>;
   /**
    * Build metrics from the current event history.
    * @param initialStates — current mission statuses (from MissionReadAdapter)
    */
-  buildMetrics(_initialStates: ReadonlyMap<MissionId, MissionStatus>, _agentAvailability?: readonly AgentAvailabilityRow[]): Promise<BoardMetrics>;
+  buildMetrics(_initialStates: ReadonlyMap<MissionId, MissionStatus>, _agentAvailability?: readonly AgentAvailabilityRow[], _options?: { readonly signal?: AbortSignal }): Promise<BoardMetrics>;
+}
+
+export interface HistoricalDeliveryIdentity {
+  readonly deliveries: readonly { readonly missionId: MissionId; readonly closedAt: string }[];
+  readonly revision: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +158,8 @@ export interface ConcreteMetricsReadAdapterOptions {
   readonly netEngineeringLines?: () => Promise<ReadonlyMap<MissionId, number | null>>;
   /** Canonical Mission metadata for cohort labels and implementers. */
   readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
+  /** Lightweight revision of non-lifecycle evidence used by FLOW and review summaries. */
+  readonly evidenceRevision?: () => Promise<string>;
 }
 
 /**
@@ -141,6 +177,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly cohortDimension: CohortDimension;
   private readonly netEngineeringLines: () => Promise<ReadonlyMap<MissionId, number | null>>;
   private readonly cohortMetadata: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
+  private readonly evidenceRevision: () => Promise<string>;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
     this.verification = options.verification;
@@ -152,21 +189,25 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     this.cohortDimension = options.cohortDimension ?? 'label';
     this.netEngineeringLines = options.netEngineeringLines ?? (async () => new Map());
     this.cohortMetadata = options.cohortMetadata ?? (async () => new Map());
+    this.evidenceRevision = options.evidenceRevision ?? (async () => '');
   }
 
   async buildMetrics(
     initialStates: ReadonlyMap<MissionId, MissionStatus>,
     agentAvailability: readonly AgentAvailabilityRow[] = [],
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<BoardMetrics> {
+    options.signal?.throwIfAborted();
     const [entries, usageRecords] = await Promise.all([
       this.laneEventRepo.findByRepositoryId(this.repositoryId),
       this.usageRepo.findAll(),
     ]);
-
+    options.signal?.throwIfAborted();
     const transitionRows = this.entriesToTransitions(entries);
     const outcomeRows = usageRecordsToOutcomes(usageRecords, this.repositoryId, entries);
     const transitions = transitionRows.transitions;
     const metadata = await this.cohortMetadata();
+    options.signal?.throwIfAborted();
     const outcomes = this.withCanonicalCohortMetadata(outcomeRows.outcomes, metadata);
     const scopedUsageRecords = usageRecords.filter((record) => record.repo === this.repositoryId);
 
@@ -175,6 +216,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
 
     // Build lifecycle entry map for missions without transitions
     const lifecycleEntries = await this.deriveLifecycleEntries(initialStates, transitions);
+    options.signal?.throwIfAborted();
 
     // One clock reading feeds both the `asOf` of the current-state metrics and
     // the rolling decision windows, so the board cannot report a window that
@@ -194,38 +236,60 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     const timestamps = this.eventTimestamps(entries, scopedUsageRecords);
     const rejectedOrMissingIdentityRowCount = transitionRows.rejected + outcomeRows.rejected;
     const completedMissions = [...initialStates.values()].filter((status) => status === 'done').length;
-    const health: StatisticsHealth = {
-      state: rejectedOrMissingIdentityRowCount > 0 ? 'partial'
-        : timestamps.length === 0 && completedMissions > 0 ? 'pre-lifecycle'
-          : timestamps.length === 0 ? 'no-telemetry'
-            : outcomes.length === 0 ? 'no-completions' : 'healthy',
-    };
-    const provenance: MetricsProvenance = {
-      repositoryId: this.repositoryId,
-      evaluatedWindow: { startedAt: timestamps[0] ?? null, endedAt: timestamps.at(-1) ?? null },
-      sampleSize: outcomes.length,
-      newestEventTimestamp: timestamps.at(-1) ?? null,
+    const health = statisticsHealth(timestamps, completedMissions, outcomes, rejectedOrMissingIdentityRowCount);
+    const provenance = metricsProvenance(
+      this.repositoryId,
+      timestamps,
+      outcomes,
       rejectedOrMissingIdentityRowCount,
-      adapterSucceeded: true,
-    };
+    );
+    const netEngineeringLines = await this.netEngineeringLines();
+    options.signal?.throwIfAborted();
     const cohorts = compareCohorts({
       outcomes,
       transitions,
       dimension: this.cohortDimension,
-      netEngineeringLines: await this.netEngineeringLines(),
+      netEngineeringLines,
       window: decisionWindows.current,
     });
+    const flowMetrics = await this.buildFlowMetrics(
+      outcomes,
+      transitions,
+      metadata,
+      decisionWindows,
+      options.signal,
+    );
+    return { ...metrics, health, provenance, cohorts, ...flowMetrics };
+  }
+
+  private async buildFlowMetrics(
+    outcomes: readonly MissionOutcome[],
+    transitions: readonly MissionTransition[],
+    metadata: ReadonlyMap<MissionId, MissionCohortMetadata>,
+    decisionWindows: ReturnType<typeof weeklyDecisionWindows>,
+    signal: AbortSignal | undefined,
+  ): Promise<Pick<BoardMetrics, 'flow' | 'flowUnavailable' | 'verification'>> {
     let flowUnavailable: string | undefined;
     const verification = await this.verification?.read().catch((error: unknown) => {
       flowUnavailable = `FLOW observations could not be read: ${error instanceof Error ? error.message : String(error)}`;
       return null;
     });
+    signal?.throwIfAborted();
     const dwell = closedLaneDwellMinutes(transitions);
-    const flow = verification ? flowStatistics(outcomes.map(outcome => flowMissionFact(outcome,
-      verification.flowMissions.find(item => item.missionId === outcome.missionId), dwell, metadata, this.repositoryId)), decisionWindows) : undefined;
-    return { ...metrics, health, provenance, cohorts, ...(flow ? { flow } : {}),
+    const flow = verification
+      ? flowStatistics(outcomes.map(outcome => flowMissionFact(
+        outcome,
+        verification.flowMissions.find(item => item.missionId === outcome.missionId),
+        dwell,
+        metadata,
+        this.repositoryId,
+      )), decisionWindows)
+      : undefined;
+    return {
+      ...(flow ? { flow } : {}),
       ...(flowUnavailable === undefined ? {} : { flowUnavailable }),
-      ...(verification === undefined ? {} : { verification }) };
+      ...(verification === undefined ? {} : { verification }),
+    };
   }
 
   // -----------------------------------------------------------------------
@@ -257,6 +321,22 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       usageRecordsToOutcomes(usageRecords, this.repositoryId, entries).outcomes,
       await this.cohortMetadata(),
     );
+  }
+
+  async readDeliveryIdentity(): Promise<HistoricalDeliveryIdentity> {
+    const [entries, usageRecords, evidenceRevision] = await Promise.all([
+      this.laneEventRepo.findByRepositoryId(this.repositoryId),
+      this.usageRepo.findWhere({ repo: this.repositoryId }),
+      this.evidenceRevision(),
+    ]);
+    const outcomes = usageRecordsToOutcomes(usageRecords, this.repositoryId, entries).outcomes;
+    const revision = createHash('sha256').update(JSON.stringify([
+      entries, usageRecords, evidenceRevision,
+    ])).digest('hex');
+    return {
+      deliveries: outcomes.map(({ missionId, closedAt }) => ({ missionId, closedAt })),
+      revision,
+    };
   }
 
   private withCanonicalCohortMetadata(

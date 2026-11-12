@@ -59,7 +59,7 @@ test('shared web and TUI board discovers launchers only on supplied PATH (TASK-2
       root, repositoryId('isolated-board'), repositories, ports, null, NO_EXECUTION_ACTIVITY,
       undefined, undefined, { configuration: resolveConfiguration({ PATH: bin, HOME: root }) },
     );
-    assert.equal(capabilities.boardProjection, capabilities.tui.boardProjection);
+    assert.ok(Object.is(capabilities.boardProjection, capabilities.tui.boardProjection));
     for (let refresh = 0; refresh < 2; refresh += 1) {
       const board = await capabilities.boardProjection.build();
       const agents = board.metrics.agentAvailability;

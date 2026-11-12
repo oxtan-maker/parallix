@@ -20,7 +20,9 @@ import type {
   PreReviewRebaseResult,
   RebaseWorkflowPort,
 } from '../../application/ports/rebase-workflow.js';
+import { rebaseObservation } from '../../application/ports/rebase-workflow.js';
 import type { RebaseCommandOptions } from '../rebase/rebase-workflow-adapter.js';
+import { formatInapplicableRebaseWarning, observeInapplicableRebaseBestEffort } from '../../application/rebase-observation.js';
 
 export type {
   PreReviewRebaseFailure,
@@ -138,24 +140,28 @@ export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRe
     if (verbose) {
       log(fmt.status('INFO', `Review provider disabled; committed worktree state and skipping pre-review rebase for ${fmt.branch(`mission/${slug}`)}.`));
     }
+    await observeInapplicableRebaseBestEffort(rebaseObservation(), 'pre-review-rebase', { missionId: slug, root: worktree,
+      baseBranch: null, reason: 'review-provider-disabled' }, cause => error(fmt.status('WARN',
+      formatInapplicableRebaseWarning('pre-review', slug, cause))));
     return { ok: true, sharedFileConflicts: false, hookFailure: false };
   }
+
+  const createPort: CreateRebaseWorkflowPortFn = createRebaseWorkflowPortFn
+    || (await import('../rebase/rebase-workflow-adapter.js')).createRebaseWorkflowPort;
+  const port = createPort({ ...rebaseWorkflowOptions, rebaseObservationStage: 'pre-review-rebase',
+    missionIdentityServices: options.missionIdentityServices, gitFn });
+  if (options.missionIdentityServices) { port.missionServices = options.missionIdentityServices; }
 
   const runWorkflow: RunRebaseWorkflowFn = runRebaseWorkflowFn
     // Loaded lazily: the rebase adapter reaches back into review-loop.js, and a
     // static import here would restore the import cycle this module exists to break.
     || (await import('../../application/rebase-workflow.js')).runRebaseWorkflow;
-  const createPort: CreateRebaseWorkflowPortFn = createRebaseWorkflowPortFn
-    || (await import('../rebase/rebase-workflow-adapter.js')).createRebaseWorkflowPort;
 
   // Every observation below is a structural seam on the port, not a text match.
   const observed: PreReviewRebaseObservations = {
     failureOutput: null, exitCode: null, hookEvidence: null, hookBounceRequests: 0, pushFailureOutput: null,
     publicationAttempted: false, pushGate: null, credentialFailure: null, conflictClassification: null,
   };
-
-  const port = createPort({ ...rebaseWorkflowOptions, rebaseObservationStage: 'pre-review-rebase', missionIdentityServices: options.missionIdentityServices, gitFn });
-  if (options.missionIdentityServices) { port.missionServices = options.missionIdentityServices; }
 
   observePreReviewRebase(port, observed, worktree, forgejoEnabledFn);
 

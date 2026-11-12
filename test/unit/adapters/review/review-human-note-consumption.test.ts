@@ -5,6 +5,9 @@ import type { ReviewState } from "../../../../src/adapters/review/review-state.j
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { consumeHumanNotes } from '../../../../src/adapters/review/review-events.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+
+const EXECUTION_CONTEXT = missionExecutionContext({ missionId: 'task-2342', missionWorktree: '/tmp/task-2342' });
 
 // Regression provenance: TASK-2342.
 function makeComment(user: string, created: string, body: string) {
@@ -40,6 +43,7 @@ test('consumeHumanNotes dedup by comment body on re-invocation', async () => {
 
   // First invocation: all 3 comments processed
   const result1 = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -58,6 +62,7 @@ test('consumeHumanNotes dedup by comment body on re-invocation', async () => {
 
   // Second invocation: same comments, all skipped as already-processed (via metadata)
   const result2 = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -98,6 +103,7 @@ test('consumeHumanNotes dedup survives across invocations via metadata', async (
 
   // First call: comment processed
   await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -109,6 +115,7 @@ test('consumeHumanNotes dedup survives across invocations via metadata', async (
 
   // Second call: same comment body, dedup via persisted metadata
   await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -136,6 +143,7 @@ test('consumeHumanNotes skips workflow-generated comments and dedup by body', as
   const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   const result = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -166,6 +174,7 @@ test('consumeHumanNotes merges dedup into currentState in-place', async () => {
   // No writeReviewStateFn needed — caller owns the persist.
   const state: { round: number; phase: 'reviewing'; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
   const result = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readTokenFn,
@@ -197,6 +206,7 @@ test('consumeHumanNotes dedup key includes author (N4)', async () => {
   const readTokenFn: NonNullable<NonNullable<Parameters<typeof consumeHumanNotes>[2]>["readTokenFn"]> = () => 'test-token';
 
   const result = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -227,6 +237,7 @@ test('consumeHumanNotes retains all dedup keys (no cap)', async () => {
 
   const state: { round: number; phase: 'reviewing'; metadata: Record<string, unknown> } = { round: 1, phase: 'reviewing', metadata: {} };
   const result = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readTokenFn,
@@ -261,6 +272,7 @@ test('consumeHumanNotes dedup works for 201+ comments (two invocations)', async 
 
   // First invocation: all 205 created
   const result1 = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -272,6 +284,7 @@ test('consumeHumanNotes dedup works for 201+ comments (two invocations)', async 
 
   // Second invocation: zero duplicates
   const result2 = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -305,6 +318,7 @@ test('consumeHumanNotes dedup durable from first invocation (no prior state)', a
 
   // First call: no prior state — creates events and persists dedup keys
   const result1 = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,
@@ -321,6 +335,7 @@ test('consumeHumanNotes dedup durable from first invocation (no prior state)', a
 
   // Second call: same comment, dedup via persisted metadata
   const result2 = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
     getCommentsFn,
     createEventFn,
     readReviewStateFn,

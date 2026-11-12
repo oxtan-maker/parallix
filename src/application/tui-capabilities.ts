@@ -5,7 +5,7 @@ import type { MissionProjectionQuery } from './projections/mission-query.js';
 
 /** Application-owned capabilities supplied by production composition to the TUI. */
 export interface TuiCapabilities {
-  readonly boardProjection: Pick<BoardProjectionBuilder, 'build' | 'buildMissionCard'>;
+  readonly boardProjection: Pick<BoardProjectionBuilder, 'build' | 'buildMissionCard' | 'cancelPendingBuilds'>;
   readonly missionDetails: MissionProjectionQuery;
   /** Returns the single shared dispatcher; progress arg accepted for API compat. */
   readonly commandControllerFactory: (_progress: BoardProgressSink) => BoardCommandDispatcher;

@@ -1,4 +1,7 @@
-import type { Review, ReviewRound, ReviewEventRecord } from '../../domain/review.js';
+import { reviewReturnStage,
+  type Review, type ReviewRound, type ReviewEventRecord } from '../../domain/review.js';
+import type { WorkflowReturnStage } from '../../domain/board-event.js';
+export type { WorkflowReturnStage } from '../../domain/board-event.js';
 import { normalizeImplementer } from './statistics-row.js';
 
 /** A return read from workflow history (pre-review gates, rebounds) rather than the Review. */
@@ -19,7 +22,7 @@ export interface WorkflowReturn {
    * Only the first two can be the same transition as a Review decision.
    */
   readonly source: 'judgment' | 'rebound' | 'repair';
-  /** Explicit sending provenance when the workflow owner observed it. Never inferred from the repair executor. */
+  /** Explicit sending provenance and operation authority retained by the workflow owner. */
   readonly origin?: ReviewReturnOrigin;
 }
 /** A reviewer lane move and its Review decision are written in the same transition. */
@@ -50,7 +53,7 @@ export interface ReviewStatistics {
 export type ReviewSendingActor = 'agent' | 'human' | 'workflow' | null;
 export interface ReviewReturnOrigin {
   readonly actor: ReviewSendingActor;
-  readonly stage: 'agent-review' | 'human-review' | 'workflow';
+  readonly stage: WorkflowReturnStage | 'workflow';
   readonly decisionIdentity: string | null;
   readonly revision: string | null;
   readonly sender: string | null;
@@ -58,6 +61,8 @@ export interface ReviewReturnOrigin {
   readonly pullRequest?: string | null;
   /** Distinct final-owner cause; absent when retained evidence cannot establish one. */
   readonly cause?: string | null;
+  readonly operationId?: string;
+  readonly operationGeneration?: number;
 }
 export interface ReviewEpisode {
   readonly identity: string;
@@ -143,13 +148,11 @@ function mergeReviewEpisodes(observed: readonly ReviewEpisode[], retained: reado
 
 const unknownOrigin: ReviewReturnOrigin = { actor: null, stage: 'workflow', decisionIdentity: null, revision: null, sender: null, cause: null };
 
-function actorOfRound(round: ReviewRound): 'agent' | 'human' {
-  return round.decision?.kind === 'changes-requested' && round.decision.source?.kind === 'operator' ? 'human' : 'agent';
-}
 function originOfRound(identity: string, round: ReviewRound | undefined): ReviewReturnOrigin {
   if (!round) { return unknownOrigin; }
-  const actor = actorOfRound(round);
-  return { actor, stage: actor === 'human' ? 'human-review' : 'agent-review', decisionIdentity: identity,
+  const stage = reviewReturnStage(round);
+  const actor = stage === 'human-review' ? 'human' : 'agent';
+  return { actor, stage, decisionIdentity: identity,
     revision: round.decision?.revision ?? round.subject.revision, sender: actor === 'human'
       ? round.decision?.kind === 'changes-requested' ? round.decision.source?.author ?? null : null
       : String(round.reviewer), cause: round.decision?.kind ?? null };
@@ -158,9 +161,10 @@ function reviewEpisodes(review: Review | null): ReviewEpisode[] {
   if (!review) { return []; }
   const episodes: ReviewEpisode[] = review.rounds.flatMap<ReviewEpisode>(round => {
     if (!round.decision) { return []; }
-    const actor = actorOfRound(round);
+    const stage = reviewReturnStage(round);
+    const actor = stage === 'human-review' ? 'human' : 'agent';
     const observed: ReviewEpisode[] = [{ identity: `review:${round.number}`, actor,
-      stage: actor === 'human' ? 'human-review' as const : 'agent-review' as const,
+      stage,
       startedAt: round.startedAt, endedAt: round.decision.decidedAt,
       revision: round.decision.revision ?? round.subject.revision,
       sender: actor === 'human' && round.decision.kind === 'changes-requested'
@@ -243,6 +247,10 @@ function mergeWorkflowReturns(review: Review | null, workflowReturns: readonly W
       judged.splice(judged.indexOf(matched), 1);
       // The lane names the submitter when Git proof could not name the author.
       if (!returns.get(matched.identity)) { returns.set(matched.identity, workflowAuthor(review, item)); }
+      const origin = origins.get(matched.identity);
+      if (origin && item.origin) {
+        origins.set(matched.identity, withWorkflowAuthority(origin, item.origin));
+      }
       continue;
     }
     returns.set(item.identity, workflowAuthor(review, item));
@@ -394,6 +402,11 @@ function normalizedWorkflowOrigin(review: Review | null, item: WorkflowReturn): 
     : unknownOrigin;
 }
 
+function withWorkflowAuthority(origin: ReviewReturnOrigin, workflow: ReviewReturnOrigin): ReviewReturnOrigin {
+  return { ...origin, ...(workflow.operationId !== undefined && workflow.operationGeneration !== undefined
+    ? { operationId: workflow.operationId, operationGeneration: workflow.operationGeneration } : {}) };
+}
+
 /**
  * The agent responsible for the rejected work is whoever was most recently put
  * on it before the return: the latest Review round started before the return
@@ -440,7 +453,8 @@ function reconcileEvent(review: Review, event: ReviewEventRecord, put: PutReturn
   // A correction on a round whose approval an operator or non-gate rebound revoked is that revocation.
   const identity = correctionIdentity(round, event);
   const actor = event.eventType === 'human_note' ? 'human' as const : 'agent' as const;
-  put(identity, round, event.createdAt, false, { actor, stage: actor === 'human' ? 'human-review' : 'agent-review',
+  put(identity, round, event.createdAt, false, { actor,
+    stage: actor === 'human' ? 'human-review' : 'agent-review',
     decisionIdentity: identity, revision: round?.decision?.revision ?? round?.subject.revision ?? null,
     sender: event.actor, cause: 'changes-requested' });
 }

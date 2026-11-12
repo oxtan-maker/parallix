@@ -110,6 +110,14 @@ test('SC4: a confirmed provider count change repaints the board', () => {
   );
 });
 
+test('SC4: historical analytics becoming fresh repaints the board (PX-0058.03)', () => {
+  const base = makeProjection();
+  const fingerprint = (freshness: 'unavailable' | 'fresh') => boardFingerprint({ ...base, metrics: { ...base.metrics, analytics: {
+    freshness, revision: 'evidence-v1', refreshedAt: freshness === 'fresh' ? '2026-11-12T12:00:00Z' : null,
+    reason: freshness === 'fresh' ? null : 'Historical analytics refresh is in progress.' } } });
+  assert.notEqual(fingerprint('unavailable'), fingerprint('fresh'), 'the subscription must publish the completed historical summary without unrelated board movement');
+});
+
 test('provider identity and uncertainty repaint while observation timestamps alone do not (TASK-2769)', () => {
   const projection = (runId: string | null, complete: boolean, observedAt = '2026-10-16T10:00:00Z') => makeProjection({ active: [makeCard({
     execution: { observedAt, limitations: complete ? [] : ['probe failed'],

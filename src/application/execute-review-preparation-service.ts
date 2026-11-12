@@ -13,6 +13,7 @@ import type {
   ReviewPreparationRunResult,
 } from './ports/execute-mission.js';
 import type { AgentLaunchPhase } from './recording/execution-activity-recorder.js';
+import { DECLARED_GATES_RETURN_STAGE, type WorkflowReturnStage } from '../domain/board-event.js';
 
 export interface ExecuteReviewPreparationPorts {
   readonly checkpoints: CheckpointValidationPort;
@@ -31,7 +32,8 @@ export interface ExecuteReviewPreparationRequest {
   readonly taskFile: string | null;
   readonly continueIntegrationRepair?: () => Promise<boolean | null>;
   readonly beginReviewPreparation?: () => Promise<void>;
-  readonly prepareImplementationRepair?: (_diagnostic: string, _reason?: ReboundReason) => Promise<void>;
+  readonly prepareImplementationRepair?: (_diagnostic: string, _reason: ReboundReason,
+    _returnStage: WorkflowReturnStage) => Promise<void>;
   readonly onAgentLaunched?: (_agent: string, _phase: AgentLaunchPhase, _model?: string | null) => Promise<void>;
   readonly onAutonomousStop?: (_reason: string) => Promise<void>;
   readonly onImplementerLaunched?: (_agent: string) => Promise<void>;
@@ -184,8 +186,12 @@ export class ExecuteReviewPreparationService {
       : reason;
     const result = await rebound(reboundReason, {
       slug: request.slug, worktree: request.worktree, implementer: request.agent,
+      returnStage: DECLARED_GATES_RETURN_STAGE,
       readHead: () => this._ports.repairLaunch.readHead(request.worktree),
-      transitionToImplementer: () => request.prepareImplementationRepair?.(typeof reason === 'string' ? reason : reboundDiagnostic(reason), reboundReason),
+      transitionToImplementer: (_slug, returnStage) => {
+        return request.prepareImplementationRepair?.(
+          typeof reason === 'string' ? reason : reboundDiagnostic(reason), reboundReason, returnStage);
+      },
       verify: async () => {
         await request.beginReviewPreparation?.();
         const result = await verify();

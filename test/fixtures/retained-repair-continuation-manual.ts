@@ -20,6 +20,7 @@ import { createReviewCommand } from '../../src/interfaces/cli/review.js';
 import { ReviewCommandUseCase } from '../../src/application/review-command-use-case.js';
 import type { ReviewLoopPorts } from '../../src/application/ports/review-round.js';
 import type { ReviewWorkflowPort } from '../../src/application/ports/review-workflow.js';
+import { missionExecutionContext } from './mission-execution-context.js';
 
 setRecoveryEvidenceFileSystem(recoveryEvidenceFileSystem);
 for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
@@ -112,7 +113,7 @@ for (const scenario of ['covered', 'uncovered', 'unrecorded']) {
     } };
     // Exercise the public review CLI parser and application command with agent/review fixtures.
     const unused = async () => { throw new Error('unexpected CLI operation'); };
-    const workflow: ReviewWorkflowPort = { preflight: (args, options = {}) => ({ slug, args, options }),
+    const workflow: ReviewWorkflowPort = { preflight: (args, options = {}) => ({ kind: 'mutation', executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }), slug, args, options }),
       enter: async () => runReviewLoop({ slug, isContinue: true, implementer: 'codex' }, ports),
       verify: unused, submit: unused, push: unused, comment: unused,
       readComments: unused, submitReview: unused, close: unused, status: unused,

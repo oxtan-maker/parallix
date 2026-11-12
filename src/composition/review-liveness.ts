@@ -4,11 +4,11 @@ import type { ReviewLivenessReader } from '../application/projections/review-liv
 import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 import { WorkflowProcessAdapter } from '../adapters/process/workflow-process.js';
 import { cliInvocation } from '../adapters/process/cli-invocation.js';
-import { detectRunningMissionSessions, startProcessTableRead } from '../adapters/agents/running-sessions.js';
+import { currentInvocationProcessIds, detectRunningMissionSessions, startProcessTableRead } from '../adapters/agents/running-sessions.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { missionId } from '../domain/mission.js';
 
-export const reviewLivenessSystem = { startProcessTableRead, detectRunningMissionSessions, createMissionTerminalCapability };
+export const reviewLivenessSystem = { currentInvocationProcessIds, startProcessTableRead, detectRunningMissionSessions, createMissionTerminalCapability };
 
 interface ReviewLivenessServices {
   readonly operatorState: { readonly db?: import('../adapters/sqlite/database-adapter.js').SqliteDatabaseAdapter | null };
@@ -50,8 +50,9 @@ export function createReviewLivenessReader(
       const owners = [operation?.owner, operation?.launcher].filter(owner => owner !== null && owner !== undefined);
       const workflowLive = operations ? anyLive(await Promise.all(owners.map(owner => processes.alive(owner)))) : null;
       const table = await reviewLivenessSystem.startProcessTableRead();
+      const invokingPids = reviewLivenessSystem.currentInvocationProcessIds();
       const sessions = reviewLivenessSystem.detectRunningMissionSessions({ rootDir: root, missionId: missionId(slug),
-        listProcesses: () => table?.filter(entry => entry.pid !== process.pid) ?? null });
+        listProcesses: () => table?.filter(entry => !invokingPids.has(entry.pid)) ?? null });
       const history = reviewLivenessSystem.createMissionTerminalCapability(root, configuration).history(slug);
       const runs = history.ok ? history.runs : [];
       const execution = history.ok && !history.unattributed.length

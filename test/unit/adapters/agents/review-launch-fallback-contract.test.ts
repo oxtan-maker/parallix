@@ -68,6 +68,26 @@ test('review requires explicit eligibility instead of a generic launcher fallbac
   assert.throws(() => eligibleAgentsForStep('review', { config: { steps: { active: { eligible: ['vibe'] } } } }), /review requires explicit/);
 });
 
+test('startAgent carries reviewer stdin isolation to the native process boundary (PX-0046.04)', async () => {
+  const worktree = registeredMkdtemp('reviewer-stdin-');
+  let stdinPolicy: unknown;
+  setBubblewrapProbeForTest(() => true);
+  try {
+    await startAgent('review', {
+      configuration: resolveConfiguration(environment), worktree, prompt: 'review', agent: 'claude', stdinPolicy: 'ignore',
+      isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null,
+      detectLimitHitFn: () => null, log: () => {}, launchAgentFn: input => {
+        stdinPolicy = input.teeOptions?.stdinPolicy;
+        return { invocation: { command: 'claude', args: [] }, result: { status: 0, stdout: '', stderr: '' } };
+      },
+    });
+    assert.equal(stdinPolicy, 'ignore');
+  } finally {
+    setBubblewrapProbeForTest(null);
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
 test('eligibleAgentsForStep returns all current launchers when act-on-review step is missing from config (TASK-1036)', () => {
   const configWithoutActOnReview = {
     steps: {

@@ -70,6 +70,36 @@ test('createReviewWorkflowAdapter returns a ReviewWorkflowAdapter', () => {
   assert.ok(createReviewWorkflowAdapter() instanceof ReviewWorkflowAdapter);
 });
 
+test('review mutation resolves once and dispatches the live checkout from another launch root (TASK-2851)', async () => {
+  const context = missionExecutionContext({ missionId: 'task-2851', missionWorktree: '/mission/checkout', baseWorktree: '/base/checkout' });
+  const roots: string[] = [];
+  let received: unknown;
+  await review(['task-2851', '--push'], {
+    rootDir: '/unrelated/launch-root',
+    inferSlugFn: slug => slug ?? null,
+    resolveExecutionContextFn: (_slug, root) => { roots.push(root); return { ok: true, context }; },
+    pushRoundFn: async (_slug, options) => { received = options.executionContext; },
+    log: () => {}, error: message => assert.fail(message), exit: code => assert.fail(`exit ${code}`),
+  });
+  assert.deepEqual(roots, ['/unrelated/launch-root']);
+  assert.deepEqual(received, context);
+});
+
+test('review mutation fails before dispatch when the live execution context is unresolved (TASK-2851)', async () => {
+  const errors: string[] = [];
+  const exits: number[] = [];
+  let dispatched = 0;
+  await review(['task-2851', '--push'], {
+    inferSlugFn: slug => slug ?? null,
+    resolveExecutionContextFn: () => ({ ok: false, reason: 'mission checkout is unavailable' }),
+    pushRoundFn: async () => { dispatched++; },
+    log: () => {}, error: message => errors.push(message), exit: code => exits.push(code),
+  });
+  assert.equal(dispatched, 0);
+  assert.deepEqual(exits, [1]);
+  assert.match(errors.join('\n'), /mission checkout is unavailable/);
+});
+
 // ============================================================================
 // flagValue tests
 // ============================================================================

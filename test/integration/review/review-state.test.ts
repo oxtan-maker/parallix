@@ -6,6 +6,7 @@ import { withMissionDatabase } from '../../fixtures/review-state-db.js';
 import { reviewLoopBindings } from '../../../src/composition/review-persistence.js';
 import { openMigratedMissionStore } from '../../fixtures/mission-sqlite-store.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { missionId } from '../../../src/domain/mission.js';
@@ -213,7 +214,7 @@ test('writeReviewState reports write-failed for a mission the database does not 
 
 test('resetReviewState returns unchanged when the mission has no review', async () => {
   await withMissionDatabase('task-rs-8', async ({ root, slug, store }) => {
-    assert.deepEqual(await resetReviewState(slug, root, store), { outcome: 'unchanged' });
+    assert.deepEqual(await resetReviewState(slug, missionExecutionContext({ missionId: slug, missionWorktree: root }), store), { outcome: 'unchanged' });
   }, { seedReview: false });
 });
 
@@ -232,7 +233,7 @@ test('resetReviewState clears loop bookkeeping but keeps the review conversation
       },
     }, root, { missionStore: store });
 
-    assert.deepEqual(await resetReviewState(slug, root, store, {
+    assert.deepEqual(await resetReviewState(slug, missionExecutionContext({ missionId: slug, missionWorktree: root }), store, {
       find: async () => null, save: async () => { throw new Error('Unexpected marker save'); }, shouldResume: async () => false,
       delete: async (mission, role) => { deleted.push([mission, role]); },
     }), { outcome: 'committed' });
@@ -256,7 +257,7 @@ test('review loop reset clears the reviewer session marker', async () => {
       delete: async (mission, role) => { deleted.push([mission, role]); },
     });
 
-    assert.deepEqual(await bindings.resetReviewState(slug, root), { outcome: 'committed' });
+    assert.deepEqual(await bindings.resetReviewState(slug, missionExecutionContext({ missionId: slug, missionWorktree: root })), { outcome: 'committed' });
     assert.deepEqual(deleted, [[slug, 'review']]);
   });
 });

@@ -1,5 +1,5 @@
 import { reviewOperation } from '../domain/review-command-policy.js';
-import { isWorkflowCommand } from '../domain/workflow-operation.js';
+import { isOpenWorkflow, isWorkflowCommand } from '../domain/workflow-operation.js';
 import { workflowFailureSummary, type WorkflowFailureFacts } from '../application/presentation/workflow-failure.js';
 import { stripTerminalControl } from '../application/run-history.js';
 import { parseReviewCliRequest } from '../interfaces/cli/review.js';
@@ -89,14 +89,85 @@ function workflowKind(command: string): 'draft:create' | 'integrate:merge' | 're
 
 
 /** CLI observation follows retained coordinator bytes; it never owns execution. */
-export function workflowCliObserver(terminal: Pick<import('../application/ports/mission-terminal.js').MissionTerminalCapability, 'history' | 'page'>,
+export const ACTIVE_WORKFLOW_OBSERVATION_MS = 1_000;
+export const IDLE_WORKFLOW_OBSERVATION_MS = 5_000;
+
+export interface WorkflowObservationTiming {
+  readonly now: () => number;
+  readonly activeMs: number;
+  readonly idleMs: number;
+}
+
+type WorkflowOperation = import('../domain/workflow-operation.js').WorkflowOperation;
+type WorkflowTerminal = Pick<import('../application/ports/mission-terminal.js').MissionTerminalCapability, 'history' | 'page'>;
+type CoordinatorRun = import('../application/run-history.js').RunSummary;
+
+interface WorkflowObservationState {
+  coordinators: CoordinatorRun[];
+  discovered: boolean;
+  discoveryFailures: number;
+  nextDiscoveryAt: number;
+  nextReadAt: number;
+  lastOperation: string;
+  lastFinished: boolean;
+}
+
+interface WorkflowProgressState { last: string; sequence: number }
+
+async function publishWorkflowProgress(operation: WorkflowOperation,
+  activity: import('../application/ports/execution-activity.js').ExecutionActivityReadPort | undefined,
+  progress: import('../application/controller/board-command.js').BoardProgressSink | undefined,
+  state: WorkflowProgressState): Promise<void> {
+  const snapshot = (await activity?.loadMissionCurrentWork(operation.missionId))?.[0];
+  const event = workflowProgress(operation, state.sequence + 1, snapshot?.frames.at(-1)?.event);
+  if (event.message === state.last) { return; }
+  state.last = event.message;
+  state.sequence += 1;
+  progress?.(event);
+}
+
+function workflowOperationFingerprint(operation: WorkflowOperation): string {
+  return `${operation.id}\0${operation.phase}\0${operation.updatedAt ?? ''}\0${operation.reason ?? ''}`;
+}
+
+function workflowObservationInterval(operation: WorkflowOperation, coordinators: readonly CoordinatorRun[], timing: WorkflowObservationTiming): number {
+  return isOpenWorkflow(operation) || coordinators.some(run => run.state === 'running') ? timing.activeMs : timing.idleMs;
+}
+
+function refreshCoordinatorRuns(terminal: WorkflowTerminal, operation: WorkflowOperation, state: WorkflowObservationState,
+  offsets: ReadonlyMap<string, number>, reportLoss: (_key: string, _text: string) => void,
+  timing: WorkflowObservationTiming, now: number): boolean {
+  const history = terminal.history(operation.missionId);
+  if (!history.ok) {
+    state.discoveryFailures += 1;
+    const retry = Math.min(timing.idleMs, timing.activeMs * 2 ** Math.min(state.discoveryFailures - 1, 8));
+    state.nextDiscoveryAt = now + retry;
+    state.nextReadAt = state.nextDiscoveryAt;
+    return false;
+  }
+  state.discovered = true;
+  state.discoveryFailures = 0;
+  const next = history.runs.filter(({ record }) => record.operationId === operation.id
+    && record.captureKind === 'coordinator' && record.supervisorPid !== process.pid);
+  for (const key of offsets.keys()) {
+    if (!next.some(({ record }) => key.startsWith(`${record.runId}:`))) { reportLoss(key, 'the operation\'s retained output has expired'); }
+  }
+  state.coordinators = next;
+  state.nextDiscoveryAt = now + workflowObservationInterval(operation, next, timing);
+  return true;
+}
+
+export function workflowCliObserver(terminal: WorkflowTerminal,
   progress?: import('../application/controller/board-command.js').BoardProgressSink,
   write: (_text: string) => void = text => { process.stdout.write(text); },
   interactive = Boolean(process.stdout.isTTY),
-  activity?: import('../application/ports/execution-activity.js').ExecutionActivityReadPort) {
+  activity?: import('../application/ports/execution-activity.js').ExecutionActivityReadPort,
+  timing: WorkflowObservationTiming = { now: Date.now, activeMs: ACTIVE_WORKFLOW_OBSERVATION_MS, idleMs: IDLE_WORKFLOW_OBSERVATION_MS }) {
   const offsets = new Map<string, number>();
   const replay = workflowReplay(write, interactive);
   const lost = new Set<string>();
+  const state: WorkflowObservationState = { coordinators: [], discovered: false, discoveryFailures: 0,
+    nextDiscoveryAt: 0, nextReadAt: 0, lastOperation: '', lastFinished: true };
   // Retention may drop or expire retained bytes; replay says so instead of
   // skipping silently (TASK-2816). A fresh observer after a restart starts at 0.
   const reportLoss = (key: string, text: string) => {
@@ -117,31 +188,32 @@ export function workflowCliObserver(terminal: Pick<import('../application/ports/
     offsets.set(key, page.to);
     return page.atEnd && !page.running;
   };
-  let last = '';
-  let sequence = 0;
-  return async (operation: import('../domain/workflow-operation.js').WorkflowOperation): Promise<boolean> => {
-    const snapshot = (await activity?.loadMissionCurrentWork(operation.missionId))?.[0];
-    const event = workflowProgress(operation, sequence + 1, snapshot?.frames.at(-1)?.event);
-    if (event.message !== last) {
-      last = event.message; sequence++;
-      progress?.(event);
+  const progressState: WorkflowProgressState = { last: '', sequence: 0 };
+  return async (operation: WorkflowOperation): Promise<boolean> => {
+    await publishWorkflowProgress(operation, activity, progress, progressState);
+    const now = timing.now();
+    const operationFingerprint = workflowOperationFingerprint(operation);
+    const changed = operationFingerprint !== state.lastOperation;
+    let interval = workflowObservationInterval(operation, state.coordinators, timing);
+    if (!changed && now < state.nextReadAt) { return state.lastFinished; }
+    state.lastOperation = operationFingerprint;
+    if (!state.discovered || changed || now >= state.nextDiscoveryAt) {
+      if (!refreshCoordinatorRuns(terminal, operation, state, offsets, reportLoss, timing, now)) { return state.lastFinished; }
+      interval = workflowObservationInterval(operation, state.coordinators, timing);
     }
-    const history = terminal.history(operation.missionId);
-    if (!history.ok) { return true; }
     let finished = true;
     // The observing CLI also retains its printed output. Replaying its own
     // capture feeds bytes back into itself and waits on its running record.
-    const coordinators = history.runs.filter(({ record }) => record.operationId === operation.id
-      && record.captureKind === 'coordinator' && record.supervisorPid !== process.pid);
-    for (const key of offsets.keys()) {
-      if (!coordinators.some(({ record }) => key.startsWith(`${record.runId}:`))) { reportLoss(key, 'the operation\'s retained output has expired'); }
-    }
-    for (const run of [...coordinators].reverse()) {
+    for (const run of [...state.coordinators].reverse()) {
       for (const stream of ['stdout', 'stderr'] as const) {
         finished = replayStream(operation.missionId, run.record.runId, stream) && finished;
       }
     }
-    return finished;
+    state.lastFinished = finished;
+    // A closed operation can still have more than one retained page to drain.
+    // Keep paging at the active cadence until every selected stream reaches end.
+    state.nextReadAt = now + (finished ? interval : timing.activeMs);
+    return state.lastFinished;
   };
 }
 
@@ -177,6 +249,9 @@ export function workflowFailureController(
 ): import('../application/controller/board-command.js').BoardCommandDispatcher {
   return {
     canExecute: kind => controller.canExecute(kind),
+    ...(controller.admit ? { admit: (request: BoardCommandRequest) => controller.admit!(request) } : {}),
+    ...(controller.operation ? { operation: (id: string) => controller.operation!(id) } : {}),
+    ...(controller.current ? { current: (mission: string) => controller.current!(mission) } : {}),
     async dispatch<T>(request: BoardCommandRequest) {
       if (!isWorkflowCommand(request.kind) && request.kind !== 'workflow:stop') { return controller.dispatch<T>(request); }
       const stopping = await stoppingWorkflow(request, current);

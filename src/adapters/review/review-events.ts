@@ -420,6 +420,6 @@ export {
   consumeHumanNotes
 };
 
-async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHumanNotesOptions = {}): Promise<ConsumeHumanNotesResult> {
+async function consumeHumanNotes(slug: string, actor: string, options: ConsumeHumanNotesOptions): Promise<ConsumeHumanNotesResult> {
   return consumeProviderHumanNotes(slug, actor, { ...options, createEventFn: options.createEventFn ?? createEvent });
 }

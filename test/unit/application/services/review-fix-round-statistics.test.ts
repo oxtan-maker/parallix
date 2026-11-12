@@ -5,7 +5,7 @@ import { changeRevision } from '../../../../src/domain/review.js';
 import type { Review, ReviewEventRecord, ReviewRound } from '../../../../src/domain/review.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
-import { workflowReturnsFromRecoveredEvidence } from '../../../../src/adapters/review/review-statistics-evidence.js';
+import { workflowReturnsFromHistory, workflowReturnsFromRecoveredEvidence } from '../../../../src/adapters/review/review-statistics-evidence.js';
 import type { StatsRecoveryEvidence } from '../../../../src/application/stats-recovery-evidence.js';
 
 function round(number: number, overrides: Partial<ReviewRound> = {}): ReviewRound {
@@ -423,6 +423,45 @@ test('FLOW preserves actor-specific return provenance and matching review episod
     rate: { state: 'measured', value: 0.5 } });
   assert.deepEqual(result.sendBacks.human, { numerator: 1, eligibleEpisodes: 1, coverage: 1,
     rate: { state: 'measured', value: 1 } });
+});
+
+test('retained workflow producer context places a return without inference (PX-0055.01)', () => {
+  const returns = workflowReturnsFromHistory([
+    { fromStatus: 'refined', toStatus: 'active', trigger: 'activate', agent: 'codex',
+      occurredAt: '2026-10-01T09:00:00Z', idempotencyKey: 'activate' },
+    { fromStatus: 'review', toStatus: 'active', trigger: 'request-changes', agent: 'claude',
+      occurredAt: '2026-10-01T10:00:00Z', idempotencyKey: 'review-return', returnIdentity: {
+        stage: 'agent-review', operationId: null, operationGeneration: null,
+      } },
+  ], [{ occurrenceId: 'gate-repair', reasonKind: 'gate-failure', area: 'handoff', agent: 'codex',
+    headBefore: null, occurredAt: '2026-10-01T11:00:00Z', returnIdentity: {
+      stage: 'declared-gates', operationId: 'review:px-0055.01', operationGeneration: 1,
+    } }]);
+  const result = reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: returns });
+
+  assert.deepEqual(result.returns[0]?.origin, {
+    actor: null, stage: 'agent-review', cause: null, decisionIdentity: null,
+    revision: null, sender: null,
+  });
+  assert.deepEqual(result.returns[1]?.origin, {
+    actor: 'workflow', stage: 'declared-gates', cause: 'gate-failure', decisionIdentity: 'repair:gate-repair',
+    operationId: 'review:px-0055.01', operationGeneration: 1,
+    revision: null, sender: 'codex',
+  });
+});
+
+test('a review round owns return facts while its lane identity supplies only workflow placement (PX-0055.01)', () => {
+  const rejected = round(1);
+  const result = reviewStatistics(review([rejected]), { equivalentSubmissions: {}, workflowReturns: [{
+    identity: 'lane:request-changes', author: 'codex', at: rejected.decision!.decidedAt, source: 'judgment',
+    origin: { actor: null, stage: 'integration-gates', decisionIdentity: null, revision: null, sender: null,
+      operationId: 'durable-operation', operationGeneration: 1 },
+  }] });
+
+  assert.deepEqual(result.returns, [{ identity: 'review:1', author: 'codex', at: rejected.decision!.decidedAt,
+    origin: { actor: 'agent', stage: 'agent-review', decisionIdentity: 'review:1',
+      revision: rejected.decision!.revision, sender: rejected.reviewer, cause: 'changes-requested',
+      operationId: 'durable-operation', operationGeneration: 1 } }]);
 });
 
 test('FLOW never infers human episodes and types a zero eligible population (TASK-2835)', () => {

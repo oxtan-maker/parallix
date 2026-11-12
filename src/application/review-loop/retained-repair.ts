@@ -5,6 +5,7 @@ import { repairContractFailure } from '../repair-checkpoint-service.js';
 import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
 import { isRetainedGateRepair } from '../rebound-checkpoints.js';
+import { DECLARED_GATES_RETURN_STAGE } from '../../domain/board-event.js';
 
 /** Gate checkpoints alone own retained process output; workflow repairs do not. */
 export function pendingRetainedRepair(mission: Mission, worktree?: string) {
@@ -32,6 +33,7 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
     const result = await rebound({ kind: 'gate-failure', area: 'retained verification', command: repair.command,
       failureReason: evidence.failureReason, signal: evidence.signal, exitCode: evidence.exitCode, stdout, stderr }, {
       slug: request.slug, worktree: ports.worktree, implementer,
+      returnStage: DECLARED_GATES_RETURN_STAGE,
       retainedFailure: evidence, repairIncidentId: repair.incidentId, repairCheckpoints: retained.checkpoints,
       maxAttempts: request.reboundsPerRound !== undefined && request.reboundsPerRound >= 0
         ? Math.min(DEFAULT_REBOUND_ATTEMPTS, request.reboundsPerRound) : DEFAULT_REBOUND_ATTEMPTS,
@@ -43,8 +45,9 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
         if (failure) { throw new Error(failure); }
         return await retained.verify(repair.command, evidence.cwd);
       },
-      transitionToImplementer: async () => {
-        if (ports.missionStore) { await transitionReviewRepair(request.slug, 'active', implementer, ports.missionStore, ports.lifecycle); }
+      transitionToImplementer: async (_missionSlug, returnStage) => {
+        if (ports.missionStore) { await transitionReviewRepair(request.slug,
+          { destination: 'active', sourceStage: returnStage }, implementer, ports.missionStore, ports.lifecycle); }
       },
       startAgent: async (_step, options) => await ports.agents.launch({ role: 'implementer', agent: options.agent as string,
         exclude: [reviewer], recovery: { prompt: options.prompt as (_agent: string) => string, sessionPolicy: options.sessionPolicy } }),

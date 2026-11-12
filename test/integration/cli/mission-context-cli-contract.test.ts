@@ -62,6 +62,7 @@ describe('Context CLI', () => {
     // Mission read/write path, so it runs against a repo with no review provider
     // configured rather than reaching a provider over the network.
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-context-repo-'));
+    const missionRepo = `${repo}-${SLUG}`;
     fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
       product: { name: 'Context CLI Fixture' },
       adapters: {
@@ -79,7 +80,10 @@ describe('Context CLI', () => {
 
     try {
       // Verdict recording pins the implementer revision to a real Git HEAD.
-      initCommittedRepository(repo);
+      const committed = initCommittedRepository(repo, {
+        'test/integration/cli/mission-context-cli-contract.test.ts': '// fixture evidence target\n',
+      });
+      committed.git('worktree', 'add', '-q', '-b', `mission/${SLUG}`, missionRepo, 'main');
       const { db } = await initOperatorState({ homeDir: home });
       const store = new SqliteMissionStore(db);
       const mission: Mission = {
@@ -253,7 +257,7 @@ describe('Context CLI', () => {
       current = (await statusJson()).version;
       assert.equal(await invoke([
         'checkpoint', 'record', '--slug', SLUG, '--name', 'CP-1',
-        '--criterion', 'CLI round trip', '--evidence', 'test/task-2521-03-context-cli.integration.test.ts',
+        '--criterion', 'CLI round trip', '--evidence', 'test/integration/cli/mission-context-cli-contract.test.ts',
         '--next', 'Read the status again.', '--expected-version', String(current),
       ]), 0, errors.join('\n'));
       const afterCheckpoint = await statusJson();
@@ -271,13 +275,13 @@ describe('Context CLI', () => {
       current = afterCheckpoint.version;
       assert.equal(await invoke([
         'checkpoint', 'record', '--slug', SLUG, '--name', 'CP-1',
-        '--criterion', 'CLI round trip', '--evidence', 'test/task-2521-03-review-verbs.test.ts',
+        '--criterion', 'CLI round trip', '--evidence', 'test/integration/cli/mission-context-cli-contract.test.ts',
         '--next', 'Replaced evidence.', '--expected-version', String(current),
       ]), 0, errors.join('\n'));
       const replaced = await statusJson();
       assert.ok(replaced.latestCheckpoint != null);
       assert.deepEqual(replaced.latestCheckpoint.goalCheck, [
-        { criterion: 'CLI round trip', criterionId: null, evidence: 'test/task-2521-03-review-verbs.test.ts' },
+        { criterion: 'CLI round trip', criterionId: null, evidence: 'test/integration/cli/mission-context-cli-contract.test.ts' },
       ]);
       assert.equal(replaced.latestCheckpoint.nextAction, 'Replaced evidence.');
       assert.deepEqual(replaced.checkpoints, afterCheckpoint.checkpoints);
@@ -351,7 +355,7 @@ describe('Context CLI', () => {
       assert.equal(await invoke([
         'resolve', '--slug', SLUG, '--actor', 'codex', '--revision', 'fixedsha',
         '--expected-version', String((await statusJson()).version),
-        '--finding', 'F1', '--fixed', 'test/task-2521-03-context-cli.integration.test.ts',
+        '--finding', 'F1', '--fixed', 'test/integration/cli/mission-context-cli-contract.test.ts',
       ]), 0, errors.join('\n'));
 
       const afterResolve = await statusJson();
@@ -373,6 +377,10 @@ describe('Context CLI', () => {
       await clearOperatorStateCache();
       if (previousHome === undefined) { delete process.env.PARALLIX_HOME; }
       else { process.env.PARALLIX_HOME = previousHome; }
+      if (fs.existsSync(missionRepo)) {
+        childProcess.spawnSync('git', ['-C', repo, 'worktree', 'remove', '--force', missionRepo]);
+        fs.rmSync(missionRepo, { recursive: true, force: true });
+      }
       fs.rmSync(home, { recursive: true, force: true });
       fs.rmSync(repo, { recursive: true, force: true });
     }

@@ -1,5 +1,5 @@
-import { approvalRequirementMet, outstandingReviewers } from '../../domain/reviewer-policy.js';
-import { changeRevision, currentReviewRound, type Review, type ReviewerResultAttribution } from '../../domain/review.js';
+import { reconcileReviewerPublications } from '../../domain/reviewer-policy.js';
+import { changeRevision, currentReviewRound, type Review, type ReviewFinding, type ReviewerResultAttribution } from '../../domain/review.js';
 import { attachReviewerResult } from './reviewer-result-attribution.js';
 
 /**
@@ -9,16 +9,40 @@ import { attachReviewerResult } from './reviewer-result-attribution.js';
  * missing second one. Returns null when the approval is decisive (or carries
  * no agent attribution, as an operator-directed approval does).
  */
-export function recordHeldApproval(
+export type ReviewerPublicationOutcome =
+  | { readonly outcome: 'held'; readonly review: Review; readonly awaitingApprovals: number }
+  | { readonly outcome: 'approved'; readonly review: Review; readonly decidedAt: string }
+  | { readonly outcome: 'changes-requested'; readonly review: Review; readonly decidedAt: string; readonly findings: readonly ReviewFinding[] };
+
+export function recordReviewerPublication(
   review: Review,
+  decision: 'approved' | 'changes-requested',
   input: { revision?: string | null; decidedAt: string; result?: ReviewerResultAttribution },
-): { review: Review; awaitingApprovals: number } | null {
+  findings: readonly ReviewFinding[],
+): ReviewerPublicationOutcome | null {
   if (!input.result || typeof input.revision !== 'string') { return null; }
   const round = currentReviewRound(review);
   if (!round.reviewerPolicy || round.decision) { return null; }
-  const attached = attachReviewerResult(review, 'approved', input, []);
+  const attached = attachReviewerResult(review, decision, input, findings);
   const revision = changeRevision(input.revision);
-  return approvalRequirementMet(attached, revision)
-    ? null
-    : { review: attached, awaitingApprovals: outstandingReviewers(attached, revision).length };
+  const resolution = reconcileReviewerPublications(attached, revision);
+  if (!resolution || resolution.kind === 'pending') {
+    return { outcome: 'held', review: attached, awaitingApprovals: resolution?.awaiting ?? 1 };
+  }
+  return resolution.kind === 'approved'
+    ? { outcome: 'approved', review: attached, decidedAt: resolution.decidedAt }
+    : { outcome: 'changes-requested', review: attached, decidedAt: resolution.decidedAt, findings: resolution.findings };
+}
+
+/** Preserve a selected reviewer's late/duplicate publication without reopening a decided round. */
+export function recordLateReviewerPublication(
+  review: Review,
+  decision: 'approved' | 'changes-requested',
+  input: { revision?: string | null; decidedAt: string; result?: ReviewerResultAttribution },
+  findings: readonly ReviewFinding[],
+): Review | null {
+  if (!input.result || typeof input.revision !== 'string') { return null; }
+  const round = currentReviewRound(review);
+  if (!round.reviewerPolicy || !round.decision || round.reviewerPolicy.revision !== input.revision) { return null; }
+  return attachReviewerResult(review, decision, input, findings);
 }

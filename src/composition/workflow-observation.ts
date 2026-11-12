@@ -79,6 +79,7 @@ export async function observeWorkflow<T>(root: string, configuration: ParallixCo
 export function runWorkflowObservation(root: string, configuration: ParallixConfiguration, terminalFactory: typeof createMissionTerminalCapability = createMissionTerminalCapability,
   createGraph: typeof createProductionApplicationServices = createProductionApplicationServices): void {
   let graph: Awaited<ReturnType<typeof createProductionApplicationServices>> | null = null;
+  let terminal: ReturnType<typeof createMissionTerminalCapability> | null = null;
   let tail: Promise<void> = Promise.resolve();
   const respond = async (input: unknown) => {
     const { id, observation } = input as { id: number; observation: Observation };
@@ -89,7 +90,7 @@ export function runWorkflowObservation(root: string, configuration: ParallixConf
         if (!graph.presentationCapabilities || !graph.mission) { throw new Error('Board authority unavailable'); }
         value = await graph.presentationCapabilities.boardProjection.build();
       } else {
-        const terminal = terminalFactory(root, configuration);
+        terminal ??= terminalFactory(root, configuration);
         value = observation.kind === 'overview' ? terminal.overview(observation.mission)
           : observation.kind === 'live' ? terminal.live(observation.mission)
           : observation.kind === 'page' ? terminal.page(observation.mission, observation.request)

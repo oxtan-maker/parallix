@@ -23,6 +23,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 test('restart context discovers retained verdicts by mission without accepting or replaying them (TASK-2826)', async t => {
   const root = mkdtemp('verdict-context-');
@@ -223,6 +224,7 @@ describe("context compaction", { concurrency: false }, () => {
 // Regression provenance: TASK-2641.
 describe('human review reconciliation', { concurrency: false }, () => {
   const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..', '..');
+  const loopContext = (slug: string) => missionExecutionContext({ missionId: slug, missionWorktree: repoRoot });
 
   test('task-2641: an operator request for changes after agent approval launches actionable repair instead of preserving no-findings approval', async () => {
     const fake = fakeReviewLoopPorts({
@@ -287,7 +289,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
       { kind: 'review', id: '7', user: 'operator', isBot: false, created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Preserve the correction.' },
       { kind: 'inline-comment', id: '7', reviewId: '7', user: 'operator', isBot: false, created: '2026-10-05T10:03:01Z', updated: '2026-10-05T10:03:01Z', state: 'REQUEST_CHANGES', location: 'src/a.ts:4', body: 'Keep this branch.' },
     ];
-    const ports = createReviewLoopPorts('task-2641', { worktree: repoRoot }, {
+    const ports = createReviewLoopPorts('task-2641', { executionContext: loopContext('task-2641') }, {
       isProviderEnabled: () => true,
       readToken: () => 'test-token',
       getComments: async () => comments,
@@ -331,7 +333,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
   test('a current human correction on an approved round stays unrecorded and unconsumed until handled (TASK-2679)', async () => {
     const events: Array<{ reference?: string }> = [];
     const comments: NonNullable<Awaited<ReturnType<typeof getComments>>> = [{ kind: 'review', id: 'late-request', user: 'operator', isBot: false, created: '2026-10-05T10:03:00Z', updated: '2026-10-05T10:03:00Z', state: 'REQUEST_CHANGES', body: 'Late correction.' }];
-    const ports = createReviewLoopPorts('task-2679', { worktree: repoRoot }, {
+    const ports = createReviewLoopPorts('task-2679', { executionContext: loopContext('task-2679') }, {
       isProviderEnabled: () => true,
       readToken: () => 'test-token',
       getComments: async () => comments,
@@ -362,7 +364,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
     const bind = (store: Partial<MissionStore>, lifecycle: Partial<Pick<MissionLifecycleService, 'transition'>>) => {
       const fullStore: MissionTransitionStore = { saveWithTransition: async () => { throw new Error('Unexpected transition save'); }, load: async () => ({ kind: 'missing' }), save: async () => { throw new Error('Unexpected review fixture save'); }, ...store };
       const service = Object.assign(new MissionLifecycleService(fullStore), lifecycle);
-      return createReviewLoopPorts('task-2679', { worktree: repoRoot }, {
+      return createReviewLoopPorts('task-2679', { executionContext: loopContext('task-2679') }, {
       missionStore: fullStore, lifecycleService: service, isProviderEnabled: () => false, log: () => {}, error: () => {},
     }).approvalRevocation!;
     };
@@ -389,7 +391,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
     });
 
     test('is unbound without a mission store, so the loop stops with guidance', () => {
-      const ports = createReviewLoopPorts('task-2679', { worktree: repoRoot }, { isProviderEnabled: () => false, log: () => {}, error: () => {} });
+      const ports = createReviewLoopPorts('task-2679', { executionContext: loopContext('task-2679') }, { isProviderEnabled: () => false, log: () => {}, error: () => {} });
       assert.equal(ports.approvalRevocation, null);
     });
   });
@@ -401,7 +403,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
       created: '2026-10-05T10:00:00Z', updated: '2026-10-05T10:00:00Z',
       state: 'APPROVED', dismissed: true, body: 'Withdrawn approval.',
     }];
-    const ports = createReviewLoopPorts('task-2641', { worktree: repoRoot }, {
+    const ports = createReviewLoopPorts('task-2641', { executionContext: loopContext('task-2641') }, {
       isProviderEnabled: () => true,
       readToken: () => 'test-token',
       getComments: async () => comments,

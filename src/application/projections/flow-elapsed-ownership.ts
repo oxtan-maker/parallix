@@ -112,7 +112,7 @@ function missionWindows(input: { repositoryId: string; lifecycle: readonly Lifec
     const refined = events.find(event => event.toStatus === 'refined');
     const delivered = events.find(event => event.toStatus === 'done' && (!refined || Date.parse(event.occurredAt) >= Date.parse(refined.occurredAt)));
     if (!refined || !delivered) {
-      defects.add(`Refined-to-first-delivery boundary incomplete for ${missionId}; rerun the affected fresh workflow with FLOW collection enabled`);
+      defects.add(`Refined-to-first-delivery boundary incomplete for ${missionId}; inspect retained lifecycle history`);
       continue;
     }
     windows.push({ missionId, start: Date.parse(refined.occurredAt), end: Date.parse(delivered.occurredAt), laneEvents: events });
@@ -167,7 +167,7 @@ function activitySegment(source: string, rows: readonly TimedActivity[], index: 
   const start = Math.max(window.start, current.at);
   if (end <= start) { return null; }
   if (!completeActivityOwnership(current.value)) {
-    defects.add(`Activity ownership incomplete for ${window.missionId} operation ${current.value.operationId ?? 'unknown'} source ${source}; rerun the affected fresh workflow with FLOW collection enabled`);
+    defects.add(`Activity ownership incomplete for ${window.missionId} operation ${current.value.operationId ?? 'unknown'} source ${source}; inspect retained activity history`);
     return null;
   }
   if (!next && current.value.state === 'running') {

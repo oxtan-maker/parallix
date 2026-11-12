@@ -1,4 +1,5 @@
-import { authorizedOperationId } from './ports/mission-write-authorization.js';
+import { authorizedOperationId, bindReturnIdentity } from './ports/mission-write-authorization.js';
+import type { WorkflowReturnStage } from '../domain/board-event.js';
 /**
  * Durable rebound repair telemetry (TASK-2653).
  *
@@ -40,6 +41,7 @@ export interface ReboundRepairRecord {
   readonly headAfter: string | null;
   readonly outcome: ReboundRepairOutcome;
   readonly durationMs: number;
+  readonly workflowReturn?: WorkflowReturnStage;
 }
 
 export interface ReboundTelemetrySink {
@@ -59,9 +61,11 @@ export async function recordReboundRepair(record: ReboundRepairRecord, log?: (_m
   const bound = sink;
   if (!bound) { return; }
   try {
+    const { workflowReturn, ...facts } = record;
+    const returnIdentity = workflowReturn ? bindReturnIdentity(workflowReturn) : undefined;
     await bound.history.append({
       eventType: REBOUND_REPAIR_EVENT,
-      eventData: JSON.stringify({ ...record, repositoryId: bound.repositoryId }),
+      eventData: JSON.stringify({ ...facts, ...(returnIdentity ? { returnIdentity } : {}), repositoryId: bound.repositoryId }),
       createdAt: new Date().toISOString(),
     });
   } catch (err: unknown) {

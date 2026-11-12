@@ -92,7 +92,7 @@ async function authorizeLaunch(slug: string | null, admission: StartAgentLoopDep
 }
 
 /** Run the launcher, announce the invocation, and await the result. */
-export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'authoritativeCompletion' | 'launchAdmission'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
+export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'stdinPolicy' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'authoritativeCompletion' | 'launchAdmission'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation: AgentInvocation | null | undefined;
@@ -128,6 +128,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
       sessionMarkerPort: launchSessionMarkerPort,
       teeOptions: {
         ...runSession?.teeOptions,
+        stdinPolicy: deps.stdinPolicy,
         onSpawn: (child: SupervisedChild) => {
           // The child is spawned now: destination work has started, so the
           // lifecycle persistence deadline starts here (not pre-spawn).
