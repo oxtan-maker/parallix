@@ -3,7 +3,9 @@ export type { StatsRow } from './services/statistics-row.js';
 import type { DurableEvidence, ProgressEvent, SourceFact } from './contracts.js';
 import type { StatsRecoveryCollection } from './stats-recovery-evidence.js';
 export type { StatsRecoveryCollection, StatsRecoveryConflict, StatsRecoveryEvidence,
-  StatsRecoveryFactKind, StatsRecoveryLinks, StatsRecoverySource, StatsRecoveryAudit } from './stats-recovery-evidence.js';
+  StatsRecoveryFactKind, StatsRecoveryLinks, StatsRecoverySource, StatsRecoveryAudit,
+} from './stats-recovery-evidence.js';
+export type { StatsMeasurementRecoveryReport, StatsMeasurementRecoveryTarget } from './stats-backfill-service.js';
 
 // Re-export operator-state repository ports so presentation consumers (TUI,
 // CLI status) can import them from the application layer without referencing
@@ -64,6 +66,8 @@ export interface StatsProjection {
   readonly skipped?: readonly StatsBackfillSkipped[];
   readonly recovery?: StatsRecoveryCollection;
   readonly recoveryAudit?: import('./stats-recovery-evidence.js').StatsRecoveryAudit;
+  /** Per-measurement native-run proof for the population frozen by the consistent copy. */
+  readonly measurementRecovery?: import('./stats-backfill-service.js').StatsMeasurementRecoveryReport;
 }
 
 /** Where a recovery run reads and writes operator state. Apply is copy-only. */
@@ -74,7 +78,8 @@ export interface StatsRecoveryTarget {
 }
 
 export interface StatsBackfillPort {
-  readProjection(_target?: StatsRecoveryTarget): Promise<StatsProjection>;
+  readProjection(_target?: StatsRecoveryTarget,
+    _inventory?: readonly import('./stats-backfill-service.js').StatsMeasurementRecoveryTarget[]): Promise<StatsProjection>;
   applyProjection(_projection: StatsProjection, _target?: StatsRecoveryTarget): Promise<readonly DurableEvidence[]>;
 }
 

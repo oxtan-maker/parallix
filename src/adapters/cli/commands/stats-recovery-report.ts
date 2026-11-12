@@ -39,6 +39,15 @@ export function renderRecoveryAudit(projection: StatsProjection): string[] {
     return `- ${identity} fields=${conflict?.fields.join(',') ?? 'unknown'}`;
   }, [...new Set(projection.recovery?.conflicts.map(item => item.identity) ?? [])]);
   pushSection(lines, 'Unresolved gaps:', gap => `- ${gap}`, audit.unresolvedGaps);
+  const measurements = projection.measurementRecovery;
+  if (measurements) {
+    lines.push(`Native-run measurement inventory: candidates=${measurements.summary.candidates} corrections=${measurements.summary.corrections} verified=${measurements.summary.verified} gaps=${measurements.summary.gaps} conflicts=${measurements.summary.conflicts}`);
+    for (const item of measurements.inventory) {
+      const proof = item.evidence ? ` run=${item.evidence.runId} sha256=${item.evidence.sha256}` : '';
+      const detail = [...item.gaps, ...item.conflicts].join('; ');
+      lines.push(`- ${item.original.mission}/${item.original.stage}/${JSON.stringify(item.original.actorKey)}: ${item.disposition}${proof}${detail ? `; ${detail}` : ''}`);
+    }
+  }
   lines.push(`Source inventory before ${audit.inventoryPeriod.before} (candidate evidence, never a corrected return total):`);
   for (const [key, label, populationKey] of INVENTORY_LABELS) {
     const population = populationKey ? ` across ${audit.inventory[populationKey]} missions` : '';
@@ -57,6 +66,7 @@ export function recoveryAuditPayload(projection: StatsProjection): unknown {
   if (!audit) { return null; }
   return {
     ...audit,
+    measurementRecovery: projection.measurementRecovery ?? null,
     conflicts: (projection.recovery?.conflicts ?? []).map(conflict => ({ identity: conflict.identity, fields: conflict.fields })),
     reportComparison: (projection.changes ?? []).map(change => ({
       mission: change.mission, before: change.before, beforeObserved: change.beforeObserved,

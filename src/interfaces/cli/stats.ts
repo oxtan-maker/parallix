@@ -24,7 +24,7 @@ export interface StatsPresentation {
 export function printStatsUsage(log: (_message: string) => unknown = fmt.log.plain): void {
   log(`Usage: px stats [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]
        px stats cohorts [--by label|implementer|model|provider] [--min-sample <n>]
-       px stats backfill [--apply --isolated-copy <db-copy>] [--json]
+       px stats backfill [--recovery-inventory <json-file>] [--apply --isolated-copy <db-copy>] [--json]
 
 Examples:
   px stats
@@ -46,8 +46,9 @@ Notes:
     cohort with too few completed missions is marked low-sample rather than
     presented as a comparable result. Run "px stats cohorts --help" for detail.
   - "px stats backfill" previews historical evidence recovery. Its JSON output
-    includes the analysis export; apply is restricted to an isolated database
-    copy. Run "px stats backfill --help" for interpretation and safety details.
+    includes the analysis export. One-time measurement repair requires an exact
+    operator-supplied recovery inventory; apply is restricted to an isolated
+    database copy. Run "px stats backfill --help" for interpretation and safety details.
   - Workflow-owned stats datasets print the current/previous-week summary tables by default.
   - Reports use the machine local timezone. Current rolling 7 days include today
     and update with new deliveries; dates advance at local midnight. The previous

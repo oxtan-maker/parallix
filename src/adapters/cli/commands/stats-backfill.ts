@@ -3,6 +3,7 @@ import * as fmt from '../../../application/presentation/cli-format.js';
 import { renderRecoveryAnalysis, renderRecoveryAudit, recoveryAuditPayload } from './stats-recovery-report.js';
 import { analyzeStatsRecovery } from '../../../application/stats-recovery-analysis.js';
 import type { StatsBackfillService } from '../../../application/stats-backfill-service.js';
+import { readStatsRecoveryInventory } from './stats-recovery-input.js';
 import path from 'node:path';
 
 function backfillReport(value: import('../../../application/ports.js').StatsProjection) {
@@ -12,7 +13,8 @@ function backfillReport(value: import('../../../application/ports.js').StatsProj
 function recoveryChangeCount(projection: import('../../../application/ports.js').StatsProjection,
   durableEvidenceCount: number, apply: boolean): number {
   if (!apply) { return 0; }
-  return projection.recoveryAudit?.additions ?? durableEvidenceCount;
+  return (projection.recoveryAudit?.additions ?? durableEvidenceCount)
+    + (projection.measurementRecovery?.summary.corrections ?? 0);
 }
 
 function backfillPayload(report: ReturnType<typeof backfillReport>,
@@ -68,12 +70,12 @@ function pushSummarySection<T>(lines: string[], header: string, renderRow: (_ite
 }
 
 function printUsage(log: (_message: string) => void = fmt.log.plain) {
-  log(`Usage: px stats backfill [--apply --isolated-copy <db-copy>] [--json]
+  log(`Usage: px stats backfill [--recovery-inventory <json-file>] [--apply --isolated-copy <db-copy>] [--json]
 
 Examples:
   px stats backfill
-  px stats backfill --json
-  px stats backfill --apply --isolated-copy /tmp/parallix-recovery.db
+  px stats backfill --recovery-inventory /tmp/recovery.json --json
+  px stats backfill --recovery-inventory /tmp/recovery.json --apply --isolated-copy /tmp/parallix-recovery.db
 
 Notes:
   - This command is for historical stats recovery only.
@@ -98,6 +100,7 @@ function parseBackfillFlags(args: readonly string[]) {
   let apply = false;
   let json = false;
   let isolatedCopy: string | undefined;
+  let recoveryInventory: string | undefined;
 
   for (let i = 0;i < args.length;i += 1) {
     const arg = args[i];
@@ -113,9 +116,16 @@ function parseBackfillFlags(args: readonly string[]) {
     }
     if (arg === '--json') {
       json = true;
+      continue;
+    }
+    if (arg === '--recovery-inventory') {
+      recoveryInventory = args[i + 1];
+      if (!recoveryInventory) { throw new Error('--recovery-inventory requires a JSON file path'); }
+      i += 1;
     }
   }
-  return { apply, json, isolatedCopy: isolatedCopy ? path.resolve(isolatedCopy) : undefined };
+  return { apply, json, isolatedCopy: isolatedCopy ? path.resolve(isolatedCopy) : undefined,
+    recoveryInventory: recoveryInventory ? path.resolve(recoveryInventory) : undefined };
 }
 
 interface BackfillOptions {
@@ -136,13 +146,14 @@ async function statsBackfill(args: string[], options: BackfillOptions = {}) {
     return;
   }
 
-  const { apply, json, isolatedCopy } = parseBackfillFlags(args);
+  const { apply, json, isolatedCopy, recoveryInventory } = parseBackfillFlags(args);
   const service = opts.service;
   if (!service) { throw new Error('stats-backfill command requires an injected service'); }
   const outcome = await service.execute({
     operationId: `stats-backfill:${Date.now()}`,
     apply,
     isolatedCopy: isolatedCopy ? { databasePath: isolatedCopy } : undefined,
+    measurementRecoveryInventory: recoveryInventory ? readStatsRecoveryInventory(recoveryInventory) : undefined,
     capabilities: apply ? new Set(['stats:apply'] as const) : new Set(),
   });
 

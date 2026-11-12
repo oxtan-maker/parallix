@@ -49,10 +49,18 @@ relabelled as all-cause totals; reconstruction outputs come from the same calcul
 establish a review measurement. `px stats backfill`
 previews recovered evidence from retained Mission, lifecycle, workflow, Git and
 provider history, including old/new counts, coverage, conflicts and unresolved
-sources. It does not restore a CSV or legacy review-state importer. Explicit
-apply writes immutable recovery evidence and its audit only to a consistent
-isolated database copy; the live operator database is refused. Repeating an
-unchanged apply preserves existing evidence without duplicating it.
+sources. For one-time measurement recovery, the operator supplies exact
+mission/actor identities with `--recovery-inventory`; the command does not infer
+the population from task names, dates, configured models or neighboring rows.
+It reports each original row and the exact run used as evidence, including its
+hash;
+missing exact run links remain named gaps rather than being matched by date,
+defaults or neighboring missions. It does not restore a CSV or legacy
+review-state importer. Explicit apply records the original and proposed row
+before writing an evidence-backed correction through the measurement store,
+and writes only to a consistent isolated database copy; the live operator
+database is refused. Repeating or resuming an unchanged apply preserves
+existing evidence and corrections without duplicating them.
 
 The JSON backfill report is also the historical analysis export. Every metric
 states its eligible population, observation count, denominator and coverage,

@@ -56,6 +56,8 @@ import type { OperationalHistoryRepository, BoardLaneEventRepository } from '../
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import type { ProductionCapabilities } from './production-capabilities.js';
+import { createMissionTerminalCapability } from './mission-terminal-capability.js';
+import type { MissionTerminalCapability } from '../application/ports/mission-terminal.js';
 
 export type OperatorStateServices = {
   readonly db: SqliteDatabaseAdapter;
@@ -92,6 +94,13 @@ export interface OperatorStateRepositories {
   readonly operationalHistory: OperationalHistoryRepository;
   readonly boardLaneEvents: BoardLaneEventRepository;
   readonly usage: UsageRepository;
+}
+
+/** Resolve retained native run history only when a stats recovery inventory needs it. */
+function lazyMissionTerminalHistory(rootDir: string,
+  configuration: ParallixConfiguration): Pick<MissionTerminalCapability, 'history'> {
+  let terminal: MissionTerminalCapability | undefined;
+  return { history: mission => (terminal ??= createMissionTerminalCapability(rootDir, configuration)).history(mission) };
 }
 
 /**
@@ -324,6 +333,7 @@ export async function createProductionApplicationServices(
       operatorState.repositories ? createWorkflowReturnReader(operatorState.repositories.boardLaneEvents, operatorState.repositories.operationalHistory) : undefined,
       operatorState.repositories ? { laneMoves: operatorState.repositories.boardLaneEvents,
         operationalHistory: operatorState.repositories.operationalHistory,
+        runs: lazyMissionTerminalHistory(rootDir, options.configuration),
         provider: repository => collectForgejoStatsRecovery(repository,
           readToken(resolveForgejoUser(undefined, options.configuration), rootDir, options.configuration) ?? undefined,
           { rootDir, configuration: options.configuration }) } : {})),

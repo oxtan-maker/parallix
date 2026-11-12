@@ -13,15 +13,18 @@ import { StatsRecoveryAdapter } from '../../../src/adapters/mission/stats-backfi
 import { closeIsolatedOperatorCopies } from '../../../src/adapters/sqlite/isolated-operator-copy.js';
 import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
-import { StatsBackfillService } from '../../../src/application/stats-backfill-service.js';
+import { measurementCorrectionIdentity, StatsBackfillService } from '../../../src/application/stats-backfill-service.js';
 import { statsBackfill } from '../../../src/adapters/cli/commands/stats-backfill.js';
+import { readStatsRecoveryInventory } from '../../../src/adapters/cli/commands/stats-recovery-input.js';
 import { resolveStatsRepoName } from '../../../src/adapters/cli/commands/stats.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import { missionLabels } from '../../../src/domain/mission.js';
+import { agentFamily } from '../../../src/domain/agents.js';
 import { collectForgejoStatsRecovery } from '../../../src/adapters/forgejo/forgejo-stats-recovery.js';
 import type { ForgejoApiResult, ForgejoAsyncApiCall } from '../../../src/adapters/forgejo/forgejo-types.js';
 import { reconcileRecoveryEvidence, recoveryIdentity } from '../../../src/application/stats-recovery-evidence.js';
 import { collectLocalStatsRecovery } from '../../../src/adapters/review/stats-recovery-collector.js';
+import type { RunSummary } from '../../../src/application/run-history.js';
 
 await prepareMigratedSchema();
 
@@ -90,6 +93,21 @@ test('local recovery excludes measured verification and keeps observation identi
   assert.equal(result.evidence.find(item => item.provenance.includes('flow.rebase'))?.collectionEra, 'measured-workflow');
   assert.equal(result.conflicts.filter(item => item.retained.source === 'git').length, 0,
     'each round observation of one revision has its own stable identity');
+});
+
+test('recovery inventory rejects malformed and duplicate identities (px-0036.03)', t => {
+  const root = mkdtemp('review-statistics-recovery-inventory-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const inventoryPath = path.join(root, 'inventory.json');
+  const rejects = (value: unknown, expected: RegExp) => {
+    fs.writeFileSync(inventoryPath, JSON.stringify(value));
+    assert.throws(() => readStatsRecoveryInventory(inventoryPath), expected);
+  };
+  rejects({}, /JSON array or an object with a measurements array/);
+  rejects([null], /recovery target 1 must be an object/);
+  rejects([{ mission: '', actorKey: 'custom' }], /recovery target 1 requires mission and actorKey/);
+  rejects([{ mission: 'task-1', actorKey: 'custom' }, { mission: 'task-1', actorKey: 'custom' }],
+    /duplicate recovery target task-1/);
 });
 
 function ok<T>(data: T): ForgejoApiResult<T> {
@@ -259,6 +277,239 @@ test('recovery apply resumes past a failed source without duplicating applied ev
   assert.ok(second.length > first.length);
   for (const identity of firstIdentities) { assert.ok(secondIdentities.has(identity), 'applied evidence is preserved'); }
 });
+
+test('recovery refuses configured model and zero usage without provider-run evidence (px-0036.03)', async t => {
+  const root = mkdtemp('review-statistics-native-gap-');
+  let measurements: SqliteMeasurementStore | undefined;
+  const db = new SqliteDatabaseAdapter();
+  t.after(async () => { closeIsolatedOperatorCopies(); measurements?.close(); await db.close();
+    fs.rmSync(root, { recursive: true, force: true }); });
+  const dbPath = path.join(root, 'operator.db');
+  const isolatedPath = path.join(root, 'isolated.db');
+  copyMigratedSchema(dbPath);
+  await db.open({ path: dbPath });
+  const missions = new SqliteMissionStore(db);
+  const repo = repositoryId(resolveStatsRepoName(root));
+  const mission = fixtureMission('task-2839', { repositoryId: repo, labels: missionLabels(['ai_sdlc']),
+    closedAt: '2026-11-10T12:00:00Z', review: repeatReview() });
+  await missions.save(mission, null);
+  const runId = 'review-custom-a1-missingfacts';
+  measurements = new SqliteMeasurementStore(dbPath);
+  measurements.upsertMeasurement({ repo, mission: mission.id, stage: 'review', actorKey: 'custom\u001fcodex',
+    runId, date: '2026-11-10', classification: 'ai_sdlc', implementer: 'custom', reviewer_agent: 'custom',
+    provider: 'codex', model: 'codex', input_tokens: 0, output_tokens: 0, cached_tokens: 0, context_tokens: 0,
+    tool_calls: 0, cost_usd: 0 });
+  const sourceBefore = measurements.listMeasurements()[0];
+  const run = unsupportedProviderRun(mission.id, runId);
+  const recoverySources = {
+    operationalHistory: new SqliteOperationalHistoryRepository(db),
+    laneMoves: new SqliteBoardLaneEventRepository(db),
+    runs: { history: () => ({ ok: true as const, runs: [run], unattributed: [] }) },
+  };
+  const adapter = new StatsRecoveryAdapter(root, { store: measurements, dbPath }, missions, undefined, recoverySources);
+  const inventory = [{ mission: mission.id, actorKey: 'custom\u001fcodex' }];
+  const preview = await adapter.readProjection(undefined, inventory);
+  const native = (preview as typeof preview & { measurementRecovery: {
+    inventory: readonly { disposition: string; gaps: readonly string[]; proposed: unknown }[] } }).measurementRecovery;
+  assert.equal(native.inventory.length, 1);
+  assert.equal(native.inventory[0].disposition, 'gap');
+  assert.equal(native.inventory[0].proposed, null);
+  assert.ok(native.inventory[0].gaps.some(gap => gap.includes('provider observation')),
+    'configuredModel is not accepted as provider model evidence');
+  await adapter.applyProjection(preview, { databasePath: isolatedPath, materialize: true });
+  const copied = new SqliteMeasurementStore(isolatedPath);
+  try { assert.deepEqual(copied.listMeasurements()[0], sourceBefore, 'unsupported model and usage stay unchanged'); }
+  finally { copied.close(); }
+  assert.deepEqual(measurements.listMeasurements()[0], sourceBefore, 'source operator state is never changed');
+});
+
+test('native-run correction preview preserves conflicts and resumes an interrupted typed apply (px-0036.03)', async t => {
+  const root = mkdtemp('review-statistics-native-correction-');
+  let measurements: SqliteMeasurementStore | undefined;
+  const db = new SqliteDatabaseAdapter();
+  const copyDb = new SqliteDatabaseAdapter();
+  t.after(async () => { closeIsolatedOperatorCopies(); measurements?.close(); await db.close(); await copyDb.close();
+    fs.rmSync(root, { recursive: true, force: true }); });
+  const dbPath = path.join(root, 'operator.db');
+  const isolatedPath = path.join(root, 'isolated.db');
+  copyMigratedSchema(dbPath);
+  await db.open({ path: dbPath });
+  const missions = new SqliteMissionStore(db);
+  const repo = repositoryId(resolveStatsRepoName(root));
+  for (const slug of ['task-2839', 'task-2842', 'px-0035']) {
+    await missions.save(fixtureMission(slug, { repositoryId: repo, labels: missionLabels(['ai_sdlc']),
+      closedAt: '2026-11-10T12:00:00Z', review: repeatReview() }), null);
+  }
+  measurements = new SqliteMeasurementStore(dbPath);
+  const correctionRun = 'review-custom-a1-correction';
+  const conflictRun = 'review-custom-a1-conflict';
+  measurements.upsertAll([
+    { repo, mission: 'task-2839', stage: 'review', actorKey: 'custom\u001fcodex', runId: correctionRun,
+      date: '2026-11-10', reviewer_agent: 'custom', provider: 'codex', model: 'codex', input_tokens: 0,
+      output_tokens: 0, cached_tokens: 0, context_tokens: 0, tool_calls: 0, cost_usd: 0 },
+    { repo, mission: 'task-2842', stage: 'review', actorKey: 'custom\u001fqwen', runId: conflictRun,
+      date: '2026-11-10', reviewer_agent: 'custom', provider: 'pi', model: 'qwen', input_tokens: 55 },
+    { repo, mission: 'px-0035', stage: 'review', actorKey: 'custom\u001fcodex', date: '2026-11-10',
+      reviewer_agent: 'custom', provider: 'codex', model: 'codex', input_tokens: 0 },
+  ]);
+  const sourceBefore = measurements.listMeasurements();
+  const runs = new Map([
+    ['task-2839', [providerRun('task-2839', correctionRun, 101)]],
+    ['task-2842', [providerRun('task-2842', conflictRun, 99)]],
+  ]);
+  const adapter = new StatsRecoveryAdapter(root, { store: measurements, dbPath }, missions, undefined, {
+    operationalHistory: new SqliteOperationalHistoryRepository(db), laneMoves: new SqliteBoardLaneEventRepository(db),
+    runs: { history: mission => ({ ok: true, runs: runs.get(mission) ?? [], unattributed: [] }) },
+  });
+  const inventory = [
+    { mission: 'task-2839', actorKey: 'custom\u001fcodex' },
+    { mission: 'task-2842', actorKey: 'custom\u001fqwen' },
+    { mission: 'px-0035', actorKey: 'custom\u001fcodex' },
+  ];
+  const preview = await adapter.readProjection(undefined, inventory);
+  assert.deepEqual(preview.measurementRecovery?.summary,
+    { candidates: 3, corrections: 1, verified: 0, gaps: 1, conflicts: 1 });
+  const correction = preview.measurementRecovery!.inventory.find(item => item.disposition === 'correction')!;
+  assert.match(correction.evidence?.sha256 ?? '', /^[a-f0-9]{64}$/);
+  assert.deepEqual([correction.proposed?.provider, correction.proposed?.model, correction.proposed?.input_tokens],
+    ['pi', 'qwen-observed', 101]);
+  assert.ok(preview.measurementRecovery!.inventory.find(item => item.disposition === 'conflict')?.conflicts
+    .some(detail => detail.includes('input_tokens retained=55 observed=99')), 'nonzero usage is never overwritten');
+  assert.deepEqual(measurements.listMeasurements(), sourceBefore, 'preview writes neither measurements nor recovery plans');
+  assert.equal((await new SqliteOperationalHistoryRepository(db).findByType('stats.recovery.measurement-plan')).length, 0);
+  const logs: string[] = [];
+  const inventoryPath = path.join(root, 'recovery-inventory.json');
+  fs.writeFileSync(inventoryPath, JSON.stringify({ measurements: inventory }));
+  await statsBackfill(['--recovery-inventory', inventoryPath, '--json'], {
+    service: new StatsBackfillService(adapter), log: line => logs.push(line),
+    error: line => assert.fail(line), exit: code => assert.fail(`unexpected exit ${code}`) });
+  const publicPreview = JSON.parse(logs.pop()!);
+  assert.deepEqual(publicPreview.recovery.measurementRecovery.summary, preview.measurementRecovery?.summary,
+    'public dry-run JSON identifies every correction, conflict and gap');
+
+  await adapter.readProjection({ databasePath: isolatedPath, materialize: true });
+  copyDb.openSync({ path: isolatedPath, enableWal: false });
+  const copyHistory = new SqliteOperationalHistoryRepository(copyDb);
+  const correctionId = measurementCorrectionIdentity(correction);
+  await copyHistory.append({ eventType: 'stats.recovery.measurement-plan', createdAt: correction.evidence!.observedAt,
+    eventData: JSON.stringify({ repositoryId: repo, missionId: correction.original.mission,
+      correctionIdentity: correctionId, correction }) });
+  await adapter.applyProjection(preview, { databasePath: isolatedPath });
+  const copied = new SqliteMeasurementStore(isolatedPath);
+  const applied = copied.findByMission('task-2839')[0];
+  assert.deepEqual([applied.provider, applied.model, applied.input_tokens], ['pi', 'qwen-observed', 101],
+    'resume applies a correction even when its durable plan predates an interrupted write');
+  assert.equal(copied.findByMission('task-2842')[0].input_tokens, 55, 'conflicting nonzero usage is preserved');
+  assert.equal(copied.findByMission('px-0035')[0].model, 'codex', 'an unlinked value remains an explicit gap');
+  copied.close();
+  const second = await adapter.readProjection({ databasePath: isolatedPath }, inventory);
+  assert.equal(second.measurementRecovery?.summary.corrections, 0);
+  await adapter.applyProjection(second, { databasePath: isolatedPath });
+  assert.equal((await copyHistory.findByType('stats.recovery.measurement-plan')).length, 1,
+    'retry is idempotent and does not duplicate the retained original/provenance plan');
+  assert.deepEqual(measurements.listMeasurements(), sourceBefore, 'copy-only apply leaves source state unchanged');
+});
+
+test('native-run inventory rejects duplicate, stale and mismatched evidence (px-0036.03)', async t => {
+  const root = mkdtemp('review-statistics-native-conflicts-');
+  let measurements: SqliteMeasurementStore | undefined;
+  const db = new SqliteDatabaseAdapter();
+  t.after(async () => { measurements?.close(); await db.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const dbPath = path.join(root, 'operator.db');
+  copyMigratedSchema(dbPath);
+  await db.open({ path: dbPath });
+  const missions = new SqliteMissionStore(db);
+  const repo = repositoryId(resolveStatsRepoName(root));
+  for (const slug of ['px-0030', 'px-0031', 'task-2836']) {
+    await missions.save(fixtureMission(slug, { repositoryId: repo, labels: missionLabels(['ai_sdlc']),
+      closedAt: '2026-11-10T12:00:00Z', review: repeatReview() }), null);
+  }
+  measurements = new SqliteMeasurementStore(dbPath);
+  measurements.upsertAll([
+    { repo, mission: 'px-0030', stage: 'review', actorKey: 'custom\u001fqwen', runId: 'review-custom-a1-duplicate', date: '2026-11-10', reviewer_agent: 'custom' },
+    { repo, mission: 'px-0031', stage: 'review', actorKey: 'custom\u001fqwen', runId: 'review-custom-a1-stale', date: '2026-11-10', reviewer_agent: 'custom' },
+    { repo, mission: 'task-2836', stage: 'review', actorKey: 'custom\u001fqwen', runId: 'review-custom-a1-mismatch', date: '2026-11-10', reviewer_agent: 'custom' },
+  ]);
+  const duplicate = providerRun('px-0030', 'review-custom-a1-duplicate', 1);
+  const mismatch = providerRun('another-mission', 'review-custom-a1-mismatch', 1);
+  const adapter = new StatsRecoveryAdapter(root, { store: measurements }, missions, undefined, { runs: {
+    history: mission => ({ ok: true, runs: mission === 'px-0030' ? [duplicate, duplicate]
+      : mission === 'task-2836' ? [mismatch] : [], unattributed: [] }),
+  } });
+  const inventory = [
+    { mission: 'px-0030', actorKey: 'custom\u001fqwen' },
+    { mission: 'px-0031', actorKey: 'custom\u001fqwen' },
+    { mission: 'task-2836', actorKey: 'custom\u001fqwen' },
+  ];
+  const report = (await adapter.readProjection(undefined, inventory)).measurementRecovery!;
+  assert.deepEqual(report.summary, { candidates: 3, corrections: 0, verified: 0, gaps: 1, conflicts: 2 });
+  assert.ok(report.inventory.some(item => item.conflicts.some(detail => detail.includes('duplicate retained native run'))));
+  assert.ok(report.inventory.some(item => item.gaps.some(detail => detail.includes('is unavailable'))));
+  assert.ok(report.inventory.some(item => item.conflicts.some(detail => detail.includes('another-mission/review'))));
+});
+
+test('consistent-copy inventory accounts for 21 custom-origin missions plus a generic Codex row (px-0036.03)', async t => {
+  const root = mkdtemp('review-statistics-frozen-inventory-');
+  let measurements: SqliteMeasurementStore | undefined;
+  const db = new SqliteDatabaseAdapter();
+  t.after(async () => { measurements?.close(); await db.close(); fs.rmSync(root, { recursive: true, force: true }); });
+  const dbPath = path.join(root, 'operator.db');
+  copyMigratedSchema(dbPath);
+  await db.open({ path: dbPath });
+  const missions = new SqliteMissionStore(db);
+  const repo = repositoryId(resolveStatsRepoName(root));
+  const customOrigins = Array.from({ length: 21 }, (_, index) => `custom-origin-${index + 1}`);
+  for (const slug of [...customOrigins, 'generic-codex-review', 'later-attributed-review']) {
+    await missions.save(fixtureMission(slug, { repositoryId: repo, labels: missionLabels(['ai_sdlc']),
+      closedAt: '2026-11-10T12:00:00Z', review: repeatReview() }), null);
+  }
+  measurements = new SqliteMeasurementStore(dbPath);
+  measurements.upsertAll([
+    ...customOrigins.map(mission => ({ repo, mission, stage: 'review',
+      actorKey: 'custom', reviewer_agent: 'custom', provider: 'mixed', model: 'mixed' })),
+    { repo, mission: 'generic-codex-review', stage: 'review', actorKey: 'codex', reviewer_agent: 'codex',
+      provider: 'mixed', model: 'mixed' },
+    { repo, mission: 'later-attributed-review', stage: 'review', actorKey: 'custom\u001fclaude', reviewer_agent: 'custom',
+      provider: 'claude', model: 'claude' },
+  ]);
+  const inventory = [
+    ...customOrigins.map(mission => ({ mission, actorKey: 'custom' })),
+    { mission: 'generic-codex-review', actorKey: 'codex' },
+  ];
+  const report = (await new StatsRecoveryAdapter(root, { store: measurements }, missions)
+    .readProjection(undefined, inventory)).measurementRecovery!;
+  assert.deepEqual(report.summary, { candidates: 22, corrections: 0, verified: 0, gaps: 22, conflicts: 0 });
+  assert.equal(new Set(report.inventory.filter(item => item.original.reviewer_agent === 'custom')
+    .map(item => item.original.mission)).size, 21);
+  assert.equal(report.inventory.some(item => item.original.mission === 'generic-codex-review'
+    && item.original.actorKey === 'codex'), true);
+  assert.equal(report.inventory.some(item => item.original.mission === 'later-attributed-review'), false,
+    'a measurement absent from the operator-supplied frozen inventory is outside recovery');
+  assert.ok(report.inventory.every(item => item.gaps.includes('missing exact run link; mission/date matching is forbidden')));
+});
+
+function unsupportedProviderRun(mission: string, runId: string): RunSummary {
+  return { state: 'exited', execution: 'stopped', coverage: [], record: {
+    version: 1, runId, missionId: mission, sourceId: runId, revision: 'revision-1', configuredModel: 'codex',
+    dependencies: [], execution: null, resources: { localProcessTreeCpu: null, provider: null }, role: 'review',
+    family: agentFamily('custom'), attempt: 1, terminalHost: 'pipe', hostFallbackReason: null, tmux: null, supervisorPid: 1,
+    state: 'exited', startedAt: '2026-11-10T10:00:00Z', endedAt: '2026-11-10T10:01:00Z', exitCode: 0,
+    signal: null, providerSessionId: null, redacted: false,
+    streams: { stdout: { bytes: 0, retainedBytes: 0, omitted: [] }, stderr: { bytes: 0, retainedBytes: 0, omitted: [] } },
+    sources: [], omissions: [],
+  } };
+}
+
+function providerRun(mission: string, runId: string, input: number): RunSummary {
+  const run = unsupportedProviderRun(mission, runId);
+  return { ...run, record: { ...run.record, resources: { localProcessTreeCpu: null, provider: {
+    provenance: 'provider-reported', provider: 'pi', model: 'qwen-observed', values: [
+      { name: 'input', value: input, unit: 'tokens' }, { name: 'output', value: 12, unit: 'tokens' },
+      { name: 'cached', value: 34, unit: 'tokens' }, { name: 'context', value: input + 46, unit: 'tokens' },
+      { name: 'tool-calls', value: 3, unit: 'count' }, { name: 'cost', value: 0, unit: 'usd' },
+    ],
+  } } } };
+}
 
 function recoveryIdentityOf(row: { readonly eventData: string }): string {
   return (JSON.parse(row.eventData) as { evidence: { identity: string } }).evidence.identity;

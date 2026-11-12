@@ -549,6 +549,9 @@ test('SC1 reverse: all durable-IO files under src/ are present in the inventory'
     // Operator-supplied provenance input is a read-once CLI payload, not a
     // durable-state authority; validated values are persisted through Mission state.
     'src/adapters/cli/commands/defect-provenance-input.ts',
+    // Operator-supplied recovery identities are another read-once CLI payload;
+    // the measurement store and retained native runs remain the authorities.
+    'src/adapters/cli/commands/stats-recovery-input.ts',
     // Exact proof inputs read checkout and runtime metadata, not domain state.
     'src/adapters/verification/verification-proof-inputs.ts',
     // Temporary-root cleanup manifests are verification infrastructure, not domain state.
