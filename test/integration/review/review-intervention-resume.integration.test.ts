@@ -199,6 +199,7 @@ async function seedRoot(review: Review): Promise<Harness> {
 /** Invoke the inferred review entry with real SQLite and a held loop fence. */
 async function invokeResume(store: SqliteMissionStore, root: string, actor: string | null, direct = true): Promise<{ cleared: boolean; outcome: string | null }> {
   const adapter = createReviewWorkflowAdapter(withReviewMutationContext({
+    rootDir: root,
     missionStore: store,
     operatorResume: bindReviewOperatorResume(store, direct, {}, async () => ({ workflow: null,
       liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
@@ -356,7 +357,7 @@ describe("stopped review recovery through inferred px review", () => {
       const { root, store } = await seedRoot(stoppedReview());
       const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
       const cleared = await continueReviewClearsIntervention(SLUG, [], {
-        resolveWorktreeFn: () => root,
+        executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
         missionStore: store,
         log: () => undefined,
         error: () => undefined,
@@ -377,7 +378,7 @@ describe("stopped review recovery through inferred px review", () => {
       const { root, store } = await seedRoot(stoppedReview());
       const gitUser = { signal: null, status: 1, stdout: '', stderr: 'fatal: not a git repository', error: null };
       const cleared = await continueReviewClearsIntervention(SLUG, [], {
-        resolveWorktreeFn: () => root,
+        executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
         missionStore: store,
         log: () => undefined,
         error: () => undefined,
@@ -395,7 +396,7 @@ describe("stopped review recovery through inferred px review", () => {
       const { root, store } = await seedRoot(plainReadyForNextRound());
       const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
       const cleared = await continueReviewClearsIntervention(SLUG, [], {
-        resolveWorktreeFn: () => root,
+        executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
         missionStore: store,
         log: () => undefined,
         error: () => undefined,
@@ -554,6 +555,7 @@ it('retries a persisted operator correction after failed revocation and a databa
       } },
     };
     await new ReviewCommandUseCase(createReviewWorkflowAdapter(withReviewMutationContext({
+      rootDir: root,
       missionStore: store, operatorResume: bindReviewOperatorResume(store, true, {}, async () => ({ workflow: null,
         liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })),
       inferSlugFn: () => SLUG, resolveWorktreeFn: () => root,

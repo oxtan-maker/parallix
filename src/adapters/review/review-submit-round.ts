@@ -292,7 +292,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     }
     const { resolveTaskFileFn, getTaskStatusFn, transitionTaskFn } = providerReviewBindings(options);
     await repairStaleActiveTaskAfterReview(slug, {
-      rootDir: worktree, resolveTaskFileFn, getTaskStatusFn, transitionTaskFn, log, error,
+      executionContext: options.executionContext, resolveTaskFileFn, getTaskStatusFn, transitionTaskFn, log, error,
     });
     return;
   }

@@ -173,7 +173,7 @@ export type IntegrationReviewSubmissionOptions = {
 
 export interface IntegrateRebasePort {
   createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: IntegrationMissionServicesFactory;
-    executionContext: LiveMissionExecutionContext; rebaseObservationStage?: 'integration-rebase'; exitFn: (_code: number) => void }): RebaseWorkflowPort;
+    cwd: string; executionContext: LiveMissionExecutionContext; rebaseObservationStage?: 'integration-rebase'; exitFn: (_code: number) => void }): RebaseWorkflowPort;
 }
 
 export interface IntegrationGateRunResult {

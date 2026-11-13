@@ -503,7 +503,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
         const { root, store } = await seedRoot(blockedRound());
         const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         const result = await continueReviewInvalidatesBlocker(SLUG, [], {
-          resolveWorktreeFn: () => root,
+          executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
@@ -524,7 +524,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
         const { root, store } = await seedRoot(parkedRound());
         const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         const result = await continueReviewInvalidatesBlocker(SLUG, [], {
-          resolveWorktreeFn: () => root,
+          executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
@@ -547,7 +547,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
         const { root, store } = await seedRoot(resolved);
         const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         const result = await continueReviewInvalidatesBlocker(SLUG, [], {
-          resolveWorktreeFn: () => root,
+          executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
@@ -566,7 +566,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
         const { root, store } = await seedRoot(blockedRound());
         const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         await continueReviewInvalidatesBlocker(SLUG, [], {
-          resolveWorktreeFn: () => root,
+          executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
           missionStore: store,
           log: () => undefined,
           error: () => undefined,
@@ -587,7 +587,7 @@ describe("continue invalidates a BLOCKED/PARKED stop —", () => {
         const { root, store } = await seedRoot(blockedRound());
         const gitUser = { signal: null, status: 0, stdout: 'alice-dev\n', stderr: '', error: null };
         await continueReviewInvalidatesBlocker(SLUG, ['--actor=operator-carol'], {
-          resolveWorktreeFn: () => root,
+          executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: root, baseWorktree: root }),
           missionStore: store,
           log: () => undefined,
           error: () => undefined,

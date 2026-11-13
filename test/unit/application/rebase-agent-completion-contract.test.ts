@@ -22,7 +22,8 @@ describe('rebase agent completion', () => {
     const prompts: string[] = [];
     const h = sharedConflictHarness({ missionServices: async () => ({ store }), findMissionDir: () => null,
       resolveTaskFile: () => assert.fail('database-only mission'),
-      resolveMissionBaseBranch: () => 'local-feature',
+      resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: '/worktree',
+        missionBranch: `mission/${slug}`, baseWorktree: '/repo', baseBranch: 'local-feature' } }),
       git: args => {
         if (subcommand(args).join(' ') === 'rebase local-feature') {
           active = true; files = ['src/first.ts'];

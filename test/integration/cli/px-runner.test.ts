@@ -37,13 +37,14 @@ function runGit(args: string[], cwd: string) {
 
 function makeTargetRepo({ slug = 'task-px-001' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-target-'));
+  const worktree = `${root}-${slug}`;
   const year = new Date().getFullYear().toString();
-  const missionDir = path.join(root, 'docs', 'missions', year, slug);
-  fs.mkdirSync(missionDir, { recursive: true });
+  const baseMissionDir = path.join(root, 'docs', 'missions', year, slug);
+  fs.mkdirSync(baseMissionDir, { recursive: true });
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
 
-  fs.writeFileSync(path.join(missionDir, 'MISSION.md'), [
+  fs.writeFileSync(path.join(baseMissionDir, 'MISSION.md'), [
     `# Mission: ${slug}`,
     '',
     '## Gates',
@@ -77,8 +78,26 @@ function makeTargetRepo({ slug = 'task-px-001' } = {}) {
   runGit(['config', 'user.name', 'Px Test'], root);
   runGit(['add', '-A'], root);
   runGit(['commit', '-m', 'initial target repo'], root);
+  runGit(['branch', `mission/${slug}`], root);
+  runGit(['worktree', 'add', worktree, `mission/${slug}`], root);
 
-  return { root, slug, year, missionDir };
+  return {
+    root,
+    worktree,
+    slug,
+    year,
+    baseMissionDir,
+    missionDir: path.join(worktree, 'docs', 'missions', year, slug),
+  };
+}
+
+function cleanupTargetRepo(target: ReturnType<typeof makeTargetRepo>) {
+  spawnSync('git', ['worktree', 'remove', '--force', target.worktree], {
+    cwd: target.root,
+    encoding: 'utf8',
+  });
+  fs.rmSync(target.worktree, { recursive: true, force: true });
+  fs.rmSync(target.root, { recursive: true, force: true });
 }
 
 function runPx(args: string[], options: { cwd?: string; env?: NodeJS.ProcessEnv; px?: PxEntryLoader } = {}) {
@@ -127,7 +146,7 @@ test('px verify-env reads repo state from the caller cwd', () => {
     assert.match(output, new RegExp(target.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(output, new RegExp(repoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally {
-    fs.rmSync(target.root, { recursive: true, force: true });
+    cleanupTargetRepo(target);
   }
 });
 
@@ -198,11 +217,16 @@ test('px review-event writes only inside the caller cwd repo mission artifacts',
       false,
       'must not export review events into the caller repo',
     );
+    assert.equal(
+      fs.existsSync(path.join(target.baseMissionDir, 'review-events')),
+      false,
+      'must not export review events into the base checkout',
+    );
 
     const sourceTreeMissionDir = path.join(repoRoot, 'docs', 'missions', target.year, target.slug);
     assert.equal(fs.existsSync(sourceTreeMissionDir), false, 'must not write mission artifacts in parallix source tree');
   } finally {
-    fs.rmSync(target.root, { recursive: true, force: true });
+    cleanupTargetRepo(target);
   }
 });
 
@@ -221,7 +245,7 @@ test('px review-event accepts an implementer disposition', async () => {
 
     assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
   } finally {
-    fs.rmSync(target.root, { recursive: true, force: true });
+    cleanupTargetRepo(target);
   }
 });
 
@@ -246,7 +270,7 @@ test('px works from a different caller cwd without copying workflow source', asy
     assert.equal(fs.existsSync(path.join(target.missionDir, 'review-events')), false);
     assert.equal(fs.existsSync(path.join(target.root, 'parallix')), false);
   } finally {
-    fs.rmSync(target.root, { recursive: true, force: true });
+    cleanupTargetRepo(target);
   }
 });
 
@@ -270,7 +294,7 @@ test('px defaults to the caller cwd when no target option is provided', async ()
     // zero exit is the cwd proof this test needs, and nothing is written out.
     assert.equal(fs.existsSync(path.join(target.missionDir, 'review-events')), false);
   } finally {
-    fs.rmSync(target.root, { recursive: true, force: true });
+    cleanupTargetRepo(target);
   }
 });
 
@@ -285,7 +309,7 @@ test('verify-env exits 0 and prints USABLE verdict on a healthy repo', () => {
     assert.match(output, /Environment verdict: USABLE/);
     assert.match(output, /this repository is ready for workflow commands/);
   } finally {
-    fs.rmSync(target.root, { recursive: true, force: true });
+    cleanupTargetRepo(target);
   }
 });
 

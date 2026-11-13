@@ -11,7 +11,7 @@ import { commitDirtyFiles } from '../git/commit-dirty-files.js';
 import * as path from 'path';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { git } from '../git/git.js';
-import { resolveWorktree, isMissionArtifact, isWorkflowGeneratedArtifact } from '../filesystem/mission-utils.js';
+import { isMissionArtifact, isWorkflowGeneratedArtifact } from '../filesystem/mission-utils.js';
 import { isProviderEnabled } from './review-adapter.js';
 import type {
   MissionConflictClassification,
@@ -36,7 +36,7 @@ export type {
 /** Workflow seam: `runRebaseWorkflow` from `src/application/rebase-workflow.ts`. */
 type RunRebaseWorkflowFn = (_args: string[], _port: RebaseWorkflowPort) => Promise<void>;
 /** Port factory seam: `createRebaseWorkflowPort` from the rebase adapter. */
-type CreateRebaseWorkflowPortFn = (_options?: RebaseCommandOptions) => RebaseWorkflowPort;
+type CreateRebaseWorkflowPortFn = (_options: RebaseCommandOptions) => RebaseWorkflowPort;
 
 /**
  * Auto-commit safe mission artifacts before rebase.
@@ -61,7 +61,7 @@ export async function commitSafeMissionArtifacts(slug: string, worktree: string,
   isMissionArtifactFn?: (_file: string, _slug: string, _rootDir: string) => boolean;
   isWorkflowGeneratedArtifactFn?: (_file: string) => boolean;
 } = {}): Promise<{ ok: boolean; dirty: boolean; unsafe?: boolean; unsafeFiles?: string[]; hookFailure?: boolean; hook?: string; output?: string }> {
-  const rootDir = worktree || process.cwd();
+  const rootDir = worktree;
   const resolvedTaskFile = taskFile ? path.relative(rootDir, taskFile) : null;
   const blockers: string[] = [];
   const result = commitDirtyFiles(rootDir, slug, gitFn, log, message => blockers.push(message), {
@@ -107,21 +107,20 @@ type PreReviewRebaseOptions = {
   runFn?: unknown;
   gitFn?: typeof git;
   taskFile?: string | null;
-  worktree?: string;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
   verbose?: boolean;
   isReviewProviderEnabledFn?: ((_wt: string) => boolean) | undefined | null;
   legacyIsForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
   isForgejoReviewEnabledFn?: ((_wt: string) => boolean) | null;
-  rebaseWorkflowOptions?: RebaseCommandOptions;
-  executionContext?: import('../../application/ports/mission-execution-context.js').LiveMissionExecutionContext;
+  rebaseWorkflowOptions?: Omit<RebaseCommandOptions, 'cwd' | 'executionContext'>;
+  executionContext: import('../../application/ports/mission-execution-context.js').LiveMissionExecutionContext;
   missionIdentityServices?: NonNullable<RebaseWorkflowPort['missionServices']>;
   runRebaseWorkflowFn?: RunRebaseWorkflowFn | null;
   createRebaseWorkflowPortFn?: CreateRebaseWorkflowPortFn | null;
 };
 
-export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRebaseOptions = {}): Promise<PreReviewRebaseResult> {
+export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRebaseOptions): Promise<PreReviewRebaseResult> {
   const { gitFn, taskFile, worktree, log, error, verbose, isReviewProviderEnabledFn, legacyIsForgejoReviewEnabledFn, isForgejoReviewEnabledFn, rebaseWorkflowOptions, runRebaseWorkflowFn, createRebaseWorkflowPortFn } = preReviewRebaseBindings(slug, options);
   const cleanup = await commitSafeMissionArtifacts(slug, worktree, { taskFile, gitFn, log, error });
   const cleanupFailure = preReviewCleanupFailure(cleanup, error);
@@ -148,8 +147,14 @@ export async function rebaseBeforeReviewRound(slug: string, options: PreReviewRe
 
   const createPort: CreateRebaseWorkflowPortFn = createRebaseWorkflowPortFn
     || (await import('../rebase/rebase-workflow-adapter.js')).createRebaseWorkflowPort;
-  const port = createPort({ ...rebaseWorkflowOptions, rebaseObservationStage: 'pre-review-rebase',
-    missionIdentityServices: options.missionIdentityServices, gitFn });
+  const port = createPort({
+    ...rebaseWorkflowOptions,
+    cwd: worktree,
+    executionContext: options.executionContext,
+    rebaseObservationStage: 'pre-review-rebase',
+    missionIdentityServices: options.missionIdentityServices,
+    gitFn,
+  });
   if (options.missionIdentityServices) { port.missionServices = options.missionIdentityServices; }
 
   const runWorkflow: RunRebaseWorkflowFn = runRebaseWorkflowFn
@@ -306,7 +311,7 @@ function preReviewRebaseBindings(slug: string, options: PreReviewRebaseOptions) 
   const {
     gitFn = git,
     taskFile = null,
-    worktree = resolveWorktree(slug) || process.cwd(),
+    executionContext,
     log = fmt.log.plain,
     error = fmt.log.plainError,
     // TASK-2477/F3: defaults to `true` so the pre-review rebase skip line stays
@@ -321,6 +326,7 @@ function preReviewRebaseBindings(slug: string, options: PreReviewRebaseOptions) 
     runRebaseWorkflowFn = null,
     createRebaseWorkflowPortFn = null,
   } = options;
+  const worktree = executionContext.missionWorktree;
   return { gitFn, taskFile, worktree, log, error, verbose, isReviewProviderEnabledFn, legacyIsForgejoReviewEnabledFn, isForgejoReviewEnabledFn, rebaseWorkflowOptions, runRebaseWorkflowFn, createRebaseWorkflowPortFn };
 }
 function preReviewCleanupFailure(cleanup: Awaited<ReturnType<typeof commitSafeMissionArtifacts>>, error: (_msg: string) => void): PreReviewRebaseResult | null {

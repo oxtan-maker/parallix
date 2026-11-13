@@ -154,6 +154,16 @@ export async function launchPtySmoke(
   options: { readonly cwd: string; readonly timeoutMs: number; readonly env?: NodeJS.ProcessEnv },
 ): Promise<PtySmokeSession> {
   if (command.length === 0) { throw new Error('PTY smoke command is required'); }
+  const env: NodeJS.ProcessEnv = { ...(options.env ?? process.env) };
+  // The harness intentionally interrupts local child processes to prove signal
+  // and terminal cleanup. Node's test runner points descendants at its raw V8
+  // directory, where an interrupted child can leave a partial JSON payload and
+  // reject the otherwise-green parent coverage report. Keep coverage on the
+  // test worker; bundled and synthetic fixture children add no src/ coverage.
+  // An explicit empty value is required: Node's covered test runner reinjects
+  // its collector into spawned process trees when the key is absent.
+  env.NODE_V8_COVERAGE = '';
+  delete env.NODE_DISABLE_COMPILE_CACHE;
   const temp = await mkdtemp(join(tmpdir(), 'parallix-pty-smoke-'));
   const ttyPath = join(temp, 'tty');
   const pidPath = join(temp, 'pid');
@@ -185,7 +195,7 @@ export async function launchPtySmoke(
   ].join('; ');
   const child = spawn(SCRIPT, ['-qefc', shell, '/dev/null'], {
     cwd: options.cwd,
-    env: options.env,
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const output: string[] = [];

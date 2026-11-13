@@ -151,7 +151,7 @@ describe("review store bindings", { concurrency: false }, () => {
       'task-9001',
       'human_note',
       { content: 'note' },
-      { worktree: os.tmpdir(), skipGit: true, log: () => {}, error: (msg: string) => messages.push(msg) },
+      { executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: os.tmpdir() }), skipGit: true, log: () => {}, error: (msg: string) => messages.push(msg) },
     );
 
     assert.equal(result.ok, false);

@@ -85,7 +85,7 @@ for (const route of ['review', 'handoff'] as const) {
     assert.equal((await ports.preReview.rebase()).ok, true);
   } else {
     assert.equal((await reviewPreparation.createReviewPreparationPorts(configuration).rebase.rebaseBeforeReviewRound('task-fixture', {
-      worktree: executionContext.missionWorktree, executionContext, log: () => {}, error: () => {}, isForgejoReviewEnabledFn: () => true,
+      executionContext, log: () => {}, error: () => {}, isForgejoReviewEnabledFn: () => true,
     })).ok, true);
   }
   assert.equal(factories, 1);

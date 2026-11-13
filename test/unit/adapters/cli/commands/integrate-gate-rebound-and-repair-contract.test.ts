@@ -493,13 +493,13 @@ describe("review preparation and push-gate regressions", () => {
       detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
       getCurrentBranch: () => `mission/${SLUG}`,
       cwd: () => '/wt',
+      resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: '/wt',
+        missionBranch: `mission/${slug}`, baseWorktree: '/base', baseBranch: 'main' } }),
       inferSlug: (explicit?: string) => explicit ?? SLUG,
       findMissionDir: () => `/wt/missions/${SLUG}`,
       findMissionArea: () => 'docs',
-      resolveWorktree: () => '/wt',
       conventionalWorktreePath: () => '/wt',
       missionBranchName: () => `mission/${SLUG}`,
-      resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => `missions/${SLUG}/`,
       startAgent: async () => ({ agent: 'claude', result: { status: 0 } }),
       selectAgent: () => 'claude',
@@ -829,6 +829,7 @@ describe("integration repair", () => {
     await fixture.store.save({ ...fixture.mission(), review }, (await fixture.store.load()).version);
     let continued = false;
     const adapter = createReviewWorkflowAdapter({
+      rootDir: '/fixture',
       missionStore: fixture.store, inferSlugFn: () => slug, resolveWorktreeFn: () => '/fixture',
       resolveExecutionContextFn: id => ({ ok: true, context: { missionId: id, missionWorktree: '/fixture', missionBranch: `mission/${id}`, baseWorktree: '/fixture/main', baseBranch: 'main' } }),
       operatorResume: bindReviewOperatorResume(fixture.store, true, {}, async () => ({ workflow: null,
@@ -973,7 +974,6 @@ describe("diff-scoped gate area", () => {
           verification: { command: 'echo area={{area}}', defaultArea: 'docs' },
         },
       }));
-
       const resolverCalls: { area: string | undefined; worktree: string | undefined; resolvedMissionDir: string | null | undefined; }[] = [];
       const commands: string[] = [];
       const result = await runPreReviewGate('task-1268', root, {

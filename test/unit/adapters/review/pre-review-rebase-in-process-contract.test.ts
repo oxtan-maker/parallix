@@ -23,6 +23,7 @@ import { runReviewLoop } from '../../../../src/application/review-loop/review-lo
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import type { RebaseObservationInput, RebaseWorkflowPort } from '../../../../src/application/ports/rebase-workflow.js';
 import { configureRebaseObservation } from '../../../../src/application/ports/rebase-workflow.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 test('pre-review shared conflicts launch a fresh resolver with database intent (px-0021)', async () => {
   const store = inMemoryTransitionStore(fixtureMission('task-2503', { assignee: agentFamily('codex'),
@@ -31,7 +32,8 @@ test('pre-review shared conflicts launch a fresh resolver with database intent (
   const h = sharedConflictHarness({ missionServices: async () => ({ store }), findMissionDir: () => null });
   const previous = setLogger({ log: (...parts: unknown[]) => h.lines.push(parts.join(' ')) });
   try {
-    const result = await rebaseBeforeReviewRound('task-2503', { worktree: '/worktree',
+    const result = await rebaseBeforeReviewRound('task-2503', {
+      executionContext: missionExecutionContext({ missionId: 'task-2503', missionWorktree: '/worktree' }),
       gitFn: () => ({ status: 0, stdout: '', stderr: '', signal: null }),
       createRebaseWorkflowPortFn: () => h.port, missionIdentityServices: async () => ({ store }),
       isForgejoReviewEnabledFn: () => true, log: () => {}, error: () => {} });
@@ -82,13 +84,13 @@ describe("02 pre-review rebase in-process", () => {
       getCurrentBranch: () => BRANCH,
 
       cwd: () => WORKTREE,
+      resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: WORKTREE,
+        missionBranch: BRANCH, baseWorktree: '/tmp', baseBranch: 'main' } }),
       inferSlug: (explicitSlug?: string) => explicitSlug ?? SLUG,
       findMissionDir: () => `${WORKTREE}/missions/${SLUG}`,
       findMissionArea: () => 'lib',
-      resolveWorktree: () => WORKTREE,
       conventionalWorktreePath: () => WORKTREE,
       missionBranchName: () => BRANCH,
-      resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => `missions/${SLUG}/`,
 
       startAgent: async () => ({ agent: 'test-agent', result: { status: 0 } }),
@@ -125,7 +127,7 @@ describe("02 pre-review rebase in-process", () => {
   /** Options that keep `rebaseBeforeReviewRound` off the real filesystem. */
   function preReviewOptions(port: RebaseWorkflowPort, extra: Record<string, unknown> = {}) {
     return {
-      worktree: WORKTREE,
+      executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: WORKTREE }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: () => OK,
       createRebaseWorkflowPortFn: () => port,
@@ -201,10 +203,13 @@ describe("02 pre-review rebase in-process", () => {
   });
 
   test('provider-disabled diagnostic failure does not abort review submission (PX-0055.03)', async () => {
-    let baseResolutions = 0;
+    let contextResolutions = 0;
     const errors: string[] = [];
     const port = stubPort({
-      resolveMissionBaseBranch: () => { baseResolutions++; return 'main'; },
+      resolveExecutionContext: slug => {
+        contextResolutions++;
+        return { ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: WORKTREE }) };
+      },
       newRebaseObservationId: () => 'pre-review-skip',
       observeRebase: async () => { throw new Error('history unavailable'); },
     });
@@ -215,7 +220,7 @@ describe("02 pre-review rebase in-process", () => {
       isForgejoReviewEnabledFn: () => false,
     })).finally(() => configureRebaseObservation(null));
     assert.equal(result.ok, true);
-    assert.equal(baseResolutions, 0, 'disabled review does not resolve a rebase target it will not use');
+    assert.equal(contextResolutions, 0, 'disabled review does not resolve a rebase target it will not use');
     assert.match(errors.join('\n'), /Could not retain pre-review rebase inapplicability.*Continuing review submission/);
   });
 

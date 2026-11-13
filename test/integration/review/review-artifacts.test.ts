@@ -2,6 +2,7 @@ import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 import type { ReviewApprovalSource } from "../../../src/domain/review.js";
+import type { CreateEventParams } from '../../../src/adapters/review/review-events.js';
 
 
 import test, { mock } from 'node:test';
@@ -310,7 +311,7 @@ test('postWorkflowReview handles postReview failure', async () => {
 test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author', async () => {
   let postCalled = false;
   let writtenState: { value: Record<string, unknown> | import("../../../src/adapters/review/review-state.js").ReviewState | import("../../../src/application/ports/review-persistence.js").ReviewStateData | null } = { value: null };
-  let recordedEvent: { value: { slug: string; type: string; params: Record<string, unknown>; } | null } = { value: null };
+  let recordedEvent: { value: { slug: string; type: string; params: CreateEventParams; } | null } = { value: null };
   const warnings: string[] = [];
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
     ...reviewVerdictFixture('test-slug', 'custom', 'custom'),

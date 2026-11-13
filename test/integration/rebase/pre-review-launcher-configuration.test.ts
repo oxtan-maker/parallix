@@ -11,7 +11,6 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
-import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { setCommandPathProbe, setLauncherHealthProbe } from '../../../src/adapters/agents/agents.js';
 import { createReviewPreparationPorts } from '../../../src/adapters/cli/commands/review-preparation.js';
@@ -84,7 +83,7 @@ describe("pre-review rebase launcher configuration", () => {
       const executionContext = missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo, baseWorktree: repo });
       const options = {
         isForgejoReviewEnabledFn: () => true,
-        worktree: repo, executionContext, log: (line: string) => logs.push(line), error: (line: string) => logs.push(line),
+        executionContext, log: (line: string) => logs.push(line), error: (line: string) => logs.push(line),
         rebaseWorkflowOptions: {
           readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
           createPrFn: () => ({ ok: true as const }),
@@ -134,12 +133,12 @@ describe("pre-review rebase launcher configuration", () => {
       let probes = 0;
       const options = {
         isForgejoReviewEnabledFn: () => true,
-        worktree: repo, log: () => {}, error: () => {},
+        log: () => {}, error: () => {},
         executionContext: missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: repo }),
         createRebaseWorkflowPortFn: (options: Parameters<typeof createRebaseWorkflowPort>[0]) => {
           assert.strictEqual(options?.configuration, configuration);
           assert.equal(options.rebaseObservationStage, 'pre-review-rebase');
-          const port = createRebaseWorkflowPort(withRebaseMutationContext(options));
+          const port = createRebaseWorkflowPort(options);
           const status = port.workflowLauncherStatus('codex', repo);
           assert.equal(status.supported, false);
           assert.equal('health' in status ? status.health : undefined, 'missing');
@@ -269,7 +268,9 @@ describe("pre-review rebase launcher configuration", () => {
       const configuration = resolveConfiguration({ PATH: `${binDir}:${process.env.PATH}`, PARALLIX_HOME: path.join(root, 'home') });
       const exits: number[] = [];
       const command = createRebaseCommand((args, options) => rebase(args, {
-        ...options, resolveWorktreeFn: () => repo,
+        ...options,
+        rootDir: repo,
+        resolveExecutionContextFn: slug => ({ ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: repo, baseWorktree: repo }) }),
         readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',
         createPrFn: () => ({ ok: false as const, error: 'controlled CLI publication rejection (TASK-2717)' }),
       }));
@@ -289,6 +290,7 @@ describe("pre-review rebase launcher configuration", () => {
         PARALLIX_WORKFLOW_OPERATION: 'integration-operation', PARALLIX_WORKFLOW_GENERATION: '3' });
       bindWorkflowObservability(configuration);
       const port = createIntegratePorts(configuration).rebase.createRebaseWorkflowPort({
+        cwd: root,
         executionContext: missionExecutionContext({ missionId: 'task-lcfg-iso', missionWorktree: root, baseWorktree: root }),
         gitFn: (() => ({ status: 0, stdout: '', stderr: '' })), exitFn: () => {},
       });
@@ -344,8 +346,10 @@ test('database-only replay preserves squashed work, relocation and completed tas
     const store = inMemoryTransitionStore(fixtureMission('task-replay', { assignee: agentFamily('codex'), review: null }));
     let launches = 0;
     const exits: number[] = [];
-    await rebase(['task-replay'], withRebaseMutationContext({
-      resolveWorktreeFn: () => repo, gitFn: args => {
+    await rebase(['task-replay'], {
+      rootDir: repo,
+      resolveExecutionContextFn: () => ({ ok: true, context: missionExecutionContext({ missionId: 'task-replay', missionWorktree: repo, baseWorktree: repo }) }),
+      gitFn: args => {
         assert.equal(args.includes('merge-tree'), false, 'paused path never predicts a merge');
         return runGit(args, { cwd: repo, env: { ...process.env, GIT_EDITOR: 'true' } });
       }, missionServicesFn: async () => ({ store }), exitFn: code => { exits.push(code); },
@@ -375,7 +379,7 @@ test('database-only replay preserves squashed work, relocation and completed tas
         }
         return { agent: 'codex', result: { status: 0 } };
       },
-    }));
+    });
     assert.deepEqual(exits, [0]); assert.equal(launches, 1);
     assert.equal(ok('rev-parse', 'main').trim(), baseHead);
     assert.equal(ok('status', '--porcelain').trim(), '');
@@ -428,12 +432,12 @@ test('exact squashed target replays only the complete mission suffix (TASK-2849)
     let launches = 0;
     const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(root, 'home'), PATH: process.env.PATH });
     const result = await rebaseBeforeReviewRound('task-exact-squash', {
-      isForgejoReviewEnabledFn: () => true, worktree: repo,
+      isForgejoReviewEnabledFn: () => true,
+      executionContext: missionExecutionContext({ missionId: 'task-exact-squash', missionWorktree: repo, baseWorktree: repo }),
       gitFn: args => runGit(args, { cwd: repo, env: { ...process.env, GIT_EDITOR: 'true' } }),
       log: () => {}, error: () => {},
       rebaseWorkflowOptions: {
         configuration,
-        executionContext: missionExecutionContext({ missionId: 'task-exact-squash', missionWorktree: repo, baseWorktree: repo }),
         missionServicesFn: async () => ({ store }),
         startAgentFn: async () => { launches += 1; return { agent: 'codex', result: { status: 1 } }; },
         readTokenFn: () => 'fixture-token', resolveForgejoUserFn: () => 'fixture-user',

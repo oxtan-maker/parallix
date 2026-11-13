@@ -16,7 +16,7 @@ import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
-import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { createGitChangeIdentity } from '../../../src/adapters/git/change-identity.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
@@ -82,16 +82,16 @@ async function approvedMission(root: string, approved: string) {
 
 async function rebase(root: string, store: SqliteMissionStore): Promise<number> {
   let code = -1;
-  const port = createRebaseWorkflowPort(withRebaseMutationContext({
+  const port = createRebaseWorkflowPort({
+    cwd: root,
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root, baseWorktree: root }),
     inferSlugFn: () => slug,
-    resolveWorktreeFn: () => root,
     findMissionDirFn: () => null,
-    resolveMissionBaseBranchFn: () => 'main',
     resolveTaskFileFn: () => ({ matches: [], reason: 'missing' as const,  ok: false as const }),
     isForgejoReviewEnabledFn: () => false,
     exitFn: (exitCode: number) => { code = exitCode; },
     missionServicesFn: async () => ({ store, lifecycle: new MissionLifecycleService(store) }),
-  }));
+  });
   await runRebaseWorkflow([slug], port);
   return code;
 }
@@ -213,10 +213,11 @@ test('isolated active conflict repair verifies its tree while integration stays 
     git(root, 'checkout', '-q', branch);
     let code = -1;
     let verified = false;
-    const port = createRebaseWorkflowPort(withRebaseMutationContext({
-      inferSlugFn: () => slug, resolveWorktreeFn: () => root,
+    const port = createRebaseWorkflowPort({
+      cwd: root,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root, baseWorktree: root }),
+      inferSlugFn: () => slug,
       findMissionDirFn: () => root, findMissionAreaFn: () => 'workflow',
-      resolveMissionBaseBranchFn: () => 'main',
       resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }), getTaskImplementerFn: () => 'codex',
       resolveConflictsFn: () => ({ ok: true as const, conflictFiles: ['contract.txt'], missionSpecificFiles: [], sharedFiles: ['contract.txt'] }),
       isForgejoReviewEnabledFn: () => false,
@@ -241,7 +242,7 @@ test('isolated active conflict repair verifies its tree while integration stays 
         return { agent: 'codex', result: { status: check.status } };
       },
       exitFn: (exitCode: number) => { code = exitCode; },
-    }));
+    });
     port.readReviewState = async () => ({ implementer: 'codex' });
     await runRebaseWorkflow([slug], port);
     assert.equal(code, 0);

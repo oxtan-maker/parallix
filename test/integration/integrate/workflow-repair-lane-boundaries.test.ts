@@ -73,7 +73,7 @@ import { transitionReviewRepair } from '../../../src/application/review-repair-l
 import { createIntegrationGateStep } from '../../../src/application/integrate/gates.js';
 import { RevokeReviewDecisionUseCase } from '../../../src/application/revoke-review-decision-use-case.js';
 import { createRebaseWorkflowPort } from '../../../src/adapters/rebase/rebase-workflow-adapter.js';
-import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 import { runRebaseWorkflow } from '../../../src/application/rebase-workflow.js';
 import { pxNodeArgs } from '../../lib/px-entry.js';
 import { run } from '../../../src/composition/create-cli.js';
@@ -330,14 +330,16 @@ test('composed rebase conflict repair commits active before its agent and review
     let exitCode: { value: number | null } = { value: null };
     let launches = 0;
     let rebaseStarted = false;
-    const port = createRebaseWorkflowPort(withRebaseMutationContext({
+    const port = createRebaseWorkflowPort({
+      cwd: fixture.root,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: fixture.root, baseWorktree: fixture.root }),
       missionServicesFn: async () => ({ store: fixture.store, lifecycle: fixture.lifecycle }),
-      inferSlugFn: () => slug, resolveWorktreeFn: () => fixture.root,
+      inferSlugFn: () => slug,
       findMissionDirFn: () => fixture.root, findMissionAreaFn: () => 'docs',
       getCurrentBranchFn: () => `mission/${slug}`,
       resolveTaskFileFn: () => ({ matches: [],  ok: true as const, taskFile }), getTaskImplementerFn: () => IMPLEMENTER,
       detectRebaseStateFn: () => ({ inProgress: rebaseStarted && launches === 0, unmergedFiles: rebaseStarted && launches === 0 ? ['src/shared.ts'] : [] }),
-      resolveMissionBaseBranchFn: () => 'main', isForgejoReviewEnabledFn: () => false,
+      isForgejoReviewEnabledFn: () => false,
       resolveConflictsFn: () => ({ ok: false as const, error: 'merge-failed', conflictFiles: ['src/shared.ts'], missionSpecificFiles: [], sharedFiles: ['src/shared.ts'] }),
       gitFn: (args: string[]) => {
         if (args.includes('rebase') && args.includes('main')) {
@@ -356,7 +358,7 @@ test('composed rebase conflict repair commits active before its agent and review
         return { agent: IMPLEMENTER, result: { status: 0 } };
       },
       exitFn: code => { exitCode.value = code; },
-    }));
+    });
     port.readReviewState = async () => ({ implementer: IMPLEMENTER });
     await runRebaseWorkflow([slug], port);
     assert.equal(launches, 1);

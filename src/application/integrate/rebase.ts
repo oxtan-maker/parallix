@@ -61,6 +61,7 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
       // only installs the rebound hook-failure path when `missionServicesFn` is a
       // function, so the mission's agent-assisted conflict path survives here too.
       missionServicesFn,
+      cwd: baseWorktree,
       // Integration entry already resolved the complete mission/base identity.
       // Carry that value through the nested factory instead of reconstructing it
       // from this process's cwd or an adapter default.
@@ -69,16 +70,9 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
       // continue to the gates; only a dead-end (exit 1) aborts.
       exitFn: (code: number) => { rebaseExitCode = code; },
     });
-    // Pin the root, current-branch, and target seams so the workflow rebases the
-    // mission onto the exact ADR 0043 target integrate already resolved, instead
-    // of re-resolving it against the ambient git state. This is the same
-    // single-source pattern rebaseBeforeReviewRound uses for port.cwd: the
-    // mission branch name is `mission/<slug>` and the primary branch is the
-    // resolved target regardless of which worktree is passed.
-    port.cwd = () => baseWorktree;
-    // Observe the actual mission checkout, including in the success postcondition.
+    // Observe the actual mission checkout, including in the success
+    // postcondition. The target branch comes solely from executionContext.
     port.getCurrentBranch = root => gitPorts.getCurrentBranch(root);
-    port.resolveMissionBaseBranch = () => baseBranch;
     try {
       await runRebaseWorkflow([slug], port);
     } catch (error) {

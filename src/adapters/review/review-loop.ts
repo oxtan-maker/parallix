@@ -403,7 +403,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       : null,
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
     approvalRevocation: approvalRevocationPort(slug, branch, worktree, missionStore, lifecycleService),
-    humanFeedback: composeHumanFeedback({ slug, branch, worktree, providerEnabled, missionStore, configuration: bindings.configuration, log, error, fetchComments, tokenFor, recordHumanNote }),
+    humanFeedback: composeHumanFeedback({ slug, branch, worktree, executionContext: target.executionContext, providerEnabled, missionStore, configuration: bindings.configuration, log, error, fetchComments, tokenFor, recordHumanNote }),
     routing: reviewerRoutingPort(worktree, bindings.configuration),
     agents: agentPort(slug, branch, worktree, missionPath, target, bindings, writeState, log, error),
     artifacts: {
@@ -415,11 +415,11 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     },
     preReview: {
       rebase: async () => preReviewRebaseFacts(await rebaseBeforeReviewRound(slug, {
-        worktree, log, error, verbose, taskFile: task.taskFile, gitFn: git, isReviewProviderEnabledFn: isProviderEnabled,
+        executionContext: target.executionContext,
+        log, error, verbose, taskFile: task.taskFile, gitFn: git, isReviewProviderEnabledFn: isProviderEnabled,
         rebaseWorkflowOptions: {
           ...bindings.rebaseWorkflowOptions,
           configuration: bindings.configuration,
-          executionContext: target.executionContext,
           ...(missionStore ? { missionServicesFn: async () => ({ store: missionStore, lifecycle: lifecycleService }) } : {}),
         },
       })),

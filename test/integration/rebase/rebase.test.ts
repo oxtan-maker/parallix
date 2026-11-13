@@ -16,14 +16,15 @@ import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import { autoResolveMissionConflicts, startRebaseRound } from '../../../src/application/rebase-continuation.js';
 import type { RebaseContext } from '../../../src/application/rebase-context.js';
 import type { RebaseWorkflowPort } from '../../../src/application/ports/rebase-workflow.js';
-import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 const rebaseModule = mockModule<typeof import('../../../src/adapters/cli/commands/rebase.js')>('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
 await installModuleMocks();
 const rawRebase = rebaseModule.default;
-const rebase = Object.assign(
-  (args: Parameters<typeof rawRebase>[0], options: Parameters<typeof rawRebase>[1] = {}) => rawRebase(args, withRebaseMutationContext(options)),
-  rawRebase,
-);
+const rebase = rawRebase;
+const resolveContext = (baseBranch = 'main', missionWorktree?: string) => (slug: string, root: string) => ({
+  ok: true as const,
+  context: missionExecutionContext({ missionId: slug, missionWorktree: missionWorktree ?? root, baseWorktree: root, baseBranch }),
+});
 function gitSubcommandArgs(args: string[]): string[] {
   let i = 0;
   while (i + 1 < args.length && (args[i] === '-C' || args[i] === '-c')) {
@@ -202,9 +203,71 @@ test('rebase exits 1 when no slug can be inferred', async () => {
   assert.equal(exitCode.value, 1);
 });
 
+test('direct rebase resolves the requested Mission context once before mutation (TASK-2852)', async () => {
+  const launchRoot = '/launch/checkout';
+  const missionRoot = '/mission/checkout';
+  let resolutions = 0;
+  let exitCode: number | null = null;
+
+  await rawRebase(['task-2852'], {
+    rootDir: launchRoot,
+    inferSlugFn: slug => slug ?? null,
+    resolveExecutionContextFn: (slug, root) => {
+      resolutions += 1;
+      assert.equal(slug, 'task-2852');
+      assert.equal(root, launchRoot);
+      return { ok: true, context: missionExecutionContext({
+        missionId: slug,
+        missionWorktree: missionRoot,
+        baseWorktree: launchRoot,
+        baseBranch: 'custom-base',
+      }) };
+    },
+    findMissionDirFn: () => null,
+    findMissionAreaFn: () => 'workflow',
+    detectRebaseStateFn: root => {
+      assert.equal(root, missionRoot);
+      return { inProgress: false, detached: false, unmergedFiles: [] };
+    },
+    getCurrentBranchFn: root => {
+      assert.equal(root, missionRoot);
+      return 'mission/task-2852';
+    },
+    isForgejoReviewEnabledFn: () => false,
+    gitFn: args => {
+      assert.equal(args[0], '-C');
+      assert.equal(args[1], missionRoot);
+      return { signal: null, status: 0, stdout: '', stderr: '' };
+    },
+    exitFn: code => { exitCode = code; },
+  });
+
+  assert.equal(resolutions, 1);
+  assert.equal(exitCode, 0);
+});
+
+test('direct rebase rejects missing live context before side effects (TASK-2852)', async () => {
+  let sideEffects = 0;
+  let exitCode: number | null = null;
+
+  await rawRebase(['task-2852'], {
+    rootDir: '/launch/checkout',
+    inferSlugFn: slug => slug ?? null,
+    resolveExecutionContextFn: () => ({ ok: false, reason: 'fixture has no live Mission context' }),
+    detectRebaseStateFn: () => { sideEffects += 1; return { inProgress: false, detached: false, unmergedFiles: [] }; },
+    getCurrentBranchFn: () => { sideEffects += 1; return 'mission/task-2852'; },
+    gitFn: () => { sideEffects += 1; return { signal: null, status: 0, stdout: '', stderr: '' }; },
+    exitFn: code => { exitCode = code; },
+  });
+
+  assert.equal(sideEffects, 0);
+  assert.equal(exitCode, 1);
+});
+
 test('rebase exits 1 when not on the correct branch', async () => {
   let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
+    resolveExecutionContextFn: resolveContext(),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
@@ -227,6 +290,7 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
 
   try {
     await rebase(['task-1322'], {
+      resolveExecutionContextFn: resolveContext(),
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1322',
       findMissionDirFn: () => '/tmp/docs/missions/2026/task-1322',
@@ -272,6 +336,7 @@ test('rebase exits 1 with recovery guidance when a rebase is already in progress
 test('rebase exits 0 on clean rebase', async () => {
   let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
+    resolveExecutionContextFn: resolveContext(),
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
     findMissionAreaFn: () => 'docs',
@@ -297,13 +362,13 @@ test('rebase targets the mission recorded base branch, not the primary branch', 
   let exitCode: { value: number | null } = { value: null };
   let rebaseTarget: { value: string | null } = { value: null };
   await rebase(['task-1350'], {
+    resolveExecutionContextFn: resolveContext('skunkworks'),
     inferSlugFn: () => 'task-1350',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1350',
     findMissionAreaFn: () => 'docs',
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-1350',
     isForgejoReviewEnabledFn: () => true,
-    resolveMissionBaseBranchFn: () => 'skunkworks',
     gitFn: args => {
       const rebaseIdx = args.indexOf('rebase');
       if (rebaseIdx !== -1 && args[rebaseIdx + 1] && !args[rebaseIdx + 1].startsWith('--')) {
@@ -325,6 +390,7 @@ test('rebase uses local main and does not fetch Forgejo even when review is enab
   let exitCode: { value: number | null } = { value: null };
   let fetchCalled = false;
   await rebase(['task-1018'], {
+    resolveExecutionContextFn: resolveContext(),
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
     findMissionAreaFn: () => 'docs',
@@ -354,6 +420,7 @@ test('rebase uses local main and does not fetch Forgejo even when review is enab
 test('rebase detects non-conflict rebase failure', async () => {
   let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
+    resolveExecutionContextFn: resolveContext(),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
@@ -376,6 +443,7 @@ test('rebase detects non-conflict rebase failure', async () => {
 test('rebase detects localized KONFLIKT in rebase output', async () => {
   let exitCode: { value: number | null } = { value: null };
   await rebase(['task-1018'], {
+    resolveExecutionContextFn: resolveContext(),
     isForgejoReviewEnabledFn: () => false,
     inferSlugFn: () => 'task-1018',
     findMissionDirFn: () => '/tmp/docs/missions/2026/task-1018',
@@ -464,6 +532,7 @@ test('rebase task-1057 flow: sharedFiles and prompt contain only workflow/docs/a
   let exitCode: { value: number | null } = { value: null };
 
   await rebase(['task-1057'], {
+    resolveExecutionContextFn: resolveContext(),
     // Git is injected below; completion probes must use the same isolated state.
     // TASK-2673: a real detector spawned Git twelve times under coverage.
     detectRebaseStateFn: () => ({ inProgress: paused && statusRead, detached: false,
@@ -598,6 +667,7 @@ test('rebase detects empty/no-op pick and guides operator', async () => {
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
   await rebase(['task-1035'], {
+    resolveExecutionContextFn: resolveContext(),
     // This fixture finishes on the second --continue; do not probe the host repo.
     detectRebaseStateFn: () => ({ inProgress: continueCalls === 1, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
@@ -654,6 +724,7 @@ test('rebase distinguishes hook failure from genuine conflict after --continue',
   console.log = (...args) => { capturedStdout.push(args.join(' ')); };
 
   await rebase(['task-1035'], {
+    resolveExecutionContextFn: resolveContext(),
     // This fixture finishes on the second --continue; do not probe the host repo.
     detectRebaseStateFn: () => ({ inProgress: continueCalls === 1, detached: false, unmergedFiles: [] }),
     isForgejoReviewEnabledFn: () => false,
@@ -728,13 +799,13 @@ test('rebase exits 1 when base is not an ancestor of HEAD', async () => {
   let pushed = false;
   try {
     await rebase(['task-2323'], {
+      resolveExecutionContextFn: resolveContext('skunkworks'),
       inferSlugFn: () => 'task-2323',
       findMissionDirFn: () => '/tmp/missions/task-2323',
       findMissionAreaFn: () => 'docs',
       detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
       getCurrentBranchFn: () => 'mission/task-2323',
       isForgejoReviewEnabledFn: () => true,
-      resolveMissionBaseBranchFn: () => 'skunkworks',
       createPrFn: () => { pushed = true; return { ok: true as const }; },
       gitFn: args => {
         if (isAncestryCheck(args)) return { signal: null,  status: 1, stdout: '', stderr: '' };
@@ -765,13 +836,13 @@ test('rebase clean rebase verifies ancestry before reporting success', async () 
   let exitCode: { value: number | null } = { value: null };
   let ancestryArgs: { value: string[] | null } = { value: null };
   await rebase(['task-2323'], {
+    resolveExecutionContextFn: resolveContext(),
     inferSlugFn: () => 'task-2323',
     findMissionDirFn: () => '/tmp/missions/task-2323',
     findMissionAreaFn: () => 'docs',
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-2323',
     isForgejoReviewEnabledFn: () => false,
-    resolveMissionBaseBranchFn: () => 'main',
     gitFn: args => {
       if (isAncestryCheck(args)) {
         ancestryArgs.value = gitSubcommandArgs(args);
@@ -790,13 +861,13 @@ test('rebase mission-specific resolution verifies ancestry before reporting succ
   let exitCode: { value: number | null } = { value: null };
   let ancestryChecked = false;
   await rebase(['task-2323'], {
+    resolveExecutionContextFn: resolveContext(),
     inferSlugFn: () => 'task-2323',
     findMissionDirFn: () => '/tmp/missions/task-2323',
     findMissionAreaFn: () => 'docs',
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-2323',
     isForgejoReviewEnabledFn: () => false,
-    resolveMissionBaseBranchFn: () => 'main',
     resolveConflictsFn: () => ({
       ok: true as const,
       conflictFiles: ['missions/task-2323/MISSION.md'],
@@ -829,6 +900,7 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
   let ancestryChecked = false;
   let agentLaunched = false;
   await rebase(['task-2323'], {
+    resolveExecutionContextFn: resolveContext(),
     resolveTaskFileFn: () => ({ matches: ['/tmp/task-2323.md'],  ok: true as const, taskFile: '/tmp/task-2323.md' }),
     getTaskImplementerFn: () => 'codex',
     inferSlugFn: () => 'task-2323',
@@ -837,7 +909,6 @@ test('rebase agent-assisted rebase rechecks ancestry after conflict resolution',
     detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
     getCurrentBranchFn: () => 'mission/task-2323',
     isForgejoReviewEnabledFn: () => false,
-    resolveMissionBaseBranchFn: () => 'main',
     resolveConflictsFn: () => ({
       ok: true as const,
       conflictFiles: ['src/adapters/git/git.ts'],
@@ -880,6 +951,7 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
   let exitCode: { value: number | null } = { value: null };
   try {
     await rebase(['task-2323'], {
+      resolveExecutionContextFn: resolveContext(),
       resolveTaskFileFn: () => ({ matches: ['/tmp/task-2323.md'],  ok: true as const, taskFile: '/tmp/task-2323.md' }),
       getTaskImplementerFn: () => 'codex',
       inferSlugFn: () => 'task-2323',
@@ -888,7 +960,6 @@ test('rebase agent-assisted rebase exits 1 when ancestry fails after conflict re
       detectRebaseStateFn: () => ({ inProgress: false, detached: false, unmergedFiles: [] }),
       getCurrentBranchFn: () => 'mission/task-2323',
       isForgejoReviewEnabledFn: () => false,
-      resolveMissionBaseBranchFn: () => 'main',
       resolveConflictsFn: () => ({
         ok: true as const,
         conflictFiles: ['src/adapters/git/git.ts'],

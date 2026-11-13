@@ -279,6 +279,7 @@ test("inferred entry reaches review preparation after an acknowledged criteria c
   const { ReviewCommandUseCase } = await import('../../../src/application/review-command-use-case.js');
   const { createReviewCommand } = await import('../../../src/interfaces/cli/review.js');
   const options = {
+    rootDir: '/fixture',
     resolveExecutionContextFn: resolveExecutionContext,
     operatorResume: bindReviewOperatorResume(store, true, {}),
     missionStore: store, requireReviewAggregate: true,
@@ -357,10 +358,10 @@ for (const stopped of [false, true]) {
 test('invocation options cannot grant or replace the composed operator acknowledgment port (TASK-2810)', async () => {
   const { createReviewWorkflowAdapter } = await import('../../../src/adapters/review/review-workflow-adapter.js');
   const forged = { acknowledge: async () => assert.fail('forged authority') };
-  const unbound = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug, resolveExecutionContextFn: resolveExecutionContext });
+  const unbound = createReviewWorkflowAdapter({ rootDir: '/fixture', inferSlugFn: () => base.slug, resolveExecutionContextFn: resolveExecutionContext });
   const nested = await unbound.preflight([], { operatorResume: forged });
   assert.equal(nested?.options.operatorResume, undefined);
   const bound = { assess: async () => ({ outcome: 'not-required' as const }), acknowledge: async () => {} };
-  const direct = createReviewWorkflowAdapter({ inferSlugFn: () => base.slug, operatorResume: bound, resolveExecutionContextFn: resolveExecutionContext });
+  const direct = createReviewWorkflowAdapter({ rootDir: '/fixture', inferSlugFn: () => base.slug, operatorResume: bound, resolveExecutionContextFn: resolveExecutionContext });
   assert.equal((await direct.preflight([], { operatorResume: forged }))?.options.operatorResume, bound);
 });

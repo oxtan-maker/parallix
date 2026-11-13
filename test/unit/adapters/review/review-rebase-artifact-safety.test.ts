@@ -7,6 +7,7 @@ import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { rebaseBeforeReviewRound, commitSafeMissionArtifacts } from '../../../../src/adapters/review/rebase.js';
 import { isMissionArtifact, isWorkflowGeneratedArtifact } from '../../../../src/adapters/filesystem/mission-utils.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 // Regression provenance: TASK-1107.
 describe("repro", { concurrency: false }, () => {
@@ -67,7 +68,7 @@ describe("repro", { concurrency: false }, () => {
     const year = new Date().getFullYear().toString();
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         gitCalls.push(args);
@@ -97,7 +98,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         gitCalls.push(args);
@@ -132,7 +133,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         gitCalls.push(args);
@@ -164,7 +165,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         gitCalls.push(args);
@@ -189,7 +190,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         if (args.includes('status')) {
@@ -220,7 +221,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: (args) => {
         if (args.includes('status')) {
@@ -247,7 +248,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       ...inProcessWorkflow([], {
@@ -280,7 +281,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       // The workflow reports a missing Forgejo token by exiting non-zero before it
@@ -305,7 +306,7 @@ describe("repro", { concurrency: false }, () => {
     const slug = 'task-1107';
 
     const result = await rebaseBeforeReviewRound(slug, {
-      worktree: '/tmp/worktree',
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
       isForgejoReviewEnabledFn: () => true,
       gitFn: () => ({ signal: null,  status: 0, stdout: '', stderr: '' }),
       ...inProcessWorkflow([], { exitCode: 1 }),

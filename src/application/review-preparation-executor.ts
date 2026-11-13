@@ -208,7 +208,6 @@ export class ReviewPreparationExecutor {
         return { store: services.store, lifecycle: services.lifecycle };
       },
       executionContext,
-      worktree: executionContext.missionWorktree,
       log: internalLog,
       error,
       isForgejoReviewEnabledFn,

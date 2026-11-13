@@ -12,9 +12,9 @@ import { readReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { type ReviewFinding, type ReviewItemDisposition } from '../../domain/review.js';
 import { resolveArtifactDir as resolveConfiguredArtifactDir } from './review-adapter.js';
+import type { CreateEventOptions, CreateEventParams, CreateEventResult } from './review-events.js';
 
-type CreateResult = { ok: boolean; path: string | null; error?: string | null; event?: unknown };
-export type CreateEventFn = (_s: string, _t: string, _p: Record<string, unknown>, _o: Record<string, unknown>) => CreateResult | Promise<CreateResult>;
+export type CreateEventFn = (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
 export type { ReviewStateReader } from './review-state.js';
 
 // ============================================================================

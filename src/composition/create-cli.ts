@@ -17,6 +17,8 @@ import { hasGitRepository } from '../adapters/config/product-config.js';
 import { loadStateMap } from '../adapters/config/state-map.js';
 import { deriveAliases, shouldLaunchDefaultUi, type MainOptions } from '../interfaces/cli/runtime.js';
 import { missionTerminalRequest } from '../interfaces/cli/mission-terminal-policy.js';
+import { liveMissionExecutionContext } from '../application/ports/mission-execution-context.js';
+import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
 
 function resolveRuntimePath(): string {
   return fileURLToPath(import.meta.url);
@@ -238,11 +240,14 @@ async function runReviewEventCommand(parsed: ParsedArgs, configuration: Parallix
   const [{ createMissionApplicationServices }, { bindReviewPersistence }] = await Promise.all([import('./mission-services.js'), import('./review-persistence.js')]);
   const mission = await createMissionApplicationServices(parsed.target, { configuration });
   try {
+    const execution = liveMissionExecutionContext(eventArgs.slug,
+      resolveMissionExecutionContext(eventArgs.slug, parsed.target, configuration));
+    if (!execution.ok) { error(fmt.status('FAIL', execution.reason)); return 1; }
     const result = await bindReviewPersistence(mission.store, mission.lifecycle).createEvent(
       eventArgs.slug,
       eventArgs.type || '',
       { actor: eventArgs.actor || '', content: eventArgs.content, disposition: eventArgs.disposition || undefined, timestamp: eventArgs.timestamp || undefined },
-      { worktree: parsed.target, skipGit: eventArgs.skipGit, log, error },
+      { executionContext: execution.context, skipGit: eventArgs.skipGit, log, error },
     );
     if (result.ok && result.path) { log(fmt.status('PASS', `Review event path: ${path.relative(parsed.target, result.path)}`)); }
     return result.ok ? 0 : 1;

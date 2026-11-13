@@ -5,7 +5,6 @@
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { run } from '../git/git.js';
-import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { resolveTaskFile, getTaskStatus, transitionTask } from '../backlog/backlog.js';
 import { toVirtual } from '../config/state-map.js';
 import type { MissionStore } from '../../application/domain-ports.js';
@@ -15,6 +14,7 @@ import { missionId } from '../../domain/mission.js';
 import { currentReviewRound, reviewStatus, resumeReview, invalidateBlocker, type Review, type ReviewStatus } from '../../domain/review.js';
 import { createEvent } from './review-events.js';
 import { flagValue } from './review-cli-flags.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 export async function repairStaleActiveTaskAfterReview(
   slug: string,
@@ -24,15 +24,15 @@ export async function repairStaleActiveTaskAfterReview(
     getTaskStatusFn?: typeof getTaskStatus;
     resolveTaskFileFn?: typeof resolveTaskFile;
     transitionTaskFn?: typeof transitionTask;
-    rootDir?: string;
-  } = {}
+    executionContext: LiveMissionExecutionContext;
+  }
 ): Promise<{ repaired: boolean; skipped?: boolean; currentStatus?: string }> {
   const log = options.log || fmt.log.plain;
   const error = options.error || fmt.log.plainError;
   const getTaskStatusFn = options.getTaskStatusFn || getTaskStatus;
   const resolveTaskFileFn = options.resolveTaskFileFn || resolveTaskFile;
   const transitionTaskFn = options.transitionTaskFn || transitionTask;
-  const rootDir = options.rootDir || process.cwd();
+  const rootDir = options.executionContext.missionWorktree;
 
   const taskResolution = resolveTaskFileFn(slug, rootDir);
   const currentStatus = taskResolution.ok ? getTaskStatusFn(taskResolution.taskFile!) : null;
@@ -58,7 +58,7 @@ async function clearHumanInterventionIfPresent(
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => void;
-    resolveWorktreeFn?: typeof resolveWorktree;
+    executionContext: LiveMissionExecutionContext;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
     runFn?: typeof run;
@@ -104,7 +104,7 @@ async function clearHumanInterventionIfPresent(
     return actor && actor.trim() ? actor.trim() : null;
   })();
 
-  const operator = explicitActor ?? operatorFromGit(slug, options.resolveWorktreeFn, options.runFn);
+  const operator = explicitActor ?? operatorFromGit(options.executionContext, options.runFn);
 
   // The domain transition clears the intervention and derives the surviving
   // round status; it does not force awaiting-review.
@@ -130,7 +130,7 @@ async function clearHumanInterventionIfPresent(
       phase: 'reviewing',
     },
     {
-      worktree: injectedReviewWorktree(slug, options.resolveWorktreeFn),
+      executionContext: options.executionContext,
       skipGit: false,
       log: options.log,
       error,
@@ -151,11 +151,11 @@ export async function continueReviewClearsIntervention(
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => void;
-    resolveWorktreeFn?: typeof resolveWorktree;
+    executionContext: LiveMissionExecutionContext;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
     runFn?: typeof run;
-  } = {}
+  }
 ): Promise<boolean> {
   const result = await clearHumanInterventionIfPresent(slug, args, {
     ...options,
@@ -176,11 +176,11 @@ export async function continueReviewInvalidatesBlocker(
     log?: (_msg: string) => void;
     error?: (_msg: string) => void;
     exit?: (_code: number) => void;
-    resolveWorktreeFn?: typeof resolveWorktree;
+    executionContext: LiveMissionExecutionContext;
     missionStore?: MissionStore | null;
     createEventFn?: typeof createEvent;
     runFn?: typeof run;
-  } = {}
+  }
 ): Promise<{ invalidated: boolean; operator: string; status: ReviewStatus }> {
   const error = options.error || fmt.log.plainError;
   const exit = options.exit || process.exit;
@@ -223,7 +223,7 @@ export async function continueReviewInvalidatesBlocker(
     return actor && actor.trim() ? actor.trim() : null;
   })();
   const operator = explicitActor || (() => {
-    const worktree = options.resolveWorktreeFn ? (options.resolveWorktreeFn(slug) ?? process.cwd()) : process.cwd();
+    const worktree = options.executionContext.missionWorktree;
     try {
       const gitUser = (options.runFn ?? run)('git', ['-C', worktree, 'config', 'user.name']);
       return (gitUser.stdout || '').trim() || 'operator';
@@ -250,7 +250,7 @@ export async function continueReviewInvalidatesBlocker(
       phase: 'reviewing',
     },
     {
-      worktree: injectedReviewWorktree(slug, options.resolveWorktreeFn),
+      executionContext: options.executionContext,
       skipGit: false,
       log: options.log,
       error,
@@ -269,12 +269,8 @@ export async function continueReviewInvalidatesBlocker(
 
 /** Failures block the review; warnings only annotate it. */
 
-function injectedReviewWorktree(slug: string, resolveWorktreeFn: typeof resolveWorktree | undefined): string | undefined {
-  return resolveWorktreeFn ? (resolveWorktreeFn(slug) ?? undefined) : undefined;
-}
-
-function operatorFromGit(slug: string, resolveWorktreeFn: typeof resolveWorktree | undefined, runFn: typeof run | undefined): string {
-  const worktree = injectedReviewWorktree(slug, resolveWorktreeFn) ?? process.cwd();
+function operatorFromGit(executionContext: LiveMissionExecutionContext, runFn: typeof run | undefined): string {
+  const worktree = executionContext.missionWorktree;
   try {
     const gitUser = (runFn ?? run)('git', ['-C', worktree, 'config', 'user.name']);
     return (gitUser.stdout || '').trim() || 'operator';

@@ -7,6 +7,7 @@ import { WORKFLOW_AGENT_NAMES } from '../agents/agent-family-names.js';
 import { CLASSIFIER_FORGEJO_USER } from './setup-review-repository.js';
 import type { getComments, readToken } from './review-adapter.js';
 import { VALID_EVENT_TYPES, type createEvent } from './review-events.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 type ForgejoFeedbackComment = {
   readonly kind?: string;
   readonly id?: string;
@@ -46,13 +47,17 @@ function isApproval(comment: ForgejoFeedbackComment): boolean {
   return comment.kind === 'review' && (comment.state ?? '').trim().toUpperCase() === 'APPROVED';
 }
 
-interface HumanFeedbackDependencies {
+interface HumanFeedbackDependenciesBase {
   slug: string; branch: string; worktree: string; providerEnabled: boolean;
-  strict?: boolean; readOnly?: boolean;
+  strict?: boolean;
   configuration?: ParallixConfiguration;
   missionStore: MissionStore | null; log: (_msg: string) => void; error: (_msg: string) => void;
   fetchComments: typeof getComments; tokenFor: typeof readToken; recordHumanNote: typeof createEvent;
 }
+type HumanFeedbackDependencies = HumanFeedbackDependenciesBase & (
+  | { readOnly: true }
+  | { readOnly?: false; executionContext: LiveMissionExecutionContext }
+);
 export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): HumanFeedbackPort {
   const { slug, branch, worktree, providerEnabled, missionStore, log, error, fetchComments, tokenFor, recordHumanNote } = dependencies;
   return {
@@ -97,11 +102,13 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
       const consumedSources = new Set([...seen, ...newFeedback.map(item => item.source)]);
       state.metadata.humanFeedbackSources = [...consumedSources];
       state.metadata.humanFeedbackHistory = feedback.map(item => ({ source: item.source, author: item.author, state: item.state, disposition: item.disposition, reason: item.reason }));
-      for (const item of dependencies.readOnly ? [] : newFeedback) {
-        await recordHumanNote(slug, VALID_EVENT_TYPES.HUMAN_NOTE, {
-          content: item.reason, actor: item.author, round: state.round, phase: state.phase,
-          followUpReference: `${item.source}; state=${item.state}`,
-        }, { worktree, skipGit: true, missionStore, log, error });
+      if (!dependencies.readOnly) {
+        for (const item of newFeedback) {
+          await recordHumanNote(slug, VALID_EVENT_TYPES.HUMAN_NOTE, {
+            content: item.reason, actor: item.author, round: state.round, phase: state.phase,
+            followUpReference: `${item.source}; state=${item.state}`,
+          }, { executionContext: dependencies.executionContext, skipGit: true, missionStore, log, error });
+        }
       }
       const currentRequest = [...unseen].reverse().find(item => item.disposition === 'REQUEST_CHANGES' && item.state === 'current');
       if (currentRequest) {
@@ -119,7 +126,7 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
         const result = await recordHumanNote(slug, VALID_EVENT_TYPES.HUMAN_NOTE, {
           content: record.reason, actor: record.author, round: state.round, phase: state.phase,
           followUpReference: `${record.source}; state=${feedback.state}`,
-        }, { worktree, skipGit: true, missionStore, log, error });
+        }, { executionContext: dependencies.executionContext, skipGit: true, missionStore, log, error });
         if (!result.ok) { throw new Error(result.error || `Could not record human correction ${record.source}`); }
       }
       const consumedSources = new Set<unknown>(Array.isArray(state.metadata.humanFeedbackSources) ? state.metadata.humanFeedbackSources : []);

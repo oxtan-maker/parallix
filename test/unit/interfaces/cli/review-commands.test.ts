@@ -61,7 +61,7 @@ test.afterEach(() => mock.restoreAll());
 const { flagValue, readTextFlag, unknownReviewFlags } = reviewCliFlags;
 const { ReviewWorkflowAdapter, createReviewWorkflowAdapter } = reviewWorkflowAdapter;
 const review = (args: string[], options: NonNullable<Parameters<typeof createReviewWorkflowAdapter>[0]> = {}) => {
-  const composed = { resolveExecutionContextFn: (slug: string, root: string) => ({ ok: true as const,
+  const composed = { rootDir: '/fixture', resolveExecutionContextFn: (slug: string, root: string) => ({ ok: true as const,
     context: missionExecutionContext({ missionId: slug, missionWorktree: `/fixture/${slug}`, baseWorktree: root }) }), ...options };
   return createReviewCommand(new ReviewCommandUseCase(createReviewWorkflowAdapter(composed)))(args, composed);
 };

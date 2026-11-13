@@ -32,7 +32,10 @@ function resolveMutationContext(slug: string, options: {
   rootDir?: string;
   resolveExecutionContextFn?: (_slug: string, _root: string) => MissionExecutionContextResolution;
 }): MissionExecutionContextResolution {
-  const root = options.rootDir || process.cwd();
+  if (!options.rootDir) {
+    return { ok: false, reason: `Mission ${slug}: mutation launch root is unavailable; composition must resolve the execution context.` };
+  }
+  const root = options.rootDir;
   if (options.resolveExecutionContextFn) { return options.resolveExecutionContextFn(slug, root); }
   if (options.configuration) { return resolveMissionExecutionContext(slug, root, options.configuration); }
   return { ok: false, reason: `Mission ${slug}: mutation configuration is unavailable; composition must resolve the execution context.` };
@@ -105,7 +108,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
   private roundUseCase(context: ReviewMutationWorkflowContext, helperExit?: (_code: number) => never): ReviewRoundUseCase {
     const o = context.options as typeof this._defaults;
-    const helperOptions = { ...o, exit: helperExit ?? o.exit, runFn: o.run };
+    const helperOptions = { ...o, executionContext: context.executionContext, exit: helperExit ?? o.exit, runFn: o.run };
     const port: ReviewRoundEntryPort = {
       operatorResume: o.operatorResume,
       loadRound: async slug => await Promise.resolve((o.readReviewStateFn || readReviewState)(slug, context.executionContext.missionWorktree, o.missionStore)),

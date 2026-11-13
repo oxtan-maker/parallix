@@ -196,16 +196,16 @@ async function persistImplementerEvents(params: {
   itemDispositions: ReviewItemDisposition[];
   blockedReason: string | null;
   createEventFn: RepoEventFn;
-  worktree: string;
+  executionContext: LiveMissionExecutionContext;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
 }): Promise<{ ok: true } | { ok: false; failureReason?: FailureReason; diagnostic: string }> {
-  const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason, createEventFn, worktree, log, error } = params;
+  const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason, createEventFn, executionContext, log, error } = params;
   const summaryEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY, {
     content: resolution, round, phase, actor: implementer,
     itemDispositions,
     ...(disposition === 'BLOCKED' && blockedReason ? { blockedReason } : {})
-  }, { worktree, skipGit: true, log: log, error });
+  }, { executionContext, skipGit: true, log: log, error });
 
   if (!summaryEventResult.ok) {
     const summaryErr = (summaryEventResult as { error?: string }).error;
@@ -215,7 +215,7 @@ async function persistImplementerEvents(params: {
 
   const dispositionEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
     content: `Autonomous review disposition: ${disposition}`, round, phase, actor: implementer, disposition
-  }, { worktree, skipGit: true, log: log, error });
+  }, { executionContext, skipGit: true, log: log, error });
 
   if (!dispositionEventResult.ok) {
     const dispErr = (dispositionEventResult as { error?: string }).error;
@@ -286,7 +286,7 @@ export async function consumeImplementerArtifacts(
 
   const persisted = await persistImplementerEvents({
     slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
-    createEventFn: options.createEventFn || createEvent, worktree, log, error,
+    createEventFn: options.createEventFn || createEvent, executionContext: options.executionContext, log, error,
   });
   if (!persisted.ok) { return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
 

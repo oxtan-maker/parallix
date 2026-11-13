@@ -14,12 +14,12 @@ export type { ConsumeHumanNotesOptions, ConsumeHumanNotesResult } from './review
  */
 
 import { git } from '../git/git.js';
-import { resolveWorktree } from '../filesystem/mission-utils.js';
 import { missionId } from '../../domain/mission.js';
 import type { Review, ReviewEventType, ReviewItemDisposition } from '../../domain/review.js';
 import { readReviewState, ReviewState } from './review-state.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { isStaleWrite, type MissionStore } from '../../application/domain-ports.js';
+import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 
 /**
  * Resolve the Mission authority supplied through the application port.
@@ -61,11 +61,11 @@ export interface CreateEventParams {
 }
 
 export interface CreateEventOptions {
+  executionContext: LiveMissionExecutionContext;
   skipGit?: boolean;
   gitFn?: typeof git;
   log?: (_msg: string) => void;
   error?: (_msg: string) => void;
-  worktree?: string;
   allowMissingRequiredFields?: boolean;
   missionStore?: MissionStore | null;
 }
@@ -186,15 +186,15 @@ function appendWorkflowFooter(slug: string, event: NormalizedEvent): void {
 
 }
 
-async function createEvent(slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions = {}): Promise<CreateEventResult> {
+async function createEvent(slug: string, eventType: string, params: CreateEventParams, options: CreateEventOptions): Promise<CreateEventResult> {
   const {
     log: logger = fmt.log.plain,
     error = fmt.log.plainError,
-    worktree,
+    executionContext,
     allowMissingRequiredFields = false
   } = options;
 
-  const rootDir = worktree || resolveWorktree(slug) || process.cwd();
+  const rootDir = executionContext.missionWorktree;
 
   const invalid = invalidEventParams(eventType, params, allowMissingRequiredFields, error);
   if (invalid) { return invalid; }

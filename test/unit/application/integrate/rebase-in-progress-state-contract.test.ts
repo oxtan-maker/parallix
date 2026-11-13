@@ -98,7 +98,9 @@ test('integration rebase uses the shared exact-tree suffix boundary (TASK-2849)'
   };
   const h = sharedConflictHarness({ git, detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
     getCurrentBranch: () => branch, findMissionDir: () => null, findMissionArea: () => 'workflow',
-    missionBranchName: () => branch, resolveMissionBaseBranch: () => 'main' });
+    missionBranchName: () => branch,
+    resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: '/mission',
+      missionBranch: branch, baseWorktree: '/base', baseBranch: 'main' } }) });
   const defaults = stubIntegrateWorkflowPorts();
   const ports = stubIntegrateWorkflowPorts({
     missionPaths: { ...defaults.missionPaths, missionBranchName: () => branch },
@@ -466,13 +468,13 @@ describe("px rebase in-progress", async () => {
       }),
       getCurrentBranch: () => BRANCH,
       cwd: () => WORKTREE,
+      resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: WORKTREE,
+        missionBranch: BRANCH, baseWorktree: '/tmp', baseBranch: 'main' } }),
       inferSlug: () => SLUG,
       findMissionDir: () => `${WORKTREE}/missions/${SLUG}`,
       findMissionArea: () => 'lib',
-      resolveWorktree: () => WORKTREE,
       conventionalWorktreePath: () => WORKTREE,
       missionBranchName: () => BRANCH,
-      resolveMissionBaseBranch: () => 'main',
       missionConflictPathPrefix: () => `missions/${SLUG}/`,
       startAgent: async () => ({ agent: 'test-agent', result: { status: 0 } }),
       selectAgent: () => 'test-agent',

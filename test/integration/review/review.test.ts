@@ -481,7 +481,7 @@ test('rebaseBeforeReviewRound succeeds after a clean rebase', async () => {
 
   const workflowRuns: string[][] = [];
   const result = await rebaseBeforeReviewRound('task-1087', {
-    worktree: '/tmp/worktree',
+    executionContext: missionExecutionContext({ missionId: 'task-1087', missionWorktree: '/tmp/worktree' }),
     isForgejoReviewEnabledFn: () => true,
     ...inProcessWorkflow(workflowRuns),
     log: message => logs.push(message),
@@ -500,7 +500,7 @@ test('rebaseBeforeReviewRound reports shared-file conflicts with recovery instru
   const errors: string[] = [];
 
   const result = await rebaseBeforeReviewRound('task-1087', {
-    worktree: '/tmp/worktree',
+    executionContext: missionExecutionContext({ missionId: 'task-1087', missionWorktree: '/tmp/worktree' }),
     isForgejoReviewEnabledFn: () => true,
     ...inProcessWorkflow([], {
       exitCode: 1,
@@ -537,7 +537,7 @@ test('rebaseBeforeReviewRound derives sharedFileConflicts from sharedFiles when 
   const startAgent: RebaseWorkflowPort['startAgent'] = async (step) => { launches.push(step); return { agent: 'claude', result: { status: 1 } }; };
 
   const result = await rebaseBeforeReviewRound('task-1087', {
-    worktree: '/tmp/worktree',
+    executionContext: missionExecutionContext({ missionId: 'task-1087', missionWorktree: '/tmp/worktree' }),
     isForgejoReviewEnabledFn: () => true,
     ...inProcessWorkflow([], {
       exitCode: 1,
@@ -568,7 +568,7 @@ test('rebaseBeforeReviewRound reports non-conflict rebase failures', async () =>
   const errors: string[] = [];
 
   const result = await rebaseBeforeReviewRound('task-1087', {
-    worktree: '/tmp/worktree',
+    executionContext: missionExecutionContext({ missionId: 'task-1087', missionWorktree: '/tmp/worktree' }),
     isForgejoReviewEnabledFn: () => true,
     ...inProcessWorkflow([], { exitCode: 1 }),
     log: message => logs.push(message),

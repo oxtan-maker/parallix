@@ -41,6 +41,7 @@ fs.mkdirSync(testMissionDir, { recursive: true });
 fs.writeFileSync(path.join(testMissionDir, 'MISSION.md'), '# Test Mission\n', 'utf8');
 
 const TEST_SLUG = 'task-test-events';
+const EVENT_CONTEXT = missionExecutionContext({ missionId: TEST_SLUG, missionWorktree: tempDir, baseWorktree: tempDir });
 
 // After the TASK-2322.12 cutover a review event is stored on the Review
 // aggregate, so anything that creates or reads one needs a real operator
@@ -114,7 +115,7 @@ test('shouldMirrorToForgejo identifies mirrored event types', () => {
 
 test('createEvent fails for invalid event type', async () => {
   const result = await createEvent(TEST_SLUG, 'invalid_type', { content: '# test' }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true
   });
   assert.ok(!result.ok);
@@ -127,7 +128,7 @@ test('createEvent fails for invalid disposition', async () => {
     content: '# test',
     disposition: 'INVALID'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true
   });
   assert.ok(!result.ok);
@@ -140,7 +141,7 @@ test('createEvent fails for invalid verdict', async () => {
     content: '# test',
     verdict: 'INVALID'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true
   });
   assert.ok(!result.ok);
@@ -156,7 +157,7 @@ test('createEvent succeeds for valid event', async () => {
     phase: 'reviewing',
     actor: 'claude'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true,
     missionStore,
   });
@@ -182,7 +183,7 @@ test('createEvent adds workflow metadata footer', async () => {
     phase: 'fixing',
     actor: 'gemini'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true,
     missionStore,
   });
@@ -199,7 +200,7 @@ test('createEvent requires verdict for reviewer_outcome', async () => {
     phase: 'reviewing',
     actor: 'codex'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true
   });
   
@@ -215,7 +216,7 @@ test('createEvent requires disposition for implementer_disposition', async () =>
     phase: 'fixing',
     actor: 'mistral'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true
   });
   
@@ -233,7 +234,7 @@ test('createEvent succeeds with required fields for reviewer_outcome', async () 
     actor: 'codex',
     verdict: 'approve'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true,
     missionStore,
   });
@@ -252,7 +253,7 @@ test('createEvent succeeds with required fields for implementer_disposition', as
     actor: 'mistral',
     disposition: 'CHANGES_MADE'
   }, {
-    worktree: tempDir,
+    executionContext: EVENT_CONTEXT,
     skipGit: true,
     missionStore,
   });
@@ -274,7 +275,7 @@ test('createEvent does not duplicate an existing workflow metadata footer', asyn
     const footer = buildEventFooter(TEST_SLUG, 1, 'reviewing');
     const result = await createEvent(TEST_SLUG, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
       content: `# Findings${footer}`, round: 1, phase: 'reviewing', actor: 'codex',
-    }, { worktree: tempDir, skipGit: true, missionStore });
+    }, { executionContext: EVENT_CONTEXT, skipGit: true, missionStore });
     assert.ok(result.ok);
     const matches = (result.event?.content ?? '').match(/`\[workflow-round:1, workflow-phase:reviewing\]`/g) || [];
     assert.equal(matches.length, 1);
@@ -294,7 +295,7 @@ test('createEvent fails loudly when no Mission store was supplied', async () => 
     round: 1,
     phase: 'reviewing',
     actor: 'claude',
-  }, { worktree: tempDir, skipGit: true, error: () => {} });
+  }, { executionContext: EVENT_CONTEXT, skipGit: true, error: () => {} });
 
   assert.ok(!result.ok);
   assert.ok(result.error);
@@ -319,7 +320,7 @@ test('createEvent fails loudly when the mission has no Review in the database', 
     round: 1,
     phase: 'reviewing',
     actor: 'claude',
-  }, { worktree: tempDir, skipGit: true, error: () => {}, missionStore });
+  }, { executionContext: EVENT_CONTEXT, skipGit: true, error: () => {}, missionStore });
 
   assert.ok(!result.ok);
   assert.ok(result.error);
@@ -355,7 +356,7 @@ test('readAllEvents reads the stored events, not the exported files', async () =
       round: 1,
       phase: 'reviewing',
       actor: 'claude',
-    }, { worktree: tempDir, skipGit: true, missionStore });
+    }, { executionContext: EVENT_CONTEXT, skipGit: true, missionStore });
     assert.ok(created.ok);
 
     const events = await readAllEvents(TEST_SLUG, { rootDir: tempDir, missionStore });

@@ -37,8 +37,13 @@ async function worker(operation: string, root: string, argument: string) {
       fs.writeFileSync(editor, `import fs from 'node:fs'; const f=process.argv[2];const a=fs.readFileSync(f,'utf8').split('\\n'); a.splice(22,0,${JSON.stringify('exec ' + command)});fs.writeFileSync(f,a.join('\\n'));`);
     }
     const port = createRebaseWorkflowPort({
-      inferSlugFn: () => 'exercise', resolveWorktreeFn: () => root,
-      findMissionDirFn: () => null, resolveMissionBaseBranchFn: () => 'main',
+      cwd: root,
+      executionContext: {
+        missionId: 'exercise', missionWorktree: root, missionBranch: 'mission/exercise',
+        baseWorktree: root, baseBranch: 'main',
+      },
+      inferSlugFn: () => 'exercise',
+      findMissionDirFn: () => null,
       getTaskImplementerFn: () => 'codex',
       gitFn: (args, options) => {
         if (args.includes('rebase')) { args.includes('--continue') ? continues++ : starts++; }
@@ -56,7 +61,6 @@ async function worker(operation: string, root: string, argument: string) {
     });
     // Mission persistence and external agents are boundary doubles. All Git
     // execution, state inspection and workflow continuation are production.
-    port.cwd = () => root;
     port.readReviewState = async () => ({ implementer: 'codex' });
     port.startAgent = async () => { repairs++; throw new Error('Unexpected agent repair'); };
     port.transitionTask = async () => { repairs++; };

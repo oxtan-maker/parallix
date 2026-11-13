@@ -162,8 +162,7 @@ export function createReviewPreparationPorts(configuration?: ParallixConfigurati
         const rebaseOptions = options as Parameters<typeof rebaseBeforeReviewRound>[1];
         return rebaseBeforeReviewRound(slug, {
           ...rebaseOptions,
-          rebaseWorkflowOptions: { ...rebaseOptions?.rebaseWorkflowOptions, configuration,
-            executionContext: rebaseOptions?.executionContext, rootDir: rebaseOptions?.worktree },
+          rebaseWorkflowOptions: { ...rebaseOptions.rebaseWorkflowOptions, configuration },
         });
       },
     },

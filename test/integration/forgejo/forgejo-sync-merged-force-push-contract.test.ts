@@ -8,7 +8,8 @@ import test, { mock, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-import { withRebaseMutationContext, withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
+import { withReviewMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -36,7 +37,13 @@ describe("review ref force push", () => {
 
   const { createPr, pushReviewRef } = createPrModule;
   const rebase = (args: Parameters<typeof rebaseModule.default>[0], options: Parameters<typeof rebaseModule.default>[1] = {}) =>
-    rebaseModule.default(args, withRebaseMutationContext(options));
+    rebaseModule.default(args, {
+      ...options,
+      resolveExecutionContextFn: options.resolveExecutionContextFn ?? ((slug, root) => ({
+        ok: true,
+        context: missionExecutionContext({ missionId: slug, missionWorktree: options.rootDir ?? root, baseWorktree: options.rootDir ?? root }),
+      })),
+    });
   const review = (args: string[], options: NonNullable<Parameters<typeof reviewModule.createReviewWorkflowAdapter>[0]> = {}) =>
     createReviewCommand(new ReviewCommandUseCase(reviewModule.createReviewWorkflowAdapter(withReviewMutationContext(options))))(args, options);
   const { mock } = test;
@@ -157,6 +164,7 @@ describe("review ref force push", () => {
   serialTest('review --push --force passes force:true to pushRound', async (t) => {
     const pushRoundArgs: { value: Parameters<NonNullable<NonNullable<Parameters<typeof review>[1]>['pushRoundFn']>>[1] | null } = { value: null };
     const options: NonNullable<Parameters<typeof review>[1]> = {
+      rootDir: FAKE_ROOT,
       inferSlugFn: (s) => s || 'task-1049',
       pushRoundFn: (slug, opts) => { pushRoundArgs.value = opts; },
       exit: () => {},

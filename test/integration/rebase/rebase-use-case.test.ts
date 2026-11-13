@@ -49,13 +49,13 @@ function harness(overrides: Partial<RebaseWorkflowPort> = {}): Harness {
     getCurrentBranch: () => 'mission/task-2332.12',
 
     cwd: () => '/repo',
+    resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: '/worktree',
+      missionBranch: `mission/${slug}`, baseWorktree: '/repo', baseBranch: 'main' } }),
     inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2332.12',
     findMissionDir: () => '/worktree/missions/task-2332.12',
     findMissionArea: () => 'docs',
-    resolveWorktree: () => '/worktree',
     conventionalWorktreePath: () => '/worktrees/task-2332.12',
     missionBranchName: () => 'mission/task-2332.12',
-    resolveMissionBaseBranch: () => 'main',
     missionConflictPathPrefix: () => 'missions/task-2332.12/',
 
     startAgent: async (step: string, options: Record<string, unknown>) => {

@@ -3,8 +3,8 @@ id: TASK-2852
 title: >-
   Remove rebase ambient context fallbacks and delete superseded context bridges
   and overloads
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-11 09:58'
 updated_date: '2026-11-11 09:58'
 labels:

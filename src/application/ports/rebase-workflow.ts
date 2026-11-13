@@ -183,10 +183,8 @@ export interface RebaseWorkflowPort {
   inferSlug(_explicitSlug?: string): string | null;
   findMissionDir(_slug: string, _root: string): string | null;
   findMissionArea(_missionDir: string): string;
-  resolveWorktree(_slug: string, _options: { cwd: string }): string | null;
   conventionalWorktreePath(_slug: string, _root: string): string;
   missionBranchName(_slug: string, _root: string): string;
-  resolveMissionBaseBranch(_slug: string, _root: string, _options: { gitFn: GitRunner }): string;
   /**
    * Repository-relative prefix that marks a conflicted path as mission-owned.
    * Kept as its own port method because the pre-extraction command resolved it

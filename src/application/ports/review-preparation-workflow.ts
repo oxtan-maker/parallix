@@ -158,8 +158,6 @@ export interface ReviewPreparationRebaseOptions {
   readonly missionIdentityServices?: NonNullable<import('./rebase-workflow.js').RebaseWorkflowPort['missionServices']>;
   /** Required resolved checkout identity; the rebase must not re-derive it (ADR 0051). */
   readonly executionContext: import('./mission-execution-context.js').LiveMissionExecutionContext;
-  /** Bridge for the not-yet-migrated rebase adapter (TASK-2852); always the context worktree. */
-  readonly worktree?: string;
   readonly log: ReviewPreparationLog;
   readonly error: ReviewPreparationLog;
   readonly isForgejoReviewEnabledFn: (_rootDir: string) => boolean;

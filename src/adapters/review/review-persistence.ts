@@ -27,7 +27,7 @@ export function bindReviewPersistence(store: MissionStore | null, lifecycleServi
     slug: string,
     eventType: string,
     params: Parameters<typeof createEvent>[2],
-    options: Parameters<typeof createEvent>[3] = {},
+    options: Parameters<typeof createEvent>[3],
   ) => createEvent(slug, eventType, params, { ...options, missionStore: store });
   const boundWriteReviewState: typeof writeReviewState = (slug, state, rootDir) =>
     writeReviewState(slug, state, rootDir, { missionStore: store });

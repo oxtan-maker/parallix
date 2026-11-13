@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
-import { withRebaseMutationContext } from '../../helpers/mission-mutation-context.js';
+import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -22,6 +22,10 @@ mockModule('../../../src/adapters/review/rebase.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
+const resolveContext = (missionWorktree?: string) => (slug: string, root: string) => ({
+  ok: true as const,
+  context: missionExecutionContext({ missionId: slug, missionWorktree: missionWorktree ?? root, baseWorktree: root }),
+});
 
 // ---- task-1104 rebase cleanup (consolidated from test/task-1104-rebase-cleanup.test.ts, TASK-2622.09) ----
 describe("rebase cleanup", () => {
@@ -67,7 +71,7 @@ describe("rebase cleanup", () => {
       // In-process rebase-workflow seam (TASK-2377.02): the pre-review rebase no
       // longer spawns the `px rebase` CLI, so the workflow is driven in-process.
       const result = await rebaseBeforeReviewRound(slug, {
-        worktree: root,
+        executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
         taskFile: taskPath,
         // Exercise the Forgejo-enabled path: rebase runs after the safe-artifact commit.
         isForgejoReviewEnabledFn: () => true,
@@ -113,7 +117,7 @@ describe("rebase cleanup", () => {
       const runFn = mock.fn(() => ({ status: 1, stdout: '', stderr: 'dirty worktree' }));
 
       const result = await rebaseBeforeReviewRound(slug, {
-        worktree: root,
+        executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
         runFn,
         isForgejoReviewEnabledFn: () => false,
         error: m => assert.fail(`Should not have errored: ${m}`)
@@ -187,7 +191,7 @@ describe("standalone rebase", () => {
       const runFn = mock.fn(() => ({ status: 0, stdout: 'success', stderr: '' }));
 
       const result = await rebaseBeforeReviewRound(slug, {
-        worktree: root,
+        executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
         runFn,
         gitFn: (args) => runGit(root, args),
         isForgejoReviewEnabledFn: () => false,
@@ -225,7 +229,7 @@ describe("standalone rebase", () => {
       fs.writeFileSync(unrelatedPath, 'operator notes');
 
       const result = await rebaseBeforeReviewRound(slug, {
-        worktree: root,
+        executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
         gitFn: (args) => runGit(root, args),
         isForgejoReviewEnabledFn: () => false,
         error: message => assert.fail(`Should not have errored: ${message}`),
@@ -252,7 +256,7 @@ describe("standalone rebase", () => {
       const runFn = mock.fn(() => ({ status: 0, stdout: '', stderr: '' }));
 
       const result = await rebaseBeforeReviewRound(slug, {
-        worktree: root,
+        executionContext: missionExecutionContext({ missionId: slug, missionWorktree: root }),
         runFn,
         gitFn: (args) => runGit(root, args),
         isForgejoReviewEnabledFn: () => false,
@@ -272,11 +276,11 @@ describe("rebase hardening", () => {
   const rebaseModule = mockModule<typeof import('../../../src/adapters/cli/commands/rebase.js')>('../../../src/adapters/cli/commands/rebase.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
-  const rebase = (args: Parameters<typeof rebaseModule.default>[0], options: Parameters<typeof rebaseModule.default>[1] = {}) =>
-    rebaseModule.default(args, withRebaseMutationContext(options));
+  const rebase = rebaseModule.default;
   test('rebase applies core.editor=true to initial rebase call', async () => {
     let capturedArgs: { value: string[] | null } = { value: null };
     await rebase(['task-1077'], {
+      resolveExecutionContextFn: resolveContext(),
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1077',
       findMissionDirFn: () => '/tmp/task-1077',
@@ -302,6 +306,7 @@ describe("rebase hardening", () => {
   test('rebase applies core.editor=true to continueRebase calls', async () => {
     let capturedArgsList: string[][] = [];
     await rebase(['task-1077'], {
+      resolveExecutionContextFn: resolveContext(),
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1077',
       findMissionDirFn: () => '/tmp/task-1077',
@@ -341,8 +346,8 @@ describe("rebase hardening", () => {
     let publishedRoot: { value: string | undefined | null } = { value: null };
     let rebaseArgs: { value: string[] | null } = { value: null };
     await rebase(['task-1077', '--push'], {
+      resolveExecutionContextFn: resolveContext(missionRoot),
       inferSlugFn: () => 'task-1077',
-      resolveWorktreeFn: () => missionRoot,
       findMissionDirFn: (_slug, root) => root === missionRoot ? '/tmp/mission-tree/missions/task-1077' : null,
       findMissionAreaFn: () => 'workflow',
       detectRebaseStateFn: root => {
@@ -351,7 +356,6 @@ describe("rebase hardening", () => {
       },
       isForgejoReviewEnabledFn: root => root === missionRoot,
       getCurrentBranchFn: root => root === missionRoot ? 'mission/task-1077' : 'main',
-      resolveMissionBaseBranchFn: (_slug, root) => root === missionRoot ? 'main' : 'wrong-base',
       resolveReviewIdentityFn: async () => ({ identityUser: 'tester', commentIdentityUser: 'tester', forgejoUser: 'tester', commentForgejoUser: 'tester', reviewState: null, source: null }),
       readTokenFn: () => 'token',
       createPrFn: (_branch, _user, _token, options) => { assert.ok(options); publishedRoot.value = options.rootDir; return { ok: true as const }; },
@@ -384,8 +388,7 @@ describe("rebase diagnostics", () => {
   const printIntegrationPreflightModule = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   test.afterEach(() => mock.restoreAll());
-  const rebase = (args: Parameters<typeof rebaseModule.default>[0], options: Parameters<typeof rebaseModule.default>[1] = {}) =>
-    rebaseModule.default(args, withRebaseMutationContext(options));
+  const rebase = rebaseModule.default;
   const { printIntegrationPreflight } = printIntegrationPreflightModule;
   function gitSubcommandArgs(args: string[]): string[] {
     let i = 0;
@@ -418,6 +421,7 @@ describe("rebase diagnostics", () => {
     console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
     await rebase(['task-1077'], {
+      resolveExecutionContextFn: resolveContext(),
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1077',
       findMissionDirFn: () => '/tmp/task-1077',
@@ -453,6 +457,7 @@ describe("rebase diagnostics", () => {
     console.error = (...args) => { capturedStderr.push(args.join(' ')); };
 
     await rebase(['task-1077'], {
+      resolveExecutionContextFn: resolveContext(),
       isForgejoReviewEnabledFn: () => false,
       inferSlugFn: () => 'task-1077',
       findMissionDirFn: () => '/tmp/task-1077',
@@ -521,6 +526,7 @@ describe("rebase diagnostics", () => {
 
     try {
       await rebase(['task-1322'], {
+        resolveExecutionContextFn: resolveContext(),
         isForgejoReviewEnabledFn: () => false,
         inferSlugFn: () => 'task-1322',
         findMissionDirFn: () => '/tmp/docs/missions/2026/task-1322',

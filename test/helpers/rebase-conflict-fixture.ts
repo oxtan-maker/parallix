@@ -32,13 +32,13 @@ export function sharedConflictHarness(overrides: Partial<RebaseWorkflowPort> = {
     detectRebaseState: () => ({ inProgress: false, unmergedFiles: [] }),
     getCurrentBranch: () => 'mission/task-2503',
     cwd: () => '/repo',
+    resolveExecutionContext: slug => ({ ok: true, context: { missionId: slug, missionWorktree: '/worktree',
+      missionBranch: `mission/${slug}`, baseWorktree: '/repo', baseBranch: 'main' } }),
     inferSlug: (explicitSlug?: string) => explicitSlug ?? 'task-2503',
     findMissionDir: () => '/worktree/missions/task-2503',
     findMissionArea: () => 'docs',
-    resolveWorktree: () => '/worktree',
     conventionalWorktreePath: () => '/worktrees/task-2503',
     missionBranchName: () => 'mission/task-2503',
-    resolveMissionBaseBranch: () => 'main',
     missionConflictPathPrefix: () => 'missions/task-2503/',
     startAgent: async (step: string, options: Record<string, unknown>) => {
       agentLaunches.push({ step, options });

@@ -115,15 +115,15 @@ async function persistReviewerEvents(params: {
   reviewOutcome: string;
   reviewVerdict: string;
   createEventFn: RepoEventFn;
-  worktree: string;
+  executionContext: LiveMissionExecutionContext;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
   verbose: boolean;
 }): Promise<{ ok: true } | { ok: false; failureReason?: FailureReason; diagnostic: string }> {
-  const { slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict, createEventFn, worktree, log, error, verbose } = params;
+  const { slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict, createEventFn, executionContext, log, error, verbose } = params;
   const findingsEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
     content: reviewFindings, round, phase, actor: reviewer
-  }, { worktree, skipGit: true, log: log, error });
+  }, { executionContext, skipGit: true, log: log, error });
 
   if (!findingsEventResult.ok) {
     const findingsErr = (findingsEventResult as { error?: string }).error;
@@ -133,7 +133,7 @@ async function persistReviewerEvents(params: {
 
   const outcomeEventResult = await createEventFn(slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
     content: reviewOutcome, round, phase, actor: reviewer, verdict: reviewVerdict
-  }, { worktree, skipGit: true, log: log, error });
+  }, { executionContext, skipGit: true, log: log, error });
 
   if (!outcomeEventResult.ok) {
     const outcomeErr = (outcomeEventResult as { error?: string }).error;
@@ -331,7 +331,7 @@ export async function consumeReviewerArtifacts(
   const persistEvents = async () => {
     const persisted = await persistReviewerEvents({
       slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
-      createEventFn: options.createEventFn || createEvent, worktree, log, error, verbose: Boolean(options.verbose),
+      createEventFn: options.createEventFn || createEvent, executionContext: options.executionContext, log, error, verbose: Boolean(options.verbose),
     });
     return persisted.ok ? null : { consumed: true as const, ok: false as const, failureReason: persisted.failureReason, diagnostic: persisted.diagnostic };
   };

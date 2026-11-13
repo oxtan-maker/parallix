@@ -77,6 +77,24 @@ test('real PTY smoke: launch, keyboard navigation, resize, clean exit, timeout b
   }
 });
 
+test('PTY smoke harness isolates interruptible children from worker coverage collection', async () => {
+  const session = await launchPtySmoke([
+    process.execPath,
+    '-e',
+    'process.stdout.write(JSON.stringify([process.env.NODE_V8_COVERAGE ?? null, process.env.NODE_DISABLE_COMPILE_CACHE ?? null]))',
+  ], {
+    cwd: process.cwd(),
+    timeoutMs: 5_000,
+    env: { ...process.env, NODE_V8_COVERAGE: '/fixture/raw-coverage', NODE_DISABLE_COMPILE_CACHE: '1' },
+  });
+  try {
+    assert.equal(await session.waitForExit(5_000), 0);
+    assert.match(session.output(), /\["",null\]/, 'the fixture child must not inherit the worker coverage destination or coverage cache policy');
+  } finally {
+    await session.cleanup();
+  }
+});
+
 test('PTY smoke harness: has no agent, Forgejo, repository-write, or network capability', () => {
   const source = fs.readFileSync(path.join(root, 'test/helpers/pty-smoke-harness.ts'), 'utf8');
   assert.doesNotMatch(source, /from 'node:(?:net|http|https)'|spawn\(['"](?:git|curl|ssh)|fetch\(|https?:\/\/|writeFile|appendFile|git (?:commit|push)/i);

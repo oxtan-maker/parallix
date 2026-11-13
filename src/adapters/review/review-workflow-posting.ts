@@ -145,7 +145,7 @@ async function recordLocalReviewVerdict(
     slug,
     VALID_EVENT_TYPES.REVIEWER_OUTCOME,
     localReviewOutcomeEvent(outcome, selfReviewAllowed),
-    { worktree, log: log, error, missionStore },
+    { executionContext: options.executionContext, log: log, error, missionStore },
   );
   if (!outcomeResult.ok) {
     throw new Error(`Cannot store review event for "${slug}": the operator database rejected the write.`);

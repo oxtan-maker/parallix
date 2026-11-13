@@ -114,7 +114,7 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
   // and persisted (N1: durable from first invocation).
   const { stateForRound, round, phase, processedKeys } = await humanNoteContext(slug, rootDir, currentState, readReviewStateFn);
 
-  await consumeComments(comments, { slug, actor, round, phase, rootDir, createEventFn, logger, error, processedKeys, created, skipped });
+  await consumeComments(comments, { slug, actor, round, phase, executionContext, createEventFn, logger, error, processedKeys, created, skipped });
 
   // Merge dedup keys into state metadata in-place.
   // No cap — each key is a compact "author\thex16" string (~22 bytes).
@@ -127,7 +127,7 @@ export async function consumeProviderHumanNotes(slug: string, actor: string, opt
 }
 
 async function consumeComments(comments: unknown[], context: {
-  slug: string; actor: string; round: number; phase: ReviewPhase; rootDir: string;
+  slug: string; actor: string; round: number; phase: ReviewPhase; executionContext: LiveMissionExecutionContext;
   createEventFn: ReviewEventCreator; logger: (message: string) => void; error: (message: string) => void;
   processedKeys: Set<unknown>; created: CreatedHumanNote[]; skipped: unknown[];
 }): Promise<void> {
@@ -140,7 +140,7 @@ async function consumeComments(comments: unknown[], context: {
     if (hasWorkflowFooter(body)) { context.skipped.push({ user, created, reason: 'workflow-generated' }); context.processedKeys.add(key); continue; }
     const classification = classifyComment(comment as { body?: string });
     if (!classification) { context.skipped.push({ user, created, reason: 'already-classified' }); context.processedKeys.add(key); continue; }
-    const result = await context.createEventFn(context.slug, classification, { content: body, round: context.round, phase: context.phase, actor: context.actor || user || 'human' }, { worktree: context.rootDir, skipGit: true, log: context.logger, error: context.error });
+    const result = await context.createEventFn(context.slug, classification, { content: body, round: context.round, phase: context.phase, actor: context.actor || user || 'human' }, { executionContext: context.executionContext, skipGit: true, log: context.logger, error: context.error });
     if (result.ok) { context.created.push({ path: result.path, user, created }); context.processedKeys.add(key); }
     else { context.error(fmt.status('WARN', `Failed to create human_note event for comment by ${user}: ${result.error}`)); }
   }
