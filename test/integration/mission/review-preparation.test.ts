@@ -15,6 +15,7 @@ import { findUnverifiableGoalCheckRow } from '../../../src/application/static-ev
 import { mockModule, installModuleMocks, importFresh } from '../../lib/module-mock.js';
 import { stubMissionServices } from '../../helpers/stub-mission-services.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+import { initCommittedRepository } from '../../fixtures/git-repository.js';
 import { ReviewPreparationCommandUseCase } from '../../../src/application/review-preparation-command-use-case.js';
 const reviewPreparationModule = mockModule<typeof import('../../../src/adapters/cli/commands/review-preparation.js')>('../../../src/adapters/cli/commands/review-preparation.js', import.meta.url);
 const git = mockModule<typeof import('../../../src/adapters/git/git.js')>('../../../src/adapters/git/git.js', import.meta.url);
@@ -397,18 +398,14 @@ test('fallback summary stages and commits in the resolved mission checkout, not 
   const launchCheckout = path.join(reviewPreparationRoot, 'launch-checkout');
   const missionCheckout = path.join(reviewPreparationRoot, 'mission-checkout');
   const runGit = (args: string[], cwd: string) => {
-    const result = childProcess.spawnSync('git',
-      ['-c', 'user.email=fixture@parallix.test', '-c', 'user.name=Fixture', ...args],
-      { cwd, encoding: 'utf8' });
+    const result = childProcess.spawnSync('git', args, { cwd, encoding: 'utf8' });
     assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`);
     return String(result.stdout);
   };
 
   fs.mkdirSync(launchCheckout, { recursive: true });
-  runGit(['init', '-b', 'main'], launchCheckout);
-  fs.writeFileSync(path.join(launchCheckout, 'README.md'), '# base checkout\n');
-  runGit(['add', '--all'], launchCheckout);
-  runGit(['commit', '-m', 'base'], launchCheckout);
+  // Persist the fixture identity so commits made by the real adapter share it.
+  initCommittedRepository(launchCheckout);
   runGit(['worktree', 'add', '-b', `mission/${slug}`, missionCheckout], launchCheckout);
   const taskFile = path.join(missionCheckout, 'backlog/tasks', `${slug} - fallback checkout probe.md`);
   fs.mkdirSync(path.dirname(taskFile), { recursive: true });
@@ -422,7 +419,11 @@ test('fallback summary stages and commits in the resolved mission checkout, not 
     // This case pins the real Git and Backlog adapters: the suite facade bindings are
     // replaced by other cases, and the regression lives in the actual subprocess call.
     const ports = createReviewPreparationPorts();
-    ports.git.git = (args, options) => (options === undefined ? realGitModule.git(args) : realGitModule.git(args, options));
+    ports.git.git = (args, options) => {
+      const result = realGitModule.git(args, options);
+      assert.equal(result.status, 0, `git ${args.join(' ')} failed: ${result.stderr}`);
+      return result;
+    };
     ports.backlog.resolveTaskFile = (taskSlug, rootDir) => realBacklogModule.resolveTaskFile(taskSlug, rootDir);
     const useCase = new ReviewPreparationCommandUseCase(ports);
     const written = useCase.writeFallbackSummary(slug, '## Fallback: PR submitted as human', {
