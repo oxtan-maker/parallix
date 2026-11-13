@@ -17,7 +17,8 @@ export const EXECUTION_ACTIVITY_EVENT_TYPE = 'mission.current-work';
  * renders, so the same row is readable by `ConcreteOperationLogReadAdapter`
  * without a second encoding.
  */
-export function executionActivityToEntry(event: ExecutionActivity, sourceId?: string, repositoryId?: string): OperationalHistoryEntry {
+export function executionActivityToEntry(event: ExecutionActivity, sourceId?: string, repositoryId?: string,
+  ownerAccepted?: boolean): OperationalHistoryEntry {
   return {
     eventType: EXECUTION_ACTIVITY_EVENT_TYPE,
     eventData: JSON.stringify({
@@ -41,6 +42,7 @@ export function executionActivityToEntry(event: ExecutionActivity, sourceId?: st
       processId: event.processId,
       processIdentity: event.processIdentity,
       blockedReason: event.blockedReason,
+      ...(ownerAccepted === undefined ? {} : { ownerAccepted }),
     }),
     createdAt: event.occurredAt,
   };
@@ -55,6 +57,11 @@ export function parseExecutionActivityEntry(entry: OperationalHistoryEntry): Exe
   } catch {
     return null;
   }
+  return parseExecutionActivityData(data, entry.createdAt, entry.id);
+}
+
+/** Decode an already indexed audit payload through the same activity contract. */
+export function parseExecutionActivityData(data: Record<string, unknown>, occurredAt: string, sequence?: number): ExecutionActivity | null {
   const identity = parsedActivityIdentity(data);
   if (!identity) { return null; }
   return {
@@ -72,10 +79,10 @@ export function parseExecutionActivityEntry(entry: OperationalHistoryEntry): Exe
     processId: numberOrNull(data.processId),
     processIdentity: stringOrNull(data.processIdentity),
     blockedReason: stringOrNull(data.blockedReason),
-    occurredAt: entry.createdAt,
+    occurredAt,
     // The store's row id is the only ordering that survives two events written
     // inside the same millisecond.
-    sequence: entry.id,
+    sequence,
   };
 }
 

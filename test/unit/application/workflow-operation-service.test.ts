@@ -525,9 +525,17 @@ test('admission commits activation, lane event and preparing before execution (T
   assert.equal(f.missions.get('task-one')?.status, 'active');
   assert.deepEqual(f.events, ['refined:active']);
   assert.deepEqual(f.publications, ['preparing workflow']);
+  const queued = (await f.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.frames.at(-1)?.event;
+  assert.deepEqual([queued?.state, queued?.actor, queued?.timeState, queued?.operationGeneration],
+    ['running', 'parallix', 'waiting', 0], 'accepted intent is the explicit queue/admission boundary');
   let release!: () => void;
   const barrier = new Promise<void>(resolve => { release = resolve; });
-  const running = f.service.run('request-one', async () => { await barrier; return completed({}); });
+  const running = f.service.run('request-one', async () => {
+    const started = (await f.activity.loadMissionCurrentWork(missionId('task-one')))[0]?.frames.at(-1)?.event;
+    assert.deepEqual([started?.state, started?.actor, started?.timeState, started?.operationGeneration],
+      ['running', 'parallix', 'working', 1], 'claimed intent is the explicit execution-start boundary');
+    await barrier; return completed({});
+  });
   try {
     const second = await f.service.admit(request('request-two', 'task-two'));
     assert.equal(second.status, 'accepted');

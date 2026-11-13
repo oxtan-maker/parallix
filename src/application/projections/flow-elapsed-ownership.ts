@@ -1,5 +1,9 @@
+import { parseExecutionActivityData } from '../recording/execution-activity-recorder.js';
+import { historicalActivityReplay, type HistoricalActivityInterval,
+  type HistoricalActivityPublication } from './execution-activity-history.js';
 import type { LifecycleHistoryEntry, OperationalHistoryEntry } from '../ports/operation-history.js';
 import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../ports/verification-observation.js';
+import { workflowObservationAuthorization, type WorkflowOperation } from '../../domain/workflow-operation.js';
 
 export type FlowTimeState = 'working' | 'waiting' | 'held';
 export interface FlowOwnershipRow {
@@ -30,45 +34,54 @@ export interface FlowOwnershipSegment extends FlowOwnershipRow {
 }
 
 type Segment = FlowOwnershipRow & { readonly id: string; readonly missionId: string;
-  readonly start: number; readonly end: number; readonly priority: number };
+  readonly start: number; readonly end: number; readonly priority: number; readonly unobserved?: boolean };
 type Activity = { repositoryId?: string; missionId?: string; operationId?: string; operationGeneration?: number | null;
   sourceId?: string; revision?: string | null; dependencies?: readonly string[] | null; phase?: string; state?: string; agent?: string | null;
   actor?: string; model?: string | null; timeState?: FlowTimeState };
 type MissionWindow = { readonly missionId: string; readonly start: number; readonly end: number;
   readonly laneEvents: readonly LifecycleHistoryEntry[] };
-type TimedActivity = { readonly at: number; readonly value: Activity };
 type IndexedHistoryEntry = { readonly entry: OperationalHistoryEntry; readonly value: Record<string, unknown> };
 type HistoryIndex = ReadonlyMap<string, ReadonlyMap<string, readonly IndexedHistoryEntry[]>>;
+type ActivityReplay = { readonly intervals: readonly HistoricalActivityInterval[];
+  readonly accepted: readonly IndexedHistoryEntry[]; readonly operation: readonly IndexedHistoryEntry[] };
 
 /**
  * Reconcile refined-to-first-delivery wall time from existing durable owners.
  * Lane events define the measured mission window. Only explicit activity,
- * gate, rebase and handoff observations own elapsed slices; lane and blocked
- * state alone never imply a human, lead or external owner. Nested work wins
- * only through its recorded dependency depth, never publication order.
+ * gate, rebase and handoff observations own elapsed slices; the durable
+ * review-to-integration approval is an explicit human handoff boundary, while
+ * lane and blocked state alone never imply a human, lead or external owner.
+ * The existing activity transition owner decides nesting and supersession.
  */
 export function flowElapsedOwnership(input: {
   readonly repositoryId: string;
   readonly history: readonly OperationalHistoryEntry[];
+  readonly operations: readonly WorkflowOperation[];
   readonly lifecycle: readonly LifecycleHistoryEntry[];
 }, defects: Set<string>, missions?: ReadonlySet<string>): FlowElapsedOwnership | null {
   const windows = missionWindows(input, defects, missions);
   if (!windows.length) { return null; }
   const history = indexHistory(input.history);
-  const segments = windows.flatMap(window => [
-    ...activitySegments(input.repositoryId, history, window, defects),
-    ...gateSegments(input.repositoryId, history, window),
-    ...rebaseSegments(input.repositoryId, history, window),
-    ...leadHandoffSegments(input.repositoryId, history, window),
-    ...operationFinalizationSegments(input.repositoryId, history, window),
-    ...operationHandoffSegments(input.repositoryId, history, window),
-  ]);
+  const operations = new Map(input.operations.map(operation => [operation.id, operation]));
+  const activity = new Map(windows.map(window => [window.missionId,
+    replayActivity(input.repositoryId, history, operations, window, defects)]));
+  const segments = windows.flatMap(window => {
+    const replay = activity.get(window.missionId)!;
+    return [
+      ...activitySegments(window, defects, replay.intervals),
+      ...gateSegments(input.repositoryId, history, window),
+      ...rebaseSegments(input.repositoryId, history, window),
+      ...leadHandoffSegments(input.repositoryId, history, window, replay.accepted),
+      ...humanReviewHandoffSegments(window),
+      ...operationFinalizationSegments(window, replay.operation),
+      ...operationHandoffSegments(window, replay.operation),
+    ];
+  });
   const terminalStates = { blocked: 0, interrupted: 0, cancelled: 0 };
   for (const window of windows) {
-    for (const { value } of indexed(history, 'mission.current-work', window.missionId)) {
+    for (const { value } of activity.get(window.missionId)!.accepted) {
       const activity = value as Activity;
-      if (activity.repositoryId === input.repositoryId
-        && activity.state && activity.state in terminalStates) {
+      if (activity.state && activity.state in terminalStates) {
         terminalStates[activity.state as keyof typeof terminalStates]++;
       }
     }
@@ -83,8 +96,7 @@ export function flowElapsedOwnership(input: {
     for (let index = 1; index < boundaries.length; index++) {
       const start = boundaries[index - 1]!, end = boundaries[index]!;
       if (end <= start) { continue; }
-      const winner = scoped.filter(segment => segment.start <= start && segment.end >= end)
-        .sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0];
+      const winner = exclusiveWinner(scoped.filter(segment => segment.start <= start && segment.end >= end));
       if (!winner) { continue; }
       explained += end - start;
       appendRow(rows, winner, end - start);
@@ -108,7 +120,8 @@ function missionWindows(input: { repositoryId: string; lifecycle: readonly Lifec
   }
   const windows: MissionWindow[] = [];
   for (const [missionId, unsorted] of grouped) {
-    const events = [...unsorted].sort(compareLaneEvents);
+    const events = sortedByInstant(unsorted, event => Date.parse(event.occurredAt), event => event.id,
+      event => event.toStatus === 'integration');
     const refined = events.find(event => event.toStatus === 'refined');
     const delivered = events.find(event => event.toStatus === 'done' && (!refined || Date.parse(event.occurredAt) >= Date.parse(refined.occurredAt)));
     if (!refined || !delivered) {
@@ -120,89 +133,73 @@ function missionWindows(input: { repositoryId: string; lifecycle: readonly Lifec
   return windows;
 }
 
-function compareLaneEvents(left: LifecycleHistoryEntry, right: LifecycleHistoryEntry): number {
-  return Date.parse(left.occurredAt) - Date.parse(right.occurredAt)
-    || (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER)
-    || left.idempotencyKey.localeCompare(right.idempotencyKey);
-}
-
-function activitySegments(repositoryId: string, history: HistoryIndex, window: MissionWindow,
-  defects: Set<string>): Segment[] {
-  const events = observedActivities(repositoryId, history, window);
-  const depths = dependencyDepths(events.map(event => event.value));
-  const bySource = activitiesBySource(events, window, defects);
-  const segments: Segment[] = [];
-  for (const [source, rows] of bySource) {
-    for (let index = 0; index < rows.length; index++) {
-      const segment = activitySegment(source, rows, index, events, window, depths, defects);
-      if (segment) { segments.push(segment); }
+function replayActivity(repositoryId: string, history: HistoryIndex, operations: ReadonlyMap<string, WorkflowOperation>, window: MissionWindow,
+  defects: Set<string>): ActivityReplay {
+  const publications = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value }) => {
+    if (value.repositoryId !== repositoryId) { return []; }
+    const at = Date.parse(entry.createdAt);
+    if (!Number.isFinite(at)) { return []; }
+    if (typeof value.sourceId !== 'string' || !value.sourceId.trim()) {
+      defects.add(`Activity source identity missing for ${window.missionId}`); return [];
     }
-  }
-  return segments;
+    const event = parseExecutionActivityData(value, entry.createdAt, entry.id);
+    if (!event) { defects.add(`Malformed activity observation for ${window.missionId}`); return []; }
+    return [{ at, id: entry.id, sourceId: value.sourceId, event, indexed: { entry, value } }];
+  }).sort((a, b) => a.at - b.at);
+  const replay = historicalActivityReplay(publications, window.end, defects);
+  return { intervals: replay.intervals,
+    accepted: publications.filter(publication => replay.accepted.has(publication.event)).map(publication => publication.indexed),
+    operation: publications.filter(publication => isWorkflowCompletion(publication.event)
+      ? replay.currentTerminals.has(publication.event)
+        && workflowCompletionAuthorized(repositoryId, operations, publication)
+      : replay.accepted.has(publication.event)).map(publication => publication.indexed) };
 }
 
-function observedActivities(repositoryId: string, history: HistoryIndex, window: MissionWindow): TimedActivity[] {
-  return indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value }) => {
-    const activity = value as Activity;
-    return activity.repositoryId === repositoryId ? [{ at: Date.parse(entry.createdAt), value: activity }] : [];
-  }).filter(event => Number.isFinite(event.at)).sort((a, b) => a.at - b.at);
+function isWorkflowCompletion(event: HistoricalActivityPublication['event']): boolean {
+  return event.state === 'ended' && event.summary === 'workflow completed';
 }
 
-function activitiesBySource(events: readonly TimedActivity[], window: MissionWindow, defects: Set<string>): Map<string, TimedActivity[]> {
-  const grouped = new Map<string, TimedActivity[]>();
-  for (const event of events) {
-    if (!event.value.sourceId) { defects.add(`Activity source identity missing for ${window.missionId}`); continue; }
-    const rows = grouped.get(event.value.sourceId) ?? [];
-    rows.push(event); grouped.set(event.value.sourceId, rows);
-  }
-  return grouped;
+function workflowCompletionAuthorized(repositoryId: string, operations: ReadonlyMap<string, WorkflowOperation>,
+  publication: HistoricalActivityPublication & { readonly indexed: IndexedHistoryEntry }): boolean {
+  const event = publication.event;
+  const operation = operations.get(event.operationId);
+  return publication.sourceId === event.operationId && operation?.phase === 'completed'
+    && workflowObservationAuthorization(operation, { repositoryId, missionId: event.missionId,
+      operationId: event.operationId, generation: event.operationGeneration }) === 'authorized';
 }
 
-function activitySegment(source: string, rows: readonly TimedActivity[], index: number, events: readonly TimedActivity[],
-  window: MissionWindow, depths: ReadonlyMap<string, number>, defects: Set<string>): Segment | null {
-  const current = rows[index]!;
-  if (current.value.state !== 'running' && current.value.state !== 'blocked') { return null; }
-  const next = nextActivityBoundary(current, rows.slice(index + 1), events);
-  const end = Math.min(window.end, next?.at ?? window.end);
-  const start = Math.max(window.start, current.at);
-  if (end <= start) { return null; }
-  if (!completeActivityOwnership(current.value)) {
-    defects.add(`Activity ownership incomplete for ${window.missionId} operation ${current.value.operationId ?? 'unknown'} source ${source}; inspect retained activity history`);
-    return null;
-  }
-  if (!next && current.value.state === 'running') {
-    defects.add(`Open activity bounded at first delivery for ${window.missionId} operation ${current.value.operationId ?? 'unknown'} source ${source}`);
-  }
-  const actor = current.value.actor;
-  const state = current.value.timeState;
-  return { id: `activity:${source}`, missionId: window.missionId, start, end,
-    priority: 20 + (depths.get(source) ?? 0),
-    ...row(activityStep(current.value.phase ?? 'unknown', actor, state), actor, current.value.model ?? null, state) };
+function activitySegments(window: MissionWindow, defects: Set<string>, intervals: readonly HistoricalActivityInterval[]): Segment[] {
+  return intervals.flatMap(interval => {
+    const start = Math.max(window.start, interval.start), end = Math.min(window.end, interval.end);
+    if (end <= start) { return []; }
+    if (!interval.owner) {
+      return [{ id: `unobserved:${window.missionId}`, missionId: window.missionId, start, end, priority: 20,
+        unobserved: true, ...row('unobserved', 'unattributed', null, 'waiting') }];
+    }
+    const { event, sourceId } = interval.owner;
+    if (!completeActivityOwnership(event)) {
+      defects.add(`Activity ownership incomplete for ${window.missionId} operation ${event.operationId} source ${sourceId}; rerun the affected fresh workflow with FLOW collection enabled`);
+      return [{ id: `unobserved:${sourceId}`, missionId: window.missionId, start, end, priority: 20,
+        unobserved: true, ...row('unobserved', 'unattributed', null, 'waiting') }];
+    }
+    if (end === window.end && event.state === 'running') {
+      defects.add(`Open activity bounded at first delivery for ${window.missionId} operation ${event.operationId} source ${sourceId}`);
+    }
+    return [{ id: `activity:${sourceId}`, missionId: window.missionId, start, end, priority: 20,
+      ...row(activityStep(event.phase, event.actor, event.timeState), event.actor, event.model ?? null, event.timeState) }];
+  });
 }
 
-function nextActivityBoundary(current: TimedActivity, following: readonly TimedActivity[], events: readonly TimedActivity[]): TimedActivity | undefined {
-  return following.find(event => event.at >= current.at)
-    ?? (current.value.state === 'blocked' ? events.find(event => event.at > current.at && event.value.state === 'running') : undefined);
-}
-
-function completeActivityOwnership(value: Activity): value is Activity & { operationId: string; operationGeneration: number;
-  revision: string; actor: string; timeState: FlowTimeState } {
-  return Boolean(value.operationId) && value.operationGeneration !== null && value.operationGeneration !== undefined
+function completeActivityOwnership(value: Activity): value is Activity & { operationId: string; revision: string;
+  actor: string; timeState: FlowTimeState } {
+  return Boolean(value.operationId) && (value.actor === 'lead'
+    || value.operationGeneration !== null && value.operationGeneration !== undefined)
     && Boolean(value.revision) && Boolean(value.actor) && value.actor !== 'unattributed' && Boolean(value.timeState);
 }
 
-function dependencyDepths(events: readonly Activity[]): Map<string, number> {
-  const dependencies = new Map(events.flatMap(event => event.sourceId ? [[event.sourceId, event.dependencies ?? []] as const] : []));
-  const memo = new Map<string, number>();
-  const visit = (source: string, visiting = new Set<string>()): number => {
-    if (memo.has(source)) { return memo.get(source)!; }
-    if (visiting.has(source)) { return 0; }
-    visiting.add(source);
-    const depth = Math.max(0, ...(dependencies.get(source) ?? []).map(parent => 1 + visit(parent, visiting)));
-    visiting.delete(source); memo.set(source, depth); return depth;
-  };
-  for (const source of dependencies.keys()) { visit(source); }
-  return memo;
+function exclusiveWinner(covering: readonly Segment[]): Segment | undefined {
+  const top = [...covering].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0];
+  return top?.unobserved ? undefined : top;
 }
 
 function gateSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
@@ -246,11 +243,13 @@ function rebaseSegments(repositoryId: string, history: HistoryIndex, window: Mis
   return segments;
 }
 
-function leadHandoffSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
-  const running = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value }) => {
+function leadHandoffSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow,
+  currentWork: readonly IndexedHistoryEntry[]): Segment[] {
+  const running = sortedByInstant(currentWork.flatMap(({ entry, value }) => {
     const activity = value as Activity;
-    return activity.repositoryId === repositoryId && activity.state === 'running' ? [Date.parse(entry.createdAt)] : [];
-  }).filter(Number.isFinite).sort((a, b) => a - b);
+    return activity.state === 'running'
+      ? [{ at: Date.parse(entry.createdAt), id: entry.id }] : [];
+  }).filter(event => Number.isFinite(event.at)), event => event.at, event => event.id, () => true);
   return indexed(history, 'lead.operator-judgment', window.missionId).flatMap(({ entry, value: raw }) => {
     const value = raw as { repositoryId?: string; missionId?: string; action?: string; summary?: string; evidenceRefs?: string[] };
     const start = Date.parse(entry.createdAt);
@@ -258,10 +257,34 @@ function leadHandoffSegments(repositoryId: string, history: HistoryIndex, window
     // the mission index. A conflicting explicit repository never crosses over.
     if ((value.repositoryId !== undefined && value.repositoryId !== repositoryId)
       || value.action !== 'escalate' || !Number.isFinite(start)) { return []; }
-    const end = Math.min(window.end, running.find(at => at > start) ?? window.end);
+    // Durable ids order same-millisecond judgment and current-work rows, so
+    // work published right after the escalation ends it. Without both ids the
+    // order is unknown: the escalation may be ended in its own millisecond, so
+    // it owns no interval rather than reaching past the tie.
+    if (running.some(event => event.at === start && (event.id === undefined || entry.id === undefined))) { return []; }
+    const next = running.find(event => event.at > start
+      || event.at === start && entry.id !== undefined && event.id !== undefined && event.id > entry.id);
+    const end = Math.min(window.end, next?.at ?? window.end);
     const incident = value.evidenceRefs?.slice().sort().join('|') || value.summary || String(entry.id ?? entry.createdAt);
     return end > start ? [{ id: `lead-escalation:${window.missionId}:${incident}`, missionId: window.missionId,
-      start: Math.max(window.start, start), end, priority: 15, ...row('lead-escalation', 'human', null, 'held') }] : [];
+      start: Math.max(window.start, start), end, priority: 17, ...row('lead-escalation', 'human', null, 'held') }] : [];
+  });
+}
+
+/** The integration transition is the durable ordinary-review handoff to the human operator. */
+function humanReviewHandoffSegments(window: MissionWindow): Segment[] {
+  return window.laneEvents.flatMap((event, index) => {
+    if (event.toStatus !== 'integration') { return []; }
+    // Any other lane event in an unordered tie may be the boundary that returns
+    // the mission, so the handoff owns nothing rather than reaching past it.
+    if (tiedUnprovably(window.laneEvents, laneEvent => Date.parse(laneEvent.occurredAt), laneEvent => laneEvent.id, event, () => true)) { return []; }
+    const start = Math.max(window.start, Date.parse(event.occurredAt));
+    const next = window.laneEvents.slice(index + 1).find(candidate => Date.parse(candidate.occurredAt) >= start);
+    const end = Math.min(window.end, next ? Date.parse(next.occurredAt) : window.end);
+    return Number.isFinite(start) && Number.isFinite(end) && end > start
+      ? [{ id: `human-handoff:${event.idempotencyKey}`, missionId: window.missionId, start, end, priority: 16,
+        ...row('human-review', 'human', null, 'held') }]
+      : [];
   });
 }
 
@@ -271,13 +294,17 @@ function leadHandoffSegments(repositoryId: string, history: HistoryIndex, window
  * the first process recorded that it ended and the next process had not yet
  * started; it is never promoted to human or lead ownership.
  */
-function operationHandoffSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
-  const events = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value: raw }) => {
+function operationHandoffSegments(window: MissionWindow, currentWork: readonly IndexedHistoryEntry[]): Segment[] {
+  const events = sortedByInstant(currentWork.flatMap(({ entry, value: raw }) => {
     const value = raw as Activity & { summary?: string };
-    return value.repositoryId === repositoryId ? [{ at: Date.parse(entry.createdAt), value }] : [];
-  }).filter(event => Number.isFinite(event.at)).sort((a, b) => a.at - b.at);
+    return [{ at: Date.parse(entry.createdAt), id: entry.id, value }];
+  }).filter(event => Number.isFinite(event.at)), event => event.at, event => event.id, event => event.value.state === 'running');
   return events.flatMap((event, index) => {
     if (event.value.state !== 'ended' || event.value.summary !== 'workflow completed' || !event.value.operationId) { return []; }
+    // A running publication in the terminal row's unordered tie may follow it
+    // immediately, which would leave no gap to attribute.
+    if (tiedUnprovably(events, candidate => candidate.at, candidate => candidate.id, event,
+      candidate => candidate.value.state === 'running' && candidate.value.operationId !== event.value.operationId)) { return []; }
     const next = events.slice(index + 1).find(candidate => candidate.value.state === 'running'
       && candidate.value.operationId && candidate.value.operationId !== event.value.operationId);
     if (!next) { return []; }
@@ -289,19 +316,25 @@ function operationHandoffSegments(repositoryId: string, history: HistoryIndex, w
 }
 
 /** A terminal workflow publication explicitly owns finalization after its last nested activity ended. */
-function operationFinalizationSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
-  const events = indexed(history, 'mission.current-work', window.missionId).flatMap(({ entry, value: raw }) => {
+function operationFinalizationSegments(window: MissionWindow, currentWork: readonly IndexedHistoryEntry[]): Segment[] {
+  const events = sortedByInstant(currentWork.flatMap(({ entry, value: raw }) => {
     const value = raw as Activity & { summary?: string };
-    return value.repositoryId === repositoryId ? [{ at: Date.parse(entry.createdAt), value }] : [];
-  }).filter(event => Number.isFinite(event.at)).sort((a, b) => a.at - b.at);
+    return [{ at: Date.parse(entry.createdAt), id: entry.id, value }];
+  }).filter(event => Number.isFinite(event.at)), event => event.at, event => event.id, event => event.value.state === 'running');
   return events.flatMap((event, index) => {
     if (event.value.state !== 'ended' || event.value.summary !== 'workflow completed'
       || event.value.actor !== 'parallix' || !event.value.operationId) { return []; }
     const prior = [...events.slice(0, index)].reverse().find(candidate => candidate.value.operationId === event.value.operationId);
     if (!prior || prior.value.state !== 'ended') { return []; }
+    // A same-operation row in the terminal row's unordered tie may be the last
+    // preceding one, which would leave a zero-length interval instead.
+    if (tiedUnprovably(events, candidate => candidate.at, candidate => candidate.id, event,
+      candidate => candidate.value.operationId === event.value.operationId)) { return []; }
     const start = Math.max(window.start, prior.at), end = Math.min(window.end, event.at);
     return end > start ? [{ id: `finalize:${event.value.operationId}`, missionId: window.missionId,
-      start, end, priority: 20,
+      // Finalization fills a gap after activity ends; it cannot replace either
+      // an authoritative activity owner or replay that explicitly stayed unobserved.
+      start, end, priority: 19,
       ...row(activityStep(event.value.phase ?? 'unknown', 'parallix', 'working'), 'parallix', null, 'working') }] : [];
   });
 }
@@ -325,6 +358,43 @@ function activityStep(phase: string, actor: string, state: FlowTimeState): strin
 
 function row(step: string, actor: string, model: string | null, state: FlowTimeState): FlowOwnershipRow {
   return { step, actor, model, state, durationMs: 0 };
+}
+
+/**
+ * Time order with durable ids breaking same-instant ties only when every tied
+ * row carries one. A tie containing a legacy or partial row has no provable
+ * order, and neither input order nor key order is authority for it. Such a tie
+ * keeps every row as a boundary at its own instant, because that instant is
+ * known, and places interval-opening rows first so what they open can close
+ * inside the tie. Ownership that would start inside the tie is suppressed by
+ * `tiedUnprovably` in the consumer that opens it.
+ */
+function sortedByInstant<T>(items: readonly T[], at: (item: T) => number, id: (item: T) => number | undefined,
+  opens: (item: T) => boolean): T[] {
+  const byTime = [...items].sort((left, right) => at(left) - at(right));
+  const ordered: T[] = [];
+  for (let start = 0, end = 1; start < byTime.length; start = end, end = start + 1) {
+    while (end < byTime.length && at(byTime[end]!) === at(byTime[start]!)) { end++; }
+    const tied = byTime.slice(start, end);
+    tied.sort(tied.every(item => id(item) !== undefined)
+      ? (left, right) => id(left)! - id(right)!
+      : (left, right) => Number(opens(right)) - Number(opens(left)));
+    ordered.push(...tied);
+  }
+  return ordered;
+}
+
+/**
+ * True when another row shares `self`'s instant, is one this interval would
+ * search past, and no durable id orders the two. The interval may open and
+ * close inside that millisecond, so it owns no elapsed time.
+ */
+function tiedUnprovably<T>(items: readonly T[], at: (item: T) => number, id: (item: T) => number | undefined,
+  self: T, relates: (item: T) => boolean): boolean {
+  const instant = at(self);
+  const selfId = id(self);
+  return items.some(item => item !== self && at(item) === instant && relates(item)
+    && (selfId === undefined || id(item) === undefined));
 }
 
 function appendRow(rows: FlowOwnershipRow[], winner: FlowOwnershipRow, durationMs: number): void {
@@ -364,5 +434,8 @@ function indexHistory(entries: readonly OperationalHistoryEntry[]): HistoryIndex
 }
 
 function indexed(history: HistoryIndex, eventType: string, missionId: string): readonly IndexedHistoryEntry[] {
-  return history.get(eventType)?.get(missionId) ?? [];
+  const entries = history.get(eventType)?.get(missionId) ?? [];
+  return eventType === 'mission.current-work'
+    ? entries.filter(({ value }) => value.ownerAccepted !== false)
+    : entries;
 }

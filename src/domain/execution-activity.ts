@@ -125,25 +125,46 @@ export interface ExecutionActivitySnapshot {
   readonly terminal: ExecutionActivity | null;
 }
 
-/**
- * The sole activity transition owner. Execution identity determines replacement;
- * source identity determines nesting. Process liveness never grants precedence.
- */
+export interface ExecutionActivityAdvance {
+  readonly snapshot: ExecutionActivitySnapshot | null;
+  readonly accepted: boolean;
+}
+
+/** Stable snapshot-only interface to the activity transition owner. */
 export function advanceExecutionActivity(
   previous: ExecutionActivitySnapshot | null,
   event: ExecutionActivity,
   sourceId: string,
   admittedExecutionId: string | null = null,
 ): ExecutionActivitySnapshot | null {
+  return reconcileExecutionActivity(previous, event, sourceId, admittedExecutionId).snapshot;
+}
+
+/**
+ * The sole activity transition owner. Execution identity determines replacement;
+ * source identity determines nesting. Process liveness never grants precedence.
+ * The disposition lets durable audit consumers preserve the same authority.
+ */
+export function reconcileExecutionActivity(
+  previous: ExecutionActivitySnapshot | null,
+  event: ExecutionActivity,
+  sourceId: string,
+  admittedExecutionId: string | null = null,
+): ExecutionActivityAdvance {
   requireActivityIdentity(previous, event, sourceId);
-  if (!mayPublishActivity(previous, event, admittedExecutionId)) { return previous; }
-  if (previous && previous.operationId !== event.operationId && event.state !== 'running') { return previous; }
+  if (!mayPublishActivity(previous, event, admittedExecutionId)) { return { snapshot: previous, accepted: false }; }
+  if (previous && previous.operationId !== event.operationId && event.state !== 'running') {
+    return { snapshot: previous, accepted: false };
+  }
   const state = previous?.operationId === event.operationId ? previous : beginActivity(previous, event);
-  if (state.closedSources.includes(sourceId)) { return state; }
+  if (state.closedSources.includes(sourceId)) { return { snapshot: state, accepted: false }; }
   const index = state.frames.findIndex(frame => frame.sourceId === sourceId);
-  if (event.state === 'blocked' && index < 0 && state.frames.length) { return state; }
-  return ['ended', 'interrupted', 'cancelled'].includes(event.state) ? closeActivityFrame(state, event, sourceId, index)
-    : updateActivityFrame(state, event, sourceId, index);
+  if (event.state === 'blocked' && index < 0 && state.frames.length) {
+    return { snapshot: state, accepted: false };
+  }
+  const snapshot = ['ended', 'interrupted', 'cancelled'].includes(event.state)
+    ? closeActivityFrame(state, event, sourceId, index) : updateActivityFrame(state, event, sourceId, index);
+  return { snapshot, accepted: true };
 }
 
 function mayPublishActivity(previous: ExecutionActivitySnapshot | null, event: ExecutionActivity, admitted: string | null): boolean {

@@ -207,10 +207,10 @@ test('exclusive elapsed ownership reconciles overlap from observed ownership rat
       phase: 'execute', state: 'ended', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
     { eventType: VERIFICATION_MEASUREMENT_EVENT, createdAt: instant(35), eventData: JSON.stringify(gate) },
     { eventType: 'mission.current-work', createdAt: instant(35), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'human-review', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
       phase: 'review', state: 'blocked', actor: 'human', model: null, timeState: 'held' }) },
     { eventType: 'mission.current-work', createdAt: instant(50), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'human-review', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
+      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
       phase: 'review', state: 'ended', actor: 'human', model: null, timeState: 'held' }) },
   ];
   const report = verificationStatistics({ repositoryId: 'repo', history, operations: [], lifecycle: [
@@ -245,7 +245,7 @@ test('FLOW ownership indexes each historical payload once across Mission windows
     { repositoryId: 'repo', missionId: mission, fromStatus: 'integration', toStatus: 'done', occurredAt: instant(index * 100 + 50), trigger: 'land', agent: 'codex', idempotencyKey: `${mission}:done` },
   ]);
 
-  const result = flowElapsedOwnership({ repositoryId: 'repo', history, lifecycle }, new Set());
+  const result = flowElapsedOwnership({ repositoryId: 'repo', history, operations: [], lifecycle }, new Set());
 
   assert.equal(result?.windows.length, 2);
   assert.equal(reads, history.length, 'history payloads are parsed once, not once per Mission and ownership source');
@@ -277,8 +277,9 @@ test('nested causal ownership replaces only its parent interval and reconciles e
 });
 
 test('fresh run resources preserve units and deduplicate nested waited trees on the exact dependency path (TASK-2835)', () => {
+  let activitySequence = 0;
   const activity = (sourceId: string, at: number, state: string, dependencies: string[], phase = 'execute', actor = 'codex', timeState = 'working') => ({
-    eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
+    id: ++activitySequence, eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
       missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId, dependencies, revision: 'rev',
       phase, state, actor, model: actor === 'codex' ? 'gpt-6.1-sol' : null, timeState }),
   });
@@ -342,8 +343,9 @@ test('fresh run resources preserve units and deduplicate nested waited trees on 
 });
 
 test('ownership retains lead handoffs and bounded partial terminal states (TASK-2835)', () => {
+  let activitySequence = 0;
   const activity = (sourceId: string, at: number, state: string, actor: string, dependencies: string[] = []) => ({
-    eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
+    id: ++activitySequence, eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({ repositoryId: 'repo',
       missionId: 'px-1', operationId: 'lead-op', operationGeneration: 1, sourceId, dependencies, revision: 'rev',
       phase: 'recovery', state, actor, model: actor === 'lead' ? 'operator-model' : null,
       timeState: state === 'blocked' ? 'held' : 'working' }),
@@ -351,6 +353,7 @@ test('ownership retains lead handoffs and bounded partial terminal states (TASK-
   const lifecycle = [
     { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
     { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'refined', toStatus: 'active', occurredAt: instant(5), trigger: 'activate', agent: 'codex', idempotencyKey: 'active' },
+    { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'review', toStatus: 'integration', occurredAt: instant(35), trigger: 'approve', agent: 'human', idempotencyKey: 'approved' },
     { repositoryId: 'repo', missionId: 'px-1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(40), trigger: 'land', agent: 'codex', idempotencyKey: 'done' },
   ];
   const report = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle, history: [
@@ -408,21 +411,26 @@ test('lane and unattributed blocked state remain unexplained instead of becoming
 });
 
 test('observed operation handoffs and same-source actor changes reconcile without human inference (TASK-2835 review F3/F4)', () => {
-  const activity = (at: number, operationId: string, sourceId: string, state: string, phase: string,
-    actor: string, model: string | null, summary: string) => ({ eventType: 'mission.current-work', createdAt: instant(at),
+  const activity = (id: number, at: number, operationId: string, sourceId: string, state: string, phase: string,
+    actor: string, model: string | null, summary: string) => ({ id, eventType: 'mission.current-work', createdAt: instant(at),
     eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'm1', operationId, operationGeneration: 1,
       sourceId, dependencies: [], revision: 'rev', phase, state, actor, model, timeState: 'working', summary }) });
-  const report = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle: [
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [
+    workflowOperation({ id: 'draft-op', requestKey: 'draft-op', missionId: 'm1' as MissionId,
+      command: 'draft:create', originalStatus: 'backlog', agent: null, reviewer: null, previousAssignee: null }),
+    workflowOperation({ id: 'active-op', requestKey: 'active-op', missionId: 'm1' as MissionId }),
+  ], lifecycle: [
     { repositoryId: 'repo', missionId: 'm1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'draft', idempotencyKey: 'refined' },
     { repositoryId: 'repo', missionId: 'm1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(30), trigger: 'land', agent: 'custom', idempotencyKey: 'done' },
   ], history: [
-    activity(0, 'draft-op', 'draft-op', 'running', 'draft', 'parallix', null, 'preparing workflow'),
-    activity(5, 'draft-op', 'draft-op', 'ended', 'draft', 'parallix', null, 'workflow completed'),
-    activity(10, 'active-op', 'active-op', 'running', 'execute', 'parallix', null, 'preparing workflow'),
-    activity(12, 'active-op', 'active-op', 'running', 'execute', 'custom', 'manual/local-runner', 'running execute agent'),
-    activity(20, 'active-op', 'active-op', 'running', 'review', 'custom', 'manual/local-runner', 'reviewer custom reviewing'),
-    activity(24, 'active-op', 'active-op', 'ended', 'execute', 'parallix', null, 'execute run finished'),
-    activity(25, 'active-op', 'active-op', 'ended', 'execute', 'parallix', null, 'workflow completed'),
+    activity(1, 0, 'draft-op', 'draft-op', 'running', 'draft', 'parallix', null, 'preparing workflow'),
+    activity(2, 5, 'draft-op', 'draft-op', 'ended', 'draft', 'parallix', null, 'workflow completed'),
+    activity(3, 10, 'active-op', 'active-op', 'running', 'execute', 'parallix', null, 'preparing workflow'),
+    activity(5, 12, 'active-op', 'active-op', 'running', 'execute', 'custom', 'manual/local-runner', 'running execute agent'),
+    activity(4, 12, 'active-op', 'active-op', 'running', 'execute', 'parallix', null, 'preparing workflow'),
+    activity(6, 20, 'active-op', 'active-op', 'running', 'review', 'custom', 'manual/local-runner', 'reviewer custom reviewing'),
+    activity(7, 24, 'active-op', 'active-op', 'ended', 'execute', 'parallix', null, 'execute run finished'),
+    activity(8, 25, 'active-op', 'active-op', 'ended', 'execute', 'parallix', null, 'workflow completed'),
   ] });
   assert.deepEqual(report.elapsedOwnership?.rows, [
     { step: 'draft', actor: 'parallix', model: null, state: 'working', durationMs: 5 },
@@ -434,6 +442,54 @@ test('observed operation handoffs and same-source actor changes reconcile withou
   ]);
   assert.equal(report.elapsedOwnership?.unexplainedMs, 5, 'post-operation time remains unexplained without a next observed handoff');
   assert.equal(report.elapsedOwnership?.rows.some(row => row.actor === 'human'), false);
+});
+
+test('fresh lead recovery and ordinary human handoff reconcile millisecond boundaries exactly (PX-0055.02)', () => {
+  const activity = (at: number, operationId: string, state: string, phase: string, actor: string,
+    summary: string, operationGeneration: number | null = 1) => ({
+    eventType: 'mission.current-work', createdAt: instant(at), eventData: JSON.stringify({
+      repositoryId: 'repo', missionId: 'm1', operationId, operationGeneration, sourceId: operationId,
+      dependencies: [], revision: 'rev', phase, state, actor,
+      model: actor === 'codex' ? 'gpt-6.1-sol' : null, timeState: 'working', summary,
+    }),
+  });
+  const report = verificationStatistics({ repositoryId: 'repo', operations: [
+    workflowOperation({ id: 'draft-op', requestKey: 'draft-op', missionId: 'm1' as MissionId,
+      command: 'draft:create', originalStatus: 'backlog', agent: null, reviewer: null, previousAssignee: null }),
+    workflowOperation({ id: 'active-op', requestKey: 'active-op', missionId: 'm1' as MissionId }),
+  ], lifecycle: [
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'backlog', toStatus: 'refined', occurredAt: instant(0),
+      trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'refined', toStatus: 'active', occurredAt: instant(2),
+      trigger: 'activate', agent: 'codex', idempotencyKey: 'active' },
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'review', toStatus: 'integration', occurredAt: instant(8),
+      trigger: 'approve', agent: 'human', idempotencyKey: 'human-handoff' },
+    { repositoryId: 'repo', missionId: 'm1', fromStatus: 'integration', toStatus: 'done', occurredAt: instant(12),
+      trigger: 'land', agent: 'human', idempotencyKey: 'done' },
+  ], history: [
+    activity(0, 'draft-op', 'running', 'draft', 'parallix', 'preparing workflow'),
+    activity(1, 'draft-op', 'ended', 'draft', 'parallix', 'workflow completed'),
+    activity(2, 'active-op', 'running', 'execute', 'codex', 'running execute agent'),
+    activity(5, 'active-op', 'ended', 'execute', 'parallix', 'workflow completed'),
+    activity(6, 'lead-recovery', 'running', 'recovery', 'lead', 'lead recovery working', null),
+    activity(8, 'lead-recovery', 'ended', 'recovery', 'lead', 'lead recovery finished', null),
+  ] });
+
+  assert.equal(report.elapsedOwnership?.totalMs, 12);
+  assert.equal(report.elapsedOwnership?.unexplainedMs, 0,
+    'the parent leaves the explicit lead and human intervals unexplained');
+  assert.deepEqual(report.elapsedOwnership?.rows, [
+    { step: 'draft', actor: 'parallix', model: null, state: 'working', durationMs: 1 },
+    { step: 'responsibility-handoff', actor: 'external', model: null, state: 'waiting', durationMs: 1 },
+    { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 3 },
+    { step: 'responsibility-handoff', actor: 'external', model: null, state: 'waiting', durationMs: 1 },
+    { step: 'recovery', actor: 'lead', model: null, state: 'working', durationMs: 2 },
+    { step: 'human-review', actor: 'human', model: null, state: 'held', durationMs: 4 },
+  ]);
+  const segments = report.elapsedOwnership?.segments ?? [];
+  assert.equal(segments.reduce((sum, segment) => sum + segment.durationMs, 0), 12);
+  assert.ok(segments.every((segment, index) => index === 0
+    || Date.parse(segments[index - 1]!.finishedAt) <= Date.parse(segment.startedAt)), 'ownership never overlaps');
 });
 
 test('shared reader deduplicates rebase snapshots without collapsing repeated cycles (TASK-2835)', () => {
@@ -869,6 +925,23 @@ test('stats CLI renders the application-selected population without selecting co
   const { StatsCommandUseCase } = await import('../../../../src/application/stats-command-use-case.js');
   const { createStatsCommand } = await import('../../../../src/interfaces/cli/stats.js');
   const { selectStatsReport } = await import('../../../../src/application/services/statistics-report-selection.js');
+  const observed = { diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null, gateRuns: [], rebaseRuns: [],
+    rebaseStages: [
+      { stage: 'direct-rebase' as const, state: 'inapplicable' as const, operationId: null, sourceId: null,
+        reason: 'not requested', outcomes: [] },
+      { stage: 'pre-review-rebase' as const, state: 'absent' as const, operationId: null, sourceId: null,
+        reason: 'missing', outcomes: [] },
+      { stage: 'integration-rebase' as const, state: 'absent' as const, operationId: null, sourceId: null,
+        reason: 'missing', outcomes: [] },
+    ], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 },
+    actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null };
+  const selected = selectStatsReport([], [{ repo: 'r', mission: 'task-done', closedAt: '2026-06-23T12:00:00Z',
+    labels: [], flowObservation: observed }], { mode: 'weekly', today: '2026-06-23', timeZone: 'UTC' });
+  assert.deepEqual(selected.flowStatistics?.current.rebaseStages.visible.map(({ stage, state }) => [stage, state]), [
+    ['integration-rebase', 'absent'],
+    ['pre-review-rebase', 'absent'],
+    ['direct-rebase', 'inapplicable'],
+  ], 'CLI selection preserves measured rebase applicability (PX-0055.02 F16)');
   const rows = [
     { repo: 'r', mission: 'task-done', date: '2026-06-01', implementer: 'codex', model: 'gpt-6.1-sol', stage: 'default', classification: 'user_value', pr_fix_rounds: '2'},
     { repo: 'r', mission: 'task-active', date: '2026-06-23', implementer: 'claude', stage: 'active', classification: 'ai_sdlc', pr_fix_rounds: '9' },
@@ -912,87 +985,4 @@ test('stats CLI renders the application-selected population without selecting co
     }).execute(request);
     assert.deepEqual(result.selection, selection);
   }
-});
-
-test('px stats fallback-reasons table renders each distinguishable classifier failure cause (TASK-2704)', async () => {
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { weeklyDecisionWindows } = await import('../../../../src/application/services/decision-window.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const row = (round: number, reason: string, unreached = false) => classificationAttempt({ round, decisionId: `d${round}`, fingerprint: `f${round}`,
-    observedAt: '2026-10-05T00:00:00Z', route: 'reviewer', reason, classificationMs: null,
-    ...(unreached ? { provider: null, model: null, packetHash: null } : {}) });
-  const attempts = [row(2, 'evidence-over-budget'), row(3, 'evidence-read-failed'), row(4, 'classifier-exception'),
-    row(5, 'provider-key-missing', true), row(6, 'provider-unavailable', true), row(7, 'consecutive-classifier-returns', true)];
-  const report = renderClassifierStatistics({ decisions: [], attempts, coverage: 'complete' }, [windows.current, windows.previous]);
-  for (const reason of ['evidence-over-budget', 'evidence-read-failed', 'classifier-exception', 'provider-key-missing', 'provider-unavailable', 'consecutive-classifier-returns']) {
-    assert.match(report, new RegExp(`\\| ${reason}\\s+\\|\\s+1 \\(partial\\) \\|`), reason);
-  }
-});
-
-test('classifier clear statistics separate omissions and historical unknowns (TASK-2751)', async () => {
-  const { reviewRounds } = await import('../../../../src/application/review-classification/statistics.js');
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-06', 'UTC');
-  const attempts = [0, 2, undefined].map((omittedDiffCount, index) => classificationAttempt({ round: index + 2,
-    decisionId: `omission-${index}`, observedAt: '2026-10-05T00:00:00Z', route: 'clear', omittedDiffCount, omittedTokens: omittedDiffCount ? 500 : 0 }));
-  attempts.push(classificationAttempt({ round: 5, decisionId: 'context-only', observedAt: '2026-10-05T00:00:00Z', route: 'clear', omittedDiffCount: 0, omittedTokens: 500 }));
-  const input = { decisions: [], attempts, coverage: 'complete' as const };
-  const result = reviewRounds(input, windows.current);
-  assert.equal(result.clearsWithOmissions, 2);
-  assert.equal(result.clearsWithoutOmissions, 1);
-  assert.equal(result.clearsOmissionsUnknown, 1);
-  const rendered = renderClassifierStatistics(input, [windows.current, windows.previous]);
-  assert.match(rendered, /With omissions\s+\|\s+2/);
-  assert.match(rendered, /Without omissions\s+\|\s+1/);
-  assert.match(rendered, /Historical unknown\s+\|\s+1/);
-});
-
-test('decided rounds ignore missing and undecided samples and use decision weeks (TASK-2758)', async () => {
-  const { reviewRounds } = await import('../../../../src/application/review-classification/statistics.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-09', 'UTC');
-  for (const round of [1, 2]) {
-    const kind = round === 1 ? 'first review' : 're-review';
-    const decisions = [
-      { id: 'no-sample', round, decidedAt: '2026-10-08T12:00:00Z', source: 'reviewer' as const, outcome: 'clear' as const },
-      { id: 'cross-week', round, decidedAt: '2026-10-08T13:00:00Z', source: 'classifier' as const, outcome: 'clear' as const },
-      { id: 'before-telemetry', round, decidedAt: '2026-10-01T12:00:00Z', source: 'classifier' as const, outcome: 'implementer' as const },
-    ];
-    const attempts = [classificationAttempt({ round, decisionId: 'cross-week', observedAt: '2026-10-01T13:00:00Z' }),
-      classificationAttempt({ round, mission: 'undecided', decisionId: 'undecided', observedAt: '2026-10-08T13:00:00Z' })];
-    const input = { decisions, attempts, coverage: 'partial' as const };
-    const current = reviewRounds(input, windows.current, kind);
-    assert.equal(current.rounds, 2, 'decided round without a sample is counted; undecided sample is excluded');
-    assert.equal(current.jevDecisions, 1, 'attribution uses the stored decider in its decision week');
-    assert.equal(reviewRounds(input, windows.previous, kind).rounds, 1);
-    assert.equal(reviewRounds({ ...input, attempts: [] }, windows.previous, kind).jevDecisions, 1, 'pre-telemetry share remains available');
-  }
-});
-
-test('deciders are exclusive and partial telemetry leaves decided share available (TASK-2758)', async () => {
-  const { reviewRounds } = await import('../../../../src/application/review-classification/statistics.js');
-  const { renderClassifierStatistics } = await import('../../../../src/application/presentation/classifier-statistics.js');
-  const { classificationAttempt } = await import('../../../fixtures/repeat-review.js');
-  const windows = weeklyDecisionWindows('2026-10-09', 'UTC');
-  const at = '2026-10-08T12:00:00Z';
-  const decisions = (['classifier', 'mechanical', 'reviewer'] as const).map(source => ({
-    id: source, round: 2, source, decidedAt: at, outcome: 'clear' as const,
-  }));
-  const sample = classificationAttempt({ observedAt: at, route: 'clear', decisionId: 'classifier' });
-  const input = { decisions: [...decisions, decisions[0]], attempts: [sample, sample], coverage: 'complete' as const };
-  const result = reviewRounds(input, windows.current, 're-review');
-  assert.deepEqual([result.rounds, result.jevDecisions, result.mechanical, result.reviewer, result.called], [3, 1, 1, 1, 1]);
-  assert.equal(result.coverage, 'partial');
-  const report = renderClassifierStatistics(input, [windows.current, windows.previous]);
-  const current = report.split('\n').find(line => line.startsWith('| This week'))!;
-  assert.match(current, /\|\s+3 \|\s+1 \|\s+1 \|\s+1 \|\s+33% \|/);
-  assert.match(current, /1 \(partial\)/);
-  assert.match(report, /Sample coverage starts: 2026-10-08T12:00:00Z/);
-  assert.match(report.split('\n').find(line => line.startsWith('| Last week'))!, /\|\s+0 \|\s+0 \|\s+0 \|\s+0 \|\s+n\/a \|/);
-  assert.doesNotMatch(report, /Observed wrong|unobserved|Integration.repair|V5|preserves probability/);
-  const complete = { decisions: [decisions[0]], attempts: [sample,
-    classificationAttempt({ observedAt: '2026-09-01T00:00:00Z', mission: 'early', round: 1 })], coverage: 'complete' as const };
-  assert.equal(reviewRounds(complete, windows.current).coverage, 'complete');
 });

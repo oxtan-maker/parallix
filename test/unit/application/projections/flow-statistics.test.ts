@@ -465,3 +465,33 @@ test('a pre-review rebase repair return is drawn exactly once (PX-0055.01)', () 
   assert.equal(returnsToImplement.reduce((sum, edge) => sum + edge.count, 0), 1,
     'the typed return must leave its retained source once, without also becoming an unrecorded return');
 });
+
+test('elapsed classifications survive both windows and every family while absent DB-only backlog dwell stays inapplicable (PX-0055.02 F16)', () => {
+  const windows = weeklyDecisionWindows('2026-11-03', 'UTC');
+  const fact = (missionId: string, closedAt: string, implementer: string, ownedMs: number): FlowMissionFacts => ({
+    repositoryId: 'repo', missionId, closedAt, implementer, diagramNodeIds: [], diagramEdgeIds: [],
+    ownership: ownedMs ? [{ step: 'implement', actor: implementer, model: null, state: 'working', durationMs: ownedMs }] : [],
+    window: { startedAt: new Date(Date.parse(closedAt) - 10).toISOString(), finishedAt: closedAt },
+    gateRuns: [], rebaseRuns: [], rebaseStages: [
+      { stage: 'direct-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not requested', outcomes: [] },
+      { stage: 'pre-review-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not configured', outcomes: [] },
+      { stage: 'integration-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not configured', outcomes: [] },
+    ], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 }, laneDwellMs: {},
+    actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], reviewStatistics: reviewStatisticsObservation(implementer, 0),
+  });
+  const result = flowStatistics([
+    fact('px-0055.03', '2026-11-03T12:00:00Z', 'codex', 10),
+    fact('px-0055.04', '2026-11-02T12:00:00Z', 'custom', 4),
+    fact('px-0055.05', '2026-10-25T12:00:00Z', 'codex', 0),
+  ], windows);
+
+  assert.deepEqual(result.current.observation, { complete: 1, partial: 1, unobserved: 0 });
+  assert.deepEqual(result.previous.observation, { complete: 0, partial: 1, unobserved: 0 });
+  assert.deepEqual(result.families.map(({ family, current, previous }) =>
+    [family, current.observation, previous.observation]), [
+    ['codex', { complete: 1, partial: 0, unobserved: 0 }, { complete: 0, partial: 1, unobserved: 0 }],
+    ['custom', { complete: 0, partial: 1, unobserved: 0 }, { complete: 0, partial: 0, unobserved: 0 }],
+  ]);
+  assert.equal(result.families[0]?.current.stateDwell.find(row => row.state === 'backlog')?.n, 0,
+    'a DB-owned wave child with no backlog entry has no applicable dwell observation, not a measured zero');
+});

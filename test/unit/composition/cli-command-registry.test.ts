@@ -23,8 +23,10 @@ for (const mode of ['empty', 'report', 'failure'] as const) {
   test(`lead recovery ${mode} publishes completion and retains fresh-session authority (TASK-2762)`, async t => {
     t.after(() => mock.restoreAll());
     const events: string[] = [];
+    const publications: Array<{ operationId: string; phase: string; actor?: string; timeState?: string }> = [];
     const services = { mission: { store: { load: async () => ({ kind: 'found', mission: { assignee: 'custom' } }) } }, currentWork: {
-      running: async () => { events.push('running'); }, ended: async () => { events.push('ended'); },
+      running: async (publication: typeof publications[number]) => { publications.push(publication); events.push('running'); },
+      ended: async (publication: typeof publications[number]) => { publications.push(publication); events.push('ended'); },
     } } as unknown as ProductionApplicationServices;
     mock.method(scope, 'createCliServiceScope', () => ({ withGraph: async (invoke: (s: unknown) => unknown) => invoke(services), openServices: async () => services }));
     mock.method(lead, 'leadRecoveryWorkspace', () => ({ worktree: '/fixture', prompt: request.instruction }));
@@ -57,6 +59,10 @@ for (const mode of ['empty', 'report', 'failure'] as const) {
     assert.ok(typeof command === 'function', 'lead command must be registered');
     await command([]);
     assert.deepEqual(events, fails ? ['running', 'launch', 'ended'] : ['running', 'launch', 'usage', 'ended']);
+    assert.deepEqual(publications.map(({ operationId, phase, actor, timeState }) => [operationId, phase, actor, timeState]), [
+      [publications[0]?.operationId, 'recovery', 'lead', 'working'],
+      [publications[0]?.operationId, 'recovery', 'lead', 'working'],
+    ], 'lead recovery publishes explicit start and terminal responsibility under one source');
   });
 }
 
@@ -105,6 +111,7 @@ for (const race of ['none', 'version', 'operation', 'progress', 'integration'] a
     t.after(() => mock.restoreAll());
     const { OperatorJudgmentService } = await import('../../../src/application/operator-judgment.js');
     const events: string[] = [];
+    const identities: Array<[string | undefined, string | undefined]> = [];
     let current = { missionId: request.missionId, version: 1, operationId: null as string | null,
       progress: 'head', lane: 'active', working: false, evidence: [{ ref: 'fixture:1', summary: 'fixture' }] };
     const service = new OperatorJudgmentService({ propose: async e => ({ missionId: e.missionId,
@@ -114,7 +121,7 @@ for (const race of ['none', 'version', 'operation', 'progress', 'integration'] a
     const judged = await service.judge(request.missionId);
     assert.ok(judged.admission);
     const services = { mission: { store: { load: async () => ({ kind: 'found', mission: { assignee: 'custom' } }) } }, currentWork: {
-      running: async () => { events.push('running'); }, ended: async () => { events.push('ended'); },
+      running: async (p: { actor?: string; agent?: string }) => { events.push('running'); identities.push([p.actor, p.agent]); }, ended: async () => { events.push('ended'); },
     } } as unknown as ProductionApplicationServices;
     mock.method(scope, 'createCliServiceScope', () => ({ withGraph: async (invoke: (s: unknown) => unknown) => invoke(services), openServices: async () => services }));
     mock.method(lead, 'leadRecoveryWorkspace', () => ({ worktree: '/fixture', prompt: request.instruction }));
@@ -144,6 +151,8 @@ for (const race of ['none', 'version', 'operation', 'progress', 'integration'] a
     });
     await createRuntimeOptions('/fixture', resolveConfiguration({})).commandFns!.lead!([]);
     assert.deepEqual(events, race === 'none' ? ['spawn', 'running', 'usage', 'ended'] : []);
+    // Judged recovery keeps explicit lead responsibility, which the elapsed owner accepts without a workflow generation (PX-0055.02).
+    assert.deepEqual(identities, race === 'none' ? [['lead', 'custom']] : []);
   });
 }
 

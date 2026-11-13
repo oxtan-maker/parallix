@@ -55,6 +55,10 @@ export function workflowAdmissionPersistenceCases(): void {
       assert.equal(snapshots[0].frames.at(-1)?.event.revision, 'revision-fixture');
       assert.equal(snapshots[0].frames.at(-1)?.event.actor, 'parallix');
       assert.equal(snapshots[0].frames.at(-1)?.event.timeState, 'waiting');
+      const audit = await fixture.database.query<{ event_data: string }>(
+        "SELECT event_data FROM operational_history WHERE event_type = 'mission.current-work' ORDER BY id");
+      assert.deepEqual(audit.map(row => (JSON.parse(row.event_data) as { ownerAccepted?: boolean }).ownerAccepted),
+        [true, false, false, false], 'audit retains which publications the authoritative activity owner rejected');
     } finally { await fixture.close(); }
   });
 

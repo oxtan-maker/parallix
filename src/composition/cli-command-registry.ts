@@ -149,7 +149,7 @@ function createCommandRegistry(rootDir: string, configuration: ParallixConfigura
         if (info) {
           publication = executionActivityIntent({ slug: request.missionId, operationId: publication?.operationId ?? `recovery-${Date.now()}`,
             phase: 'recovery', summary: `recovery agent ${info.agent} working ${request.missionId} after ${request.attemptedOperation}`,
-            agent: info.agent, model: recoveryWorktree ? resolveAgentModel(info.agent, recoveryWorktree) : null, timeState: 'working' });
+            actor: 'lead', agent: info.agent, model: recoveryWorktree ? resolveAgentModel(info.agent, recoveryWorktree) : null, timeState: 'working' });
         }
         if (publication) { published = true; await currentWork.running(publication); }
       };
