@@ -1866,6 +1866,7 @@ test('submitReviewRound records changes on the current round when provider=none'
 
 
 test('consumeImplementerArtifacts posts resolution and normalized disposition from files', async () => {
+  const publication = reviewVerdictFixture('task-089', 'custom', 'codex');
   const posted: { branch: string; token: string; message: string; meta: ForgejoOptions | undefined; }[] = [];
   const deleted: string[] = [];
   const artifactMap = new Map([
@@ -1874,11 +1875,13 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
   ]);
 
   const result = consumeImplementerArtifacts('task-089', 'codex', {
+    ...publication,
     executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
+    getCommentsFn: async () => [],
     postCommentFn: (branch, token, message, meta) => {
       posted.push({ branch, token, message, meta });
       return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const };
@@ -1887,8 +1890,6 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
     buildMetadataFooterFn: async () => '',
     log: () => {},
     error: () => {},
-    // Mock createEvent to avoid requiring real mission directory
-    createEventFn: () => ({ ok: true as const, path: '/tmp/fake-event.md' }),
     // /tmp/worktree is not a checkout; supply the branch tip and stub the
     // round-closing record (covered in test/unit/adapters/review/review-round-loop.test.ts).
     headRevisionFn: () => 'rev-4',
@@ -1907,6 +1908,7 @@ test('consumeImplementerArtifacts posts resolution and normalized disposition fr
 });
 
 test('consumeReviewerArtifacts deletes artifacts only after successful comment and review posts', async () => {
+  const publication = reviewVerdictFixture('task-089', 'custom', 'codex');
   const deleted: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-review-findings.md', '# findings'],
@@ -1915,19 +1917,22 @@ test('consumeReviewerArtifacts deletes artifacts only after successful comment a
   ]);
 
   const result = await consumeReviewerArtifacts('task-089', 'custom', {
+    ...publication,
     executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
+    revision: publication.revision,
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
+    getCommentsFn: async () => [],
+    getPrAuthorFn: () => 'codex',
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
     deleteArtifactFn: (filePath) => deleted.push(filePath),
     buildMetadataFooterFn: async () => '',
     log: () => {},
     error: () => {},
-    // Mock createEvent to avoid requiring real mission directory
-    createEventFn: () => ({ ok: true as const, path: '/tmp/fake-event.md' }),
+    recordApprovalFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
@@ -1969,6 +1974,7 @@ test('consumeImplementerArtifacts leaves artifacts in place when posting fails',
 
 // SC 1: Regression test proving persist-before-mirror ordering for reviewer artifacts
 test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () => {
+  const publication = reviewVerdictFixture('task-089', 'custom', 'codex');
   const calls: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-review-findings.md', '# findings'],
@@ -1977,19 +1983,27 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
   ]);
 
   const result = await consumeReviewerArtifacts('task-089', 'custom', {
+    ...publication,
     executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
+    revision: publication.revision,
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
+    getCommentsFn: async () => [],
+    getPrAuthorFn: () => 'codex',
     postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     postReviewFn: (branch, token, body, options) => { calls.push('postReview'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     deleteArtifactFn: (filePath) => {},
     buildMetadataFooterFn: async () => '',
     log: () => {},
     error: () => {},
-    // Track createEvent calls
-    createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true as const, path: `/tmp/fake-${eventType}.md` }; },
+    // Track the real in-memory persistence boundary rather than bypassing it.
+    createEventFn: async (slug, eventType, params, options) => {
+      calls.push('createEvent');
+      return publication.createEventFn(slug, eventType, params, options);
+    },
+    recordApprovalFn: async () => ({ outcome: 'recorded' as const }),
   });
 
   assert.deepEqual(result, { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] });
@@ -2008,6 +2022,7 @@ test('consumeReviewerArtifacts proves persist-before-mirror ordering', async () 
 
 // SC 1: Regression test proving persist-before-mirror ordering for implementer artifacts
 test('consumeImplementerArtifacts proves persist-before-mirror ordering', async () => {
+  const publication = reviewVerdictFixture('task-089', 'custom', 'codex');
   const calls: string[] = [];
   const artifactMap = new Map([
     ['/tmp/task-089-round-resolution.md', '# resolution'],
@@ -2015,18 +2030,23 @@ test('consumeImplementerArtifacts proves persist-before-mirror ordering', async 
   ]);
 
   const result = consumeImplementerArtifacts('task-089', 'codex', {
+    ...publication,
     executionContext: missionExecutionContext({ missionId: 'task-089', missionWorktree: '/tmp/visualBoard-task-089' }),
     forgejoEnabled: true,
     tmpDir: '/tmp',
     readArtifactFn: (filePath) => artifactMap.get(filePath) ?? null,
     readTokenFn: () => 'token',
+    getCommentsFn: async () => [],
     postCommentFn: (branch, token, body, options) => { calls.push('postComment'); return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
     deleteArtifactFn: (filePath) => {},
     buildMetadataFooterFn: async () => '',
     log: () => {},
     error: () => {},
-    // Track createEvent calls
-    createEventFn: (slug, eventType, params, options) => { calls.push('createEvent'); return { ok: true as const, path: `/tmp/fake-${eventType}.md` }; },
+    // Track the real in-memory persistence boundary rather than bypassing it.
+    createEventFn: async (slug, eventType, params, options) => {
+      calls.push('createEvent');
+      return publication.createEventFn(slug, eventType, params, options);
+    },
     // /tmp/worktree is not a checkout; supply the branch tip and stub the
     // round-closing record (covered in test/unit/adapters/review/review-round-loop.test.ts).
     headRevisionFn: () => 'rev-4',

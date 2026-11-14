@@ -1,5 +1,7 @@
 // -------- Event Taxonomy --------
 
+import { hasReviewPublicationMarker } from './review-publication.js';
+
 /**
  * Valid event classification labels.
  * These are the canonical types that can be stored and (optionally) mirrored to the review provider.
@@ -99,7 +101,7 @@ export function hasWorkflowFooter(body: string): boolean {
  */
 export function classifyComment(comment: { body?: string }): string | null {
   const body = comment.body || '';
-  if (hasWorkflowFooter(body)) {
+  if (hasWorkflowFooter(body) || hasReviewPublicationMarker(body)) {
     return null;
   }
   return VALID_EVENT_TYPES.HUMAN_NOTE;

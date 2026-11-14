@@ -5,6 +5,7 @@ import type { ReviewState } from "../../../../src/adapters/review/review-state.j
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { consumeHumanNotes } from '../../../../src/adapters/review/review-events.js';
+import { reviewPublicationBody } from '../../../../src/adapters/review/review-publication.js';
 import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 
 const EXECUTION_CONTEXT = missionExecutionContext({ missionId: 'task-2342', missionWorktree: '/tmp/task-2342' });
@@ -155,6 +156,35 @@ test('consumeHumanNotes skips workflow-generated comments and dedup by body', as
   assert.equal(result.created.length, 1, 'only real human comment creates event');
   assert.equal(result.skipped.length, 1, 'workflow comment skipped');
   assert.equal(eventsCreated, 1, 'createEventFn called once');
+});
+
+test('consumeHumanNotes skips recovered publication bodies without workflow footers (PX-0054.02 F5)', async () => {
+  const publicationBody = reviewPublicationBody('Recovered reviewer finding', {
+    slug: 'task-2342',
+    round: 21,
+    actor: 'custom',
+    revision: 'abc123',
+    eventType: 'reviewer_findings',
+    target: 'comment',
+  });
+  let eventsCreated = 0;
+
+  const result = await consumeHumanNotes('task-2342', 'alice', {
+    executionContext: EXECUTION_CONTEXT,
+    getCommentsFn: async () => [makeComment('custom', '2026-01-01T00:00:00Z', publicationBody)],
+    createEventFn: async () => {
+      eventsCreated += 1;
+      return { ok: true as const, path: '/tmp/unexpected-human-note.md' };
+    },
+    readReviewStateFn: async () => ({ round: 21, phase: 'reviewing' as const, metadata: {} }),
+    writeReviewStateFn: async () => ({ outcome: 'committed' as const }),
+    readTokenFn: () => 'test-token',
+    reviewIdentity: 'alice',
+  });
+
+  assert.equal(result.created.length, 0);
+  assert.equal(result.skipped.length, 1);
+  assert.equal(eventsCreated, 0, 'publication recovery must not fabricate a human_note event');
 });
 
 test('consumeHumanNotes merges dedup into currentState in-place', async () => {

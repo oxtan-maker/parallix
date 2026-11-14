@@ -14,7 +14,7 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import assert from 'node:assert/strict';
-import { pxNodeArgs, resolvePxEntryLoader } from '../../lib/px-entry.js';
+import { PREBUILT_PX_ENTRY, pxNodeArgs, resolvePxEntryLoader } from '../../lib/px-entry.js';
 import { clearOperatorStateCache, initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { run } from '../../../src/composition/create-cli.js';
@@ -32,6 +32,7 @@ import { composeBoardProjection } from '../../../src/composition/board-projectio
 import { MissionEditService } from '../../../src/application/mission-edit-service.js';
 import { MissionCard } from '../../../src/interfaces/tui/mission-card.js';
 import { initCommittedRepository } from '../../fixtures/git-repository.js';
+import { exerciseReviewPublicationRecoveryCli } from '../../fixtures/review-publication-recovery-cli.js';
 
 
 // TASK-2521.03 (was test/task-2521-03-context-cli.integration.test.ts)
@@ -455,6 +456,16 @@ describe('Context CLI', () => {
       fs.rmSync(root, { recursive: true, force: true });
     }
   });
+});
+
+test('public CLI recovers interrupted review publication exactly once and cleans isolated state (PX-0054.02 F2)', async () => {
+  assert.equal(fs.existsSync(PREBUILT_PX_ENTRY), true, 'run npm run bundle before this public-CLI contract');
+  const observed = await exerciseReviewPublicationRecoveryCli({ entry: PREBUILT_PX_ENTRY, loader: '' });
+  assert.deepEqual(observed, {
+    exits: [1, 0, 0, 0], comments: 4, reviews: 2, completedPublications: 6,
+    uniquePublicationMarkers: 6, usageRows: 0, cleaned: true,
+  });
+  console.log(`PX-0054.02 public CLI observation: ${JSON.stringify(observed)}`);
 });
 
 // TASK-2521.04 (was test/task-2521.04-mission-dependencies.integration.test.ts)

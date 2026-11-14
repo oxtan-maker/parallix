@@ -570,10 +570,10 @@ test('getComments returns null when the comment APIs fail', async () => {
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
       return { ok: true as const, data: [{ number: 121, head: { ref: 'mission/task-121' } }] };
     }
-    if (method === 'GET' && apiPath === '/issues/121/comments') {
+    if (method === 'GET' && apiPath.startsWith('/issues/121/comments')) {
       return { ok: false as const, data: null };
     }
-    if (method === 'GET' && apiPath === '/pulls/121/reviews') {
+    if (method === 'GET' && apiPath.startsWith('/pulls/121/reviews')) {
       return { ok: true as const, data: [] };
     }
     return { ok: false as const, data: null };
@@ -594,10 +594,10 @@ test('getComments failure path works with the production default logger', async 
     if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
       return { ok: true as const, data: [{ number: 121, head: { ref: 'mission/task-121' } }] };
     }
-    if (method === 'GET' && apiPath === '/issues/121/comments') {
+    if (method === 'GET' && apiPath.startsWith('/issues/121/comments')) {
       return { ok: false as const, data: null };
     }
-    if (method === 'GET' && apiPath === '/pulls/121/reviews') {
+    if (method === 'GET' && apiPath.startsWith('/pulls/121/reviews')) {
       return { ok: true as const, data: [] };
     }
     return { ok: false as const, data: null };
@@ -638,7 +638,7 @@ assignee: [custom]
             return { ok: true as const, data: [{ number: 204, head: { ref: 'mission/task-204' } }], status: 0 };
           }
         }
-        if (method === 'GET' && apiPath === '/issues/204/comments') {
+        if (method === 'GET' && apiPath.startsWith('/issues/204/comments')) {
           if (token !== 'custom-token') return { ok: false as const, data: null, status: 401 };
           return {
             ok: true as const,
@@ -646,7 +646,7 @@ assignee: [custom]
             status: 0
           };
         }
-        if (method === 'GET' && apiPath === '/pulls/204/reviews') {
+        if (method === 'GET' && apiPath.startsWith('/pulls/204/reviews')) {
           if (token !== 'custom-token') return { ok: false as const, data: null, status: 401 };
           return { ok: true as const, data: [], status: 0 };
         }
@@ -657,8 +657,8 @@ assignee: [custom]
     assert.ok(comments != null);
     assert.equal(comments.length, 1);
     assert.equal(comments[0].user, 'custom');
-    assert.ok(calls.some(call => call.apiPath === '/issues/204/comments' && call.token === 'custom-token'));
-    assert.ok(calls.some(call => call.apiPath === '/pulls/204/reviews' && call.token === 'custom-token'));
+    assert.ok(calls.some(call => call.apiPath.startsWith('/issues/204/comments?') && call.token === 'custom-token'));
+    assert.ok(calls.some(call => call.apiPath.startsWith('/pulls/204/reviews?') && call.token === 'custom-token'));
   } finally {
     fs.rmSync(taskFile, { force: true });
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -675,10 +675,10 @@ test('getComments preserves provider identities and review context for reconcili
       if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
         return { ok: true as const, data: [{ number: 2641, head: { ref: 'mission/task-2641' } }] };
       }
-      if (method === 'GET' && apiPath === '/issues/2641/comments') {
+      if (method === 'GET' && apiPath.startsWith('/issues/2641/comments')) {
         return { ok: true as const, data: [{ id: 1, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:01:00Z', body: 'Context only' }] };
       }
-      if (method === 'GET' && apiPath === '/pulls/2641/reviews') {
+      if (method === 'GET' && apiPath.startsWith('/pulls/2641/reviews?')) {
         return { ok: true as const, data: [{ id: 42, user: { login: 'operator', type: 'user' }, created_at: '2026-10-05T10:02:00Z', updated_at: '2026-10-05T10:03:00Z', submitted_at: '2026-10-05T10:02:30Z', body: 'Please repair', state: 'REQUEST_CHANGES', dismissed: true }] };
       }
       if (method === 'GET' && apiPath === '/pulls/2641/reviews/42/comments') {
@@ -692,6 +692,52 @@ test('getComments preserves provider identities and review context for reconcili
     { kind: 'issue-comment', id: '1', user: 'operator', isBot: false, created: '2026-10-05T10:00:00Z', updated: '2026-10-05T10:01:00Z', body: 'Context only' },
     { kind: 'review', id: '42', user: 'operator', isBot: false, created: '2026-10-05T10:02:30Z', updated: '2026-10-05T10:03:00Z', body: 'Please repair', state: 'REQUEST_CHANGES', dismissed: true },
     { kind: 'inline-comment', id: '43', reviewId: '42', user: 'forgejo[bot]', isBot: true, created: '2026-10-05T10:04:00Z', updated: '2026-10-05T10:05:00Z', body: 'Inline detail', state: 'REQUEST_CHANGES', dismissed: true, location: 'src/review.ts:9' },
+  ]);
+});
+
+test('getComments follows provider pages by progress before publication-marker reconciliation (PX-0054.02 F1)', async () => {
+  const calls: string[] = [];
+  const pageOne = [{ id: 1, body: 'old 1' }, { id: 2, body: 'old 2' }];
+  const comments = await getComments('mission/task-5412', 'token', { configuration: resolveConfiguration(process.env),
+    apiCall: forgejoApiFixture((method, apiPath) => {
+      calls.push(apiPath);
+      if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
+        return { ok: true as const, data: [{ number: 5412, head: { ref: 'mission/task-5412' } }] };
+      }
+      if (apiPath === '/issues/5412/comments?limit=50&page=1') return { ok: true as const, data: pageOne };
+      if (apiPath === '/issues/5412/comments?limit=50&page=2') {
+        return { ok: true as const, data: [{ id: 3, body: '<!-- parallix-publication:older-marker -->' }] };
+      }
+      if (apiPath === '/issues/5412/comments?limit=50&page=3') return { ok: true as const, data: [] };
+      if (apiPath === '/pulls/5412/reviews?limit=50&page=1') return { ok: true as const, data: [] };
+      return { ok: false as const, data: null };
+    }),
+  });
+
+  assert.equal(comments?.length, 3);
+  assert.match(comments?.at(-1)?.body ?? '', /older-marker/);
+  assert.ok(calls.includes('/issues/5412/comments?limit=50&page=2'));
+});
+
+test('getComments stops when a provider ignores pagination without wedging recovery (PX-0054.02 F1)', async () => {
+  const calls: string[] = [];
+  const repeated = Array.from({ length: 30 }, (_, index) => ({ id: index + 1, body: `old ${index + 1}` }));
+  const comments = await getComments('mission/task-5413', 'token', { configuration: resolveConfiguration(process.env),
+    apiCall: forgejoApiFixture((method, apiPath) => {
+      calls.push(apiPath);
+      if (method === 'GET' && apiPath.includes('/pulls?state=open')) {
+        return { ok: true as const, data: [{ number: 5413, head: { ref: 'mission/task-5413' } }] };
+      }
+      if (apiPath.startsWith('/issues/5413/comments?')) return { ok: true as const, data: repeated };
+      if (apiPath.startsWith('/pulls/5413/reviews?')) return { ok: true as const, data: [] };
+      return { ok: false as const, data: null };
+    }),
+  });
+
+  assert.equal(comments?.length, 30);
+  assert.deepEqual(calls.filter(call => call.startsWith('/issues/5413/comments?')), [
+    '/issues/5413/comments?limit=50&page=1',
+    '/issues/5413/comments?limit=50&page=2',
   ]);
 });
 

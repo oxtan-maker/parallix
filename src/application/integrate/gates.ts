@@ -344,6 +344,8 @@ class IntegrationGateStep {
     const route = await seams.routeIntegrationGateFailureFn({
       slug,
       missionWorktree: checkout,
+      executionContext: context.executionContext,
+      missionStore: missionServices.store,
       verificationCommand: this.dependencies.verification.formatVerificationCommand(context.area, checkout),
       failedGate: result.failedGate,
       failedGates: result.failures?.length ? result.failures : result.failedGate ? [result.failedGate] : [],

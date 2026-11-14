@@ -15,6 +15,7 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { resolveConfiguration } from '../../../../src/composition/config.js';
 import type { MissionStore } from '../../../../src/application/domain-ports.js';
 import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+import { fixtureMission, inMemoryTransitionStore, pendingReview } from '../../../fixtures/mission-builders.js';
 
 const ARTIFACT_REBOUND_ATTEMPTS = DEFAULT_REBOUND_ATTEMPTS;
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
@@ -169,6 +170,7 @@ test('concurrent reviewer verdicts retry bounded automatic-version conflicts but
 
 test('consumeReviewerArtifacts retains composed configuration through provider consumers (px-0042.02 F7)', async () => {
   const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
+  const missionStore = inMemoryTransitionStore(fixtureMission('test-slug', { review: pendingReview('test-slug') }));
   const consumers: string[] = [];
   const observe = (consumer: string, received: unknown) => {
     assert.strictEqual(received, configuration);
@@ -178,6 +180,8 @@ test('consumeReviewerArtifacts retains composed configuration through provider c
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }),
     providerEnabled: true,
+    missionStore,
+    revision: 'review-revision',
     configuration,
     output: { findings: [], comment: 'reviewed', verdict: 'comment' },
     readReviewStateFn: () => ({ round: 1, phase: 'reviewing' }),
@@ -192,18 +196,19 @@ test('consumeReviewerArtifacts retains composed configuration through provider c
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comment', 'token', 'author', 'review']);
+  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comments', 'comment', 'token', 'author', 'comments', 'review']);
 });
 
 test('consumeImplementerArtifacts retains composed configuration through human-note and provider consumers (px-0042.02 F10)', async () => {
   const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
+  const missionStore = inMemoryTransitionStore(fixtureMission('test-slug', { review: pendingReview('test-slug') }));
   const consumers: string[] = [];
   const observe = (consumer: string, received: unknown) => {
     assert.strictEqual(received, configuration);
     consumers.push(consumer);
   };
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
-    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }), providerEnabled: true, configuration,
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }), providerEnabled: true, missionStore, configuration,
     output: { items: [], evidence: ['fixed'], disposition: 'CHANGES_MADE', resultingRevision: 'revision' },
     readReviewStateFn: () => ({ round: 1, phase: 'fixing' }),
     recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
@@ -214,7 +219,7 @@ test('consumeImplementerArtifacts retains composed configuration through human-n
     log: () => {}, error: message => assert.fail(message),
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comment', 'token', 'comment']);
+  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comments', 'comment', 'token', 'comments', 'comment']);
 });
 
 // ============================================================================
@@ -277,6 +282,21 @@ test('consumeImplementerArtifacts returns diagnostic when disposition is missing
   assert.ok(result.diagnostic!.includes('disposition'), `diagnostic should mention disposition: ${result.diagnostic}`);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('consumeImplementerArtifacts rejects unchanged fixes before publishing a successful response (PX-0054.02)', async () => {
+  const effects: string[] = [];
+  const result = await consumeImplementerArtifacts('test-slug', 'codex', {
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }),
+    output: { items: [], evidence: ['fixed'], disposition: 'CHANGES_MADE', resultingRevision: 'revision' },
+    readReviewStateFn: () => ({ round: 1, phase: 'fixing' }),
+    recordImplementerResolutionFn: async () => ({ outcome: 'unchanged', noRevisionChange: true, reason: 'resulting revision did not change' }),
+    createEventFn: () => { effects.push('event'); return { ok: true, path: null }; },
+    providerEnabled: false, log: () => {}, error: () => {},
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.diagnostic ?? '', /resulting revision did not change/);
+  assert.deepEqual(effects, [], 'a refused resolution cannot publish success events');
 });
 
 test('consumeImplementerArtifacts returns diagnostic when persist fails', async () => {

@@ -7,6 +7,7 @@ import { latestEvidencedCheckpoint, type GoalCheckRow } from '../../../domain/ch
 import { latestIntegrationRepair } from '../../../application/integration-repair-review.js';
 import { readLegacyTaskContent } from '../../backlog/legacy-task-content.js';
 import { readLegacyMissionContent, readLegacyReviewSnapshot } from '../../backlog/legacy-mission-content.js';
+import { parseReviewPublication } from '../../review/review-publication.js';
 
 /** Carried rows name their source checkpoint; freshly recorded rows have no provenance key. */
 function statusGoalCheckRow(row: GoalCheckRow) {
@@ -139,6 +140,7 @@ function legacyFields({ legacyTask, legacyMission, legacyReview }: StatusSources
 function reviewFields({ recorded, card }: StatusSources) {
   return {
     ...reviewCardFields(card),
+    reviewPublicationGaps: statusReviewPublicationGaps(recorded),
     integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
   };
 }
@@ -160,4 +162,18 @@ function reviewCardFields(card: MissionCard | null) {
     // that could contradict the board (TASK-2846).
     reviewHistory: card?.reviewHistory ?? []
   };
+}
+
+function statusReviewPublicationGaps(recorded: RecordedMission) {
+  return (recorded?.mission.review?.reviewEvents ?? []).flatMap(event => {
+    const publication = parseReviewPublication(event.followUpReference);
+    return publication && publication.state !== 'completed' ? [{
+      eventType: event.eventType,
+      round: publication.round,
+      actor: publication.actor,
+      revision: publication.revision,
+      status: publication.state,
+      error: publication.error,
+    }] : [];
+  });
 }

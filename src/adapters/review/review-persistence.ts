@@ -14,6 +14,12 @@ import {
 } from './review-artifacts.js';
 import { parseReviewFindings } from './review-round.js';
 import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
+import { parseReviewPublication } from './review-publication.js';
+
+function publicationComplete(reference: string | null | undefined): boolean {
+  const publication = parseReviewPublication(reference);
+  return publication === null || publication.state === 'completed';
+}
 
 /**
  * Bind every review-state operation to the Mission authority.
@@ -96,6 +102,7 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     const events = await persistence.readAllEvents(slug, { rootDir: worktree });
     const outcome = [...events].reverse().find((event) =>
       event.event_type === 'reviewer_outcome' && event.round === state.round && event.actor === reviewer
+      && publicationComplete(event.followup_reference)
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
     );
     if (!outcome?.verdict) { return { consumed: false }; }
@@ -116,6 +123,7 @@ export function reviewLoopBindings(store: MissionStore, lifecycleService?: Missi
     const events = await persistence.readAllEvents(slug, { rootDir: worktree });
     const disposition = [...events].reverse().find((event) =>
       event.event_type === 'implementer_disposition' && event.round === state.round && event.actor === implementer
+      && publicationComplete(event.followup_reference)
       && Date.parse(event.timestamp) >= Date.parse(state.startedAt),
     );
     return disposition?.disposition

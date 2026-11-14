@@ -54,7 +54,7 @@ test('retention and landing distinguish dismissed approvals from withdrawn chang
       apiCall: forgejoApiFixture((method, route) => {
         assert.equal(method, 'GET');
         if (route.includes('/mission/task-retention')) { return { ok: true as const, data: { number: 7, state: 'open' } }; }
-        if (route === '/pulls/7/reviews') { return { ok: true as const, data: comments.map((comment, index) => ({
+        if (route === '/pulls/7/reviews?limit=50&page=1') { return { ok: true as const, data: comments.map((comment, index) => ({
           id: index + 1, user: { login: comment.user }, state: comment.state, dismissed: comment.dismissed,
           commit_id: comment.commitId, submitted_at: comment.created,
         })) }; }

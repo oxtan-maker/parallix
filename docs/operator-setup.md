@@ -439,6 +439,12 @@ its clear result cannot substitute for the required reviewer approvals. Human
 inspection in Forgejo or through `px integrate` stays optional and never becomes
 a required verdict.
 
+When provider mirroring is enabled, accepted findings, decisions and responses
+are recorded locally before their PR publication is attempted. A rejected or
+interrupted publication remains visible in text and JSON status and prevents the
+review loop from consuming that event. Retrying review reconciles the existing PR
+marker and completes the same publication without posting it twice.
+
 A launcher fallback counts only as the family that actually reviewed the change,
 even when that family already has a reviewer slot. Usage-blocked reviewers are
 unavailable even when their launcher is installed. Resume and explicit approval

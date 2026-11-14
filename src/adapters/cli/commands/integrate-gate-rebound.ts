@@ -21,6 +21,8 @@ import { gateFailureReasonFromProcess } from '../../../domain/failure-classifica
 // from here, never the other way round.
 import * as fmt from '../../../application/presentation/cli-format.js';
 import type { IntegrationApproval } from '../../../application/ports/integration-records.js';
+import type { MissionStore } from '../../../application/domain-ports.js';
+import type { LiveMissionExecutionContext } from '../../../application/ports/mission-execution-context.js';
 import { missionId } from '../../../domain/mission.js';
 import { rebound, type GateFailureReason, type ReboundContext, type ReboundOutcome } from '../../../application/rebound-kernel.js';
 import { runPhaseGates, type GateRunOutcome, type PhaseGateRunResult, type RepositoryGate } from '../../config/repository-gates.js';
@@ -192,6 +194,8 @@ async function routeFixedIntegrationGateRebound({
     approval: opts.approval,
     approvedRevision: approvedRevision ?? undefined,
     summary: staleApprovalSummary(opts.slug, approvedLabel, repairedLabel, failedGate.key),
+    executionContext: opts.executionContext,
+    missionStore: opts.missionStore,
   });
   error(fmt.status('INFO', `The integration-gate repair of ${opts.slug} requires a fresh review: prior approved revision ${approvedLabel}, repaired revision ${repairedLabel}. The withdrawn approval cannot authorize the merge.`));
   if (opts.reportedStaleness) {
@@ -229,8 +233,10 @@ function reportFreshReviewRoute(opts: IntegrationGateRouteOptions, invalidation:
 
 export interface IntegrationGateRouteOptions {
   slug: string;
+  executionContext?: LiveMissionExecutionContext;
   /** Mission checkout the failed gates ran from. */
   missionWorktree: string;
+  missionStore?: MissionStore;
   /** The mission's ordinary verification command, for the coverage note. */
   verificationCommand?: string | null;
   failedGate: GateRunOutcome | null | undefined;
@@ -435,5 +441,6 @@ async function withdrawChangedExhaustedRepair(opts: IntegrationGateRouteOptions,
   if (await opts.assessRepairFn?.() !== 'changed') { return; }
   await invalidateApprovalFn({ slug: opts.slug, branch: opts.branch ?? `mission/${opts.slug}`, approval: opts.approval,
     approvedRevision: approvedRevision ?? undefined,
-    summary: staleApprovalSummary(opts.slug, approvedRevision ?? 'unknown', committedRevision(captureFinalTreeFn(opts.missionWorktree)) ?? 'unknown', failedGate.key) });
+    summary: staleApprovalSummary(opts.slug, approvedRevision ?? 'unknown', committedRevision(captureFinalTreeFn(opts.missionWorktree)) ?? 'unknown', failedGate.key),
+    executionContext: opts.executionContext, missionStore: opts.missionStore });
 }

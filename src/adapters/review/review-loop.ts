@@ -1,4 +1,4 @@
-import { invalidateApprovedPrReview } from './integration-approval-invalidation.js';
+import { invalidateApprovedPrReview, recoverApprovalWithdrawal } from './integration-approval-invalidation.js';
 import { createIntegrationApprovalEvidence } from './integration-approval-evidence.js';
 import { createReviewObservationRecorder } from './review-observation-recording.js';
 import { providerReviewObservation, providerReviewChanges, providerResolution } from './review-provider-observations.js';
@@ -61,6 +61,7 @@ import { createGitChangeIdentity } from '../git/change-identity.js';
 import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import { dismissProviderApproval } from './review-adapter.js';
 import { persistedReviewerOutcome } from '../../application/review-loop/reviewer-outcome.js';
+import { recoverReviewPublications } from './review-workflow-posting.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -88,9 +89,12 @@ export interface ReviewLoopBindings {
   readonly exit?: (_code: number) => void;
   /** Provider seams retained here so adapter contracts can exercise normalization. */
   readonly getComments?: typeof getComments;
+  readonly postComment?: typeof import('./review-adapter.js').postComment;
   readonly readToken?: typeof readToken;
   readonly isProviderEnabled?: typeof isProviderEnabled;
   readonly createEvent?: typeof createEvent;
+  readonly recoverReviewPublications?: typeof recoverReviewPublications;
+  readonly recoverApprovalWithdrawal?: typeof recoverApprovalWithdrawal;
 }
 
 /** The per-request knobs the mechanisms read. */
@@ -129,7 +133,7 @@ function primaryBranch(worktree: string): string {
 }
 
 /** The configured review provider for this mission branch. */
-function providerPort(slug: string, branch: string, worktree: string, target: ReviewLoopTarget, log: (_msg: string) => void, error: (_msg: string) => void, configuration: ParallixConfiguration): ReviewProviderPort {
+function providerPort(slug: string, branch: string, worktree: string, target: ReviewLoopTarget, log: (_msg: string) => void, error: (_msg: string) => void, configuration: ParallixConfiguration, missionStore: MissionStore | null, bindings: ReviewLoopBindings): ReviewProviderPort {
   const intervalMs = resolvePollIntervalMs(configuration);
   const timeoutMs = resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, configuration);
   let prNumber: number | null = null;
@@ -144,8 +148,10 @@ function providerPort(slug: string, branch: string, worktree: string, target: Re
   const push = (options: Record<string, unknown>) => pushReviewRef(branch, branch, worktree, { ...options, token: credentials() });
   return {
     async dismissApproval(approvedRevision, reason) {
+      if (!missionStore) { throw new Error('Mission store unavailable for durable approval withdrawal'); }
       const result = await invalidateApprovedPrReview({ slug, branch, approval: { ok: true }, summary: reason,
-        approvedRevision, rootDir: worktree, configuration });
+        approvedRevision, executionContext: target.executionContext, configuration, missionStore,
+        getCommentsFn: bindings.getComments, postCommentFn: bindings.postComment });
       if (!result.ok) { throw new Error(result.errors.join('; ')); }
     },
     async ensureReachable() {
@@ -275,6 +281,26 @@ function rebaseDiagnostic(result: Awaited<ReturnType<typeof rebaseBeforeReviewRo
   return '';
 }
 
+async function recoverBeforeStateRead(slug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings,
+  providerEnabled: boolean, missionStore: MissionStore | null,
+  log: (_message: string) => void, error: (_message: string) => void): Promise<void> {
+  if (!providerEnabled || !missionStore) { return; }
+  const withdrawal = await (bindings.recoverApprovalWithdrawal ?? recoverApprovalWithdrawal)({
+    slug, branch: missionBranchName(slug, target.executionContext.missionWorktree),
+    executionContext: target.executionContext, missionStore,
+    configuration: bindings.configuration,
+    getCommentsFn: bindings.getComments, postCommentFn: bindings.postComment,
+  });
+  if (!withdrawal.ok) { throw new Error(`Approval withdrawal recovery failed: ${withdrawal.errors.join('; ')}`); }
+  const publications = await (bindings.recoverReviewPublications ?? recoverReviewPublications)(slug, {
+    executionContext: target.executionContext, missionStore,
+    configuration: bindings.configuration,
+    log,
+    error,
+  });
+  if (!publications.ok) { throw new Error(`Review publication recovery failed with ${publications.pending} pending publication(s).`); }
+}
+
 /** Map the pre-review rebase result onto the facts the review loop interprets. */
 export function preReviewRebaseFacts(result: Awaited<ReturnType<typeof rebaseBeforeReviewRound>>): PreReviewRebaseFacts {
   if (result.ok) { return { ok: true }; }
@@ -373,7 +399,10 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore, bindings.configuration) : undefined,
     lifecycle: lifecycleService,
     state: {
-      read: async () => await Promise.resolve(readState(slug, worktree, missionStore)),
+      read: async () => {
+        await recoverBeforeStateRead(slug, target, bindings, providerEnabled, missionStore, log, error);
+        return await Promise.resolve(readState(slug, worktree, missionStore));
+      },
       persist: async state => { await persistReviewStateOrThrow(writeState, slug, state, worktree, missionStore); },
       ...createReviewObservationRecorder(slug, () => headRevision(worktree), providerEnabled, { missionStore, lifecycleService }),
       async reset() {
@@ -403,7 +432,8 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     reviewPreparation: bindings.performReviewPreparationFn
       ? { reviewPreparation: async implementer => await bindings.performReviewPreparationFn!(slug, { forgejoUser: implementer, executionContext: target.executionContext, recoverGateFailure: true }) }
       : null,
-    provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error, bindings.configuration ?? DEFAULT_CONFIGURATION) : null,
+    provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error,
+      bindings.configuration ?? DEFAULT_CONFIGURATION, missionStore, bindings) : null,
     approvalRevocation: approvalRevocationPort(slug, branch, worktree, missionStore, lifecycleService),
     humanFeedback: composeHumanFeedback({ slug, branch, worktree, executionContext: target.executionContext, providerEnabled, missionStore, configuration: bindings.configuration, log, error, fetchComments, tokenFor, recordHumanNote }),
     routing: reviewerRoutingPort(worktree, bindings.configuration),

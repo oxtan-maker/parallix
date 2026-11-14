@@ -131,6 +131,7 @@ function statusReviewJson(result: StatusResult) {
         progress: md.reviewProgress ?? null,
         approvalCoverage: md.approvalCoverage ?? null,
         integrationRepair: md.integrationRepair ?? null,
+        publicationGaps: md.reviewPublicationGaps ?? [],
         history: md.reviewHistory,
       }
       : null
@@ -159,6 +160,7 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   const repair = missionData.integrationRepair ? integrationRepairSummary(missionData.integrationRepair) : null;
   if (!missionData.reviewPhase) { log('Review: not started'); if (repair) { log(repair); } return; }
   log(`Review: round ${missionData.reviewRound ?? 1}, phase ${missionData.reviewPhase}, disposition ${missionData.reviewDisposition ?? 'none'}`);
+  logReviewPublicationGaps(missionData, log);
   if (missionData.sameAgentReview) {
     log('Optional human inspection: the same agent reviewed in a fresh context; approve in Forgejo or run px integrate when satisfied.');
   }
@@ -190,6 +192,13 @@ function logReviewProgress(missionData: StatusMissionData, log: (_msg: string) =
   if (progress.degradedReason) { log(`  Degraded review: ${progress.degradedReason}`); }
   for (const blocker of progress.blockers) { log(`  Blocker: ${blocker}`); }
   log(`  Next action: ${progress.nextAction.replace(/^Run /, '')}`);
+}
+
+function logReviewPublicationGaps(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  for (const gap of missionData.reviewPublicationGaps ?? []) {
+    const error = gap.error ? ` (${gap.error})` : '';
+    log(`  Provider publication ${gap.status}: ${gap.eventType}, round ${gap.round}, actor ${gap.actor}, revision ${gap.revision}${error}`);
+  }
 }
 
 function logIntegrationRepairAssessment(a: StatusMissionData['reviewHistory'][number]['integrationRepairAssessment'], log: (_msg: string) => void): void {

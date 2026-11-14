@@ -20,6 +20,7 @@ import { readReviewState, ReviewState } from './review-state.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { isStaleWrite, type MissionStore } from '../../application/domain-ports.js';
 import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
+import { sameReviewPublication } from './review-publication.js';
 
 /**
  * Resolve the Mission authority supplied through the application port.
@@ -294,6 +295,11 @@ async function appendReviewEvent(store: MissionStore, slug: string, event: Norma
   const mission = result.mission;
   const review = mission.review!; // narrowed above
   const eventRecord = storedReviewEvent(event, review.reviewEvents.length);
+  const existing = review.reviewEvents.find(candidate =>
+    sameReviewPublication(candidate.followUpReference, eventRecord.followUpReference));
+  if (existing) {
+    return { ok: true, path: `sqlite:${slug}:${existing.position}` };
+  }
 
   const updatedReview: Review = {
     ...review,

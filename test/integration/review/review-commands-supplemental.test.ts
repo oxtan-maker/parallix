@@ -392,7 +392,7 @@ test('submitReviewRound records an exact-revision same-agent result when reviewe
     decision: result.decision,
   })), [{ family: 'custom', revision: 'review-head', decision: 'approved' }], 'the selected same-agent reviewer is attributed before integration');
   assert.equal(recordedVerdict.value, 'approve', 'reviewer_outcome event recorded locally');
-  assert.ok(warnings.some(w => /same-agent review was recorded locally.*Human inspection remains optional/.test(w)), 'must describe optional human inspection without approval debt');
+  assert.ok(warnings.some(w => /self-review was recorded as a provenance comment.*Human inspection remains optional/.test(w)), 'must describe visible self-review provenance and optional human inspection without approval debt');
 });
 
 test('submitReviewRound exits(1) on a genuine review failure (non-author path)', async () => {

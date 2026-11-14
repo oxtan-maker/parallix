@@ -15,7 +15,7 @@ import type { MissionStore } from '../domain-ports.js';
 import { decidedRevisionOf, type ReviewRound } from '../../domain/review.js';
 import type { IntegrationMissionServices, IntegrationRepairContinuationPort } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
-import type { MissionExecutionContext } from '../ports/mission-execution-context.js';
+import type { LiveMissionExecutionContext, MissionExecutionContext } from '../ports/mission-execution-context.js';
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
 import { carriedRetentionValidation, retainIntegrationApproval, type RetentionOutcome } from './approval-retention.js';
 import { IntegrationStopsForHuman, reviewBeforeIntegration } from './review-before-integration.js';
@@ -116,6 +116,7 @@ function withdrawnApprovalRevision(after: Mission | null, before: ReviewRound): 
 
 interface RepairExecution {
   slug: string; services: IntegrationMissionServices; ports: IntegrateWorkflowPorts;
+  executionContext: LiveMissionExecutionContext;
   verification: Pick<GateStepRequest, 'realAgent' | 'realAgentModel'> & { dryRun?: boolean };
   pending: ReviewRound; worktree: string; evidence: IntegrationApprovalEvidencePort; revision: string; baseline: string;
   mirrorOwnership: BacklogMirrorOwnership;
@@ -198,7 +199,8 @@ async function resolveRepairExecution(slug: string, services: IntegrationMission
     || ports.git.git(['-C', worktree, 'merge-base', '--is-ancestor', baseline, tree.commit]).status !== 0) {
     throw abortWith(ports.landing, 'Integration repair baseline is not established; resume rebase before integration.');
   }
-  return { slug, services, ports, verification, pending, worktree, evidence, revision: tree.commit, baseline, mirrorOwnership };
+  return { slug, services, ports, executionContext: { ...context, missionWorktree: worktree }, verification,
+    pending, worktree, evidence, revision: tree.commit, baseline, mirrorOwnership };
 }
 
 function committedRepairHead({ ports, worktree }: RepairExecution): string | null {
@@ -230,7 +232,7 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
 }
 
 async function finishResumedRepair(execution: RepairExecution, outcome: RetentionOutcome, gatesPassed: boolean, seams: IntegrateSeams): Promise<void> {
-  const { slug, ports, worktree, pending, mirrorOwnership } = execution;
+  const { slug, ports, worktree, pending, mirrorOwnership, services } = execution;
   if (outcome === 'retained') {
     await projectBacklogTransition(mirrorOwnership, seams.transitionTaskFn, slug, 'ready-for-integration');
     throw new IntegrationStopsForHuman(`Original approval retained for ${slug}; review the PR and run px integrate ${slug} to land.`);
@@ -238,9 +240,14 @@ async function finishResumedRepair(execution: RepairExecution, outcome: Retentio
   if (outcome === 'changed') {
     const branch = ports.missionPaths.missionBranchName(slug, worktree);
     const approval = ports.forgejo.getLatestReviewDecision(branch, {});
-    await ports.gates.invalidateApproval?.({ slug, branch, approval,
+    const invalidation = await ports.gates.invalidateApproval?.({ slug, branch, approval,
       approvedRevision: pending.decision?.revision ? String(pending.decision.revision) : undefined,
-      summary: 'Integration repair changed the approved mission patch; fresh review is required.' });
+      summary: 'Integration repair changed the approved mission patch; fresh review is required.',
+      executionContext: execution.executionContext,
+      missionStore: services.store });
+    if (invalidation && !invalidation.ok) {
+      throw abortWith(ports.landing, `Changed repair could not publish approval withdrawal: ${invalidation.errors.join('; ')}`);
+    }
     if (!gatesPassed) { throw abortWith(ports.landing, 'Changed repair withdrew stale approval, but integration verification did not pass.'); }
     return reviewBeforeIntegration(slug, worktree, ports.landing, seams.reReviewFn);
   }

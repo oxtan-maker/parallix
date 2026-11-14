@@ -36,6 +36,11 @@ export interface ResolvePxEntryOptions {
   readonly exists?: (file: string) => boolean;
 }
 
+export interface PxNodeArgsOptions {
+  /** Import the prebuilt coverage stopper; disable only when the child environment has no collector. */
+  readonly stopPrebuiltCoverage?: boolean;
+}
+
 /** The bundle in a prebuilt lane whose bundle exists; the tsx-loaded source otherwise. */
 export function resolvePxEntryLoader({ env = process.env, exists = fs.existsSync }: ResolvePxEntryOptions = {}): PxEntryLoader {
   return env.PARALLIX_PREBUILT_PACK === '1' && exists(PREBUILT_PX_ENTRY)
@@ -44,10 +49,10 @@ export function resolvePxEntryLoader({ env = process.env, exists = fs.existsSync
 }
 
 /** Node arguments that run px with `args` from the resolved entry. */
-export function pxNodeArgs(px: PxEntryLoader, args: readonly string[]): string[] {
+export function pxNodeArgs(px: PxEntryLoader, args: readonly string[], { stopPrebuiltCoverage = true }: PxNodeArgsOptions = {}): string[] {
   // These short fixture commands need one compiler worker. Node 26 otherwise
   // starts a host-sized V8 pool before a case can do its actual CLI work.
-  const preload = px.loader || (px.entry === PREBUILT_PX_ENTRY
+  const preload = px.loader || (stopPrebuiltCoverage && px.entry === PREBUILT_PX_ENTRY
     ? path.join(REPO_ROOT, 'test/lib/prebuilt-cli-runtime.mjs') : '');
   return ['--v8-pool-size=1', ...(preload ? ['--import', preload] : []), px.entry, ...args];
 }

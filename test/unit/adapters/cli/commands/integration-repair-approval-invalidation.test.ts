@@ -25,7 +25,12 @@ import {
   staleApprovalSummary,
   type IntegrationGateRouteOptions,
 } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
+import { recoverApprovalWithdrawal } from '../../../../../src/adapters/review/integration-approval-invalidation.js';
 import type { GateRunOutcome } from '../../../../../src/adapters/config/repository-gates.js';
+import { approvedReview, fixtureMission, inMemoryTransitionStore } from '../../../../fixtures/mission-builders.js';
+import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
+import { parseReviewPublication } from '../../../../../src/adapters/review/review-publication.js';
+import { changeRevision } from '../../../../../src/domain/review.js';
 
 const SLUG = 'task-2528-fixture';
 const GATE_COMMAND = 'npm run test:integration';
@@ -139,26 +144,51 @@ test('a concurrent withdrawal cannot take the fixed route even when the tree is 
 
 test('TASK-2620: a stale approval is dismissed as parallix; no review is posted as the reviewer', async () => {
   const dismissals: Array<{ branch: string; user: string; token: string; reason: string }> = [];
-  const result = await invalidateApprovedPrReview({
+  const comments: string[] = [];
+  const missionStore = inMemoryTransitionStore(fixtureMission(SLUG, {
+    status: 'integration',
+    review: approvedReview(SLUG),
+  }));
+  const invalidate = () => invalidateApprovedPrReview({
     slug: SLUG,
     branch: `mission/${SLUG}`,
     approval: { ok: true, reviewerApproved: true },
+    approvedRevision: 'approved-commit',
+    executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/tmp/mission' }),
+    missionStore,
     summary: staleApprovalSummary(SLUG, 'approved-commit', 'repaired-commit', 'integration-suite'),
     readTokenFn: ((user: string) => `token-for-${user}`),
+    getCommentsFn: async () => comments.map((body, index) => ({
+      kind: 'comment', id: String(index + 1), user: 'parallix', isBot: true,
+      created: '2026-11-13T00:00:00.000Z', updated: '2026-11-13T00:00:00.000Z', body,
+    })),
+    postCommentFn: (_branch, _token, body) => {
+      comments.push(body);
+      return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+    },
     dismissFn: ((branch: string, token: string, reason: string, o) => {
       assert.ok(o?.forgejoUser);
       dismissals.push({ branch, user: o.forgejoUser, token, reason });
-      return { ok: true as const, dismissed: [REVIEWER], errors: [] };
+      return { ok: true as const, dismissed: dismissals.length === 1 ? [REVIEWER] : [], errors: [] };
     }),
   });
+  const result = await invalidate();
+  const repeated = await invalidate();
 
   assert.deepEqual(result, { ok: true, dismissed: [REVIEWER], errors: [] });
-  assert.equal(dismissals.length, 1);
+  assert.deepEqual(repeated, { ok: true, dismissed: [], errors: [] });
+  assert.equal(dismissals.length, 2, 'retry rechecks the provider but finds no standing approval to mutate');
   assert.equal(dismissals[0]!.user, 'parallix', 'Parallix acts as its own login');
   assert.equal(dismissals[0]!.token, 'token-for-parallix', 'never the reviewer\'s token');
   assert.match(dismissals[0]!.reason, /approved-commit/);
   assert.match(dismissals[0]!.reason, /repaired-commit/);
   assert.doesNotMatch(dismissals[0]!.reason, /\bF\d+\b|blocking/i, 'the reason is not a fabricated finding');
+  assert.equal(comments.length, 1, 'the withdrawal is mirrored once as a Parallix comment');
+  assert.match(comments[0]!, /round 1; actor parallix; revision approved-commit/);
+  const withdrawal = missionStore.mission().review?.reviewEvents.at(-1);
+  assert.equal(withdrawal?.eventType, 'blocked_publication');
+  assert.equal(parseReviewPublication(withdrawal?.followUpReference)?.state, 'completed');
+  assert.equal(missionStore.mission().review?.reviewEvents.length, 1, 'retry retains one durable withdrawal event');
 });
 
 test('TASK-2620: no provider approval means nothing to dismiss', async () => {
@@ -167,6 +197,72 @@ test('TASK-2620: no provider approval means nothing to dismiss', async () => {
     readTokenFn: (() => { throw new Error('must not read a token'); }),
   });
   assert.deepEqual(result, { ok: true, dismissed: [], errors: [] });
+});
+
+test('missing withdrawal credentials retain a visible failed publication gap (PX-0054.02 F1)', async () => {
+  const store = inMemoryTransitionStore(fixtureMission(SLUG, { review: approvedReview(SLUG) }));
+  const result = await invalidateApprovedPrReview({
+    slug: SLUG, branch: `mission/${SLUG}`, approval: { ok: true }, summary: 'withdrawal',
+    approvedRevision: 'approved-commit', missionStore: store,
+    executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/tmp/mission' }),
+    readTokenFn: () => null,
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /no Forgejo token for parallix/);
+  const publication = parseReviewPublication(store.mission().review?.reviewEvents.at(-1)?.followUpReference);
+  assert.equal(publication?.state, 'failed');
+  assert.match(publication?.error ?? '', /no Forgejo token for parallix/);
+});
+
+test('restart recovery rechecks dismissal before publishing an interrupted withdrawal (PX-0054.02 F1/F4)', async () => {
+  const base = approvedReview(SLUG);
+  const revoked = {
+    ...base,
+    rounds: [{
+      ...base.rounds[0],
+      decision: {
+        ...base.rounds[0].decision!,
+        revision: changeRevision('approved-commit'),
+        revocation: {
+          revokedAt: '2026-11-13T00:00:00.000Z', revokedBy: 'workflow', reason: 'repair changed patch',
+          cause: { kind: 'integration-gate-failure' as const, gate: 'unit' },
+        },
+      },
+    }] as typeof base.rounds,
+  };
+  const store = inMemoryTransitionStore(fixtureMission(SLUG, { status: 'active', review: revoked }));
+  const comments: string[] = [];
+  let dismissals = 0;
+  const common = {
+    slug: SLUG, branch: `mission/${SLUG}`,
+    executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/tmp/mission' }),
+    missionStore: store,
+    readTokenFn: () => 'parallix-token',
+    dismissFn: (() => ({ ok: true as const, dismissed: dismissals++ === 0 ? [REVIEWER] : [], errors: [] })),
+    getCommentsFn: async () => comments.map((body, index) => ({
+      kind: 'comment' as const, id: String(index), user: 'parallix', isBot: true,
+      created: '', updated: '', body,
+    })),
+  };
+  const interrupted = await invalidateApprovedPrReview({
+    ...common, approval: { ok: true }, approvedRevision: 'approved-commit', summary: 'withdrawal',
+    postCommentFn: () => { throw new Error('connection closed after dismissal'); },
+  });
+  assert.equal(interrupted.ok, false);
+  assert.equal(dismissals, 1);
+
+  const recovered = await recoverApprovalWithdrawal({
+    ...common,
+    postCommentFn: (_branch, _token, body) => {
+      comments.push(body);
+      return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+    },
+  });
+  assert.equal(recovered.ok, true);
+  assert.equal(dismissals, 2, 'restart rechecks the idempotent provider dismissal before announcing withdrawal');
+  assert.equal(comments.length, 1);
+  assert.equal(parseReviewPublication(store.mission().review?.reviewEvents.at(-1)?.followUpReference)?.state, 'completed');
 });
 
 test('TASK-2528: an approval that cannot be retracted is reported and still refuses the merge', async () => {

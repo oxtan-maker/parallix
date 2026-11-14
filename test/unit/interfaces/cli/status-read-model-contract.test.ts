@@ -17,6 +17,7 @@ import { type StatusResult } from '../../../../src/application/ports/cli-workflo
 import { renderStatus, statusJson } from '../../../../src/interfaces/cli/status.js';
 import { type CheckpointData } from '../../../../src/domain/checkpoint.js';
 import { type MissionCard, type ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
+import { reviewPublicationReference } from '../../../../src/adapters/review/review-publication.js';
 
 test('mission status renders concrete orphan recovery and preserves uncertain liveness (TASK-2826)', () => {
   for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
@@ -60,7 +61,6 @@ test('status and JSON expose the shared reviewer progress without a waiting-for-
   assert.doesNotMatch(rendered, /waiting for human/i);
   assert.deepEqual(JSON.parse(statusJson(result)).review.progress, reviewProgress);
 });
-
 test('settled MAX_ATTEMPTS review guides acknowledgment and never asks for another stop (TASK-2839)', async () => {
   // TASK-2830 shape: round 10 still reviewing, MAX_ATTEMPTS human stop, a browser stop already settled.
   const id = missionId('task-2830');
@@ -442,6 +442,41 @@ describe("focused Mission status reads only the selected Mission", () => {
     ]);
     assert.match(data.reviewHistory[0].fixes[0] ?? '', /Focused query covers it/);
     assert.match(data.reviewHistory[0].pushbacks[0] ?? '', /Owned by TASK-2400/);
+  });
+
+  test('failed provider publication is visible in focused text and JSON status (PX-0054.02)', async () => {
+    const review = reviewFixture(selectedId);
+    const failedEvent = {
+      ...review.reviewEvents[0]!,
+      eventType: 'reviewer_findings',
+      actor: 'custom',
+      followUpReference: reviewPublicationReference({
+        slug: selectedId,
+        round: 2,
+        actor: 'custom',
+        revision: 'revision-two',
+        eventType: 'reviewer_findings',
+        target: 'comment',
+      }, 'failed', 'provider rejected'),
+    };
+    const recorded = missionRecord(selectedId, { review: { ...review, reviewEvents: [failedEvent] } as Review });
+    const board = createStatusBoardAdapter({
+      buildProjectionFn: async () => ({ async buildMissionCard() {
+        return makeCard({ id: selectedId, reviewPhase: 'reviewing', reviewRound: 2, reviewHistory: [] });
+      } }),
+      loadMissionFn: async () => ({ mission: recorded, version: 7 }),
+    });
+    const data = await board.getMissionData(selectedId, '/repo');
+    assert.ok(data);
+
+    const lines: string[] = [];
+    const result = statusResult({ slug: selectedId, missionData: data });
+    renderStatus(result, line => lines.push(line));
+    assert.match(lines.join('\n'), /Provider publication failed: reviewer_findings, round 2, actor custom, revision revision-two \(provider rejected\)/);
+    assert.deepEqual(JSON.parse(statusJson(result)).review.publicationGaps, [{
+      eventType: 'reviewer_findings', round: 2, actor: 'custom', revision: 'revision-two',
+      status: 'failed', error: 'provider rejected',
+    }]);
   });
 
   test('focused mission status reports the selected mission activity only', async () => {

@@ -1,6 +1,6 @@
 import { failureReason, type FailureReason } from '../../domain/failure-reason.js';
 import type { ReviewPhase } from '../../domain/review-phase-policy.js';
-import type { postComment } from './review-adapter.js';
+import type { postComment, getComments } from './review-adapter.js';
 /**
  * Implementer artifact consumption: resolve the implementer artifact set,
  * record the resolution, and close the implementer round.
@@ -17,6 +17,8 @@ import { postWorkflowComment } from './review-workflow-posting.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import { resolveProviderEnabled, type RepoEventFn } from './review-reviewer-artifacts.js';
 import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
+import { reviewPublicationReference, type ReviewEventDraft } from './review-publication.js';
+import { artifactPublicationRevision } from './review-artifact-publication.js';
 
 type ImplementerArtifactOptions = {
   executionContext: LiveMissionExecutionContext;
@@ -28,7 +30,7 @@ type ImplementerArtifactOptions = {
   providerEnabled?: boolean | null;
   forgejoEnabled?: boolean | null;
   readTokenFn?: (_user: string, _opts?: Record<string, unknown>) => string | null;
-  getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
+  getCommentsFn?: typeof getComments;
   postCommentFn?: typeof postComment;
   buildMetadataFooterFn?: (_s: string, _r?: string) => string | Promise<string>;
   createEventFn?: (_s: string, _t: string, _p: CreateEventParams, _o: CreateEventOptions) => CreateEventResult | Promise<CreateEventResult>;
@@ -136,6 +138,7 @@ function parseImplementerResolution(resolution: string, disposition: string): { 
  */
 async function closeImplementerRound(slug: string, context: {
   disposition: string; itemDispositions: ReviewItemDisposition[]; worktree: string;
+  implementer: string; round: number; phase: ReviewPhase; resolution: string; blockedReason: string | null; providerEnabled: boolean;
   options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
   const { disposition, itemDispositions, worktree, options, log, error } = context;
@@ -154,6 +157,11 @@ async function closeImplementerRound(slug: string, context: {
     evidence: `${disposition} — implementer round summary for ${slug}`,
     resultingRevision,
     respondedAt: new Date().toISOString(),
+    publicationEvents: context.providerEnabled ? implementerPublicationEventDrafts({
+      slug, implementer: context.implementer, round: context.round, phase: context.phase,
+      resolution: context.resolution, disposition, itemDispositions, blockedReason: context.blockedReason,
+      providerEnabled: context.providerEnabled, revision: resultingRevision,
+    }) : undefined,
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
   }, { missionStore: options.missionStore });
   if (recorded.outcome === 'failed') {
@@ -161,23 +169,57 @@ async function closeImplementerRound(slug: string, context: {
     return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${recorded.diagnostic}` };
   }
   if (recorded.outcome === 'unchanged') {
+    if (recorded.noRevisionChange) {
+      return { consumed: true, ok: false, diagnostic: recorded.reason };
+    }
     log(fmt.status('INFO', `Implementer resolution for ${slug} already recorded (${recorded.reason}).`));
   }
   return null;
 }
 
+function implementerPublicationEventDrafts(params: {
+  slug: string; implementer: string; round: number; phase: ReviewPhase; resolution: string; disposition: string;
+  itemDispositions: readonly ReviewItemDisposition[]; blockedReason: string | null; providerEnabled: boolean; revision: string;
+}): readonly ReviewEventDraft[] {
+  const reference = (eventType: 'implementer_round_summary' | 'implementer_disposition') => params.providerEnabled
+    ? reviewPublicationReference({ slug: params.slug, round: params.round, actor: params.implementer, revision: params.revision, eventType, target: 'comment' })
+    : null;
+  return [{
+    eventType: VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY,
+    roundNumber: params.round, phase: params.phase, actor: params.implementer, content: params.resolution,
+    disposition: null, verdict: null, itemDispositions: params.itemDispositions,
+    blockedReason: params.disposition === 'BLOCKED' ? params.blockedReason : null,
+    followUpReference: reference('implementer_round_summary'),
+  }, {
+    eventType: VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION,
+    roundNumber: params.round, phase: params.phase, actor: params.implementer,
+    content: `Autonomous review disposition: ${params.disposition}`,
+    disposition: params.disposition, verdict: null, itemDispositions: null, blockedReason: null,
+    followUpReference: reference('implementer_disposition'),
+  }];
+}
+
 /** Mirror the round resolution and its disposition onto the pull request. */
 async function mirrorImplementerArtifacts(slug: string, context: {
   resolution: string; disposition: string; implementer: string;
+  round: number; revision: string;
   options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
   const { resolution, disposition, implementer, options, log, error } = context;
   const postOptions = {
     executionContext: options.executionContext, reviewIdentity: implementer, readTokenFn: options.readTokenFn,
-    postCommentFn: options.postCommentFn, buildMetadataFooterFn: options.buildMetadataFooterFn, configuration: options.configuration, log, error,
+    postCommentFn: options.postCommentFn, getCommentsFn: options.getCommentsFn,
+    buildMetadataFooterFn: options.buildMetadataFooterFn, configuration: options.configuration,
+    missionStore: options.missionStore, log, error,
   };
-  for (const [body, label] of [[resolution, 'resolution'], [`Autonomous review disposition: ${disposition}`, 'disposition']] as const) {
-    const result = await postWorkflowComment(slug, body, postOptions);
+  for (const [body, label, eventType] of [
+    [resolution, 'resolution', 'implementer_round_summary'],
+    [`Autonomous review disposition: ${disposition}`, 'disposition', 'implementer_disposition'],
+  ] as const) {
+    const result = await postWorkflowComment(slug, body, {
+      ...postOptions,
+      publication: { slug, round: context.round, actor: implementer, revision: context.revision, eventType, target: 'comment' },
+    });
     if (!result.ok) {
       return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: `Implementer ${label} post failed: ${(result as { error?: string }).error}` };
     }
@@ -199,12 +241,18 @@ async function persistImplementerEvents(params: {
   executionContext: LiveMissionExecutionContext;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
+  providerEnabled: boolean;
+  revision: string;
 }): Promise<{ ok: true } | { ok: false; failureReason?: FailureReason; diagnostic: string }> {
   const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason, createEventFn, executionContext, log, error } = params;
+  const publication = (eventType: 'implementer_round_summary' | 'implementer_disposition') => params.providerEnabled
+    ? reviewPublicationReference({ slug, round: round!, actor: implementer, revision: params.revision, eventType, target: 'comment' })
+    : null;
   const summaryEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_ROUND_SUMMARY, {
     content: resolution, round, phase, actor: implementer,
     itemDispositions,
-    ...(disposition === 'BLOCKED' && blockedReason ? { blockedReason } : {})
+    ...(disposition === 'BLOCKED' && blockedReason ? { blockedReason } : {}),
+    ...(publication('implementer_round_summary') ? { followUpReference: publication('implementer_round_summary')! } : {}),
   }, { executionContext, skipGit: true, log: log, error });
 
   if (!summaryEventResult.ok) {
@@ -214,7 +262,8 @@ async function persistImplementerEvents(params: {
   }
 
   const dispositionEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
-    content: `Autonomous review disposition: ${disposition}`, round, phase, actor: implementer, disposition
+    content: `Autonomous review disposition: ${disposition}`, round, phase, actor: implementer, disposition,
+    ...(publication('implementer_disposition') ? { followUpReference: publication('implementer_disposition')! } : {}),
   }, { executionContext, skipGit: true, log: log, error });
 
   if (!dispositionEventResult.ok) {
@@ -245,6 +294,34 @@ function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactO
   return { log, error, deleteArtifactFn, worktree, providerEnabled, artifacts, disposition, hasAny };
 }
 
+async function publishImplementerArtifacts(context: {
+  slug: string; implementer: string; round: number; phase: ReviewPhase; resolution: string; disposition: string;
+  itemDispositions: ReviewItemDisposition[]; blockedReason: string | null; providerEnabled: boolean;
+  worktree: string; options: ImplementerArtifactOptions; log: (_message: string) => void; error: (_message: string) => void;
+}): Promise<ImplementerArtifactFailure | null> {
+  const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason,
+    providerEnabled, worktree, options, log, error } = context;
+  const publication = artifactPublicationRevision(providerEnabled, {
+    store: options.missionStore, explicit: options.output?.resultingRevision, worktree,
+    head: options.headRevisionFn ?? headRevision,
+  });
+  if (!publication.ok) { return { consumed: true, ok: false, diagnostic: publication.error }; }
+  const persisted = await persistImplementerEvents({
+    slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason,
+    createEventFn: options.createEventFn || createEvent, executionContext: options.executionContext, log, error,
+    providerEnabled, revision: publication.revision,
+  });
+  if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
+  await consumeImplementerHumanNotes(slug, implementer, providerEnabled, worktree, options, log, error);
+  if (!providerEnabled) {
+    log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
+    return null;
+  }
+  return mirrorImplementerArtifacts(slug, {
+    resolution, disposition, implementer, round, revision: publication.revision, options, log, error,
+  });
+}
+
 export async function consumeImplementerArtifacts(
   slug: string,
   implementer: string,
@@ -266,7 +343,6 @@ export async function consumeImplementerArtifacts(
   }
 
   const { round, phase } = await implementerArtifactRound(slug, worktree, options);
-
   const { itemDispositions, blockedReason } = options.output
     ? { itemDispositions: [...options.output.items], blockedReason: options.output.blockedReason ?? null }
     : parseImplementerResolution(artifacts.resolution, disposition);
@@ -280,24 +356,18 @@ export async function consumeImplementerArtifacts(
   // that landed in between. The recorder saves with a compare-and-swap on the
   // version it checks, which is what makes this atomic rather than pre-checked.
   if (disposition !== 'BLOCKED') {
-    const closed = await closeImplementerRound(slug, { disposition, itemDispositions, worktree, options, log, error });
+    const closed = await closeImplementerRound(slug, {
+      disposition, itemDispositions, worktree, implementer, round, phase, resolution: artifacts.resolution,
+      blockedReason, providerEnabled: Boolean(providerEnabled), options, log, error,
+    });
     if (closed) { return closed; }
   }
 
-  const persisted = await persistImplementerEvents({
+  const publicationFailure = await publishImplementerArtifacts({
     slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
-    createEventFn: options.createEventFn || createEvent, executionContext: options.executionContext, log, error,
+    providerEnabled: Boolean(providerEnabled), worktree, options, log, error,
   });
-  if (!persisted.ok) { return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
-
-  await consumeImplementerHumanNotes(slug, implementer, providerEnabled, worktree, options, log, error);
-
-  if (providerEnabled) {
-    const mirrored = await mirrorImplementerArtifacts(slug, { resolution: artifacts.resolution, disposition, implementer, options, log, error });
-    if (mirrored) { return mirrored; }
-  } else {
-    log(fmt.status('INFO', `Review provider disabled; skipping PR mirroring for ${slug}`));
-  }
+  if (publicationFailure) { return publicationFailure; }
 
   if (!options.output) {
     deleteArtifactFn(artifacts.resolutionPath);
@@ -327,7 +397,7 @@ async function consumeImplementerHumanNotes(slug: string, implementer: string, p
 
 async function implementerArtifactRound(slug: string, worktree: string, options: ImplementerArtifactOptions) {
   const currentState = await Promise.resolve((options.readReviewStateFn || readReviewState)(slug, worktree));
-  const round = currentState ? currentState.round : 1;
-  const phase = currentState ? currentState.phase : 'fixing';
+  const round = currentState?.round ?? 1;
+  const phase = currentState?.phase ?? 'fixing';
   return { round, phase };
 }

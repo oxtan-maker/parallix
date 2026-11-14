@@ -24,7 +24,7 @@ export interface ConsumeHumanNotesResult {
 
 export interface ConsumeHumanNotesOptions {
   executionContext: LiveMissionExecutionContext;
-  getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[]>;
+  getCommentsFn?: (_branch: string, _token: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => Promise<unknown[] | null>;
   createEventFn?: ReviewEventCreator;
   readReviewStateFn?: ReviewStateReader;
   readTokenFn?: (_user: string, _options?: { rootDir?: string; configuration?: ParallixConfiguration }) => string | null;

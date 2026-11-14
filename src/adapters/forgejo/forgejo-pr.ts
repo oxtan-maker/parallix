@@ -1033,6 +1033,49 @@ function inlineCommentRecord(comment: ForgejoReviewComment, review: ForgejoRevie
   return { kind: 'inline-comment', ...commentRecord(comment), reviewId: String(review.id ?? ''), state: review.state || '', dismissed: Boolean(review.dismissed), location: line ? `${path}:${line}` : path };
 }
 
+const FORGEJO_DISCUSSION_PAGE_SIZE = 50;
+const FORGEJO_MAX_DISCUSSION_PAGES = 100;
+
+function discussionItemKey(item: unknown): string | null {
+  if (item && typeof item === 'object' && 'id' in item) {
+    const id = (item as { id?: unknown }).id;
+    if (typeof id === 'string' || typeof id === 'number') { return `id:${String(id)}`; }
+  }
+  try {
+    const serialized = JSON.stringify(item);
+    return serialized === undefined ? null : `value:${serialized}`;
+  } catch { return null; }
+}
+
+function discussionPagePath(apiPath: string, page: number): string {
+  const separator = apiPath.includes('?') ? '&' : '?';
+  return `${apiPath}${separator}limit=${FORGEJO_DISCUSSION_PAGE_SIZE}&page=${page}`;
+}
+
+/** Request an explicit page size and continue only while a page adds unseen provider records. */
+function collectPaged<T>(apiCall: ForgejoApiCall, apiPath: string, token: string | undefined, configuration?: ParallixConfiguration): ForgejoApiResult<T[]> {
+  const data: T[] = [];
+  const seen = new Set<string>();
+  let first: ForgejoApiResult<T[]> | null = null;
+  for (let page = 1; page <= FORGEJO_MAX_DISCUSSION_PAGES; page += 1) {
+    const current = apiCall<T[]>('GET', discussionPagePath(apiPath, page), token, undefined, { configuration });
+    first ??= current;
+    if (!current.ok || !Array.isArray(current.data)) { return current; }
+    let added = 0;
+    for (const item of current.data) {
+      const key = discussionItemKey(item);
+      if (key === null) { return { ...current, ok: false as const, data: null, error: 'pagination-item-unidentifiable' }; }
+      if (seen.has(key)) { continue; }
+      seen.add(key);
+      data.push(item);
+      added += 1;
+    }
+    if (added === 0) { return { ...first, data }; }
+  }
+  if (first === null) { throw new Error('discussion pagination did not request a page'); }
+  return { ...first, ok: false as const, data: null, error: 'pagination-limit' };
+}
+
 function collectPrComments(prNumber: number, accessToken: string | undefined, issueComments: ForgejoIssueComment[], reviews: ForgejoReview[], apiCall: ForgejoApiCall, configuration?: ParallixConfiguration): ForgejoCommentRecord[] {
   const allComments: ForgejoCommentRecord[] = [];
 
@@ -1067,8 +1110,8 @@ function getCommentsSync(branch: string, token: string, options: ForgejoOptions 
   const prNumber = prAccess.prNumber;
   const accessToken = prAccess.token;
 
-  const issueCommentsRes = apiCall<ForgejoIssueComment[]>('GET', `/issues/${prNumber}/comments`, accessToken, undefined, { ...({}), configuration: options.configuration });
-  const reviewsRes = apiCall<ForgejoReview[]>('GET', `/pulls/${prNumber}/reviews`, accessToken, undefined, { ...({}), configuration: options.configuration });
+  const issueCommentsRes = collectPaged<ForgejoIssueComment>(apiCall, `/issues/${prNumber}/comments`, accessToken, options.configuration);
+  const reviewsRes = collectPaged<ForgejoReview>(apiCall, `/pulls/${prNumber}/reviews`, accessToken, options.configuration);
 
   if (!issueCommentsRes.ok || !reviewsRes.ok) {
     logger(`getComments API failure: issueCommentsRes.ok=${issueCommentsRes.ok}, reviewsRes.ok=${reviewsRes.ok}`);

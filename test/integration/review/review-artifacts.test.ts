@@ -1,8 +1,11 @@
 import { reviewVerdictFixture } from '../../helpers/review-verdict-fixture.js';
-import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { fixtureMission, inMemoryTransitionStore, pendingReview, requestedChangesReview } from '../../fixtures/mission-builders.js';
 import { reviewStateWriterFixture } from '../../helpers/review-state-writer.js';
 import type { ReviewApprovalSource } from "../../../src/domain/review.js";
 import type { CreateEventParams } from '../../../src/adapters/review/review-events.js';
+import { parseReviewPublication } from '../../../src/adapters/review/review-publication.js';
+import { reviewPublicationReference } from '../../../src/adapters/review/review-publication.js';
+import { createEvent as persistReviewEvent } from '../../../src/adapters/review/review-events.js';
 
 
 import test, { mock } from 'node:test';
@@ -31,6 +34,7 @@ const {
 } = __mm1;
 import { classifyRecoveryReason } from '../../../src/application/rebound-classification.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 
 const artifactContext = (worktree: string, slug = 'test-slug') => missionExecutionContext({ missionId: slug, missionWorktree: worktree });
 
@@ -310,15 +314,29 @@ test('postWorkflowReview handles postReview failure', async () => {
 // task-1255: reviewer==author self-approval short-circuit + 422 passthrough
 test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author', async () => {
   let postCalled = false;
+  let commentBody = '';
   let writtenState: { value: Record<string, unknown> | import("../../../src/adapters/review/review-state.js").ReviewState | import("../../../src/application/ports/review-persistence.js").ReviewStateData | null } = { value: null };
   let recordedEvent: { value: { slug: string; type: string; params: CreateEventParams; } | null } = { value: null };
   const warnings: string[] = [];
+  const fixture = reviewVerdictFixture('test-slug', 'custom', 'custom');
+  const publication = { slug: 'test-slug', round: 1, actor: 'custom', revision: fixture.revision,
+    eventType: 'reviewer_outcome' as const, target: 'review' as const };
+  await persistReviewEvent('test-slug', 'reviewer_outcome', {
+    content: 'looks good', round: 1, phase: 'reviewing', actor: 'custom', verdict: 'approve',
+    followUpReference: reviewPublicationReference(publication),
+  }, { executionContext: artifactContext('/fixture'), missionStore: fixture.missionStore, log: () => {}, error: () => {} });
   const result = await postWorkflowReview('test-slug', 'approve', 'looks good', {
-    ...reviewVerdictFixture('test-slug', 'custom', 'custom'),
+    ...fixture,
     executionContext: artifactContext('/fixture'),
     readTokenFn: () => 'mock-token',
     getPrAuthorFn: () => 'custom', // reviewer == PR author
     postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
+    postCommentFn: (_branch, _token, body) => {
+      commentBody = body;
+      return { data: null, status: 201, statusCode: 201, stderr: null, error: null, ok: true as const };
+    },
+    getCommentsFn: async () => [],
+    publication,
     writeReviewStateFn: reviewStateWriterFixture((slug, state) => { writtenState.value = state; }),
     createEventFn: (slug, type, params) => { recordedEvent.value = { slug, type, params }; return { ok: true as const, path: '/mock' }; },
     buildMetadataFooterFn: () => '',
@@ -330,13 +348,17 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   assert.equal(result.skipped, true);
   assert.equal(result.reason, 'self-author');
   assert.equal(postCalled, false, 'must NOT POST a self-approval to Forgejo');
+  assert.match(commentBody, /parallix-publication/, 'the same-agent outcome is still visible on the PR as a comment');
+  const obligation = fixture.missionStore.mission().review?.reviewEvents.find(event => parseReviewPublication(event.followUpReference));
+  assert.equal(parseReviewPublication(obligation?.followUpReference)?.state, 'completed');
+  assert.equal(fixture.missionStore.mission().review?.reviewEvents.filter(event => event.eventType === 'reviewer_outcome').length, 1,
+    'the provider path must not add an unreferenced outcome that bypasses controller publication fencing');
 
   // The configured single-family verdict is recorded locally.
   assert.ok(writtenState.value, 'review-state must be written locally');
   assert.equal(writtenState.value.disposition, 'APPROVED');
-  assert.ok(recordedEvent.value, 'a reviewer_outcome event must be recorded');
-  assert.equal(recordedEvent.value.type, 'reviewer_outcome');
-  assert.equal(recordedEvent.value.params.verdict, 'approve');
+  assert.equal(recordedEvent.value, null,
+    'the durable outcome obligation is authoritative; no unreferenced complete-looking outcome may be added');
 
   // WARN mentions the self-approval and instructs a different agent/human to post.
   assert.equal(warnings.length, 1);
@@ -1185,6 +1207,7 @@ test('consumeImplementerArtifacts with PUSHBACK_ALL disposition', async () => {
 
 test('consumeReviewerArtifacts with forgejoEnabled and consumeHumanNotes', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-consume-human-'));
+  const missionStore = inMemoryTransitionStore(fixtureMission('test-slug', { review: pendingReview('test-slug') }));
 
   const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
     readArtifactFn: (p) => {
@@ -1199,6 +1222,9 @@ test('consumeReviewerArtifacts with forgejoEnabled and consumeHumanNotes', async
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
+    missionStore,
+    revision: 'provider-revision',
+    recordApprovalFn: async () => ({ outcome: 'recorded' as const }),
     readTokenFn: () => 'mock-token',
     getCommentsFn: async () => [],
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -1302,6 +1328,7 @@ test('consumeReviewerArtifacts with forgejo disabled', async () => {
 
 test('consumeImplementerArtifacts with consumeHumanNotes', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-impl-human-'));
+  const missionStore = inMemoryTransitionStore(fixtureMission('test-slug', { review: pendingReview('test-slug') }));
 
   const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
     readArtifactFn: (p) => {
@@ -1315,6 +1342,7 @@ test('consumeImplementerArtifacts with consumeHumanNotes', async () => {
     createEventFn: () => ({ ok: true as const, path: '/mock/path' }),
     deleteArtifactFn: () => {},
     forgejoEnabled: true,
+    missionStore,
     readTokenFn: () => 'mock-token',
     getCommentsFn: async () => [],
     postCommentFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
@@ -1567,6 +1595,104 @@ test('a failed approval persist fails the consumer instead of reporting APPROVED
   assert.match(result.diagnostic, /expected version 7, found 9/);
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('an interrupted provider approval leaves a durable gap and grants no local authority (PX-0054.02)', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-approve-publication-gap-'));
+  const store = inMemoryTransitionStore(fixtureMission('test-slug', {
+    status: 'review', review: pendingReview('test-slug'),
+  }));
+  const providerEntries: { body: string }[] = [];
+  let approvals = 0;
+
+  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+    output: { findings: [], comment: 'approved externally', verdict: 'approve' },
+    tmpDir,
+    executionContext: artifactContext(tmpDir),
+    revision: 'reviewed-fixture-revision',
+    missionStore: store,
+    createEventFn: (eventSlug, eventType, params, eventOptions) =>
+      persistReviewEvent(eventSlug, eventType, params, { ...eventOptions, missionStore: store }),
+    readReviewStateFn: () => null,
+    deleteArtifactFn: () => {},
+    forgejoEnabled: true,
+    readTokenFn: () => 'mock-token',
+    getCommentsFn: async () => providerEntries.map((entry, index) => ({
+      kind: 'comment', id: String(index + 1), user: 'test-reviewer', isBot: false,
+      created: '2026-11-13T00:00:00.000Z', updated: '2026-11-13T00:00:00.000Z', body: entry.body,
+    })),
+    postCommentFn: (_branch, _token, body) => {
+      providerEntries.push({ body });
+      return { data: null, status: 201, statusCode: 201, stderr: null, error: null, ok: true as const };
+    },
+    getPrAuthorFn: () => 'codex',
+    postReviewFn: (_branch, _token, _outcome, body) => {
+      providerEntries.push({ body });
+      throw new Error('connection closed after approval acceptance');
+    },
+    buildMetadataFooterFn: () => '',
+    recordApprovalFn: async () => { approvals += 1; return { outcome: 'recorded' as const }; },
+    log: () => {},
+    error: () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(approvals, 0, 'an unavailable provider result cannot grant local approval');
+  const events = store.mission().review!.reviewEvents;
+  assert.equal(events.length, 2, 'findings and approval obligations exist before provider mutation');
+  assert.equal(parseReviewPublication(events[0]!.followUpReference)?.state, 'completed');
+  assert.equal(parseReviewPublication(events[1]!.followUpReference)?.state, 'failed');
+  assert.match(parseReviewPublication(events[1]!.followUpReference)?.error ?? '', /connection closed/);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test('request-changes acceptance and publication obligations commit before an interrupted provider call (PX-0054.02 F1)', async () => {
+  const slug = 'task-5413';
+  const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', review: pendingReview(slug) }));
+  const result = await consumeReviewerArtifacts(slug, 'custom', {
+    output: { findings: [{ id: 'F1' as never, summary: 'durable finding', location: null }], comment: 'repair it', verdict: 'request-changes' },
+    executionContext: artifactContext('/tmp'), revision: 'reviewed-revision', missionStore: store,
+    lifecycleService: new MissionLifecycleService(store),
+    readReviewStateFn: () => ({ round: 1, phase: 'reviewing', reviewer: 'custom', implementer: 'codex' }),
+    forgejoEnabled: true, readTokenFn: () => 'token', getCommentsFn: async () => [], getPrAuthorFn: () => 'codex',
+    postCommentFn: () => {
+      const mission = store.mission();
+      assert.equal(mission.status, 'active');
+      assert.equal(mission.review?.rounds[0].decision?.kind, 'changes-requested');
+      assert.equal(mission.review?.reviewEvents.length, 2, 'both obligations share the decision CAS');
+      assert.ok(mission.review?.reviewEvents.every(event => parseReviewPublication(event.followUpReference)?.state === 'pending'));
+      throw new Error('interrupted before findings acceptance');
+    },
+    buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(store.mission().review?.reviewEvents.length, 2);
+});
+
+test('implementer resolution and publication obligations commit before an interrupted provider call (PX-0054.02 F1)', async () => {
+  const slug = 'task-5414';
+  const store = inMemoryTransitionStore(fixtureMission(slug, {
+    status: 'active', review: requestedChangesReview(slug, { startedAt: '2026-11-13T00:00:00Z', decidedAt: '2026-11-13T00:01:00Z' }),
+  }));
+  const result = await consumeImplementerArtifacts(slug, 'codex', {
+    output: { items: [], evidence: ['fixed'], disposition: 'CHANGES_MADE', resultingRevision: 'fixed-revision' },
+    executionContext: artifactContext('/tmp'), missionStore: store,
+    readReviewStateFn: () => ({ round: 1, phase: 'fixing', reviewer: 'custom', implementer: 'codex' }),
+    forgejoEnabled: true, readTokenFn: () => 'token', getCommentsFn: async () => [],
+    postCommentFn: () => {
+      const round = store.mission().review?.rounds[0];
+      assert.equal(round?.response?.kind, 'resolved');
+      assert.equal(store.mission().review?.reviewEvents.length, 2, 'both obligations share the resolution CAS');
+      assert.ok(store.mission().review?.reviewEvents.every(event => parseReviewPublication(event.followUpReference)?.state === 'pending'));
+      throw new Error('interrupted before resolution acceptance');
+    },
+    buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(store.mission().review?.reviewEvents.length, 2);
 });
 
 test('a review decision against a stale Mission is refused before anything is written', async () => {

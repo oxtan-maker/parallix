@@ -209,6 +209,8 @@ export interface IntegrationGateRoute {
 
 export interface IntegrationGateFailureRequest {
   slug: string; missionWorktree: string; verificationCommand?: string | null;
+  executionContext: LiveMissionExecutionContext;
+  missionStore: MissionStore;
   failedGate: IntegrationFailedGate | null | undefined; gateError?: string | null;
   /** Every gate that actually ran and failed in the same integration execution. */
   failedGates?: readonly IntegrationFailedGate[];
@@ -232,7 +234,7 @@ export interface IntegrationGateFailureRequest {
 
 export interface IntegrateGatesPort {
   approvalEvidence?(_worktree: string): import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
-  invalidateApproval?: (_options: { slug: string; branch: string; approval: IntegrationApproval; summary: string; approvedRevision?: string }) => Promise<{ ok: boolean; dismissed: string[]; errors: string[] }>;
+  invalidateApproval?: (_options: { slug: string; branch: string; approval: IntegrationApproval; summary: string; approvedRevision?: string; executionContext?: LiveMissionExecutionContext; missionStore?: MissionStore }) => Promise<{ ok: boolean; dismissed: string[]; errors: string[] }>;
 
   loadPhaseGates(_rootDir: string, _phase: 'preIntegration'): IntegrationGateDefinition[];
   loadRequirePreIntegration(_rootDir: string): boolean;

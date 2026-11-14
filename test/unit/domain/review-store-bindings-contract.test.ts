@@ -16,6 +16,7 @@ import { missionId, missionLabels, type Mission } from '../../../src/domain/miss
 import { repositoryId } from '../../../src/domain/repository.js';
 import { changeRevision } from '../../../src/domain/review.js';
 import { persistReviewStateOrThrow, ReviewState } from '../../../src/adapters/review/review-state.js';
+import { reviewPublicationReference } from '../../../src/adapters/review/review-publication.js';
 
 // Regression provenance: TASK-2339.
 describe("review store bindings", { concurrency: false }, () => {
@@ -100,6 +101,24 @@ describe("review store bindings", { concurrency: false }, () => {
     });
 
     assert.equal(result.consumed, false);
+  });
+
+  test('loop reviewer reader blocks a locally accepted outcome until provider publication completes (PX-0054.02)', async () => {
+    const store = fakeStore();
+    const identity = { slug: 'task-9001', round: 3, actor: 'claude', revision: 'reviewed-revision', eventType: 'reviewer_outcome' as const, target: 'review' as const };
+    store.setReviewEvents([{ eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'request-changes', content: 'pending',
+      followUpReference: reviewPublicationReference(identity), createdAt: '2026-08-04T10:00:01.000Z' }]);
+    const bindings = reviewLoopBindings(store);
+
+    assert.equal((await bindings.consumeReviewerArtifacts('task-9001', 'claude', {
+      executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }),
+    })).consumed, false);
+
+    store.setReviewEvents([{ eventType: 'reviewer_outcome', roundNumber: 3, actor: 'claude', verdict: 'request-changes', content: 'complete',
+      followUpReference: reviewPublicationReference(identity, 'completed'), createdAt: '2026-08-04T10:00:01.000Z' }]);
+    assert.equal((await bindings.consumeReviewerArtifacts('task-9001', 'claude', {
+      executionContext: missionExecutionContext({ missionId: 'task-9001', missionWorktree: '/tmp/worktree' }),
+    })).consumed, true);
   });
 
   test('loop reviewer reader ignores an outcome from before a reset', async () => {

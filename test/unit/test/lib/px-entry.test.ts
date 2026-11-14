@@ -38,4 +38,7 @@ test('prebuilt CLI launches omit unattributable bundle coverage while source lau
   assert.deepEqual(pxNodeArgs(SOURCE_PX, ['version']), [
     '--v8-pool-size=1', '--import', TSX_LOADER, SOURCE_PX_ENTRY, 'version',
   ]);
+  assert.deepEqual(pxNodeArgs({ entry: PREBUILT_PX_ENTRY, loader: '' }, ['version'], { stopPrebuiltCoverage: false }), [
+    '--v8-pool-size=1', PREBUILT_PX_ENTRY, 'version',
+  ]);
 });

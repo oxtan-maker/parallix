@@ -67,6 +67,15 @@ export interface StatusMissionData {
   readonly reviewRecovery?: import('../review-recovery.js').ReviewRecovery | null;
   /** Current review disposition. */
   readonly reviewDisposition?: string | null;
+  /** Provider publications that are not durably complete. */
+  readonly reviewPublicationGaps?: readonly {
+    readonly eventType: string;
+    readonly round: number;
+    readonly actor: string;
+    readonly revision: string;
+    readonly status: 'pending' | 'failed';
+    readonly error: string | null;
+  }[];
   /** Advisory approval debt recorded by the provider workflow. */
   readonly approvalOwed?: boolean;
   /** Whether the current round deliberately runs the implementer in a fresh context. */
