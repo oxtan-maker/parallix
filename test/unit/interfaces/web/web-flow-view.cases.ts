@@ -1,4 +1,4 @@
-import { webProjection } from '../../../fixtures/web-projection.js';
+import { webFreshness, webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -7,6 +7,7 @@ import { FlowPanel } from '../../../../web/src/flow-panel.js';
 import type { WebBoardSnapshot, WebFlowWindow } from '../../../../src/interfaces/web/transport.js';
 import { flowReferenceProjection } from '../../../fixtures/flow-reference.js';
 import { makeProjection } from '../../../fixtures/board-projection.js';
+import { withAnalyticsFreshness } from '../../../../src/interfaces/web/host-support.js';
 
 const snapshot = (): WebBoardSnapshot => webProjection.snapshot(flowReferenceProjection());
 const renderFlow = (value = snapshot()): string => renderToStaticMarkup(
@@ -59,6 +60,17 @@ test('Mission Flow exposes graph and timing bars as text without replacing missi
   assert.match(emptyHtml, /Historical analytics refresh is in progress/);
   assert.match(emptyHtml, /No flow values are shown in place of the missing projection/);
   assert.doesNotMatch(emptyHtml, /data-flow-kpi=/);
+});
+
+test('board responses report deferred analytics as stale with their reason (TASK-2854.01)', () => {
+  const projection = makeProjection();
+  const pending = { ...projection, metrics: { ...projection.metrics, analytics: {
+    freshness: 'unavailable' as const, revision: 'history-v1', refreshedAt: null,
+    reason: 'Historical analytics refresh is in progress.',
+  } } };
+  const response = withAnalyticsFreshness({ projection: pending, freshness: webFreshness(pending) });
+  assert.equal(response.freshness.state, 'stale');
+  assert.equal(response.freshness.reason, 'Historical analytics refresh is in progress.');
 });
 
 test('Mission Flow keeps sparse observations explicit without turning them into missing or invented values (TASK-2836 review 3615)', () => {

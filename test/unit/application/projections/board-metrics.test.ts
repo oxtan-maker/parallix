@@ -58,6 +58,8 @@ test('background FLOW reconstruction survives detector ticks within its finite b
     agentAvailability: [], nowMs, deliveries: new Map(), evidenceRevision: 'flow-v1' });
 
   assert.equal((await build()).analytics?.freshness, 'unavailable');
+  assert.equal(reconstructions, 0, 'current board delivery finishes before historical reconstruction starts');
+  await new Promise(resolve => setImmediate(resolve));
   nowMs = 30_000;
   await build();
   nowMs = 119_999;
@@ -67,6 +69,7 @@ test('background FLOW reconstruction survives detector ticks within its finite b
 
   nowMs = 120_000;
   await build();
+  await new Promise(resolve => setImmediate(resolve));
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(reconstructions, 2, 'the finite bound still replaces a hung reconstruction');
   assert.equal(aborted, 1);

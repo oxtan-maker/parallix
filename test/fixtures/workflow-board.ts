@@ -18,7 +18,8 @@ import type { WebHost, WebHostInfo, WebHostOptions } from '../../src/interfaces/
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
 /** Isolated real store/host/process fixture shared by retained and manual checks. */
-export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean; worktrees?: boolean; subscription?: WebHostOptions['subscription'] } = {}) {
+export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean; worktrees?: boolean;
+  historicalHold?: boolean; subscription?: WebHostOptions['subscription'] } = {}) {
   const fixture = await openMigratedMissionStore();
   const root = fixture.root;
   const hosts = new Map<number, string>();
@@ -61,6 +62,7 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
   }
   for (const slug of slugs) { await fixture.store.save(fixtureMission(slug, { status: 'refined', repositoryId: repository }), null); }
   const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: root, PARALLIX_TERMINAL_STATE_DIR: path.join(root, 'terminal-state'), PARALLIX_TEST_NO_FORGEJO: '1', PARALLIX_NO_TUI: '1' });
+  if (options.historicalHold) { fs.writeFileSync(path.join(root, 'historical-reconstruction.hold'), 'hold'); }
   const cli = options.cli ?? { command: process.execPath, args: ['--import', createRequire(import.meta.url).resolve('tsx'), path.resolve('test/fixtures/workflow-owner-child.ts')] };
   const graph = await createProductionApplicationServices(root, undefined, { configuration });
   const owned = await composeWorkflowOperations(root, configuration, graph.presentationCapabilities!.commandController,

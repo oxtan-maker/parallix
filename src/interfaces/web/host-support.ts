@@ -19,6 +19,14 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** Surface deferred historical work without claiming that its values are current. */
+export function withAnalyticsFreshness(read: SharedProjectionRead<BoardProjection>): SharedProjectionRead<BoardProjection> {
+  const analytics = read.projection.metrics.analytics;
+  if (read.freshness.state === 'stale' || analytics === undefined || analytics.freshness === 'fresh') { return read; }
+  return { ...read, freshness: { ...read.freshness, state: 'stale',
+    reason: analytics.reason ?? 'Historical analytics are unavailable.' } };
+}
+
 /** Every body this host answers with for a command is the safe wire envelope. */
 export function sendCommandResult(reply: FastifyReply, status: number, outcome: ApplicationOutcome<unknown>): void {
   reply.code(status).type('application/json; charset=utf-8').send(toWebCommandResult(outcome));

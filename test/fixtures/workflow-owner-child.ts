@@ -23,9 +23,23 @@ function synchronousBarrier(release: string): void {
 }
 
 const createGraph: typeof createProductionApplicationServices = async (root, progress, options) => {
+  const fixtureRoot = options!.configuration!.storage.parallixHome!;
+  const holdHistoricalReconstruction = fs.existsSync(path.join(fixtureRoot, 'historical-reconstruction.hold'));
+  if (holdHistoricalReconstruction) {
+    const { ConcreteMetricsReadAdapter } = await import('../../src/application/projections/metrics-read-adapter.js');
+    const buildMetrics = ConcreteMetricsReadAdapter.prototype.buildMetrics;
+    let held = false;
+    ConcreteMetricsReadAdapter.prototype.buildMetrics = async function(initialStates, availability, buildOptions) {
+      if (!held) {
+        held = true;
+        const { barrier } = await import('./workflow-provider.js');
+        await barrier(fixtureRoot, 'historical-reconstruction');
+      }
+      return buildMetrics.call(this, initialStates, availability, buildOptions);
+    };
+  }
   const { createProductionApplicationServices } = await import('../../src/composition/application-services.js');
   const graph = await createProductionApplicationServices(root, progress, options);
-  const fixtureRoot = options!.configuration!.storage.parallixHome!;
   const ports = graph.executePorts;
   const originalWorkspace = ports.workspace;
   const workspace = {
@@ -67,6 +81,14 @@ const createGraph: typeof createProductionApplicationServices = async (root, pro
   };
   if (!graph.presentationCapabilities) { throw new Error('Fixture graph missing'); }
   const raw = new BoardCommandController(executePorts, undefined, {}, graph.currentWork, graph.mission!.store);
+  if (holdHistoricalReconstruction) {
+    const projection = graph.presentationCapabilities.boardProjection;
+    const build = projection.build.bind(projection);
+    projection.build = async options => {
+      fs.appendFileSync(path.join(fixtureRoot, 'observation-builds.log'), 'board\n');
+      return build(options);
+    };
+  }
   return { ...graph, executePorts, presentationCapabilities: { ...graph.presentationCapabilities, commandController: raw } };
 };
 
@@ -157,7 +179,7 @@ if (process.argv[2] === '--fixture-public') {
       synchronousBarrier(path.join(root, 'terminal-probe.release'));
       return terminal.live(mission);
     } };
-  });
+  }, createGraph);
 } else {
   const role = process.argv[2] === '--workflow-execute' ? 'executor' : 'supervisor';
   fs.writeFileSync(path.join(process.argv[4], `workflow-${role}-${process.pid}`), JSON.stringify({ pid: process.pid, identity: processStartIdentity(process.pid) }));

@@ -151,6 +151,7 @@ test('BoardProjectionBuilder applies its configured completed-mission retention 
   ).build();
   assert.deepEqual(projection.stages.find(stage => stage.lane === 'done')?.cards.map(card => card.id), [recent.id]);
   assert.deepEqual(reviewed, [recent.id]);
+  await settle();
   assert.deepEqual(metricStates, [recent.id, old.id], 'retention is a presentation filter, not a metrics filter');
 });
 
@@ -660,6 +661,7 @@ describe("Slow metrics cache reuse — SC4", () => {
     await builder.build();
     await builder.build();
     await builder.build();
+    await settle();
 
     assert.equal(
       metricsAdapterCallCount,
@@ -746,6 +748,7 @@ describe("Slow metrics cache reuse — SC4", () => {
 
     const projection1 = await builder.build();
     const blockedFor1 = projection1.metrics.agentAvailability[0]?.blockedForMs;
+    await settle();
 
     // Change agent availability (simulate time passing)
     currentUntilMs = Date.now() + 50_000;
@@ -802,18 +805,21 @@ test('current cards do not wait for historical reconstruction and declare freshn
   if (result === 'historical-timeout') { return; }
   assert.deepEqual(result.stages.find(stage => stage.lane === 'active')?.cards.map(card => card.id), [id1]);
   assert.equal(result.metrics.analytics?.freshness, 'unavailable'); assert.equal((await builder.build()).metrics.analytics?.freshness, 'unavailable');
+  assert.equal(reconstructions, 0, 'the current board response settles before historical reconstruction starts');
+  await settle();
   assert.equal(reconstructions, 1, 'an in-budget refresh owns one reconstruction');
   revision = 'history-v2'; await builder.build(); revision = 'history-v3'; await builder.build();
   assert.equal(reconstructions, 1, 'moving evidence queues only the newest revision behind one reconstruction');
   const metrics = historicalMetrics();
-  finishes[0](metrics); await settle(); assert.equal(reconstructions, 2, 'completion starts only the newest queued evidence revision');
+  finishes[0](metrics); await settle(); await settle();
+  assert.equal(reconstructions, 2, 'completion starts only the newest queued evidence revision');
   finishes[1](metrics); await settle();
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
 
   revision = 'history-v4'; assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
-  assert.equal(reconstructions, 3);
+  assert.equal(reconstructions, 2); await settle(); assert.equal(reconstructions, 3);
   nowMs += 120_000;
-  assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale'); await settle();
+  assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale'); await settle(); await settle();
   assert.equal(reconstructions, 4, 'a hung refresh is cancelled and the newest revision starts after its finite deadline'); assert.equal(aborted, 1);
   nowMs += 300_000; finishes[3](metrics); await settle();
   const fresh = await builder.build(); assert.equal(fresh.metrics.analytics?.freshness, 'fresh');
@@ -821,6 +827,7 @@ test('current cards do not wait for historical reconstruction and declare freshn
 
   revision = 'history-v5';
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
+  assert.equal(reconstructions, 4); await settle();
   assert.equal(reconstructions, 5, 'changed evidence starts one owned background reconstruction');
   builder.cancelPendingBuilds(); await settle();
   assert.equal(aborted, 2, 'closing the projection owner cancels its outstanding historical reconstruction');
@@ -870,19 +877,20 @@ test('historical cache invalidates on durable revisions, reviews and checkpoints
   const checkpointChanged = await builder.build();
   assert.equal(checkpointChanged.metrics.analytics?.freshness, 'stale');
   assert.deepEqual(checkpointChanged.stages.find(stage => stage.lane === 'active')?.cards.map(card => card.id), [id1]);
-  assert.equal(reconstructions, 2, 'checkpoint evidence invalidates history without changing mission status');
-  await settle();
+  assert.equal(reconstructions, 1, 'checkpoint reconstruction starts after the current board response');
+  await settle(); assert.equal(reconstructions, 2, 'checkpoint evidence invalidates history without changing mission status');
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
 
   current = { ...current, review: pendingReview(String(id1)) };
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
-  assert.equal(reconstructions, 3, 'review evidence invalidates history without changing mission status');
-  await settle();
+  assert.equal(reconstructions, 2);
+  await settle(); assert.equal(reconstructions, 3, 'review evidence invalidates history without changing mission status');
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'fresh');
 
   revision = 'evidence-v2';
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
-  assert.equal(reconstructions, 4, 'the application-port evidence revision invalidates history');
+  assert.equal(reconstructions, 3);
+  await settle(); assert.equal(reconstructions, 4, 'the application-port evidence revision invalidates history');
 });
 
 test('board and focused reads pass the current owner into execution while done history stays complete (TASK-2769 F1)', async () => {

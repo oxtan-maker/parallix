@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
+import { performance } from 'node:perf_hooks';
+import { validateWebBoardSnapshot, type WebMissionCard, type WebStage } from '../../../src/interfaces/web/transport.js';
 // Synchronous terminal work must stay in its own persistent observation process.
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +15,7 @@ let fixture: Awaited<ReturnType<typeof workflowBoard>>;
 let host: Awaited<ReturnType<typeof fixture.start>>;
 before(async () => {
   bundle = await bundleWorkflowChild();
-  fixture = await workflowBoard(2, { cli: bundle.cli });
+  fixture = await workflowBoard(2, { cli: bundle.cli, historicalHold: true });
   fs.mkdirSync(path.join(fixture.root, 'config'), { recursive: true });
   fs.writeFileSync(path.join(fixture.root, 'config/agents.json'), JSON.stringify({ families: ['codex', 'claude'] }));
   host = await fixture.start();
@@ -22,8 +23,93 @@ before(async () => {
   // here so the timed cases measure isolation, not cold observer startup.
   await fixture.observation.board();
   await fixture.observation.terminal.overview(fixture.slugs[0]);
+  await until(() => fs.existsSync(path.join(fixture.root, 'historical-reconstruction.entered')), 'historical reconstruction handoff');
 });
 after(async () => { try { await fixture?.close(); } finally { bundle?.close(); } });
+
+async function within<T>(promise: Promise<T>, milliseconds = 500): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([promise, new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(`Observation exceeded ${milliseconds}ms`)), milliseconds);
+    })]);
+  } finally { if (timer) { clearTimeout(timer); } }
+}
+
+function observationBuilds(): number {
+  const filename = path.join(fixture.root, 'observation-builds.log');
+  if (!fs.existsSync(filename)) { return 0; }
+  return fs.readFileSync(filename, 'utf8').trim().split('\n').filter(Boolean).length;
+}
+
+async function waitForObservationBuild(target: number): Promise<void> {
+  await within(new Promise<void>(resolve => {
+    const check = () => {
+      if (observationBuilds() >= target) { resolve(); return; }
+      setTimeout(check, 5);
+    };
+    check();
+  }));
+}
+
+test('held historical reconstruction cannot delay current board or terminal reads (TASK-2854.01)', async () => {
+  const release = path.join(fixture.root, 'historical-reconstruction.release');
+  try {
+    assert.equal(fs.existsSync(release), false, 'historical reconstruction remains held during the reads');
+    const [board, overview] = await within(Promise.all([
+      fixture.observation.board(),
+      fixture.observation.terminal.overview(fixture.slugs[0]),
+    ]));
+    assert.ok(overview);
+    assert.ok(['unavailable', 'stale'].includes(board.metrics.analytics?.freshness ?? ''));
+    assert.match(board.metrics.analytics?.reason ?? '', /Historical analytics/);
+
+    const snapshot = await within((await workflowHttp(host)).snapshot());
+    assert.equal(snapshot.freshness.state, 'stale');
+    assert.match(snapshot.freshness.reason, /Historical analytics/);
+  } finally { fs.writeFileSync(release, 'release'); }
+
+  await within(new Promise<void>(resolve => {
+    const check = async () => {
+      const board = await fixture.observation.board();
+      if (board.metrics.analytics?.freshness === 'fresh') { resolve(); return; }
+      setTimeout(() => { void check(); }, 5);
+    };
+    void check();
+  }));
+});
+
+test('running host keeps repeated unchanged and changed observations inside fresh-read bounds (TASK-2854.01)', async () => {
+  const http = await workflowHttp(host);
+  const latencies: number[] = [];
+  let target = observationBuilds();
+  for (let index = 0; index < 2; index += 1) {
+    await waitForObservationBuild(++target);
+    const startedAt = performance.now();
+    const snapshot = await within(http.snapshot());
+    latencies.push(performance.now() - startedAt);
+    assert.ok(snapshot.stages.length > 0);
+  }
+
+  const loaded = await fixture.store.load(fixture.slugs[0] as never);
+  assert.equal(loaded.kind, 'found');
+  if (loaded.kind !== 'found') { return; }
+  const changedTitle = 'Changed during bounded host observation';
+  await fixture.store.save({ ...loaded.mission, title: changedTitle }, loaded.version);
+  const changedAt = performance.now();
+  const changed = await within(new Promise<Awaited<ReturnType<typeof http.snapshot>>>(resolve => {
+    const check = async () => {
+      const snapshot = await http.snapshot();
+      const card = snapshot.stages.flatMap((stage: WebStage) => stage.cards).find((item: WebMissionCard) => item.id === fixture.slugs[0]);
+      if (card?.title === changedTitle) { resolve(snapshot); return; }
+      setTimeout(() => { void check(); }, 5);
+    };
+    void check();
+  }));
+  latencies.push(performance.now() - changedAt);
+  assert.equal(changed.stages.flatMap((stage: WebStage) => stage.cards).find((card: WebMissionCard) => card.id === fixture.slugs[0])?.title, changedTitle);
+  assert.ok(latencies.every(milliseconds => milliseconds < 500), `fresh observation latencies: ${latencies.join(', ')}`);
+});
 
 test('held synchronous terminal probe cannot block board snapshots or independent admission (TASK-2750)', async () => {
   const http = await workflowHttp(host);

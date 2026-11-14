@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers';
 import { decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
 import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
@@ -66,7 +67,6 @@ export class HistoricalBoardMetrics {
     }
 
     const initialStates = new Map(input.missions.map(mission => [mission.id, mission.status] as const));
-    if (!adapter.readDeliveryIdentity) { return this.legacy(key, adapter, initialStates, input); }
     return this.refreshable(key, adapter, initialStates, input, settle);
   }
 
@@ -80,7 +80,7 @@ export class HistoricalBoardMetrics {
     if (input.evidenceRevision === null) { return this.missingIdentity(input); }
     if (this.retryIsDelayed(key, input.nowMs)) { return this.failedRefresh(input, key); }
 
-    const pending = this.start(key, adapter, initialStates, input);
+    const pending = this.start(key, adapter, initialStates, input, !settle);
     if (settle) {
       await this.settle(pending, key);
       return this.build(input);
@@ -178,6 +178,7 @@ export class HistoricalBoardMetrics {
     adapter: MetricsReadAdapter,
     initialStates: ReadonlyMap<MissionId, MissionStatus>,
     input: HistoricalBoardMetricsRead,
+    deferred: boolean,
   ): Promise<void> {
     const request = { key, adapter, initialStates, input };
     if (this.refresh) {
@@ -188,18 +189,32 @@ export class HistoricalBoardMetrics {
       }
       return this.completion;
     }
-    return this.launch(request);
+    return this.schedule(request, deferred);
   }
 
-  private launch(request: HistoricalRefresh): Promise<void> {
+  private schedule(request: HistoricalRefresh, deferred = true): Promise<void> {
     const controller = new AbortController();
     const active = { key: request.key, startedAtMs: request.input.nowMs, controller };
     this.refresh = active;
-    this.completion = request.adapter.buildMetrics(
+    let complete!: () => void;
+    this.completion = new Promise<void>(resolve => { complete = resolve; });
+    const launch = () => {
+      if (this.refresh !== active) { complete(); return; }
+      void this.launch(request, active).finally(complete);
+    };
+    if (deferred) { setImmediate(launch); } else { launch(); }
+    return this.completion;
+  }
+
+  private async launch(
+    request: HistoricalRefresh,
+    active: NonNullable<HistoricalBoardMetrics['refresh']>,
+  ): Promise<void> {
+    await Promise.resolve().then(() => request.adapter.buildMetrics(
       request.initialStates,
       request.input.agentAvailability,
-      { signal: controller.signal },
-    ).then(metrics => {
+      { signal: active.controller.signal },
+    )).then(metrics => {
       if (this.refresh === active) {
         this.cache = {
           key: request.key,
@@ -209,7 +224,7 @@ export class HistoricalBoardMetrics {
         this.failure = null;
       }
     }, (error: unknown) => {
-      if (this.refresh === active && !controller.signal.aborted) {
+      if (this.refresh === active && !active.controller.signal.aborted) {
         this.failure = {
           key: request.key,
           reason: `Historical analytics are unavailable: ${error instanceof Error ? error.message : String(error)}`,
@@ -221,30 +236,8 @@ export class HistoricalBoardMetrics {
       this.refresh = null;
       const queued = this.queued;
       this.queued = null;
-      if (queued && this.cache?.key !== queued.key) { void this.launch(queued); }
+      if (queued && this.cache?.key !== queued.key) { void this.schedule(queued); }
     });
-    return this.completion;
-  }
-
-  private async legacy(
-    key: string,
-    adapter: MetricsReadAdapter,
-    initialStates: ReadonlyMap<MissionId, MissionStatus>,
-    input: HistoricalBoardMetricsRead,
-  ): Promise<BoardMetrics> {
-    try {
-      const metrics = await adapter.buildMetrics(initialStates, input.agentAvailability);
-      const refreshedAt = new Date(input.nowMs).toISOString();
-      this.cache = { key, metrics, refreshedAt };
-      return this.withAnalytics(metrics, {
-        freshness: 'fresh', revision: input.evidenceRevision, refreshedAt, reason: null,
-      });
-    } catch (error: unknown) {
-      return this.unavailable(
-        input,
-        `Historical analytics are unavailable: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   private unavailable(input: HistoricalBoardMetricsRead, reason: string): BoardMetrics {

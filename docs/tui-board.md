@@ -472,6 +472,10 @@ Closing `px web` also stops its board readers.
 If a projection refresh fails, the browser keeps the last validated board visible
 with its prior identity, a stale warning and the server's failure message. A
 failure before any projection completes is unavailable, never an empty board.
+Historical FLOW reconstruction runs after the current board response. While it
+is still running, the browser keeps current mission and operation facts visible
+but marks the response stale with the analytics reason; a prior historical
+summary remains explicitly stale, and an absent summary remains unavailable.
 Stream errors request a
 coordinated refresh; only a successful read begun after the latest failure can
 clear it. Recovery reads are serial and coalesced. A failed recovery waits for

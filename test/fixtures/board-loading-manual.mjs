@@ -7,6 +7,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { chromium } from 'playwright-core';
 import { seedBoardLoading } from './board-loading-state.ts';
+import { SqliteDatabaseAdapter } from '../../src/adapters/sqlite/database-adapter.ts';
+import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.ts';
 
 const [cli, label, snapshot] = process.argv.slice(2);
 assert.ok(cli && label, 'provide the packaged CLI path and comparison label');
@@ -82,9 +84,21 @@ try {
     await page.reload({ waitUntil: 'domcontentloaded' });
     warmMs.push(await page.evaluate(() => window.boardLoadingPaint) - at);
   }
+  const database = new SqliteDatabaseAdapter();
+  const changedTitle = 'Board loading fixture changed';
+  await database.open({ path: path.join(root, 'home', 'parallix.db') });
+  try {
+    const store = new SqliteMissionStore(database);
+    const loaded = await store.load('task-9001');
+    assert.equal(loaded.kind, 'found');
+    await store.save({ ...loaded.mission, title: changedTitle }, loaded.version);
+  } finally { await database.close(); }
+  const changedAt = performance.now();
+  await page.getByText(changedTitle, { exact: true }).waitFor({ timeout: 7_000 });
+  const changedMs = performance.now() - changedAt;
   assert.equal(await page.locator('[data-board-card]').count(), 100);
   assert.ok(responses.length >= 6 && responses.every(status => status === 200));
-  console.log(JSON.stringify({ label, origin, coldMs, warmMs, cards: 100, responses, output,
+  console.log(JSON.stringify({ label, origin, coldMs, warmMs, changedMs, cards: 100, responses, output,
     environment: { node: process.version, chromium: browser.version(), cpu: os.cpus()[0].model } }));
 } finally {
   clearInterval(scan);
