@@ -22,7 +22,7 @@ import type { UsageRepository } from '../../../../src/application/ports/mission-
 import type { MissionStore } from '../../../../src/application/domain-ports.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import type { Mission } from '../../../../src/domain/mission.js';
-import type { OperationalHistoryEntry, BoardLaneEventEntry } from '../../../../src/application/ports/operation-history.js';
+import type { OperationalHistoryEntry, BoardLaneEventEntry, ReboundRepairHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +59,40 @@ class MockHistoryRepo implements OperationalHistoryRepository {
   async findByType(type: string) { return this.entries.filter(row => row.eventType === type); }
   async findByTypeForMission(type: string, id: string) { return this.entries.filter(row => row.eventType === type
     && (JSON.parse(row.eventData) as { missionId?: unknown }).missionId === id); }
+  async append() {}
+  async clear() {}
+}
+
+/**
+ * Records what the board's analytical read session asks of operational history,
+ * so a retained repair transcript cannot cross the boundary unnoticed
+ * (TASK-2854.02).
+ */
+class RecordingHistoryRepo implements OperationalHistoryRepository {
+  readonly analyticalTypeReads: string[][] = [];
+  readonly missionScopedReads: string[][] = [];
+  analyticalBytes = 0;
+  compactRepairReads = 0;
+  readonly findReboundRepairs?: () => Promise<readonly ReboundRepairHistoryEntry[]>;
+  constructor(readonly entries: readonly OperationalHistoryEntry[] = [],
+    compactRepairs?: readonly ReboundRepairHistoryEntry[]) {
+    if (compactRepairs) {
+      this.findReboundRepairs = () => { this.compactRepairReads += 1; return Promise.resolve(compactRepairs); };
+    }
+  }
+  async findAll() { return this.entries; }
+  async findByTypes(types: readonly string[]) {
+    this.analyticalTypeReads.push([...types]);
+    const rows = this.entries.filter(row => types.includes(row.eventType));
+    this.analyticalBytes += rows.reduce((sum, row) => sum + row.eventData.length, 0);
+    return rows;
+  }
+  async findByType(type: string) { return this.entries.filter(row => row.eventType === type); }
+  async findByTypeForMission(type: string, id: string) {
+    this.missionScopedReads.push([type, id]);
+    return this.entries.filter(row => row.eventType === type
+      && (JSON.parse(row.eventData) as { missionId?: unknown }).missionId === id);
+  }
   async append() {}
   async clear() {}
 }
@@ -353,5 +387,79 @@ test('board FLOW retains recovered returns outside its cached analytical event f
     assert.equal(projection.metrics.analytics?.freshness, 'fresh');
     assert.equal(projection.metrics.flow?.current.graph.nodes.find(node => node.id === 'implement')?.rework, 1);
     assert.equal(projection.metrics.flow?.current.sendBacks.human.numerator, 1);
+  } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+// TASK-2854.02: the shared analytical read must stay compact. A retained repair
+// transcript keeps its full diagnostic text in the audit row, and the board must
+// still attribute the repair from compact repository facts.
+const REPAIR_TRANSCRIPT = 'gate output line\n'.repeat(20_000);
+
+function repairedMissionFixture() {
+  const repo = repositoryId('test-repo');
+  const id = missionId('task-2854-repair');
+  const closedAt = '2026-11-10T12:00:00.000Z';
+  const mission: Mission = { id, repositoryId: repo, title: 'Repaired return', labels: missionLabels(['user_value']),
+    assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null, status: 'done', closedAt, declaredGates: [] };
+  const store: MissionStore = { load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
+    save: async () => missionVersion(1), loadByRepository: async () => [mission] };
+  const row: OperationalHistoryEntry = { eventType: 'rebound.repair', createdAt: closedAt,
+    eventData: JSON.stringify({ missionId: id, occurrenceId: 'repair-1', reasonKind: 'gate-failure', area: 'declared gate',
+      agent: 'codex', durationMs: 60_000, fingerprintBefore: REPAIR_TRANSCRIPT, fingerprintAfter: REPAIR_TRANSCRIPT,
+      returnIdentity: { stage: 'declared-gates', operationId: 'op-1', operationGeneration: 3 }, repositoryId: repo }) };
+  const compact: ReboundRepairHistoryEntry = { missionId: id, occurrenceId: 'repair-1', reasonKind: 'gate-failure',
+    area: 'declared gate', agent: 'codex', headBefore: null, durationMs: 60_000, occurredAt: closedAt,
+    returnIdentity: { stage: 'declared-gates', operationId: 'op-1', operationGeneration: 3 } };
+  const lanes = new MockLaneEventRepo([{ repositoryId: repo, missionId: id, fromStatus: 'integration', toStatus: 'done',
+    trigger: 'land', agent: 'human', occurredAt: closedAt, idempotencyKey: 'land' }]);
+  return { repo, id, closedAt, mission, store, row, compact, lanes };
+}
+
+function composeRepairBoard(rootDir: string, fixture: ReturnType<typeof repairedMissionFixture>,
+  historyRepo: OperationalHistoryRepository) {
+  return composeBoardProjection({ rootDir, missionStore: fixture.store, repositoryId: fixture.repo,
+    blocklistRepo: new MockBlocklistRepo(), historyRepo, laneEventRepo: fixture.lanes, usageRepo: new MockUsageRepo(),
+    knownAgentFamilies: [], launcherProbe: () => ({ available: true, detail: null }), readAgentConfig: () => null,
+    detectRunningSessions: () => null,
+    providerExecution: { observe: () => ({ observedAt: fixture.closedAt, complete: true, invocations: [], limitations: [] }) },
+    gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    gateEvidence: { readDeclaredGates: async () => ({ checkout: { kind: 'absent' }, gates: [] }),
+      readIntegrationGates: async () => ({ checkout: { kind: 'absent' }, configured: [], gates: [], running: null }) } }).builder;
+}
+
+test('board analytical read selects compact repair facts and never a retained repair transcript (TASK-2854.02)', async () => {
+  const rootDir = createTempBacklog({});
+  const fixture = repairedMissionFixture();
+  const history = new RecordingHistoryRepo([fixture.row], [fixture.compact]);
+  try {
+    const builder = composeRepairBoard(rootDir, fixture, history);
+    await builder.build();
+    await new Promise(resolve => setImmediate(resolve));
+    const projection = await builder.build();
+    assert.ok(history.analyticalTypeReads.length > 0, 'the board performs its shared analytical read');
+    assert.ok(history.analyticalTypeReads.every(types => !types.includes('rebound.repair')),
+      'the shared analytical read never selects raw rebound.repair event JSON');
+    assert.ok(history.analyticalBytes < 4_096, `analytical read carried ${history.analyticalBytes} bytes of event JSON`);
+    assert.ok(history.compactRepairReads > 0, 'repair facts come from the compact repository read');
+    assert.deepEqual(projection.metrics.flow?.current.returns.map(item => [item.identity, item.actor, item.stage, item.cause]),
+      [['repair:repair-1', 'workflow', 'declared-gates', 'gate-failure']],
+      'the compact repair fact still attributes the same return');
+  } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+test('board analytical read scopes a rebound repair read to the Mission when no compact read exists (TASK-2854.02)', async () => {
+  const rootDir = createTempBacklog({});
+  const fixture = repairedMissionFixture();
+  const history = new RecordingHistoryRepo([fixture.row]);
+  try {
+    const builder = composeRepairBoard(rootDir, fixture, history);
+    await builder.build();
+    await new Promise(resolve => setImmediate(resolve));
+    const projection = await builder.build();
+    assert.ok(history.analyticalTypeReads.every(types => !types.includes('rebound.repair')),
+      'the fallback still keeps rebound.repair out of the shared analytical read');
+    assert.deepEqual(history.missionScopedReads.filter(([type]) => type === 'rebound.repair'),
+      [['rebound.repair', fixture.id]], 'the repair read is scoped to the Mission, not the whole history');
+    assert.equal(projection.metrics.flow?.current.returns.length, 1, 'the mission-scoped read attributes the same return');
   } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
 });

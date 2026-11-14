@@ -78,10 +78,19 @@ export interface BoardProjectionCompositionDeps {
   readonly gateEvidence?: GateEvidenceReader;
 }
 
-const BOARD_ANALYTICS_HISTORY_TYPES = [
-  'mission.current-work', 'verification.attempt', 'flow.rebase', 'lead.operator-judgment', 'rebound.repair',
+/** Event families one projection build shares across every analytical reader. */
+export const BOARD_ANALYTICS_HISTORY_TYPES = [
+  'mission.current-work', 'verification.attempt', 'flow.rebase', 'lead.operator-judgment',
   'stats.recovery.evidence',
 ] as const;
+
+/**
+ * A retained repair transcript is megabytes of audit text, so it never joins the
+ * shared payload read; consumers take compact repair facts from
+ * `findReboundRepairs` or a Mission-scoped read. Its row identity still bounds
+ * analytical currency through the aggregate revision read.
+ */
+const REBOUND_REPAIR_HISTORY_TYPE = 'rebound.repair';
 
 /**
  * The process table is read by a child that starts with the build, so it runs
@@ -156,6 +165,8 @@ function createCachedMissionReader(deps: BoardProjectionCompositionDeps,
 /** One projection build shares its immutable analytical rows across every reader. */
 function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
   const cachedHistoryTypes = new Set<string>(BOARD_ANALYTICS_HISTORY_TYPES);
+  const revisionHistoryTypes = deps.historyRepo.revisionForTypes
+    ? [...BOARD_ANALYTICS_HISTORY_TYPES, REBOUND_REPAIR_HISTORY_TYPE] : BOARD_ANALYTICS_HISTORY_TYPES;
   let historyRows: Promise<readonly import('../application/ports/operation-history.js').OperationalHistoryEntry[]> | null = null;
   let laneRows: Promise<readonly import('../application/ports/operation-history.js').BoardLaneEventEntry[]> | null = null;
   let usageRows: Promise<readonly import('../application/ports/mission-measurements.js').UsageRecord[]> | null = null;
@@ -211,7 +222,7 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
         ? usage()
         : deps.usageRepo.findWhere({ ...filter, repo: deps.repositoryId }),
   };
-  return { historyRepo, laneEventRepo, usageRepo,
+  return { historyRepo, laneEventRepo, usageRepo, revisionHistoryTypes,
     reset: () => { historyRows = null; laneRows = null; usageRows = null; historyByMission = null; } };
 }
 
@@ -321,7 +332,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
         repositoryId: deps.repositoryId,
         historyRepo: metricsSession.historyRepo,
         evidenceRevision: async () => JSON.stringify([
-          await metricsSession.historyRepo.revisionForTypes!(BOARD_ANALYTICS_HISTORY_TYPES),
+          await metricsSession.historyRepo.revisionForTypes!(metricsSession.revisionHistoryTypes),
           await workflowOperations?.analyticsRevision?.() ?? 'no-workflow-history',
         ]),
         // Net engineering lines are a mission fact, not telemetry, so the

@@ -1,6 +1,6 @@
 {
   "name": "@magnusekdahl/parallix",
-  "version": "1.5.543",
+  "version": "1.5.544",
   "description": "Local-first workflow and trust layer for AI coding agents — isolated Git worktree missions, separate code review, repository-owned verification, Linux confinement, and human-owned merges",
   "license": "AGPL-3.0-or-later",
   "private": false,
@@ -81,6 +81,7 @@
     "release:publish": "tsx scripts/release-publish.ts",
     "benchmark:runtime": "tsx scripts/benchmark-runtime.ts",
     "benchmark:web-reload": "tsx scripts/benchmark-web-reload.ts",
+    "benchmark:board-analytics": "tsx scripts/benchmark-board-analytics.ts",
     "coverage:merge": "tsx scripts/coverage-merge.ts coverage/lcov.info coverage/.lcov-unit.info coverage/.lcov-integration-ci.info",
     "coverage:summary": "tsx scripts/render-lcov-summary.ts coverage/lcov.info",
     "docs:velocity:export": "tsx scripts/docs-velocity-export.ts",

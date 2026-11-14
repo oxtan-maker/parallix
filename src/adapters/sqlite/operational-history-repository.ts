@@ -56,15 +56,39 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
 
   async findEarliestForMissions(missionIds: readonly string[], repositoryId: string): Promise<readonly OperationalHistoryEntry[]> {
     if (missionIds.length === 0) { return []; }
-    const rows = await this.db.query<{ mission_id: unknown; created_at: unknown }>(
-      `SELECT json_extract(event_data, '$.missionId') AS mission_id, MIN(created_at) AS created_at
-       FROM operational_history
-       WHERE json_valid(event_data)
-         AND json_extract(event_data, '$.repositoryId') = ?
-         AND json_extract(event_data, '$.missionId') IN (${missionIds.map(() => '?').join(',')})
-       GROUP BY json_extract(event_data, '$.missionId')`, [repositoryId, ...missionIds]);
-    return rows.map((row, index) => ({ id: index, eventType: 'mission.first-observation',
-      eventData: JSON.stringify({ repositoryId, missionId: String(row.mission_id) }), createdAt: String(row.created_at) }));
+    const remaining = new Set(missionIds);
+    const earliest = new Map<string, string>();
+    let cursor: { createdAt: string; id: number } | null = null;
+    // Walk the existing chronological index and stop reading a Mission as soon
+    // as its first repository-scoped row is known. A GROUP BY has to JSON-parse
+    // every retained payload, including legacy repair transcripts, even though
+    // the caller needs only one compact identity and timestamp per Mission. The
+    // composite cursor preserves timestamp ties while ensuring each index range
+    // is visited at most once.
+    while (remaining.size > 0) {
+      const wanted = [...remaining];
+      const rows: readonly { id: unknown; mission_id: unknown; created_at: unknown }[] = await this.db.query(
+        `SELECT id, json_extract(event_data, '$.missionId') AS mission_id, created_at
+         FROM operational_history INDEXED BY idx_operational_history_created
+         WHERE json_valid(event_data)
+           AND json_extract(event_data, '$.repositoryId') = ?
+           ${cursor ? 'AND (created_at, id) > (?, ?)' : ''}
+           AND json_extract(event_data, '$.missionId') IN (${wanted.map(() => '?').join(',')})
+         ORDER BY created_at ASC, id ASC
+         LIMIT 1024`, [repositoryId, ...(cursor ? [cursor.createdAt, cursor.id] : []), ...wanted]);
+      if (rows.length === 0) { break; }
+      for (const row of rows) {
+        const missionId = String(row.mission_id);
+        if (!remaining.delete(missionId)) { continue; }
+        earliest.set(missionId, String(row.created_at));
+      }
+      const last = rows[rows.length - 1]!;
+      cursor = { createdAt: String(last.created_at), id: Number(last.id) };
+    }
+    return [...earliest].sort(([left], [right]) => left.localeCompare(right)).map(([missionId, createdAt], index) => ({
+      id: index, eventType: 'mission.first-observation',
+      eventData: JSON.stringify({ repositoryId, missionId }), createdAt,
+    }));
   }
 
   async findReboundRepairs(): Promise<readonly ReboundRepairHistoryEntry[]> {

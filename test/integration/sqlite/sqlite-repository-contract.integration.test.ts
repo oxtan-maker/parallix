@@ -15,6 +15,7 @@ import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
 import { SqliteMigrationLedgerRepository } from '../../../src/adapters/sqlite/migration-ledger-repository.js';
 import { SqliteSessionMarkerRepository } from '../../../src/adapters/sqlite/session-marker-repository.js';
+import { BOARD_ANALYTICS_HISTORY_TYPES } from '../../../src/composition/board-projection.js';
 import { SQLITE_ENTITY_AUTHORITY } from '../../../src/adapters/sqlite/authority-map.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import type { AgentBlocklistRepository } from '../../../src/application/ports/agent-blocklist.js';
@@ -487,6 +488,47 @@ describe("SQLite repository contract", () => {
         returnIdentity: { stage: 'declared-gates', operationId: 'repair-operation', operationGeneration: 1 } },
       { missionId: 'task-a', occurrenceId: 'repair-2', reasonKind: 'gate-failure', area: 'unit', agent: 'codex',
         headBefore: null, durationMs: 120_000, occurredAt: '2026-10-01T10:02:00Z' }]);
+    } finally { await db.close(); cleanupTempDir(dir); }
+  });
+
+  it('operational-history: the shared analytical read stays compact while repair audit evidence keeps its transcript (TASK-2854.02)', async () => {
+    const { db, dir } = await createDbWithSchema();
+    try {
+      const repo = new SqliteOperationalHistoryRepository(db);
+      const transcript = 'gate output line\n'.repeat(20_000);
+      await repo.append({ eventType: 'rebound.repair', eventData: JSON.stringify({ repositoryId: 'repository', missionId: 'task-a', occurrenceId: 'repair-1',
+        reasonKind: 'gate-failure', area: 'unit', agent: 'codex', durationMs: 60_000,
+        fingerprintBefore: transcript, fingerprintAfter: transcript }), createdAt: '2026-10-01T10:00:00Z' });
+      await repo.append({ eventType: 'mission.current-work', eventData: JSON.stringify({ repositoryId: 'repository',
+        missionId: 'task-a', observationId: 'obs-1', state: 'ended' }), createdAt: '2026-10-01T10:01:00Z' });
+
+      const analytical = await repo.findByTypes(BOARD_ANALYTICS_HISTORY_TYPES);
+      assert.ok(analytical.length > 0, 'the analytical families are readable');
+      assert.equal(analytical.some(row => row.eventType === 'rebound.repair'), false,
+        'the analytical families never select a retained repair transcript');
+      assert.ok(analytical.reduce((sum, row) => sum + row.eventData.length, 0) < 4_096,
+        'the shared analytical read stays below the seeded transcript');
+
+      assert.deepEqual((await repo.findReboundRepairs()).map(row => [row.missionId, row.occurrenceId, row.reasonKind, row.durationMs]),
+        [['task-a', 'repair-1', 'gate-failure', 60_000]], 'the compact read still carries the repair identity');
+      await repo.append({ eventType: 'verification.attempt', eventData: JSON.stringify({ repositoryId: 'other',
+        missionId: 'task-b' }), createdAt: '2026-09-01T09:00:00Z' });
+      await db.execute(`WITH RECURSIVE page(row_number) AS (
+          VALUES(1) UNION ALL SELECT row_number + 1 FROM page WHERE row_number < 1024
+        )
+        INSERT INTO operational_history(event_type, event_data, created_at)
+        SELECT 'verification.attempt', json_object('repositoryId', 'repository', 'missionId', 'task-a'),
+               '2026-10-01T10:30:00Z'
+        FROM page`);
+      await repo.append({ eventType: 'verification.attempt', eventData: JSON.stringify({ repositoryId: 'repository',
+        missionId: 'task-b' }), createdAt: '2026-10-01T10:30:00Z' });
+      const first = await repo.findEarliestForMissions(['task-a', 'task-b', 'task-missing'], 'repository');
+      assert.deepEqual(first.map(row => [JSON.parse(row.eventData).missionId, row.createdAt]), [
+        ['task-a', '2026-10-01T10:00:00Z'], ['task-b', '2026-10-01T10:30:00Z'],
+      ], 'the paged compact read keeps repository scope, timestamp ties and earliest attribution');
+      const audit = await repo.findByTypeForMission('rebound.repair', 'task-a');
+      assert.equal(JSON.parse(audit[0].eventData).fingerprintBefore, transcript,
+        'the persisted audit row is neither deleted nor truncated in place');
     } finally { await db.close(); cleanupTempDir(dir); }
   });
 

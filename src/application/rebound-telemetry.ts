@@ -1,4 +1,5 @@
 import { authorizedOperationId, bindReturnIdentity } from './ports/mission-write-authorization.js';
+import { createHash } from 'node:crypto';
 import type { WorkflowReturnStage } from '../domain/board-event.js';
 /**
  * Durable rebound repair telemetry (TASK-2653).
@@ -35,7 +36,9 @@ export interface ReboundRepairRecord {
   readonly role?: string;
   readonly provider: string | null;
   readonly model: string | null;
+  /** Failure fingerprint as the kernel saw it before the attempt; persisted as a bounded digest. */
   readonly fingerprintBefore: string;
+  /** Failure fingerprint as the attempt ended; persisted as a bounded digest. */
   readonly fingerprintAfter: string;
   readonly headBefore: string | null;
   readonly headAfter: string | null;
@@ -51,6 +54,23 @@ export interface ReboundTelemetrySink {
 
 let sink: ReboundTelemetrySink | null = null;
 
+/**
+ * Stated maximum length of one persisted repair fingerprint.
+ *
+ * A failure fingerprint carries the whole gate diagnostic, which is megabytes of
+ * retained audit text. The analytical readers never use it, so the row stores a
+ * bounded identity digest instead and the full diagnostic stays with its
+ * existing evidence owners: the retained recovery capture of the failed command
+ * (`captureRecoveryEvidence`, read back by `lookupRecoveryEvidence`) and the
+ * `rebound.outcome` accounting row.
+ */
+export const REBOUND_REPAIR_IDENTITY_MAX_LENGTH = 64;
+
+/** Stable identity for one failure fingerprint, within the stated maximum length. */
+export function reboundRepairIdentityDigest(fingerprint: string): string {
+  return createHash('sha256').update(fingerprint).digest('hex').slice(0, REBOUND_REPAIR_IDENTITY_MAX_LENGTH);
+}
+
 /** Composition root binds the process sink once; `null` unbinds it. */
 export function configureReboundTelemetry(next: ReboundTelemetrySink | null): void {
   sink = next;
@@ -61,11 +81,14 @@ export async function recordReboundRepair(record: ReboundRepairRecord, log?: (_m
   const bound = sink;
   if (!bound) { return; }
   try {
-    const { workflowReturn, ...facts } = record;
+    const { workflowReturn, fingerprintBefore, fingerprintAfter, ...facts } = record;
     const returnIdentity = workflowReturn ? bindReturnIdentity(workflowReturn) : undefined;
     await bound.history.append({
       eventType: REBOUND_REPAIR_EVENT,
-      eventData: JSON.stringify({ ...facts, ...(returnIdentity ? { returnIdentity } : {}), repositoryId: bound.repositoryId }),
+      eventData: JSON.stringify({ ...facts,
+        fingerprintBefore: reboundRepairIdentityDigest(fingerprintBefore),
+        fingerprintAfter: reboundRepairIdentityDigest(fingerprintAfter),
+        ...(returnIdentity ? { returnIdentity } : {}), repositoryId: bound.repositoryId }),
       createdAt: new Date().toISOString(),
     });
   } catch (err: unknown) {

@@ -8,7 +8,8 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
-import { configureReboundTelemetry, REBOUND_REPAIR_EVENT } from '../../../src/application/rebound-telemetry.js';
+import { configureReboundTelemetry, REBOUND_OUTCOME_EVENT, REBOUND_REPAIR_EVENT,
+  REBOUND_REPAIR_IDENTITY_MAX_LENGTH } from '../../../src/application/rebound-telemetry.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
 
@@ -190,4 +191,44 @@ test('reviewer output telemetry names the actual reviewer and fallback (px-0017)
   const data = JSON.parse(rows[0].eventData);
   assert.equal(data.role, 'reviewer');
   assert.equal(data.agent, 'custom');
+});
+
+test('a repair row persists a bounded identity digest while its diagnostic stays with the outcome accounting (TASK-2854.02)', async () => {
+  const rows: OperationalHistoryEntry[] = [];
+  bind(async entry => { rows.push(entry); });
+  configureMissionWriteAuthorization({ operationId: 'owned', assert: async () => {} });
+  const transcript = 'gate output line\n'.repeat(20_000);
+  const reason: ReboundReason = { ...gateReason, stdout: transcript };
+  const outcome = await rebound(reason, contextFor(() => ({ ok: false as const, diagnostic: `still failing\n${transcript}` })));
+  assert.equal(outcome.outcome, 'exhausted');
+  const repairs = rows.filter(row => row.eventType === REBOUND_REPAIR_EVENT);
+  assert.equal(repairs.length, 2, 'each attempt still records exactly one row');
+  for (const row of repairs) {
+    const data = JSON.parse(row.eventData);
+    assert.match(data.fingerprintBefore, /^[a-f0-9]+$/, 'the persisted identity is a hex digest');
+    assert.ok(data.fingerprintBefore.length <= REBOUND_REPAIR_IDENTITY_MAX_LENGTH,
+      `the persisted fingerprint stays within ${REBOUND_REPAIR_IDENTITY_MAX_LENGTH} characters`);
+    assert.ok(row.eventData.length < 2_048, `the repair row stays bounded at ${row.eventData.length} characters`);
+    assert.equal(row.eventData.includes('gate output line'), false, 'the retained diagnostic never enters the repair row');
+  }
+  assert.notEqual(JSON.parse(repairs[0].eventData).fingerprintBefore, JSON.parse(repairs[0].eventData).fingerprintAfter,
+    'a changed failure still yields a different digest');
+  const accounting = JSON.parse(rows.find(row => row.eventType === REBOUND_OUTCOME_EVENT)!.eventData);
+  assert.ok(accounting.diagnostic.includes('gate output line'),
+    'the outcome accounting row keeps the failure diagnostic for its existing evidence owner');
+});
+
+test('the same failure identity digests identically across repair occurrences (TASK-2854.02)', async () => {
+  const rows: OperationalHistoryEntry[] = [];
+  bind(async entry => { rows.push(entry); });
+  const transcript = 'gate output line\n'.repeat(20_000);
+  const reason: ReboundReason = { ...gateReason, stdout: transcript };
+  for (let run = 0; run < 2; run++) {
+    await rebound(reason, contextFor(() => ({ ok: true as const })));
+  }
+  const firsts = rows.filter(row => row.eventType === REBOUND_REPAIR_EVENT)
+    .map(row => JSON.parse(row.eventData).fingerprintBefore);
+  assert.equal(firsts.length, 2);
+  assert.equal(firsts[0], firsts[1], 'one failure identity keeps one digest across occurrences');
+  assert.equal(firsts[0].length, REBOUND_REPAIR_IDENTITY_MAX_LENGTH, 'the digest is the stated maximum length, not the diagnostic');
 });

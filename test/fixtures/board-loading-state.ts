@@ -7,8 +7,66 @@ import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import { fixtureMission } from './mission-builders.js';
 
+/**
+ * Analytical population matching the measured operator workload
+ * (TASK-2854.02): 65468 rows read by the shared analytical session, of which
+ * 1119 `rebound.repair` rows carried 499888811 bytes of event JSON with the
+ * full gate diagnostic in `fingerprintBefore` and `fingerprintAfter`. Rows are
+ * seeded exactly as they were persisted, so a compact-read claim is measured
+ * against the real audit shape instead of a stub.
+ */
+export const BOARD_ANALYTICS_BASELINE_WORKLOAD = {
+  /** Rows in the shared analytical families other than `rebound.repair`. */
+  analyticalRows: 64_349,
+  /** Persisted `rebound.repair` audit rows carrying full diagnostic text. */
+  repairRows: 1_119,
+  /** Characters of retained gate diagnostic per persisted fingerprint field. */
+  repairFingerprintChars: 223_364,
+} as const;
+
+export type BoardLoadingWorkload = {
+  analyticalRows?: number;
+  repairRows?: number;
+  repairFingerprintChars?: number;
+};
+
+/** The analytical families the board's shared read session selects. */
+const ANALYTICAL_FAMILIES = ['mission.current-work', 'verification.attempt', 'flow.rebase',
+  'lead.operator-judgment', 'stats.recovery.evidence'] as const;
+
+/** Seed the measured analytical population, repair transcripts included. */
+async function seedAnalyticalWorkload(database: SqliteDatabaseAdapter, count: number, workload: BoardLoadingWorkload) {
+  const analyticalRows = workload.analyticalRows ?? BOARD_ANALYTICS_BASELINE_WORKLOAD.analyticalRows;
+  const repairRows = workload.repairRows ?? BOARD_ANALYTICS_BASELINE_WORKLOAD.repairRows;
+  const fingerprintChars = workload.repairFingerprintChars ?? BOARD_ANALYTICS_BASELINE_WORKLOAD.repairFingerprintChars;
+  // A Mission's history naturally occupies one work window. Distinct Mission
+  // timestamps make the chronological compact reader traverse the same paging
+  // path as a populated operator repository instead of resolving every Mission
+  // from the first page of one shared timestamp.
+  const missionCreatedAt = Array.from({ length: count }, (_, index) =>
+    new Date(Date.UTC(2026, 9, 11, 12, 0, 0, index)).toISOString());
+  for (let index = 0; index < analyticalRows; index++) {
+    const family = ANALYTICAL_FAMILIES[index % ANALYTICAL_FAMILIES.length]!;
+    await database.execute('INSERT INTO operational_history(event_type,event_data,created_at) VALUES (?,?,?)',
+      [family, JSON.stringify({ repositoryId: 'repository', missionId: `task-${9001 + index % count}` }),
+        missionCreatedAt[index % count]!]);
+  }
+  // Exactly what the kernel persisted before bounded identity digests existed:
+  // the whole gate transcript in both fingerprint fields.
+  const transcript = 'gate output line\n'.repeat(Math.ceil(fingerprintChars / 'gate output line\n'.length));
+  for (let index = 0; index < repairRows; index++) {
+    await database.execute('INSERT INTO operational_history(event_type,event_data,created_at) VALUES (?,?,?)',
+      ['rebound.repair', JSON.stringify({ repositoryId: 'repository', missionId: `task-${9001 + index % count}`,
+        occurrenceId: `repair-${index}`, reasonKind: 'gate-failure', area: 'declared gate', attempt: 1, maxAttempts: 2,
+        strategy: 'targeted', context: 'resumed', agent: 'codex', provider: null, model: null,
+        fingerprintBefore: transcript, fingerprintAfter: transcript, headBefore: null, headAfter: null,
+        outcome: 'advance', durationMs: 60_000 }), missionCreatedAt[index % count]!]);
+  }
+}
+
 /** Fresh populated operator state, never copied from an operator or a running workflow. */
-export async function seedBoardLoading(input: string, count = 120, options: { telemetry?: boolean; schemaTemplate?: string } = {}) {
+export async function seedBoardLoading(input: string, count = 120, options: {
+  telemetry?: boolean; schemaTemplate?: string; workload?: BoardLoadingWorkload | null } = {}) {
   const root = path.join(input, 'repository');
   const home = path.join(input, 'home');
   fs.mkdirSync(root, { recursive: true });
@@ -50,6 +108,7 @@ export async function seedBoardLoading(input: string, count = 120, options: { te
         ['fixture', JSON.stringify({ repositoryId: 'repository', missionId: `task-${9001 + index % count}`,
           message: 'isolated fixture history' }), '2026-10-12T12:00:00.000Z']);
     }
+    if (options.workload) { await seedAnalyticalWorkload(database, count, options.workload); }
     await database.execute('COMMIT');
   } finally { await database.close(); }
   return { root, home };
