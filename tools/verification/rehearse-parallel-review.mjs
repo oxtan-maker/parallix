@@ -103,11 +103,24 @@ try {
   assert.ok(reviewers.find(item => item.family === 'custom').startedAt >= releasedAt, 'queued reviewer starts only after admission releases');
   const status = JSON.parse(run(mainWorktree, ['status', mainSlug, '--json']));
   assert.equal(status.missionStatus, 'integration');
+  assert.equal(status.review.progress.requiredApprovals, 2);
+  assert.equal(status.review.progress.independentAvailable, 2);
+  assert.deepEqual(status.review.progress.selected, ['claude', 'custom']);
+  assert.ok(status.review.progress.reviewers.every(reviewer => reviewer.state === 'completed'));
+  const headlessStatus = run(mainWorktree, ['status', mainSlug]);
+  assert.match(headlessStatus, /1\/2 claude.*completed/);
+  assert.match(headlessStatus, /2\/2 custom.*completed/);
+  assert.doesNotMatch(headlessStatus, /\x1b/);
   const history = JSON.parse(run(mainWorktree, ['history', mainSlug, 'list', '--json']));
   const reviewRuns = history.map(item => item.record).filter(record => record.captureKind === 'agent' && ['claude', 'custom'].includes(record.family) && record.role === 'review');
   assert.deepEqual(reviewRuns.map(record => record.family).sort(), ['claude', 'custom']);
   assert.equal(new Set(reviewRuns.map(record => record.runId)).size, 2, 'review histories keep distinct labels and run identities');
   assert.ok(reviewRuns.every(record => record.revision === reviewers[0].sha));
+  assert.deepEqual(status.review.progress.reviewers.map(reviewer => reviewer.runId).sort(), reviewRuns.map(record => record.runId).sort(),
+    'completed status labels correlate exactly with retained history run IDs');
+  const reviewOutput = fs.readFileSync(path.join(scratch, 'main.log'), 'utf8');
+  assert.match(reviewOutput, /1\/2 claude.*completed.*approved/);
+  assert.match(reviewOutput, /2\/2 custom.*completed.*approved/);
   assert.equal(fs.readFileSync(path.join(mainWorktree, 'src/value.js'), 'utf8'), 'export const value = 1;\n');
   console.log(JSON.stringify({ lifecycle: 'public-px-parallel-review', revision: reviewers[0].sha,
     overlap: true, queuedBeforeAdmission: true, stdin: 'private pipes', histories: reviewRuns.map(({ runId, family, revision, state }) => ({ runId, family, revision, state })),

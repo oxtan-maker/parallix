@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import './web-board-card-facts.cases.js';
 import './web-refinement-render.cases.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
@@ -25,7 +26,7 @@ import './web-operation-log-render.cases.js';
 import { Shell } from '../../../../web/src/shell.js';
 import { durationText, isSpinning } from '../../../../web/src/format.js';
 import { C, TYPE } from '../../../../web/src/palette.js';
-import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import type { AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
@@ -45,7 +46,7 @@ const render = (snapshot: WebBoardSnapshot): string =>
   renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
 
 const snapshotOf = (overrides: Partial<BoardProjection>): WebBoardSnapshot =>
-  toWebBoardSnapshot({ ...makeProjection(), ...overrides });
+  webProjection.snapshot({ ...makeProjection(), ...overrides });
 
 function metric(overrides: Partial<AgentAvailabilityMetric>): AgentAvailabilityMetric {
   return { family: agentFamily('custom'), available: true, blockedForMs: 0, reason: null, ...overrides };
@@ -81,7 +82,7 @@ function populated(): WebBoardSnapshot {
     integration: [makeCard({ id: fixtureMissionId('task-0005') as MissionCard['id'], title: 'integration mission', lane: 'integration', status: 'integration' })],
     done: [makeCard({ id: fixtureMissionId('task-0006') as MissionCard['id'], title: 'shipped mission', lane: 'done', status: 'done', closed: true })],
   });
-  return toWebBoardSnapshot({
+  return webProjection.snapshot({
     ...base,
     attentionQueue: [{ ...makeAttentionItem(blocked, { kind: 'blocking', detail: 'two blocking findings' }, 1),
       action: { kind: 'active:execute', display: 'px active task-0001' } }],
@@ -111,6 +112,25 @@ test('settled review recovery renders explicit guidance, evidence and Resume rev
   assert.match(html, /Owned review work settled; acknowledge the stop and resume\./);
   assert.match(html, /Review stopped for human review: MAX_ATTEMPTS/);
   assert.match(html, /Resume review/);
+});
+
+test('review card renders shared reviewer states, fallback reason, blockers and operator action (PX-0046.06)', () => {
+  const card = makeCard({ lane: 'review', status: 'review', reviewRound: 3, reviewPhase: 'reviewing', reviewProgress: {
+    round: 3, revision: 'head-3', mode: 'one-independent', selected: ['claude'], independentAvailable: 1, requiredApprovals: 1,
+    unavailable: [{ family: 'custom', reason: 'launcher missing' }], degradedReason: 'only one independent reviewer is available',
+    reviewers: [{ reviewer: 'claude', reviewerLabel: '1/1 claude', runId: 'review-claude-a1-run', runLabel: 'review-claude-a1-run', state: 'failed', outcome: 'unknown', status: 1, blocker: 'Reviewer process exited with status 1.' }],
+    blockers: ['Reviewer process exited with status 1.'], nextAction: 'Run px review task-9999 to resume 1 outstanding reviewer.',
+  } } as never);
+  const html = render(snapshotOf({ stages: makeProjection({ review: [card] }).stages }));
+  assert.match(html, /Review round 3 · revision head-3 · 1\/1 approval/);
+  assert.match(html, /1\/1 claude/);
+  assert.match(html, /review-claude-a1-run/);
+  assert.match(html, /failed/);
+  assert.match(html, /only one independent reviewer is available/);
+  assert.match(html, /Reviewer process exited with status 1/);
+  assert.match(html, /px review task-9999/);
+  assert.doesNotMatch(html, /--continue/);
+  assert.doesNotMatch(html, /waiting for human/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -198,7 +218,7 @@ test('normal server projections keep compact cards across all unfinished lanes (
     const mission = fixtureMission('task-2705-compact', { status: lane, checkpoints: [] });
     const commands = availableBoardCommands(mission, { reviewApproval: null });
     const card = makeCard({ id: mission.id, lane, status: lane, commands });
-    const board = toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
+    const board = webProjection.snapshot(makeProjection({ [lane]: [card] }));
     const html = render(board);
     const runnable = commands.filter(command => command.command !== 'cancel' && command.enabled).length;
     assert.equal((html.match(/data-action-kind=/g) ?? []).length, Math.max(1, runnable) + 2, `${lane}: Cancel, Edit and each eligible command, or one explanatory fallback`);
@@ -258,33 +278,6 @@ test('a checkpoint with evidence renders a clickable label that opens its detail
   assert.match(html, /Recorded: CP-2\.md/, 'recorded checkpoint remains in accessible track metadata');
 });
 
-test('the checkpoint detail renders the description and every evidence row', () => {
-  const snapshot = snapshotOf({
-    stages: makeProjection({
-      review: [makeCard({
-        id: fixtureMissionId('task-0100') as MissionCard['id'],
-        checkpoint: 'CP-2.md',
-        checkpointDescription: 'CP-2: components extracted',
-        checkpointEvidence: [
-          { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
-          { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'adds rows', evidence: 'test/unit/x' }, { criterion: 'wires the wire', evidence: 'src/interfaces/web/transport.ts' }] },
-        ],
-      })],
-    }).stages,
-  });
-  const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
-  assert.ok(card);
-  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-2.md', onClose: () => {} }));
-  // The opened checkpoint is CP-2, so its description and every one of its
-  // Goal Check rows render; the unopened CP-1 rows do not.
-  assert.match(html, /CP-2: components extracted/, 'the checkpoint description renders');
-  assert.match(html, /adds rows/);
-  assert.match(html, /wires the wire/);
-  assert.match(html, /test\/unit\/x/);
-  assert.match(html, /src\/interfaces\/web\/transport\.ts/);
-  assert.doesNotMatch(html, /runs the gate/, 'an unopened checkpoint keeps its rows hidden');
-});
-
 test('the checkpoint detail takes the board color authority and the title/body type steps (TASK-2773.02)', () => {
   const snapshot = snapshotOf({
     stages: makeProjection({
@@ -297,7 +290,7 @@ test('the checkpoint detail takes the board color authority and the title/body t
   });
   const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
   assert.ok(card);
-  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-2.md', onClose: () => {} }));
+  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-2.md', onClose: () => {}, openedRevision: snapshot.freshness.revision, snapshotRevision: snapshot.freshness.revision }));
   // The panel is the board's own card surface and edge, not a modal palette.
   assert.ok(html.includes(`background:${C.card}`), 'the dialog surface is the board card token');
   assert.ok(html.includes(`border:1px solid ${C.cardEdge}`), 'the dialog edge is the board card edge token');
@@ -313,7 +306,7 @@ test('the checkpoint detail renders nothing when the card carries no evidence ro
   });
   const card = snapshot.stages.flatMap((stage) => stage.cards).find((wireCard) => wireCard.checkpoint !== null);
   assert.ok(card);
-  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-1.md', onClose: () => {} }));
+  const html = renderToStaticMarkup(React.createElement(CheckpointDetail, { card, initial: 'CP-1.md', onClose: () => {}, openedRevision: snapshot.freshness.revision, snapshotRevision: snapshot.freshness.revision }));
   assert.equal(html, '', 'an empty mission keeps its layout with no panel');
 });
 
@@ -534,7 +527,7 @@ test('each card renders projected action availability without inventing a runnab
   assert.match(html, /aria-label="px active task-0001 — unavailable: command is not eligible for this mission"/, 'the unavailable projected control retains the server reason');
   const reviewCard = makeCard({ lane: 'review', status: 'review', blockingReason: 'Workflow exited with status 1',
     commands: [{ command: 'review', enabled: true, reason: null }] });
-  const reviewHtml = render(toWebBoardSnapshot({ ...makeProjection({ review: [reviewCard] }),
+  const reviewHtml = render(webProjection.snapshot({ ...makeProjection({ review: [reviewCard] }),
     attentionQueue: [makeAttentionItem(reviewCard, { kind: 'blocking', detail: reviewCard.blockingReason! }, 1)] }));
   assert.match(reviewHtml, /aria-label="px review task-9999 — enabled"/, 'production-derived review recovery is rendered verbatim (TASK-2814)');
 });
@@ -563,7 +556,7 @@ test('the board root fills the viewport flex chain for empty and populated lanes
   assert.match(page, /display:flex/);
   assert.match(page, /flex-direction:column/);
   for (const active of [[], makeCards(1, 'active'), makeCards(40, 'active')]) {
-    const html = render(toWebBoardSnapshot(makeProjection({ active })));
+    const html = render(webProjection.snapshot(makeProjection({ active })));
     const root = html.match(/^<div\b[^>]*style="([^"]*)"/)?.[1] ?? '';
     for (const style of ['flex:1', 'display:flex', 'flex-direction:column', 'min-height:0']) {
       assert.ok(root.split(';').includes(style), `Board root carries ${style} with ${active.length} active cards`);
@@ -598,7 +591,7 @@ test('an empty in-flight lane claims a compact column instead of the populated a
   const populatedAllocation = `flex:1`;
 
   // All three in-flight lanes empty: every one is compact, none keeps 318.
-  const empty = render(toWebBoardSnapshot(makeProjection({})));
+  const empty = render(webProjection.snapshot(makeProjection({})));
   for (const lane of ['active', 'review', 'integration']) {
     const style = laneWrapperStyle(empty, lane).split(';');
     assert.ok(style.includes(compact), `${lane}: an empty lane is a fixed compact column`);
@@ -614,7 +607,7 @@ test('an empty in-flight lane claims a compact column instead of the populated a
   }
 
   // Mixed: the empty lanes give their width back to the lane that carries cards.
-  const mixed = render(toWebBoardSnapshot(makeProjection({ active: makeCards(2, 'active') })));
+  const mixed = render(webProjection.snapshot(makeProjection({ active: makeCards(2, 'active') })));
   assert.ok(laneWrapperStyle(mixed, 'active').split(';').includes(populatedAllocation), 'a populated lane still grows');
   assert.ok(laneWrapperStyle(mixed, 'active').includes(`min-width:${FLIGHT_LANE_MIN_WIDTH_PX}px`), 'a populated lane keeps the reference minimum');
   for (const lane of ['review', 'integration']) {
@@ -622,7 +615,7 @@ test('an empty in-flight lane claims a compact column instead of the populated a
   }
 
   // Fully populated: nothing about the allocation changes for a loaded board.
-  const full = render(toWebBoardSnapshot(makeProjection({
+  const full = render(webProjection.snapshot(makeProjection({
     active: makeCards(1, 'active'), review: makeCards(1, 'review'), integration: makeCards(1, 'integration'),
   })));
   for (const lane of ['active', 'review', 'integration']) {
@@ -677,7 +670,10 @@ test('every board region is a named landmark and every lane carries a heading', 
 
 test('every action control has an accessible name carrying the server display and state', () => {
   const html = render(populated());
-  const names = [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]);
+  const buttonNames = [...html.matchAll(/<button[^>]*aria-label="([^"]+)"/g)].map((match) => match[1]);
+  const dialogOpeners = buttonNames.filter(name => /^(?:View checkpoint evidence|View review history)/.test(name));
+  const names = buttonNames.filter(name => !dialogOpeners.includes(name));
+  assert.ok(dialogOpeners.some(name => name.startsWith('View review history')), 'the review dialog opener remains named');
   assert.ok(names.length > 0, 'the fixture renders at least one action');
   for (const name of names) {
     assert.match(name ?? '', / — (?:enabled|ineligible|unavailable)/, `accessible name states availability: ${String(name)}`);
@@ -743,7 +739,7 @@ test('production browser code uses no browser persistence; history polling is co
 
 test('production browser code reads snapshots and mission history while keeping one guarded mutation route', () => {
   const fetches = browserSources.flatMap((file) => (file.text.match(/\bfetch\(/g) ?? []).map(() => file.name)).sort();
-  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'mission-history-data.ts'], 'snapshot, command and mission history requests stay in typed clients');
+  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'board-data.ts', 'mission-history-data.ts'], 'snapshot, detail, command and mission history requests stay in typed clients');
   const data = browserSources.find((file) => file.name === 'board-data.ts')?.text ?? '';
   assert.match(data, /COMMANDS_PATH = '\/api\/commands'/);
   assert.match(browserSources.find((file) => file.name === 'mission-history-data.ts')?.text ?? '', /`\/api\/terminal\/\$\{encodeURIComponent\(missionId\)\}`/);
@@ -835,7 +831,7 @@ test('weekly missions use the delivery cohort instead of current DONE stock (TAS
 
 test('DONE exposes other retained history without adding it to the weekly count (TASK-2688)', () => {
   const projection = makeProjection({ done: [makeCard({ id: missionId('task-weekly'), lane: 'done' })] });
-  const snapshot = toWebBoardSnapshot({ ...projection, stages: projection.stages.map(stage => stage.lane === 'done'
+  const snapshot = webProjection.snapshot({ ...projection, stages: projection.stages.map(stage => stage.lane === 'done'
     ? { ...stage, historyCards: [makeCard({ id: missionId('task-unknown'), lane: 'done' })] } : stage) });
   const html = render(snapshot);
   assert.match(html, /DONE · 1/);
@@ -860,7 +856,7 @@ test('checkpoint track is bounded and honest across supplied plan shapes (TASK-2
   for (const { plan, fill, label } of cases) {
     for (const lane of ['backlog', 'refined', 'active', 'review', 'integration', 'done'] as const) {
       const card = makeCard({ lane, status: lane, checkpoint: 'CP-99', checkpointEvidence: plan });
-      const snapshot = toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
+      const snapshot = webProjection.snapshot(makeProjection({ [lane]: [card] }));
       const html = render(snapshot);
       assert.match(html, new RegExp(label));
       assert.match(html, /Recorded: CP-99/);
@@ -888,7 +884,8 @@ test('checkpoint track is bounded and honest across supplied plan shapes (TASK-2
     }
   }
   const absent = renderToStaticMarkup(React.createElement(CheckpointPips, {
-    card: { ...toWebBoardSnapshot(makeProjection({ active: [makeCard()] })).stages.find(stage => stage.lane === 'active')!.cards[0], checkpointEvidence: undefined },
+    card: { ...webProjection.snapshot(makeProjection({ active: [makeCard()] })).stages.find(stage => stage.lane === 'active')!.cards[0], checkpointEvidence: undefined },
+    snapshotRevision: null,
   }));
   assert.match(absent, /checkpoints · completion unknown/);
   assert.doesNotMatch(absent, /0\/0|completed|data-checkpoint-track|data-checkpoint-fill|View checkpoint evidence/);
@@ -901,7 +898,7 @@ test('checkpoint gate and review metadata share one ordered bounded row with vis
     { name: 'CP-2', description: 'Build', state: 'current', goalCheck: [] },
     { name: 'CP-3', description: 'Verify', state: 'future', goalCheck: [] },
   ] });
-  const html = render(toWebBoardSnapshot(makeProjection({ active: [card] })));
+  const html = render(webProjection.snapshot(makeProjection({ active: [card] })));
   assert.match(html, /data-card-progress-row=""[^>]*height:24px[^>]*>[\s\S]*?aria-label="Checkpoint plan"[\s\S]*?data-gate-status=""[\s\S]*?aria-label="Pull request and review"[\s\S]*?PR #47[\s\S]*?aria-label="Review attempts"/);
   assert.equal((html.match(/aria-label="Review attempts"/g) ?? []).length, 1, 'review attempts have no separate progress row');
   assert.equal((html.match(/PR #47/g) ?? []).length, 1, 'pull request information has no separate row');
@@ -909,9 +906,11 @@ test('checkpoint gate and review metadata share one ordered bounded row with vis
   assert.doesNotMatch(html, /data-checkpoint-summary/);
   assert.match(html, /data-checkpoint-fill=""[^>]*background:#6fd0e8/);
   assert.match(html, /data-gate="running"[^>]*>[\s\S]*?aria-label="Running"/);
+  const snapshot = webProjection.snapshot(makeProjection({ active: [card] }));
   const detail = renderToStaticMarkup(React.createElement(CheckpointDetail, {
-    card: toWebBoardSnapshot(makeProjection({ active: [card] })).stages.find(stage => stage.lane === 'active')!.cards[0],
-    initial: 'CP-2', onClose: () => {},
+    card: snapshot.stages.find(stage => stage.lane === 'active')!.cards[0],
+    initial: 'CP-2', onClose: () => {}, openedRevision: snapshot.freshness.revision,
+    snapshotRevision: snapshot.freshness.revision,
   }));
   assert.match(detail, /✓.*CP-1 · completed/);
   assert.match(detail, /▶.*CP-2 · current/);
@@ -923,7 +922,7 @@ test('unknown or absent checkpoint state never invents progress and preserves th
     [{ name: 'CP-1', description: 'Legacy', goalCheck: [{ criterion: 'evidence', evidence: 'npm test' }] }],
     [],
   ]) {
-    const html = render(toWebBoardSnapshot(makeProjection({ active: [makeCard({ gate: 'failed', checkpointEvidence })] })));
+    const html = render(webProjection.snapshot(makeProjection({ active: [makeCard({ gate: 'failed', checkpointEvidence })] })));
     assert.match(html, /data-checkpoint-gate-row=""/);
     assert.match(html, /data-gate="failed"/);
     assert.doesNotMatch(html, /0\/1|1\/1|data-checkpoint-fill/);
@@ -940,7 +939,7 @@ test('recorded guidance and checkpoint evidence stay distinct from current activ
       { name: 'CP-2', description: 'Planned step', state: 'current', goalCheck: [] },
     ], currentWork: { operationId: 'repair', phase: 'review-response', summary: 'Repairing reviewer findings', agent: null, updatedAt: 'now', freshness: 'live' },
   });
-  const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ active: [card] }));
   const html = render(snapshot);
   assert.match(html, /Recorded: CP-1/);
   assert.match(html, /Current: CP-2/);
@@ -948,16 +947,11 @@ test('recorded guidance and checkpoint evidence stay distinct from current activ
   assert.match(html, /Resume planned step/);
   assert.match(html, /Repairing reviewer findings/);
   assert.doesNotMatch(html, /review-pip--running/);
-  const wire = snapshot.stages.flatMap(stage => stage.cards)[0];
-  const detail = renderToStaticMarkup(React.createElement(CheckpointDetail, { card: wire, initial: 'CP-1', onClose: () => {} }));
-  assert.match(detail, /Last recorded Goal Check evidence/);
-  assert.match(detail, /Recorded step/);
-  assert.match(detail, /verified/);
 });
 
 test('attention rail shows manual blocker and lead investigation next step without a run control (TASK-2799)', () => {
   const card = makeCard({ id: missionId('task-human'), blockingReason: 'Review authority requires operator decision' });
-  const snapshot = toWebBoardSnapshot({ ...makeProjection({ active: [card] }),
+  const snapshot = webProjection.snapshot({ ...makeProjection({ active: [card] }),
     attentionQueue: [makeAttentionItem(card, { kind: 'blocking', detail: card.blockingReason! }, 1)] });
   const html = render(snapshot);
   assert.match(html, /Review authority requires operator decision/);

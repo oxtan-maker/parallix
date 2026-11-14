@@ -429,6 +429,8 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
     assert.equal(round.reviewerPolicy?.requiredApprovals, 2);
     assert.equal(reviewStatus(harness.store.mission().review!), 'approved');
     assert.deepEqual(round.reviewerResults?.map(result => [result.agentFamily, result.decision, result.revision]).sort(), [['claude', 'approved', 'head-1'], ['vibe', 'approved', 'head-1']]);
+    assert.ok(harness.fake.logs.some(line => /1\/2 claude.*completed.*approved/.test(line)), harness.fake.logs.join(' | '));
+    assert.ok(harness.fake.logs.some(line => /2\/2 vibe.*completed.*approved/.test(line)), harness.fake.logs.join(' | '));
     assert.ok(harness.fake.launches.every(launch => launch.sessionPolicy === 'fresh-ephemeral'));
   });
 
@@ -803,6 +805,7 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
   test('a failed parallel settlement cannot mask a same-revision authoritative negative decision (PX-0046.05)', async () => {
     const scenario = reviewClassificationScenario();
     const round = new ReviewRound(1, scenario.context);
+    const settlements: string[] = [];
     const batch = await runParallelReviewerBatch(scenario.context, round, ['claude', 'vibe'], {
       launch: async () => null,
       consume: async isolated => {
@@ -810,9 +813,12 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
         return { step: null, reviewState: 'REQUEST_CHANGES' };
       },
       recover: async (_isolated, _localRound, reviewState) => ({ step: null, reviewState }),
+      settled: async (isolated, _localRound, state) => { settlements.push(`${isolated.identities.reviewer}:${state}`); },
       recordApproval: async () => {},
       persistedOutcome: async () => 'REQUEST_CHANGES',
     });
     assert.deepEqual(batch, { stopped: false, reviewState: 'REQUEST_CHANGES' });
+    assert.ok(settlements.includes('claude:completed'));
+    assert.ok(settlements.includes('vibe:failed'));
   });
 });

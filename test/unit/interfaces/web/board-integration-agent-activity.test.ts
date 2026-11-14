@@ -1,10 +1,10 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../../../../web/src/board.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 
@@ -22,7 +22,7 @@ function render(agent: string | null, phase = 'integrate'): string {
     liveSession: { missionId: fixtureMissionId('task-2576'), family: agentFamily('codex') },
   });
   return renderToStaticMarkup(React.createElement(Board, {
-    snapshot: toWebBoardSnapshot(makeProjection({ integration: [card] })),
+    snapshot: webProjection.snapshot(makeProjection({ integration: [card] })),
     onRefresh: async () => {},
   }));
 }

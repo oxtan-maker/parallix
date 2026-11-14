@@ -1,6 +1,6 @@
 # ADR 0066: Mission context management
 
-**Status:** Accepted; fresh-review exception implemented by PX-0046.02
+**Status:** Accepted; fresh-review policy implemented by PX-0046.02 and PX-0046.06
 
 **Date:** 2026-10-14
 

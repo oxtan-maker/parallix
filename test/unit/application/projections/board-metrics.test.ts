@@ -25,7 +25,8 @@ import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId, missionLabels, type MissionId, type MissionStatus } from '../../../../src/domain/mission.js';
 import { missionOutcome } from '../../../fixtures/mission-outcome.js';
 import { weeklyDecisionWindows } from '../../../../src/application/services/decision-window.js';
-import { ConcreteMetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
+import { ConcreteMetricsReadAdapter, type MetricsReadAdapter } from '../../../../src/application/projections/metrics-read-adapter.js';
+import { HistoricalBoardMetrics } from '../../../../src/application/projections/historical-board-metrics.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { matchesUsageFilter } from '../../../fixtures/metrics-adapter.js';
 import type { UsageFilter, UsageRecord, UsageRepository } from '../../../../src/application/ports/mission-measurements.js';
@@ -39,6 +40,40 @@ const id3 = missionId('task-0003');
 const now = '2026-07-22T10:00:00Z';
 const earlier = '2026-07-22T08:00:00Z';
 const later = '2026-07-22T12:00:00Z';
+
+test('background FLOW reconstruction survives detector ticks within its finite bound (PX-0058.04)', async () => {
+  let nowMs = 0;
+  let reconstructions = 0;
+  let aborted = 0;
+  const adapter: MetricsReadAdapter = { async readDeliveryIdentity() { return { deliveries: [], revision: 'flow-v1' }; },
+    async buildMetrics(_states, _availability, options) {
+      reconstructions += 1;
+      return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => {
+        aborted += 1;
+        reject(options.signal?.reason);
+      }, { once: true }));
+    } };
+  const historical = new HistoricalBoardMetrics({ metricsAdapter: adapter, now: () => nowMs });
+  const build = () => historical.build({ repositoryId: fixtureRepositoryId('parallix'), missions: [],
+    agentAvailability: [], nowMs, deliveries: new Map(), evidenceRevision: 'flow-v1' });
+
+  assert.equal((await build()).analytics?.freshness, 'unavailable');
+  nowMs = 30_000;
+  await build();
+  nowMs = 119_999;
+  await build();
+  assert.equal(reconstructions, 1, 'detector ticks share the owned reconstruction');
+  assert.equal(aborted, 0);
+
+  nowMs = 120_000;
+  await build();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(reconstructions, 2, 'the finite bound still replaces a hung reconstruction');
+  assert.equal(aborted, 1);
+  historical.cancelPendingRefresh();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(aborted, 2, 'the owner cancels its replacement on close');
+});
 
 test('state flow preserves unordered and duplicate instants without reparsing history per point (TASK-2770)', t => {
   const transitions = Array.from({ length: 120 }, (_, index) => ({

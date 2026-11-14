@@ -1,3 +1,4 @@
+import { webProjection } from './web-projection.js';
 /**
  * Disposable manual observation, not an E2E suite.
  * Run: npx tsx test/fixtures/web-board-text-observation.ts
@@ -6,7 +7,6 @@
 import assert from 'node:assert/strict';
 import { pointerBoard, pointerSnapshot } from './web-pointer-board.js';
 import { makeCard, makeFullCard, makeProjection, makeAttentionItem } from './board-projection.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 
 const fixture = await pointerBoard();
 try {
@@ -16,7 +16,7 @@ try {
     ...makeProjection({ review: [card], done: [makeCard({ lane: 'done', status: 'done', closed: true })] }),
     attentionQueue: [makeAttentionItem(card, { kind: 'review-lane', detail: 'needs review' }, 1)],
   };
-  await fixture.render(toWebBoardSnapshot(projection));
+  await fixture.render(webProjection.snapshot(projection));
   const { page } = fixture;
   await page.locator('.shipped > summary').click();
   assert.equal(await page.locator('.shipped').getAttribute('open'), '');

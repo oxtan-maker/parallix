@@ -1,8 +1,8 @@
 # ADR 0053: Operational persistence and authority boundaries
 
-Status: Accepted
+Status: Accepted; concurrent-review authority implemented by PX-0046
 Date: 2026-07-29
-Last updated: 2026-09-16
+Last updated: 2026-11-12
 Related: ADR 0037 (workflow coordination), ADR 0043 (Git target resolution),
 ADR 0045 (branch model), ADR 0048 (fail-closed harness),
 ADR 0051 (application and UI boundary)
@@ -188,7 +188,8 @@ Review state and review events are durable Mission data.
 
 PX-0046 applies this authority to concurrent reviews: persist each reviewer,
 revision, approval count, finding, decision and availability reason. Provider
-and terminal views remain projections, not quorum stores.
+and terminal views remain projections, not quorum stores. CLI, TUI and web
+surfaces consume one application-owned reviewer-progress projection.
 
 The current pattern:
 

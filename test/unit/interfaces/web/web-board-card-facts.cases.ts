@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 // Mission identity and optional facts rendered through the validated production Board.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,12 +6,12 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../../../../web/src/board.js';
 import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
-import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeFullCard, makeProjection } from '../../../fixtures/board-projection.js';
 
 // TASK-2784: retired card facts belong to the production Board, after wire validation.
 function renderedCard(card: MissionCard): string {
-  const wire = JSON.parse(JSON.stringify(toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }))));
+  const wire = JSON.parse(JSON.stringify(webProjection.snapshot(makeProjection({ [card.lane]: [card] }))));
   const validation = validateWebBoardSnapshot(wire);
   assert.ok(validation.ok);
   const article = renderToStaticMarkup(React.createElement(Board, { snapshot: validation.value, onRefresh: async () => {} })).match(/<article\b[^>]*data-board-card="[^"]*"[\s\S]*?<\/article>/)?.[0];

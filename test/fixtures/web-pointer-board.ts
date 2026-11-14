@@ -1,3 +1,4 @@
+import { webProjection } from './web-projection.js';
 import { build } from 'esbuild';
 // Browser fixture bootstrapping installs these globals before a page is returned.
 declare global {
@@ -15,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { makeCard, makeProjection } from './board-projection.js';
 import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { missionId } from '../../src/domain/mission.js';
-import type { WebCommandRequest } from '../../src/interfaces/web/transport.js';
+import type { WebCommandRequest, WebMissionDetail } from '../../src/interfaces/web/transport.js';
 import { fixtureMission } from './mission-builders.js';
 import { availableBoardCommands, type BoardCommand } from '../../src/application/projections/mission-board.js';
 
@@ -23,7 +24,7 @@ export function compactPointerSnapshot(lane: 'backlog' | 'refined' | 'active' | 
   const mission = fixtureMission('task-pointer-disposable', { status: lane, checkpoints: [] });
   const card = makeCard({ id: mission.id, title: 'Disposable pointer mission', lane, status: lane,
     commands: availableBoardCommands(mission, { reviewApproval: null }) });
-  return toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
+  return webProjection.snapshot(makeProjection({ [lane]: [card] }));
 }
 
 // Only immutable browser assets are shared. Each case still owns its browser,
@@ -76,11 +77,19 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
   let release: (() => void) | undefined;
   let responseDelay: Promise<void> | undefined;
   const streams = new Set<import('node:http').ServerResponse>();
+  const missionDetails = new Map<string, WebMissionDetail>();
   const server = createServer(async (req, res) => {
     if (req.url === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       streams.add(res); res.write(': connected\n\n');
       req.on('close', () => streams.delete(res)); return;
+    }
+    const detailMatch = /^\/api\/board\/([^/]+)\/detail$/.exec(new URL(req.url ?? '/', 'http://fixture').pathname);
+    if (req.method === 'GET' && detailMatch !== null) {
+      const detail = missionDetails.get(decodeURIComponent(detailMatch[1]));
+      res.writeHead(detail === undefined ? 404 : 200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(detail ?? { error: 'mission detail unavailable' }));
+      return;
     }
     if (req.method === 'POST') {
       let body = ''; for await (const part of req) { body += part; }
@@ -90,7 +99,7 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
       try { await onCommand?.(command); }
       catch (error) { res.writeHead(500); res.end(JSON.stringify({error: String(error)})); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({kind: 'command-result', transportVersion: 2, status: 'completed', value: null, error: null, durableEvidence: []})); return;
+      res.end(JSON.stringify({kind: 'command-result', transportVersion: 3, status: 'completed', value: null, error: null, durableEvidence: []})); return;
     }
     res.setHeader('content-type', req.url === '/board.js' ? 'text/javascript' : req.url === '/board.css' ? 'text/css' : 'text/html');
     res.end(req.url === '/board.js' ? js : req.url === '/board.css' ? css : '<link rel="stylesheet" href="/board.css"><div id="root"></div><script src="/board.js"></script>');
@@ -137,7 +146,9 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
       await page.waitForFunction((previous: number) => window.boardInput.ups > previous, seen, { timeout: 5000 });
       await page.evaluate('window.boardSettled()');
     },
-    async render(snapshot: ReturnType<typeof toWebBoardSnapshot>, sse = false) {
+    async render(snapshot: ReturnType<typeof toWebBoardSnapshot>, sse = false, details: readonly WebMissionDetail[] = []) {
+      missionDetails.clear();
+      for (const detail of details) { missionDetails.set(detail.missionId, detail); }
       const applied = await page.evaluate(() => window.boardRenders);
       if (sse) {
         // A frame can only land once the page's EventSource is registered.
@@ -165,5 +176,5 @@ export function pointerSnapshot(lane: 'backlog' | 'refined' | 'active' | 'review
     blockingReason: work === 'stopped' ? 'blocked fixture' : null,
     commands: commands.map((command) => ({command, enabled: true, reason: null, targetLane: null})),
   });
-  return toWebBoardSnapshot(makeProjection({ [lane]: [card] }));
+  return webProjection.snapshot(makeProjection({ [lane]: [card] }));
 }

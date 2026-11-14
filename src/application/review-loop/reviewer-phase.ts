@@ -11,11 +11,12 @@ import { missionId } from '../../domain/mission.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
 import { isArtifactInfraFailure, isPollTimeout, POLL_TIMEOUT, type ReviewerArtifactFacts } from '../ports/review-round.js';
 import { pinReviewBaseline } from './pin-baseline.js';
-import { establishReviewerPolicy, launchFailureAllowsReplacement, nextOutstandingReviewer, reconcileReroutedReviewer, recordedApprovalReady, recordedPendingApproval, recordObservedApproval, replaceFailedReviewer } from './reviewer-policy.js';
+import { emitReviewerProgress, establishReviewerPolicy, launchFailureAllowsReplacement, nextOutstandingReviewer, reconcileReroutedReviewer, recordedApprovalReady, recordedPendingApproval, recordObservedApproval, replaceFailedReviewer } from './reviewer-policy.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
 import { selectReviewer } from './reviewer-selection.js';
 import { runParallelReviewerBatch } from './parallel-reviewers.js';
+import { applyReviewerArtifacts, incompleteReviewerDiagnostic, missingReviewerArtifacts, reviewerArtifactDiagnostic } from './reviewer-artifacts.js';
 import { applyReviewerOutcome, persistedReviewerOutcome } from './reviewer-outcome.js';
 
 type ReviewOutcome = { outcome: 'stop' } | { reviewState: unknown };
@@ -105,9 +106,11 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
       exclude: [identities.implementer],
       prompt: round.promptFacts(),
       sessionPolicy: 'fresh-ephemeral',
+      onStarted: async ({ agent, runId }) => await emitReviewerProgress(context, round, 'running', { reviewer: agent, runLabel: runId }),
       ...(context.parallelReviewer ? { pinnedAgent: true } : {}),
     });
   } catch (err: unknown) {
+    await emitReviewerProgress(context, round, 'failed', { blocker: (err as Error).message, nextAction: `Run px review ${context.slug}.` });
     context.emit({ kind: 'agent-selection', outcome: 'launch-failed', fields: { agent: identities.reviewer, step: 'review', error: (err as Error).message } });
     context.emit({ kind: 'reviewer-launch-failed', reviewer: identities.reviewer, message: (err as Error).message });
     const replacement = launchFailureAllowsReplacement(err) && await replaceFailedReviewer(context, round, identities.reviewer, (err as Error).message);
@@ -115,6 +118,8 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
     await context.escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
     return 'stop';
   }
+  await emitReviewerProgress(context, round, 'waiting', { reviewer: launch?.agent ?? identities.reviewer,
+    runLabel: typeof launch?.result?.runId === 'string' ? launch.result.runId : null });
   return await recordReviewerLaunch(context, round, launch);
 }
 
@@ -150,22 +155,6 @@ async function recordReviewerLaunch(
   await adoptLaunchedAgent(context, 'reviewer', identities.reviewer, launch);
   await ports.agents.recordStage('reviewer', context.state, identities, launch);
   return null;
-}
-
-function reviewerArtifactDiagnostic(context: LoopContext, artifacts: ReviewerArtifactFacts): string {
-  return artifacts.diagnostic || `Reviewer ${context.identities.reviewer} produced incomplete or invalid review artifacts`;
-}
-
-function missingReviewerArtifacts(context: LoopContext, round: ReviewRound): string {
-  const stopReason = round.reviewerLaunch?.result?.stopReason;
-  const cause = stopReason === 'length' ? 'output-token-limit' : stopReason;
-  return `Incomplete reviewer artifact: reviewer ${context.identities.reviewer} exited without a recorded verdict or consumable review artifacts${cause ? ` (${cause})` : ''}`;
-}
-
-/** A completed process cannot produce a later verdict without a relaunch. */
-function incompleteReviewerDiagnostic(context: LoopContext, round: ReviewRound, artifacts: ReviewerArtifactFacts): string | null {
-  if (artifacts.consumed) { return artifacts.ok ? null : reviewerArtifactDiagnostic(context, artifacts); }
-  return typeof round.reviewerLaunch?.result?.status === 'number' ? missingReviewerArtifacts(context, round) : null;
 }
 
 /**
@@ -230,12 +219,6 @@ async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): 
     reviewState = await pollProviderReview(context, round, { label: `round ${round.attempt} review`, retryCount: 0 });
   }
   return { step: null, reviewState };
-}
-
-function applyReviewerArtifacts(round: ReviewRound, artifacts: ReviewerArtifactFacts): unknown {
-  // TASK-2477/F1: recovered findings must accompany the changes-requested summary.
-  round.blockingFindings = artifacts.reviewFindings || [];
-  return artifacts.reviewState;
 }
 
 async function stopForArtifactRecovery(context: LoopContext, round: ReviewRound, recovery: Awaited<ReturnType<typeof rebound>>, maxAttempts: number): Promise<RoundStep> {
@@ -445,6 +428,8 @@ async function runSequentialReviewers(
     if (consumed.step) { return stop; }
     const recovered = await recoverReviewerTimeout(context, round, consumed.reviewState);
     if (recovered.step) { return stop; }
+    await emitReviewerProgress(context, round, 'completed', { outcome: recovered.reviewState === 'APPROVED' ? 'approved' : 'changes-requested',
+      runLabel: typeof round.reviewerLaunch?.result?.runId === 'string' ? round.reviewerLaunch.result.runId : null });
     // Only an approval can leave a revision owing another reviewer; a negative verdict is decisive.
     const next = policyApplies && recovered.reviewState === 'APPROVED' ? await nextOutstandingReviewer(context, round, launched) : 'done';
     if (next === 'next') { round.reviewerLaunch = undefined; continue; }
@@ -465,6 +450,7 @@ async function runConcurrentReviewers(
     launch: launchReviewer,
     consume: consumeReviewerOutput,
     recover: recoverReviewerTimeout,
+    settled: async (isolated, isolatedRound, state, outcome) => await emitReviewerProgress(isolated, isolatedRound, state, { outcome, runLabel: typeof isolatedRound.reviewerLaunch?.result?.runId === 'string' ? isolatedRound.reviewerLaunch.result.runId : null }),
     recordApproval: async (isolated, isolatedRound) => {
       const reviewed = isolatedRound.verifiedRevision ?? isolated.ports.preReview.head();
       if (reviewed) { await recordObservedApproval(isolated, isolatedRound, reviewed); }

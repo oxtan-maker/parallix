@@ -516,6 +516,7 @@ test('provider observation deduplicates owned invocation metadata and keeps part
   assert.deepEqual(observed.limitations, []);
   assert.deepEqual(observed.invocations.map(run => run.runId).sort(), [first.runId, second.runId].sort());
   assert.equal(observed.invocations.find(run => run.runId === first.runId)?.operationId, 'owned-operation');
+  assert.equal(observed.invocations.find(run => run.runId === first.runId)?.role, 'execute');
   alive = null;
   observed = observeProviderExecution(duplicateStore, identity);
   assert.equal(observed.limitations.length, 1, 'the inconclusive probe is a scoped diagnostic on its own invocation');

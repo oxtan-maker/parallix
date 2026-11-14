@@ -298,6 +298,8 @@ export interface ReviewAgentLaunch {
   readonly sessionPolicy?: SessionLaunchPolicy;
   /** This family already owns a parallel policy slot; capacity waits instead of rerouting it. */
   readonly pinnedAgent?: boolean;
+  /** Observational callback after the native run and durable run ID exist. */
+  readonly onStarted?: (_event: { readonly agent: string; readonly runId: string | null }) => Promise<void> | void;
   /** The role prompt; absent for a bare repair launch that carries only `recovery`. */
   readonly prompt?: ReviewPromptFacts;
   /** Recovery instructions appended to the role prompt by a rebound. */

@@ -1,4 +1,4 @@
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { projectActivityPublications } from '../../../fixtures/execution-activity.js';
 import { fixtureMission as completeMissionFixture } from '../../../fixtures/mission-builders.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
@@ -491,7 +491,7 @@ for (const phase of ['accepted', 'executing', 'stopping', 'completed', 'blocked'
     assert.equal(projected.blockingReason, null);
     assert.equal(projected.currentWork, null);
     assert.ok(projected.commands.every(command => !command.enabled));
-    const web = toWebBoardSnapshot(board).stages.flatMap(stage => stage.cards)[0];
+    const web = webProjection.snapshot(board).stages.flatMap(stage => stage.cards)[0];
     assert.equal(web.activity.work.kind, 'idle');
     assert.ok(web.actions.every(action => action.state !== 'enabled'), 'retained owner must not enable Stop');
   });

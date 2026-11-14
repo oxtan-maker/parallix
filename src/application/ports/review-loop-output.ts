@@ -93,7 +93,8 @@ export type ReviewLoopEvent =
   | { readonly kind: 'reviewer-route-unavailable'; readonly implementer: string }
   | { readonly kind: 'different-family-unavailable'; readonly implementer: string; readonly unavailable: { agent: string; detail: string; }[] }
   | { readonly kind: 'single-family-review'; readonly implementer: string }
-  | { readonly kind: 'reviewer-policy'; readonly mode: 'two-independent' | 'one-independent' | 'same-agent'; readonly required: number; readonly selected: readonly string[]; readonly available: number; readonly reason: string | null }
+  | { readonly kind: 'reviewer-policy'; readonly round: number; readonly revision: string; readonly mode: 'two-independent' | 'one-independent' | 'same-agent'; readonly required: number; readonly selected: readonly string[]; readonly available: number; readonly unavailable: readonly { readonly family: string; readonly reason: string }[]; readonly reason: string | null }
+  | { readonly kind: 'reviewer-progress'; readonly round: number; readonly revision: string; readonly required: number; readonly reviewer: string; readonly reviewerLabel: string; readonly runLabel: string; readonly state: 'queued' | 'running' | 'waiting' | 'completed' | 'failed'; readonly outcome: 'approved' | 'changes-requested' | 'unknown' | null; readonly blocker: string | null; readonly nextAction: string | null }
   | { readonly kind: 'reviewer-next'; readonly reviewer: string; readonly required: number; readonly approved: number }
   | { readonly kind: 'reviewer-resumed'; readonly reviewer: string; readonly round: number; readonly isContinue: boolean }
   | { readonly kind: 'reviewer-defaulted'; readonly detail: string | null }

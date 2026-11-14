@@ -1,6 +1,6 @@
 # ADR 0064: Mission terminal sessions and run history
 
-**Status:** Accepted
+**Status:** Accepted; concurrent-review presentation implemented by PX-0046
 
 **Date:** 2026-10-05
 
@@ -70,7 +70,9 @@ session; this is the fallback for TUI actions and other unhosted callers.
 Concurrent mission operations may use separate windows within the same mission
 session; they must not inject commands into an occupied terminal or create
 another mission session. PX-0046 review runs use separately labelled streams;
-ADR 0037 owns their policy and ADR 0053 their durable state.
+the family, attempt and run ID remain stable across interactive output,
+redirected output and retained history. ADR 0037 owns their policy and ADR 0053
+their durable state; terminal and browser renderers do not derive quorum rules.
 
 When an operation finishes or is stopped, close its operation window. Keep
 one console shell in the mission worktree for inspection, reconnection and later

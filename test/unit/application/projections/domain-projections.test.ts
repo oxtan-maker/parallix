@@ -133,6 +133,7 @@ test('mission card counts approvals against the post-rebase governed revision (P
       },
       reviewerResults: [{
         publicationId: 'reviewer-post-rebase-head', reviewerId: reviewer, agentFamily: reviewer,
+        runId: 'review-configured-reviewer-a1-native',
         revision: postRebaseRevision, decision: 'approved' as const, findings: [], outcome: 'completed' as const,
         status: 0, publishedAt: '2026-11-09T20:00:00.000Z',
       }],
@@ -145,6 +146,122 @@ test('mission card counts approvals against the post-rebase governed revision (P
   });
 
   assert.equal(card.awaitingApprovals, 1);
+  assert.deepEqual((card as unknown as { reviewProgress: unknown }).reviewProgress, {
+    round: 1,
+    revision: 'post-rebase-head',
+    mode: 'two-independent',
+    selected: ['configured-reviewer', 'vibe'],
+    independentAvailable: 2,
+    requiredApprovals: 2,
+    unavailable: [],
+    degradedReason: null,
+    reviewers: [
+      { reviewer: 'configured-reviewer', reviewerLabel: '1/2 configured-reviewer', runId: 'review-configured-reviewer-a1-native', runLabel: 'review-configured-reviewer-a1-native', state: 'completed', outcome: 'approved', status: 0, blocker: null },
+      { reviewer: 'vibe', reviewerLabel: '2/2 vibe', runId: null, runLabel: 'review-r1-2-vibe', state: 'waiting', outcome: null, status: null, blocker: null },
+    ],
+    blockers: [],
+    nextAction: 'Run px review task-post-rebase-review to resume 1 outstanding reviewer.',
+  });
+});
+
+test('mission card projects degraded reviewer availability, failed runs, blockers and the operator action (PX-0046.06)', () => {
+  const revision = changeRevision('repair-head');
+  const review = reviewConversation();
+  const round = currentReviewRound(review);
+  const degraded: Review = { ...review, rounds: [{ ...round,
+    reviewerPolicy: { revision, mode: 'one-independent', requiredApprovals: 1, selected: [reviewer], independentAvailable: 1,
+      unavailable: [{ family: 'vibe', reason: 'launcher missing' }], fallbackReason: 'only one independent reviewer is available (vibe: launcher missing)' },
+    reviewerResults: [{ publicationId: 'review-configured-reviewer-a1-run', reviewerId: reviewer, agentFamily: reviewer,
+      runId: 'review-configured-reviewer-a1-native',
+      revision, decision: 'unknown', findings: [], outcome: 'missing-output', status: 1, publishedAt: '2026-11-12T10:00:00.000Z' }],
+  }] };
+  const card = projectMissionCard(fixtureMission('task-review-repair', { status: 'review', review: degraded }), {
+    latestGate: 'passed', reviewApproval: null, currentWork: null, blockingReason: 'review owner disconnected', flags: [],
+  });
+
+  assert.deepEqual((card as unknown as { reviewProgress: unknown }).reviewProgress, {
+    round: 1,
+    revision: 'repair-head',
+    mode: 'one-independent',
+    selected: ['configured-reviewer'],
+    independentAvailable: 1,
+    requiredApprovals: 1,
+    unavailable: [{ family: 'vibe', reason: 'launcher missing' }],
+    degradedReason: 'only one independent reviewer is available (vibe: launcher missing)',
+    reviewers: [{ reviewer: 'configured-reviewer', reviewerLabel: '1/1 configured-reviewer', runId: 'review-configured-reviewer-a1-native', runLabel: 'review-configured-reviewer-a1-native', state: 'failed', outcome: 'unknown', status: 1, blocker: 'Reviewer process exited with status 1.' }],
+    blockers: ['Reviewer process exited with status 1.', 'review owner disconnected'],
+    nextAction: 'Run px review task-review-repair to resume 1 outstanding reviewer.',
+  });
+});
+
+test('review progress keeps publication identity distinct when native run ID is unavailable (PX-0046.06 F8)', () => {
+  const revision = changeRevision('legacy-reviewed-head');
+  const review = reviewConversation();
+  const round = currentReviewRound(review);
+  const governed: Review = { ...review, rounds: [{ ...round,
+    reviewerPolicy: { revision, mode: 'one-independent', requiredApprovals: 1, selected: [reviewer],
+      independentAvailable: 1, unavailable: [], fallbackReason: null },
+    reviewerResults: [{ publicationId: 'provider-session-42', reviewerId: reviewer, agentFamily: reviewer,
+      revision, decision: 'approved', findings: [], outcome: 'completed', status: 0,
+      publishedAt: '2026-11-13T05:00:00.000Z' }],
+  }] };
+  const card = projectMissionCard(fixtureMission('task-partial-review-attribution', { status: 'review', review: governed }), {
+    latestGate: 'passed', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+  });
+
+  assert.deepEqual(card.reviewProgress?.reviewers[0], {
+    reviewer: 'configured-reviewer', reviewerLabel: '1/1 configured-reviewer', runId: null,
+    runLabel: 'publication:provider-session-42', state: 'completed', outcome: 'approved', status: 0, blocker: null,
+  });
+});
+
+test('review progress keeps blockers bounded while round history owns finding summaries (PX-0046.06 F4)', () => {
+  const revision = changeRevision('finding-heavy-head');
+  const review = reviewConversation();
+  const round = currentReviewRound(review);
+  const governed: Review = { ...review, rounds: [{ ...round,
+    reviewerPolicy: { revision, mode: 'one-independent', requiredApprovals: 1, selected: [reviewer],
+      independentAvailable: 1, unavailable: [], fallbackReason: null },
+  }] };
+  const findings = Array.from({ length: 8 }, (_, index) => ({
+    id: reviewFindingId(`finding-${index + 1}`), summary: `Detailed finding ${index + 1}`, location: null,
+  }));
+  const requested = applyReviewerCommand(governed, {
+    type: 'request-changes', revision, decidedAt: '2026-11-13T03:17:59.449Z', comment: null, findings,
+  });
+  const card = projectMissionCard(fixtureMission('task-bounded-review-progress', { status: 'active', review: requested }), {
+    latestGate: 'passed', reviewApproval: null, currentWork: null, blockingReason: 'review owner disconnected', flags: [],
+  });
+
+  assert.deepEqual(card.reviewProgress?.blockers, ['review owner disconnected']);
+  assert.equal(card.reviewHistory[0]?.findingSummaries.length, findings.length, 'round history retains the detailed findings once');
+  assert.equal(card.reviewProgress?.nextAction, 'Run px active task-bounded-review-progress to address reviewer blockers.');
+});
+
+test('closed missions retain review history without an unavailable progress action (PX-0046.06 F7)', () => {
+  const revision = changeRevision('closed-reviewed-head');
+  const review = reviewConversation();
+  const round = currentReviewRound(review);
+  const governed: Review = { ...review, rounds: [{ ...round,
+    reviewerPolicy: { revision, mode: 'one-independent', requiredApprovals: 1, selected: [reviewer],
+      independentAvailable: 1, unavailable: [], fallbackReason: null },
+    reviewerResults: [{ publicationId: 'review-configured-reviewer-a1-run', reviewerId: reviewer, agentFamily: reviewer,
+      runId: 'review-configured-reviewer-a1-native', revision, decision: 'approved', findings: [], outcome: 'completed',
+      status: 0, publishedAt: '2026-11-13T04:00:00.000Z' }],
+  }] };
+  const approved = applyReviewerCommand(governed, {
+    type: 'approve', revision, decidedAt: '2026-11-13T04:01:00.000Z', comment: null, source: { kind: 'local' },
+  });
+  const card = projectMissionCard(fixtureMission('task-closed-review-progress', {
+    status: 'done', closedAt: '2026-11-13T04:02:00.000Z', review: approved,
+  }), {
+    latestGate: 'passed', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+  });
+
+  assert.equal(card.closed, true);
+  assert.equal(card.reviewProgress, null, 'closed cards expose no live review action');
+  assert.equal(card.reviewHistory[0]?.comment, null, 'retained review history remains available');
+  assert.ok(card.commands.every(command => !command.enabled && command.reason === 'Mission is closed'));
 });
 
 test('board lanes are mission statuses, never a vocabulary of their own', () => {

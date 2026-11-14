@@ -7,6 +7,8 @@ export type ReviewerResultOutcome = 'completed' | 'missing-output';
 /** One immutable reviewer publication attributed to its native run and judged head. */
 export interface ReviewerResult {
   readonly publicationId: string;
+  /** Retained native run identity shared with `px history`, when observed. */
+  readonly runId?: string | null;
   readonly reviewerId: string;
   readonly agentFamily: AgentFamily;
   readonly revision: ChangeRevision;
@@ -20,6 +22,7 @@ export interface ReviewerResult {
 
 export interface ReviewerResultAttribution {
   readonly publicationId?: string;
+  readonly runId?: string | null;
   readonly reviewerId?: string;
   readonly agentFamily?: AgentFamily;
   readonly outcome?: ReviewerResultOutcome;
@@ -37,6 +40,23 @@ export function recordReviewerResult(review: Review, result: ReviewerResult): Re
       || left.publicationId.localeCompare(right.publicationId));
   const [first, ...rest] = review.rounds;
   const updated = { ...round, reviewerResults };
+  return { ...review, rounds: rest.length === 0 ? [updated] : [first, ...rest.slice(0, -1), updated] };
+}
+
+/** Add the retained launcher identity once without changing publication identity or judgment. */
+export function attributeReviewerRun(review: Review, roundNumber: number, family: AgentFamily, runId: string): Review {
+  if (!runId.trim()) { throw new Error('Reviewer result run ID cannot be empty'); }
+  const round = review.rounds.at(-1);
+  if (!round || round.number !== roundNumber) { return review; }
+  const results = [...(round.reviewerResults ?? [])];
+  let index = -1;
+  for (let candidate = results.length - 1; candidate >= 0; candidate--) {
+    if (results[candidate]?.agentFamily === family && !results[candidate]?.runId) { index = candidate; break; }
+  }
+  if (index < 0) { return review; }
+  results[index] = { ...results[index]!, runId };
+  const [first, ...rest] = review.rounds;
+  const updated = { ...round, reviewerResults: results };
   return { ...review, rounds: rest.length === 0 ? [updated] : [first, ...rest.slice(0, -1), updated] };
 }
 
@@ -84,6 +104,9 @@ function validateReviewerResult(result: ReviewerResult): void {
   if (result.status !== null && !Number.isSafeInteger(result.status)) { throw new Error('Reviewer result status must be an integer or null'); }
   if (result.revokedAt !== undefined && result.revokedAt !== null && !result.revokedAt.trim()) {
     throw new Error('Reviewer result revocation requires a time');
+  }
+  if (result.runId !== undefined && result.runId !== null && !result.runId.trim()) {
+    throw new Error('Reviewer result run ID cannot be empty');
   }
 }
 

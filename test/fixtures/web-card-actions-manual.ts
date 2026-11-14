@@ -1,8 +1,8 @@
+import { webProjection } from './web-projection.js';
 /** Isolated running-board walkthrough; only disposable projections and in-memory requests. */
 import assert from 'node:assert/strict';
 import { pointerBoard, compactPointerSnapshot, pointerSnapshot } from './web-pointer-board.js';
 import { makeCard, makeProjection } from './board-projection.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { C } from '../../web/src/palette.js';
 const fixture = await pointerBoard();
 try {
@@ -81,7 +81,7 @@ try {
   const live = pointerSnapshot('active', ['review'], 'running');
   const active = live.stages.find(stage => stage.lane === 'active')!.cards[0];
   const intake = compactPointerSnapshot('refined').stages.find(stage => stage.lane === 'refined')!.cards[0];
-  const done = toWebBoardSnapshot(makeProjection({ done: [makeCard({ status: 'done', lane: 'done', closed: true })] })).stages.find(stage => stage.lane === 'done')!;
+  const done = webProjection.snapshot(makeProjection({ done: [makeCard({ status: 'done', lane: 'done', closed: true })] })).stages.find(stage => stage.lane === 'done')!;
   await fixture.render({ ...live, attentionQueue: [{ missionId: active.id, rank: 1, reason: { kind: 'gate-failed', detail: 'Fixture failed gate' }, action: active.actions[0], dependsOnSources: [] }], stages: live.stages.map(stage => stage.lane === 'active' ? { ...stage, cards: [{ ...active, gate: 'failed', blockingReason: 'Fixture blocked' }] } : stage.lane === 'refined' ? { ...stage, count: 1, cards: [{ ...intake, id: 'task-fixture-intake' }] } : stage.lane === 'done' ? done : stage) });
   const attention = page.locator('[aria-labelledby="attention-heading"] article');
   await attention.focus();

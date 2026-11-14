@@ -107,7 +107,7 @@ export function parseAttachCliRequest(args: readonly string[]): AttachCliRequest
 export function renderRunList(runs: readonly RunSummary[]): string {
   if (runs.length === 0) { return 'No retained agent runs for this Mission.'; }
   return runs.map(({ record, state, coverage }) => [
-    `${record.runId}  ${state}${record.exitCode !== null ? ` exit=${record.exitCode}` : ''}${record.signal ? ` signal=${record.signal}` : ''}  host=${record.terminalHost}  started=${record.startedAt}`,
+    `${record.role === 'review' || record.role === 'reviewer' ? 'reviewer' : record.role} ${record.family} #${record.attempt ?? '?'}  ${record.runId}  ${state}${record.exitCode !== null ? ` exit=${record.exitCode}` : ''}${record.signal ? ` signal=${record.signal}` : ''}  host=${record.terminalHost}  started=${record.startedAt}`,
     ...coverage.map(line => `  - ${line}`),
   ].join('\n')).join('\n');
 }

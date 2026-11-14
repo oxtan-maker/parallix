@@ -35,7 +35,7 @@ export interface StartAgentOptions {
   exclude?: string[] | Set<string>;
   onLimitHit?: (event: { agent: string; until: string; source?: string }) => unknown;
   launchAdmission?: import('../../application/ports/repair-agent-launch.js').AgentLaunchAdmission;
-  onLaunch?: (event: { agent: string; model: string | null; invocation: AgentInvocation | null | undefined; startedAtMs: number }) => unknown | Promise<unknown>;
+  onLaunch?: (event: { agent: string; model: string | null; invocation: AgentInvocation | null | undefined; startedAtMs: number; runId?: string | null }) => unknown | Promise<unknown>;
   /**
    * A persisted workflow decision can finish an agent's assignment before the
    * provider process returns (for example, a reviewer that has submitted its

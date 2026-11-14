@@ -11,6 +11,8 @@ const dirtyHandoffRepair = process.argv.includes('--dirty-handoff-repair');
 const aggregateIntegrationRebound = process.argv.includes('--aggregate-integration-rebound');
 const integrationRebound = process.argv.includes('--integration-rebound') || aggregateIntegrationRebound;
 const preferredReviewerFallback = process.argv.includes('--preferred-reviewer-fallback');
+const oneReviewer = process.argv.includes('--one-reviewer');
+const lostReviewerRestart = process.argv.includes('--lost-reviewer-restart');
 const configureReviewOpinion = process.argv.includes('--configure-review-opinion');
 const reviewOpinionArgument = process.argv.indexOf('--review-opinion-file');
 const reviewOpinionValue = reviewOpinionArgument >= 0 ? process.argv[reviewOpinionArgument + 1] : null;
@@ -38,7 +40,9 @@ if (integrationRebound) env.REHEARSAL_INTEGRATION_REBOUND = '1';
 if (aggregateIntegrationRebound) env.REHEARSAL_AGGREGATE_INTEGRATION_REBOUND = '1';
 for (const key of ['NODE_OPTIONS', 'NODE_V8_COVERAGE', 'PI_BIN', 'CLAUDE_BIN', 'CODEX_BIN', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_OPERATION_CAPTURE', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET']) delete env[key];
 if (preferredReviewerFallback) env.CLAUDE_BIN = claudeAgent;
-if (preferredReviewerFallback) env.PATH = scratch + path.delimiter + env.PATH;
+if (oneReviewer) env.CLAUDE_BIN = claudeAgent;
+if (preferredReviewerFallback || oneReviewer) env.PATH = scratch + path.delimiter + env.PATH;
+if (lostReviewerRestart) env.REHEARSAL_LOST_REVIEWER_RESTART = '1';
 if (reviewOpinionFile) env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE = reviewOpinionFile;
 const run = (cwd, args) => {
   const result = spawnSync(cli, args, { cwd, env, encoding: 'utf8', timeout: 120000, maxBuffer: 20 * 1024 * 1024 });
@@ -78,6 +82,9 @@ fs.appendFileSync(path.join(process.env.REHEARSAL_STATE, 'preferred-reviewer-lau
 console.log(JSON.stringify({ type: 'rate_limit_event', api_error_status: 429, api_error: 'usage_limit_reached', rate_limit_info: { status: 'rejected', resetsAt: '2099-01-01T00:00:00.000Z' }, diagnostic: 'controlled disposable failure' }));
 process.exit(1);
 `, { mode: 0o755 });
+  } else if (oneReviewer) {
+    fs.copyFileSync(agent, claudeAgent);
+    fs.chmodSync(claudeAgent, 0o755);
   }
   const probe = [
     "const fs = require('node:fs'); const cp = require('node:child_process');",
@@ -90,7 +97,9 @@ process.exit(1);
     "if(covered) { fs.mkdirSync('coverage',{recursive:true}); fs.writeFileSync('coverage/.lcov-unit.info','TN:\\nSF:src/value.js\\nDA:1,1\\nLF:1\\nLH:1\\nend_of_record\\n'); }",
   ].join('\n');
   initCommittedRepository(root, {
-    'config/agents.json': JSON.stringify({ steps: Object.fromEntries(['draft', 'active', 'review', 'integrate'].map(step => [step, { eligible: preferredReviewerFallback && step === 'review' ? ['claude', 'custom'] : ['custom'] }])) }),
+    'config/agents.json': JSON.stringify({ steps: Object.fromEntries(['draft', 'active', 'review', 'integrate'].map(step => [step, {
+      eligible: step === 'review' ? (oneReviewer ? ['claude'] : preferredReviewerFallback ? ['claude', 'custom'] : ['custom']) : ['custom'],
+    }])) }),
     '.gitignore': 'node_modules\ncoverage\n',
     ['backlog/tasks/' + slug + ' - Unit-rehearsal.md']: '---\nid: TASK-UNIT-REHEARSAL\ntitle: Unit rehearsal\nstatus: backlog\nassignee: []\nlabels: [ai_sdlc]\ndependencies: []\n---\n\nDisposable verification rehearsal.\n',
     'src/value.js': 'export const value = 0;\n',
@@ -129,6 +138,41 @@ process.exit(1);
   run(worktree, ['active', slug, '--implementer', 'custom', ...(preferredReviewerFallback ? ['--reviewer', 'claude'] : [])]);
   const approved = JSON.parse(run(worktree, ['status', slug, '--json']));
   assert.equal(approved.missionStatus, 'integration');
+  if (oneReviewer) {
+    assert.equal(approved.review.progress.requiredApprovals, 1);
+    assert.equal(approved.review.progress.independentAvailable, 1);
+    assert.deepEqual(approved.review.progress.selected, ['claude']);
+    assert.ok(approved.review.progress.reviewers.every(reviewer => reviewer.state === 'completed'));
+    const headlessStatus = run(worktree, ['status', slug]);
+    assert.match(headlessStatus, /1\/1 claude.*completed/);
+    assert.doesNotMatch(headlessStatus, /\x1b/);
+    const headlessHistory = run(worktree, ['history', slug, 'list']);
+    assert.match(headlessHistory, /reviewer claude #/);
+    const history = JSON.parse(run(worktree, ['history', slug, 'list', '--json']));
+    const retainedRunIds = history.map(item => item.record.runId);
+    assert.ok(approved.review.progress.reviewers.every(reviewer => retainedRunIds.includes(reviewer.runId)),
+      'completed status labels correlate with retained history run IDs');
+    const tty = spawnSync('script', ['-q', '-e', '-c', `${cli} status ${slug}`, '/dev/null'],
+      { cwd: worktree, env, encoding: 'utf8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 });
+    assert.equal(tty.status, 0, `TTY status capture failed: ${tty.stdout}${tty.stderr}`);
+    assert.match(tty.stdout, /1\/1 claude.*completed/);
+    const reviewLaunches = fs.readFileSync(path.join(scratch, 'agent-launches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+      .filter(launch => launch.mode === 'review');
+    assert.equal(reviewLaunches.length, lostReviewerRestart ? 3 : 2, 'lost reviewer is restarted once before repair and re-review');
+    assert.equal(new Set(reviewLaunches.map(launch => launch.sessionID)).size, reviewLaunches.length, 'every reviewer restart uses a fresh native session');
+    if (lostReviewerRestart) assert.ok(fs.existsSync(path.join(scratch, 'lost-reviewer')));
+  }
+  if (!oneReviewer && !preferredReviewerFallback) {
+    assert.equal(approved.review.progress.mode, 'same-agent');
+    assert.equal(approved.review.progress.requiredApprovals, 1);
+    assert.equal(approved.review.progress.independentAvailable, 0);
+    assert.deepEqual(approved.review.progress.selected, ['custom']);
+    assert.match(approved.review.progress.degradedReason, /same agent reviews in a fresh context/);
+    assert.ok(approved.review.progress.reviewers.every(reviewer => reviewer.state === 'completed'));
+    const history = JSON.parse(run(worktree, ['history', slug, 'list', '--json']));
+    assert.ok(approved.review.progress.reviewers.every(reviewer => history.some(item => item.record.runId === reviewer.runId)),
+      'same-agent completed status labels correlate with retained history run IDs');
+  }
   if (preferredReviewerFallback) {
     const log = fs.readFileSync(path.join(scratch, 'cli.log'), 'utf8');
     const launches = fs.readFileSync(path.join(scratch, 'agent-launches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
@@ -193,6 +237,9 @@ process.exit(1);
       }
       run(worktree, ['integrate', slug]);
     }
+    const integrated = JSON.parse(run(root, ['status', slug, '--json']));
+    assert.equal(integrated.missionStatus, 'done');
+    assert.equal(integrated.review.progress, null, 'closed status exposes no unavailable review action');
     assert.equal(fs.readFileSync(path.join(scratch, 'post-squash-hooks'), 'utf8').trim().split('\n').length, 1,
       'configured post-squash maintenance runs once after landing');
     const after = fs.readFileSync(countFile, 'utf8').trim().split('\n').map(JSON.parse);

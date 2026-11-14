@@ -21,7 +21,7 @@ function cancelAction(actions: readonly WebMissionCard['actions'][number][]) {
     ?? actions.find((action) => action.kind === 'mission:cancel') ?? null;
 }
 
-function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
+function IntakeCard({ card, snapshotRevision, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; snapshotRevision: string | null; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const actions = cardCommands(card.actions);
   const cancel = cancelAction(card.actions);
   const work = card.activity.work;
@@ -57,7 +57,7 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       {/* The compact intake row states current work in the shared actor line.
           An idle row publishes no work and keeps its baseline layout. */}
       {work.kind !== 'idle' && <ActorLine card={card} style={{ marginTop: SPACE.sm, lineHeight: 1.35 }} />}
-      <CheckpointPips card={card} />
+      <CheckpointPips card={card} snapshotRevision={snapshotRevision} />
       {(actions.length > 0 || cancel !== null) && (
         <div className="card-actions" style={{ display: 'flex', justifyContent: 'flex-end', gap: SPACE.sm, marginTop: SPACE.md, flexWrap: 'wrap' }}>
           {cancel !== null && (
@@ -73,13 +73,13 @@ function IntakeCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
   );
 }
 
-export function IntakeColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
+export function IntakeColumn({ stage, snapshotRevision, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; snapshotRevision: string | null; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
   return (
     <section aria-label={`${stage.lane} stage`} style={{ display: 'flex', flexDirection: 'column', ...style }}>
       <LaneHeader lane={stage.lane} count={stage.count} />
       <div onDragOver={(event: DragEvent<HTMLDivElement>) => { if (draggable) { event.preventDefault(); } }} onDrop={() => onDrop(stage.lane)} style={{ flex: 1, overflowY: 'auto', paddingTop: SPACE.md, minHeight: 0 }}>
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
-        {stage.cards.map((card) => <IntakeCard key={card.id} card={card} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingCommands={pendingCommands} />)}
+        {stage.cards.map((card) => <IntakeCard key={card.id} card={card} snapshotRevision={snapshotRevision} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingCommands={pendingCommands} />)}
       </div>
     </section>
   );

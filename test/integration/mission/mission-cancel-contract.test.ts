@@ -1,3 +1,4 @@
+import { webProjection } from '../../fixtures/web-projection.js';
 import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import { TerminalStream as Stream } from '../../helpers/terminal-stream.js';
@@ -31,7 +32,6 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Board } from '../../../web/src/board.js';
-import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { createCancelCommand, parseCancelCliRequest } from '../../../src/interfaces/cli/cancel.js';
 import { missionCleanupCommand } from '../../../src/composition/production-capabilities.js';
 import { makeCard, makeProjection } from '../../fixtures/board-projection.js';
@@ -538,7 +538,7 @@ describe('Cancel surfaces', () => {
   // ---------------------------------------------------------------------------
 
   function webSnapshot() {
-    return toWebBoardSnapshot(makeProjection({
+    return webProjection.snapshot(makeProjection({
       active: [makeCard({ id: missionId(SLUG), status: 'active', lane: 'active', commands: [CANCEL_COMMAND] })],
     }));
   }
@@ -553,7 +553,7 @@ describe('Cancel surfaces', () => {
     globalThis.fetch = async (_url, init) => {
       calls.push(init!);
       return new Response(
-        JSON.stringify({ kind: 'command-result', transportVersion: 2, status: 'completed', value: { slug: SLUG, cleanupCommand: 'git worktree remove /tmp/x && git branch -D mission/x' }, error: null, durableEvidence: [] }),
+        JSON.stringify({ kind: 'command-result', transportVersion: 3, status: 'completed', value: { slug: SLUG, cleanupCommand: 'git worktree remove /tmp/x && git branch -D mission/x' }, error: null, durableEvidence: [] }),
         { headers: { 'content-type': 'application/json' } },
       );
     };

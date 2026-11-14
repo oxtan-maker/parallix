@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 // Checkpoint disclosure and progress interactions share the presentation suite owner.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -5,11 +6,10 @@ import { HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'h
 import { act } from 'react';
 import { renderBoard } from './web-board-harness.fixture.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 
-const snapshot = (cards: ReturnType<typeof makeCard>[]) => toWebBoardSnapshot(makeProjection({ active: cards }));
+const snapshot = (cards: ReturnType<typeof makeCard>[]) => webProjection.snapshot(makeProjection({ active: cards }));
 const isSameNode = (actual: unknown, expected: unknown) => actual === expected;
 
 test('checkpoint track never blinks through activity transitions and retains disclosure (TASK-2773.04)', async () => {
@@ -73,7 +73,9 @@ test('execution advances to the next checkpoint after recorded completion (TASK-
 for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as const) {
   test(`checkpoint dialog opens unrecorded long plans in ${lane} (TASK-2773.04)`, async () => {
     const plan = Array.from({ length: 100 }, (_, i) => ({ name: `CP-${i}`, description: `Description ${i}`, goalCheck: [] }));
-    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ [lane]: [makeCard({ lane, status: lane, checkpoint: null, checkpointEvidence: plan })] })) });
+    const card = makeCard({ lane, status: lane, checkpoint: null, checkpointEvidence: plan });
+    const projection = makeProjection({ [lane]: [card] });
+    const page = await renderBoard({ board: webProjection.snapshot(projection), detail: webProjection.detail(projection, card.id) });
     try {
       const button = page.mount.querySelector<DomButton>('button[aria-label^="View checkpoint evidence for"]')!;
       await act(async () => { button.click(); });
@@ -85,7 +87,7 @@ for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as con
       assert.match(dialog.textContent, /No evidence recorded/);
       await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape' })); });
       assert.equal(page.window.document.querySelector('[role="dialog"]'), null);
-      assert.equal(page.calls.length, 0);
+      assert.equal(page.calls.length, 1, 'opening the disclosure performs exactly one detail read');
     } finally { await page.close(); }
   });
 }
@@ -93,7 +95,8 @@ for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as con
 test('done checkpoint modal escapes card stacking contexts and cleans up (TASK-2773.04 F1)', async () => {
   const cards = ['task-first', 'task-second'].map(id => makeCard({ id: missionId(id), lane: 'done', status: 'done',
     checkpointEvidence: [{ name: 'CP-1', description: id, goalCheck: [] }] }));
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ done: cards })) });
+  const projection = makeProjection({ done: cards });
+  const page = await renderBoard({ board: webProjection.snapshot(projection), detail: webProjection.detail(projection, cards[0].id) });
   try {
     const buttons = page.mount.querySelectorAll<DomButton>('button[aria-label^="View checkpoint evidence for"]');
     buttons[0].focus();
@@ -108,9 +111,9 @@ test('done checkpoint modal escapes card stacking contexts and cleans up (TASK-2
     await act(async () => { buttons[1].click(); });
     assert.equal(page.window.document.querySelectorAll('[role="dialog"]').length, 1);
     assert.match(page.window.document.querySelector('[role="dialog"]')!.textContent, /task-second/);
-    await page.rerender(toWebBoardSnapshot(makeProjection()));
+    await page.rerender(webProjection.snapshot(makeProjection()));
     assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'removing the card removes its portal');
-    assert.equal(page.calls.length, 0);
+    assert.ok(page.calls.length >= 1, 'opening a disclosure reads detail on demand');
   } finally { await page.close(); }
 });
 

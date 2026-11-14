@@ -102,6 +102,21 @@ function gutterColor(card: MissionCardFacts): 'green' | 'red' | 'yellow' | 'blue
   return 'gray';
 }
 
+function ReviewProgressLines({ card, width }: { card: MissionCardFacts; width: number }): React.ReactElement | null {
+  const progress = card.reviewProgress;
+  if (!progress) { return null; }
+  const approvals = `${progress.requiredApprovals}/${progress.requiredApprovals} approval${progress.requiredApprovals === 1 ? '' : 's'}`;
+  return <>
+    <Text wrap="truncate-end" color="cyan">{truncate(`R${progress.round} · ${approvals} · independent ${progress.independentAvailable}`, width)}</Text>
+    {progress.reviewers.map(reviewer => <Text key={`${reviewer.runLabel}:${reviewer.state}`} wrap="truncate-end" color={reviewer.state === 'failed' ? 'red' : 'gray'}>
+      {truncate(`${reviewer.reviewerLabel} · ${reviewer.state} · ${reviewer.runLabel}${reviewer.outcome ? ` · ${reviewer.outcome}` : ''}`, width)}
+    </Text>)}
+    {progress.degradedReason && <Text wrap="truncate-end" color="yellow">{truncate(`degraded: ${progress.degradedReason}`, width)}</Text>}
+    {progress.blockers.map(blocker => <Text key={blocker} wrap="truncate-end" color="red">{truncate(`blocker: ${blocker}`, width)}</Text>)}
+    <Text wrap="truncate-end" dimColor>{truncate(`next: ${progress.nextAction}`, width)}</Text>
+  </>;
+}
+
 export interface MissionCardProps {
   readonly card: MissionCardFacts;
   /** Content width available to the card, in columns. */
@@ -171,6 +186,7 @@ export function MissionCard({ card, width = DEFAULT_CARD_WIDTH, selected = false
       </Box>
       <Text wrap="truncate-end" dimColor={title === UNAVAILABLE}>{truncate(title, width)}</Text>
       {isInFlight && <><Box flexDirection="row"><Text wrap="truncate-end" color="gray">{truncate(checkpoint, Math.max(6, width - 14))}</Text><Text wrap="truncate-end" color={gateColor(card.gate)} bold={card.gate === 'failed'}>{' '}{gateText(card.gate)}</Text></Box><Text wrap="truncate-end" dimColor>{truncate(`next: ${nextAction}`, width)}</Text><Text wrap="truncate-end" color={card.reviewApproved ? 'green' : 'gray'}>{truncate(prLine, width)}</Text></>}
+      <ReviewProgressLines card={card} width={width} />
       {enabledCommands.length > 0 && <Box flexDirection="row">{enabledCommands.map(cmd => <Box key={cmd.command} marginRight={1}><Text bold color="cyan">{actionLabel(card.lane as BoardLane, cmd.command, card.flags)}</Text></Box>)}</Box>}
       {card.execution !== undefined && card.execution.limitations.length > 0 && <Text wrap="wrap" color="yellow">{`\u25b2 ${card.execution.limitations.join('; ')} (provider observation ${card.execution.observedAt})`}</Text>}
       {card.blockingReason !== null && card.blockingReason !== '' && <Text wrap="truncate-end" bold color="red">{truncate(`\u25b2 ${card.blockingReason}`, width)}</Text>}

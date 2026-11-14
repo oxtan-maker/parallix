@@ -1,10 +1,11 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { COMMANDS_PATH, loadSnapshot, sendCommand, SNAPSHOT_PATH } from '../../../../web/src/board-data.js';
-import { toWebBoardSnapshot, WEB_TRANSPORT_VERSION } from '../../../../src/interfaces/web/transport.js';
-import { makeProjection } from '../../../fixtures/board-projection.js';
+import { COMMANDS_PATH, loadMissionDetail, loadSnapshot, sendCommand, SNAPSHOT_PATH } from '../../../../web/src/board-data.js';
+import { toWebBoardSnapshot, toWebMissionDetail, WEB_TRANSPORT_VERSION } from '../../../../src/interfaces/web/transport.js';
+import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 
-const validSnapshot = (): unknown => JSON.parse(JSON.stringify(toWebBoardSnapshot(makeProjection())));
+const validSnapshot = (): unknown => JSON.parse(JSON.stringify(webProjection.snapshot(makeProjection())));
 
 interface Call { readonly url: string; readonly method: string | undefined; readonly body: string | null }
 
@@ -92,12 +93,30 @@ test('no settled snapshot state is the loading state', async () => {
   assert.notEqual(state.kind as string, 'loading');
 });
 
+test('deferred mission detail must describe the rendered projection revision (PX-0058.04)', async () => {
+  const projection = makeProjection({ active: [makeCard()] });
+  const snapshot = toWebBoardSnapshot(projection, {
+    state: 'fresh', revision: 'snapshot-revision', refreshedAt: '2026-11-12T00:00:00.000Z', reason: null,
+  });
+  const detail = toWebMissionDetail(projection, projection.stages.find(stage => stage.lane === 'active')!.cards[0].id, {
+    state: 'fresh', revision: 'later-revision', refreshedAt: '2026-11-12T00:00:01.000Z', reason: null,
+  });
+  await withFetch(() => jsonResponse(detail), async () => {
+    await assert.rejects(loadMissionDetail(detail.missionId, snapshot.freshness.revision),
+      /detail describes projection later-revision, while the board shows snapshot-revision/);
+  });
+  const matching = { ...detail, freshness: snapshot.freshness };
+  const loaded = await withFetch(() => jsonResponse(matching), async () =>
+    loadMissionDetail(detail.missionId, snapshot.freshness.revision));
+  assert.equal(loaded.freshness.revision, 'snapshot-revision');
+});
+
 test('the command client sends one typed request to the guarded route', async () => {
   const originalDocument = globalThis.document;
   Object.defineProperty(globalThis, 'document', { configurable: true, value: undefined });
   try {
     const calls = await withFetch(
-      () => jsonResponse({ kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [] }),
+      () => jsonResponse({ kind: 'command-result', transportVersion: 3, status: 'completed', error: null, durableEvidence: [] }),
       async recorded => {
         await sendCommand({ missionId: 'task-2433', kind: 'active:execute', missionStatusAtRequest: 'active' });
         return recorded;

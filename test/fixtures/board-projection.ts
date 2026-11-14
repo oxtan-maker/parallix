@@ -73,6 +73,7 @@ export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
     reviewApproved: false,
     reviewRound: null,
     reviewPhase: null,
+    reviewProgress: null,
     reviewDisposition: null,
     reviewHistory: [],
     currentWork: null,

@@ -1,7 +1,8 @@
-import type { BoardProjection } from '../../application/projections/board.js';
+import { findBoardMission, type BoardProjection } from '../../application/projections/board.js';
 import type { BoardCommandRequest } from '../../application/controller/board-command.js';
 import type { WebCommandRequest, WebBoardSnapshot, WebCommandResult } from './transport.js';
 import { toWebBoardSnapshot } from './transport.js';
+import type { SharedProjectionRead } from './shared-build.js';
 import { validateWebEditMissionRequest } from './transport-edit-mission.js';
 import { missionVersion } from '../../application/domain-ports.js';
 import type { FastifyReply } from 'fastify';
@@ -31,12 +32,39 @@ export function transportStatusCode(error: unknown): number {
   return 500;
 }
 
+function staleProjectionReason(read: SharedProjectionRead<BoardProjection>): string | null {
+  if (read.freshness.state === 'fresh') { return null; }
+  return read.freshness.reason ?? 'board projection is stale; refresh and retry';
+}
+
+/** Read the retained command gate and fail closed unless its identity is fresh. */
+export async function readFreshProjection(reply: FastifyReply,
+  readProjection?: () => Promise<SharedProjectionRead<BoardProjection>>): Promise<SharedProjectionRead<BoardProjection> | null> {
+  if (readProjection === undefined) {
+    sendCommandResult(reply, 503, failure('unavailable', 'board projection port is not wired'));
+    return null;
+  }
+  try {
+    const read = await readProjection();
+    const reason = staleProjectionReason(read);
+    if (reason !== null) {
+      sendCommandResult(reply, 503, failure('unavailable', reason));
+      return null;
+    }
+    return read;
+  } catch (error) {
+    sendCommandResult(reply, 503, failure('unavailable', errorMessage(error)));
+    return null;
+  }
+}
+
 /**
  * Dispatch a validated "Create new mission" body through the guarded board
  * dispatcher. Identity is host-owned exactly as for card commands: a fresh
  * operation ID and the single intake capability; the wire has no key for either.
  */
-export async function dispatchCreateMission(reply: FastifyReply, dispatcher: BoardCommandDispatcher, body: unknown): Promise<void> {
+export async function dispatchCreateMission(reply: FastifyReply, dispatcher: BoardCommandDispatcher, body: unknown,
+  afterDispatch: () => Promise<void> = async () => {}): Promise<void> {
   const validation = validateWebCreateMissionRequest(body);
   if ('problems' in validation) { return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; '))); }
   const { kind: _kind, ...fields } = validation.value;
@@ -52,6 +80,7 @@ export async function dispatchCreateMission(reply: FastifyReply, dispatcher: Boa
   } catch (error) {
     outcome = failure('execution', errorMessage(error));
   }
+  await afterDispatch();
   try {
     reply.code(200).type('application/json; charset=utf-8').send(toWebCommandResult(outcome));
   } catch (error) {
@@ -59,7 +88,8 @@ export async function dispatchCreateMission(reply: FastifyReply, dispatcher: Boa
   }
 }
 
-export async function dispatchEditMission(reply: FastifyReply, dispatcher: BoardCommandDispatcher, body: unknown): Promise<void> {
+export async function dispatchEditMission(reply: FastifyReply, dispatcher: BoardCommandDispatcher, body: unknown,
+  afterDispatch: () => Promise<void> = async () => {}): Promise<void> {
   const validation = validateWebEditMissionRequest(body);
   if ('problems' in validation) { return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; '))); }
   const request = validation.value;
@@ -68,39 +98,35 @@ export async function dispatchEditMission(reply: FastifyReply, dispatcher: Board
       : { ...request, expectedVersion: missionVersion(request.expectedVersion) };
     const outcome = await dispatcher.dispatch({ operationId: crypto.randomUUID(), kind: request.kind,
       missionId: request.missionId, capabilities: new Set<Capability>(['mission:context']), payload });
+    if (request.kind === 'mission:edit') { await afterDispatch(); }
     sendCommandResult(reply, 200, outcome);
   } catch (error) { sendCommandResult(reply, 500, failure('execution', errorMessage(error))); }
 }
 
 /** Synchronous card actions retain projection eligibility and guarded dispatch. */
-export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: BoardCommandDispatcher, command: WebCommandRequest, buildProjection?: () => Promise<BoardProjection>): Promise<void> {
-  const build = buildProjection;
-  if (build === undefined) {
+export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: BoardCommandDispatcher, command: WebCommandRequest,
+  read?: SharedProjectionRead<BoardProjection>, afterDispatch: () => Promise<void> = async () => {}): Promise<void> {
+  if (read === undefined) {
     return sendCommandResult(reply, 503, failure('unavailable', 'board projection port is not wired'));
   }
-  let projection: BoardProjection;
-  try {
-    projection = await build();
-  } catch (error) {
-    // A failed rebuild is transient, exactly as on the snapshot route:
-    // "unavailable, try again", never a dispatch on a stale board.
-    return sendCommandResult(reply, 503, failure('unavailable', errorMessage(error)));
+  const staleReason = staleProjectionReason(read);
+  if (staleReason !== null) {
+    return sendCommandResult(reply, 503, failure('unavailable', staleReason));
   }
   let snapshot: WebBoardSnapshot;
   try {
     // Gating on the wire card reuses the server-owned action states
     // (`enabled`/`ineligible`/`unavailable`) rather than re-deriving
     // them: one definition of "currently advertised".
-    snapshot = toWebBoardSnapshot(projection);
+    snapshot = toWebBoardSnapshot(read.projection, read.freshness);
   } catch (error) {
     return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
   }
-  const card = snapshot.stages
-    .flatMap((stage) => stage.cards)
-    .find((candidate) => candidate.id === command.missionId);
-  if (card === undefined) {
+  if (findBoardMission(read.projection, command.missionId) === undefined) {
     return sendCommandResult(reply, 409, failure('conflict', `mission ${command.missionId} is not on the board`));
   }
+  const card = snapshot.stages.flatMap(stage => [...stage.cards, ...stage.historyCards ?? []])
+    .find(candidate => candidate.id === command.missionId)!;
   const action = card.actions.find((candidate) => candidate.kind === command.kind);
   if (action === undefined || action.state !== 'enabled') {
     const detail = action?.reason !== null && action?.reason !== undefined ? `: ${action.reason}` : '';
@@ -133,6 +159,7 @@ export async function dispatchProjectedCommand(reply: FastifyReply, dispatcher: 
     // failure, not a dispatched outcome.
     return sendCommandResult(reply, 500, failure('execution', errorMessage(error)));
   }
+  await afterDispatch();
   // Every dispatched outcome — completed, conflict, failed, cancelled —
   // answers 200 inside the envelope; the wire status carries the
   // meaning and no server-side retry happens.

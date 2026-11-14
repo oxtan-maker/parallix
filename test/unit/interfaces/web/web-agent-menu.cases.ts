@@ -1,17 +1,17 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { HTMLButtonElement as DomButton } from 'happy-dom';
 import { act } from 'react';
 import { renderBoard } from './web-board-harness.fixture.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WebAgentAvailability } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
 const action = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
-const commandResult = () => ({ kind: 'command-result' as const, transportVersion: 2, status: 'completed', value: null, error: null, durableEvidence: [] });
+const commandResult = () => ({ kind: 'command-result' as const, transportVersion: 3, status: 'completed', value: null, error: null, durableEvidence: [] });
 function snapshot() {
-  return toWebBoardSnapshot(makeProjection({ active: [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })] }));
+  return webProjection.snapshot(makeProjection({ active: [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })] }));
 }
 function payload(calls: readonly RequestInit[]) { return JSON.parse(String(calls[0].body)); }
 function isSameNode(actual: unknown, expected: unknown) { return actual === expected; }

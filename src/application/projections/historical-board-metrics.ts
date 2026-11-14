@@ -9,6 +9,7 @@ interface HistoricalBoardMetricsOptions {
   readonly metricsAdapter?: MetricsReadAdapter;
   readonly now?: () => number;
   readonly historicalRefreshTimeoutMs?: number;
+  readonly historicalRefreshStallTimeoutMs?: number;
 }
 
 interface HistoricalBoardMetricsRead {
@@ -28,6 +29,9 @@ interface HistoricalRefresh {
 }
 
 const REFRESH_RETRY_MS = 30_000;
+// Detector ticks must not starve a valid populated reconstruction. This bound
+// is separate from failed-read retry cadence and one-shot settlement.
+const BACKGROUND_REFRESH_HANG_MS = 120_000;
 
 /** Owns the one refreshable historical summary used by current board reads. */
 export class HistoricalBoardMetrics {
@@ -178,7 +182,7 @@ export class HistoricalBoardMetrics {
     const request = { key, adapter, initialStates, input };
     if (this.refresh) {
       this.queued = this.refresh.key === key ? null : request;
-      if (input.nowMs - this.refresh.startedAtMs >= REFRESH_RETRY_MS) {
+      if (input.nowMs - this.refresh.startedAtMs >= (this.options.historicalRefreshStallTimeoutMs ?? BACKGROUND_REFRESH_HANG_MS)) {
         this.queued = request;
         this.refresh.controller.abort();
       }

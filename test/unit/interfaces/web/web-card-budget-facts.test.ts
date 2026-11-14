@@ -1,11 +1,12 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeFullCard, makeProjection } from '../../../fixtures/board-projection.js';
 import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
 
 function payloadFor(card: MissionCard): Record<string, unknown> {
-  return JSON.parse(JSON.stringify(toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }))));
+  return JSON.parse(JSON.stringify(webProjection.snapshot(makeProjection({ [card.lane]: [card] }))));
 }
 
 function cardPayload(payload: Record<string, unknown>): Record<string, unknown> {

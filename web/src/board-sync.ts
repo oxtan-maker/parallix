@@ -62,8 +62,10 @@ export function useBoardSync() {
       shown = result.kind;
       setState(result);
       if (result.kind === 'ready' && !superseded && started.failure === failureEpoch && started.open === openEpoch) {
-        projectionError = null;
-        setFreshness(current => ({ ...current, refreshError: null, revalidated: current.connection === 'open' }));
+        projectionError = result.snapshot.freshness.state === 'fresh' ? null
+          : result.snapshot.freshness.reason ?? `projection is ${result.snapshot.freshness.state}`;
+        setFreshness(current => ({ ...current, refreshError: projectionError,
+          revalidated: current.connection === 'open' && projectionError === null }));
       }
       return true;
     };

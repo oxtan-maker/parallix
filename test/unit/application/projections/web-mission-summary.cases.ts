@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -8,7 +9,6 @@ import { ConcreteMissionReadAdapter } from '../../../../src/adapters/backlog/con
 import { buildBoardProjection } from '../../../../src/application/projections/board.js';
 import { emptyMetrics } from '../../../fixtures/board-projection.js';
 import { projectMissionCard, type MissionOperationalFacts } from '../../../../src/application/projections/mission-board.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
@@ -74,7 +74,7 @@ async function webTitleFor(taskFile: string, titleFrontmatter: string): Promise<
       emptyMetrics,
       [{ source: 'task-markdown', status: 'fresh', value: 'test' }],
     );
-    const snapshot = toWebBoardSnapshot(projection);
+    const snapshot = webProjection.snapshot(projection);
     const card2526 = snapshot.stages
       .flatMap((stage) => stage.cards)
       .find((c) => c.id === mission.id);

@@ -3,10 +3,11 @@ import { invalidContractRecoveryCommands } from '../checkpoint-recovery-commands
 import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';
 import type { ProviderExecutionFacts } from './provider-execution.js';
-import { projectReviewHistory } from './review-history.js';
+import { projectReviewHistory, type ReviewRoundSummary } from './review-history.js';
 import { projectRepairBudget, type RepairBudgetFacts } from './repair-budget.js';
 import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
 export { projectReviewHistory } from './review-history.js';
+export type { ReviewRoundSummary } from './review-history.js';
 import type { AgentFamily } from '../../domain/agents.js';
 import { isPlannedCheckpoint, latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
@@ -15,6 +16,8 @@ import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
 import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
 import { outstandingReviewers } from '../../domain/reviewer-policy.js';
+import type { ReviewerMode, ReviewerPolicy, UnavailableReviewer } from '../../domain/reviewer-policy.js';
+import type { ReviewerResult, ReviewerResultDecision } from '../../domain/reviewer-result.js';
 import {
   currentReviewRound,
   reviewApprovalOwed,
@@ -111,6 +114,31 @@ export interface CommandAvailability {
   readonly label?: string;
 }
 
+export type ReviewerProgressState = 'queued' | 'running' | 'waiting' | 'completed' | 'failed';
+export interface ReviewerRunProgress {
+  readonly reviewer: string;
+  readonly reviewerLabel: string;
+  readonly runId: string | null;
+  readonly runLabel: string;
+  readonly state: ReviewerProgressState;
+  readonly outcome: ReviewerResultDecision | null;
+  readonly status: number | null;
+  readonly blocker: string | null;
+}
+export interface ReviewProgress {
+  readonly round: number;
+  readonly revision: string;
+  readonly mode: ReviewerMode;
+  readonly selected: readonly string[];
+  readonly independentAvailable: number;
+  readonly requiredApprovals: number;
+  readonly unavailable: readonly UnavailableReviewer[];
+  readonly degradedReason: string | null;
+  readonly reviewers: readonly ReviewerRunProgress[];
+  readonly blockers: readonly string[];
+  readonly nextAction: string;
+}
+
 export interface MissionCard {
   readonly execution?: ProviderExecutionFacts;
   readonly workflowOperation?: import('../../domain/workflow-operation.js').WorkflowOperation;
@@ -157,6 +185,8 @@ export interface MissionCard {
   readonly sameAgentReview?: boolean;
   /** Selected reviewers still owing approval on the current exact revision. */
   readonly awaitingApprovals?: number;
+  /** Reviewer-labelled policy, native outcomes, blockers and next action for the current round. */
+  readonly reviewProgress?: ReviewProgress | null;
   /**
    * Whether the effective approval still covers what the branch would land,
    * null when there is no effective approval or it was not observed.
@@ -191,28 +221,6 @@ export interface MissionCard {
   readonly blocker?: import('../../domain/rebound-policy.js').InvalidContractBlocker;
   readonly flags: readonly string[];
   readonly commands: readonly CommandAvailability[];
-}
-
-/** One past round, flattened for display and for handing to the next reviewer. */
-export interface ReviewRoundSummary {
-  readonly startRevision?: string;
-  readonly decidedRevision?: string | null;
-  readonly integrationRepairAssessment?: import('../../domain/integration-approval-retention.js').IntegrationRepairAssessment;
-  readonly number: number;
-  readonly reviewer: AgentFamily;
-  readonly implementer: AgentFamily;
-  readonly phase: ReviewPhase;
-  readonly disposition: ReviewDisposition | null;
-  readonly comment: string | null;
-  readonly findingSummaries: readonly string[];
-  /** Findings the implementer disputed rather than fixed, with their rationale. */
-  readonly pushbacks: readonly string[];
-  /** Findings the implementer fixed, with the evidence they cited. */
-  readonly fixes: readonly string[];
-  /** Operator withdrawal of this round's approval, if any. */
-  readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string };
-  /** A branch move after this round's approval: the revision that superseded it. */
-  readonly supersession?: { readonly revision: string; readonly by: string; readonly at: string };
 }
 
 /**
@@ -409,7 +417,56 @@ function cardReviewRound(mission: Mission, currentRound: ReturnType<typeof curre
   };
 }
 
+function reviewerIndex(policy: ReviewerPolicy, reviewer: string): number {
+  return Math.max(0, policy.selected.indexOf(reviewer as AgentFamily));
+}
+function reviewerResultBlocker(result: ReviewerResult): string | null {
+  if (result.status !== null && result.status !== 0) { return `Reviewer process exited with status ${result.status}.`; }
+  if (result.outcome === 'missing-output') { return 'Reviewer run ended without a usable verdict.'; }
+  return result.decision === 'unknown' ? 'Reviewer run completed without a usable decision.' : null;
+}
+function completedReviewer(policy: ReviewerPolicy, result: ReviewerResult): ReviewerRunProgress {
+  const blocker = reviewerResultBlocker(result);
+  const runId = result.runId ?? null;
+  return { reviewer: result.agentFamily, reviewerLabel: `${reviewerIndex(policy, result.agentFamily) + 1}/${policy.selected.length} ${result.agentFamily}`,
+    runId, runLabel: runId ?? `publication:${result.publicationId}`,
+    state: blocker ? 'failed' : 'completed', outcome: result.decision, status: result.status, blocker };
+}
+function pendingReviewer(round: number, policy: ReviewerPolicy, reviewer: AgentFamily, active: boolean): ReviewerRunProgress {
+  const position = reviewerIndex(policy, reviewer) + 1;
+  return { reviewer, reviewerLabel: `${position}/${policy.selected.length} ${reviewer}`, runId: null,
+    runLabel: `review-r${round}-${position}-${reviewer}`, state: active ? 'queued' : 'waiting', outcome: null, status: null, blocker: null };
+}
+function reviewProgressAction(mission: Mission, reviewers: readonly ReviewerRunProgress[], decision: ReturnType<typeof currentReviewRound>['decision']): string {
+  if (decision?.kind === 'changes-requested') { return `Run px active ${mission.id} to address reviewer blockers.`; }
+  if (decision?.kind === 'approved') { return `Run px integrate ${mission.id} when ready.`; }
+  const outstanding = reviewers.filter(reviewer => reviewer.state !== 'completed').length;
+  return reviewers.some(reviewer => reviewer.state === 'queued' || reviewer.state === 'running')
+    ? `Wait for ${outstanding} reviewer outcome${outstanding === 1 ? '' : 's'}.`
+    : `Run px review ${mission.id} to resume ${outstanding} outstanding reviewer${outstanding === 1 ? '' : 's'}.`;
+}
+function projectReviewProgress(mission: Mission, reviewActive: boolean, blockingReason: string | null): ReviewProgress | null {
+  if (!mission.review) { return null; }
+  const round = currentReviewRound(mission.review);
+  const policy = round.reviewerPolicy;
+  if (!policy) { return null; }
+  const results = (round.reviewerResults ?? []).filter(result => result.revision === policy.revision && policy.selected.includes(result.agentFamily));
+  const reviewers = policy.selected.flatMap(reviewer => {
+    const matches = results.filter(result => result.agentFamily === reviewer);
+    return matches.length ? matches.map(result => completedReviewer(policy, result)) : [pendingReviewer(round.number, policy, reviewer, reviewActive)];
+  });
+  // Detailed decision findings already have one bounded presentation owner in
+  // review history. Progress carries only per-run and operational blockers.
+  const blockers = [...new Set([...reviewers.map(reviewer => reviewer.blocker), blockingReason]
+    .filter((value): value is string => Boolean(value)))];
+  return { round: round.number, revision: policy.revision, mode: policy.mode, selected: [...policy.selected],
+    independentAvailable: policy.independentAvailable, requiredApprovals: policy.requiredApprovals,
+    unavailable: policy.unavailable.map(entry => ({ ...entry })), degradedReason: policy.fallbackReason,
+    reviewers, blockers, nextAction: reviewProgressAction(mission, reviewers, round.decision) };
+}
+
 function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSubject: ReviewedRevision | null, reviewedChange: ReviewedRevision['change'] | null, currentRound: ReturnType<typeof currentReviewRound> | null) {
+  const reviewActive = facts.currentWork?.phase === 'review' && facts.currentWork.freshness !== 'stale';
   return {
     pullRequest: reviewedChange?.kind === 'pull-request' ? reviewedChange : null,
     reviewApproved: reviewedRevisionIsApproved(facts, reviewedSubject),
@@ -417,6 +474,7 @@ function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSu
     pendingApprovalRetention: Boolean(pendingIntegrationApproval(mission)),
     approvalOwed: reviewApprovalOwed(mission.review),
     approvalCoverage: facts.approvalCoverage ?? null,
+    reviewProgress: projectReviewProgress(mission, reviewActive, facts.blockingReason),
     reviewHistory: projectReviewHistory(mission.review),
     reviewWindowAllowance: AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS,
     repairBudget: projectRepairBudget(mission.checkpoints),
@@ -426,7 +484,7 @@ function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSu
 /** Closure ends live obligations without rewriting retained activity or history. */
 export function projectMissionClosure(card: MissionCard): MissionCard {
   if (!card.closed) { return card; }
-  return { ...card, currentWork: null, activityOperationId: undefined,
+  return { ...card, currentWork: null, activityOperationId: undefined, reviewProgress: null,
     blockingReason: null, blocker: undefined, blockerRequiresOperator: false,
     nextActionText: null, workflowOperation: undefined,
     commands: card.commands.map(command => ({ ...command, enabled: false, reason: 'Mission is closed' })),

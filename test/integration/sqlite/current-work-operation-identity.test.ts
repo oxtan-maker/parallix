@@ -1,3 +1,4 @@
+import { webProjection } from '../../fixtures/web-projection.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { SqliteWorkflowOperationStore } from '../../../src/adapters/sqlite/workflow-operation-store.js';
@@ -5,7 +6,6 @@ import { workflowOperation, claimWorkflow, finishWorkflow } from '../../../src/d
 import { projectMissionCard } from '../../../src/application/projections/mission-board.js';
 import { projectWorkflowBoard } from '../../../src/application/projections/workflow-board.js';
 import { buildBoardProjection } from '../../../src/application/projections/board.js';
-import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { emptyMetrics } from '../../fixtures/board-projection.js';
 import { projectExecutionActivity, isWorkInProgress } from '../../../src/domain/execution-activity.js';
 import { SqliteExecutionActivityStore } from '../../../src/adapters/sqlite/execution-activity-store.js';
@@ -348,7 +348,7 @@ test('persisted closed integration blockers disappear on repeatable board and we
           reviewApproval: null, latestGate: 'passed', flags: [] }));
       }
       const board = projectWorkflowBoard(buildBoardProjection(repo, cards, [], [], emptyMetrics, []), await workflows.latestByMission());
-      const web = toWebBoardSnapshot(board);
+      const web = webProjection.snapshot(board);
       assert.deepEqual(board.attentionQueue.map(item => item.missionId), ['task-open-failure']);
       assert.deepEqual(web.attentionQueue.map(item => item.missionId), ['task-open-failure']);
       for (const card of web.stages.flatMap(stage => stage.cards)) {

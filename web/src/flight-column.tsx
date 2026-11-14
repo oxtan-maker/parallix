@@ -5,7 +5,8 @@ import { CommandOutcome } from './command-outcome.js';
  * carrying checkpoint, gate, actor and next action; and a footer of the
  * server's actions.
  */
-import type { CSSProperties, DragEvent } from 'react';
+import { useState, type CSSProperties, type DragEvent } from 'react';
+import { createPortal } from 'react-dom';
 import type { WebMissionCard, WebStage } from '../../src/interfaces/web/transport.js';
 import { ActionButton, cardCommands } from './action-button.js';
 import { Fan } from './fan.js';
@@ -17,6 +18,8 @@ import type { PendingCommands } from './pending-command.js';
 import { ReasonDisclosure } from './reason-disclosure.js';
 import { ActorLine, AgentLabel } from './card-activity.js';
 import { actorLine, coordinatorText, executingFamily, executionDiagnosticText, familyAccent, isSpinning } from './format.js';
+import { ReviewDetail } from './review-detail.js';
+import { ReviewProgress } from './review-progress.js';
 
 function edgeColor(card: WebMissionCard): string {
   if (card.blockingReason !== null) { return C.red; }
@@ -170,7 +173,8 @@ function FlightCardHeader({ card, agent, liveAgent, accent, spinning }: { card: 
   );
 }
 
-function PullRequestReview({ card }: { card: WebMissionCard }) {
+function PullRequestReview({ card, snapshotRevision }: { card: WebMissionCard; snapshotRevision: string | null }) {
+  const [openedRevision, setOpenedRevision] = useState<string | null>();
   if (card.pullRequest === null && card.reviewRound === null) { return null; }
   return (
     <span data-review-status="" role="group" aria-label="Pull request and review"
@@ -178,23 +182,29 @@ function PullRequestReview({ card }: { card: WebMissionCard }) {
       {card.pullRequest !== null && (card.pullRequest.url === null
         ? <span style={{ maxWidth: 64, color: C.cyan, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>PR #{card.pullRequest.id}</span>
         : <a href={card.pullRequest.url} rel="noreferrer" style={{ maxWidth: 64, color: C.cyan, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>PR #{card.pullRequest.id}</a>)}
-      <ReviewAttempts card={card} />
+      {card.reviewRound === null ? null : <button type="button" aria-haspopup="dialog" aria-label={`View review history for ${card.id}`}
+        onClick={(event) => { event.stopPropagation(); setOpenedRevision(snapshotRevision); }}
+        style={{ border: 0, padding: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}>
+        <ReviewAttempts card={card} />
+      </button>}
+      {openedRevision !== undefined && createPortal(<ReviewDetail card={card} openedRevision={openedRevision}
+        snapshotRevision={snapshotRevision} onClose={() => setOpenedRevision(undefined)} />, document.body)}
     </span>
   );
 }
 
-function FlightCardCheckpoint({ card }: { card: WebMissionCard }) {
+function FlightCardCheckpoint({ card, snapshotRevision }: { card: WebMissionCard; snapshotRevision: string | null }) {
   return (
     <div data-card-progress-row="" data-checkpoint-gate-row="" aria-label="Mission progression" style={{ display: 'flex', alignItems: 'center', gap: SPACE.md,
       width: '100%', minWidth: 0, height: 24, marginBottom: SPACE.md, overflow: 'hidden' }}>
-      <CheckpointPips card={card} />
+      <CheckpointPips card={card} snapshotRevision={snapshotRevision} />
       <GateIcon gate={card.gate} />
-      <PullRequestReview card={card} />
+      <PullRequestReview card={card} snapshotRevision={snapshotRevision} />
     </div>
   );
 }
 
-function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
+function FlightCard({ card, snapshotRevision, onAction, onSelect, onDragStart, selected, pendingCommands }: { card: WebMissionCard; snapshotRevision: string | null; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; selected: boolean; pendingCommands: PendingCommands }) {
   const spinning = isSpinning(card);
   // The work publication names the worker; a px process alone does not.
   const working = card.activity.work.kind === 'working';
@@ -224,8 +234,9 @@ function FlightCard({ card, onAction, onSelect, onDragStart, selected, pendingCo
       <FlightCardHeader card={card} agent={agent} liveAgent={liveAgent} accent={accent} spinning={spinning} />
 
       <div style={{ padding: SPACE.lg }}>
-        <FlightCardCheckpoint card={card} />
+        <FlightCardCheckpoint card={card} snapshotRevision={snapshotRevision} />
         <RepairBudgetFact card={card} />
+        <ReviewProgress card={card} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md, flexWrap: 'wrap' }}>
           <ActorLine card={card} />
           <details style={{ color: C.faint, fontSize: TYPE.micro }}>
@@ -317,7 +328,7 @@ function runNote(stage: WebStage): { readonly text: string; readonly color: stri
   };
 }
 
-export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
+export function FlightColumn({ stage, snapshotRevision, style, onAction, onSelect, onDragStart, onDrop, selectedId, pendingCommands, draggable }: { stage: WebStage; snapshotRevision: string | null; style: CSSProperties; onAction: (card: WebMissionCard, action: WebMissionCard['actions'][number], control: HTMLButtonElement, agent?: string) => void; onSelect: (id: string) => void; onDragStart: (card: WebMissionCard, event: DragEvent<HTMLElement>) => void; onDrop: (lane: WebStage['lane']) => void; selectedId: string | null; pendingCommands: PendingCommands; draggable: boolean }) {
   const note = runNote(stage);
   return (
     <section aria-label={`${stage.lane} stage`} style={{ display: 'flex', flexDirection: 'column', ...style }}>
@@ -331,7 +342,7 @@ export function FlightColumn({ stage, style, onAction, onSelect, onDragStart, on
       />
       <div onDragOver={(event: DragEvent<HTMLDivElement>) => { if (draggable) { event.preventDefault(); } }} onDrop={() => onDrop(stage.lane)} style={{ flex: 1, overflowY: 'auto', paddingTop: SPACE.lg, minHeight: 0 }}>
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
-        {stage.cards.map((card) => <FlightCard key={card.id} card={card} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingCommands={pendingCommands} />)}
+        {stage.cards.map((card) => <FlightCard key={card.id} card={card} snapshotRevision={snapshotRevision} onAction={onAction} onSelect={onSelect} onDragStart={onDragStart} selected={selectedId === card.id} pendingCommands={pendingCommands} />)}
       </div>
     </section>
   );

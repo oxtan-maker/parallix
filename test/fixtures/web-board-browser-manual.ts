@@ -1,9 +1,9 @@
+import { webProjection } from './web-projection.js';
 /** Disposable whole-board walkthrough. Run with npx tsx; no operator state. */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeCards, makeProjection } from './board-projection.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { C, MONO } from '../../web/src/palette.js';
 import { createWebHost } from '../../src/interfaces/web/host.js';
 import { loadWebAssets } from '../../src/adapters/web/asset-store.js';
@@ -38,7 +38,7 @@ try {
       blockingReason: index === 0 ? 'fixture blocked' : null, gate: index === 1 ? 'failed' as const : card.gate,
       commands: [{command:'cancel' as const,enabled:true,reason:null,targetLane:null}],
     }));
-    const base = toWebBoardSnapshot(makeProjection({active:cards, done:[makeCard({lane:'done',status:'done',closed:true})]}));
+    const base = webProjection.snapshot(makeProjection({active:cards, done:[makeCard({lane:'done',status:'done',closed:true})]}));
     await fixture.render({...base, operationLog:[{operationId:'manual',phase:'execute',message:'Isolated log observation',timestamp:'2026-10-20T08:09:10Z'}]});
     const lane = page.locator('[aria-label="active stage"]');
     const geometry = await lane.evaluate(node => {
@@ -73,14 +73,14 @@ try {
     await summary.click(); assert.match(await page.locator('[aria-label="Operation log"]').innerText(),/source: 2026-10-20T08:09:10Z/);
     await page.screenshot({path:`/tmp/board-manual-${viewport.width}.png`});
     console.log(JSON.stringify({viewport,geometry,observed:'lane/viewport scrolling, done disclosure, red blocked/failed borders, two-stage cancel and local timestamp disclosure pass'}));
-    await fixture.render(toWebBoardSnapshot(makeProjection()));
+    await fixture.render(webProjection.snapshot(makeProjection()));
     assert.equal(await page.locator('[data-board-card]').count(),0);
     console.log('Compact empty lanes remain visible; no cards fabricated.');
     for (const kind of ['long','unknown','review'] as const) {
       const card=makeCard({lane:kind==='long'?'active':'review',status:kind==='long'?'active':'review',blockingReason:null, currentWork:{operationId:'manual-live',phase:'execute',summary:'Disposable work',agent:null,updatedAt:new Date().toISOString(),freshness:'live'}, checkpoint:kind==='unknown'?null:'CP-1',
         checkpointEvidence:kind==='unknown'?[]:Array.from({length:100},(_,i)=>({name:`CP-${i+1}`,description:`Step ${i+1}`,goalCheck:[],state:'future' as const})),
         reviewRound:kind==='review'?6:kind==='unknown'?0:null, reviewPhase:kind==='review'?'reviewing':null, reviewHistory:[], reviewDisposition:kind==='review'?'REQUEST_CHANGES':null});
-      await fixture.render(toWebBoardSnapshot(makeProjection({[kind==='long'?'active':'review']:[card]})));
+      await fixture.render(webProjection.snapshot(makeProjection({[kind==='long'?'active':'review']:[card]})));
       if(kind!=='unknown') {
         await page.getByRole('button',{name:/View checkpoint evidence/}).click();
         await page.getByRole('dialog').getByRole('button',{name:'CP-100 · future',exact:true}).click();
@@ -104,7 +104,7 @@ try {
     await page.route('**/fonts/*.woff2',route=>route.abort());
     await page.reload();
     await shellStyle();
-    await fixture.render(toWebBoardSnapshot(makeProjection({active:[makeCard({title:'Readable fallback Ω 漢字 → ✓'})]})));
+    await fixture.render(webProjection.snapshot(makeProjection({active:[makeCard({title:'Readable fallback Ω 漢字 → ✓'})]})));
     assert.match(await page.locator('[data-board-card]').innerText(),/Readable fallback Ω 漢字 → ✓/);
     await page.screenshot({path:`/tmp/board-fallback-${viewport.width}.png`});
     console.log('Font requests blocked: text and out-of-subset glyphs remain visible.');

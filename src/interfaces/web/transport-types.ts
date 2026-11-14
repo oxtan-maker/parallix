@@ -7,7 +7,7 @@ import type { RepairBudgetFacts } from '../../application/projections/repair-bud
 
 
 
-export const WEB_TRANSPORT_VERSION = 2 as const;
+export const WEB_TRANSPORT_VERSION = 3 as const;
 export type WebTransportVersion = typeof WEB_TRANSPORT_VERSION;
 export const SUPPORTED_WEB_TRANSPORT_VERSIONS: readonly number[] = [WEB_TRANSPORT_VERSION];
 
@@ -108,15 +108,19 @@ export interface WebPullRequestReference {
   readonly targetBranch: string;
 }
 
-/** Wire mirror of review history, oldest first. */
+/** Compact review attempt retained in the common snapshot. */
 export interface WebReviewRoundSummary {
+  readonly number: number;
+  readonly disposition: string | null;
+}
+
+/** Full review history returned only by the mission-detail read. */
+export interface WebReviewRoundDetail extends WebReviewRoundSummary {
   readonly startRevision?: string;
   readonly decidedRevision?: string | null;
-  readonly number: number;
   readonly reviewer: string;
   readonly implementer: string;
   readonly phase: string;
-  readonly disposition: string | null;
   readonly comment: string | null;
   readonly findingSummaries: readonly string[];
   readonly pushbacks: readonly string[];
@@ -136,16 +140,24 @@ export interface WebGoalCheckRow {
  * Goal Check rows. Optional on the wire — a snapshot built before this field exists
  * omits it and the client reads it as "no evidence", never malformed.
  */
-export interface WebCheckpointEvidence {
+export interface WebCheckpointSummary {
   readonly name: string;
   readonly description: string;
-  readonly goalCheck: readonly WebGoalCheckRow[];
+  /** Exact row count; row content is deferred to the detail read. */
+  readonly goalCheckCount: number;
   /** Server-owned progress state; omitted by older snapshots. */
   readonly state?: 'completed' | 'current' | 'future';
 }
 
+/** Full checkpoint evidence returned only by the mission-detail read. */
+export interface WebCheckpointEvidence extends WebCheckpointSummary {
+  readonly goalCheck: readonly WebGoalCheckRow[];
+}
+
 export interface WebMissionCard {
   readonly execution?: ProviderExecutionFacts;
+  /** Application-owned review progress; browsers render it without deriving policy. */
+  readonly reviewProgress?: import('../../application/projections/mission-board.js').MissionCard['reviewProgress'];
   readonly id: string;
   readonly title: string;
   readonly lane: WebBoardLane;
@@ -161,7 +173,7 @@ export interface WebMissionCard {
    * the server always sends it, but an omitted field on an older snapshot reads as
    * "no evidence" rather than a malformed card.
    */
-  readonly checkpointEvidence?: readonly WebCheckpointEvidence[];
+  readonly checkpointEvidence?: readonly WebCheckpointSummary[];
   readonly nextActionText: string | null;
   readonly gate: WebGateState;
   readonly pullRequest: WebPullRequestReference | null;
@@ -257,6 +269,7 @@ export interface WebBoardSnapshot {
   readonly kind: 'board-snapshot';
   readonly transportVersion: WebTransportVersion;
   readonly projectionVersion: number;
+  readonly freshness: WebProjectionFreshness;
   readonly repositoryId: string;
   readonly stages: readonly WebStage[];
   readonly attentionQueue: readonly WebAttentionItem[];
@@ -268,6 +281,24 @@ export interface WebBoardSnapshot {
   readonly metrics: WebBoardMetrics;
   /** One fact per `(source, status, value)` tuple; repeats are collapsed by the projection. */
   readonly sourceFacts: readonly WebSourceFact[];
+}
+
+export interface WebProjectionFreshness {
+  readonly state: 'fresh' | 'stale' | 'unavailable';
+  readonly revision: string | null;
+  readonly refreshedAt: string | null;
+  readonly reason: string | null;
+}
+
+/** Bulky facts loaded only after a mission detail disclosure is opened. */
+export interface WebMissionDetail {
+  readonly kind: 'mission-detail';
+  readonly transportVersion: WebTransportVersion;
+  readonly repositoryId: string;
+  readonly missionId: string;
+  readonly freshness: WebProjectionFreshness;
+  readonly checkpointEvidence: readonly WebCheckpointEvidence[];
+  readonly reviewHistory: readonly WebReviewRoundDetail[];
 }
 
 export interface WebCommandError {

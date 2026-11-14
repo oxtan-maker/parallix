@@ -108,6 +108,28 @@ describe("review presentation", { concurrency: false }, () => {
 
 // Regression provenance: TASK-2351.
 describe('review independence and verdict output', () => {
+  test('review progress renders bounded plain reviewer and run labels for every public state (PX-0046.06)', () => {
+    const lines: string[] = [];
+    const output = { log: (line: string) => { lines.push(line); }, error: (line: string) => { lines.push(line); } };
+    renderReviewLoopEvent({ kind: 'reviewer-policy', round: 3, revision: '1234567890abcdef', mode: 'two-independent', required: 2,
+      selected: ['claude', 'custom'], available: 2, unavailable: [], reason: null } as ReviewLoopEvent, output);
+    for (const state of ['queued', 'running', 'waiting', 'completed', 'failed'] as const) {
+      renderReviewLoopEvent({ kind: 'reviewer-progress', round: 3, revision: '1234567890abcdef', required: 2,
+        reviewer: 'claude', reviewerLabel: '1/2 claude', runLabel: state === 'queued' ? 'review-r3-1-claude' : 'review-claude-a1-run',
+        state, outcome: state === 'completed' ? 'approved' : null,
+        blocker: state === 'failed' ? 'provider exited before a verdict' : null,
+        nextAction: state === 'failed' ? 'Run px review task-progress.' : null } as ReviewLoopEvent, output);
+    }
+    const rendered = lines.join('\n');
+    assert.match(rendered, /Review round 3 · revision 1234567890ab · selected claude, custom · independent available 2 · approvals required 2/);
+    for (const state of ['queued', 'running', 'waiting', 'completed', 'failed']) { assert.match(rendered, new RegExp(`1/2 claude.*${state}`)); }
+    assert.match(rendered, /review-claude-a1-run/);
+    assert.match(rendered, /Next: Run px review task-progress\./);
+    assert.doesNotMatch(rendered, /--continue/);
+    assert.doesNotMatch(rendered, /\x1b/);
+    assert.ok(lines.every(line => line.length <= 240), `review progress lines must stay bounded: ${rendered}`);
+  });
+
   test('classifier fallbacks say whether the classifier abstained, failed or was not used (TASK-2675)', () => {
     const lines: string[] = [];
     const output = { log: (line: string) => { lines.push(line); }, error: (line: string) => { lines.push(line); } };

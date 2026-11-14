@@ -63,9 +63,38 @@ function revisionOf(context: LoopContext, round: ReviewRound): string | null {
   return round.verifiedRevision ?? context.ports.preReview.head() ?? null;
 }
 
-function announce(context: LoopContext, policy: ReviewerPolicy): void {
-  context.emit({ kind: 'reviewer-policy', mode: policy.mode, required: policy.requiredApprovals, selected: policy.selected,
-    available: policy.independentAvailable, reason: policy.fallbackReason });
+export async function emitReviewerProgress(
+  context: LoopContext,
+  round: ReviewRound,
+  state: 'running' | 'waiting' | 'completed' | 'failed',
+  detail: { readonly reviewer?: string; readonly runLabel?: string | null; readonly outcome?: 'approved' | 'changes-requested' | 'unknown' | null; readonly blocker?: string | null; readonly nextAction?: string | null } = {},
+): Promise<void> {
+  try {
+    const revision = revisionOf(context, round);
+    const progress = revision ? await context.ports.state.reviewerProgress(context.state, revision) : null;
+    if (!revision || !progress) { return; }
+    const reviewer = detail.reviewer ?? context.identities.reviewer;
+    const index = Math.max(0, progress.policy.selected.indexOf(agentFamily(reviewer)));
+    context.emit({ kind: 'reviewer-progress', round: context.state.round, revision,
+      required: progress.policy.requiredApprovals, reviewer, reviewerLabel: `${index + 1}/${progress.policy.selected.length} ${reviewer}`,
+      runLabel: detail.runLabel ?? `review-r${context.state.round}-${index + 1}-${reviewer}`, state,
+      outcome: detail.outcome ?? null, blocker: detail.blocker ?? null, nextAction: detail.nextAction ?? null });
+  } catch {
+    try { context.emit({ kind: 'recovery-progress', channel: 'log', diagnostic: 'Reviewer progress observation unavailable; reviewer execution continues.' }); } catch { /* observational only */ }
+  }
+}
+
+function announce(context: LoopContext, policy: ReviewerPolicy, progress?: ReviewerProgress): void {
+  context.emit({ kind: 'reviewer-policy', round: context.state.round, revision: policy.revision, mode: policy.mode,
+    required: policy.requiredApprovals, selected: policy.selected, available: policy.independentAvailable,
+    unavailable: policy.unavailable, reason: policy.fallbackReason });
+  policy.selected.forEach((reviewer, index) => context.emit({
+    kind: 'reviewer-progress', round: context.state.round, revision: policy.revision,
+    required: policy.requiredApprovals, reviewer, reviewerLabel: `${index + 1}/${policy.selected.length} ${reviewer}`,
+    runLabel: `review-r${context.state.round}-${index + 1}-${reviewer}`,
+    state: progress?.approved.includes(reviewer) ? 'completed' : 'queued',
+    outcome: progress?.approved.includes(reviewer) ? 'approved' : null, blocker: null, nextAction: null,
+  }));
 }
 
 /**
@@ -78,9 +107,16 @@ export async function establishReviewerPolicy(context: LoopContext, round: Revie
   const { ports, identities } = context;
   const revision = revisionOf(context, round);
   if (!revision || identities.reviewer === 'autonomous') { return false; }
-  const { progress, policy } = await refreshReviewerAvailability(ports.state, ports.routing, context.state, revision,
-    policy => announce(context, policy), identities);
+  const { progress, policy } = await refreshReviewerAvailability(
+    ports.state,
+    ports.routing,
+    context.state,
+    revision,
+    undefined,
+    identities,
+  );
   if (!policy) { return false; }
+  announce(context, policy, progress ?? undefined);
   await switchReviewer(context, progress?.outstanding[0] ?? policy.selected[0]);
   return true;
 }

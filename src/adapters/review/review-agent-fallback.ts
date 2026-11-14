@@ -16,9 +16,26 @@ import { enforceTaskAssignee } from '../backlog/backlog.js';
 import { type ReviewStateData, readReviewState, writeReviewState, persistReviewStateOrThrow } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
+import { persistReviewerRunAttribution } from './reviewer-result-attribution.js';
 import * as statsModule from '../cli/commands/stats.js';
 
 type FallbackReviewState = ReviewStateData;
+type StageStatsOptions = {
+  configuration?: ParallixConfiguration;
+  executionContext: LiveMissionExecutionContext;
+  stage: string;
+  slug: string;
+  rootDir?: string;
+  implementer?: string;
+  reviewer?: string;
+  result?: AgentProcessResult;
+  sinceMs?: number;
+  log?: (_msg: string) => void;
+  error?: (_msg: string) => void;
+  state?: FallbackReviewState;
+  writeReviewStateFn?: ReviewStateWriter;
+  missionStore?: MissionStore | null;
+};
 
 /** Lazily loaded stats module — loaded on first use to avoid circular dependency. */
 let _stats: typeof statsModule | null = null;
@@ -80,7 +97,7 @@ export async function markStageLaunchRecorded(
   return true;
 }
 
-function stageMeasurements({ result, executionContext, sinceMs }: Parameters<typeof recordStageStatsSafe>[1]) {
+function stageMeasurements({ result, executionContext, sinceMs }: StageStatsOptions) {
   let durationMinutes: number | undefined;
   if (result && result.startedAt && result.endedAt) {
     durationMinutes = (Date.parse(result.endedAt) - Date.parse(result.startedAt)) / 60000;
@@ -89,41 +106,37 @@ function stageMeasurements({ result, executionContext, sinceMs }: Parameters<typ
   return { durationMinutes, telemetry, runId: result?.runId };
 }
 
+async function persistStageReviewerRun(kind: 'review' | 'active', opts: StageStatsOptions): Promise<void> {
+  const { reviewer, result, state, slug, missionStore = null } = opts;
+  if (kind !== 'review' || !reviewer || !result?.runId || !missionStore || typeof state?.round !== 'number') { return; }
+  await persistReviewerRunAttribution(slug, reviewer, state.round, result.runId, missionStore);
+}
+
+async function shouldRecordStage(actorFamily: string | undefined, opts: StageStatsOptions): Promise<boolean> {
+  const { state, slug, executionContext, result, stage, writeReviewStateFn = writeReviewState, missionStore = null } = opts;
+  if (!state || !actorFamily) { return true; }
+  const currentState = await readReviewState(slug, executionContext.missionWorktree, missionStore);
+  return await markStageLaunchRecorded(currentState || state, {
+    stage,
+    agentFamily: actorFamily,
+    result,
+    slug,
+    executionContext,
+    writeReviewStateFn,
+    missionStore
+  });
+}
+
 export async function recordStageStatsSafe(
   kind: 'review' | 'active',
-  opts: {
-    configuration?: ParallixConfiguration;
-    executionContext: LiveMissionExecutionContext;
-    stage: string;
-    slug: string;
-    rootDir?: string;
-    implementer?: string;
-    reviewer?: string;
-    result?: AgentProcessResult;
-    sinceMs?: number;
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    state?: FallbackReviewState;
-    writeReviewStateFn?: ReviewStateWriter;
-    missionStore?: MissionStore | null;
-  }
+  opts: StageStatsOptions
 ): Promise<void> {
-  const { stage, slug, rootDir, executionContext, implementer, reviewer, result, log, state, writeReviewStateFn = writeReviewState, missionStore = null } = opts;
+  const { stage, slug, rootDir, implementer, reviewer, log } = opts;
   const { durationMinutes, telemetry, runId } = stageMeasurements(opts);
   try {
     const actorFamily = kind === 'review' ? reviewer : implementer;
-    const currentState = state && await readReviewState(slug, executionContext.missionWorktree, missionStore);
-    if (state && actorFamily && !(await markStageLaunchRecorded(currentState || state, {
-      stage,
-      agentFamily: actorFamily,
-      result,
-      slug,
-      executionContext,
-      writeReviewStateFn,
-      missionStore
-    }))) {
-      return;
-    }
+    await persistStageReviewerRun(kind, opts);
+    if (!(await shouldRecordStage(actorFamily, opts))) { return; }
     try { getStats().accumulateStageStats({ configuration: opts.configuration, stage, slug, rootDir, implementer, reviewer, telemetry, durationMinutes, runId }); } catch { /* best-effort */ }
   } catch (err: unknown) {
     log?.(fmt.status('WARN', `Could not record ${kind} stats for ${slug}: ${(err as Error).message}`));

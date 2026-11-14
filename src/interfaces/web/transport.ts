@@ -26,10 +26,10 @@
 
 
 export { WEB_TRANSPORT_VERSION, SUPPORTED_WEB_TRANSPORT_VERSIONS, isInvalidWebCommandRequest, WebTransportError } from './transport-types.js';
-export type { WebTransportVersion, WebBoardLane, WebBoardCommandKind, WebCommandActionState, WebGateState, WebWorkCertainty, WebAttentionReasonKind, WebTerminalStatus, WebErrorKind, WebEvidenceSource, WebDurationMs, WebMissionWork, WebCoordinatorEvidence, WebMissionActivity, WebCommandAction, WebPullRequestReference, WebReviewRoundSummary, WebGoalCheckRow, WebCheckpointEvidence, WebMissionCard, WebStage, WebAttentionItem, WebOperationLogEntry, WebAgentAvailability, WebSourceFact, WebBoardMetrics, WebBoardSnapshot, WebFlowStatistics, WebFlowWindow, WebFlowLane, WebFlowNodeId, WebFlowEdge, WebFlowNode, WebFlowTimeRow, WebCommandError, WebCommandResult, WebProgressEvent, WebCommandRequestKind, WebCommandRequest, WebCommandRequestValidation, WebTransportErrorCode } from './transport-types.js';
-export { BOARD_COMMAND_KINDS, toWebBoardSnapshot, toWebCommandResult, toWebProgressEvent } from './transport-projection.js';
+export type { WebTransportVersion, WebBoardLane, WebBoardCommandKind, WebCommandActionState, WebGateState, WebWorkCertainty, WebAttentionReasonKind, WebTerminalStatus, WebErrorKind, WebEvidenceSource, WebDurationMs, WebMissionWork, WebCoordinatorEvidence, WebMissionActivity, WebCommandAction, WebPullRequestReference, WebReviewRoundSummary, WebReviewRoundDetail, WebGoalCheckRow, WebCheckpointSummary, WebCheckpointEvidence, WebMissionCard, WebStage, WebAttentionItem, WebOperationLogEntry, WebAgentAvailability, WebSourceFact, WebBoardMetrics, WebBoardSnapshot, WebProjectionFreshness, WebMissionDetail, WebFlowStatistics, WebFlowWindow, WebFlowLane, WebFlowNodeId, WebFlowEdge, WebFlowNode, WebFlowTimeRow, WebCommandError, WebCommandResult, WebProgressEvent, WebCommandRequestKind, WebCommandRequest, WebCommandRequestValidation, WebTransportErrorCode } from './transport-types.js';
+export { BOARD_COMMAND_KINDS, toWebBoardSnapshot, toWebMissionDetail, toWebCommandResult, toWebProgressEvent } from './transport-projection.js';
 export type { WebTransportValidation } from './transport-validation-primitives.js';
-export { validateWebBoardSnapshot, validateWebCommandResult, validateWebCommandRequest, validateWebProgressEvent, validateWebStreamError } from './transport-validators.js';
+export { validateWebBoardSnapshot, validateWebMissionDetail, validateWebCommandResult, validateWebCommandRequest, validateWebProgressEvent, validateWebStreamError } from './transport-validators.js';
 /**
  * transport.ts — the versioned, JSON-safe wire contract between the local
  * web host (ADR 0054) and a future browser client (ADR 0055).

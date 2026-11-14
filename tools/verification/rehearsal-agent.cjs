@@ -3,8 +3,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
-const prompt = process.argv.includes('--help') ? '' : fs.readFileSync(0, 'utf8');
-if (process.argv.includes('--help')) { console.log('run --format json'); process.exit(0); }
+const runner = path.basename(process.argv[1]);
+const family = runner === 'claude' ? 'claude' : 'custom';
+const prompt = process.argv.includes('--help') || process.argv.includes('--version') ? '' : fs.readFileSync(0, 'utf8');
+if (process.argv.includes('--help') || process.argv.includes('--version')) {
+  console.log(family === 'claude' ? 'Claude Code 2.1.317' : 'run --format json');
+  process.exit(0);
+}
 const slug = 'task-unit-rehearsal';
 const expectedReviewOpinion = process.env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE
   ? fs.readFileSync(process.env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE, 'utf8').trimEnd()
@@ -113,12 +118,22 @@ if (process.env.REHEARSAL_INTEGRATION_REBOUND === '1' && prompt.includes('The in
 if (/^Mode: review\./m.test(prompt)) {
   if (process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR) px(['rebase', slug]);
   px(['verify', 'all']);
+  const lostMarker = path.join(process.env.REHEARSAL_STATE, 'lost-reviewer');
+  if (process.env.REHEARSAL_LOST_REVIEWER_RESTART === '1' && !fs.existsSync(lostMarker)) {
+    fs.writeFileSync(lostMarker, sessionID);
+  } else {
   const marker = path.join(process.env.REHEARSAL_STATE, 'reviewed');
   if (!fs.existsSync(marker) && !process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR) {
     fs.writeFileSync(marker, 'first review');
-    write(['verdict', 'request-changes', '--actor', 'custom', '--finding', 'repair-value', '--summary', 'Set value to 2', '--location', 'src/value.js']);
+    write(['verdict', 'request-changes', '--actor', family, '--finding', 'repair-value', '--summary', 'Set value to 2', '--location', 'src/value.js']);
   } else {
-    write(['verdict', 'approve', '--actor', 'custom', '--comment', 'Repaired value and exact unit proof verified']);
+    write(['verdict', 'approve', '--actor', family, '--comment', 'Repaired value and exact unit proof verified']);
+  }
   }
 }
-console.log(JSON.stringify({ sessionID }));
+if (family === 'claude') {
+  console.log(JSON.stringify({ type: 'system', subtype: 'init', session_id: sessionID }));
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'complete', session_id: sessionID }));
+} else {
+  console.log(JSON.stringify({ sessionID }));
+}

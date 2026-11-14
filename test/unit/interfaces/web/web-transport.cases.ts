@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { projectMissionCard } from '../../../../src/application/projections/mission-board.js';
 import test from 'node:test';
@@ -7,6 +8,7 @@ import {
   toWebCommandResult,
   toWebProgressEvent,
   validateWebBoardSnapshot,
+  validateWebMissionDetail,
   validateWebCommandResult,
   validateWebProgressEvent,
   SUPPORTED_WEB_TRANSPORT_VERSIONS,
@@ -30,9 +32,9 @@ import type { AgentAvailabilityMetric } from '../../../../src/application/projec
 test('web FLOW transport carries shared verification wording without recalculation (px-0025)', () => {
   const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
   const flow = flowStatistics([], weeklyDecisionWindows('2026-11-03', 'UTC'));
-  const snapshot = toWebBoardSnapshot(makeProjection({}));
+  const snapshot = webProjection.snapshot(makeProjection({}));
   const projection = { ...makeProjection({}), metrics: { ...emptyMetrics, verification, flow } };
-  const output = toWebBoardSnapshot(projection);
+  const output = webProjection.snapshot(projection);
   assert.ok(snapshot.metrics.verification);
   assert.match(output.metrics.verification!.join('\n'), /historical work is unavailable, not zero/);
   assert.deepEqual(output.metrics.flow, flow);
@@ -98,6 +100,22 @@ function deepFreeze<T>(value: T): T {
   }
   return value;
 }
+
+test('web transport carries shared review progress without deriving UI policy (PX-0046.06)', () => {
+  const reviewProgress = {
+    round: 2, revision: 'head-2', mode: 'two-independent', selected: ['claude', 'custom'], independentAvailable: 2, requiredApprovals: 2,
+    unavailable: [], degradedReason: null,
+    reviewers: [
+      { reviewer: 'claude', reviewerLabel: '1/2 claude', runId: 'review-claude-a1-run', runLabel: 'review-claude-a1-run', state: 'running', outcome: null, status: null, blocker: null },
+      { reviewer: 'custom', reviewerLabel: '2/2 custom', runId: null, runLabel: 'review-r2-2-custom', state: 'queued', outcome: null, status: null, blocker: null },
+    ], blockers: [], nextAction: 'Wait for 2 reviewer outcomes.',
+  };
+  const card = makeCard({ lane: 'review', status: 'review', reviewRound: 2, reviewPhase: 'reviewing', reviewProgress } as never);
+  const payload = webProjection.snapshot(makeProjection({ review: [card] }));
+  const wire = payload.stages.find(stage => stage.lane === 'review')!.cards[0];
+  assert.deepEqual((wire as unknown as { reviewProgress: unknown }).reviewProgress, reviewProgress);
+  assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(payload))).ok, true);
+});
 
 /** Walk a parsed payload: only JSON types, only finite numbers. */
 function assertWireJson(value: unknown): void {
@@ -174,7 +192,7 @@ test('snapshot DTO round-trips through JSON.stringify and JSON.parse without los
     ],
   });
 
-  const snapshot = toWebBoardSnapshot(projection);
+  const snapshot = webProjection.snapshot(projection);
   assert.equal(snapshot.transportVersion, WEB_TRANSPORT_VERSION);
   assert.equal(snapshot.projectionVersion, projection.version);
 
@@ -191,7 +209,7 @@ test('snapshot DTO round-trips through JSON.stringify and JSON.parse without los
 });
 
 test('snapshot carries inFlightWip and rejects missing or non-finite values', () => {
-  const snapshot = toWebBoardSnapshot(projectionWith({ inFlightWip: 3 }));
+  const snapshot = webProjection.snapshot(projectionWith({ inFlightWip: 3 }));
   assert.equal(roundTrip(snapshot).inFlightWip, 3);
 
   const { inFlightWip: _omitted, ...missing } = snapshot;
@@ -225,7 +243,7 @@ test('indefinite agent block projects to a dedicated indefinite wire representat
       ],
     },
   });
-  const snapshot = toWebBoardSnapshot(projection);
+  const snapshot = webProjection.snapshot(projection);
   const [indefinite, zero, finite] = snapshot.agentAvailability;
 
   assert.deepStrictEqual(indefinite.blockedFor, { kind: 'indefinite' });
@@ -253,7 +271,7 @@ test('running sessions distinguish unobserved, observed-none, and a positive cou
       ],
     },
   });
-  const snapshot = toWebBoardSnapshot(projection);
+  const snapshot = webProjection.snapshot(projection);
   const [absent, observedOne, observedNone, observedTwo] = snapshot.agentAvailability;
 
   assert.ok(!('runningSessions' in absent), 'absent probe result must omit the key');
@@ -277,7 +295,7 @@ test('mission work activity preserves live, unconfirmed, stale, blocked, and idl
     ['idle', makeCard({ id: tid('task-1005'), currentWork: null, blockingReason: null })],
   ];
   const projection = projectionWith({ stages: makeProjection({ active: cards.map(([, card]) => card) }).stages });
-  const snapshot = toWebBoardSnapshot(projection);
+  const snapshot = webProjection.snapshot(projection);
   const byId = new Map(snapshot.stages.flatMap((stage) => stage.cards).map((card) => [card.id, card]));
 
   assert.deepStrictEqual(byId.get('task-1001')?.activity.work, {
@@ -308,7 +326,7 @@ test('coordinator evidence distinguishes unknown, stopped, and live', () => {
     makeCard({ id: tid('task-1008'), liveSession: { missionId: tid('task-1008'), family: agentFamily('codex') } }),
     makeCard({ id: tid('task-1009'), liveSession: { missionId: tid('task-1009'), family: null } }),
   ];
-  const snapshot = toWebBoardSnapshot(projectionWith({ stages: makeProjection({ active: cards }).stages }));
+  const snapshot = webProjection.snapshot(projectionWith({ stages: makeProjection({ active: cards }).stages }));
   const byId = new Map(snapshot.stages.flatMap((stage) => stage.cards).map((card) => [card.id, card]));
 
   assert.deepStrictEqual(byId.get('task-1006')?.activity.coordinator, { state: 'unknown' });
@@ -322,7 +340,7 @@ test('coordinator evidence distinguishes unknown, stopped, and live', () => {
 // ---------------------------------------------------------------------------
 
 function actionsFor(card: MissionCard): Map<string, WebCommandAction> {
-  const snapshot = toWebBoardSnapshot(projectionWith({ stages: makeProjection({ [card.lane]: [card] }).stages }));
+  const snapshot = webProjection.snapshot(projectionWith({ stages: makeProjection({ [card.lane]: [card] }).stages }));
   const wire = snapshot.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   return new Map((wire?.actions ?? []).map((action) => [action.kind, action]));
 }
@@ -367,7 +385,7 @@ test('enabled action DTO carries null reason and exact display text', () => {
 test('attention action keeps the server-owned display text and state', () => {
   const base = reviewLaneCard();
   const card = { ...base, commands: base.commands.map(command => command.command === 'review' ? { ...command, enabled: true, reason: null } : command) };
-  const snapshot = toWebBoardSnapshot(projectionWith({
+  const snapshot = webProjection.snapshot(projectionWith({
     stages: makeProjection({ review: [card] }).stages,
     attentionQueue: [makeAttentionItem(card, { kind: 'review-lane', detail: 'Awaiting review decision' }, 2)],
   }));
@@ -388,7 +406,7 @@ test('settled human stop relabels the existing review action as resume (TASK-283
     evidence: ['no open workflow operation', 'no live workflow, coordinator, execution or reviewer'],
     guidance: 'Review stopped for human review (MAX_ATTEMPTS) and owned work has settled, so no further stop is required.' };
   const card = { ...base, reviewRecovery: recovery };
-  const snapshot = toWebBoardSnapshot(projectionWith({
+  const snapshot = webProjection.snapshot(projectionWith({
     stages: makeProjection({ review: [card] }).stages,
     attentionQueue: [makeAttentionItem(card, { kind: 'review-lane', detail: recovery.guidance }, 1)],
   }));
@@ -486,7 +504,8 @@ test('snapshot validation accepts real command actions with and without a label'
       { command: 'review', enabled: false, reason: "ReviewPreparation requires an active mission with checkpoint evidence", targetLane: 'review' },
     ],
   });
-  const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  const projection = makeProjection({ active: [card] });
+  const snapshot = webProjection.snapshot(projection);
   const actions = snapshot.stages.flatMap((stage) => stage.cards.flatMap((missionCard) => missionCard.actions));
   assert.ok(actions.some((action) => 'label' in action), 'a real action carries its label');
   assert.ok(actions.some((action) => !('label' in action)), 'a real action omits the label');
@@ -495,7 +514,7 @@ test('snapshot validation accepts real command actions with and without a label'
 
 // SC3 — the checkpoint evidence field validates, and an omission reads as
 // "no evidence" rather than a malformed card.
-test('a card carries its checkpoint evidence through the wire unchanged', () => {
+test('common snapshot defers bulky checkpoint and review detail while typed on-demand detail preserves it (PX-0058.04)', () => {
   const card = makeFullCard({
     checkpoint: 'CP-2.md',
     checkpointDescription: 'CP-2: components extracted',
@@ -503,19 +522,29 @@ test('a card carries its checkpoint evidence through the wire unchanged', () => 
       { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'a', evidence: 'b' }] },
       { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'c', evidence: 'd' }, { criterion: 'e', evidence: 'f' }] },
     ],
+    reviewHistory: task2447History,
   });
-  const snapshot = toWebBoardSnapshot(makeProjection({ review: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ review: [card] }));
   const wireCard = snapshot.stages.flatMap((stage) => stage.cards)[0];
   assert.deepStrictEqual(wireCard.checkpointEvidence, [
-    { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'a', evidence: 'b' }] },
-    { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'c', evidence: 'd' }, { criterion: 'e', evidence: 'f' }] },
+    { name: 'CP-1', description: 'CP-1: plan', goalCheckCount: 1 },
+    { name: 'CP-2', description: 'CP-2: components extracted', goalCheckCount: 2 },
   ]);
+  assert.deepStrictEqual(wireCard.reviewHistory, task2447History.map(({ number, disposition }) => ({ number, disposition })));
+  assert.doesNotMatch(JSON.stringify(snapshot), /Two findings on the gate wiring|transport\.ts: review fields unvalidated|"criterion":"a"/);
   assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(snapshot))).ok, true);
+
+  const detail = webProjection.detail(makeProjection({ review: [card] }), card.id);
+  assert.deepStrictEqual(detail.checkpointEvidence, card.checkpointEvidence.map(checkpoint => ({
+    ...checkpoint, goalCheckCount: checkpoint.goalCheck.length,
+  })));
+  assert.deepStrictEqual(detail.reviewHistory, task2447History);
+  assert.equal(validateWebMissionDetail(JSON.parse(JSON.stringify(detail))).ok, true);
 });
 
 test('an omitted checkpoint evidence field reads as no evidence, never malformed', () => {
   const card = makeFullCard({ checkpointEvidence: [] });
-  const snapshot = toWebBoardSnapshot(makeProjection({ review: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ review: [card] }));
   const parsed = JSON.parse(JSON.stringify(snapshot));
   for (const stage of parsed.stages) {
     for (const wireCard of stage.cards) { delete wireCard.checkpointEvidence; }
@@ -524,7 +553,7 @@ test('an omitted checkpoint evidence field reads as no evidence, never malformed
 });
 
 test('a malformed checkpoint evidence field is rejected', () => {
-  const snapshot = toWebBoardSnapshot(makeProjection({ review: [makeFullCard({ checkpointEvidence: [] })] }));
+  const snapshot = webProjection.snapshot(makeProjection({ review: [makeFullCard({ checkpointEvidence: [] })] }));
   const parsed = JSON.parse(JSON.stringify(snapshot));
   const card = stageCards(parsed).find(wireCard => 'checkpointEvidence' in wireCard);
   card!.checkpointEvidence = 'not-an-array';
@@ -534,7 +563,7 @@ test('a malformed checkpoint evidence field is rejected', () => {
 });
 
 test('unsupported transport version is rejected as an incompatible client', () => {
-  const snapshot = toWebBoardSnapshot(projectionWith({}));
+  const snapshot = webProjection.snapshot(projectionWith({}));
   const snapshotValidation = validateWebBoardSnapshot({ ...snapshot, transportVersion: 99 });
   assert.deepStrictEqual(snapshotValidation, {
     ok: false,
@@ -595,7 +624,7 @@ test('unsupported projection version is rejected before conversion', () => {
   const future = { ...makeProjection(), version: 99 };
   assert.throws(
     // @ts-expect-error Intentional unsupported projection version must fail closed.
-    () => toWebBoardSnapshot(future),
+    () => webProjection.snapshot(future),
     (error: unknown) => error instanceof WebTransportError && error.code === 'unsupported-projection-version',
   );
 });
@@ -630,14 +659,14 @@ const task2447History: readonly ReviewRoundSummary[] = [
 ];
 
 function wireCardFor(card: MissionCard): WebMissionCard {
-  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ [card.lane]: [card] }));
   const wire = snapshot.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   assert.ok(wire !== undefined, `wire card for ${card.id} must exist`);
   return wire;
 }
 
 function snapshotPayloadFor(card: MissionCard): Record<string, unknown> {
-  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ [card.lane]: [card] }));
   return JSON.parse(JSON.stringify(snapshot));
 }
 
@@ -646,7 +675,7 @@ function stageCards(payload: Record<string, unknown>): Record<string, unknown>[]
   return stages.flatMap((stage) => (stage.cards ?? []) as Record<string, unknown>[]);
 }
 
-test('snapshot card DTO carries pullRequest, reviewApproved, and reviewHistory through a JSON round trip', () => {
+test('snapshot card DTO carries pullRequest, reviewApproved, and compact review outcomes through a JSON round trip', () => {
   const card = makeFullCard({
     reviewRound: 2,
     reviewPhase: 'fixing',
@@ -663,16 +692,17 @@ test('snapshot card DTO carries pullRequest, reviewApproved, and reviewHistory t
     targetBranch: 'main',
   });
   assert.strictEqual(wire.reviewApproved, true);
-  assert.deepStrictEqual(wire.reviewHistory, task2447History);
+  const summaries = task2447History.map(({ number, disposition }) => ({ number, disposition }));
+  assert.deepStrictEqual(wire.reviewHistory, summaries);
 
-  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ [card.lane]: [card] }));
   const parsed = roundTrip(snapshot);
   assert.deepStrictEqual(parsed, snapshot);
   const parsedCard = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   assert.ok(parsedCard !== undefined);
   assert.deepStrictEqual(parsedCard.pullRequest, card.pullRequest);
   assert.strictEqual(parsedCard.reviewApproved, card.reviewApproved);
-  assert.deepStrictEqual(parsedCard.reviewHistory, card.reviewHistory);
+  assert.deepStrictEqual(parsedCard.reviewHistory, summaries);
 
   // Existing checkpoint and current-round fields survive the round trip unchanged.
   assert.equal(parsedCard.checkpoint, 'CP-2.md');
@@ -691,16 +721,16 @@ test('snapshot card DTO keeps pullRequest null when the card has no pull-request
   assert.strictEqual(wire.reviewApproved, true);
   assert.deepStrictEqual(wire.reviewHistory, []);
 
-  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ [card.lane]: [card] }));
   const parsed = roundTrip(snapshot);
   const parsedCard = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   assert.ok(parsedCard !== undefined);
   assert.strictEqual(parsedCard.pullRequest, null);
 });
 
-test('snapshot card DTO round-trips reviewApproved and every per-round reviewHistory field', () => {
+test('snapshot card DTO round-trips reviewApproved and only per-round outcome summaries', () => {
   const card = makeFullCard({ reviewHistory: task2447History });
-  const snapshot = toWebBoardSnapshot(makeProjection({ [card.lane]: [card] }));
+  const snapshot = webProjection.snapshot(makeProjection({ [card.lane]: [card] }));
   const parsed = roundTrip(snapshot);
   const parsedCard = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   assert.ok(parsedCard !== undefined);
@@ -711,22 +741,14 @@ test('snapshot card DTO round-trips reviewApproved and every per-round reviewHis
   parsedCard.reviewHistory.forEach((round, index) => {
     const source = task2447History[index];
     assert.strictEqual(round.number, source.number);
-    assert.strictEqual(round.reviewer, source.reviewer);
-    assert.strictEqual(round.implementer, source.implementer);
-    assert.strictEqual(round.phase, source.phase);
     assert.strictEqual(round.disposition, source.disposition);
-    assert.strictEqual(round.comment, source.comment);
-    assert.deepStrictEqual(round.findingSummaries, [...source.findingSummaries]);
-    assert.deepStrictEqual(round.pushbacks, [...source.pushbacks]);
-    assert.deepStrictEqual(round.fixes, [...source.fixes]);
+    assert.deepStrictEqual(Object.keys(round).sort(), ['disposition', 'number']);
   });
 
   // The second round has disposition null with non-empty finding/pushback/fix lists.
   const openRound = parsedCard.reviewHistory[1];
   assert.strictEqual(openRound.disposition, null);
-  assert.ok(openRound.findingSummaries.length > 0);
-  assert.ok(openRound.pushbacks.length > 0);
-  assert.ok(openRound.fixes.length > 0);
+  assert.deepStrictEqual(openRound, { number: 2, disposition: null });
 
   // Unapproved card without history: false and [] survive the round trip.
   const bare = makeCard();
@@ -794,39 +816,39 @@ test('snapshot validation accepts the extended card and fails closed on malforme
   }
 });
 
-test('transport version 2 rejects v1 payloads as incompatible clients, not invalid payloads', () => {
-  assert.equal(WEB_TRANSPORT_VERSION, 2);
-  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [2]);
+test('transport version 3 rejects v2 payloads as incompatible clients, not invalid payloads', () => {
+  assert.equal(WEB_TRANSPORT_VERSION, 3);
+  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [3]);
 
-  const snapshot = toWebBoardSnapshot(makeProjection({}));
-  assert.equal(snapshot.transportVersion, 2);
+  const snapshot = webProjection.snapshot(makeProjection({}));
+  assert.equal(snapshot.transportVersion, 3);
 
-  const v1Snapshot = validateWebBoardSnapshot({ ...snapshot, transportVersion: 1 });
-  assert.deepStrictEqual(v1Snapshot, {
+  const v2Snapshot = validateWebBoardSnapshot({ ...snapshot, transportVersion: 2 });
+  assert.deepStrictEqual(v2Snapshot, {
     ok: false,
     code: 'incompatible-client',
     field: 'transportVersion',
-    received: 1,
-    supported: [2],
+    received: 2,
+    supported: [3],
   });
 
-  const v1Result = validateWebCommandResult({
-    kind: 'command-result', transportVersion: 1, status: 'completed', error: null, durableEvidence: [],
+  const v2Result = validateWebCommandResult({
+    kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [],
   });
-  assert.equal(v1Result.ok, false);
-  if (!v1Result.ok) {
-    assert.equal(v1Result.code, 'incompatible-client');
-    assert.equal(v1Result.received, 1);
+  assert.equal(v2Result.ok, false);
+  if (!v2Result.ok) {
+    assert.equal(v2Result.code, 'incompatible-client');
+    assert.equal(v2Result.received, 2);
   }
 
-  const v1Progress = validateWebProgressEvent({
-    kind: 'progress', transportVersion: 1, operationId: 'op-1', sequence: 1,
+  const v2Progress = validateWebProgressEvent({
+    kind: 'progress', transportVersion: 2, operationId: 'op-1', sequence: 1,
     phase: 'p', message: 'm', timestamp: 't',
   });
-  assert.equal(v1Progress.ok, false);
-  if (!v1Progress.ok) {
-    assert.equal(v1Progress.code, 'incompatible-client');
-    assert.equal(v1Progress.received, 1);
+  assert.equal(v2Progress.ok, false);
+  if (!v2Progress.ok) {
+    assert.equal(v2Progress.code, 'incompatible-client');
+    assert.equal(v2Progress.received, 2);
   }
 });
 
@@ -838,11 +860,16 @@ test('stamped checkpoint repair evidence validates after web projection (TASK-26
     }],
   }] });
   const card = projectMissionCard(mission, { latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });
-  const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  const projection = makeProjection({ active: [card] });
+  const snapshot = webProjection.snapshot(projection);
   assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
   const wireCard = snapshot.stages.flatMap((stage) => stage.cards).find((item) => item.id === card.id)!;
   assert.deepStrictEqual(wireCard.checkpointEvidence, [{
-    name: 'CP-3', description: 'repair', state: 'completed', goalCheck: [{
+    name: 'CP-3', description: 'repair', state: 'completed', goalCheckCount: 1,
+  }]);
+  const detail = webProjection.detail(projection, card.id);
+  assert.deepStrictEqual(detail.checkpointEvidence, [{
+    name: 'CP-3', description: 'repair', state: 'completed', goalCheckCount: 1, goalCheck: [{
       criterion: 'repair verified', evidence: 'src/domain/checkpoint.ts',
       recordedRound: 3, repairedGate: 'static-analysis', repairedGates: ['transport', 'static-analysis'],
     }],
@@ -850,31 +877,29 @@ test('stamped checkpoint repair evidence validates after web projection (TASK-26
   assert.equal(card.checkpointEvidence[0].goalCheck[0].recordedRound, 3);
   assert.equal(card.checkpointEvidence[0].goalCheck[0].repairedGate, 'static-analysis');
   assert.deepStrictEqual(card.checkpointEvidence[0].goalCheck[0].repairedGates, ['transport', 'static-analysis']);
-  const malformed = JSON.parse(JSON.stringify(snapshot));
-  const malformedCard = malformed.stages.flatMap((stage: { cards: typeof snapshot.stages[number]['cards'] }) => stage.cards)
-    .find((item: { id: string }) => item.id === card.id)!;
-  malformedCard.checkpointEvidence[0].goalCheck[0].unrelatedKey = true;
-  assert.equal(validateWebBoardSnapshot(malformed).ok, false);
+  const malformed = JSON.parse(JSON.stringify(detail));
+  malformed.checkpointEvidence[0].goalCheck[0].unrelatedKey = true;
+  assert.equal(validateWebMissionDetail(malformed).ok, false);
   for (const patch of [
     { recordedRound: -1 }, { recordedRound: 1.5 }, { recordedRound: Infinity },
     { repairedGate: 42 }, { repairedGates: 'transport' }, { repairedGates: [42] },
   ]) {
-    const invalid = structuredClone(snapshot);
-    const row = invalid.stages.flatMap(stage => stage.cards).find(item => item.id === card.id)!.checkpointEvidence![0].goalCheck[0];
+    const invalid = structuredClone(detail);
+    const row = invalid.checkpointEvidence[0].goalCheck[0];
     Object.assign(row, patch);
-    assert.equal(validateWebBoardSnapshot(invalid).ok, false, JSON.stringify(patch));
+    assert.equal(validateWebMissionDetail(invalid).ok, false, JSON.stringify(patch));
   }
-  const legacy = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [{
+  const legacy = webProjection.snapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [{
     name: 'CP-1', description: 'original', goalCheck: [{ criterion: 'unchanged', evidence: 'test/unit/interfaces/web/web-transport.cases.ts' }],
   }] })] }));
   assert.equal(validateWebBoardSnapshot(legacy).ok, true);
-  const empty = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [] })] }));
+  const empty = webProjection.snapshot(makeProjection({ active: [makeFullCard({ checkpointEvidence: [] })] }));
   assert.deepStrictEqual(empty.stages.flatMap((stage) => stage.cards)[0].checkpointEvidence, []);
   assert.equal(validateWebBoardSnapshot(empty).ok, true);
 });
 
 test('snapshot metrics are projected and malformed metrics fail closed', () => {
-  const snapshot = toWebBoardSnapshot(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 } } }));
+  const snapshot = webProjection.snapshot(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 } } }));
   assert.equal(snapshot.metrics.health.state, 'healthy');
   assert.equal(snapshot.metrics.provenance.sampleSize, 3);
   assert.equal(validateWebBoardSnapshot({ ...snapshot, metrics: {} }).ok, false);
@@ -894,14 +919,14 @@ test('conversion is pure: the source projection is not mutated and the output is
   }));
 
   // Writing through the converter would throw on the frozen source (strict mode).
-  const first = toWebBoardSnapshot(projection);
-  const second = toWebBoardSnapshot(projection);
+  const first = webProjection.snapshot(projection);
+  const second = webProjection.snapshot(projection);
   assert.deepStrictEqual(first, second);
   assert.doesNotThrow(() => JSON.stringify(first));
 });
 
 test('weekly delivery count survives transport and rejects malformed values (TASK-2688)', () => {
-  const snapshot = toWebBoardSnapshot(projectionWith({}));
+  const snapshot = webProjection.snapshot(projectionWith({}));
   for (const value of [0, 3]) {
     const wire = { ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: value } };
     assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(wire))).ok, true);
@@ -916,7 +941,7 @@ test('other completed history round-trips separately from the weekly DONE count 
   const projection = makeProjection({ done: [makeCard({ id: tid('task-weekly'), lane: 'done' })] });
   const withHistory = { ...projection, stages: projection.stages.map(stage => stage.lane === 'done'
     ? { ...stage, historyCards: [makeCard({ id: tid('task-unknown'), lane: 'done' })] } : stage) } satisfies NonNullable<Parameters<typeof toWebBoardSnapshot>[0]>;
-  const snapshot = JSON.parse(JSON.stringify(toWebBoardSnapshot(withHistory)));
+  const snapshot = JSON.parse(JSON.stringify(webProjection.snapshot(withHistory)));
   const validated = validateWebBoardSnapshot(snapshot);
   assert.ok(validated.ok);
   const done = validated.value.stages.find(stage => stage.lane === 'done');
@@ -934,7 +959,7 @@ test('other completed history round-trips separately from the weekly DONE count 
 
 test('stored progress sequence round-trips and malformed identity is rejected (TASK-2719)', () => {
   const projection = { ...makeProjection(), operationLog: [{ operationId: 'producer', sequence: 4, phase: 'run', message: 'same', timestamp: '2026-10-06T10:00:00Z' }] };
-  const snapshot = toWebBoardSnapshot(projection);
+  const snapshot = webProjection.snapshot(projection);
   assert.equal(snapshot.operationLog[0].sequence, 4);
   assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
   assert.equal(validateWebBoardSnapshot({ ...snapshot, operationLog: [{ ...snapshot.operationLog[0], sequence: '4' }] }).ok, false);
@@ -945,7 +970,7 @@ test('checkpoint progress state round-trips and invalid states fail closed (TASK
   const card = makeFullCard({ checkpointEvidence: [
     { name: 'CP-1', description: 'work', goalCheck: [], state: 'current' },
   ] });
-  const wire = toWebBoardSnapshot(makeProjection({ active: [card] }));
+  const wire = webProjection.snapshot(makeProjection({ active: [card] }));
   assert.equal(validateWebBoardSnapshot(wire).ok, true);
   assert.equal(wire.stages.flatMap(stage => stage.cards)[0].checkpointEvidence?.[0].state, 'current');
   const malformed = JSON.parse(JSON.stringify(wire));
@@ -956,7 +981,7 @@ test('checkpoint progress state round-trips and invalid states fail closed (TASK
 
 test('execution checkpoint and absent current plan round-trip fail closed (TASK-2776)', () => {
   for (const state of ['completed', 'future', 'current'] as const) {
-    const wire = toWebBoardSnapshot(makeProjection({ active: [makeFullCard({ currentCheckpoint: state === 'current' ? 'CP-2' : null,
+    const wire = webProjection.snapshot(makeProjection({ active: [makeFullCard({ currentCheckpoint: state === 'current' ? 'CP-2' : null,
       checkpointEvidence: [{ name: 'CP-2', description: 'Step', goalCheck: [], state }] })] }));
     assert.equal(validateWebBoardSnapshot(wire).ok, true);
     const card = wire.stages.flatMap(stage => stage.cards)[0];
@@ -975,7 +1000,7 @@ test('execution checkpoint and absent current plan round-trip fail closed (TASK-
 test('manual attention round-trips without becoming a command capability (TASK-2799)', () => {
   const card = makeCard({ blockingReason: 'Operator must decide review authority' });
   const item = makeAttentionItem(card, { kind: 'blocking', detail: card.blockingReason! }, 1);
-  const snapshot = toWebBoardSnapshot({ ...makeProjection({ active: [card] }), attentionQueue: [item] });
+  const snapshot = webProjection.snapshot({ ...makeProjection({ active: [card] }), attentionQueue: [item] });
   const action = snapshot.attentionQueue[0]!.action;
   assert.ok(action);
   assert.equal(action.kind, 'manual');

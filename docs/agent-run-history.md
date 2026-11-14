@@ -49,6 +49,16 @@ resume with `px review <slug>` or the board's **Resume review** action; another
 refuses acknowledgment rather than treating uncertainty as proof of shutdown.
 Status commands only inspect; they do not stop or restart review.
 
+Reviewer progress uses stable labels in interactive and redirected output.
+`px history <slug> list` names each retained reviewer family, attempt and run ID,
+so a disconnected client can correlate a queued, running, waiting, completed or
+failed reviewer with `px status <slug>`. Output redirected to a file stays plain
+and bounded; interactive rendering may add terminal styling without changing the
+labels. A historical or partial verdict without a retained native run ID keeps
+that ID unavailable and uses an explicit `publication:<id>` evidence label
+instead of presenting a publication identity as run history. Each reviewer keeps
+private non-interactive stdin and starts from a fresh native conversation.
+
 A verdict rejected by the ownership fence remains rejected. Its decision,
 findings and comment are retained at the evidence location printed by
 `px verdict`. A restarted reviewer receives references identifying the original

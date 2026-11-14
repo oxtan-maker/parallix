@@ -16,8 +16,8 @@ function checkpointProgress(card: WebMissionCard) {
 }
 
 /** Supplied states alone determine completion; names and evidence are labels. */
-export function CheckpointPips({ card }: { card: WebMissionCard }) {
-  const [open, setOpen] = useState(false);
+export function CheckpointPips({ card, snapshotRevision }: { card: WebMissionCard; snapshotRevision: string | null }) {
+  const [openedRevision, setOpenedRevision] = useState<string | null>();
   const { checkpoints, known, completed, current, summary } = checkpointProgress(card);
   if (checkpoints.length === 0) {
     return <span role="group" data-checkpoint-unknown="" aria-label="Checkpoint plan" aria-description={summary}
@@ -30,7 +30,7 @@ export function CheckpointPips({ card }: { card: WebMissionCard }) {
       <button type="button" aria-haspopup="dialog"
         aria-label={`View checkpoint evidence for ${card.checkpoint ?? card.id}: ${summary}`}
         title={`${summary} · Open checkpoint descriptions and evidence`}
-        onClick={(event) => { event.stopPropagation(); setOpen(true); }}
+        onClick={(event) => { event.stopPropagation(); setOpenedRevision(snapshotRevision); }}
         style={{ display: 'flex', alignItems: 'center', gap: SPACE.sm, width: '100%', maxWidth: 148, minHeight: 24,
           padding: SPACE.xs, border: 0, borderRadius: RADIUS.control, background: 'transparent', color: C.cyan,
           cursor: 'pointer' }}>
@@ -40,8 +40,9 @@ export function CheckpointPips({ card }: { card: WebMissionCard }) {
         {!known && <span data-checkpoint-unknown="" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>checkpoints · completion unknown</span>}
         {known && completed === checkpoints.length && <span data-checkpoint-complete="" aria-hidden="true" title="All supplied checkpoints completed">✓</span>}
       </button>
-      {open && createPortal(<CheckpointDetail card={card}
-        initial={current[0] ?? card.checkpoint ?? checkpoints[0]?.name ?? ''} onClose={() => setOpen(false)} />, document.body)}
+      {openedRevision !== undefined && createPortal(<CheckpointDetail card={card}
+        initial={current[0] ?? card.checkpoint ?? checkpoints[0]?.name ?? ''} openedRevision={openedRevision}
+        snapshotRevision={snapshotRevision} onClose={() => setOpenedRevision(undefined)} />, document.body)}
     </div>
   );
 }

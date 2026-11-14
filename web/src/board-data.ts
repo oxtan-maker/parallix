@@ -1,4 +1,5 @@
 import type { WebEditMissionRequest } from '../../src/interfaces/web/transport-edit-mission.js';
+import { useEffect, useState } from 'react';
 /**
  * The browser's only network read: `GET /api/board`, validated by the shared
  * transport contract (`src/interfaces/web/transport.ts`) before anything
@@ -9,11 +10,12 @@ import type { WebEditMissionRequest } from '../../src/interfaces/web/transport-e
  * No caching, no retry, no polling: `board-sync.ts` decides when to read, and
  * each call performs exactly one read.
  */
-import { validateWebBoardSnapshot, validateWebCommandResult, type WebBoardSnapshot, type WebCommandRequest, type WebCommandResult, type WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot, validateWebMissionDetail, validateWebCommandResult, type WebBoardSnapshot, type WebMissionDetail, type WebCommandRequest, type WebCommandResult, type WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
 
 /** The snapshot read path. This client has no mutation route. */
 export const SNAPSHOT_PATH = '/api/board';
 export const COMMANDS_PATH = '/api/commands';
+export const missionDetailPath = (missionId: string) => `/api/board/${encodeURIComponent(missionId)}/detail`;
 
 /** The four presentation states the board contract distinguishes, plus loading. */
 export type SnapshotState =
@@ -58,6 +60,66 @@ export async function loadSnapshot(): Promise<SettledSnapshotState> {
     return { kind: 'malformed', problems: validation.problems };
   }
   return { kind: 'ready', snapshot: validation.value };
+}
+
+/** Explain why deferred facts do not describe the rendered board projection. */
+export function missionDetailRevisionError(detail: WebMissionDetail, expectedRevision: string | null): string | null {
+  if (expectedRevision === null) { return 'the board snapshot has no projection revision'; }
+  if (detail.freshness.revision === expectedRevision) { return null; }
+  return `detail describes projection ${detail.freshness.revision ?? 'unavailable'}, while the board shows ${expectedRevision}; refresh the board and reopen the detail`;
+}
+
+class MissionDetailRevisionMismatch extends Error {}
+
+/** Load one deferred review/checkpoint payload and reject every malformed or mismatched shape. */
+export async function loadMissionDetail(missionId: string, expectedRevision: string | null): Promise<WebMissionDetail> {
+  const response = await fetch(missionDetailPath(missionId), { headers: { accept: 'application/json' } });
+  if (!response.ok) { throw new Error(`HTTP ${response.status} ${response.statusText}`.trim()); }
+  let payload: unknown;
+  try { payload = await response.json(); }
+  catch (error) { throw new Error(`mission detail is not JSON: ${describe(error)}`); }
+  const validation = validateWebMissionDetail(payload);
+  if ('supported' in validation) {
+    throw new Error(`mission detail transport ${String(validation.received)} is incompatible; supported: ${validation.supported.join(', ')}`);
+  }
+  if ('problems' in validation) { throw new Error(`invalid mission detail: ${validation.problems.join('; ')}`); }
+  const revisionError = missionDetailRevisionError(validation.value, expectedRevision);
+  if (revisionError !== null) { throw new MissionDetailRevisionMismatch(revisionError); }
+  return validation.value;
+}
+
+/** One deferred-detail state machine shared by every board disclosure. */
+export function useMissionDetail(missionId: string, openedRevision: string | null, currentRevision: string | null): {
+  readonly detail: WebMissionDetail | null;
+  readonly error: string | null;
+} {
+  const [detail, setDetail] = useState<WebMissionDetail | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [requestRevision, setRequestRevision] = useState(openedRevision);
+  const [waitingForCurrent, setWaitingForCurrent] = useState(false);
+  const [retried, setRetried] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setError(null);
+    void loadMissionDetail(missionId, requestRevision).then(value => {
+      if (live) { setDetail(value); setError(null); }
+    }, failure => {
+      if (!live) { return; }
+      if (failure instanceof MissionDetailRevisionMismatch && requestRevision !== null && !retried) {
+        setWaitingForCurrent(true);
+        return;
+      }
+      setError(describe(failure));
+    });
+    return () => { live = false; };
+  }, [missionId, requestRevision, retried]);
+  useEffect(() => {
+    if (!waitingForCurrent || retried || currentRevision === requestRevision) { return; }
+    setWaitingForCurrent(false);
+    setRetried(true);
+    setRequestRevision(currentRevision);
+  }, [currentRevision, requestRevision, retried, waitingForCurrent]);
+  return { detail, error };
 }
 
 async function postCommand(request: WebCommandRequest | WebCreateMissionRequest | WebEditMissionRequest): Promise<WebCommandResult> {

@@ -138,6 +138,13 @@ function legacyFields({ legacyTask, legacyMission, legacyReview }: StatusSources
 
 function reviewFields({ recorded, card }: StatusSources) {
   return {
+    ...reviewCardFields(card),
+    integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
+  };
+}
+
+function reviewCardFields(card: MissionCard | null) {
+  return {
     reviewPhase: card?.reviewPhase,
     reviewRound: card?.reviewRound,
     reviewLiveness: card?.reviewLiveness,
@@ -146,8 +153,8 @@ function reviewFields({ recorded, card }: StatusSources) {
     approvalOwed: card?.approvalOwed,
     sameAgentReview: card?.sameAgentReview,
     awaitingApprovals: card?.awaitingApprovals,
+    reviewProgress: card?.reviewProgress ?? null,
     approvalCoverage: card?.approvalCoverage ?? null,
-    integrationRepair: recorded ? latestIntegrationRepair(recorded.mission) : null,
     // The board card's rounds are the review-round read model; status carries
     // them through unchanged rather than widening each field into a mirror type
     // that could contradict the board (TASK-2846).

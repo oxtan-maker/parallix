@@ -1,8 +1,8 @@
 # ADR 0037: AI workflow coordination architecture
 
-Status: Accepted; review-policy amendment approved, implementation pending PX-0046
+Status: Accepted; review-policy amendment implemented by PX-0046
 Date: 2026-04-06
-Last updated: 2026-11-08
+Last updated: 2026-11-12
 Related: ADR 0048 (fail-closed harness), ADR 0051 (UI-neutral application boundary), ADR 0053 (persistence and authority), ADR 0064 (terminal ownership), ADR 0066 (context)
 
 ## Context

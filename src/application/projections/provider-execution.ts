@@ -1,14 +1,24 @@
 import type { AgentFamily } from '../../domain/agents.js';
 import { parseAgentRunId } from '../../domain/agent-run.js';
+import { sessionRole } from '../../domain/session.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
+import type { MissionCard, ReviewProgress } from './mission-board.js';
 import type { MissionTerminalScope, MissionHistoryStorePort } from '../ports/mission-terminal.js';
 import { getRun, observeRunExecution, type RunSummary } from '../run-history.js';
-import { MAX_RUNS_PER_MISSION, runCaptureKind } from '../run-history-types.js';
+import { MAX_RUNS_PER_MISSION, runCaptureKind, type RunRecord } from '../run-history-types.js';
+
+const REVIEW_SESSION_ROLE = sessionRole('review');
 
 /** One current metadata/probe reading, never a cached positive or workflow state. */
 export interface ProviderExecutionFacts {
   readonly observedAt: string;
-  readonly invocations: readonly { readonly runId: string; readonly operationId: string | null; readonly family: AgentFamily }[];
+  readonly invocations: readonly {
+    readonly runId: string;
+    readonly operationId: string | null;
+    readonly family: AgentFamily;
+    /** Missing on legacy or injected observations, which cannot occupy a reviewer slot. */
+    readonly role?: RunRecord['role'];
+  }[];
   /** Scoped diagnostics for the invocations or probes that failed; they never change another mission's counts. */
   readonly limitations: readonly string[];
   readonly recordedOperationIds?: readonly string[];
@@ -100,7 +110,7 @@ function collectInvocation(run: RunSummary, invocations: ProviderExecutionFacts[
   if (runCaptureKind(record) !== 'agent') { return; }
   if (record.operationId) { operations.add(record.operationId); }
   if (execution === 'live' && record.family) {
-    invocations.push({ runId: record.runId, operationId: record.operationId ?? null, family: record.family });
+    invocations.push({ runId: record.runId, operationId: record.operationId ?? null, family: record.family, role: record.role });
   } else if (execution === 'live') {
     limitations.push(`${record.runId}: live provider has no recorded agent family`);
   } else if (probeUnavailable) {
@@ -117,11 +127,34 @@ export function readProviderExecution(reader: ProviderExecutionReader, scope: Mi
   try { return reader.observe(scope, currentOperationId); } catch { return failedExecution(); }
 }
 
+/** Overlay confirmed live native invocations onto the durable reviewer slots. */
+function projectLiveReviewerRuns(progress: ReviewProgress | null, execution: ProviderExecutionFacts): ReviewProgress | null {
+  if (!progress) { return null; }
+  const claimed = new Set<string>();
+  const reviewers = progress.reviewers.map(reviewer => {
+    if (reviewer.runId !== null || reviewer.state === 'completed' || reviewer.state === 'failed') { return reviewer; }
+    const live = execution.invocations.find(invocation => invocation.role === REVIEW_SESSION_ROLE
+      && invocation.family === reviewer.reviewer && !claimed.has(invocation.runId));
+    if (!live) { return reviewer; }
+    claimed.add(live.runId);
+    return { ...reviewer, runId: live.runId, runLabel: live.runId, state: 'running' as const };
+  });
+  const outstanding = reviewers.filter(reviewer => reviewer.state !== 'completed').length;
+  return { ...progress, reviewers, nextAction: reviewers.some(reviewer => reviewer.state === 'running')
+    ? `Wait for ${outstanding} reviewer outcome${outstanding === 1 ? '' : 's'}.` : progress.nextAction };
+}
+
+/** Apply one provider observation to a card, including its live reviewer overlay. */
+export function projectProviderExecutionCard(card: MissionCard, execution: ProviderExecutionFacts): MissionCard {
+  return { ...card, execution, reviewProgress: projectLiveReviewerRuns(card.reviewProgress ?? null, execution) };
+}
+
 /** Apply one repository observation to both surfaces, independent of workflow activity. */
 export function projectProviderExecution(board: import('./board.js').BoardProjection, reader: ProviderExecutionReader, operations: readonly WorkflowOperation[] = []): import('./board.js').BoardProjection {
   const owners = new Map(operations.filter(operation => operation.repositoryId === board.repositoryId).map(operation => [operation.missionId, operation.id]));
   const stages = board.stages.map(stage => ({ ...stage, cards: stage.cards.map(card => {
-    return { ...card, execution: readProviderExecution(reader, { repositoryId: board.repositoryId, missionId: card.id }, owners.get(card.id)) };
+    const execution = readProviderExecution(reader, { repositoryId: board.repositoryId, missionId: card.id }, owners.get(card.id));
+    return projectProviderExecutionCard(card, execution);
   }) }));
   return projectExecutionMetrics({ ...board, stages });
 }

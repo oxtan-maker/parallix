@@ -1,14 +1,14 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { FlowPanel } from '../../../../web/src/flow-panel.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot, WebFlowWindow } from '../../../../src/interfaces/web/transport.js';
 import { flowReferenceProjection } from '../../../fixtures/flow-reference.js';
 import { makeProjection } from '../../../fixtures/board-projection.js';
 
-const snapshot = (): WebBoardSnapshot => toWebBoardSnapshot(flowReferenceProjection());
+const snapshot = (): WebBoardSnapshot => webProjection.snapshot(flowReferenceProjection());
 const renderFlow = (value = snapshot()): string => renderToStaticMarkup(
   React.createElement(FlowPanel, { snapshot: value, onNavigate: () => {} }),
 );
@@ -51,9 +51,12 @@ test('Mission Flow exposes graph and timing bars as text without replacing missi
   assert.match(html, /aria-label="waiting 6m, working 76m"/);
   assert.match(html, /aria-label="held 950m, waiting and hands-on time not split"/);
 
-  const unavailable = toWebBoardSnapshot(makeProjection());
+  const pending = makeProjection();
+  const unavailable = webProjection.snapshot({ ...pending, metrics: { ...pending.metrics, analytics: {
+    freshness: 'unavailable', revision: 'flow-v1', refreshedAt: null, reason: 'Historical analytics refresh is in progress.' } } });
   const emptyHtml = renderFlow(unavailable);
   assert.match(emptyHtml, /FLOW statistics unavailable/);
+  assert.match(emptyHtml, /Historical analytics refresh is in progress/);
   assert.match(emptyHtml, /No flow values are shown in place of the missing projection/);
   assert.doesNotMatch(emptyHtml, /data-flow-kpi=/);
 });

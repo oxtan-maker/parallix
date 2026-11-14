@@ -299,6 +299,15 @@ window just enough to keep the focused card shown. Navigation itself changes
 nothing; the keys that do act on a mission — `Enter` and `Shift+X` — each open a
 confirmation first.
 
+## Review progress
+
+Review cards render the application-owned review projection also used by
+`px status` and the web board. The card names the round, approval requirement,
+independent-reviewer availability, and each selected reviewer's stable run label
+and queued, running, waiting, completed or failed state. Degraded one-reviewer
+and fresh same-agent fallback reasons, blockers, and the next operator action
+appear on the card without creating a separate waiting-for-human lane or state.
+
 ## Cancelling a mission
 
 A mission that went wrong and will be redone from scratch can be retired from the
@@ -423,7 +432,11 @@ including unavailable actions and unknown states. Secondary text colors meet
 Decorative strokes and hidden glyphs use separate treatments.
 
 Review circles show recorded rounds and outcomes, including rounds beyond five.
-The round number does not indicate how many retries remain.
+The round number does not indicate how many retries remain. Open the review
+circles to load comments, findings, pushbacks and fixes. Checkpoint tracks keep
+their plan and progress in the board, while Goal Check rows load only when the
+checkpoint disclosure opens. These detail reads come from the same application
+projection as the card and fail visibly if that detail is unavailable.
 
 Focusable mission cards show hover and keyboard focus outlines. Use Up/Down to
 move the current mission selection, then Enter or Space to open its operation
@@ -447,13 +460,19 @@ appears below the board with the mission ID; revealing the card moves it back
 into its footer. Refreshing the board retains this feedback until another
 action for that mission clears or replaces it.
 
-The web host stays responsive while a separate process builds board data. A read
-that exceeds its deadline fails individually; it does not discard work already
-loading or fail other pending reads. A later refresh reuses the loaded state.
+The web host keeps one completed board projection. Change detection performs the
+next build; every connected browser reuses that completed result, including
+checkpoint, review and terminal detail reads, until detection replaces it.
+Snapshot and detail responses identify the projection and its observation time.
+After a board command changes state, its response waits for the same retained
+projection to refresh, so the browser's immediate follow-up read cannot present
+the earlier board as fresh.
 Closing `px web` also stops its board readers.
 
 If a projection refresh fails, the browser keeps the last validated board visible
-with a stale warning and the server's failure message. Stream errors request a
+with its prior identity, a stale warning and the server's failure message. A
+failure before any projection completes is unavailable, never an empty board.
+Stream errors request a
 coordinated refresh; only a successful read begun after the latest failure can
 clear it. Recovery reads are serial and coalesced. A failed recovery waits for
 another stream signal, reconnect or requested refresh rather than retrying in a

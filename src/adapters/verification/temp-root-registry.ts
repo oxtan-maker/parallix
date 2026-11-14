@@ -252,6 +252,16 @@ function livenessVerdict(alive: boolean | null): 'reclaim' | 'keep' | string {
   return alive === false ? 'reclaim' : alive === true ? 'keep' : 'owner absence cannot be confirmed';
 }
 
+function checkoutCacheLivenessVerdict(
+  owner: NonNullable<ReturnType<typeof readCheckoutCacheOwner>>['owner'],
+  liveness: OwnerLiveness,
+): 'reclaim' | 'keep' | string {
+  const verdicts = [owner, ...(owner.children ?? [])]
+    .map(identity => liveness(identity.pid, identity.startId));
+  if (verdicts.includes(true)) { return 'keep'; }
+  return livenessVerdict(verdicts.includes(null) ? null : false);
+}
+
 /** `reclaim`, `keep`, or the fail-closed reason the cache remains unresolved. */
 function abandonedCheckoutCacheVerdict(root: string, liveness: OwnerLiveness): 'reclaim' | 'keep' | string {
   if (!currentOwnedDirectory(root)) { return 'checkout cache is not a non-symlink directory owned by this user'; }
@@ -259,6 +269,11 @@ function abandonedCheckoutCacheVerdict(root: string, liveness: OwnerLiveness): '
   if (owner === null) { return 'no durable checkout-cache ownership record'; }
   if (!matchesCheckoutCacheIdentity(root, owner)) {
     return 'checkout-cache path does not match its durable checkout identity';
+  }
+  if (owner.owner.checkoutLifecycle === 'disposable-stand-in'
+    && owner.checkoutGitDir === null && owner.repositoryGitDir === null) {
+    if (fs.existsSync(owner.checkoutPath)) { return activeCheckoutVerdict(owner); }
+    return checkoutCacheLivenessVerdict(owner.owner, liveness);
   }
   if (owner.checkoutGitDir === null || owner.repositoryGitDir === null
     || owner.checkoutGitDir === owner.repositoryGitDir) {
@@ -269,7 +284,7 @@ function abandonedCheckoutCacheVerdict(root: string, liveness: OwnerLiveness): '
   }
   if (!currentOwnedDirectory(owner.repositoryGitDir)) { return 'repository identity cannot be confirmed'; }
   if (fs.existsSync(owner.checkoutGitDir)) { return 'checkout retirement cannot be confirmed'; }
-  return livenessVerdict(liveness(owner.owner.pid, owner.owner.startId));
+  return checkoutCacheLivenessVerdict(owner.owner, liveness);
 }
 
 function recoverAbandonedCheckoutCaches(bases: readonly string[], liveness: OwnerLiveness, report: TempRootRecoveryReport): void {

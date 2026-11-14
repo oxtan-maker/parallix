@@ -7,6 +7,7 @@ import { isRetainedRebaseOutcome, REBASE_OBSERVATION_STAGES } from '../../applic
  */
 
 import { LANES, GATES, ACTION_STATES, CERTAINTIES, ATTENTION_REASONS, COMMAND_KINDS, isPlainObject, checkKeys, checkString, checkNullableString, checkBoolean, checkFiniteNumber, checkNullableFiniteNumber, checkEnum, checkStringArray, checkOptString, checkDuration } from './transport-validation-primitives.js';
+import { checkReviewProgress } from './review-progress-shape.js';
 
 
 export function checkCommandAction(object: unknown, path: string, problems: string[]): void {
@@ -78,7 +79,7 @@ function checkPullRequest(object: unknown, path: string, problems: string[]): vo
   checkString(object, 'targetBranch', path, problems);
 }
 
-function checkCheckpointEvidence(object: unknown, path: string, problems: string[]): void {
+export function checkCheckpointEvidence(object: unknown, path: string, problems: string[], full = false): void {
   if (!Array.isArray(object)) {
     problems.push(`${path}.checkpointEvidence must be an array`);
     return;
@@ -86,14 +87,21 @@ function checkCheckpointEvidence(object: unknown, path: string, problems: string
   object.forEach((checkpoint, index) => {
     const checkpointPath = `${path}.checkpointEvidence[${index}]`;
     if (!isPlainObject(checkpoint)) { problems.push(`${checkpointPath} must be an object`); return; }
-    checkKeys(checkpoint, ['name', 'description', 'goalCheck', 'state'], ['name', 'description', 'goalCheck'], checkpointPath, problems);
+    checkKeys(checkpoint, ['name', 'description', 'goalCheckCount', ...(full ? ['goalCheck'] : []), 'state'],
+      ['name', 'description', 'goalCheckCount', ...(full ? ['goalCheck'] : [])], checkpointPath, problems);
     checkString(checkpoint, 'name', checkpointPath, problems);
     checkString(checkpoint, 'description', checkpointPath, problems);
+    checkFiniteNumber(checkpoint, 'goalCheckCount', checkpointPath, problems);
+    if (!Number.isSafeInteger(checkpoint.goalCheckCount) || Number(checkpoint.goalCheckCount) < 0) {
+      problems.push(`${checkpointPath}.goalCheckCount must be a non-negative safe integer`);
+    }
     if (Object.prototype.hasOwnProperty.call(checkpoint, 'state')) {
       checkEnum(checkpoint, 'state', ['completed', 'current', 'future'], checkpointPath, problems);
     }
+    if (!full) { return; }
     const rows = checkpoint.goalCheck as unknown;
     if (!Array.isArray(rows)) { problems.push(`${checkpointPath}.goalCheck must be an array`); return; }
+    if (rows.length !== checkpoint.goalCheckCount) { problems.push(`${checkpointPath}.goalCheckCount must match goalCheck length`); }
     rows.forEach((row, rowIndex) => {
       const rowPath = `${checkpointPath}.goalCheck[${rowIndex}]`;
       if (!isPlainObject(row)) { problems.push(`${rowPath} must be an object`); return; }
@@ -109,8 +117,14 @@ function checkCheckpointEvidence(object: unknown, path: string, problems: string
   });
 }
 
-function checkReviewRound(object: unknown, path: string, problems: string[]): void {
+export function checkReviewRound(object: unknown, path: string, problems: string[], full = false): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
+  if (!full) {
+    checkKeys(object, ['number', 'disposition'], ['number', 'disposition'], path, problems);
+    checkFiniteNumber(object, 'number', path, problems);
+    checkNullableString(object, 'disposition', path, problems);
+    return;
+  }
   checkKeys(object,
     ['number', 'reviewer', 'implementer', 'phase', 'disposition', 'comment',
       'findingSummaries', 'pushbacks', 'fixes', 'startRevision', 'decidedRevision'],
@@ -127,6 +141,21 @@ function checkReviewRound(object: unknown, path: string, problems: string[]): vo
   checkStringArray(object, 'findingSummaries', path, problems);
   checkStringArray(object, 'pushbacks', path, problems);
   checkStringArray(object, 'fixes', path, problems);
+}
+
+export function checkProjectionFreshness(object: unknown, path: string, problems: string[]): void {
+  if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
+  checkKeys(object, ['state', 'revision', 'refreshedAt', 'reason'], ['state', 'revision', 'refreshedAt', 'reason'], path, problems);
+  checkEnum(object, 'state', ['fresh', 'stale', 'unavailable'], path, problems);
+  checkNullableString(object, 'revision', path, problems);
+  checkNullableString(object, 'refreshedAt', path, problems);
+  checkNullableString(object, 'reason', path, problems);
+  if (object.state === 'fresh' && (object.revision === null || object.refreshedAt === null || object.reason !== null)) {
+    problems.push(`${path} fresh state requires revision/refreshedAt and no reason`);
+  }
+  if (object.state !== 'fresh' && typeof object.reason !== 'string') {
+    problems.push(`${path} ${String(object.state)} state requires a reason`);
+  }
 }
 
 function checkReviewWindowAllowance(value: unknown, path: string, problems: string[]): void {
@@ -158,7 +187,7 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'currentCheckpoint', 'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewWindowAllowance', 'repairBudget', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
+      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewWindowAllowance', 'repairBudget', 'reviewProgress', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
@@ -200,6 +229,9 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   }
   if (Object.prototype.hasOwnProperty.call(object, 'repairBudget')) {
     checkRepairBudget(object.repairBudget, `${path}.repairBudget`, problems);
+  }
+  if (Object.prototype.hasOwnProperty.call(object, 'reviewProgress')) {
+    checkReviewProgress(object.reviewProgress, `${path}.reviewProgress`, problems);
   }
   checkNullableString(object, 'blockingReason', path, problems);
   checkStringArray(object, 'flags', path, problems);

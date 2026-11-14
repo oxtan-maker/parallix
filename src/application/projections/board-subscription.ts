@@ -57,6 +57,16 @@ export interface BoardSubscriptionOptions {
 
 export type BoardProjectionListener = (_projection: BoardProjection) => void;
 
+/** A projection whose change verdict was already decided by its retained source. */
+export interface DetectedBoardProjection {
+  readonly projection: BoardProjection;
+  readonly changed: boolean;
+}
+
+function isDetectedProjection(value: BoardProjection | DetectedBoardProjection): value is DetectedBoardProjection {
+  return 'projection' in value;
+}
+
 function projectionIsActive(projection: BoardProjection): boolean {
   return projection.stages.some(stage => stage.cards.some(card => agentIsWorking(card)
     || (card.workflowOperation ? isOpenWorkflow(card.workflowOperation) : false)));
@@ -68,7 +78,7 @@ function projectionIsActive(projection: BoardProjection): boolean {
  * updated after the fact.
  */
 export function subscribeToBoardProjection(
-  build: () => Promise<BoardProjection>,
+  build: () => Promise<BoardProjection | DetectedBoardProjection>,
   onChange: BoardProjectionListener,
   options: BoardSubscriptionOptions = {},
 ): () => void {
@@ -86,13 +96,15 @@ export function subscribeToBoardProjection(
 
   const tick = async () => {
     try {
-      const projection = await build();
+      const built = await build();
+      const projection = isDetectedProjection(built) ? built.projection : built;
       if (stopped) { return; }
       active = projectionIsActive(projection);
       failures = 0;
-      const fingerprint = boardFingerprint(projection, { displayedCountdown });
-      if (fingerprint !== lastFingerprint) {
-        lastFingerprint = fingerprint;
+      const fingerprint = isDetectedProjection(built) ? null : boardFingerprint(projection, { displayedCountdown });
+      const changed = isDetectedProjection(built) ? built.changed : fingerprint !== lastFingerprint;
+      if (fingerprint !== null) { lastFingerprint = fingerprint; }
+      if (changed) {
         onChange(projection);
       }
     } catch (error) {
@@ -137,11 +149,14 @@ export function subscribeToBoardProjection(
  */
 export function boardFingerprint(
   projection: BoardProjection,
-  options: { readonly displayedCountdown?: boolean } = {},
+  options: { readonly displayedCountdown?: boolean; readonly deferredDetails?: boolean } = {},
 ): string {
   return JSON.stringify({
     repositoryId: projection.repositoryId,
-    cards: projection.stages.flatMap((stage) => stage.cards.map((card) => ({
+    cards: projection.stages.flatMap((stage) => [
+      ...stage.cards,
+      ...(options.deferredDetails ? stage.historyCards ?? [] : []),
+    ].map((card) => ({
       id: card.id,
       lane: card.lane,
       status: card.status,
@@ -158,6 +173,21 @@ export function boardFingerprint(
       blocker: card.blocker,
       execution: card.execution ? { ...card.execution, observedAt: undefined } : undefined,
       liveSession: card.liveSession ?? null,
+      ...(options.deferredDetails ? {
+        title: card.title,
+        closed: card.closed,
+        labels: card.labels,
+        checkpoint: card.checkpoint,
+        currentCheckpoint: card.currentCheckpoint,
+        checkpointDescription: card.checkpointDescription,
+        nextActionText: card.nextActionText,
+        pullRequest: card.pullRequest,
+        reviewDisposition: card.reviewDisposition,
+        reviewHistory: card.reviewHistory,
+        reviewRecovery: card.reviewRecovery,
+        repairBudget: card.repairBudget,
+        flags: card.flags,
+      } : {}),
     }))),
     attention: projection.attentionQueue.map((item) => [item.missionId, item.reason.kind, item.action?.kind]),
     agents: options.displayedCountdown

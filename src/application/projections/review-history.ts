@@ -1,5 +1,23 @@
-import { parseResolutionDispositions, type Review, type ReviewDisposition } from '../../domain/review.js';
-import type { ReviewRoundSummary } from './mission-board.js';
+import type { AgentFamily } from '../../domain/agents.js';
+import { parseResolutionDispositions, type Review, type ReviewDisposition, type ReviewPhase } from '../../domain/review.js';
+
+/** One past round, flattened for display and for handing to the next reviewer. */
+export interface ReviewRoundSummary {
+  readonly startRevision?: string;
+  readonly decidedRevision?: string | null;
+  readonly integrationRepairAssessment?: import('../../domain/integration-approval-retention.js').IntegrationRepairAssessment;
+  readonly number: number;
+  readonly reviewer: AgentFamily;
+  readonly implementer: AgentFamily;
+  readonly phase: ReviewPhase;
+  readonly disposition: ReviewDisposition | null;
+  readonly comment: string | null;
+  readonly findingSummaries: readonly string[];
+  readonly pushbacks: readonly string[];
+  readonly fixes: readonly string[];
+  readonly revocation?: { readonly by: string; readonly reason: string; readonly at: string };
+  readonly supersession?: { readonly revision: string; readonly by: string; readonly at: string };
+}
 
 function outcomeComment(content: string): string | null {
   const summary = content.match(/(?:^|\n)## Summary[^\S\n]*\n+([^\n]+)/);

@@ -1,6 +1,6 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { activitySnapshots } from '../../../fixtures/execution-activity.js';
 import { projectMissionActivity } from '../../../../src/application/projections/mission-activity.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 import { makeCard as fixtureCard } from '../../../fixtures/board-projection.js';
 import { missionOutcome } from '../../../fixtures/mission-outcome.js';
@@ -812,7 +812,7 @@ test('current cards do not wait for historical reconstruction and declare freshn
 
   revision = 'history-v4'; assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale');
   assert.equal(reconstructions, 3);
-  nowMs += 30_000;
+  nowMs += 120_000;
   assert.equal((await builder.build()).metrics.analytics?.freshness, 'stale'); await settle();
   assert.equal(reconstructions, 4, 'a hung refresh is cancelled and the newest revision starts after its finite deadline'); assert.equal(aborted, 1);
   nowMs += 300_000; finishes[3](metrics); await settle();
@@ -980,7 +980,7 @@ for (const state of ['running', 'blocked', 'ended'] as const) {
       assert.equal(closeout?.closed, false);
       assert.ok(closeout?.blockingReason, 'unclosed done retains closeout failure');
       assert.ok(board.attentionQueue.some(item => item.missionId === unclosed.id));
-      const web = toWebBoardSnapshot(board);
+      const web = webProjection.snapshot(board);
       const wire = web.stages.flatMap(stage => stage.cards).find(card => card.id === closed.id)!;
       assert.equal(wire.activity.work.kind, 'idle');
       assert.equal(wire.blockingReason, null);

@@ -1,3 +1,4 @@
+import { webProjection } from '../../fixtures/web-projection.js';
 // Historical regression provenance: TASK-2363.
 import { fixtureCohortMetadata } from '../../fixtures/review-statistics.js';
 import { describe, it } from 'node:test';
@@ -12,7 +13,6 @@ import { ConcreteOperationLogReadAdapter } from '../../../src/adapters/backlog/c
 import { ConcreteReviewReadAdapter } from '../../../src/adapters/backlog/concrete-review-read-adapter.js';
 import { BoardProjectionBuilder } from '../../../src/application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
-import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 import {
   createPrimaryAndWorktree,
@@ -163,10 +163,10 @@ describe("production certification: persisted weekly FLOW decision surface", () 
           new Set(Array.from({ length: 31 }, (_, index) => `task-current-${index}`)));
         assert.deepEqual(new Set(done.historyCards?.map(card => card.id)),
           new Set(['task-old-unclosed', 'task-unknown-delivery']));
-        const snapshot = toWebBoardSnapshot(projection);
+        const snapshot = webProjection.snapshot(projection);
         assert.equal(snapshot.stages.find(stage => stage.lane === 'done')!.count, snapshot.metrics.weeklyCompletedMissions);
         assert.equal(projection.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done, 31);
-        assert.equal(toWebBoardSnapshot(projection).metrics.weeklyCompletedMissions, 31);
+        assert.equal(webProjection.snapshot(projection).metrics.weeklyCompletedMissions, 31);
 
         // Hand-computed oracle: 31 current missions × 40 min; old 240 × 1000
         // min and the 28 previous missions are deliberately outside Aug 5–11.

@@ -1,12 +1,12 @@
+import { webProjection } from './web-projection.js';
 /** Manual disposable Chromium exercise; no operator database or mission mutations. */
 import assert from 'node:assert/strict';
 import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeProjection } from './board-projection.js';
 import { missionId } from '../../src/domain/mission.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 
 const id = missionId('task-outcome-disposable');
-const snapshot = (lane: 'active' | 'review' | 'done') => toWebBoardSnapshot(makeProjection({
+const snapshot = (lane: 'active' | 'review' | 'done') => webProjection.snapshot(makeProjection({
   [lane]: [makeCard({ id, title: 'Disposable command outcome', lane, status: lane,
     commands: [{ command: 'review', enabled: true, reason: null, targetLane: null }] })],
 }));
@@ -31,7 +31,7 @@ try {
 
   // A typed failure response at the public HTTP boundary, scoped to this disposable page.
   await page.route('**/api/commands', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-    kind: 'command-result', transportVersion: 2, status: 'failed', value: null,
+    kind: 'command-result', transportVersion: 3, status: 'failed', value: null,
     error: { kind: 'execution', message: 'Disposable command failed' }, durableEvidence: [],
   }) }));
   await page.locator('[data-action-kind="review:submit"]').click();
@@ -54,7 +54,7 @@ try {
   await rail.locator(':scope > summary').click();
   await fallback.waitFor({ state: 'visible' });
   assert.equal(await status.count(), 0);
-  const empty = toWebBoardSnapshot(makeProjection());
+  const empty = webProjection.snapshot(makeProjection());
   await fixture.render(empty, true);
   await fixture.render(empty, true);
   assert.ok((await fallback.innerText()).includes('Disposable command failed'));

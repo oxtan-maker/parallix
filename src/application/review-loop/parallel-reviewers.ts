@@ -11,6 +11,7 @@ export interface ParallelReviewerCollaborators {
   consume(_context: LoopContext, _round: ReviewRound): Promise<{ readonly step: 'stop' | null; readonly reviewState?: unknown }>;
   recover(_context: LoopContext, _round: ReviewRound, _reviewState: unknown): Promise<{ readonly step: 'stop' | null; readonly reviewState?: unknown }>;
   recordApproval(_context: LoopContext, _round: ReviewRound): Promise<void>;
+  settled(_context: LoopContext, _round: ReviewRound, _state: 'completed' | 'failed', _outcome: 'approved' | 'changes-requested' | 'unknown'): Promise<void>;
   persistedOutcome(): Promise<string | null>;
 }
 
@@ -18,6 +19,11 @@ export interface ParallelReviewerResult extends ReviewerRunResult {
   readonly reviewer: string;
   readonly round: ReviewRound;
   readonly escalationReasons: readonly string[];
+}
+
+async function observeSettlement(collaborators: ParallelReviewerCollaborators, context: LoopContext, round: ReviewRound,
+  state: 'completed' | 'failed', outcome: 'approved' | 'changes-requested' | 'unknown'): Promise<void> {
+  try { await collaborators.settled(context, round, state, outcome); } catch { /* observational only */ }
 }
 
 /** One selected reviewer gets private mutable loop scratch over shared authorities. */
@@ -103,8 +109,10 @@ async function runOne(context: LoopContext, round: ReviewRound, claimed: Set<str
     }
     return await serializeSettlement(async () => {
       const consumed = await collaborators.consume(context, round);
-      if (consumed.step) { return { stopped: true }; }
+      if (consumed.step) { await observeSettlement(collaborators, context, round, 'failed', 'unknown'); return { stopped: true }; }
       const recovered = await collaborators.recover(context, round, consumed.reviewState);
+      await observeSettlement(collaborators, context, round, recovered.step ? 'failed' : 'completed',
+        recovered.step ? 'unknown' : recovered.reviewState === 'APPROVED' ? 'approved' : 'changes-requested');
       if (!recovered.step && recovered.reviewState === 'APPROVED') { await collaborators.recordApproval(context, round); }
       return recovered.step ? { stopped: true } : { stopped: false, reviewState: recovered.reviewState };
     });
@@ -126,7 +134,10 @@ export async function runParallelReviewerBatch(
     return await current;
   };
   const results = await runParallelReviewers(context, round, reviewers,
-    async (isolated, isolatedRound) => await runOne(isolated, isolatedRound, claimed, collaborators, serializeSettlement));
+    async (isolated, isolatedRound) => {
+      try { return await runOne(isolated, isolatedRound, claimed, collaborators, serializeSettlement); }
+      catch (error) { await observeSettlement(collaborators, isolated, isolatedRound, 'failed', 'unknown'); throw error; }
+    });
   round.blockingFindings = results.flatMap(result => result.round.blockingFindings);
   round.used = Math.max(round.used, ...results.map(result => result.round.used));
   const authoritative = await collaborators.persistedOutcome();

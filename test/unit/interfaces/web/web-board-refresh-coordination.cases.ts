@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 /**
  * Refresh-coordination contract for the browser shell (TASK-2655): every
@@ -22,12 +23,105 @@ import { Shell } from '../../../../web/src/shell.js';
 import { COMMANDS_PATH } from '../../../../web/src/board-data.js';
 import { createRefreshCoordinator } from '../../../../web/src/refresh-coordinator.js';
 import { EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, observeStreamId, recordProgress, withLiveProgress } from '../../../../web/src/operation-log.js';
-import { toWebBoardSnapshot, toWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../../src/interfaces/web/transport.js';
+import { toWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
+import { createSharedProjection } from '../../../../src/interfaces/web/shared-build.js';
 
 /** The window after which a burst of stream events becomes one read. */
 const COALESCE_MS = 150;
+
+test('completed projection is shared by concurrent browser reads until change detection replaces it (PX-0058.04)', async () => {
+  const releases: Array<() => void> = [];
+  let builds = 0;
+  let changed = false;
+  const source = createSharedProjection(
+    async () => {
+      builds += 1;
+      await new Promise<void>(resolve => { releases.push(resolve); });
+      return makeProjection({ active: [makeCard({ id: missionId(changed ? 'task-b' : 'task-a') })] });
+    },
+    projection => projection.stages.flatMap(stage => stage.cards).map(card => `${card.id}:${card.reviewHistory.length}:${card.checkpointEvidence.length}`).join('|'),
+    () => '2026-11-12T10:00:00.000Z',
+  );
+
+  const detected = source.refresh();
+  const clients = Array.from({ length: 4 }, () => source.read());
+  assert.equal(builds, 1, 'change detection and concurrent clients share one in-flight build');
+  releases.shift()?.();
+  const first = await detected;
+  const reads = await Promise.all(clients);
+  assert.equal(builds, 1);
+  assert.ok(first.changed);
+  assert.deepEqual(reads.map(read => read.projection), Array(4).fill(first.projection));
+  assert.ok(reads.every(read => read.freshness.state === 'fresh' && read.freshness.revision === first.freshness.revision));
+
+  await source.read();
+  assert.equal(builds, 1, 'a completed projection is reused instead of rebuilt per browser');
+
+  changed = true;
+  const replacement = source.refresh();
+  releases.shift()?.();
+  const second = await replacement;
+  assert.equal(builds, 2);
+  assert.ok(second.changed);
+  assert.notEqual(second.freshness.revision, first.freshness.revision,
+    'projection identity changes with mission, review-history, or checkpoint-evidence identity');
+});
+
+test('post-command refresh waits for an in-flight detector and shares one later build (PX-0058.04)', async () => {
+  const releases: Array<() => void> = [];
+  let builds = 0;
+  const source = createSharedProjection(
+    async () => {
+      const generation = ++builds;
+      await new Promise<void>(resolve => { releases.push(resolve); });
+      return { generation };
+    },
+    projection => String(projection.generation),
+  );
+
+  const detection = source.refresh();
+  const afterCommand = source.refreshAfterCurrent();
+  const concurrentCommand = source.refreshAfterCurrent();
+  assert.equal(afterCommand, concurrentCommand, 'post-command callers share one queued build');
+  assert.equal(builds, 1, 'the command refresh never joins or restarts the running detector');
+  releases.shift()?.();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(builds, 2, 'the command projection starts only after the detector completes');
+  releases.shift()?.();
+
+  const [detected, refreshed] = await Promise.all([detection, afterCommand]);
+  assert.equal(detected.projection.generation, 1);
+  assert.equal(refreshed.projection.generation, 2);
+  assert.equal((await source.read()).projection.generation, 2, 'browser reads retain the post-command projection');
+});
+
+test('synchronous projection failures mark the retained completion stale (PX-0058.04)', async () => {
+  let builds = 0;
+  let fail = false;
+  const source = createSharedProjection(
+    () => {
+      builds += 1;
+      if (fail) { throw new Error('synchronous observation failure'); }
+      return Promise.resolve({ generation: builds });
+    },
+    projection => String(projection.generation),
+    () => '2026-11-13T00:00:00.000Z',
+  );
+
+  const first = await source.read();
+  assert.equal(first.freshness.state, 'fresh');
+  fail = true;
+  await assert.rejects(source.refresh(), /synchronous observation failure/);
+
+  const retained = await source.read();
+  assert.equal(builds, 2);
+  assert.equal(retained.freshness.state, 'stale');
+  assert.equal(retained.freshness.revision, first.freshness.revision);
+  assert.equal(retained.freshness.refreshedAt, first.freshness.refreshedAt);
+  assert.equal(retained.freshness.reason, 'synchronous observation failure');
+});
 
 type Listener = (event: { readonly data?: string; readonly lastEventId?: string }) => void;
 
@@ -72,7 +166,7 @@ interface PendingRead {
 /** `id` names one mission, or several separated by commas, each an active card. */
 const boardOf = (id: string, operationLog: readonly { readonly operationId: string; readonly message: string; readonly sequence?: number }[] = []) => {
   const reviewPreparation = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
-  const snapshot = toWebBoardSnapshot(makeProjection({ active: id.split(',').map(card => makeCard({ id: missionId(card), status: 'active', lane: 'active', commands: [reviewPreparation] })) }));
+  const snapshot = webProjection.snapshot(makeProjection({ active: id.split(',').map(card => makeCard({ id: missionId(card), status: 'active', lane: 'active', commands: [reviewPreparation] })) }));
   return {
     ...snapshot,
     operationLog: operationLog.map(entry => ({ phase: 'run' as const, timestamp: '2026-10-06T10:00:00.000Z', ...entry })),

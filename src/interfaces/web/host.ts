@@ -19,10 +19,13 @@ import { registerCommandRoute } from './command-route.js';
 export { WEB_COMMANDS_PATH } from './command-route.js';
 import * as crypto from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
-import { shareBuilds } from './shared-build.js';
+import { createSharedProjection } from './shared-build.js';
+import { registerBoardReadRoutes } from './board-read-routes.js';
+export { WEB_MISSION_DETAIL_PATH, WEB_SNAPSHOT_PATH, type WebBoardSnapshotError } from './board-read-routes.js';
 import type { BoardProjection } from '../../application/projections/board.js';
 import {
   subscribeToBoardProjection,
+  boardFingerprint,
   type BoardSubscriptionOptions,
 } from '../../application/projections/board-subscription.js';
 import type {
@@ -34,11 +37,7 @@ import {
   type WebEventStream,
 } from './stream.js';
 import {
-  toWebBoardSnapshot,
   toWebProgressEvent,
-  WEB_TRANSPORT_VERSION,
-  type WebCommandError,
-  type WebTransportVersion,
 } from './transport.js';
 import {
   actualOrigin,
@@ -55,22 +54,6 @@ export { WEB_TERMINAL_PATH, WEB_TERMINAL_HISTORY_PATH, WEB_TERMINAL_LIVE_PATH, W
 export { PROTECTION_HEADERS, WEB_CSRF_HEADER } from './host-request-policy.js';
 export { WEB_CSRF_META_NAME } from './shell-bootstrap.js';
 export const DEFAULT_BODY_LIMIT_BYTES = 64 * 1024;
-
-/** Read-only route paths. Both outrank the `/*` asset catch-all. */
-export const WEB_SNAPSHOT_PATH = '/api/board';
-
-/**
- * A projection rebuild that failed. Deliberately *not* an empty board: a
- * locked database or a Git command that lost a race must read as "unavailable,
- * try again", never as zero missions and zero WIP. The envelope reuses the
- * transport's `WebCommandError` shape rather than adding a new one to
- * transport.ts, which this mission consumes but does not renegotiate.
- */
-export interface WebBoardSnapshotError {
-  readonly kind: 'board-snapshot-error';
-  readonly transportVersion: WebTransportVersion;
-  readonly error: WebCommandError;
-}
 
 /**
  * The loaded, manifest-allowlisted browser assets the host serves. The
@@ -134,10 +117,6 @@ export interface WebHost {
   clientCount(): number;
 }
 
-function snapshotError(kind: WebCommandError['kind'], message: string): WebBoardSnapshotError {
-  return { kind: 'board-snapshot-error', transportVersion: WEB_TRANSPORT_VERSION, error: { kind, message } };
-}
-
 export function createWebHost(options: WebHostOptions): WebHost {
   const bindHost: string = options.host ?? '127.0.0.1';
   if (!isLoopbackHost(bindHost)) {
@@ -150,7 +129,13 @@ export function createWebHost(options: WebHostOptions): WebHost {
     throw new Error('web host requires loaded web assets');
   }
   const bodyLimitBytes = options.bodyLimitBytes ?? DEFAULT_BODY_LIMIT_BYTES;
-  const sharedBuild = options.buildProjection === undefined ? undefined : shareBuilds(options.buildProjection);
+  const projectionSource = options.buildProjection === undefined ? undefined : createSharedProjection(
+    options.buildProjection,
+    projection => crypto.createHash('sha256').update(boardFingerprint(projection, {
+      displayedCountdown: options.subscription?.displayedCountdown,
+      deferredDetails: true,
+    })).digest('hex'),
+  );
   const { manifest } = options.assets;
   if (manifest['index.html'] === undefined) {
     throw new Error('web asset manifest has no index.html entry');
@@ -169,7 +154,6 @@ export function createWebHost(options: WebHostOptions): WebHost {
   // response. `close()` runs them all, so no stream outlives the host.
   const clients = new Set<() => void>();
   let unsubscribeProjection: (() => void) | null = null;
-  let displayedProjection: BoardProjection | null = null;
   return {
     progress(event) { stream.publishProgress(toWebProgressEvent(event)); },
     clientCount: () => clients.size,
@@ -181,31 +165,21 @@ export function createWebHost(options: WebHostOptions): WebHost {
 
       registerEventRoute(app, stream, clients);
 
-      app.get(WEB_SNAPSHOT_PATH, async (_request, reply) => {
-        const build = sharedBuild;
-        if (build === undefined) {
-          return reply.code(503).send(snapshotError('unavailable', 'board projection port is not wired'));
-        }
-        let projection: BoardProjection;
-        try {
-          projection = await build();
-        } catch (error) {
-          return reply.code(503).send(snapshotError('unavailable', errorMessage(error)));
-        }
-        try {
-          const snapshot = toWebBoardSnapshot(projection);
-          displayedProjection = projection;
-          return reply.type('application/json; charset=utf-8').send(snapshot);
-        } catch (error) {
-          // A transport-rejected projection is a contract failure.
-          return reply.code(500).send(snapshotError('execution', errorMessage(error)));
-        }
-      });
-      // Terminal polls reuse the displayed board; commands still rebuild below.
-      registerTerminalRoute(app, { ...options, buildProjection: sharedBuild === undefined
-        ? undefined : async () => displayedProjection ?? sharedBuild() });
+      registerBoardReadRoutes(app, projectionSource);
+      // Terminal, detail, and command eligibility reads reuse the completed board.
+      registerTerminalRoute(app, { ...options, buildProjection: projectionSource === undefined
+        ? undefined : async () => (await projectionSource.read()).projection });
       registerWorkflowReads(app, () => options.commandDispatcher?.() ?? null);
-      registerCommandRoute(app, options, sharedBuild, () => stream.publishInvalidation());
+      registerCommandRoute(app, options, projectionSource === undefined ? undefined : () => projectionSource.read(), async () => {
+        const source = projectionSource;
+        if (source === undefined) { return; }
+        // A known command change refreshes the retained projection before the
+        // invalidation reaches browsers, so their refetch cannot race back to
+        // the pre-command completed value.
+        await source.refreshAfterCurrent().then(result => {
+          if (result.changed) { stream.publishInvalidation(); }
+        }, error => { stream.publishError({ kind: 'unavailable', message: errorMessage(error) }); });
+      });
 
       registerAssetRoutes(app, options.assets, shell, () => binding);
 
@@ -222,13 +196,14 @@ export function createWebHost(options: WebHostOptions): WebHost {
         });
       });
       binding = { host: bindHost, port: address.port };
-      const build = sharedBuild;
-      if (build !== undefined) {
+      const source = projectionSource;
+      if (source !== undefined) {
         // The only board-change detector in web code. No SQLite, no Git, no
         // process scan, no watcher: one shared subscription that publishes a
-        // payload-free "refetch" when the fingerprint moves (ADR 0051).
+        // payload-free "refetch" when the fingerprint moves or freshness
+        // recovers from stale to fresh (ADR 0051).
         unsubscribeProjection = subscribeToBoardProjection(
-          build,
+          () => source.refresh(),
           () => { stream.publishInvalidation(); },
           {
             ...options.subscription,

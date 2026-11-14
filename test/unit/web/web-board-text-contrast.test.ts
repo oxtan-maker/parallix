@@ -1,3 +1,4 @@
+import { webProjection } from '../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -9,7 +10,6 @@ import { AttentionRail } from '../../../web/src/attention-rail.js';
 import { DoneRail } from '../../../web/src/done-rail.js';
 import { C, DANGER, FLOW, TYPE } from '../../../web/src/palette.js';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { makeCard, makeFullCard, makeProjection, makeAttentionItem } from '../../fixtures/board-projection.js';
 
 function rgb(color: string): number[] {
@@ -78,13 +78,14 @@ for (const check of ['contrast', 'type'] as const) {
         ...makeProjection({ review: [card], done: [makeCard({ lane: 'done', status: 'done', closed: true })] }),
         attentionQueue: [makeAttentionItem(card, { kind: 'review-lane', detail: 'needs review' }, 1)],
       };
-      const snapshot = toWebBoardSnapshot(projection);
+      const snapshot = webProjection.snapshot(projection);
+      const snapshotRevision = snapshot.freshness.revision;
       const common = { onAction() {}, onSelect() {}, selectedId: null, pendingCommands: new Map() };
       const html = renderToString(createElement('div', { style: { color: C.text, fontSize: TYPE.body, background: C.panel } },
-        createElement(FlightColumn, { ...common, stage: snapshot.stages.find(stage => stage.lane === 'review')!, style: {}, onDragStart() {}, onDrop() {}, draggable: false }),
+        createElement(FlightColumn, { ...common, stage: snapshot.stages.find(stage => stage.lane === 'review')!, snapshotRevision, style: {}, onDragStart() {}, onDrop() {}, draggable: false }),
         createElement(AttentionRail, { ...common, snapshot }),
-        createElement(DoneRail, { stage: snapshot.stages.find(stage => stage.lane === 'done')! }),
-        createElement(FlightColumn, { ...common, stage: { lane: 'active', cards: [], count: 0 }, style: {}, onDragStart() {}, onDrop() {}, draggable: false })));
+        createElement(DoneRail, { stage: snapshot.stages.find(stage => stage.lane === 'done')!, snapshotRevision }),
+        createElement(FlightColumn, { ...common, stage: { lane: 'active', cards: [], count: 0 }, snapshotRevision, style: {}, onDragStart() {}, onDrop() {}, draggable: false })));
       const window = new Window();
       try {
         window.document.body.innerHTML = html;

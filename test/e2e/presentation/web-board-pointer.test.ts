@@ -1,9 +1,9 @@
+import { webProjection } from '../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { makeProjection } from '../../fixtures/board-projection.js';
 import { projectMissionCard } from '../../../src/application/projections/mission-board.js';
-import { toWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import type { Locator, Page } from 'playwright-core';
 import type { HistoryOperation, HistoryOverview, HistoryPage } from '../../../src/interfaces/web/history-transport-types.js';
 import { compactPointerSnapshot, pointerBoard, pointerSnapshot } from '../../fixtures/web-pointer-board.js';
@@ -47,7 +47,7 @@ test('Mission Flow controls keep one cohort and remain keyboard-operable (TASK-2
   const { page } = fixture;
   try {
     await page.setViewportSize({ width: 1288, height: 900 });
-    await fixture.render(toWebBoardSnapshot(flowReferenceProjection()));
+    await fixture.render(webProjection.snapshot(flowReferenceProjection()));
     const flowNav = page.getByRole('button', { name: 'Flow', exact: true });
     await flowNav.focus();
     await page.keyboard.press('Enter');
@@ -276,14 +276,15 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
       latestGate: 'not-run', reviewApproval: null, flags: [], blockingReason: null,
       currentWork: working ? { operationId: 'execute', phase: 'execute', summary: 'Implement', agent: null, updatedAt: 'now', freshness: 'live' } : null,
     });
-    await fixture.render(toWebBoardSnapshot(makeProjection({ active: [card] })), sse);
+    const projection = makeProjection({ active: [card] });
+    await fixture.render(webProjection.snapshot(projection), sse, [webProjection.detail(projection, mission.id)]);
   };
   const operation: HistoryOperation = { legacy: false, redacted: false, captureKind: 'agent', operationId: null, execution: 'stopped', runId: 'execute-codex-a1-x', role: 'execute', family: 'codex', attempt: 1, state: 'exited', terminalHost: 'tmux', startedAt: '2026-10-14T00:00:00.000Z', endedAt: null, exitCode: 0, signal: null, streams: { stdout: 27, stderr: 0 }, coverage: [] };
   await page.route('**/api/terminal/**', route => route.fulfill({ json: new URL(route.request().url()).pathname.endsWith('/history')
     ? { runId: operation.runId, stream: 'stdout', from: 0, to: 27, text: 'Checkpoint terminal output\n', hasEarlier: false, atEnd: true, running: false, gaps: [] } satisfies HistoryPage
     : { missionId: mission.id, state: 'ended', probe: { kind: 'absent' }, operations: [operation], unattributed: [], notices: [] } satisfies HistoryOverview }));
   await page.route('**/api/commands', route => route.fulfill({ json: {
-    kind: 'command-result', transportVersion: 2, status: 'completed', error: null, durableEvidence: [],
+    kind: 'command-result', transportVersion: 3, status: 'completed', error: null, durableEvidence: [],
     value: { missionId: mission.id, version: 1, title: mission.title, description: '', context: '', labels: [], successCriteria: ['visible'], successCriterionIds: ['sc-1'], dependencies: [] },
   } }));
   try {

@@ -14,11 +14,11 @@ import { resolveConfiguration } from '../../src/composition/config.js';
 import { createProductionApplicationServices } from '../../src/composition/application-services.js';
 import { composeWorkflowOperations } from '../../src/composition/workflow-operations.js';
 import { workflowObservationCapabilities } from '../../src/composition/workflow-observation.js';
-import type { WebHost, WebHostInfo } from '../../src/interfaces/web/host.js';
+import type { WebHost, WebHostInfo, WebHostOptions } from '../../src/interfaces/web/host.js';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
 /** Isolated real store/host/process fixture shared by retained and manual checks. */
-export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean; worktrees?: boolean } = {}) {
+export async function workflowBoard(count = 2, options: { cli?: CliInvocation; inProcess?: boolean; providers?: boolean; worktrees?: boolean; subscription?: WebHostOptions['subscription'] } = {}) {
   const fixture = await openMigratedMissionStore();
   const root = fixture.root;
   const hosts = new Map<number, string>();
@@ -118,7 +118,15 @@ export async function workflowBoard(count = 2, options: { cli?: CliInvocation; i
     // and assets out of their setup, as the child entry already does.
     const { createWebHost } = await import('../../src/interfaces/web/host.js');
     const { loadWebAssets } = await import('../../src/adapters/web/asset-store.js');
-    const inProcess = createWebHost({ assets: loadWebAssets(path.resolve('build/web')), buildProjection: options.inProcess ? () => graph.presentationCapabilities!.boardProjection.build() : observation.board, commandDispatcher: () => service, missionTerminal: () => observation.terminal });
+    const inProcess = createWebHost({
+      assets: loadWebAssets(path.resolve('build/web')),
+      buildProjection: options.inProcess ? () => graph.presentationCapabilities!.boardProjection.build() : observation.board,
+      commandDispatcher: () => service,
+      missionTerminal: () => observation.terminal,
+      // Integration cases synchronize on the real detector contract without
+      // spending production's two-second reconciliation interval per state.
+      subscription: options.subscription ?? { intervalMs: 10, idleIntervalMs: 10 },
+    });
     host = inProcess;
     return inProcess.start();
   };

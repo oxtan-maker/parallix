@@ -1,8 +1,8 @@
 ---
 id: TASK-2853
 title: Reclaim test runner caches owned by disposable stand-in checkouts
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-12 10:50'
 labels: [bug]
 dependencies: []

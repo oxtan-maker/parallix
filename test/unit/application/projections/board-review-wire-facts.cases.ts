@@ -1,6 +1,6 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeFullCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
@@ -11,8 +11,9 @@ import { MissionId } from '../../../../src/domain/mission.js';
  * server-owned pull-request reference, review approval, and review history,
  * but the versioned web transport dropped them from the wire card, so the
  * browser cannot truthfully render the checkpoint indicator's PR line or the
- * review round meter. The card facts must survive the JSON round trip
- * equal to the source.
+ * review round meter. The common card retains the attempt identity and
+ * disposition needed by that meter; the full source rounds survive through
+ * the on-demand mission-detail read.
  */
 
 const reviewHistory: readonly ReviewRoundSummary[] = [
@@ -40,15 +41,19 @@ const reviewHistory: readonly ReviewRoundSummary[] = [
   },
 ];
 
-test('wire board card carries pullRequest, reviewApproved, and reviewHistory from the MissionCard', () => {
+test('wire board card carries review summaries and on-demand detail from the MissionCard', () => {
   const card = makeFullCard({ reviewHistory });
 
-  const snapshot = toWebBoardSnapshot(makeProjection({ review: [card] }));
+  const projection = makeProjection({ review: [card] });
+  const snapshot = webProjection.snapshot(projection);
   const parsed = JSON.parse(JSON.stringify(snapshot)) as typeof snapshot;
   const wire = parsed.stages.flatMap((stage) => stage.cards).find((c) => c.id === card.id);
   assert.ok(wire !== undefined, 'the card must appear in the wire snapshot');
 
   assert.deepStrictEqual(wire.pullRequest, card.pullRequest, 'wire pullRequest must equal the source reference');
   assert.strictEqual(wire.reviewApproved, card.reviewApproved, 'wire reviewApproved must equal the source');
-  assert.deepStrictEqual(wire.reviewHistory, card.reviewHistory, 'wire reviewHistory must equal the source rounds');
+  assert.deepStrictEqual(wire.reviewHistory, card.reviewHistory.map(({ number, disposition }) => ({ number, disposition })),
+    'common wire reviewHistory must retain only the attempt identity and outcome');
+  assert.deepStrictEqual(webProjection.detail(projection, card.id).reviewHistory, card.reviewHistory,
+    'on-demand detail must retain every source review fact');
 });

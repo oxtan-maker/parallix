@@ -1,10 +1,10 @@
+import { webProjection } from './web-projection.js';
 /** Disposable Chromium board exercise; no operator missions, database or statistics. */
 import assert from 'node:assert/strict';
 import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeProjection } from './board-projection.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { projectProviderExecution } from '../../src/application/projections/provider-execution.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 
 const card = makeCard({
   title: 'Disposable header observation', agent: agentFamily('codex'),
@@ -23,7 +23,7 @@ try {
   const states = [['populated', 'claude', true], ['empty', null, true],
     ['incomplete-populated', 'codex', false], ['incomplete-empty', null, false], ['absent', null, true]] as const;
   for (const [state, family, complete] of states) {
-    const snapshot = toWebBoardSnapshot(state === 'absent' ? board : projectProviderExecution(
+    const snapshot = webProjection.snapshot(state === 'absent' ? board : projectProviderExecution(
       { ...board, metrics: { ...board.metrics, agentAvailability: availability } }, {
         observe: () => ({ observedAt: new Date().toISOString(), complete,
           limitations: complete ? [] : ['fixture probe unavailable'],

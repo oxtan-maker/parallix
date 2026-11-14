@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import './web-board-drag.cases.js';
 import './web-font-bundle.cases.js';
 import './web-board-interaction.cases.js';
+import './web-detail-disclosure.cases.js';
 import './web-agent-menu.cases.js';
 import './web-checkpoint-interaction.cases.js';
 import './web-board-refresh-coordination.cases.js';
@@ -14,7 +15,9 @@ import './web-command-request.cases.js';
 import './web-mission-history.cases.js';
 import './web-security-policy.cases.js';
 import './web-stream.cases.js';
+import './web-execution-transport.cases.js';
 import './web-transport.cases.js';
+import './web-payload-size.cases.js';
 
 test('presentation web contract entrypoint registers its behavior cases', () => {
   assert.ok(true, 'the static case-module imports above are evaluated before this entrypoint test');

@@ -1,7 +1,7 @@
 {
   "unitSuites": {
     "plain": 200000,
-    "fastPlain": 150000,
+    "fastPlain": 200000,
     "covered": 225000,
     "fastCovered": 280000
   },
@@ -118,6 +118,7 @@
       "integration/presentation/presentation-board.integration.test.ts": 200,
       "integration/presentation/presentation-tui.integration.test.ts": 750,
       "integration/presentation/presentation-web.integration.test.ts": 800,
+      "integration/presentation/web-projection-reads.integration.test.ts": 800,
       "integration/presentation/web-bundle-shell.integration.test.ts": 800,
       "integration/presentation/web-bundle-board.integration.test.ts": 800,
       "integration/config/product-config.test.ts": 100,
@@ -311,6 +312,7 @@
       "integration/presentation/presentation-board.integration.test.ts": 300,
       "integration/presentation/presentation-tui.integration.test.ts": 1450,
       "integration/presentation/presentation-web.integration.test.ts": 2000,
+      "integration/presentation/web-projection-reads.integration.test.ts": 2000,
       "integration/presentation/web-bundle-shell.integration.test.ts": 2000,
       "integration/presentation/web-bundle-board.integration.test.ts": 2000,
       "integration/config/product-config.test.ts": 100,

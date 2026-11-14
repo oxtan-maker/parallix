@@ -160,8 +160,16 @@ export const reviewerOutputRenderers = {
     return;
   }),
   'reviewer-policy': reviewEventRenderer('reviewer-policy', (event, output) => {
-    output.log(fmt.status('INFO', `Reviewer policy: ${event.mode}; ${event.required} approval${event.required === 1 ? '' : 's'} required from ${event.selected.join(', ')} (${event.available} independent available).`));
-    if (event.reason) { output.log(fmt.status('WARN', event.reason)); }
+    const summary = `Review round ${event.round} · revision ${event.revision.slice(0, 12)} · selected ${event.selected.join(', ')} · independent available ${event.available} · approvals required ${event.required} · Reviewer policy: ${event.mode}; ${event.required} approval${event.required === 1 ? '' : 's'} required`;
+    output.log(summary.slice(0, 240));
+    if (event.unavailable.length > 0) { output.log(`Unavailable: ${event.unavailable.map(item => `${item.family} (${item.reason})`).join('; ')}`.slice(0, 240)); }
+    if (event.reason) { output.log(`Degraded: ${event.reason}`.slice(0, 240)); }
+    return;
+  }),
+  'reviewer-progress': reviewEventRenderer('reviewer-progress', (event, output) => {
+    const suffix = [event.outcome, event.blocker].filter(Boolean).join(' · ');
+    output.log(`${event.reviewerLabel} · ${event.runLabel} · ${event.state}${suffix ? ` · ${suffix}` : ''}`.replace(/[\r\n]+/g, ' ').slice(0, 240));
+    if (event.nextAction) { output.log(`Next: ${event.nextAction}`.replace(/[\r\n]+/g, ' ').slice(0, 240)); }
     return;
   }),
   'reviewer-next': reviewEventRenderer('reviewer-next', (event, output) => {

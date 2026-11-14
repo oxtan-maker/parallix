@@ -16,22 +16,16 @@ import { missionId as fixtureMissionId } from '../../../src/domain/mission.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as crypto from 'node:crypto';
-import * as fs from 'node:fs';
 import * as net from 'node:net';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import { loadWebAssets } from '../../../src/adapters/web/asset-store.js';
 import {
-  createWebHost,
   WEB_COMMANDS_PATH,
   WEB_SNAPSHOT_PATH,
-  type WebAssets,
-  type WebHost,
   type WebHostInfo,
-  type WebHostOptions,
 } from '../../../src/interfaces/web/host.js';
+import { manualTimers, withHost } from './web-host.integration.fixture.js';
 import { sessionCookieName } from '../../../src/interfaces/web/security.js';
 import {
+  validateWebBoardSnapshot,
   validateWebCommandResult,
   validateWebProgressEvent,
 } from '../../../src/interfaces/web/transport.js';
@@ -45,50 +39,6 @@ import {
 import { makeCard, makeProjection } from '../../fixtures/board-projection.js';
 import type { CommandAvailability, MissionCard } from '../../../src/application/projections/mission-board.js';
 import type { MissionId } from '../../../src/domain/mission.js';
-
-let assets: WebAssets;
-let assetDir: string;
-
-function sha256(text: string): string {
-  return crypto.createHash('sha256').update(text).digest('hex');
-}
-
-test.before(() => {
-  assetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-web-mutation-'));
-  const assetsDir = path.join(assetDir, 'assets');
-  fs.mkdirSync(assetsDir, { recursive: true });
-  const html = '<!doctype html><html><head><title>shell</title>'
-    + '<script type="module" src="/assets/app.js"></script></head>'
-    + '<body><div id="root"></div></body></html>';
-  const js = 'console.log("web shell");\n';
-  fs.writeFileSync(path.join(assetDir, 'index.html'), html);
-  fs.writeFileSync(path.join(assetDir, 'assets', 'app.js'), js);
-  fs.writeFileSync(path.join(assetDir, 'manifest.json'), JSON.stringify({
-    version: 1,
-    files: {
-      'index.html': { size: html.length, sha256: sha256(html), contentType: 'text/html; charset=utf-8' },
-      'assets/app.js': { size: js.length, sha256: sha256(js), contentType: 'text/javascript' },
-    },
-  }, null, 2));
-  assets = loadWebAssets(assetDir);
-});
-
-test.after(() => {
-  fs.rmSync(assetDir, { recursive: true, force: true });
-});
-
-async function withHost(
-  options: Omit<WebHostOptions, 'assets'> = {},
-  fn: (info: WebHostInfo, host: WebHost) => Promise<void>,
-): Promise<void> {
-  const host = createWebHost({ assets, ...options });
-  const info = await host.start();
-  try {
-    await fn(info, host);
-  } finally {
-    await host.close();
-  }
-}
 
 /** The one card this suite drives: task-2433 in the active lane. */
 function commandCard(
@@ -274,6 +224,179 @@ test('web mutation: an enabled action dispatches exactly once with a host-genera
     assert.ok(progressValidation.ok, `progress frame rejected: ${JSON.stringify(progressValidation)}`);
     assert.equal(client.frames.length, 1, 'exactly one progress event for the one dispatch');
     await client.close();
+  });
+});
+
+test('web mutation: command refresh starts after an in-flight detection build (PX-0058.04)', async () => {
+  let stopped = false;
+  let builds = 0;
+  const releases: Array<() => void> = [];
+  let scheduled: (() => void) | null = null;
+  const dispatcher: BoardCommandDispatcher = {
+    canExecute: () => true,
+    dispatch: async <T = unknown>(): Promise<BoardCommandResult<T>> => {
+      stopped = true;
+      return completed({ stopped: true }) as BoardCommandResult<T>;
+    },
+  };
+  const waitForBuild = async (count: number) => {
+    for (let turn = 0; turn < 100 && builds < count; turn += 1) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(builds, count, `projection build ${count} must start`);
+  };
+  await withHost({
+    commandDispatcher: () => dispatcher,
+    buildProjection: async () => {
+      const observedStopped = stopped;
+      builds += 1;
+      if (builds > 1) { await new Promise<void>(resolve => { releases.push(resolve); }); }
+      return makeProjection({ active: [makeCard({ id: fixtureMissionId('task-2433') as MissionId,
+        title: observedStopped ? 'stopped after command' : 'running before command' })] });
+    },
+    subscription: {
+      intervalMs: 1,
+      setTimer: (callback) => { scheduled = callback; return callback; },
+      clearTimer: (handle) => { if (scheduled === handle) { scheduled = null; } },
+    },
+  }, async (info) => {
+    const initial = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+    assert.equal(initial.status, 200);
+    const value = await launchValue(info);
+    const client = openSse(info);
+    try {
+      await client.ready;
+      assert.ok(scheduled, 'the detection tick is scheduled');
+      scheduled();
+      await waitForBuild(2);
+
+      const commandResponse = postCommand(info, value, {
+        missionId: 'task-2433',
+        kind: 'workflow:stop',
+        missionStatusAtRequest: 'active',
+      });
+      for (let turn = 0; turn < 100 && !stopped; turn += 1) { await new Promise(resolve => setImmediate(resolve)); }
+      assert.equal(stopped, true, 'the command effect lands while the older detection build is in flight');
+
+      releases.shift()?.();
+      await waitForBuild(3);
+      releases.shift()?.();
+      const command = await commandResponse;
+      assert.equal(command.status, 200);
+      await client.waitFor(1);
+      assert.deepEqual(client.frames.map(frame => frame.event), ['invalidate'],
+        'the shared source publishes one invalidation for the changed post-command projection');
+
+      const refreshed = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+      const validation = validateWebBoardSnapshot(await refreshed.json());
+      assert.ok(validation.ok);
+      const card = validation.value.stages.flatMap(stage => stage.cards).find(candidate => candidate.id === 'task-2433');
+      assert.equal(card?.title, 'stopped after command',
+        'the retained projection is built after the command rather than reusing the pre-command detection result');
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test('web mutation: every production-shaped synchronous command refreshes the retained projection before reply (PX-0058.04)', async () => {
+  const commands = [
+    ['active:execute', 'active'],
+    ['review:submit', 'review'],
+    ['integrate:merge', 'integrate'],
+    ['draft:create', 'draft'],
+    ['mission:cancel', 'cancel'],
+  ] as const;
+  const completedKinds = new Set<string>();
+  let builds = 0;
+  const dispatcher: BoardCommandDispatcher = {
+    canExecute: () => true,
+    dispatch: async <T = unknown>(request: BoardCommandRequest): Promise<BoardCommandResult<T>> => {
+      completedKinds.add(request.kind);
+      return completed({ kind: request.kind }) as BoardCommandResult<T>;
+    },
+  };
+  await withHost({
+    commandDispatcher: () => dispatcher,
+    buildProjection: async () => {
+      builds += 1;
+      return makeProjection({ active: commands.map(([kind, command], index) => makeCard({
+        id: fixtureMissionId(`task-command-${index}`) as MissionId,
+        title: completedKinds.has(kind) ? `completed ${kind}` : `pending ${kind}`,
+        commands: [{ command, enabled: true, reason: null }],
+      })) });
+    },
+  }, async info => {
+    const initial = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+    assert.equal(initial.status, 200);
+    const value = await launchValue(info);
+    for (const [kind, _command, index] of commands.map((entry, index) => [...entry, index] as const)) {
+      const before = builds;
+      const response = await postCommand(info, value, {
+        missionId: `task-command-${index}`,
+        kind,
+        missionStatusAtRequest: 'active',
+        requestKey: `request-${index}`,
+      });
+      assert.equal(response.status, 200, kind);
+      assert.equal(builds, before + 1, `${kind} uses one post-command refresh and no separate command build`);
+      const refreshed = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+      const validation = validateWebBoardSnapshot(await refreshed.json());
+      assert.ok(validation.ok);
+      const card = validation.value.stages.flatMap(stage => stage.cards)
+        .find(candidate => candidate.id === `task-command-${index}`);
+      assert.equal(card?.title, `completed ${kind}`, `${kind} reply waits until the retained projection carries its effect`);
+      assert.equal(validation.value.freshness.state, 'fresh');
+      assert.equal(builds, before + 1, 'the browser read reuses the completed refresh');
+    }
+  });
+});
+
+test('web mutation: an explicitly stale retained projection rejects command gates with 503 and zero dispatch (PX-0058.04)', async () => {
+  const spy = makeDispatcherSpy();
+  const timers = manualTimers();
+  let failRefresh = false;
+  let builds = 0;
+  await withHost({
+    commandDispatcher: () => spy.dispatcher,
+    buildProjection: async () => {
+      builds += 1;
+      if (failRefresh) { throw new Error('simulated projection failure'); }
+      return makeProjection({ active: [commandCard([
+        { command: 'active', enabled: true, reason: null },
+        { command: 'review', enabled: true, reason: null },
+      ])] });
+    },
+    subscription: timers.options,
+  }, async info => {
+    const initial = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
+    assert.equal(initial.status, 200);
+    assert.equal(builds, 1);
+    const value = await launchValue(info);
+
+    failRefresh = true;
+    await timers.tick();
+    assert.equal(builds, 2, 'the detector attempted the failed refresh');
+    const stale = validateWebBoardSnapshot(await (await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`)).json());
+    assert.ok(stale.ok);
+    assert.equal(stale.value.freshness.state, 'stale');
+    assert.equal(stale.value.freshness.reason, 'simulated projection failure');
+
+    const commands = [
+      { missionId: 'task-2433', kind: 'active:execute', missionStatusAtRequest: 'active', agent: 'codex' },
+      { missionId: 'task-2433', kind: 'review:submit', missionStatusAtRequest: 'active', requestKey: 'review-delivery' },
+      { missionId: 'task-2433', kind: 'workflow:stop', missionStatusAtRequest: 'active' },
+    ] as const;
+    for (const command of commands) {
+      const response = await postCommand(info, value, command);
+      assert.equal(response.status, 503, command.kind);
+      const result = validateWebCommandResult(await response.json());
+      assert.ok(result.ok, `${command.kind}: rejection must be a command-result body`);
+      assert.equal(result.value.error?.kind, 'unavailable');
+      assert.match(result.value.error?.message ?? '', /simulated projection failure/);
+    }
+    assert.equal(spy.requests.length, 0, 'neither stale command gate may dispatch');
+    assert.equal(builds, 2, 'command gating reads the retained stale state without creating another authority');
   });
 });
 

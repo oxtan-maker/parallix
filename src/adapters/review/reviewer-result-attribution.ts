@@ -1,4 +1,6 @@
 import { agentFamily } from '../../domain/agents.js';
+import { isStaleWrite, type MissionStore } from '../../application/domain-ports.js';
+import { missionId } from '../../domain/mission.js';
 import {
   changeRevision,
   currentReviewRound,
@@ -7,10 +9,12 @@ import {
   type ReviewFinding,
   type ReviewerResultAttribution,
 } from '../../domain/review.js';
+import { attributeReviewerRun } from '../../domain/reviewer-result.js';
 
 export interface ReviewerProcessResult {
   readonly status?: number | null;
   readonly sessionId?: string | null;
+  readonly runId?: string | null;
 }
 
 type ReviewerResultInput = {
@@ -26,6 +30,7 @@ export function reviewerResultAttribution(
 ): ReviewerResultAttribution {
   return {
     ...(processResult?.sessionId ? { publicationId: processResult.sessionId } : {}),
+    ...(processResult?.runId ? { runId: processResult.runId } : {}),
     reviewerId: reviewer,
     agentFamily: agentFamily(reviewer),
     outcome: 'completed',
@@ -57,6 +62,7 @@ export function attachReviewerResult(
     // Actor identity survives a launch reroute; the requested family can later
     // publish its own verdict without colliding with the fallback's result.
     publicationId: result.publicationId,
+    ...(input.result?.runId ? { runId: input.result.runId } : {}),
     reviewerId: result.reviewerId,
     agentFamily: agentFamily(family),
     revision,
@@ -66,6 +72,33 @@ export function attachReviewerResult(
     status: result.status,
     publishedAt: input.decidedAt,
   });
+}
+
+/** Enrich a verdict that committed before its launcher returned the retained run ID. */
+export async function persistReviewerRunAttribution(
+  slug: string,
+  reviewer: string,
+  roundNumber: number,
+  runId: string,
+  store: MissionStore,
+): Promise<boolean> {
+  const family = agentFamily(reviewer);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const loaded = await store.load(missionId(slug));
+    if (loaded.kind !== 'found' || !loaded.mission.review) { return false; }
+    const review = loaded.mission.review;
+    const round = currentReviewRound(review);
+    if (round.number !== roundNumber) { return false; }
+    const attributed = attributeReviewerRun(review, roundNumber, family, runId);
+    if (attributed === review) { return (round.reviewerResults ?? []).some(result => result.agentFamily === family && result.runId === runId); }
+    try {
+      await store.save({ ...loaded.mission, review: attributed }, loaded.version);
+      return true;
+    } catch (error) {
+      if (!isStaleWrite(error) || attempt === 2) { throw error; }
+    }
+  }
+  return false;
 }
 
 function authorizedReviewerFamily(

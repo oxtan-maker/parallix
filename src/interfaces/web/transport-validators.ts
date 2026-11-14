@@ -5,9 +5,9 @@ import { isWorkflowCommand } from '../../domain/workflow-operation.js';
  */
 
 import type { WebStreamError } from './stream.js';
-import { SUPPORTED_WEB_TRANSPORT_VERSIONS, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebCommandRequestKind, type WebCommandRequestValidation } from './transport-types.js';
+import { SUPPORTED_WEB_TRANSPORT_VERSIONS, type WebBoardSnapshot, type WebMissionDetail, type WebCommandResult, type WebProgressEvent, type WebCommandRequestKind, type WebCommandRequestValidation } from './transport-types.js';
 import { LANES, TERMINAL_STATUSES, ERROR_KINDS, EVIDENCE_SOURCES, COMMAND_REQUEST_KINDS, isPlainObject, checkKeys, checkString, checkFiniteNumber, checkEnum, checkOptString, checkJsonValue, type WebTransportValidation } from './transport-validation-primitives.js';
-import { checkCommandAction, checkMissionCard, checkAttentionItem, checkLogEntry, checkAgentAvailability, checkSourceFact, checkMetrics } from './transport-shape-checks.js';
+import { checkCommandAction, checkMissionCard, checkAttentionItem, checkLogEntry, checkAgentAvailability, checkSourceFact, checkMetrics, checkCheckpointEvidence, checkReviewRound, checkProjectionFreshness } from './transport-shape-checks.js';
 
 function validateWithVersion<T>(
   payload: unknown,
@@ -45,13 +45,14 @@ function validateWithVersion<T>(
 export function validateWebBoardSnapshot(payload: unknown): WebTransportValidation<WebBoardSnapshot> {
   return validateWithVersion<WebBoardSnapshot>(payload, 'board-snapshot', (p, problems) => {
     checkKeys(p,
-      ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
+      ['kind', 'transportVersion', 'projectionVersion', 'freshness', 'repositoryId', 'stages', 'attentionQueue',
         'availableActions', 'wipCounts', 'inFlightWip', 'operationLog', 'agentAvailability', 'metrics',
         'sourceFacts'],
-      ['kind', 'transportVersion', 'projectionVersion', 'repositoryId', 'stages', 'attentionQueue',
+      ['kind', 'transportVersion', 'projectionVersion', 'freshness', 'repositoryId', 'stages', 'attentionQueue',
         'availableActions', 'wipCounts', 'inFlightWip', 'operationLog', 'agentAvailability', 'metrics', 'sourceFacts'],
       'snapshot', problems);
     checkFiniteNumber(p, 'projectionVersion', 'snapshot', problems);
+    checkProjectionFreshness(p.freshness, 'snapshot.freshness', problems);
     checkString(p, 'repositoryId', 'snapshot', problems);
     checkFiniteNumber(p, 'inFlightWip', 'snapshot', problems);
     checkMetrics(p.metrics, 'snapshot.metrics', problems);
@@ -111,6 +112,21 @@ export function validateWebBoardSnapshot(payload: unknown): WebTransportValidati
     } else {
       problems.push('snapshot.sourceFacts must be an array');
     }
+  });
+}
+
+/** Validate an on-demand mission-detail payload independently of the common snapshot. */
+export function validateWebMissionDetail(payload: unknown): WebTransportValidation<WebMissionDetail> {
+  return validateWithVersion<WebMissionDetail>(payload, 'mission-detail', (p, problems) => {
+    checkKeys(p, ['kind', 'transportVersion', 'repositoryId', 'missionId', 'freshness', 'checkpointEvidence', 'reviewHistory'],
+      ['kind', 'transportVersion', 'repositoryId', 'missionId', 'freshness', 'checkpointEvidence', 'reviewHistory'], 'detail', problems);
+    checkString(p, 'repositoryId', 'detail', problems);
+    checkString(p, 'missionId', 'detail', problems);
+    checkProjectionFreshness(p.freshness, 'detail.freshness', problems);
+    checkCheckpointEvidence(p.checkpointEvidence, 'detail.checkpointEvidence', problems, true);
+    if (Array.isArray(p.reviewHistory)) {
+      p.reviewHistory.forEach((round, index) => checkReviewRound(round, `detail.reviewHistory[${index}]`, problems, true));
+    } else { problems.push('detail.reviewHistory must be an array'); }
   });
 }
 

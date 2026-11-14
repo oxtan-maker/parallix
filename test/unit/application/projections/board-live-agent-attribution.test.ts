@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { activitySnapshots } from '../../../fixtures/execution-activity.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { agentFamily as fixtureAgentFamily } from '../../../../src/domain/agents.js';
@@ -52,7 +53,7 @@ test('a working card with an unidentified agent omits its label and dot, never t
       freshness: 'live',
     },
   });
-  const html = render(toWebBoardSnapshot(makeProjection({ review: [workingNull] })));
+  const html = render(webProjection.snapshot(makeProjection({ review: [workingNull] })));
   assert.doesNotMatch(html, /no implementer|class="live-indicator"/, 'an unidentified agent has no label or blinking dot');
   assert.equal((html.match(/fan spin/g) ?? []).length, 2, 'work still spins the fans');
   assert.doesNotMatch(html, /custom/, 'the assignee family must never appear in the pill');
@@ -65,7 +66,7 @@ test('an idle card still renders its assignee family unchanged', () => {
     status: 'active',
     agent: agentFamily('custom'),
   });
-  const html = render(toWebBoardSnapshot(makeProjection({ active: [idle] })));
+  const html = render(webProjection.snapshot(makeProjection({ active: [idle] })));
   assert.match(html, /custom/, 'an idle card keeps showing who owns the mission');
 });
 
@@ -170,7 +171,7 @@ for (const path of ['CLI', 'board'] as const) {
       operationId: 'workflow:preparing', phase: 'execute', summary: 'preparing workflow',
       agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'unverified',
     } });
-    const snapshot = toWebBoardSnapshot(makeProjection({ active: [card] }));
+    const snapshot = webProjection.snapshot(makeProjection({ active: [card] }));
     const html = render(snapshot);
     assert.doesNotMatch(html, /title="active worker family: (codex|custom)"/, 'held preparation has no confirmed provider');
     assert.match(html, /fan spin/, 'workflow activity remains visible');
@@ -191,6 +192,29 @@ test('CLI pinned wrapper during preparation contributes no provider (TASK-2769)'
   assert.equal(observed.metrics.agentAvailability[0].runningSessions, 0, 'wrapper liveness is not provider execution');
 });
 
+test('only live review-session invocations occupy reviewer progress slots (PX-0046.06 F5)', async () => {
+  const { projectProviderExecution } = await import('../../../../src/application/projections/provider-execution.js');
+  const reviewProgress: NonNullable<MissionCard['reviewProgress']> = {
+    round: 1, revision: 'reviewed-head', mode: 'two-independent', selected: ['claude', 'custom'],
+    independentAvailable: 2, requiredApprovals: 2, unavailable: [], degradedReason: null, blockers: [],
+    reviewers: [
+      { reviewer: 'claude', reviewerLabel: '1/2 claude', runId: null, runLabel: 'review-r1-1-claude', state: 'waiting', outcome: null, status: null, blocker: null },
+      { reviewer: 'custom', reviewerLabel: '2/2 custom', runId: null, runLabel: 'review-r1-2-custom', state: 'waiting', outcome: null, status: null, blocker: null },
+    ],
+    nextAction: 'Run px review task-2498 to resume 2 outstanding reviewers.',
+  };
+  const board = makeProjection({ review: [makeCard({ id: missionId, lane: 'review', status: 'review', reviewProgress })] });
+  const projected = projectProviderExecution(board, { observe: () => ({ observedAt: new Date().toISOString(), limitations: [], invocations: [
+    { runId: 'execute-claude-a1-live', operationId: 'active-work', family: agentFamily('claude'), role: 'execute' },
+    { runId: 'review-custom-a1-live', operationId: 'review-work', family: agentFamily('custom'), role: 'review' },
+  ] }) });
+  const reviewers = projected.stages.flatMap(stage => stage.cards)[0].reviewProgress?.reviewers;
+  assert.deepEqual(reviewers?.map(slot => [slot.reviewer, slot.state, slot.runId]), [
+    ['claude', 'waiting', null],
+    ['custom', 'running', 'review-custom-a1-live'],
+  ]);
+});
+
 test('header keeps actual invocation counts while a failing mission keeps its own diagnostic and cards keep actual fallback family (TASK-2769, px-0013)', async () => {
   const { projectProviderExecution } = await import('../../../../src/application/projections/provider-execution.js');
   const board = makeProjection({ active: [makeCard({ id: missionId, currentWork: {
@@ -205,7 +229,7 @@ test('header keeps actual invocation counts while a failing mission keeps its ow
   });
   assert.deepEqual(projected.metrics.agentAvailability.map(agent => [agent.family, agent.runningSessions]), [['codex', 0], ['claude', 1]]);
   assert.deepEqual(projected.stages.flatMap(stage => stage.cards).map(card => card.execution?.limitations), [[], ['probe timed out']], 'the diagnostic stays on the mission that failed');
-  const snapshot = toWebBoardSnapshot(projected);
+  const snapshot = webProjection.snapshot(projected);
   const html = render(snapshot);
   assert.doesNotMatch(html, /data-provider-execution|executing|execution unknown/);
   assert.match(html, /title="active worker family: claude"/);

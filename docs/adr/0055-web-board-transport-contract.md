@@ -41,9 +41,10 @@ existing read models, converted by pure functions at the board-to-browser
 boundary. No raw `BoardProjection` crosses the wire; the browser never sees
 the capability registry, lane rules, or in-process class instances.
 
-- Every envelope carries an explicit transport version and a `kind` tag
-  (`board-snapshot`, `command-result`, `progress`). The snapshot also carries
-  the projection version it was projected from.
+- Every envelope carries a transport version and `kind`. Version 3 adds
+  freshness to `board-snapshot` and a revision-bound `mission-detail` envelope.
+  The snapshot keeps checkpoint and review summaries; validated detail reads
+  return their full facts on demand from the same completed projection.
 - Special values are encoded, not serialized: an indefinite block is a tagged
   `indefinite` duration; session counts keep absent / `null` / `0` / `n` as
   four distinct wire states; mission work keeps live / unknown / stale /
@@ -144,16 +145,17 @@ validated shape in this contract.
 - The transport mission (TASK-2429) implements routes and SSE against this
   contract; the client can never drift from the server on special values or
   action states.
+- One retained source owns projection identity and change detection. Browser
+  reads share it; failures are stale or unavailable, and successful mutations
+  wait for its post-command refresh before answering.
 - New wire fields are additive within a transport version; changing an
   existing encoding, or adding a new projection version the converter does
   not know, requires a new transport version and an ADR-level note.
 - The additive card `reviewRecovery` fact carries the application-owned action,
   evidence and guidance; the browser renders it and does not derive a
   stop-or-resume sequence.
-- The v1 wire snapshot deliberately omits the flow-metric series, cohorts,
-  bottleneck narrative, and card review history/PR/labels. They are
-  in-process TUI features with no special-value requirements; add them when
-  the browser board actually renders them.
+- Version 3 keeps rendered flow metrics in the snapshot and defers full review
+  and Goal Check facts to `mission-detail`.
 - The TUI keeps consuming in-process read models; this ADR changes nothing
   about lifecycle, ranking, liveness derivation, lane rules, or the
   capability registry.
@@ -167,8 +169,8 @@ validated shape in this contract.
 
 ## Reconsideration triggers
 
-- A second browser-facing representation (e.g. per-mission detail over the
-  wire) that does not fit the three envelopes.
+- Another browser-facing representation that does not fit the snapshot,
+  mission-detail, command-result or progress envelopes.
 - A need for server→client push other than snapshot re-query, which would
   add an event envelope here rather than inventing one in transport.
 - A browser feature that requires a flow-metric series or review history on
@@ -177,3 +179,5 @@ validated shape in this contract.
 ## References
 
 - [TASK-2447](../../backlog/tasks/task-2447%20-%20Expose-complete-mission-card-facts-to-the-web-board.md) — amended: transport version 2 extends the card DTO with the server-owned `pullRequest` (nullable), `reviewApproved`, and `reviewHistory` facts that the v1 snapshot deliberately omitted, each validated fail-closed; v1 was dropped from the supported versions because no v1 browser client existed when the board shell was still in phase 1.
+- PX-0058.04 — transport version 3 replaces the bulky v2 common snapshot with
+  freshness-bound summaries and application-owned detail reads.

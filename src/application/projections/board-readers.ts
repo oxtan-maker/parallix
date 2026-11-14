@@ -4,7 +4,7 @@ import type { ReviewLivenessReader } from './review-liveness.js';
 import type { WorkflowOperationStore } from '../ports/workflow-operation.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { GateState } from './gate-observation.js';
-import { projectProviderExecution, readProviderExecution, type ProviderExecutionReader } from './provider-execution.js';
+import { projectProviderExecution, projectProviderExecutionCard, readProviderExecution, type ProviderExecutionReader } from './provider-execution.js';
 import { alignDoneCohort } from './done-cohort.js';
 import { decisionRetentionBoundary, decisionWindowDay, localReportingTimeZone, weeklyDecisionWindows } from '../../domain/decision-window.js';
 import type { AgentAvailability, AgentFamily } from '../../domain/agents.js';
@@ -141,6 +141,8 @@ export interface BoardProjectionOptions {
   now?: () => number;
   /** Finite wait used only by one-frame consumers settling their first historical summary. */
   historicalRefreshTimeoutMs?: number;
+  /** Finite age after which a background historical reconstruction is treated as hung. */
+  historicalRefreshStallTimeoutMs?: number;
   /** Number of days completed missions remain visible on the board. */
   completedMissionRetentionDays?: number;
   /**
@@ -317,7 +319,9 @@ export class BoardProjectionBuilder {
   }
 
   private observeCardExecution(card: MissionCard, owner: WorkflowOperation | null): MissionCard {
-    const observed = this._options?.providerExecution ? { ...card, execution: readProviderExecution(this._options.providerExecution, { repositoryId: card.repositoryId, missionId: card.id }, owner?.id) } : card;
+    const observed = this._options?.providerExecution
+      ? projectProviderExecutionCard(card, readProviderExecution(this._options.providerExecution, { repositoryId: card.repositoryId, missionId: card.id }, owner?.id))
+      : card;
     return projectWorkflowCard(observed, owner);
   }
 

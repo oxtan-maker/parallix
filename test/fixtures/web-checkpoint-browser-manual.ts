@@ -1,10 +1,10 @@
+import { webProjection } from './web-projection.js';
 /** Disposable Chromium checkpoint exercise; no operator data or workflow writes. */
 import assert from 'node:assert/strict';
 import type { Locator } from 'playwright-core';
 import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeProjection } from './board-projection.js';
 import { missionId } from '../../src/domain/mission.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 
 type Checkpoint = NonNullable<ReturnType<typeof makeCard>['checkpointEvidence']>[number];
 
@@ -70,7 +70,7 @@ async function geometry(card: Locator) {
 
 const fixture = await pointerBoard();
 try {
-  await fixture.render(toWebBoardSnapshot(makeProjection({ active: cases })));
+  await fixture.render(webProjection.snapshot(makeProjection({ active: cases })));
   for (const viewport of [{ width: 1600, height: 900 }, { width: 390, height: 844 }]) {
     await fixture.page.setViewportSize(viewport);
     for (const card of cases) {

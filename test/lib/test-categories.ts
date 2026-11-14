@@ -191,6 +191,7 @@ export const INTEGRATION_CI_TESTS: readonly string[] = [
   'integration/integrate/integration-provider-approval-recovery.test.ts',
   'integration/presentation/board-shell-subscription-lifetime.test.ts',
   'integration/presentation/presentation-web.integration.test.ts',
+  'integration/presentation/web-projection-reads.integration.test.ts',
   'integration/presentation/web-bundle-shell.integration.test.ts',
   'integration/presentation/web-bundle-board.integration.test.ts',
   'integration/presentation/board-worktree-mission-scope.test.ts',

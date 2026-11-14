@@ -447,6 +447,15 @@ one approval is enough. A saved approval can complete that reduced requirement
 without another verdict. If the approval transition is interrupted, resume with `px review <slug>`
 before running `px integrate <slug>`.
 
+`px status <slug>` and `px status <slug> --json` expose that same typed review
+progress: round, governed revision, selected and unavailable reviewers, approval
+requirement, and each stable reviewer/run label with its queued, running,
+waiting, completed or failed state. The TUI and web boards render the same
+application projection. A degraded one-reviewer or fresh same-agent policy names
+its reason; failed runs and blocking findings name the blocker and the next
+operator command. These states do not introduce a waiting-for-human lifecycle
+state.
+
 When a rebase pauses on shared conflicts, the implementer starts a fresh
 ephemeral session with the authoritative Mission goal, why, scope, out-of-scope
 constraints and success criteria, plus the mission worktree, captured mission

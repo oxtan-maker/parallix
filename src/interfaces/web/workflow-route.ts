@@ -18,7 +18,7 @@ function settledWorkflowOutcome(operation: WorkflowOperation) {
 
 /** Returns false only for synchronous commands or legacy injected dispatchers. */
 export async function admitWebWorkflow(reply: FastifyReply, dispatcher: BoardCommandDispatcher, command: WebCommandRequest,
-  invalidate: () => void): Promise<boolean> {
+  afterDispatch: () => void | Promise<void>): Promise<boolean> {
   if (!isWorkflowCommand(command.kind) && command.kind !== 'workflow:stop') { return false; }
   if (command.kind !== 'workflow:stop' && !dispatcher.admit) { return false; }
   const request: BoardCommandRequest = {
@@ -29,14 +29,14 @@ export async function admitWebWorkflow(reply: FastifyReply, dispatcher: BoardCom
   try {
     if (command.kind === 'workflow:stop') {
       const result = await dispatcher.dispatch(request);
-      invalidate(); sendCommandResult(reply, result.error?.kind === 'conflict' ? 409 : 200, result); return true;
+      await afterDispatch(); sendCommandResult(reply, result.error?.kind === 'conflict' ? 409 : 200, result); return true;
     }
     const outcome = await dispatcher.admit!(request);
     if (outcome.status !== 'accepted') {
       sendCommandResult(reply, ADMISSION_ERROR_STATUSES[outcome.error?.kind ?? 'unavailable'] ?? 503, outcome);
       return true;
     }
-    invalidate();
+    await afterDispatch();
     if (!isOpenWorkflow(outcome.operation)) {
       sendCommandResult(reply, 200, settledWorkflowOutcome(outcome.operation));
       return true;

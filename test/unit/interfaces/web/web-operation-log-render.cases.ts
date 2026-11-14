@@ -1,12 +1,12 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { OperationLog, EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, recordProgress } from '../../../../web/src/operation-log.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeProjection } from '../../../fixtures/board-projection.js';
 const renderLog = (timestamp: string, phase = 'checkpoint', message = phase, agent?: string) => {
-  const snapshot = toWebBoardSnapshot(makeProjection());
+  const snapshot = webProjection.snapshot(makeProjection());
   const entry = { operationId: 'op-original', sequence: 7, timestamp, phase, message, ...(agent === undefined ? {} : { agent }) };
   const before = JSON.stringify(entry);
   const html = renderToStaticMarkup(React.createElement(OperationLog, { snapshot: { ...snapshot, operationLog: [entry] } }));
@@ -14,7 +14,7 @@ const renderLog = (timestamp: string, phase = 'checkpoint', message = phase, age
   return html;
 };
 test('operation progress deduplicates reconnects and evicts oldest entries', () => {
-  const progress = { kind: 'progress' as const, transportVersion: 2 as const, operationId: 'op-reconnect', sequence: 1, phase: 'run', message: 'one', timestamp: '2026-08-30T11:00:00.000Z' } satisfies Partial<NonNullable<Parameters<typeof recordProgress>[1]>>;
+  const progress = { kind: 'progress' as const, transportVersion: 3 as const, operationId: 'op-reconnect', sequence: 1, phase: 'run', message: 'one', timestamp: '2026-08-30T11:00:00.000Z' } satisfies Partial<NonNullable<Parameters<typeof recordProgress>[1]>>;
   const once = recordProgress(EMPTY_LIVE_PROGRESS, progress);
   assert.equal(recordProgress(once, progress).entries.length, once.entries.length);
   let bounded = once;

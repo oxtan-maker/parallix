@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 /** Status presentation contract, separate from the over-cap general board renderer. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -7,7 +8,6 @@ import { Window } from 'happy-dom';
 import { Board } from '../../../../web/src/board.js';
 import { makeCard, makeProjection, makeAttentionItem } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 
 function statusSnapshot() {
   const cards = ['task-status-a', 'task-status-b'].map((id, index) => makeCard({
@@ -17,7 +17,7 @@ function statusSnapshot() {
       summary: 'Shared failure reason', agent: null, updatedAt: 'now', freshness: 'live' },
   }));
   const projection = makeProjection({ active: cards });
-  return toWebBoardSnapshot({ ...projection, attentionQueue: cards.map((card, index) =>
+  return webProjection.snapshot({ ...projection, attentionQueue: cards.map((card, index) =>
     makeAttentionItem(card, { kind: 'blocking', detail: index === 0 ? 'Shared failure reason' : 'Distinct attention reason' }, index + 1)) });
 }
 

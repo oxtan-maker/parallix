@@ -14,6 +14,7 @@ import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
 import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
 import { checkoutTestTmpdir, linkSharedTsxCache } from './lib/test-tmpdir.js';
+import { checkoutCacheIdentity, retireCheckoutCache } from '../src/adapters/verification/checkout-cache.js';
 import { assertValidTestLayout } from './lib/test-layout-validation.js';
 import { MEMORY_BOUNDARY_ENV, MEMORY_LIMIT_ENV, classifyWorkload, formatBreachReport, MEMORY_SCOPE_ENV, resolveMemoryBoundaryPolicy } from '../src/adapters/process/test-memory-policy.js';
 import { assertRunnerHealth, RUNNER_HEALTH_EXIT_STATUS, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
@@ -97,6 +98,19 @@ if (fastUnit && fileTimingProfile) {
 const executedNodeArgs = fastUnit
   ? ['--import', 'tsx', path.join(testRoot, 'run-fast-unit-tests.ts')]
   : suiteNodeArgs;
+const executionIdentity = checkoutCacheIdentity(executionRoot);
+const disposableStandIn = process.env.PARALLIX_TEST_DISPOSABLE_STANDIN === '1'
+  && executionIdentity.checkoutGitDir === null && executionIdentity.repositoryGitDir === null;
+const checkoutCacheBases = new Set<string>();
+let checkoutCacheChildren: readonly { readonly pid: number; readonly startId: string | null }[] = [];
+function runnerCheckoutTmpdir(base?: string): string {
+  const root = checkoutTestTmpdir(executionRoot, base, {
+    ...(disposableStandIn ? { checkoutLifecycle: 'disposable-stand-in' as const } : {}),
+    ...(checkoutCacheChildren.length === 0 ? {} : { children: checkoutCacheChildren }),
+  });
+  checkoutCacheBases.add(path.dirname(root));
+  return root;
+}
 // Node writes raw V8 payloads below TMPDIR. Give each covered invocation an
 // owned scratch root outside the checkout: fixtures must not inherit its Git
 // history, package metadata or configuration through ancestor discovery.
@@ -109,7 +123,9 @@ if (coverageEnabled) {
   try {
     coverageBase = checkoutTestTmpdir(executionRoot,
       diskBackedTempBase(process.env.XDG_RUNTIME_DIR, [path.join(executionRoot, 'tmp'),
-        ...(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR ? [process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR] : [])]));
+        ...(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR ? [process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR] : [])]),
+      disposableStandIn ? { checkoutLifecycle: 'disposable-stand-in' } : {});
+    checkoutCacheBases.add(path.dirname(coverageBase));
   }
   catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
@@ -150,7 +166,7 @@ if (coverageBase) {
   // The per-invocation scratch would otherwise cold-start tsx's transpile cache
   // for every covered run, so each tsx-loaded child re-transformed the module
   // graph. Keep that cache in the checkout's stable tmp root.
-  linkSharedTsxCache(coverageScratchDir, checkoutTestTmpdir(executionRoot));
+  linkSharedTsxCache(coverageScratchDir, runnerCheckoutTmpdir());
 }
 
 // Unit tests import production modules directly from `src/` and replace
@@ -214,16 +230,16 @@ const child = spawn(launch.command, launch.args, {
     ...(childCpuModule ? { PARALLIX_CHILD_CPU_USAGE_MODULE: childCpuModule } : {}),
     PARALLIX_EXECUTION_ROOT: executionRoot,
     PARALLIX_TEST_MANIFEST_DIR: testManifestDir,
-    PARALLIX_TEST_FIXTURE_TMPDIR: checkoutTestTmpdir(executionRoot),
+    PARALLIX_TEST_FIXTURE_TMPDIR: runnerCheckoutTmpdir(),
     // Coverage scratch already lives below the checkout's temporary root.
     // Use it directly to keep tsx IPC paths within Unix socket limits.
-    TMPDIR: coverageScratchDir ?? checkoutTestTmpdir(executionRoot),
+    TMPDIR: coverageScratchDir ?? runnerCheckoutTmpdir(),
     // Reuse V8 bytecode across isolated workers without sharing module
     // state. tsx's transform cache avoids transpilation, but each new worker
     // otherwise compiles the same dependency graph again. Keep coverage out:
     // deserialized bytecode can make V8's source coverage less precise.
     ...(coverageEnabled ? { NODE_DISABLE_COMPILE_CACHE: '1' }
-      : fastUnit || runsIntegrationSuite ? { NODE_COMPILE_CACHE: path.join(checkoutTestTmpdir(executionRoot), 'node-compile-cache') }
+      : fastUnit || runsIntegrationSuite ? { NODE_COMPILE_CACHE: path.join(runnerCheckoutTmpdir(), 'node-compile-cache') }
         : {}),
     ...(fastUnitScratchDir ? { PARALLIX_FAST_UNIT_SCRATCH_DIR: fastUnitScratchDir } : {}),
     // The profile belongs to this invocation only: runners that tests spawn as
@@ -232,7 +248,14 @@ const child = spawn(launch.command, launch.args, {
   },
   detached: process.platform !== 'win32'
 });
-if (child.pid !== undefined) { runnerRoots.recordChild({ pid: child.pid, startId: processStartIdentity(child.pid) }); }
+if (child.pid !== undefined) {
+  const childIdentity = { pid: child.pid, startId: processStartIdentity(child.pid) };
+  runnerRoots.recordChild(childIdentity);
+  if (disposableStandIn) {
+    checkoutCacheChildren = [childIdentity];
+    for (const base of checkoutCacheBases) { runnerCheckoutTmpdir(base); }
+  }
+}
 let outputBytes = 0;
 child.stdout.on('data', (chunk: Buffer) => {
   outputBytes += chunk.length;
@@ -288,6 +311,9 @@ process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 function cleanupRunnerOwnedRoots() {
   if (launch.unit !== null) { forgetScope(launch.unit); }
   cleanupRunnerTempRoots(testManifestDir);
+  if (disposableStandIn) {
+    for (const base of checkoutCacheBases) { retireCheckoutCache(executionRoot, base); }
+  }
 }
 
 // Measure elapsed time for the suite-level budget check.

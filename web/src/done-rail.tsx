@@ -8,7 +8,7 @@ import { laneEmpty, laneHeaderBox, laneHeading } from './lane-header.js';
 import { C, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
 import { CheckpointPips } from './checkpoint-pips.js';
 
-function ShippedCard({ card }: { card: WebMissionCard }) {
+function ShippedCard({ card, snapshotRevision }: { card: WebMissionCard; snapshotRevision: string | null }) {
   return (
     <article
       style={{
@@ -21,13 +21,13 @@ function ShippedCard({ card }: { card: WebMissionCard }) {
         <span style={{ color: C.dim, fontWeight: 500, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>{card.id}</span>
       </div>
       <p style={{ margin: `${SPACE.sm}px 0 0`, color: C.faint, fontSize: TYPE.meta }}>{card.title}</p>
-      <CheckpointPips card={card} />
+      <CheckpointPips card={card} snapshotRevision={snapshotRevision} />
       <CommandOutcome missionId={card.id} />
     </article>
   );
 }
 
-export function DoneRail({ stage, disclosure, onDisclosureChange }: { stage: WebStage; disclosure?: { rail: boolean; history: boolean }; onDisclosureChange?: (level: 'rail' | 'history', open: boolean) => void }) {
+export function DoneRail({ stage, snapshotRevision, disclosure, onDisclosureChange }: { stage: WebStage; snapshotRevision: string | null; disclosure?: { rail: boolean; history: boolean }; onDisclosureChange?: (level: 'rail' | 'history', open: boolean) => void }) {
   return (
     <details open={disclosure?.rail} onToggle={event => onDisclosureChange?.('rail', event.currentTarget.open)} className="shipped" aria-label={`${stage.lane} stage`}>
       <summary>
@@ -46,12 +46,12 @@ export function DoneRail({ stage, disclosure, onDisclosureChange }: { stage: Web
       </summary>
       <div className="shipped-cards">
         {stage.cards.length === 0 && <p style={laneEmpty}>no missions in this stage</p>}
-        {stage.cards.map((card) => <ShippedCard key={card.id} card={card} />)}
+        {stage.cards.map((card) => <ShippedCard key={card.id} card={card} snapshotRevision={snapshotRevision} />)}
         {(stage.historyCards?.length ?? 0) > 0 && (
           <details open={disclosure?.history} aria-label="Other completed history" onToggle={event => onDisclosureChange?.('history', event.currentTarget.open)}>
             <summary>Other completed history · {stage.historyCards!.length}</summary>
             <p style={laneEmpty}>Outside this week or delivery date unavailable</p>
-            {stage.historyCards!.map(card => <ShippedCard key={card.id} card={card} />)}
+            {stage.historyCards!.map(card => <ShippedCard key={card.id} card={card} snapshotRevision={snapshotRevision} />)}
           </details>
         )}
       </div>

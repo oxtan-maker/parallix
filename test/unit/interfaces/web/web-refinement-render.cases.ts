@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
@@ -7,11 +8,10 @@ import { Board } from '../../../../web/src/board.js';
 import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
 import { missionId as fixtureMissionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { WebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
-const snapshotOf = (overrides: Partial<BoardProjection>) => toWebBoardSnapshot({ ...makeProjection(), ...overrides });
+const snapshotOf = (overrides: Partial<BoardProjection>) => webProjection.snapshot({ ...makeProjection(), ...overrides });
 const render = (snapshot: WebBoardSnapshot) => renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
 const browserSources = fs.readdirSync('web/src').filter(name => /\.(?:ts|tsx|css)$/.test(name)).map(name => ({ name, text: fs.readFileSync(`web/src/${name}`, 'utf8') }));
 const refinementExecution = (family: string | null, complete = true): MissionCard['execution'] => ({

@@ -36,6 +36,29 @@ test('each checkout gets one stable private temporary directory outside the repo
   }
 });
 
+test('explicitly owned active stand-ins keep one isolated warm cache (TASK-2853)', () => {
+  const fixture = mkdtemp('test-tmpdir-stand-in-');
+  const base = path.join(fixture, 'cache');
+  const firstCheckout = path.join(fixture, 'first');
+  const secondCheckout = path.join(fixture, 'second');
+  fs.mkdirSync(base);
+  fs.mkdirSync(firstCheckout);
+  fs.mkdirSync(secondCheckout);
+  try {
+    const ownership = { checkoutLifecycle: 'disposable-stand-in' as const };
+    const first = checkoutTestTmpdir(firstCheckout, base, ownership);
+    const warmEntry = path.join(first, 'warm-entry');
+    fs.writeFileSync(warmEntry, 'warm');
+    assert.equal(checkoutTestTmpdir(firstCheckout, base, ownership), first,
+      'an active stand-in reuses its stable cache');
+    assert.equal(fs.readFileSync(warmEntry, 'utf8'), 'warm');
+    const second = checkoutTestTmpdir(secondCheckout, base, ownership);
+    assert.notEqual(second, first, 'distinct stand-ins remain isolated');
+    assert.equal(readCheckoutCacheOwner(first)?.owner.checkoutLifecycle, 'disposable-stand-in',
+      'the runner ownership is durable');
+  } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
+});
+
 test('covered runs keep raw coverage scratch off memory-backed temporary storage (TASK-2816)', { skip: process.platform !== 'linux' && 'statfs filesystem types are Linux-specific' }, t => {
   const base = mkdtemp('test-tmpdir-bulk-');
   t.after(() => fs.rmSync(base, { recursive: true, force: true }));

@@ -1,10 +1,11 @@
+import { webProjection } from '../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { FlightColumn } from '../../../web/src/flight-column.js';
-import { toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { makeFullCard, makeProjection } from '../../fixtures/board-projection.js';
 import type { ReviewDisposition } from '../../../src/domain/review.js';
@@ -13,7 +14,7 @@ import type { MissionCard } from '../../../src/application/projections/mission-b
 import type { WebMissionCard } from '../../../src/interfaces/web/transport.js';
 
 function wireCard(card: MissionCard): WebMissionCard {
-  const validation = validateWebBoardSnapshot(toWebBoardSnapshot(makeProjection({ [card.lane]: [card] })));
+  const validation = validateWebBoardSnapshot(webProjection.snapshot(makeProjection({ [card.lane]: [card] })));
   assert.equal(validation.ok, true);
   if (!validation.ok) { throw new Error('unreachable'); }
   const wire = validation.value.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === card.id);
@@ -24,6 +25,7 @@ function wireCard(card: MissionCard): WebMissionCard {
 function renderPips(card: WebMissionCard): string {
   return renderToString(createElement(FlightColumn, {
     stage: { lane: card.lane, count: 1, cards: [card] },
+    snapshotRevision: null,
     style: {},
     onAction: () => {},
     onSelect: () => {},

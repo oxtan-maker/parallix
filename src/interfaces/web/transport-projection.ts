@@ -3,12 +3,12 @@
  * outcomes into wire DTOs, failing closed on values JSON would collapse.
  */
 
-import { BOARD_PROJECTION_VERSION, type AgentAvailabilityMetric, type AttentionItem, type BoardMetrics, type BoardProjection, type OperationLogEntry } from '../../application/projections/board.js';
+import { BOARD_PROJECTION_VERSION, findBoardMission, type AgentAvailabilityMetric, type AttentionItem, type BoardMetrics, type BoardProjection, type OperationLogEntry } from '../../application/projections/board.js';
 import { projectMissionActivity, type CoordinatorEvidence, type MissionWorkActivity } from '../../application/projections/mission-activity.js';
 import type { BoardCommand, CommandAvailability, MissionCard } from '../../application/projections/mission-board.js';
 import { isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
 import type { ApplicationOutcome, ProgressEvent, SourceFact } from '../../application/contracts.js';
-import { WEB_TRANSPORT_VERSION, WebTransportError, type WebBoardCommandKind, type WebDurationMs, type WebMissionWork, type WebCoordinatorEvidence, type WebCommandAction, type WebMissionCard, type WebAttentionItem, type WebOperationLogEntry, type WebAgentAvailability, type WebSourceFact, type WebBoardMetrics, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent } from './transport-types.js';
+import { WEB_TRANSPORT_VERSION, WebTransportError, type WebBoardCommandKind, type WebDurationMs, type WebMissionWork, type WebCoordinatorEvidence, type WebCommandAction, type WebMissionCard, type WebAttentionItem, type WebOperationLogEntry, type WebAgentAvailability, type WebSourceFact, type WebBoardMetrics, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebMissionDetail, type WebProjectionFreshness, type WebReviewRoundDetail } from './transport-types.js';
 import { renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
 
 export const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> = {
@@ -108,17 +108,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     checkpoint: card.checkpoint,
     currentCheckpoint: card.currentCheckpoint ?? null,
     checkpointDescription: card.checkpointDescription,
-    checkpointEvidence: card.checkpointEvidence.map(({ name, description, goalCheck, state }) => ({
-      name,
-      description,
-      ...(state === undefined ? {} : { state }),
-      goalCheck: goalCheck.map(({ criterion, evidence, recordedRound, repairedGate, repairedGates }) => ({
-        criterion, evidence,
-        ...(recordedRound === undefined ? {} : { recordedRound }),
-        ...(repairedGate === undefined ? {} : { repairedGate }),
-        ...(repairedGates === undefined ? {} : { repairedGates: [...repairedGates] }),
-      })),
-    })),
+    checkpointEvidence: card.checkpointEvidence.map(checkpointSummary),
     nextActionText: card.nextActionText,
     gate: card.gate,
     pullRequest: card.pullRequest === null ? null : {
@@ -134,29 +124,38 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     reviewPhase: card.reviewPhase,
     reviewRecovery: card.reviewRecovery ?? null,
     reviewDisposition: card.reviewDisposition,
-    reviewHistory: card.reviewHistory.map((round) => ({
-      number: round.number,
-      ...(round.startRevision === undefined ? {} : { startRevision: round.startRevision }),
-      ...(round.decidedRevision === undefined ? {} : { decidedRevision: round.decidedRevision }),
-      reviewer: round.reviewer,
-      implementer: round.implementer,
-      phase: round.phase,
-      disposition: round.disposition,
-      comment: round.comment,
-      findingSummaries: [...round.findingSummaries],
-      pushbacks: [...round.pushbacks],
-      fixes: [...round.fixes],
-    })),
+    reviewHistory: card.reviewHistory.map(({ number, disposition }) => ({ number, disposition })),
     reviewWindowAllowance: card.reviewWindowAllowance ?? null,
     repairBudget: card.repairBudget ?? null,
     blockingReason: card.blockingReason,
     flags: [...card.flags],
     ...(card.execution ? { execution: card.execution } : {}),
+    reviewProgress: card.reviewProgress ?? null,
     activity: {
       work: toWebMissionWork(activity.work),
       coordinator: toWebCoordinatorEvidence(activity.coordinator),
     },
     actions: toCardActions(card),
+  };
+}
+
+function checkpointSummary({ name, description, goalCheck, state }: MissionCard['checkpointEvidence'][number]) {
+  return { name, description, goalCheckCount: goalCheck.length, ...(state === undefined ? {} : { state }) };
+}
+
+function fullReviewRound(round: MissionCard['reviewHistory'][number]): WebReviewRoundDetail {
+  return {
+    number: round.number,
+    ...(round.startRevision === undefined ? {} : { startRevision: round.startRevision }),
+    ...(round.decidedRevision === undefined ? {} : { decidedRevision: round.decidedRevision }),
+    reviewer: round.reviewer,
+    implementer: round.implementer,
+    phase: round.phase,
+    disposition: round.disposition,
+    comment: round.comment,
+    findingSummaries: [...round.findingSummaries],
+    pushbacks: [...round.pushbacks],
+    fixes: [...round.fixes],
   };
 }
 
@@ -209,10 +208,13 @@ function toSourceFact(fact: SourceFact<string>): WebSourceFact {
 }
 
 function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
+  const flowUnavailable = metrics.flow === undefined
+    ? metrics.flowUnavailable ?? metrics.analytics?.reason ?? undefined
+    : metrics.flowUnavailable;
   return {
     verification: renderVerificationStatistics(metrics.verification),
     ...(metrics.flow === undefined ? {} : { flow: metrics.flow }),
-    ...(metrics.flowUnavailable === undefined ? {} : { flowUnavailable: metrics.flowUnavailable }),
+    ...(flowUnavailable === undefined ? {} : { flowUnavailable }),
     ...(metrics.decisionWindow === undefined || ['unavailable', 'pre-lifecycle'].includes(metrics.health.state)
       ? {} : { weeklyCompletedMissions: metrics.decisionWindow.current.completedMissions }),
     health: { state: metrics.health.state },
@@ -230,7 +232,10 @@ function toWebMetrics(metrics: BoardMetrics): WebBoardMetrics {
  * Project a `BoardProjection` to the wire snapshot. Pure and fail-closed:
  * an unknown projection version is rejected rather than guessed at.
  */
-export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapshot {
+export function toWebBoardSnapshot(
+  projection: BoardProjection,
+  freshness: WebProjectionFreshness,
+): WebBoardSnapshot {
   if (projection.version !== BOARD_PROJECTION_VERSION) {
     throw new WebTransportError(
       'unsupported-projection-version',
@@ -245,6 +250,7 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
     kind: 'board-snapshot',
     transportVersion: WEB_TRANSPORT_VERSION,
     projectionVersion: projection.version,
+    freshness,
     repositoryId: projection.repositoryId,
     stages: projection.stages.map((stage) => ({
       lane: stage.lane,
@@ -263,6 +269,35 @@ export function toWebBoardSnapshot(projection: BoardProjection): WebBoardSnapsho
     metrics: toWebMetrics(projection.metrics),
     sourceFacts: projection.sourceFacts.map(toSourceFact),
   };
+}
+
+/** Project the existing application-owned card facts only for an opened detail disclosure. */
+export function toWebMissionDetail(
+  projection: BoardProjection,
+  missionId: string,
+  freshness: WebProjectionFreshness,
+): WebMissionDetail {
+  if (projection.version !== BOARD_PROJECTION_VERSION) {
+    throw new WebTransportError('unsupported-projection-version', `projection version ${String(projection.version)} is not supported by transport v${WEB_TRANSPORT_VERSION}`);
+  }
+  const card = findBoardMission(projection, missionId);
+  if (card === undefined) { throw new WebTransportError('unsafe-value', `mission ${missionId} is not present in the projection`); }
+  const detail: WebMissionDetail = {
+    kind: 'mission-detail', transportVersion: WEB_TRANSPORT_VERSION,
+    repositoryId: projection.repositoryId, missionId: card.id, freshness,
+    checkpointEvidence: card.checkpointEvidence.map(checkpoint => ({
+      ...checkpointSummary(checkpoint),
+      goalCheck: checkpoint.goalCheck.map(({ criterion, evidence, recordedRound, repairedGate, repairedGates }) => ({
+        criterion, evidence,
+        ...(recordedRound === undefined ? {} : { recordedRound }),
+        ...(repairedGate === undefined ? {} : { repairedGate }),
+        ...(repairedGates === undefined ? {} : { repairedGates: [...repairedGates] }),
+      })),
+    })),
+    reviewHistory: card.reviewHistory.map(fullReviewRound),
+  };
+  assertJsonValueSafe(detail, 'missionDetail');
+  return detail;
 }
 
 /**

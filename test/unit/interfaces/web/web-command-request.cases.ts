@@ -158,6 +158,7 @@ test('web command request: explicit launch families are accepted only on eligibl
 test('web launch route checks server family availability before admitting explicit requests', async () => {
   const { registerCommandRoute } = await import('../../../../src/interfaces/web/command-route.js');
   const { makeProjection } = await import('../../../fixtures/board-projection.js');
+  const { webFreshness } = await import('../../../fixtures/web-projection.js');
   const { agentFamily } = await import('../../../../src/domain/agents.js');
   type Handler = (request: { body: unknown }, reply: unknown) => Promise<unknown>;
   let handler: Handler;
@@ -168,7 +169,9 @@ test('web launch route checks server family availability before admitting explic
     async admit(request: typeof admitted[number]) { admitted.push(request); return { status: 'failed' as const, error: { kind: 'unavailable' as const, message: 'fixture accepted input' }, durableEvidence: [] }; } };
   registerCommandRoute(app as unknown as import('fastify').FastifyInstance, { commandDispatcher: () => dispatcher }, async () => {
     const projection = makeProjection();
-    return { ...projection, metrics: { ...projection.metrics, agentAvailability: [{ family: agentFamily('custom-family'), available, blockedForMs: 0 }] } };
+    const availableProjection = { ...projection, metrics: { ...projection.metrics,
+      agentAvailability: [{ family: agentFamily('custom-family'), available, blockedForMs: 0 }] } };
+    return { projection: availableProjection, freshness: webFreshness(availableProjection) };
   });
   const reply = { status: 0, body: undefined as unknown, code(status: number) { this.status = status; return this; }, type() { return this; }, send(body: unknown) { this.body = body; return this; } };
   for (const kind of ['draft:create', 'active:execute', 'review:submit']) {

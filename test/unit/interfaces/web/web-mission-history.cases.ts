@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 /**
  * Browser mission history view (TASK-2661, TASK-2749).
  *
@@ -15,7 +16,6 @@ import { Board } from '../../../../web/src/board.js';
 import { ACTIVE_POLL_MS, IDLE_POLL_MS, MissionHistory } from '../../../../web/src/mission-history.js';
 import { loadOverview, loadLive, loadPage, searchHistory } from '../../../../web/src/mission-history-data.js';
 import { C } from '../../../../web/src/palette.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId } from '../../../../src/domain/mission.js';
@@ -98,7 +98,7 @@ async function render(route: Route, context: import('node:test').TestContext, el
 }
 
 test('selecting a mission card opens retained mission history through GET reads only (TASK-2661, TASK-2749)', async context => {
-  const board = toWebBoardSnapshot(makeProjection({ active: [makeCard({ id: missionId(MISSION), status: 'active', lane: 'active', commands: [] })] }));
+  const board = webProjection.snapshot(makeProjection({ active: [makeCard({ id: missionId(MISSION), status: 'active', lane: 'active', commands: [] })] }));
   const view = await render(() => overview('missing', []), context, () => React.createElement(Board, { snapshot: board, onRefresh: async () => {} }));
   await view.click('[data-board-card]');
   assert.match(view.dialog(), /mission history/);
@@ -398,7 +398,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
 test('nested card interactions do not open mission progress (TASK-2773.09)', async () => {
   const { renderBoard } = await import('./web-board-harness.fixture.js');
   const card = makeCard({ gate: 'failed', blockingReason: 'Fixture blocked', commands: [{ command: 'review', enabled: true, reason: null, targetLane: 'review' }] });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [card] })) });
+  const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ active: [card] })) });
   try {
     const article = page.mount.querySelector<DomHtmlElement>('[data-board-card]')!;
     await act(async () => { article.focus(); });

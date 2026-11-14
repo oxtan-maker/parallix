@@ -63,6 +63,7 @@ test('reviewer source round survives in inherited launch environment without cha
   assert.equal(configuration.forwardedEnvironment.PARALLIX_REVIEW_SOURCE_ROUND, undefined);
   assert.equal(reviewerLaunchConfiguration(configuration, 'implementer', facts), configuration);
 });
+
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { reviewStateDataFrom } from '../../../../src/adapters/review/review-state-mapping.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';

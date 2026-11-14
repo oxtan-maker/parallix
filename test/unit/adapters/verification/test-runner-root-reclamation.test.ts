@@ -302,3 +302,49 @@ test('abandoned checkout caches require retired checkout and dead durable owner 
     assert.equal(again.reclaimed.length, 0, 'recovery is idempotent');
   } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
 });
+
+test('recovery reclaims an explicitly owned disposable stand-in cache after owner death (TASK-2853)', () => {
+  const fixture = registeredMkdtemp('task-2853-recovery-');
+  const base = path.join(fixture, 'cache');
+  fs.mkdirSync(base);
+  const standIn = (name: string, pid: number, explicit = true, children?: readonly { pid: number; startId: string | null }[]) => {
+    const checkout = path.join(fixture, name);
+    fs.mkdirSync(checkout);
+    const cache = ensureCheckoutCache(checkout, base, {
+      pid, startId: null,
+      ...(explicit ? { checkoutLifecycle: 'disposable-stand-in' as const } : {}),
+      ...(children === undefined ? {} : { children }),
+    });
+    return { checkout, cache };
+  };
+  const abandoned = standIn('abandoned', 101);
+  const live = standIn('live-owner', 102);
+  const uncertain = standIn('uncertain-owner', 103);
+  const active = standIn('active', 104);
+  const unknown = standIn('unknown', 105, false);
+  const childProtected = standIn('live-child', 106, true, [{ pid: 206, startId: 'suite' }]);
+  const unrelated = path.join(base, 'manual-evidence');
+  fs.mkdirSync(unrelated);
+  try {
+    assert.equal(fs.existsSync(path.join(abandoned.checkout, '.git')), false, 'the stand-in has no Git identity');
+    for (const candidate of [abandoned, live, uncertain, unknown, childProtected]) {
+      fs.rmSync(candidate.checkout, { recursive: true, force: true });
+    }
+
+    const report = recoverRecordedTempRoots({
+      manifestDir: path.join(fixture, 'manifests'),
+      legacyCoverageBases: [base],
+      ownerLiveness: pid => pid === 102 || pid === 206 ? true : pid === 103 ? null : false,
+    });
+
+    assert.equal(fs.existsSync(abandoned.cache), false, 'dead explicitly owned stand-in cache must be reclaimed');
+    for (const candidate of [live.cache, uncertain.cache, active.cache, unknown.cache, childProtected.cache, unrelated]) {
+      assert.equal(fs.existsSync(candidate), true, `unproven or active data must survive: ${candidate}`);
+    }
+    assert.deepEqual(report.reclaimed, [abandoned.cache]);
+    assert.deepEqual(report.unresolved.map(entry => [entry.root, entry.reason]).sort(), [
+      [uncertain.cache, 'owner absence cannot be confirmed'],
+      [unknown.cache, 'durable linked-checkout identity is incomplete'],
+    ].sort());
+  } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
+});

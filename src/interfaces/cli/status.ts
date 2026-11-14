@@ -128,6 +128,7 @@ function statusReviewJson(result: StatusResult) {
         approvalOwed: md.approvalOwed ?? false,
         sameAgentReview: md.sameAgentReview ?? false,
         awaitingApprovals: md.awaitingApprovals ?? 0,
+        progress: md.reviewProgress ?? null,
         approvalCoverage: md.approvalCoverage ?? null,
         integrationRepair: md.integrationRepair ?? null,
         history: md.reviewHistory,
@@ -164,6 +165,7 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
   if ((missionData.awaitingApprovals ?? 0) > 0) {
     log(`Outstanding reviewer approvals: ${missionData.awaitingApprovals} required before integration.`);
   }
+  logReviewProgress(missionData, log);
   if (repair) { log(repair); }
   const coverage = missionData.approvalCoverage;
   if (coverage?.kind === 'stale') {
@@ -173,6 +175,21 @@ function logReviewRounds(missionData: StatusMissionData, log: (_msg: string) => 
     log(`Approval coverage unknown: ${coverage.reason}.`);
   }
   for (const round of missionData.reviewHistory) { logReviewRound(round, log); }
+}
+
+function logReviewProgress(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  const progress = missionData.reviewProgress;
+  if (!progress) { return; }
+  log(`Review progress: round ${progress.round}, revision ${progress.revision}`);
+  log(`  Selected reviewers: ${progress.selected.join(', ')}; independent available: ${progress.independentAvailable}; required agent approvals: ${progress.requiredApprovals}`);
+  for (const reviewer of progress.reviewers) {
+    const outcome = reviewer.outcome ? `; outcome ${reviewer.outcome}` : '';
+    const status = reviewer.status === null ? '' : `; exit ${reviewer.status}`;
+    log(`  ${reviewer.reviewerLabel} [${reviewer.runLabel}]: ${reviewer.state}${outcome}${status}`);
+  }
+  if (progress.degradedReason) { log(`  Degraded review: ${progress.degradedReason}`); }
+  for (const blocker of progress.blockers) { log(`  Blocker: ${blocker}`); }
+  log(`  Next action: ${progress.nextAction.replace(/^Run /, '')}`);
 }
 
 function logIntegrationRepairAssessment(a: StatusMissionData['reviewHistory'][number]['integrationRepairAssessment'], log: (_msg: string) => void): void {

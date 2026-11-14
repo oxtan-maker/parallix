@@ -1,8 +1,8 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { isSpinning } from '../../../../web/src/format.js';
 import { ActionButton } from '../../../../web/src/action-button.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
@@ -16,7 +16,7 @@ test('TASK-2453 SC1: an unverified integrate fact spins the web fan', () => {
       agent: agentFamily('codex'), updatedAt: '2026-09-05T00:00:00.000Z', freshness: 'unverified',
     },
   });
-  const snapshot = toWebBoardSnapshot({ ...makeProjection({ integration: [card] }), attentionQueue: [], operationLog: [] });
+  const snapshot = webProjection.snapshot({ ...makeProjection({ integration: [card] }), attentionQueue: [], operationLog: [] });
   const webCard = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === card.id);
 
   assert.ok(webCard, 'the authoritative current-work fact must reach the web projection');
@@ -38,7 +38,7 @@ test('TASK-2453 SC2/SC4: web and Ink agree on live-work freshness', () => {
         agent: agentFamily('codex'), updatedAt: '2026-09-05T00:00:00.000Z', freshness,
       },
     });
-    const snapshot = toWebBoardSnapshot({ ...makeProjection({ integration: [card] }), attentionQueue: [], operationLog: [] });
+    const snapshot = webProjection.snapshot({ ...makeProjection({ integration: [card] }), attentionQueue: [], operationLog: [] });
     const webCard = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === card.id);
 
     assert.ok(webCard);
@@ -46,7 +46,7 @@ test('TASK-2453 SC2/SC4: web and Ink agree on live-work freshness', () => {
     assert.equal(agentIsWorking(card), expected, `Ink ${freshness}`);
   }
   const cleared = makeCard({ currentWork: null });
-  const snapshot = toWebBoardSnapshot({ ...makeProjection({ integration: [cleared] }), attentionQueue: [], operationLog: [] });
+  const snapshot = webProjection.snapshot({ ...makeProjection({ integration: [cleared] }), attentionQueue: [], operationLog: [] });
   const webCard = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === cleared.id);
 
   assert.ok(webCard);

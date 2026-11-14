@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { renderBoard as renderBoardFixture } from './web-board-harness.fixture.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import test from 'node:test';
@@ -5,17 +6,16 @@ import assert from 'node:assert/strict';
 import { Window, Element as DomElement, HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'happy-dom';
 import { act } from 'react';
 import { EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX, restoreActionFocus } from '../../../../web/src/board.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
 const action = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
 const cancel = { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' } as const;
 const request = { missionId: 'task-2436-interaction', kind: 'review:submit', missionStatusAtRequest: 'active' };
-const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result' as const, transportVersion: 2, status, value: null, error, durableEvidence: [] });
+const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result' as const, transportVersion: 3, status, value: null, error, durableEvidence: [] });
 
 function snapshot(cards = [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })]) {
-  return toWebBoardSnapshot(makeProjection({ active: cards }));
+  return webProjection.snapshot(makeProjection({ active: cards }));
 }
 
 function renderBoard(options: Omit<Parameters<typeof renderBoardFixture>[0], 'board'> & { board?: ReturnType<typeof snapshot> } = {}) {
@@ -91,7 +91,7 @@ test('independent missions dispatch concurrently and retain separate pending sta
   });
   const first = makeCard({ id: missionId('task-2657-a'), status: 'active', lane: 'active', commands: [action] });
   const second = makeCard({ id: missionId('task-2657-b'), status: 'active', lane: 'active', commands: [action] });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [first, second] })), respond: deferred });
+  const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ active: [first, second] })), respond: deferred });
   try {
     const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')];
     await act(async () => { buttons[0].click(); });
@@ -166,7 +166,7 @@ test('drag start and drop on a pending mission give feedback without dispatching
 test('cancel pointer activation opens its confirmation from intake and flight cards', async () => {
   for (const lane of ['refined', 'active'] as const) {
     const card = makeCard({ id: missionId(`task-2553-${lane}`), status: lane, lane, commands: [cancel] });
-    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ [lane]: [card] })) });
+    const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ [lane]: [card] })) });
     try {
       const button = page.mount.querySelector<DomButton>('button[aria-label^="px cancel"]')!;
       const pointerDown = new page.window.MouseEvent('mousedown', { bubbles: true, cancelable: true });
@@ -188,85 +188,6 @@ test('cancellation confirmation stays open when the refreshed projection removes
     assert.equal(page.calls.length, 0);
     assert.ok(page.mount.querySelector('[aria-label="Confirm cancelling task-2657-confirm"]'));
     assert.match(page.mount.querySelector('[role="status"]')?.textContent ?? '', /Cancellation was not sent.*no longer available/i);
-  } finally { await page.close(); }
-});
-
-test('checkpoint evidence opens from the label and closes from its dialog (TASK-2660, TASK-2745)', async () => {
-  const card = makeCard({
-    id: missionId('task-2660-detail'),
-    status: 'review',
-    lane: 'review',
-    checkpoint: 'CP-2.md',
-    checkpointDescription: 'CP-2: components extracted',
-    checkpointEvidence: [
-      { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
-    ],
-  });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
-  try {
-    const label = page.mount.querySelector<DomHtmlElement>('button[aria-label^="View checkpoint evidence for"]')!;
-    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'no panel before the first click');
-    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    const dialog = page.window.document.querySelector('[role="dialog"]');
-    assert.ok(dialog !== null, 'the panel opens on click');
-    assert.match(dialog?.textContent ?? '', /CP-2: components extracted/, 'the panel renders the checkpoint description');
-    assert.match(dialog?.textContent ?? '', /runs the gate/, 'the panel renders the Goal Check evidence row');
-    await act(async () => { page.window.document.querySelector<DomButton>('[role="dialog"] button')!.click(); });
-    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'the dialog close control closes the panel');
-  } finally { await page.close(); }
-});
-
-test('the checkpoint evidence panel closes on Escape (TASK-2660)', async () => {
-  const card = makeCard({
-    id: missionId('task-2660-escape'),
-    status: 'review',
-    lane: 'review',
-    checkpoint: 'CP-1.md',
-    checkpointDescription: 'CP-1: plan',
-    checkpointEvidence: [
-      { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'runs the gate', evidence: 'npm test' }] },
-    ],
-  });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
-  try {
-    const label = page.mount.querySelector<DomHtmlElement>('button[aria-label^="View checkpoint evidence for"]')!;
-    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    assert.ok(page.window.document.querySelector('[role="dialog"]'), 'the panel opens on click');
-    await act(async () => { page.window.dispatchEvent(new page.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
-    assert.equal(page.window.document.querySelector('[role="dialog"]'), null, 'Escape closes the panel');
-  } finally { await page.close(); }
-});
-
-test('selecting a different checkpoint keeps the dialog open and shows its rows (TASK-2660)', async () => {
-  const card = makeCard({
-    id: missionId('task-2660-select'),
-    status: 'review',
-    lane: 'review',
-    checkpoint: 'CP-1.md',
-    checkpointDescription: 'CP-1: plan',
-    checkpointEvidence: [
-      { name: 'CP-1', description: 'CP-1: plan', goalCheck: [{ criterion: 'first gate', evidence: 'npm test' }] },
-      { name: 'CP-2', description: 'CP-2: components extracted', goalCheck: [{ criterion: 'second gate', evidence: 'npm run build' }] },
-    ],
-  });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [card] })) });
-  try {
-    const label = page.mount.querySelector<DomHtmlElement>('button[aria-label^="View checkpoint evidence for"]')!;
-    await act(async () => { label.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    const dialog = page.window.document.querySelector('[role="dialog"]');
-    assert.ok(dialog !== null, 'the panel opens on click');
-    assert.match(dialog?.textContent ?? '', /CP-1: plan/, 'the panel opens on the first active checkpoint');
-    // The CP-2 selector button click bubbles up to the backdrop; only a direct
-    // backdrop click dismisses the panel, so selecting a checkpoint keeps it open.
-    const selectors = page.window.document.querySelectorAll('nav[aria-label="Checkpoints"] button');
-    const cp2 = [...selectors].find((button) => (button.textContent ?? '').includes('CP-2 · unknown'));
-    assert.ok(cp2, 'the CP-2 selector button is present');
-    await act(async () => { cp2.dispatchEvent(new page.window.MouseEvent('click', { bubbles: true, detail: 0 })); });
-    assert.ok(page.window.document.querySelector('[role="dialog"]'), 'selecting a checkpoint keeps the dialog open');
-    const reopened = page.window.document.querySelector('[role="dialog"]');
-    assert.match(reopened?.textContent ?? '', /CP-2: components extracted/, 'the dialog shows the selected checkpoint description');
-    assert.match(reopened?.textContent ?? '', /second gate/, 'the dialog shows the selected checkpoint evidence rows');
-    assert.doesNotMatch(reopened?.textContent ?? '', /first gate/, 'the dialog dropped the previous checkpoint rows');
   } finally { await page.close(); }
 });
 
@@ -299,7 +220,7 @@ test('a thrown send and rejected refresh release only their own pending ownershi
   const second = makeCard({ id: missionId('task-2657-refresh'), status: 'active', lane: 'active', commands: [action] });
   let calls = 0;
   const page = await renderBoard({
-    board: toWebBoardSnapshot(makeProjection({ active: [first, second] })),
+    board: webProjection.snapshot(makeProjection({ active: [first, second] })),
     respond: async () => {
       calls += 1;
       if (calls === 1) { throw new Error('network lost'); }
@@ -352,7 +273,7 @@ test('unmounting a request and completing an older request cannot restore stale 
   });
   const first = makeCard({ id: missionId('task-2657-focus-a'), status: 'active', lane: 'active', commands: [action] });
   const second = makeCard({ id: missionId('task-2657-focus-b'), status: 'active', lane: 'active', commands: [action] });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ active: [first, second] })), respond: deferred });
+  const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ active: [first, second] })), respond: deferred });
   let closed = false;
   try {
     const buttons = [...page.mount.querySelectorAll<DomButton>('button[aria-label^="px "][aria-label*=" — enabled"]')];
@@ -403,8 +324,8 @@ test('board drag dispatches the projected target action and rejects other target
 test('an empty-to-populated snapshot expands the lane and a populated-to-empty snapshot compacts it without resetting selection or a running command (TASK-2773.06)', async () => {
   let resolveRequest: ((response: Response) => void) | undefined;
   const survivor = makeCard({ id: missionId('task-2773-06-survivor'), status: 'active', lane: 'active', commands: [action] });
-  const emptyReview = toWebBoardSnapshot(makeProjection({ active: [survivor] }));
-  const filledReview = toWebBoardSnapshot(makeProjection({
+  const emptyReview = webProjection.snapshot(makeProjection({ active: [survivor] }));
+  const filledReview = webProjection.snapshot(makeProjection({
     active: [survivor],
     review: [makeCard({ id: missionId('task-2773-06-review'), status: 'review', lane: 'review' })],
   }));
@@ -442,13 +363,13 @@ test('an empty-to-populated snapshot expands the lane and a populated-to-empty s
 
 test('a populated-to-empty snapshot that removes the selected mission keeps the existing selection semantics (TASK-2773.06)', async () => {
   const leaving = makeCard({ id: missionId('task-2773-06-leaving'), status: 'review', lane: 'review', commands: [action] });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ review: [leaving] })) });
+  const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ review: [leaving] })) });
   try {
     const card = page.mount.querySelector<DomHtmlElement>('[data-board-card="task-2773-06-leaving"]')!;
     await act(async () => { card.focus(); });
     assert.equal(card.getAttribute('aria-current'), 'true');
     assert.deepEqual(laneAllocation(page.mount, 'review'), POPULATED_ALLOCATION, 'the lane is populated before the removal');
-    await page.rerender(toWebBoardSnapshot(makeProjection({})));
+    await page.rerender(webProjection.snapshot(makeProjection({})));
     assert.deepEqual(laneAllocation(page.mount, 'review'), COMPACT_ALLOCATION, 'the lane that lost its only card compacts');
     assert.equal(page.mount.querySelectorAll('[aria-current="true"]').length, 0, 'no other card takes over the removed mission selection');
     assert.equal(page.calls.length, 0, 'removal sends nothing on its own');
@@ -508,7 +429,7 @@ function createBoard() {
     makeCard({ id: missionId('task-shipped'), title: 'Shipped mission', status: 'done', lane: 'done' }),
     makeCard({ id: missionId('task-closed'), title: 'Closed mission', status: 'review', lane: 'review', closed: true }),
   ];
-  return toWebBoardSnapshot(makeProjection({ active: [cards[0]], backlog: [cards[1]], done: [cards[2]], review: [cards[3]] }));
+  return webProjection.snapshot(makeProjection({ active: [cards[0]], backlog: [cards[1]], done: [cards[2]], review: [cards[3]] }));
 }
 
 /** The dialog's text fields are uncontrolled, so typing is assigning the DOM value. */
@@ -614,7 +535,7 @@ test('Create new mission offers only unfinished missions as dependencies and sen
     assert.equal(refreshed, 1);
     assert.equal(dialogOf(page), null);
     assert.match(page.mount.querySelector('[data-command-fallback][aria-live="polite"]')?.textContent ?? '', /px-0001.*Created px-0001 in backlog/);
-    await page.rerender(toWebBoardSnapshot(makeProjection({ backlog: [makeCard({ id: missionId('px-0001'), lane: 'backlog', status: 'backlog' })] })));
+    await page.rerender(webProjection.snapshot(makeProjection({ backlog: [makeCard({ id: missionId('px-0001'), lane: 'backlog', status: 'backlog' })] })));
     assert.equal(page.mount.querySelector('[data-command-fallback]'), null);
     assert.match(page.mount.querySelector('[data-board-card="px-0001"] footer [role="status"]')?.textContent ?? '', /Created px-0001/);
   } finally { await page.close(); }
@@ -755,7 +676,7 @@ test('Edit uses individual criterion rows with keyboard Add and Remove, preservi
 
 test('backlog Cancel pointer opens confirmation without selecting the card (TASK-2705)', async () => {
   const card = makeCard({ id: missionId('task-2705-backlog'), status: 'backlog', lane: 'backlog', commands: [action, { ...action, command: 'active' }, cancel] });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ backlog: [card] })) });
+  const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ backlog: [card] })) });
   try {
     const button = page.mount.querySelector<DomButton>('button[aria-label^="px cancel"]')!;
     await act(async () => {
@@ -770,7 +691,7 @@ test('backlog Cancel pointer opens confirmation without selecting the card (TASK
 
 test('backlog simultaneous projected actions have separate working controls (TASK-2705)', async () => {
   const card = makeCard({ id: missionId('task-2705-backlog'), status: 'backlog', lane: 'backlog', commands: [action, { ...action, command: 'active' }, cancel] });
-  const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ backlog: [card] })) });
+  const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ backlog: [card] })) });
   try {
     const buttons = [...page.mount.querySelectorAll<DomButton>('[data-board-card] button')].filter((button) => button.getAttribute('aria-label')?.startsWith('px ') && !button.getAttribute('aria-label')?.startsWith('px cancel'));
     assert.equal(buttons.length, 2);
@@ -830,7 +751,7 @@ test('accepted command waits for authoritative preparing snapshot and exposes se
   const { projectWorkflowBoard } = await import('../../../../src/application/projections/workflow-board.js');
   const { workflowOperation } = await import('../../../../src/domain/workflow-operation.js');
   const card = makeCard({ id: missionId('task-2436-interaction'), status: 'refined', lane: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] });
-  const initial = toWebBoardSnapshot(makeProjection({ refined: [card] }));
+  const initial = webProjection.snapshot(makeProjection({ refined: [card] }));
   const page = await renderBoard({ board: initial, result: { ...commandResult('accepted'), value: { operationId: 'durable-operation', phase: 'accepted', statusUrl: '/api/operations/durable-operation' } } });
   try {
     await act(async () => { page.mount.querySelector<DomButton>('[data-action-kind="active:execute"]')!.click(); });
@@ -840,7 +761,7 @@ test('accepted command waits for authoritative preparing snapshot and exposes se
 
       generation: 0, phase: 'accepted', providerStarted: false, agent: 'codex', reviewer: null, originalStatus: 'refined', previousAssignee: null, owner: null,
       createdAt: '2026-10-15T00:00:00Z', updatedAt: '2026-10-15T00:00:00Z', reason: null });
-    const server = toWebBoardSnapshot(projectWorkflowBoard(makeProjection({ active: [{ ...card, status: 'active', lane: 'active', currentWork: { operationId: 'durable-operation', phase: 'execute', summary: 'preparing workflow', agent: null, updatedAt: '2026-10-15T00:00:00Z', freshness: 'unverified' } }] }), [operation]));
+    const server = webProjection.snapshot(projectWorkflowBoard(makeProjection({ active: [{ ...card, status: 'active', lane: 'active', currentWork: { operationId: 'durable-operation', phase: 'execute', summary: 'preparing workflow', agent: null, updatedAt: '2026-10-15T00:00:00Z', freshness: 'unverified' } }] }), [operation]));
     await page.rerender(server);
     assert.match(page.mount.textContent ?? '', /preparing workflow/);
     const stop = page.mount.querySelector<DomButton>('[data-action-kind="workflow:stop"]');
@@ -853,7 +774,7 @@ test('accepted command waits for authoritative preparing snapshot and exposes se
 test('settled workflow retries show their terminal result without restarting (TASK-2750)', async () => {
   for (const status of ['completed', 'failed', 'cancelled']) {
     const card = makeCard({ id: missionId('task-2436-interaction'), status: 'refined', lane: 'refined', commands: [{ command: 'active', enabled: true, reason: null }] });
-    const page = await renderBoard({ board: toWebBoardSnapshot(makeProjection({ refined: [card] })), result: {
+    const page = await renderBoard({ board: webProjection.snapshot(makeProjection({ refined: [card] })), result: {
       ...commandResult(status, status === 'completed' ? null : { kind: status === 'cancelled' ? 'cancelled' : 'execution', message: 'Retained terminal result' }),
       value: status === 'completed' ? { operationId: 'retained', phase: 'completed' } : null,
     } });
@@ -872,7 +793,7 @@ test('mounted header and card execution transition together while workflow fans 
     agent: agentFamily('codex'), updatedAt: new Date().toISOString(), freshness: 'live' } });
   const board = makeProjection({ active: [card] });
   const availability = ['codex', 'claude'].map(family => ({ family: agentFamily(family), available: true, blockedForMs: 0 }));
-  const observation = (family: string | null, diagnostic = false) => toWebBoardSnapshot(projectProviderExecution(
+  const observation = (family: string | null, diagnostic = false) => webProjection.snapshot(projectProviderExecution(
     { ...board, metrics: { ...board.metrics, agentAvailability: availability } }, {
       observe: () => ({ observedAt: new Date().toISOString(), limitations: diagnostic ? ['probe unavailable'] : [],
         invocations: family ? [{ runId: `execute-${family}-a1-test`, operationId: 'held-workflow', family: agentFamily(family) }] : [] }),
@@ -899,7 +820,7 @@ test('mounted header and card execution transition together while workflow fans 
         assert.ok(header.textContent?.includes('codex0') && !header.textContent.includes('unknown'));
       }
     }
-    await page.rerender(toWebBoardSnapshot(board));
+    await page.rerender(webProjection.snapshot(board));
     const absent = page.mount.querySelector('[data-board-card]')!;
     assert.equal(absent.querySelector('[data-provider-execution]') !== null, false);
     assert.ok(absent.firstElementChild?.querySelector('.fan'));
@@ -922,11 +843,11 @@ for (const result of [commandResult(), commandResult('failed', { kind: 'executio
       assert.equal(footer()?.getAttribute('aria-live'), 'polite');
       assert.equal(fallback(), null);
       for (const lane of ['backlog', 'refined', 'review', 'integration'] as const) {
-        await page.rerender(toWebBoardSnapshot(makeProjection({ [lane]: [makeCard({ ...card, lane, status: lane, commands: [] })] })));
+        await page.rerender(webProjection.snapshot(makeProjection({ [lane]: [makeCard({ ...card, lane, status: lane, commands: [] })] })));
         assert.match(footer()?.textContent ?? '', new RegExp(expected));
         assert.equal(fallback(), null);
       }
-      const done = toWebBoardSnapshot(makeProjection({ done: [makeCard({ ...card, lane: 'done', status: 'done', commands: [] })] }));
+      const done = webProjection.snapshot(makeProjection({ done: [makeCard({ ...card, lane: 'done', status: 'done', commands: [] })] }));
       await page.rerender(done);
       assert.equal(footer(), null, 'collapsed rail must not contain an outcome');
       assert.match(fallback()?.textContent ?? '', /task-outcome-routing/);
@@ -960,7 +881,7 @@ for (const result of [commandResult(), commandResult('failed', { kind: 'executio
 test('intake flight and attention articles expose valid current selection (TASK-2773.09)', async () => {
   const intake = makeCard({ id: missionId('task-current-intake'), lane: 'refined', status: 'refined' });
   const flight = makeCard({ id: missionId('task-current-flight'), lane: 'active', status: 'active', commands: [action] });
-  const board = toWebBoardSnapshot(makeProjection({ refined: [intake], active: [flight] }));
+  const board = webProjection.snapshot(makeProjection({ refined: [intake], active: [flight] }));
   const page = await renderBoard({ board: { ...board, attentionQueue: [{ missionId: flight.id, rank: 1,
     reason: { kind: 'blocking', detail: 'Fixture reason' }, action: board.stages.find(stage => stage.lane === 'active')!.cards[0].actions[0], dependsOnSources: [] }] } });
   try {

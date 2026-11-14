@@ -51,6 +51,10 @@ test('board observes provider execution separately from held workflow preparatio
   assert.equal(preparation.metrics.agentAvailability.find(agent => agent.family === 'codex')?.runningSessions, 0);
   fixture.release(slug);
   await until(() => fs.existsSync(path.join(fixture.root, `${slug}.provider-1.entered`)), 'provider barrier');
+  await until(async () => {
+    const snapshot = await http.snapshot();
+    return snapshot.agentAvailability.find((agent: { family: string }) => agent.family === 'codex').runningSessions === 1;
+  }, 'shared board detects provider execution');
   const active = await http.snapshot();
   assert.equal(validateWebBoardSnapshot(active).ok, true);
   assert.equal(active.agentAvailability.find((agent: { family: string }) => agent.family === 'codex').runningSessions, 1);

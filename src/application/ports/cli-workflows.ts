@@ -73,6 +73,8 @@ export interface StatusMissionData {
   readonly sameAgentReview?: boolean;
   /** Selected reviewers still owing approval on the current exact revision. */
   readonly awaitingApprovals?: number;
+  /** Shared application-owned reviewer policy and per-run progress. */
+  readonly reviewProgress?: import('../projections/mission-board.js').MissionCard['reviewProgress'];
   /** Whether the effective approval still covers what the branch would land (TASK-2555). */
   readonly approvalCoverage?: import('../../domain/approval-coverage.js').ApprovalCoverage | null;
   /** The latest integration repair: failed gate, repair range, re-review outcome (TASK-2620). */

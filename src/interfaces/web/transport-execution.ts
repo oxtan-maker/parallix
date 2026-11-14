@@ -10,7 +10,8 @@ export function checkExecution(object: unknown, path: string, problems: string[]
   object.invocations.forEach((run, index) => {
     const at = `${path}.invocations[${index}]`;
     if (!isPlainObject(run)) { problems.push(`${at} must be an object`); return; }
-    checkKeys(run, ['runId', 'operationId', 'family'], ['runId', 'operationId', 'family'], at, problems);
+    checkKeys(run, ['runId', 'operationId', 'family', 'role'], ['runId', 'operationId', 'family'], at, problems);
     checkString(run, 'runId', at, problems); checkNullableString(run, 'operationId', at, problems); checkString(run, 'family', at, problems);
+    if (run.role !== undefined) { checkString(run, 'role', at, problems); }
   });
 }

@@ -10,95 +10,16 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as crypto from 'node:crypto';
-import * as fs from 'node:fs';
 import * as net from 'node:net';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import { loadWebAssets } from '../../../src/adapters/web/asset-store.js';
-import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebAssets, type WebMissionTerminal, type WebHostInfo, type WebHostOptions } from '../../../src/interfaces/web/host.js';
+import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebMissionTerminal, type WebHostInfo } from '../../../src/interfaces/web/host.js';
 import { validateWebBoardSnapshot, validateWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../src/interfaces/web/transport.js';
 import { WEB_EVENT_BUFFER_LIMIT } from '../../../src/interfaces/web/stream.js';
 import { sessionCookieName } from '../../../src/interfaces/web/security.js';
-import type { WebHost } from '../../../src/interfaces/web/host.js';
-import type { BoardProjection } from '../../../src/application/projections/board.js';
 import type { BoardProgressSink } from '../../../src/application/controller/board-command.js';
 import { runWebCommand } from '../../../src/interfaces/cli/web.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import { makeCards, makeProjection } from '../../fixtures/board-projection.js';
-
-let assets: WebAssets;
-let assetDir: string;
-
-function sha256(text: string): string {
-  return crypto.createHash('sha256').update(text).digest('hex');
-}
-
-test.before(() => {
-  assetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-web-host-'));
-  const assetsDir = path.join(assetDir, 'assets');
-  fs.mkdirSync(assetsDir, { recursive: true });
-  const html = '<!doctype html><html><head><title>shell</title>'
-    + '<script type="module" src="/assets/app.js"></script></head>'
-    + '<body><div id="root"></div></body></html>';
-  const js = 'console.log("web shell");\n';
-  const secret = 'secret-not-in-manifest';
-  fs.writeFileSync(path.join(assetDir, 'index.html'), html);
-  fs.writeFileSync(path.join(assetDir, 'assets', 'app.js'), js);
-  fs.writeFileSync(path.join(assetDir, 'secret.txt'), secret);
-  fs.writeFileSync(path.join(assetDir, 'manifest.json'), JSON.stringify({
-    version: 1,
-    files: {
-      'index.html': { size: html.length, sha256: sha256(html), contentType: 'text/html; charset=utf-8' },
-      'assets/app.js': { size: js.length, sha256: sha256(js), contentType: 'text/javascript' },
-    },
-  }, null, 2));
-  assets = loadWebAssets(assetDir);
-});
-
-test.after(() => {
-  fs.rmSync(assetDir, { recursive: true, force: true });
-});
-
-async function withHost(
-  options: Omit<WebHostOptions, 'assets'> = {},
-  fn: (info: WebHostInfo, host: WebHost) => Promise<void>,
-): Promise<void> {
-  const host = createWebHost({ assets, ...options });
-  const info = await host.start();
-  try {
-    await fn(info, host);
-  } finally {
-    await host.close();
-  }
-}
-
-/**
- * A manual timer seam for the shared projection subscription: tests advance
- * the rebuild loop explicitly, so nothing here waits on a real clock.
- */
-function manualTimers() {
-  let pending: { value: (() => void) | null } = { value: null };
-  let sets = 0;
-  let clears = 0;
-  return {
-    options: {
-      intervalMs: 1,
-      setTimer: (callback: () => void) => { sets += 1; pending.value = callback; return sets; },
-      clearTimer: () => { clears += 1; pending.value = null; },
-    },
-    /** Fire the scheduled rebuild and drain the microtasks it queues. */
-    async tick(): Promise<void> {
-      const callback = pending.value;
-      pending.value = null;
-      callback?.();
-      for (let i = 0; i < 8; i += 1) { await new Promise(resolve => setImmediate(resolve)); }
-    },
-    get scheduled(): boolean { return pending.value !== null; },
-    get setCount(): number { return sets; },
-    get clearCount(): number { return clears; },
-  };
-}
+import { assets, manualTimers, withHost } from './web-host.integration.fixture.js';
 
 interface SseFrame { id: number; event: string; data: Record<string, unknown> }
 
@@ -606,41 +527,6 @@ test('web host: snapshot route returns a valid versioned board snapshot', async 
   });
 });
 
-test('web host: overlapping snapshot reads share builds and never take a build that began before them (TASK-2681)', async () => {
-  const gates: Array<() => void> = [];
-  const log: string[] = [];
-  let builds = 0;
-  const build: () => Promise<BoardProjection> = async () => {
-    const id = ++builds;
-    log.push(`start-${id}`);
-    await new Promise<void>(resolve => { gates.push(resolve); });
-    return makeProjection({ active: makeCards(id, 'active') });
-  };
-  const timers = manualTimers();
-  await withHost({ buildProjection: build, subscription: timers.options }, async info => {
-    const read = async (label: string) => {
-      log.push(`ask-${label}`);
-      const res = await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`);
-      const validation = validateWebBoardSnapshot(await res.json());
-      assert.ok(validation.ok);
-      return validation.value.stages.find(stage => stage.lane === 'active')?.count;
-    };
-    const first = read('first');
-    while (gates.length < 1) { await new Promise(resolve => setTimeout(resolve, 5)); }
-    const late = ['a', 'b', 'c', 'd'].map(read);
-    // Let the late requests reach the host while build 1 is still running.
-    await new Promise(resolve => setTimeout(resolve, 100));
-    assert.equal(builds, 1, 'a running build is not restarted per request');
-    gates[0]();
-    while (gates.length < 2) { await new Promise(resolve => setTimeout(resolve, 5)); }
-    gates[1]();
-    assert.equal(await first, 1, 'the first caller gets the build it started');
-    assert.deepEqual(await Promise.all(late), [2, 2, 2, 2], 'late callers share one later build');
-    assert.equal(builds, 2);
-    assert.ok(log.indexOf('start-2') > log.lastIndexOf('ask-d'), 'the shared build began after every caller it serves asked');
-  });
-});
-
 test('web host: mission history routes are GET-only, typed, bounded to projected missions and reject handle input (TASK-2661, TASK-2749)', async () => {
   const projection = makeProjection({ active: makeCards(1, 'active') });
   const missionId = projection.stages.find(stage => stage.lane === 'active')!.cards[0]!.id;
@@ -840,19 +726,23 @@ test('web host: SSE reconnect with Last-Event-ID replays only newer events', asy
   });
 });
 
-test('web host: a failed rebuild emits a typed stream error and the next tick still invalidates', async () => {
+test('web host: recovery from a stale retained projection invalidates an unchanged board (PX-0058.04)', async () => {
   const timers = manualTimers();
   let attempts = 0;
+  let failing = false;
   await withHost({
     buildProjection: async () => {
       attempts += 1;
-      if (attempts === 1) { throw new Error('database is locked'); }
+      if (failing) { throw new Error('database is locked'); }
       return makeProjection({ active: makeCards(1, 'active') });
     },
     subscription: timers.options,
   }, async info => {
     const client = openSse(info);
     await client.ready;
+    const first = await (await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`)).json();
+    assert.equal(first.freshness.state, 'fresh');
+    failing = true;
     await timers.tick();
     await client.waitFor(1);
     assert.equal(client.frames[0]?.event, 'error');
@@ -863,9 +753,18 @@ test('web host: a failed rebuild emits a typed stream error and the next tick st
     });
     // The subscription survived the failure: it rescheduled and recovers.
     assert.equal(timers.scheduled, true, 'a failed rebuild must not tear the subscription down');
+    const stale = await (await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`)).json();
+    assert.equal(stale.freshness.state, 'stale');
+    assert.equal(stale.freshness.revision, first.freshness.revision);
+    failing = false;
     await timers.tick();
-    await client.waitFor(2);
+    assert.equal(client.frames.length, 2, 'stale-to-fresh recovery must wake connected browsers');
     assert.equal(client.frames[1]?.event, 'invalidate');
+    const recovered = await (await fetch(`${info.origin}${WEB_SNAPSHOT_PATH}`)).json();
+    assert.equal(recovered.freshness.state, 'fresh');
+    assert.equal(recovered.freshness.revision, first.freshness.revision,
+      'freshness recovery publishes even when the board fingerprint is unchanged');
+    assert.equal(attempts, 3, 'one initial build, one failure, and one recovery build');
     await client.close();
   });
 });

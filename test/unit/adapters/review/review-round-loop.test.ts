@@ -10,7 +10,7 @@ import { runReviewLoop } from '../../../../src/application/review-loop/review-lo
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { openReviewRound } from '../../../../src/adapters/review/review-round-open.js';
 import { reviewFindingId } from '../../../../src/domain/review.js';
-import { reviewerResultAttribution } from '../../../../src/adapters/review/reviewer-result-attribution.js';
+import { persistReviewerRunAttribution, reviewerResultAttribution } from '../../../../src/adapters/review/reviewer-result-attribution.js';
 
 /**
  * The request-changes review contract over an injected MissionTransitionStore.
@@ -268,6 +268,8 @@ it('duplicate, failed and late reviewer publications remain attributable without
     result: reviewerResultAttribution(reviewer, { status: 0, sessionId: 'codex-run-1' }) };
 
   assert.deepEqual(await recordApproval(String(MISSION), approval, ports), { outcome: 'held', awaitingApprovals: 1 });
+  assert.equal(await persistReviewerRunAttribution(String(MISSION), reviewer, 1, 'review-codex-a1-native', store), true);
+  assert.equal(currentReviewRound(store.mission().review!).reviewerResults?.[0]?.runId, 'review-codex-a1-native', 'a direct verdict gains the retained history run ID after launch completion');
   assert.deepEqual(await recordApproval(String(MISSION), approval, ports), { outcome: 'held', awaitingApprovals: 1 });
   assert.equal(currentReviewRound(store.mission().review!).reviewerResults?.length, 1, 'one publication identity contributes once');
 

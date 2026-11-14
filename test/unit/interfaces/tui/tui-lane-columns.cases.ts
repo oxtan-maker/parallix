@@ -103,6 +103,25 @@ describe('LaneColumn renders one BoardStage', () => {
 });
 
 describe('MissionCard renders projection facts', () => {
+  it('renders bounded shared review progress with fallback reason and next action (PX-0046.06)', async () => {
+    const card = makeFullCard({ reviewApproved: false, reviewRound: 4, reviewPhase: 'reviewing',
+      reviewProgress: {
+        round: 4, revision: 'abcdef1234567890', mode: 'one-independent', selected: ['claude'], independentAvailable: 1,
+        requiredApprovals: 1, unavailable: [{ family: 'custom', reason: 'launcher unavailable' }],
+        degradedReason: 'only one independent reviewer is available',
+        reviewers: [{ reviewer: 'claude', reviewerLabel: '1/1 claude', runId: null, runLabel: 'review-r4-1-claude', state: 'waiting', outcome: null, status: null, blocker: null }],
+        blockers: [], nextAction: 'Run px review task-1234 to resume 1 outstanding reviewer.',
+      },
+    } as never);
+    const output = await renderMissionCard({ card, width: 60 });
+    assert.match(output, /R4 · 1\/1 approval · independent 1/);
+    assert.match(output, /1\/1 claude · waiting/);
+    assert.match(output, /only one independent reviewer is available/);
+    assert.match(output, /px review task-1234/);
+    assert.doesNotMatch(output, /--continue/);
+    assert.ok(output.split('\n').every(line => line.length <= 80), output);
+  });
+
   it('renders every fact of a fully populated card', async () => {
     const output = await renderMissionCard({ card: makeFullCard(), width: 60 });
 

@@ -308,6 +308,20 @@ describe("active persisted Mission", () => {
     return { promise, resolve };
   }
 
+  async function waitForActiveWebCard(origin: string) {
+    const deadline = Date.now() + 5_000;
+    while (true) {
+      const response = await fetch(`${origin}${WEB_SNAPSHOT_PATH}`);
+      const wire = validateWebBoardSnapshot(await response.json());
+      if (wire.ok) {
+        const card = wire.value.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === 'task-2580');
+        if (card?.status === 'active' && card.agent === 'claude') { return wire.value; }
+      }
+      if (Date.now() >= deadline) { throw new Error('timed out waiting for the detected active web card'); }
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+  }
+
   test('px active delivers an active web card before its held agent completes', async () => {
     let mission: Mission = fixtureMission('task-2580', {
       id: missionId('task-2580'), repositoryId: repositoryId('repo'), title: 'Fixture', labels: [], assignee: null,
@@ -353,6 +367,9 @@ describe("active persisted Mission", () => {
       buildProjection: async () => makeProjection({ active: [projectMissionCard(mission, {
         latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
       })] }),
+      // Keep the production change detector, with an accelerated cadence for
+      // this bounded integration case. Snapshot reads themselves stay shared.
+      subscription: { intervalMs: 1, idleIntervalMs: 1 },
     });
     const web = await host.start();
     // The browser and its loopback connection already exist before a user presses
@@ -368,15 +385,12 @@ describe("active persisted Mission", () => {
         started.promise,
         execution.then(() => { throw new Error('active returned before reaching the held launch'); }),
       ]);
-      const snapshot = await fetch(`${web.origin}${WEB_SNAPSHOT_PATH}`);
-      const wire = validateWebBoardSnapshot(await snapshot.json());
-      assert.ok(wire.ok, 'the delivered snapshot must validate');
-      if (!wire.ok) { throw new Error('unreachable'); }
-      const webCard = wire.value.stages.flatMap((stage) => stage.cards).find((card) => card.id === 'task-2580');
+      assert.ok(performance.now() - startedAt < 200, 'px active command and persistence stay within 200 ms');
+      const snapshot = await waitForActiveWebCard(web.origin);
+      const webCard = snapshot.stages.flatMap((stage) => stage.cards).find((card) => card.id === 'task-2580');
       assert.equal(webCard?.status, 'active');
       assert.equal(webCard?.agent, 'claude', 'the fallback implementer replaces the preselected family');
-      assert.match(renderToString(createElement(Board, { snapshot: wire.value, onRefresh: async () => {} })), /data-board-card="task-2580"/);
-      assert.ok(performance.now() - startedAt < 200, 'px active command, persistence, delivery, and rendering stay within 200 ms');
+      assert.match(renderToString(createElement(Board, { snapshot, onRefresh: async () => {} })), /data-board-card="task-2580"/);
     } finally {
       finish.resolve();
       await execution;

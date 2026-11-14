@@ -17,8 +17,20 @@ import { selectDiskBackedDirectory, DISK_TEMP_FALLBACK } from '../../src/adapter
 import { ensureCheckoutCache } from '../../src/adapters/verification/checkout-cache.js';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
-export function checkoutTestTmpdir(executionRoot: string, base: string = os.tmpdir()): string {
-  return ensureCheckoutCache(executionRoot, base, { pid: process.pid, startId: processStartIdentity(process.pid) });
+export function checkoutTestTmpdir(
+  executionRoot: string,
+  base: string = os.tmpdir(),
+  { checkoutLifecycle, children }: {
+    checkoutLifecycle?: 'disposable-stand-in';
+    children?: readonly { readonly pid: number; readonly startId: string | null }[];
+  } = {},
+): string {
+  return ensureCheckoutCache(executionRoot, base, {
+    pid: process.pid,
+    startId: processStartIdentity(process.pid),
+    ...(checkoutLifecycle === undefined ? {} : { checkoutLifecycle }),
+    ...(children === undefined ? {} : { children }),
+  });
 }
 
 /**

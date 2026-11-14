@@ -25,6 +25,11 @@ export interface BoardStage {
   readonly count: number;
 }
 
+/** Locate one board-visible mission, including retained DONE history. */
+export const findBoardMission = (projection: BoardProjection, missionId: string): MissionCard | undefined =>
+  projection.stages.flatMap(stage => [...stage.cards, ...stage.historyCards ?? []])
+    .find(card => card.id === missionId);
+
 export interface AttentionItem {
   readonly missionId: MissionId;
   readonly rank: number;

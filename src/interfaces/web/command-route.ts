@@ -5,18 +5,20 @@ import { failure, rejected } from '../../application/contracts.js';
 import type { WebHostOptions } from './host.js';
 import { isEditMissionBody } from './transport-edit-mission.js';
 import { toWebBoardSnapshot, isCreateMissionBody, isInvalidWebCommandRequest, validateWebCommandRequest } from './transport.js';
-import { dispatchProjectedCommand, dispatchEditMission, dispatchCreateMission, sendCommandResult } from './host-support.js';
+import { dispatchProjectedCommand, dispatchEditMission, dispatchCreateMission, readFreshProjection, sendCommandResult } from './host-support.js';
+import type { SharedProjectionRead } from './shared-build.js';
 
 export const WEB_COMMANDS_PATH = '/api/commands';
 
-export function registerCommandRoute(app: FastifyInstance, options: Pick<WebHostOptions, 'commandDispatcher'>, sharedBuild?: () => Promise<BoardProjection>, invalidate: () => void = () => {}) {
+export function registerCommandRoute(app: FastifyInstance, options: Pick<WebHostOptions, 'commandDispatcher'>,
+  readProjection?: () => Promise<SharedProjectionRead<BoardProjection>>, afterDispatch: () => Promise<void> = async () => {}) {
   app.post(WEB_COMMANDS_PATH, async (request, reply) => {
     const dispatcher = options.commandDispatcher?.();
     if (dispatcher === undefined || dispatcher === null) {
       return sendCommandResult(reply, 503, failure('unavailable', 'command dispatcher port is not wired'));
     }
-    if (isEditMissionBody(request.body)) { return dispatchEditMission(reply, dispatcher, request.body); }
-    if (isCreateMissionBody(request.body)) { return dispatchCreateMission(reply, dispatcher, request.body); }
+    if (isEditMissionBody(request.body)) { return dispatchEditMission(reply, dispatcher, request.body, afterDispatch); }
+    if (isCreateMissionBody(request.body)) { return dispatchCreateMission(reply, dispatcher, request.body, afterDispatch); }
     const validation = validateWebCommandRequest(request.body);
     if (isInvalidWebCommandRequest(validation)) {
       return sendCommandResult(reply, 400, rejected('validation', validation.problems.join('; ')));
@@ -24,24 +26,25 @@ export function registerCommandRoute(app: FastifyInstance, options: Pick<WebHost
     if (!dispatcher.canExecute(validation.value.kind)) {
       return sendCommandResult(reply, 409, failure('conflict', 'This workflow capability is unavailable'));
     }
-    if (!await validateFamily(reply, validation.value.agent, sharedBuild)) { return; }
-    if (await admitWebWorkflow(reply, dispatcher, validation.value, invalidate)) { return; }
-    return dispatchProjectedCommand(reply, dispatcher, validation.value, sharedBuild);
+    const read = await readFreshProjection(reply, readProjection);
+    if (read === null) { return; }
+    if (!validateFamily(reply, validation.value.agent, read)) { return; }
+    if (await admitWebWorkflow(reply, dispatcher, validation.value, afterDispatch)) { return; }
+    return dispatchProjectedCommand(reply, dispatcher, validation.value, read, afterDispatch);
   });
 }
 
 
-async function validateFamily(reply: FastifyReply, agent: string | undefined, build?: () => Promise<BoardProjection>): Promise<boolean> {
+function validateFamily(reply: FastifyReply, agent: string | undefined,
+  read: SharedProjectionRead<BoardProjection>): boolean {
   if (agent === undefined) { return true; }
-  if (build) {
-    try {
-      const snapshot = toWebBoardSnapshot(await build());
-      const family = snapshot.agentAvailability.find(candidate => candidate.family === agent);
-      if (family?.available && family.blockedFor.kind === 'finite' && family.blockedFor.ms === 0) { return true; }
-      sendCommandResult(reply, 409, rejected('validation', `Agent ${agent} is unknown or unavailable. Refresh and choose an available family.`));
-      return false;
-    } catch { /* A failed projection must never admit the requested family. */ }
+  if (read.freshness.state !== 'fresh') {
+    sendCommandResult(reply, 503, failure('unavailable', read.freshness.reason ?? 'Agent availability cannot be checked; refresh and retry'));
+    return false;
   }
-  sendCommandResult(reply, 503, failure('unavailable', 'Agent availability cannot be checked; refresh and retry'));
+  const snapshot = toWebBoardSnapshot(read.projection, read.freshness);
+  const family = snapshot.agentAvailability.find(candidate => candidate.family === agent);
+  if (family?.available && family.blockedFor.kind === 'finite' && family.blockedFor.ms === 0) { return true; }
+  sendCommandResult(reply, 409, rejected('validation', `Agent ${agent} is unknown or unavailable. Refresh and choose an available family.`));
   return false;
 }

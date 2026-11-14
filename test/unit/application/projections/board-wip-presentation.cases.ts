@@ -1,10 +1,10 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 // Regression provenance: TASK-2452.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { BoardShell } from '../../../../src/interfaces/tui/shell.js';
-import { toWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { TopBar } from '../../../../web/src/top-bar.js';
 import { makeCards, makeProjection } from '../../../fixtures/board-projection.js';
 
@@ -32,7 +32,7 @@ test('TUI and web top bars share the in-flight WIP total', async () => {
   const { renderToString } = await import('ink');
   const tuiWip = renderedWip(renderToString(React.createElement(BoardShell, { projection, columns: 120, rows: 30 })));
   const webWip = renderedWip(renderToStaticMarkup(React.createElement(TopBar, {
-    snapshot: toWebBoardSnapshot(projection), onNavigate: () => {}, onCreate: () => {},
+    snapshot: webProjection.snapshot(projection), onNavigate: () => {}, onCreate: () => {},
   })));
 
   assert.equal(tuiWip, 4, 'the eight-card board has four in-flight missions');

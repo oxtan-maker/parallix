@@ -269,6 +269,7 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
                 <IntakeColumn
                   key={stage.lane}
                   stage={stage}
+                  snapshotRevision={snapshot.freshness.revision}
                   onAction={open}
                   onSelect={setSelectedId}
                   onDragStart={startDrag}
@@ -285,10 +286,10 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
           )}
           {flight.map((stage) => (
             <div key={stage.lane} aria-dropeffect={canDrop(stage.lane) ? 'move' : undefined} style={flightLaneStyle(stage.cards.length)}>
-              <FlightColumn stage={stage} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingCommands={pendingCommands} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
+              <FlightColumn stage={stage} snapshotRevision={snapshot.freshness.revision} onAction={open} onSelect={setSelectedId} onDragStart={startDrag} onDrop={dropAction} selectedId={selectedId} pendingCommands={pendingCommands} draggable={canDrop(stage.lane) === true} style={{ height: '100%' }} />
             </div>
           ))}
-          {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} disclosure={doneDisclosure} onDisclosureChange={onDoneDisclosure} />)}
+          {shipped.map((stage) => <DoneRail key={stage.lane} stage={stage} snapshotRevision={snapshot.freshness.revision} disclosure={doneDisclosure} onDisclosureChange={onDoneDisclosure} />)}
         </div>
       </div>
       <BoardCancellation cancelPrompt={cancelPrompt} setCancelPrompt={setCancelPrompt} snapshot={snapshot} outcomes={outcomes} pendingRef={pendingRef} publishOutcome={publishOutcome} dispatch={dispatch} />

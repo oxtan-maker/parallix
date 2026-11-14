@@ -8,9 +8,11 @@ import assert from 'node:assert/strict';
 import { workflowBoard, until } from '../../fixtures/workflow-board.js';
 import { workflowHttp } from '../../fixtures/workflow-http.js';
 import { validateWebBoardSnapshot } from '../../../src/interfaces/web/transport.js';
+import { manualTimers } from '../presentation/web-host.integration.fixture.js';
 
 test('ten admissions commit active, one lane event and preparing before held work; retries join and competitors conflict (TASK-2750)', { timeout: 10_000 }, async t => {
-  const fixture = await workflowBoard(10, { inProcess: true, worktrees: false }); t.after(() => fixture.close());
+  const timers = manualTimers();
+  const fixture = await workflowBoard(10, { inProcess: true, worktrees: false, subscription: timers.options }); t.after(() => fixture.close());
   // This admission contract holds its workers at an in-process boundary;
   // unrelated host sessions do not contribute to its projected operation facts.
   const bin = path.join(fixture.root, '.fixture-bin');
@@ -23,11 +25,14 @@ test('ten admissions commit active, one lane event and preparing before held wor
     else { process.env.PATH = previousPath; }
   });
   const host = await fixture.start();
+  await timers.tick();
+  await until(() => timers.scheduled, 'initial projection completion');
   const http = await workflowHttp(host);
-  const events = await fetch(`${host.origin}/api/events`);
+  // Replay the initial projection if it completed before this client connected (PX-0058.04).
+  const events = await fetch(`${host.origin}/api/events`, { headers: { 'last-event-id': '0' } });
   const reader = events.body!.getReader(); t.after(() => reader.cancel().catch(() => {}));
-  // Consume connection frame before admission so only a committed change can satisfy the wait.
-  await reader.read();
+  // Consume the initial projection frame before admission so a later change satisfies the wait.
+  assert.match(new TextDecoder().decode((await reader.read()).value), /invalidate/);
   const ids: string[] = [];
   for (const [index, slug] of fixture.slugs.entries()) {
     const response = await http.post(slug, `delivery-${index}`);
@@ -42,6 +47,9 @@ test('ten admissions commit active, one lane event and preparing before held wor
     assert.equal(operation?.phase, 'executing', 'the claimed command owns execution while preparation is held');
     assert.match((await new SqliteExecutionActivityStore(fixture.database, resolveCanonicalRepositoryId(fixture.root)).loadMissionCurrentWork(slug as never))[0]?.frames.at(-1)?.event.summary ?? '', /preparing/, 'preparation is activity, not another execution phase');
   }
+  // Advance detection once after every worker reached its held preparation state.
+  await timers.tick();
+  await until(() => timers.scheduled, 'completed held-state refresh');
   const frame = await reader.read(); assert.match(new TextDecoder().decode(frame.value), /invalidate/);
   const snapshot = await http.snapshot(); assert.equal(validateWebBoardSnapshot(snapshot).ok, true);
   for (const slug of fixture.slugs) {

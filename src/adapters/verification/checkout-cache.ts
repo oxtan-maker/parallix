@@ -17,7 +17,14 @@ export interface CheckoutCacheOwner extends CheckoutCacheIdentity {
   readonly kind: 'parallix-checkout-cache';
   readonly version: 1;
   readonly cacheRoot: string;
-  readonly owner: { readonly pid: number; readonly startId: string | null };
+  readonly owner: {
+    readonly pid: number;
+    readonly startId: string | null;
+    /** Explicit authority for a test runner to end this no-Git checkout's cache lifetime. */
+    readonly checkoutLifecycle?: 'disposable-stand-in';
+    /** Suite processes that can still be consuming the cache after runner termination. */
+    readonly children?: readonly { readonly pid: number; readonly startId: string | null }[];
+  };
 }
 
 function resolvedExistingPath(target: string): string {
@@ -89,10 +96,17 @@ function isNullableString(value: unknown): value is string | null {
   return typeof value === 'string' || value === null;
 }
 
-function isProcessOwner(value: unknown): value is CheckoutCacheOwner['owner'] {
+function isProcessIdentity(value: unknown): value is { readonly pid: number; readonly startId: string | null } {
   if (typeof value !== 'object' || value === null) { return false; }
+  const identity = value as { readonly pid?: number; readonly startId?: unknown };
+  return Number.isSafeInteger(identity.pid) && (identity.pid ?? 0) > 0 && isNullableString(identity.startId);
+}
+
+function isProcessOwner(value: unknown): value is CheckoutCacheOwner['owner'] {
+  if (!isProcessIdentity(value)) { return false; }
   const owner = value as Partial<CheckoutCacheOwner['owner']>;
-  return Number.isSafeInteger(owner.pid) && (owner.pid ?? 0) > 0 && isNullableString(owner.startId);
+  return (owner.children === undefined || (Array.isArray(owner.children) && owner.children.every(isProcessIdentity)))
+    && (owner.checkoutLifecycle === undefined || owner.checkoutLifecycle === 'disposable-stand-in');
 }
 
 export function isCheckoutCacheOwner(value: unknown): value is CheckoutCacheOwner {

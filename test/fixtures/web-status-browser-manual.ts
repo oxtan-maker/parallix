@@ -1,9 +1,9 @@
+import { webProjection } from './web-projection.js';
 /** Disposable public browser walkthrough; no operator database or statistics. */
 import assert from 'node:assert/strict';
 import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeProjection, makeAttentionItem } from './board-projection.js';
 import { missionId } from '../../src/domain/mission.js';
-import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 
 const reason = 'Shared failure: verification needs operator attention';
 const cards = ['task-status-a', 'task-status-b'].map((id, index) => makeCard({
@@ -17,7 +17,7 @@ const distinct = makeCard({ id: missionId('task-status-distinct'), lane: 'review
 });
 const projection = makeProjection({ active: cards, review: [distinct],
   done: [makeCard({ id: missionId('task-status-done'), lane: 'done', status: 'done', closed: true })] });
-const snapshot = toWebBoardSnapshot({ ...projection, attentionQueue: [
+const snapshot = webProjection.snapshot({ ...projection, attentionQueue: [
   makeAttentionItem(cards[0], { kind: 'blocking', detail: reason }, 1),
   makeAttentionItem(cards[1], { kind: 'blocking', detail: 'Distinct attention reason' }, 2),
 ] });

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp } from '../../../helpers/temp-dir.js';
-import { parseAttachCliRequest, parseHistoryCliRequest, createHistoryCommand } from '../../../../src/interfaces/cli/run-history.js';
+import { parseAttachCliRequest, parseHistoryCliRequest, createHistoryCommand, renderRunList } from '../../../../src/interfaces/cli/run-history.js';
 import { attachRun, createRunHistoryPort, resolveRunHistoryMission } from '../../../../src/adapters/cli/commands/run-history.js';
 import { agentRunIdentity as logicalRunIdentity } from '../../../../src/domain/agent-run.js';
 import { missionSocketPath } from '../../../../src/adapters/process/tmux-host.js';
@@ -44,6 +44,18 @@ test('history show rejects a malformed reference and attach explains why nothing
   assert.deepEqual(lines, ['No retained agent runs for this Mission.']);
   assert.throws(() => attachRun({ readOnly: false, list: false }, { ...deps, isTTY: true }), /Nothing to attach: no mission terminal is live for task-1\. Retained history: px history task-1 list/);
   assert.throws(() => attachRun({ slug: 'task-1_x', readOnly: false, list: false }, { ...deps, inferSlugFn: () => null, isTTY: true }), /not a Mission ID/);
+});
+
+test('headless history labels reviewer family, attempt and stable run id without ANSI (PX-0046.06)', () => {
+  const runId = 'review-claude-a2-labeled';
+  const text = renderRunList([{ state: 'exited', coverage: [], execution: 'stopped', record: {
+    runId, role: 'review', family: 'claude', attempt: 2, state: 'exited', exitCode: 0, signal: null,
+    terminalHost: 'pipe', startedAt: '2026-11-12T10:00:00.000Z',
+  } }] as never);
+  assert.match(text, /reviewer claude #2/);
+  assert.match(text, new RegExp(runId));
+  assert.match(text, /completed.*approved|exited.*exit=0/);
+  assert.doesNotMatch(text, /\x1b/);
 });
 
 

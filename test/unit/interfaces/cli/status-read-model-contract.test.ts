@@ -39,6 +39,28 @@ test('mission status renders concrete orphan recovery and preserves uncertain li
   }
 });
 
+test('status and JSON expose the shared reviewer progress without a waiting-for-human state (PX-0046.06)', () => {
+  const reviewProgress = {
+    round: 2, revision: 'review-head-2', mode: 'same-agent', selected: ['codex'], independentAvailable: 0, requiredApprovals: 1,
+    unavailable: [{ family: 'claude', reason: 'quota blocked' }], degradedReason: 'no independent reviewer is available; the same agent reviews in a fresh context',
+    reviewers: [{ reviewer: 'codex', reviewerLabel: '1/1 codex', runId: 'review-codex-a1-run', runLabel: 'review-codex-a1-run', state: 'waiting', outcome: null, status: 0, blocker: null }],
+    blockers: [], nextAction: 'Run px review task-progress to resume 1 outstanding reviewer.',
+  };
+  const result = statusResult({ slug: 'task-progress', missionData: { backlogStatus: 'review', reviewHistory: [],
+    reviewRound: 2, reviewPhase: 'reviewing', reviewProgress } as never });
+  const lines: string[] = [];
+  renderStatus(result, line => lines.push(line));
+  const rendered = lines.join('\n');
+  assert.match(rendered, /Review progress: round 2, revision review-head-2/);
+  assert.match(rendered, /Selected reviewers: codex; independent available: 0; required agent approvals: 1/);
+  assert.match(rendered, /1\/1 codex.*review-codex-a1-run.*waiting/);
+  assert.match(rendered, /same agent reviews in a fresh context/);
+  assert.match(rendered, /Next action: px review task-progress/);
+  assert.doesNotMatch(rendered, /--continue/);
+  assert.doesNotMatch(rendered, /waiting for human/i);
+  assert.deepEqual(JSON.parse(statusJson(result)).review.progress, reviewProgress);
+});
+
 test('settled MAX_ATTEMPTS review guides acknowledgment and never asks for another stop (TASK-2839)', async () => {
   // TASK-2830 shape: round 10 still reviewing, MAX_ATTEMPTS human stop, a browser stop already settled.
   const id = missionId('task-2830');
@@ -221,7 +243,10 @@ describe("focused Mission status reads only the selected Mission", () => {
           phase: 'pending-approval',
           disposition: 'CHANGES_MADE',
         }),
-        round({ number: 2, subject: subject('revision-two'), phase: 'reviewing' }),
+        round({ number: 2, subject: subject('revision-two'), phase: 'reviewing', reviewerPolicy: {
+          revision: changeRevision('revision-two'), mode: 'one-independent', requiredApprovals: 1,
+          selected: [agentFamily('codex')], independentAvailable: 1, unavailable: [], rerouted: [], fallbackReason: null,
+        } }),
       ],
       intervention: null,
       stageLaunches: [],
@@ -262,7 +287,7 @@ describe("focused Mission status reads only the selected Mission", () => {
    * unrelated ones. Every read is recorded so a test can assert which missions
    * were materialized at all.
    */
-  function makeFixtureBuilder(ledger: ReadLedger) {
+  function makeFixtureBuilder(ledger: ReadLedger, liveReviewer = false) {
     const all = [missionRecord(selectedId, { review: null }), ...unrelatedIds.map((id) => missionRecord(id))];
     const reviews = new Map<MissionId, ReviewProjectionFact>([
       [selectedId, { review: reviewFixture(selectedId), approval: null }],
@@ -327,11 +352,16 @@ describe("focused Mission status reads only the selected Mission", () => {
         },
       },
       now: () => Date.parse('2026-08-24T09:00:30.000Z'),
+      providerExecution: liveReviewer ? { observe(scope) {
+        return { observedAt: '2026-08-24T09:00:30.000Z', limitations: [], invocations: scope.missionId === selectedId
+          ? [{ runId: 'review-codex-a1-live', operationId: null, family: agentFamily('codex'), role: 'review' }]
+          : [] };
+      } } : undefined,
     });
   }
 
-  function statusBoardFor(ledger: ReadLedger) {
-    const builder = makeFixtureBuilder(ledger);
+  function statusBoardFor(ledger: ReadLedger, liveReviewer = false) {
+    const builder = makeFixtureBuilder(ledger, liveReviewer);
     return createStatusBoardAdapter({ buildProjectionFn: async () => builder });
   }
 
@@ -457,13 +487,13 @@ describe("focused Mission status reads only the selected Mission", () => {
     assert.equal(data?.title, `Mission ${adHocId}`);
   });
 
-  test('focused mission status matches the board projection card for the same mission', async () => {
+  test('focused mission status matches live board reviewer progress (PX-0046.06 F6)', async () => {
     const focusedLedger = newLedger();
-    const board = statusBoardFor(focusedLedger);
+    const board = statusBoardFor(focusedLedger, true);
     const focused = await board.getMissionData(selectedId, '/repo');
 
     const boardLedger = newLedger();
-    const projection = await makeFixtureBuilder(boardLedger).build();
+    const projection = await makeFixtureBuilder(boardLedger, true).build();
     const card = projection.stages.flatMap((stage) => stage.cards).find((entry) => entry.id === selectedId);
 
     assert.ok(card);
@@ -478,6 +508,9 @@ describe("focused Mission status reads only the selected Mission", () => {
     assert.equal(focused.sameAgentReview, card.sameAgentReview);
     assert.equal(focused.awaitingApprovals, card.awaitingApprovals);
     assert.equal(focused.reviewHistory.length, card.reviewHistory.length);
+    assert.deepEqual(focused.reviewProgress, card.reviewProgress);
+    assert.equal(focused.reviewProgress?.reviewers[0]?.state, 'running');
+    assert.equal(focused.reviewProgress?.reviewers[0]?.runId, 'review-codex-a1-live');
   });
 
   // TASK-2846.01: the board's ReviewRoundSummary is the one review-round read

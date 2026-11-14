@@ -1,7 +1,7 @@
 // Regression provenance: TASK-2373.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BOARD_IDLE_REFRESH_INTERVAL_MS, BOARD_REFRESH_INTERVAL_MS, subscribeToBoardProjection } from '../../../../src/application/projections/board-subscription.js';
+import { BOARD_IDLE_REFRESH_INTERVAL_MS, BOARD_REFRESH_INTERVAL_MS, boardFingerprint, subscribeToBoardProjection } from '../../../../src/application/projections/board-subscription.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
@@ -201,4 +201,17 @@ test('checkpoint-only plan and evidence changes repaint the subscribed board (TA
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(seen.length, 3, 'unchanged checkpoint state does not repaint');
   } finally { stop(); }
+});
+
+test('deferred web detail expands web identity without widening the Ink repaint contract (PX-0058.04)', () => {
+  const base = makeCard({ reviewHistory: [] });
+  const detailed = makeCard({ reviewHistory: [{ number: 1, reviewer: agentFamily('custom'), implementer: agentFamily('codex'),
+    phase: 'fixing', disposition: 'REQUEST_CHANGES', comment: 'deferred comment', findingSummaries: ['deferred finding'],
+    pushbacks: [], fixes: [] }] });
+  const before = makeProjection({ review: [base] });
+  const after = makeProjection({ review: [detailed] });
+  assert.equal(boardFingerprint(before), boardFingerprint(after),
+    'detail-only review history does not create an Ink repaint trigger');
+  assert.notEqual(boardFingerprint(before, { deferredDetails: true }), boardFingerprint(after, { deferredDetails: true }),
+    'the web projection revision includes deferred review history');
 });

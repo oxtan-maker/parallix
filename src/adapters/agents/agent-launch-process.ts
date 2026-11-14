@@ -7,6 +7,7 @@ import { withSandboxProfile } from "../process/bubblewrap.js";
 import { openRunSession } from "./run-session.js";
 import { providerResourceObservation } from '../../application/run-history-types.js';
 import type { SupervisedChild } from '../process/spawn-tee.js';
+import type { NoOutputWatchdog } from '../process/output-watchdog.js';
 import type { PreparedLaunch, StartAgentLoopDeps } from './agent-launch-context.js';
 import { sessionMissionId } from './agent-launch-authority.js';
 
@@ -14,6 +15,7 @@ import { sessionMissionId } from './agent-launch-authority.js';
 // A watchdog tick is only news once the agent's output has been silent this long.
 export const QUIET_STREAM_REPORT_MS = 15_000;
 const AUTHORITATIVE_COMPLETION_POLL_MS = 100;
+type LaunchPreparedDeps = Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'stdinPolicy' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'authoritativeCompletion' | 'launchAdmission'>;
 
 
 export function formatElapsed(elapsedMs: number) {
@@ -91,8 +93,55 @@ async function authorizeLaunch(slug: string | null, admission: StartAgentLoopDep
   await admission?.assert();
 }
 
+function watchdogTeeOptions(
+  watchdogConfig: PreparedLaunch['watchdogConfig'],
+  step: string,
+  chosen: string,
+  log: StartAgentLoopDeps['log'],
+): { noOutputWatchdog?: NoOutputWatchdog } {
+  if (!watchdogConfig) { return {}; }
+  return {
+    noOutputWatchdog: {
+      ...watchdogConfig,
+      onNoOutput: (evt) => {
+        // The watchdog keeps ticking after the agent's first output, so on a
+        // healthy run it used to announce "Still waiting ... last visible
+        // output 0s ago" while the agent was visibly streaming. Only speak up
+        // when the stream has actually gone quiet.
+        if (evt.sawOutput && (evt.msSinceLastOutput ?? 0) < QUIET_STREAM_REPORT_MS) { return; }
+        const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
+          ? 'starting up'
+          : 'running';
+        const detail = evt.sawOutput
+          ? `last visible output ${formatElapsed(evt.msSinceLastOutput ?? 0)} ago`
+          : 'stdout/stderr have not produced visible output';
+        log(fmt.status(
+          'INFO',
+          `${evt.sawOutput ? 'Still waiting on' : 'No output yet from'} ${fmt.agent(chosen)} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
+          `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
+          `Launcher is still running; ${detail}.`
+        ));
+      }
+    }
+  };
+}
+
+function openLaunchRunSession(prepared: PreparedLaunch, deps: LaunchPreparedDeps, chosen: string, attempt: number) {
+  const { sessionRole, model } = prepared;
+  const { step, log, slug } = deps;
+  return openRunSession({
+    worktree: deps.worktree,
+    slug,
+    role: sessionRole ?? deps.role ?? step,
+    family: chosen,
+    attempt,
+    model,
+    log: (line) => log(line)
+  }, { configuration: deps.configuration });
+}
+
 /** Run the launcher, announce the invocation, and await the result. */
-export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartAgentLoopDeps, 'step' | 'log' | 'slug' | 'unrefChild' | 'stdinPolicy' | 'configuration' | 'worktree' | 'role' | 'onLaunch' | 'authoritativeCompletion' | 'launchAdmission'>, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
+export async function launchPrepared(prepared: PreparedLaunch, deps: LaunchPreparedDeps, chosen: string, attempt: number): Promise<{ invocation: AgentInvocation | null | undefined; result: AgentProcessResult }> {
   const { step, log, slug, unrefChild } = deps;
   const { launcher, agentEnv, resume, sessionId, model, watchdogConfig, customReservation, effectiveProfile, nativeSandbox, launchSessionMarkerPort, sessionRole, actualPrompt } = prepared;
   let invocation: AgentInvocation | null | undefined;
@@ -110,8 +159,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
   // onLaunch.
   let startedAtMs = monotonicNowMs();
   // Durable run history and the optional tmux terminal host (TASK-2643).
-  const runSession = openRunSession({ worktree: deps.worktree, slug, role: sessionRole ?? deps.role ?? step, family: chosen, attempt,
-    model, log: (line) => log(line) }, { configuration: deps.configuration });
+  const runSession = openLaunchRunSession(prepared, deps, chosen, attempt);
   try {
     await authorizeLaunch(slug, deps.launchAdmission);
     const launchResult = withSandboxProfile(effectiveProfile, () => launcher({
@@ -138,36 +186,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
           customReservation?.bindChild(child.pid);
         },
         ...(unrefChild ? { unrefChild: true } : {}),
-        ...(watchdogConfig
-          ? {
-              noOutputWatchdog: {
-                ...watchdogConfig,
-                onNoOutput: (evt) => {
-                  // The watchdog keeps ticking after the agent's first output,
-                  // so on a healthy run it announced "Still waiting ... last
-                  // visible output 0s ago" while the agent was visibly
-                  // streaming. Only speak up when the stream has actually
-                  // gone quiet; a live agent is its own progress report.
-                  if (evt.sawOutput && (evt.msSinceLastOutput ?? 0) < QUIET_STREAM_REPORT_MS) { return; }
-                  const stage = evt.elapsedMs < (step === 'draft' ? DRAFT_NO_OUTPUT_INITIAL_DELAY_MS : DEFAULT_NO_OUTPUT_INITIAL_DELAY_MS)
-                    ? 'starting up'
-                    : 'running';
-                  // The watchdog is observational and keeps reporting after
-                  // the agent's first output, so the wording has to stay
-                  // truthful once output has already been seen.
-                  const detail = evt.sawOutput
-                    ? `last visible output ${formatElapsed(evt.msSinceLastOutput ?? 0)} ago`
-                    : 'stdout/stderr have not produced visible output';
-                  log(fmt.status(
-                    'INFO',
-                    `${evt.sawOutput ? 'Still waiting on' : 'No output yet from'} ${fmt.agent(chosen)} for step "${step}" after ${formatElapsed(evt.elapsedMs)} ` +
-                    `(pid ${evt.pid || 'unknown'}, agent ${stage}). ` +
-                    `Launcher is still running; ${detail}.`
-                  ));
-                }
-              }
-            }
-          : {})
+        ...watchdogTeeOptions(watchdogConfig, step, chosen, log)
       }
     }));
     const { invocation: launchedInvocation, resultPromise } = launchResult;
@@ -197,7 +216,7 @@ export async function launchPrepared(prepared: PreparedLaunch, deps: Pick<StartA
 
     if (deps.onLaunch) {
       try {
-        await deps.onLaunch({ agent: chosen, model: prepared.model, invocation, startedAtMs });
+        await deps.onLaunch({ agent: chosen, model: prepared.model, invocation, startedAtMs, runId: runSession?.runId ?? null });
       } catch (err) {
         // A rejecting launch callback (a refused authoritative boundary, a
         // failed current-work publication) must not leave the already-spawned

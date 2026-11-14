@@ -1,3 +1,4 @@
+import { webProjection } from '../../../fixtures/web-projection.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { emptyBoardRepositories } from '../../../helpers/empty-board-repositories.js';
@@ -13,7 +14,7 @@ import type { MissionStore } from '../../../../src/application/domain-ports.js';
 import type { Mission, MissionStatus } from '../../../../src/domain/mission.js';
 import { missionId } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
-import { BOARD_COMMAND_KINDS, toWebBoardSnapshot, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import { BOARD_COMMAND_KINDS, validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { buildBoardMetrics, buildBoardProjection } from '../../../../src/application/projections/board.js';
 import {
   projectMissionCard,
@@ -68,7 +69,7 @@ test('stranded active mission snapshot validates and advertises active:execute',
   const root = registeredMkdtemp('task-2518-');
   try {
     const projection = await strandedProjection(root);
-    const wire: unknown = JSON.parse(JSON.stringify(toWebBoardSnapshot(projection)));
+    const wire: unknown = JSON.parse(JSON.stringify(webProjection.snapshot(projection)));
     const validation = validateWebBoardSnapshot(wire);
     assert.deepEqual(validation.ok ? [] : [JSON.stringify(validation)], []);
     assert.ok(validation.ok);
@@ -138,7 +139,7 @@ test('every board lane produces only wire-accepted action kinds', () => {
     ['backlog', 'refined', 'active', 'review', 'integration', 'done'],
   );
 
-  const wire: unknown = JSON.parse(JSON.stringify(toWebBoardSnapshot(projection)));
+  const wire: unknown = JSON.parse(JSON.stringify(webProjection.snapshot(projection)));
   const validation = validateWebBoardSnapshot(wire);
   assert.deepEqual(validation.ok ? [] : [JSON.stringify(validation)], []);
   assert.ok(validation.ok);

@@ -220,7 +220,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
     ].filter(Boolean).join('\n\n');
   };
   return {
-    async launch({ role, agent, exclude, prompt, recovery, sessionPolicy, pinnedAgent }) {
+    async launch({ role, agent, exclude, prompt, recovery, sessionPolicy, pinnedAgent, onStarted }) {
       const phase = role === 'reviewer' ? 'review' : 'review-response';
       const launchSessionPolicy = role === 'reviewer'
         ? 'fresh-ephemeral' as const
@@ -239,11 +239,13 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
         } } : {}),
         ...(launchSessionPolicy === undefined ? {} : { sessionPolicy: launchSessionPolicy }),
         // A bare repair launch is not review work the board reports.
-        onLaunch: async ({ agent: launched, model }: { agent: string; model: string | null }) => {
+        onLaunch: async ({ agent: launched, model, runId }: { agent: string; model: string | null; runId?: string | null }) => {
           if (role === 'implementer' && bindings.missionStore) {
             await recordImplementerLaunch(slug, launched, bindings.missionStore, bindings.lifecycleService);
           }
           if (prompt) { await bindings.onAgentLaunched?.(launched, phase, model); }
+          try { await onStarted?.({ agent: launched, runId: runId ?? null }); }
+          catch { log(fmt.status('WARN', 'Reviewer progress observation unavailable; reviewer execution continues.')); }
         },
       });
     },
