@@ -17,7 +17,8 @@ import type { RecoveryFileSystem } from '../../application/recovery-evidence-typ
 import type { MissionId } from '../../domain/mission.js';
 import { loadPhaseGates } from '../config/repository-gates.js';
 import { recoveryEvidenceFileSystem } from '../filesystem/recovery-evidence-fs.js';
-import { git } from '../git/git.js';
+import { git, type GitReader } from '../git/git.js';
+import { readCheckoutCurrency } from './verification-proof-inputs.js';
 import { inspectActiveVerificationProof } from './active-verification-proof.js';
 import { readIntegrationGateRun, type IntegrationGateRun } from './integration-verification-proof.js';
 import { completedRebaseLineageForCheckout } from '../git/rebase-completion-recorder.js';
@@ -31,7 +32,8 @@ export type IntegrationValidationRead = (_missionId: MissionId) => Promise<{
 } | null>;
 
 export interface VerificationGateEvidenceOptions {
-  readonly gitRunner?: typeof git;
+  /** Composition-owned runner, so one build's Git subprocesses share one snapshot and counter. */
+  readonly gitRunner?: GitReader;
   readonly configuration?: ParallixConfiguration;
   /** Resolves the mission checkout, normally from the board's per-build worktree snapshot. */
   readonly resolveWorktree: (_missionId: MissionId) => string | null;
@@ -42,11 +44,13 @@ export interface VerificationGateEvidenceOptions {
   readonly recoveryFileSystem?: RecoveryFileSystem;
 }
 
-function readCheckout(worktree: string, gitRunner = git): Extract<GateCheckout, { kind: 'present' }> {
-  const head = gitRunner(['-C', worktree, 'rev-parse', 'HEAD']);
-  const status = gitRunner(['-C', worktree, 'status', '--porcelain']);
-  if (head.status !== 0 || status.status !== 0) { throw new Error(`Mission checkout ${worktree} is unreadable`); }
-  return { kind: 'present', revision: head.stdout.trim(), clean: status.stdout.trim() === '' };
+/** Checkout currency for gate coverage: HEAD, cleanliness and branch from the one
+ * consolidated status subprocess proof identity already asks for. A checkout Git
+ * cannot name a HEAD for is unreadable, never a clean empty one. */
+function readCheckout(worktree: string, gitRunner: GitReader = git): Extract<GateCheckout, { kind: 'present' }> {
+  const currency = readCheckoutCurrency(worktree, gitRunner);
+  if (!currency || currency.status !== 0 || !currency.commit) { throw new Error(`Mission checkout ${worktree} is unreadable`); }
+  return { kind: 'present', revision: currency.commit, clean: currency.clean };
 }
 
 /** A recorded gate outcome covers the checkout on its revision and command, or

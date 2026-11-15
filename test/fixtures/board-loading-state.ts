@@ -18,16 +18,26 @@ import { fixtureMission } from './mission-builders.js';
 export const BOARD_ANALYTICS_BASELINE_WORKLOAD = {
   /** Rows in the shared analytical families other than `rebound.repair`. */
   analyticalRows: 64_349,
-  /** Persisted `rebound.repair` audit rows carrying full diagnostic text. */
+  /** Repair audit rows carrying full diagnostic text. */
   repairRows: 1_119,
   /** Characters of retained gate diagnostic per persisted fingerprint field. */
   repairFingerprintChars: 223_364,
+  /**
+   * TOTAL Mission checkouts the operator board resolves per build. The measured
+   * operator workload keeps a live checkout per open Mission, which is where
+   * its per-build Git subprocesses come from; without a checkout the board
+   * never asks Git for a revision, a dirty state or gate evidence. The fixture
+   * splits this total between open and closed Missions, so `N` means exactly
+   * `N` checkouts, never `2N`.
+   */
+  missionWorktrees: 12,
 } as const;
 
 export type BoardLoadingWorkload = {
   analyticalRows?: number;
   repairRows?: number;
   repairFingerprintChars?: number;
+  missionWorktrees?: number;
 };
 
 /** The analytical families the board's shared read session selects. */
@@ -74,6 +84,25 @@ export async function seedBoardLoading(input: string, count = 120, options: {
   execFileSync('git', ['init', '-q'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
     'commit', '--allow-empty', '-qm', 'fixture'], { cwd: root });
+  // One clean checkout per Mission the board asks Git about, as on the operator
+  // workstation: an active Mission with a declared gate and a closed Mission
+  // with an integration run are where a build spends its Git subprocesses.
+  // `missionWorktrees` is the total checkout count, split between the open and
+  // the closed half of the population. Callers that do not ask for checkouts
+  // keep the single-worktree fixture.
+  const worktrees = options.workload?.missionWorktrees ?? 0;
+  const openCheckouts = Math.ceil(worktrees / 2);
+  const closedCheckouts = worktrees - openCheckouts;
+  const checkedOut = new Set<number>();
+  for (let index = 1; index <= openCheckouts; index++) { checkedOut.add(index); }
+  for (let index = Math.max(openCheckouts + 1, count - closedCheckouts + 1); index <= count; index++) { checkedOut.add(index); }
+  const worktreeRoot = path.join(input, 'worktrees');
+  fs.mkdirSync(worktreeRoot, { recursive: true });
+  for (const index of checkedOut) {
+    execFileSync('git', ['worktree', 'add', '-q', path.join(worktreeRoot, `task-${9000 + index}`),
+      '-b', `mission/task-${9000 + index}`], { cwd: root });
+  }
+  const worktreeCount = checkedOut.size;
   const database = new SqliteDatabaseAdapter();
   try {
     // Boundary suites may reuse closed empty schema; all writable data stays
@@ -86,15 +115,20 @@ export async function seedBoardLoading(input: string, count = 120, options: {
     const store = new SqliteMissionStore(database);
     const open = Math.floor(count * 5 / 6);
     for (let index = 1; index <= count; index++) {
+      const active = index <= openCheckouts;
       await store.save(fixtureMission(`task-${9000 + index}`, {
-        repositoryId: repositoryId('repository'), status: index <= open ? 'backlog' : 'done',
+        repositoryId: repositoryId('repository'),
+        status: index <= open ? (active ? 'active' : 'backlog') : 'done',
         closedAt: index <= open ? null : '2026-10-12T12:00:00.000Z', checkpoints: [],
+        // A Mission on a live checkout declares a gate, so the board reads that
+        // gate's proof against the checkout instead of reporting it unconfigured.
+        declaredGates: checkedOut.has(index) ? ['npm run typecheck'] : [],
         title: `Board loading fixture ${index}`,
       }), null);
     }
     // The loading benchmark needs dense telemetry; HTTP smoke contracts only
     // need persisted Missions. Leave that stress workload with its owner.
-    if (options.telemetry === false) { return { root, home }; }
+    if (options.telemetry === false) { return { root, home, worktrees: worktreeCount }; }
     await database.execute('BEGIN');
     for (let index = 0; index < count * 20; index++) {
       await database.execute(`INSERT INTO board_lane_events
@@ -111,5 +145,5 @@ export async function seedBoardLoading(input: string, count = 120, options: {
     if (options.workload) { await seedAnalyticalWorkload(database, count, options.workload); }
     await database.execute('COMMIT');
   } finally { await database.close(); }
-  return { root, home };
+  return { root, home, worktrees: worktreeCount };
 }

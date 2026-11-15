@@ -31,6 +31,7 @@ import type { SqliteDatabaseAdapter } from '../src/adapters/sqlite/database-adap
 import type { SQLInputValue } from 'node:sqlite';
 import type { OperationalHistoryEntry, OperationalHistoryRepository }
   from '../src/application/ports/operation-history.js';
+import { git as realGit, type GitOptions, type GitResult } from '../src/adapters/git/git.js';
 
 /** Declared bound for one historical analytics completion or refresh. */
 export const ANALYTICS_REFRESH_LIMIT_MS = 3_000;
@@ -38,15 +39,19 @@ export const ANALYTICS_REFRESH_LIMIT_MS = 3_000;
 export const STEADY_OBSERVER_RSS_LIMIT_MIB = 512;
 
 export interface AnalyticsMeasurement {
-  readonly workload: { readonly missions: number; readonly repairRows: number; readonly repairFingerprintChars: number };
+  readonly workload: { readonly missions: number; readonly repairRows: number; readonly repairFingerprintChars: number;
+    readonly missionWorktrees: number };
   readonly builds: readonly { readonly label: string; readonly ms: number; readonly freshness: string | null;
     readonly reason: string | null;
-    readonly rows: number; readonly bytes: number; readonly compactRepairRows: number; readonly queries: number }[];
+    readonly rows: number; readonly bytes: number; readonly compactRepairRows: number; readonly queries: number;
+    readonly gitChildren: number }[];
   readonly coldAnalyticsMs: number;
   readonly refreshAnalyticsMs: number;
   readonly totalReadRows: number;
   readonly totalReadBytes: number;
   readonly totalQueries: number;
+  readonly totalGitChildren: number;
+  readonly gitChildrenByOperation: readonly { readonly operation: string; readonly count: number }[];
   readonly repairBytesInAnalyticalRead: number;
   readonly storageReads: readonly { readonly method: string; readonly count: number; readonly ms: number; readonly rows: number }[];
   readonly slowestStatements: readonly { readonly sql: string; readonly count: number; readonly ms: number }[];
@@ -65,6 +70,9 @@ class ReadCounts {
   statements = 0;
   compactRepairRows = 0;
   repairBytes = 0;
+  gitChildren = 0;
+  /** Git subprocesses by operation, so a subprocess-reduction claim names the call that stopped happening. */
+  readonly gitByOperation = new Map<string, number>();
   /** Elapsed storage time by read method, so a compact-read claim names the read it removed. */
   readonly calls = new Map<string, { count: number; ms: number; rows: number; bytes: number }>();
   /** Slowest individual SQL statements, so the remaining cost is attributable to a statement. */
@@ -87,7 +95,26 @@ class ReadCounts {
       return value;
     });
   }
-  snapshot() { return { rows: this.rows, bytes: this.bytes, queries: this.queries, compactRepairRows: this.compactRepairRows }; }
+  gitCall(args: readonly string[]) {
+    this.gitChildren += 1;
+    // Keep the flags: `status --porcelain` and `status --porcelain=v2 --branch`
+    // are different questions, and the count must show which one a build asks.
+    const operation = args.flatMap((arg, index) =>
+      arg === '-C' || args[index - 1] === '-C' ? [] : [arg]).join(' ');
+    this.gitByOperation.set(operation, (this.gitByOperation.get(operation) ?? 0) + 1);
+  }
+  snapshot() {
+    return { rows: this.rows, bytes: this.bytes, queries: this.queries, compactRepairRows: this.compactRepairRows,
+      gitChildren: this.gitChildren };
+  }
+}
+
+/** Count every Git subprocess the composed board starts, without changing what it asks of Git. */
+function instrumentGit(counts: ReadCounts) {
+  return (args: string[], options?: GitOptions): Pick<GitResult, 'status' | 'stdout' | 'stderr'> => {
+    counts.gitCall(args);
+    return realGit(args, options);
+  };
 }
 
 /** Decorate the storage boundary without changing what the composition asks for. */
@@ -139,6 +166,7 @@ async function measure(): Promise<AnalyticsMeasurement> {
   const missions = argument('missions', 120);
   const builds = argument('builds', 3);
   const workload: BoardLoadingWorkload = {
+    missionWorktrees: argument('worktrees', BOARD_ANALYTICS_BASELINE_WORKLOAD.missionWorktrees),
     analyticalRows: argument('analytical-rows', BOARD_ANALYTICS_BASELINE_WORKLOAD.analyticalRows),
     repairRows: argument('repair-rows', BOARD_ANALYTICS_BASELINE_WORKLOAD.repairRows),
     repairFingerprintChars: argument('transcript-chars', BOARD_ANALYTICS_BASELINE_WORKLOAD.repairFingerprintChars),
@@ -147,17 +175,22 @@ async function measure(): Promise<AnalyticsMeasurement> {
   const counts = new ReadCounts();
   try {
     const seeded = await seedBoardLoading(state, missions, { workload });
+    // The reported workload must be the fixture that was actually built, so a
+    // subprocess or query count can never be read against a phantom population.
+    if (seeded.worktrees !== workload.missionWorktrees) {
+      throw new Error(`fixture created ${seeded.worktrees} mission worktrees for a requested ${workload.missionWorktrees}`);
+    }
     const { db } = await initOperatorState({ homeDir: seeded.home });
     const counted = instrumentDatabase(db, counts);
     const history = instrumentHistory(new SqliteOperationalHistoryRepository(counted), counts);
     const board = composeBoardProjection({
-      rootDir: seeded.root, missionStore: new SqliteMissionStore(counted), database: counted,
+      rootDir: seeded.root, missionStore: new SqliteMissionStore(counted), database: counted, gitFn: instrumentGit(counts),
       repositoryId: repositoryId('repository'), blocklistRepo: new SqliteBlocklistRepository(counted),
       historyRepo: history, laneEventRepo: new SqliteBoardLaneEventRepository(counted),
       usageRepo: new SqliteUsageRepository(counted), knownAgentFamilies: [agentFamily('codex')],
     });
     const samples: { label: string; ms: number; freshness: string | null; reason: string | null;
-      rows: number; bytes: number; compactRepairRows: number; queries: number }[] = [];
+      rows: number; bytes: number; compactRepairRows: number; queries: number; gitChildren: number }[] = [];
     const run = async (label: string) => {
       const before = counts.snapshot();
       const started = performance.now();
@@ -168,7 +201,8 @@ async function measure(): Promise<AnalyticsMeasurement> {
         reason: projection.metrics.analytics?.reason ?? null,
         rows: after.rows - before.rows, bytes: after.bytes - before.bytes,
         compactRepairRows: after.compactRepairRows - before.compactRepairRows,
-        queries: after.queries - before.queries });
+        queries: after.queries - before.queries,
+        gitChildren: after.gitChildren - before.gitChildren });
       return projection;
     };
     await run('cold');
@@ -179,11 +213,16 @@ async function measure(): Promise<AnalyticsMeasurement> {
       eventData: JSON.stringify({ repositoryId: 'repository', missionId: 'task-9001', state: 'passed' }) });
     await run('warm-refresh');
     return {
-      workload: { missions, repairRows: workload.repairRows!, repairFingerprintChars: workload.repairFingerprintChars! },
+      workload: { missions, repairRows: workload.repairRows!, repairFingerprintChars: workload.repairFingerprintChars!,
+        missionWorktrees: seeded.worktrees },
       builds: samples,
       coldAnalyticsMs: samples[0]!.ms,
       refreshAnalyticsMs: samples[samples.length - 1]!.ms,
       totalReadRows: counts.rows, totalReadBytes: counts.bytes, totalQueries: counts.queries,
+      totalGitChildren: counts.gitChildren,
+      gitChildrenByOperation: [...counts.gitByOperation.entries()]
+        .map(([operation, count]) => ({ operation, count }))
+        .sort((left, right) => right.count - left.count),
       repairBytesInAnalyticalRead: counts.repairBytes,
       storageReads: [...counts.calls.entries()]
         .map(([method, entry]) => ({ method, ...entry, ms: Math.round(entry.ms) }))

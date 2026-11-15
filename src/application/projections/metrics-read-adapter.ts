@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
 import { reviewStatistics, type ReviewStatistics, type ReviewStatisticsEvidence } from '../services/review-statistics.js';
 import { usageRecordsToOutcomes } from './metrics-outcomes.js';
+import { deliveryIdentityRevision } from './metrics-delivery-identity.js';
 import type { UsageRecord, UsageRepository } from '../ports/mission-measurements.js';
 import type { BoardLaneEventEntry, BoardLaneEventRepository, OperationalHistoryRepository } from '../ports/operation-history.js';
 import type { Mission, MissionId, MissionLabel, MissionStatus } from '../../domain/mission.js';
@@ -329,14 +329,9 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
       this.usageRepo.findWhere({ repo: this.repositoryId }),
       this.evidenceRevision(),
     ]);
-    const outcomes = usageRecordsToOutcomes(usageRecords, this.repositoryId, entries).outcomes;
-    const revision = createHash('sha256').update(JSON.stringify([
-      entries, usageRecords, evidenceRevision,
-    ])).digest('hex');
-    return {
-      deliveries: outcomes.map(({ missionId, closedAt }) => ({ missionId, closedAt })),
-      revision,
-    };
+    const deliveries = usageRecordsToOutcomes(usageRecords, this.repositoryId, entries).outcomes
+      .map(({ missionId, closedAt }) => ({ missionId, closedAt }));
+    return { deliveries, revision: deliveryIdentityRevision(entries, usageRecords, deliveries, evidenceRevision) };
   }
 
   private withCanonicalCohortMetadata(

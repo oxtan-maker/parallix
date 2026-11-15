@@ -6,7 +6,9 @@ import test from 'node:test';
 import os from 'os';
 import path from 'path';
 import { recoveryEvidenceFileSystem } from '../../../src/adapters/filesystem/recovery-evidence-fs.js';
-import { writeActiveVerificationProof } from '../../../src/adapters/verification/active-verification-proof.js';
+import { writeActiveVerificationProof, inspectActiveVerificationProof } from '../../../src/adapters/verification/active-verification-proof.js';
+import { VerificationReadSnapshot } from '../../../src/adapters/verification/verification-read-snapshot.js';
+import { git, type GitReader } from '../../../src/adapters/git/git.js';
 import { VerificationGateEvidenceReader } from '../../../src/adapters/verification/gate-evidence-reader.js';
 import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
 import { VerificationGateObserver } from '../../../src/application/projections/gate-observation.js';
@@ -66,6 +68,53 @@ test('gate evidence reader classifies proofs, failures and validation against th
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
+
+test('checkout currency names the current head and never calls a dirty worktree clean (TASK-2854.03)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-checkout-currency-'));
+  try {
+    const repo = initCommittedRepository(root, { 'src/input.ts': 'export const value = 1;\n' });
+    const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(root, '.git', 'home') });
+    const reader = new VerificationGateEvidenceReader({ configuration, resolveWorktree: () => root, integrationValidation: async () => null });
+    const scope = { repositoryId: repositoryId('task-2854-repository'), missionId: missionId('task-2854-checkout') };
+    const checkout = async () => (await reader.readDeclaredGates(scope, ['true'])).checkout;
+    const facts = async () => {
+      const present = await checkout();
+      return present.kind === 'present' ? { clean: present.clean, revision: present.revision } : { clean: null, revision: null };
+    };
+
+    assert.deepEqual(await facts(), { clean: true, revision: repo.git('rev-parse', 'HEAD').trim() }, 'currency reports the current head');
+    fs.writeFileSync(path.join(root, 'untracked.log'), 'noise\n');
+    assert.equal((await facts()).clean, false, 'an untracked file is never a clean checkout');
+    fs.rmSync(path.join(root, 'untracked.log'));
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 2;\n');
+    repo.git('commit', '-am', 'moved head');
+    assert.deepEqual(await facts(), { clean: true, revision: repo.git('rev-parse', 'HEAD').trim() }, 'a moved head moves the currency');
+    repo.git('checkout', '--detach');
+    assert.equal((await facts()).revision, repo.git('rev-parse', 'HEAD').trim(), 'a detached checkout keeps its revision');
+    await assert.rejects(new VerificationGateEvidenceReader({ configuration, resolveWorktree: () => path.join(root, 'no-such-checkout'), integrationValidation: async () => null })
+      .readDeclaredGates(scope, ['true']), /unreadable/, 'a checkout Git cannot report is unavailable, never clean');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+// The proof slot must report an unreadable checkout as unavailable, exactly as
+// the pre-consolidation branch read did; a failed status subprocess must not
+// collapse into a scope with an empty branch and answer "no proof was written".
+test('a checkout whose status cannot be read is unavailable, never an absent proof (TASK-2854.03)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-checkout-unreadable-'));
+  try {
+    initCommittedRepository(root, { 'src/input.ts': 'export const value = 1;\n' });
+    const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(root, '.git', 'home') });
+    // A runner that answers HEAD queries but cannot report the checkout itself.
+    const unreadableCheckout: GitReader = (args, options) => (args.includes('status') || args.includes('branch'))
+      ? { status: 128, signal: null, stdout: '', stderr: 'fatal: cannot read checkout state' }
+      : git(args, options);
+
+    assert.throws(() => inspectActiveVerificationProof('true', root, { configuration }, new VerificationReadSnapshot(unreadableCheckout)),
+      /unreadable/, 'a checkout Git cannot report is unavailable, never an absent proof');
+    assert.deepEqual(inspectActiveVerificationProof('true', root, { configuration }, new VerificationReadSnapshot(git)),
+      { state: 'absent' }, 'a checkout Git can report still answers absent when no proof was written');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 // Separate execution-observation contract keeps both cases inside the existing
 // finite per-case CPU limit; proof identity assertions above stay intact.
@@ -213,6 +262,11 @@ test('gate evidence reader keeps marker and run results current across completed
 });
 
 // Count the actual boundary, including helpers that do not use a supplied Git double.
+/** Any porcelain status subprocess, v1 or the consolidated v2 form. */
+function statusSpawns(calls: readonly (readonly string[])[]): number {
+  return calls.filter(args => args.some(arg => arg === '--porcelain' || arg.startsWith('--porcelain='))).length;
+}
+
 test('board gate inputs are shared per build and refreshed on the next read (TASK-2775)', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-read-snapshot-'));
   const { syncBuiltinESMExports } = await import('node:module');
@@ -255,8 +309,8 @@ test('board gate inputs are shared per build and refreshed on the next read (TAS
       const result = await read(missionId(`task-fixture-${i}`));
       assert.deepEqual(result.gates.map(gate => gate.proof.state), ['current', 'absent']);
     }
-    assert.ok(calls.length <= 6, `one input snapshot, not one per mission or command: ${calls.length} Git spawns`);
-    assert.equal(calls.filter(args => args.includes('--porcelain')).length, 1, 'checkout and proof identity share status');
+    assert.ok(calls.length <= 4, `one consolidated currency read per checkout: ${calls.length} Git spawns`);
+    assert.equal(statusSpawns(calls), 1, 'checkout and proof identity share one status subprocess');
     assert.equal(launcherReads, 1, 'one toolchain hash per build');
     const declaredConfigReads = configReads;
     const observer = new VerificationGateObserver(reader);
@@ -274,7 +328,7 @@ test('board gate inputs are shared per build and refreshed on the next read (TAS
     calls = []; launcherReads = 0; configReads = 0;
     beginRead();
     assert.equal((await read()).gates[0].proof.state, 'stale', 'a new build observes dirty inputs');
-    assert.equal(calls.filter(args => args.includes('--porcelain')).length, 1);
+    assert.equal(statusSpawns(calls), 1);
     assert.equal(launcherReads, 1);
     // A clean new revision, branch and launcher must not inherit the cached identity.
     repo.git('commit', '-am', 'changed input');

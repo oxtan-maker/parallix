@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { git } from './git.js';
+import { git, type GitReader } from './git.js';
 import type { RepositoryMetadataWriter } from '../../application/ports/repository-metadata.js';
 import { isVerificationBookkeeping, type CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
 
@@ -11,22 +11,22 @@ export interface RebaseCompletion {
   mappings: Array<[string, string]>;
 }
 
-function gitText(root: string, args: string[], gitRunner = git): string {
+function gitText(root: string, args: string[], gitRunner: GitReader = git): string {
   const result = gitRunner(['-C', root, ...args]);
   if (result.status !== 0) { throw new Error(`Git metadata unavailable (${args[0]})`); }
   return result.stdout.trim();
 }
 
-function stateDirectory(root: string, gitRunner = git): string {
+function stateDirectory(root: string, gitRunner: GitReader = git): string {
   return path.join(gitText(root, ['rev-parse', '--absolute-git-dir'], gitRunner), 'parallix');
 }
 
-export function rebaseInProgress(root: string, gitRunner = git): boolean {
+export function rebaseInProgress(root: string, gitRunner: GitReader = git): boolean {
   const gitDirectory = path.dirname(stateDirectory(root, gitRunner));
   return ['rebase-merge', 'rebase-apply'].some(name => fs.existsSync(path.join(gitDirectory, name)));
 }
 
-export function readRebaseCompletions(root: string, gitRunner = git): RebaseCompletion[] {
+export function readRebaseCompletions(root: string, gitRunner: GitReader = git): RebaseCompletion[] {
   try {
     return fs.readFileSync(path.join(stateDirectory(root, gitRunner), 'rebase-completions.jsonl'), 'utf8')
       .split('\n').filter(Boolean).map(line => JSON.parse(line) as RebaseCompletion);
@@ -35,7 +35,7 @@ export function readRebaseCompletions(root: string, gitRunner = git): RebaseComp
 
 const revision = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{40,64}$/.test(value);
 
-function onlyBookkeeping(root: string, from: string, to: string, gitRunner = git): boolean {
+function onlyBookkeeping(root: string, from: string, to: string, gitRunner: GitReader = git): boolean {
   if (from === to) { return true; }
   const result = gitRunner(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
   return result.status === 0 && result.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
@@ -47,7 +47,7 @@ function onlyBookkeeping(root: string, from: string, to: string, gitRunner = git
  * implementation edit outside a rebase breaks the lineage. Rebase content is
  * not compared: upstream changes and resolved conflicts are carried.
  */
-export function completedRebaseLineage(root: string, branch: string, from: string, to: string, gitRunner = git): CompletedRebaseLineage | null {
+export function completedRebaseLineage(root: string, branch: string, from: string, to: string, gitRunner: GitReader = git): CompletedRebaseLineage | null {
   let covered = from;
   const steps: { from: string; to: string }[] = [];
   for (const record of readRebaseCompletions(root, gitRunner)) {
@@ -63,7 +63,7 @@ export function completedRebaseLineage(root: string, branch: string, from: strin
 }
 
 /** Lineage from `from` to the checked-out branch HEAD; null when detached or unreadable. */
-export function completedRebaseLineageForCheckout(root: string, from: string, to: string, gitRunner = git): CompletedRebaseLineage | null {
+export function completedRebaseLineageForCheckout(root: string, from: string, to: string, gitRunner: GitReader = git): CompletedRebaseLineage | null {
   try {
     const branch = gitRunner(['-C', root, 'symbolic-ref', '--quiet', '--short', 'HEAD']);
     if (branch.status !== 0 || !branch.stdout.trim() || !revision(from) || !revision(to)) { return null; }

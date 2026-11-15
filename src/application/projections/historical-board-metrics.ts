@@ -1,7 +1,9 @@
 import { setImmediate } from 'node:timers';
 import { decisionWindowDay, localReportingTimeZone } from '../../domain/decision-window.js';
+import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { Mission, MissionId, MissionStatus } from '../../domain/mission.js';
 import type { RepositoryId } from '../../domain/repository.js';
+import type { Review, ReviewerDecision, ReviewRound } from '../../domain/review.js';
 import { buildBoardMetrics, type BoardMetrics, type HistoricalAnalyticsState } from './board.js';
 import type { MetricsReadAdapter } from './metrics-read-adapter.js';
 
@@ -100,7 +102,7 @@ export class HistoricalBoardMetrics {
       input.evidenceRevision,
       input.missions.map(mission => [
         mission.id, mission.status, mission.labels, mission.assignee, mission.netEngineeringLines,
-        mission.review, mission.checkpoints, input.deliveries.get(mission.id),
+        reviewIdentity(mission.review), checkpointIdentity(mission.checkpoints), input.deliveries.get(mission.id),
       ]),
     ]);
   }
@@ -276,3 +278,51 @@ export class HistoricalBoardMetrics {
 }
 
 const skip = () => ({ series: [], missingHistoryFallback: 'skip' as const });
+
+/**
+ * Review facts the historical summary is derived from: the rounds, decisions,
+ * judged revisions and audit events that `reviewStatistics` reads. Round
+ * summaries, findings, resolutions and audit prose are board text the summary
+ * never consumes, so serializing the whole Review into the cache key paid for
+ * megabytes of evidence text it could not use.
+ */
+function reviewIdentity(review: Review | null): readonly unknown[] | null {
+  if (!review) { return null; }
+  return [
+    review.rounds.map(roundIdentity),
+    review.reviewEvents.map(event => [
+      event.position, event.eventType, event.roundNumber, event.actor, event.createdAt,
+      event.disposition, event.verdict, event.followUpReference,
+    ]),
+  ];
+}
+
+function roundIdentity(round: ReviewRound): readonly unknown[] {
+  const change = round.subject.change;
+  return [
+    round.number, round.startedAt, round.implementer, round.reviewer, change.kind,
+    change.kind === 'pull-request' ? change.id : null, round.subject.revision,
+    decisionIdentity(round.decision),
+  ];
+}
+
+function decisionIdentity(decision: ReviewerDecision | null): readonly unknown[] | null {
+  if (!decision) { return null; }
+  const source = decision.source;
+  const revocation = decision.kind === 'approved' ? decision.revocation : undefined;
+  return [
+    decision.kind, decision.decidedAt, decision.revision ?? null,
+    source ? [source.kind, 'author' in source ? source.author ?? null : null] : null,
+    revocation
+      ? [revocation.revokedAt, revocation.revokedBy, revocation.cause?.kind ?? null, revocation.reason]
+      : null,
+  ];
+}
+
+/** Checkpoint identity: which evidence exists and when it was recorded. */
+function checkpointIdentity(checkpoints: readonly CheckpointData[]): readonly unknown[] {
+  return checkpoints.map(checkpoint => [
+    checkpoint.name, checkpoint.rawFilename ?? '',
+    checkpoint.recording?.recordedAt ?? '', checkpoint.recording?.missionRevision ?? -1,
+  ]);
+}

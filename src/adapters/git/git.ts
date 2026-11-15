@@ -34,6 +34,14 @@ export interface GitResult {
 // spawnSync reports a capture overflow as ENOBUFS and can still hand back exit 0 with the
 // stdout it managed to read, so `status === 0` never proves the output is complete.
 const OUTPUT_LIMIT_CODES = new Set(['ENOBUFS', 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER']);
+
+/**
+ * The runner shape adapters accept: a Git invocation answered with its exit
+ * status and captured output. Composition injects one runner per board so every
+ * subprocess of a build is observable and shareable across the build's reads.
+ */
+export type GitReader =
+  (_args: string[], _options?: GitOptions) => Pick<GitResult, 'status' | 'stdout' | 'stderr' | 'failureReason'>;
 /** Node's spawnSync default when the caller does not declare one. */
 const DEFAULT_CAPTURE_LIMIT = 1024 * 1024;
 const NARROW_RECOVERY = 'the incomplete output was rejected instead of accepted; narrow the query or read it in bounded parts';

@@ -2,6 +2,7 @@
 // npm archive selection belongs to npm-pack-install-smoke; HTTP policy to web-bundle-shell.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -57,4 +58,24 @@ test('web bundle board: populated SQLite snapshot reads share one revision and t
     await stopHost(host);
   }
   await assert.rejects(() => get(`${host.origin}/`), 'the host and session must be unreachable once the px process has exited');
+});
+
+test('board loading fixture creates exactly the requested mission checkouts (TASK-2854.03)', async t => {
+  // The benchmark names its workload by this option, so a requested total must
+  // never become two halves: even, odd and fully checked out populations all
+  // have to land on exactly the requested count.
+  for (const requested of [4, 3, 6]) {
+    const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'px-board-fixture-'));
+    t.after(() => fs.rmSync(stateRoot, { recursive: true, force: true }));
+    const state = await seedBoardLoading(stateRoot, 6, {
+      telemetry: false, schemaTemplate: migratedSchemaPath(),
+      workload: { missionWorktrees: requested, analyticalRows: 0, repairRows: 0, repairFingerprintChars: 0 },
+    });
+    const listed = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: state.root, encoding: 'utf8' });
+    const checkouts = listed.split('\n').filter(line => line.startsWith('branch refs/heads/mission/task-')).length;
+
+    assert.equal(state.worktrees, requested,
+      `missionWorktrees=${requested} is the total checkout count, not one half of a doubled population`);
+    assert.equal(checkouts, state.worktrees, `Git reports the ${requested} checkouts the fixture reports`);
+  }
 });

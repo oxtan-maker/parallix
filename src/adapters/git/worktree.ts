@@ -14,7 +14,8 @@ import {
   getMissionYear,
 } from '../filesystem/mission-paths.js';
 
-export type GitReader = (args: string[], options?: gitModule.GitOptions) => Pick<gitModule.GitResult, 'status' | 'stdout' | 'stderr' | 'failureReason'>;
+export type { GitReader } from './git.js';
+import type { GitReader } from './git.js';
 
 /** @param {string|GitReader} rootDirOrGitFn @param {GitReader|null} [maybeGitFn] */
 function configuredPrimaryBranch(rootDir: string, listLocalBranches: () => string[]): string | null {

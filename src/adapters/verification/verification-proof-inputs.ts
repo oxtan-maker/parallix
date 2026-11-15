@@ -1,4 +1,4 @@
-import type { GitFn } from './verification.js';
+import type { GitReader } from '../git/git.js';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -88,16 +88,57 @@ function isVerificationHeadIdentity(oid: string): boolean {
   return oid === '(initial)' || /^[a-f0-9]{40,64}$/.test(oid);
 }
 
-export function readVerificationInputs(rootDir: string, gitRunner: GitFn, searchPath = '',
-  toolchainIdentity = () => verificationToolchainIdentity(searchPath)):
-  { ok: true; root: string; trackedOutput: string; branch: string; commit: string | null; toolchain: string } | { ok: false; error: string } {
+/** One checkout's currency: HEAD, cleanliness and branch, from one subprocess. */
+export interface CheckoutCurrency {
+  /** Realpath-resolved checkout, so every reader asks Git the same question. */
+  readonly root: string;
+  /** Exit code of the consolidated status subprocess. */
+  readonly status: number;
+  /** Raw porcelain v2 output lines, branch headers included. */
+  readonly lines: readonly string[];
+  /** True when nothing is staged, unstaged, unmerged or untracked. */
+  readonly clean: boolean;
+  /** Branch name; empty for a detached or unnamed checkout. */
+  readonly branch: string;
+  /** Judged HEAD, or null for an empty or unreadable HEAD. */
+  readonly commit: string | null;
+}
+
+/**
+ * The checkout currency every board read needs. Porcelain v2 reports HEAD,
+ * branch and cleanliness together, so a build that wants any one of them asks
+ * for all three and the read snapshot memoizes the answer for the rest of the
+ * build; gate observation no longer pays a separate revision, status and branch
+ * subprocess per checkout.
+ */
+export function readCheckoutCurrency(rootDir: string, gitRunner: GitReader): CheckoutCurrency | null {
   let root: string;
-  try { root = fs.realpathSync(rootDir); } catch { return { ok: false, error: 'verification proof root is unreadable' }; }
-  // Porcelain v2 reports cleanliness, branch and HEAD together. Repeated
-  // active/review checks need no separate branch and revision subprocesses.
+  try { root = fs.realpathSync(rootDir); } catch { return null; }
   const status = gitRunner(['-C', root, 'status', '--porcelain=v2', '--branch']);
   const lines = (status.stdout || '').split('\n').filter(Boolean);
-  if (status.status !== 0 || lines.some(line => !line.startsWith('# '))) {
+  const branchLine = lines.find(line => line.startsWith('# branch.head '));
+  const oid = lines.find(line => line.startsWith('# branch.oid '))?.slice('# branch.oid '.length) ?? '';
+  return {
+    root, status: status.status ?? 1, lines,
+    clean: status.status === 0 && lines.every(line => line.startsWith('# ')),
+    branch: branchLine && branchLine.slice('# branch.head '.length) !== '(detached)'
+      ? branchLine.slice('# branch.head '.length) : '',
+    commit: isVerificationHeadIdentity(oid) && oid !== '(initial)' ? oid : null,
+  };
+}
+
+/** Checkout inputs a verification proof is scoped to; also usable when identity fails. */
+export type VerificationInputs = {
+  readonly ok: true; readonly root: string; readonly trackedOutput: string;
+  readonly branch: string; readonly commit: string | null; readonly toolchain: string;
+};
+
+export function readVerificationInputs(rootDir: string, gitRunner: GitReader, searchPath = '',
+  toolchainIdentity = () => verificationToolchainIdentity(searchPath)): VerificationInputs | { ok: false; error: string } {
+  const currency = readCheckoutCurrency(rootDir, gitRunner);
+  if (!currency) { return { ok: false, error: 'verification proof root is unreadable' }; }
+  const { root, lines } = currency;
+  if (currency.status !== 0 || lines.some(line => !line.startsWith('# '))) {
     return { ok: false, error: 'verification proof cannot reuse a dirty worktree' };
   }
   const branchLine = lines.find(line => line.startsWith('# branch.head '));

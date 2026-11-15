@@ -4,10 +4,10 @@ import { readIntegrationVerificationProof } from './integration-verification-pro
 import fs from 'node:fs';
 import { activeVerificationScope, createActiveVerificationIdentity, type ActiveVerificationOptions as Options } from './active-verification-identity.js';
 export { createActiveVerificationIdentity } from './active-verification-identity.js';
-import { git } from '../git/git.js';
+import { git, type GitReader } from '../git/git.js';
 import { completedRebaseLineage, ensureRebaseCompletionRecorder } from '../git/rebase-completion-recorder.js';
 import { readJson, resolveParallixHome, writeJson } from '../storage/storage.js';
-import { verificationToolchainIdentity } from './verification-proof-inputs.js';
+import { readCheckoutCurrency, verificationToolchainIdentity, type VerificationInputs } from './verification-proof-inputs.js';
 
 interface ActiveProof {
   policy: 'active-review-v1';
@@ -33,7 +33,7 @@ function matchesProof(proof: ActiveProof | null, scope: string, toolchain: strin
     && revision(proof.verifiedCommit) && typeof proof.inputFingerprint === 'string');
 }
 
-function completedRebaseCovers(root: string, branch: string, from: string, to: string, gitRunner = git): boolean {
+function completedRebaseCovers(root: string, branch: string, from: string, to: string, gitRunner: GitReader = git): boolean {
   return completedRebaseLineage(root, branch, from, to, gitRunner) !== null;
 }
 
@@ -83,13 +83,22 @@ export type ActiveProofInspection =
   | { readonly state: 'absent' }
   | { readonly state: 'current' | 'stale'; readonly revision: string; readonly observedAt: string };
 
-function inspectionSlot(command: string, root: string, options: Options, readSnapshot?: VerificationReadSnapshot) {
+function inspectionSlot(command: string, root: string, options: Options, readSnapshot?: VerificationReadSnapshot, inputs?: VerificationInputs) {
+  const searchPath = options.configuration?.agents.searchPath ?? '';
+  const toolchain = inputs?.toolchain ?? readSnapshot?.toolchain(searchPath) ?? verificationToolchainIdentity(searchPath);
+  // A failed identity still names its checkout facts, and the consolidated
+  // currency read is memoized for the build, so the branch needs no subprocess
+  // of its own unless Git cannot report the checkout at all. A non-zero status
+  // subprocess names no checkout, so it must not become a scope built from an
+  // empty branch: the fallback observes the failure and reports the checkout as
+  // unreadable rather than handing back an absent proof.
+  const currency = inputs ? null : readCheckoutCurrency(root, readSnapshot?.git ?? git);
+  if (currency && currency.status === 0) {
+    return { scope: activeVerificationScope(currency.root, currency.branch, command, toolchain, options.context), toolchain };
+  }
   const branch = (readSnapshot?.git ?? git)(['-C', root, 'branch', '--show-current']);
   if (branch.status !== 0) { throw new Error('Mission checkout branch is unreadable'); }
-  const searchPath = options.configuration?.agents.searchPath ?? '';
-  const toolchain = readSnapshot?.toolchain(searchPath) ?? verificationToolchainIdentity(searchPath);
-  const scope = activeVerificationScope(fs.realpathSync(root), branch.stdout.trim(), command, toolchain, options.context);
-  return { scope, toolchain };
+  return { scope: activeVerificationScope(fs.realpathSync(root), branch.stdout.trim(), command, toolchain, options.context), toolchain };
 }
 
 /**
@@ -111,7 +120,7 @@ function inspectProof(command: string, root: string, options: Options, readSnaps
     const integration = readIntegrationVerificationProof(command, root, current, readSnapshot);
     if (integration.ok) { return { state: 'current', revision: integration.proof.verifiedCommit, observedAt: integration.proof.verifiedAt }; }
   }
-  const { scope, toolchain } = current.ok ? current : inspectionSlot(command, root, options, readSnapshot);
+  const { scope, toolchain } = current.ok ? current : inspectionSlot(command, root, options, readSnapshot, current.inputs);
   const cached = readJson<ActiveProof>(proofPath(scope, options));
   if (!cached.ok && cached.error === null) { return { state: 'absent' }; }
   const proof = cached.data;

@@ -26,6 +26,22 @@ function artifactEnvironment(): NodeJS.ProcessEnv {
   return env;
 }
 
+/**
+ * Hang bound for the observer warm-up, not a product deadline.
+ *
+ * Measured on this workstation against the packaged tree with a cold compile
+ * cache: 173 ms for the first prime and 92-105 ms afterwards; 539 ms worst
+ * case with 16 competing CPU burners. The prime asserts nothing about the
+ * product: packaged `px --version` exit status and payload-root output belong
+ * to npm-pack-install-smoke, and the board host's own startup deadline bounds
+ * the packaged CLI this suite really runs. Incident integration:7bcd6246…
+ * turned a 10 s bound on this warm-up into two failed board contracts while
+ * sibling suites in the same lane ran up to 11x slower (8 279 ms for the shell
+ * host against 757 ms on an uncontended re-run of the same tree), so the bound
+ * stays finite but carries roughly 170x the measured cold cost.
+ */
+const OBSERVER_PRIME_HANG_BOUND_MS = 30_000;
+
 /** Each process owns its artifact tree; package and board suites share no state. */
 export function useWebArtifactFixture(primeObserver = false): void {
   test.before(() => {
@@ -47,9 +63,16 @@ export function useWebArtifactFixture(primeObserver = false): void {
     if (primeObserver) {
       // Only the board starts a second CLI observer. Prime private compilation
       // state once; manual verification also exercises the uncached command.
-      execFileSync(process.execPath, pxNodeArgs({ entry: path.join(packageDir, 'build', 'px.mjs'), loader: '' }, ['--version']), {
-        env: artifactEnvironment(), encoding: 'utf8', timeout: 10_000,
-      });
+      // A starved warm-up only costs the host its compile cache, so report it
+      // instead of failing the board contracts it protects; the host spawn and
+      // the case's own deadlines still bound the packaged CLI.
+      try {
+        execFileSync(process.execPath, pxNodeArgs({ entry: path.join(packageDir, 'build', 'px.mjs'), loader: '' }, ['--version']), {
+          env: artifactEnvironment(), encoding: 'utf8', timeout: OBSERVER_PRIME_HANG_BOUND_MS,
+        });
+      } catch (error) {
+        console.error(`[web-bundle-fixture] observer warm-up incomplete: ${(error as Error).message}`);
+      }
     }
   }, { timeout: 300_000 });
 

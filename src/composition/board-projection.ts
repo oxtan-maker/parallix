@@ -233,6 +233,7 @@ function createBoardGateEvidence(
   if (deps.gateEvidence) { return deps.gateEvidence; }
   const validations = deps.database ? new SqliteIntegrationValidationReader(deps.database) : null;
   return new VerificationGateEvidenceReader({
+    gitRunner: deps.gitFn ?? undefined,
     configuration: deps.configuration,
     resolveWorktree,
     integrationValidation: validations ? mission => validations.read(mission) : null,
