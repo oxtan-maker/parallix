@@ -1,6 +1,8 @@
 import { createHumanReviewEpisodeReader, createMissionCohortMetadataReader, createReboundRepairReader, createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
 import { SqliteWorkflowOperationStore, workflowOperationCollectionDefects } from '../adapters/sqlite/workflow-operation-store.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
+import { retainedRepositoryRunRecords } from '../adapters/filesystem/run-history-store.js';
+import { retainedFlowRunRecords } from './verification-statistics.js';
 import { failedExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
 import { DEFAULT_CONFIGURATION } from '../application/ports/configuration.js';
 import type { AgentFamily } from '../domain/agents.js';
@@ -27,6 +29,7 @@ import { BoardProjectionBuilder } from '../application/projections/board-readers
 import type { MissionReadAdapter } from '../application/projections/board-readers.js';
 import { ConcreteMetricsReadAdapter } from '../application/projections/metrics-read-adapter.js';
 import { verificationStatisticsReader } from './verification-statistics.js';
+import type { VerificationStatisticsInput } from '../application/projections/verification-statistics.js';
 import { MissionProjectionQuery } from '../application/projections/mission-query.js';
 import type { SourceFact } from '../application/contracts.js';
 import { BoardCommandController, type BoardMissionServices } from '../application/controller/board-controller.js';
@@ -162,30 +165,75 @@ function createCachedMissionReader(deps: BoardProjectionCompositionDeps,
   return { missions, reset: () => { cached = null; } };
 }
 
+type OperationalHistoryEntry = import('../application/ports/operation-history.js').OperationalHistoryEntry;
+
+function indexOperationalHistory(
+  rows: readonly OperationalHistoryEntry[],
+  missionIdFrom: (eventData: string) => string | null,
+): ReadonlyMap<string, readonly OperationalHistoryEntry[]> {
+  const indexed = new Map<string, OperationalHistoryEntry[]>();
+  for (const row of rows) {
+    try {
+      const missionId = missionIdFrom(row.eventData);
+      if (missionId === null) { continue; }
+      const mission = indexed.get(missionId) ?? [];
+      mission.push(row);
+      indexed.set(missionId, mission);
+    } catch { /* malformed history has no usable Mission identity */ }
+  }
+  return indexed;
+}
+
 /** One projection build shares its immutable analytical rows across every reader. */
 function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
   const cachedHistoryTypes = new Set<string>(BOARD_ANALYTICS_HISTORY_TYPES);
   const revisionHistoryTypes = deps.historyRepo.revisionForTypes
     ? [...BOARD_ANALYTICS_HISTORY_TYPES, REBOUND_REPAIR_HISTORY_TYPE] : BOARD_ANALYTICS_HISTORY_TYPES;
-  let historyRows: Promise<readonly import('../application/ports/operation-history.js').OperationalHistoryEntry[]> | null = null;
+  let historyRows: Promise<readonly OperationalHistoryEntry[]> | null = null;
   let laneRows: Promise<readonly import('../application/ports/operation-history.js').BoardLaneEventEntry[]> | null = null;
   let usageRows: Promise<readonly import('../application/ports/mission-measurements.js').UsageRecord[]> | null = null;
-  let historyByMission: Promise<ReadonlyMap<string, readonly import('../application/ports/operation-history.js').OperationalHistoryEntry[]>> | null = null;
+  let historyByMission: Promise<ReadonlyMap<string, readonly OperationalHistoryEntry[]>> | null = null;
+  let scopedHistory: { readonly key: string;
+    readonly rows: Promise<readonly import('../application/ports/operation-history.js').OperationalHistoryEntry[]> } | null = null;
   const history = () => historyRows ??= deps.historyRepo.findByTypes?.([...cachedHistoryTypes]) ?? deps.historyRepo.findAll();
   const lanes = () => laneRows ??= deps.laneEventRepo.findByRepositoryId(deps.repositoryId);
   const usage = () => usageRows ??= deps.usageRepo.findWhere({ repo: deps.repositoryId });
-  const indexedHistory = () => historyByMission ??= history().then(rows => {
-    const indexed = new Map<string, import('../application/ports/operation-history.js').OperationalHistoryEntry[]>();
-    for (const row of rows) {
-      try {
-        const missionId = (JSON.parse(row.eventData) as { missionId?: unknown }).missionId;
-        if (typeof missionId !== 'string') { continue; }
-        const mission = indexed.get(missionId) ?? [];
-        mission.push(row); indexed.set(missionId, mission);
-      } catch { /* malformed history has no usable Mission identity */ }
-    }
-    return indexed;
-  });
+  const indexedHistory = () => historyByMission ??= history().then(rows => indexOperationalHistory(rows, eventData => {
+    const missionId = (JSON.parse(eventData) as { missionId?: unknown }).missionId;
+    return typeof missionId === 'string' ? missionId : null;
+  }));
+  const historyForMissions = (missions: ReadonlySet<string>) => {
+    const missionIds = [...missions].sort((left, right) => left.localeCompare(right));
+    const key = missionIds.join('\0');
+    if (scopedHistory?.key === key) { return scopedHistory.rows; }
+    const rows = deps.historyRepo.findByTypesForMissions
+      ? deps.historyRepo.findByTypesForMissions([...cachedHistoryTypes], missionIds, deps.repositoryId)
+      : history().then(values => values.filter(value => {
+        try {
+          const data = JSON.parse(value.eventData) as { missionId?: unknown; repositoryId?: unknown };
+          return missions.has(String(data.missionId ?? ''))
+            && (data.repositoryId === undefined || data.repositoryId === deps.repositoryId);
+        }
+        catch { return false; }
+      }));
+    scopedHistory = { key, rows };
+    return rows;
+  };
+  const missionScopedHistory = (type: string, missionId: string): Promise<readonly OperationalHistoryEntry[]> =>
+    deps.historyRepo.findByTypeForMission?.(type, missionId)
+      ?? deps.historyRepo.findByType(type).then(rows => rows.filter(row => {
+        try { return (JSON.parse(row.eventData) as { missionId?: unknown }).missionId === missionId; }
+        catch { return false; }
+      }));
+  const scopedHistoryReader = (missions: ReadonlySet<string>) => {
+    const indexed = historyForMissions(missions).then(rows => indexOperationalHistory(rows, eventData =>
+      String((JSON.parse(eventData) as { missionId?: unknown }).missionId ?? '')));
+    // Retained audit types stay out of the scoped analytical payload; they keep their own
+    // Mission-scoped read, exactly as the unscoped reader delegates them.
+    return { findByTypeForMission: (type: string, missionId: string) => cachedHistoryTypes.has(type)
+      ? indexed.then(rows => rows.get(missionId)?.filter(row => row.eventType === type) ?? [])
+      : missionScopedHistory(type, missionId) };
+  };
   const laneEventRepo: BoardLaneEventRepository = {
     append: entry => deps.laneEventRepo.append(entry),
     findByMissionId: async missionId => (await lanes()).filter(row => row.missionId === missionId),
@@ -196,6 +244,15 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
   const historyRepo: OperationalHistoryRepository = {
     findAll: history,
     findByTypes: types => deps.historyRepo.findByTypes?.(types) ?? deps.historyRepo.findAll().then(rows => rows.filter(row => types.includes(row.eventType))),
+    findByTypesForMissions: (types, missionIds, repositoryId) => deps.historyRepo.findByTypesForMissions?.(types, missionIds, repositoryId)
+      ?? deps.historyRepo.findByTypes?.(types).then(rows => rows.filter(row => {
+        try {
+          const data = JSON.parse(row.eventData) as { missionId?: unknown; repositoryId?: unknown };
+          return missionIds.includes(String(data.missionId ?? ''))
+            && (data.repositoryId === undefined || data.repositoryId === repositoryId);
+        }
+        catch { return false; }
+      })) ?? Promise.resolve([]),
     revisionForTypes: types => deps.historyRepo.revisionForTypes?.(types)
       ?? (deps.historyRepo.findByTypes?.(types) ?? deps.historyRepo.findAll().then(rows => rows.filter(row => types.includes(row.eventType))))
         .then(rows => JSON.stringify(rows.map(row => [row.id, row.eventType, row.createdAt, row.eventData]))),
@@ -206,11 +263,7 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
       ? history().then(rows => rows.filter(row => row.eventType === type)) : deps.historyRepo.findByType(type),
     findByTypeForMission: (type, missionId) => cachedHistoryTypes.has(type)
       ? indexedHistory().then(rows => rows.get(missionId)?.filter(row => row.eventType === type) ?? [])
-      : deps.historyRepo.findByTypeForMission?.(type, missionId)
-        ?? deps.historyRepo.findByType(type).then(rows => rows.filter(row => {
-          try { return (JSON.parse(row.eventData) as { missionId?: unknown }).missionId === missionId; }
-          catch { return false; }
-        })),
+      : missionScopedHistory(type, missionId),
     append: entry => deps.historyRepo.append(entry),
     clear: () => deps.historyRepo.clear(),
   };
@@ -222,8 +275,8 @@ function createMetricsReadSession(deps: BoardProjectionCompositionDeps) {
         ? usage()
         : deps.usageRepo.findWhere({ ...filter, repo: deps.repositoryId }),
   };
-  return { historyRepo, laneEventRepo, usageRepo, revisionHistoryTypes,
-    reset: () => { historyRows = null; laneRows = null; usageRows = null; historyByMission = null; } };
+  return { historyRepo, laneEventRepo, usageRepo, revisionHistoryTypes, historyForMissions, scopedHistoryReader,
+    reset: () => { historyRows = null; laneRows = null; usageRows = null; historyByMission = null; scopedHistory = null; } };
 }
 
 function createBoardGateEvidence(
@@ -241,11 +294,39 @@ function createBoardGateEvidence(
   });
 }
 
+/**
+ * The one verification input population a board build reads: the breakdown owns
+ * every retained agent run in this repository, open or historical, while only
+ * the per-Mission FLOW projection is limited to the delivery population.
+ * Staged rebound repairs join the lifecycle events because they persist the same
+ * validated return identity when their Mission transition emits no lane event.
+ */
+async function boardVerificationInput(deps: {
+  readonly metricsSession: ReturnType<typeof createMetricsReadSession>,
+  readonly workflowOperations: SqliteWorkflowOperationStore | undefined,
+  readonly repositoryId: RepositoryId, readonly rootDir: string,
+  readonly missionTerminal: () => ReturnType<typeof createMissionTerminalCapability>,
+}, requestedMissions?: ReadonlySet<string>, flowRunMissions?: ReadonlySet<string>): Promise<VerificationStatisticsInput> {
+  const [history, operationHistory, lifecycle, reboundRepairs] = await Promise.all([
+    requestedMissions ? deps.metricsSession.historyForMissions(requestedMissions)
+      : deps.metricsSession.historyRepo.findAll(),
+    deps.workflowOperations?.readHistorical() ?? { operations: [], unreadableRowCount: 0 },
+    deps.metricsSession.laneEventRepo.findByRepositoryId(deps.repositoryId),
+    deps.metricsSession.historyRepo.findReboundRepairs?.() ?? [],
+  ]);
+  const operations = operationHistory.operations;
+  const flowMissions = flowRunMissions ?? requestedMissions
+    ?? new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)]);
+  return { repositoryId: deps.repositoryId, history, operations, lifecycle, reboundRepairs,
+    runs: retainedRepositoryRunRecords(deps.rootDir),
+    flowRuns: retainedFlowRunRecords(deps.missionTerminal(), flowMissions),
+    repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
+}
+
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const catalog = createRepositoryMissionCatalog(deps);
-  const loadBoardMissions = () => catalog.loadAllMissions();
-  const missionReader = createCachedMissionReader(deps, loadBoardMissions);
+  const missionReader = createCachedMissionReader(deps, () => catalog.loadAllMissions());
   const missions = missionReader.missions;
   const currentWork = deps.executionActivity ?? (deps.database ? new SqliteExecutionActivityStore(deps.database, deps.repositoryId) : undefined);
   const workflowOperations = deps.database ? new SqliteWorkflowOperationStore(deps.database, deps.repositoryId) : undefined;
@@ -258,6 +339,8 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
     mission => topology?.resolveWorktree(mission, { cwd: deps.rootDir }) ?? null);
   const gates = new VerificationGateObserver(gateEvidence);
   let terminal: ReturnType<typeof createMissionTerminalCapability> | undefined;
+  const missionTerminal = () => terminal ??= createMissionTerminalCapability(deps.rootDir,
+    deps.configuration ?? DEFAULT_CONFIGURATION, mission => topology?.resolveWorktree(mission) ?? null);
   const builder = new BoardProjectionBuilder(
     missions,
     new ConcreteReviewReadAdapter({
@@ -286,8 +369,7 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       workflowOperations,
       reviewExecution: deps.reviewExecution,
       providerExecution: deps.providerExecution ?? { observe: (scope, currentOperationId) => {
-        terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION, mission => topology?.resolveWorktree(mission) ?? null);
-        const result = terminal.execution?.(scope.missionId, currentOperationId);
+        const result = missionTerminal().execution?.(scope.missionId, currentOperationId);
         return result && 'invocations' in result ? result : failedExecution();
       } },
       prepareReads: () => {
@@ -310,24 +392,9 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       changeIdentity,
       completedMissionRetentionDays,
       metricsAdapter: new ConcreteMetricsReadAdapter({
-        verification: verificationStatisticsReader(async () => {
-          const [history, operationHistory, lifecycle] = await Promise.all([
-            metricsSession.historyRepo.findAll(), workflowOperations?.readHistorical()
-              ?? { operations: [], unreadableRowCount: 0 },
-            metricsSession.laneEventRepo.findByRepositoryId(deps.repositoryId),
-          ]);
-          const operations = operationHistory.operations;
-          terminal ??= createMissionTerminalCapability(deps.rootDir, deps.configuration ?? DEFAULT_CONFIGURATION,
-            mission => topology?.resolveWorktree(mission) ?? null);
-          const seen = new Set<string>();
-          const runs = [...new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)])]
-            .flatMap(mission => {
-              const retained = terminal!.history(mission);
-              return retained.ok ? retained.runs.flatMap(run => seen.has(run.record.runId) ? [] : (seen.add(run.record.runId), [run.record])) : [];
-            });
-          return { repositoryId: deps.repositoryId, history, operations, lifecycle, runs,
-            repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
-        }),
+        verification: verificationStatisticsReader((requestedMissions, flowRunMissions) => boardVerificationInput(
+          { metricsSession, workflowOperations, repositoryId: deps.repositoryId, rootDir: deps.rootDir, missionTerminal },
+          requestedMissions, flowRunMissions)),
         laneEventRepo: metricsSession.laneEventRepo,
         usageRepo: metricsSession.usageRepo,
         repositoryId: deps.repositoryId,
@@ -341,11 +408,15 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
         netEngineeringLines: async () => new Map(
           (await missions.loadAllMissions()).map((mission) => [mission.id, mission.netEngineeringLines]),
         ),
-        cohortMetadata: async () => createMissionCohortMetadataReader(deps.rootDir,
-          createWorkflowReturnReader(metricsSession.laneEventRepo, metricsSession.historyRepo,
-            metricsSession.historyRepo.findReboundRepairs ? createReboundRepairReader(metricsSession.historyRepo) : undefined),
-          createHumanReviewEpisodeReader(metricsSession.laneEventRepo))(
-          await missions.loadAllMissions()),
+        cohortMetadata: async requestedMissions => {
+          const allMissions = await missions.loadAllMissions();
+          const history = requestedMissions ? metricsSession.scopedHistoryReader(requestedMissions) : metricsSession.historyRepo;
+          return createMissionCohortMetadataReader(deps.rootDir,
+            createWorkflowReturnReader(metricsSession.laneEventRepo, history,
+              metricsSession.historyRepo.findReboundRepairs ? createReboundRepairReader(metricsSession.historyRepo) : undefined),
+            createHumanReviewEpisodeReader(metricsSession.laneEventRepo))(
+            requestedMissions ? allMissions.filter(mission => requestedMissions.has(mission.id)) : allMissions);
+        },
       }),
     },
   );

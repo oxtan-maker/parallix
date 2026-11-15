@@ -10,8 +10,8 @@
  * Every answer states its source and coverage, and reports omissions instead
  * of implying the history is whole.
  */
-import { retainedRunFamily } from './mission-terminal-compat.js';
-import { isRunHistoryId, runCaptureKind } from './run-history-types.js';
+import { retainedRunRecord } from './mission-terminal-compat.js';
+import { isRunHistoryId } from './run-history-types.js';
 import {
   MAX_RUN_PAGE_BYTES,
   MAX_RUN_SEARCH_HITS,
@@ -107,7 +107,7 @@ function readRecord(scope: RunHistoryScope, runId: string): RunLookup {
   let record: RunRecord;
   try { record = JSON.parse(raw) as RunRecord; } catch { return { ok: false, error: 'malformed', detail: `run record ${runId} is not valid JSON` }; }
   if (record.runId !== runId) { return { ok: false, error: 'malformed', detail: `run record ${runId} names another run` }; }
-  try { record = { ...record, family: retainedRunFamily(record), captureKind: runCaptureKind(record) }; }
+  try { record = retainedRunRecord(record); }
   catch { return { ok: false, error: 'malformed', detail: `run record ${runId} has an invalid agent family` }; }
   if (scope.acceptRecord && !scope.acceptRecord(record)) { return { ok: false, error: 'malformed', detail: `run record ${runId} is not attributed to this scope` }; }
   const state = effectiveState(record, scope.isAlive);

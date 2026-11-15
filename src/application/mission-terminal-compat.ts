@@ -68,6 +68,16 @@ export function resolveMissionSession(owned: string | null, others: readonly str
   };
 }
 
+/**
+ * The record shape every retained-run reader hands its consumers: the family and
+ * capture kind resolved by the compatibility resolver, never the raw token. An
+ * agent record with no resolvable family throws, so each reader decides how to
+ * report that one record instead of each re-deriving the rule.
+ */
+export function retainedRunRecord(record: RunRecord): RunRecord {
+  return { ...record, family: retainedRunFamily(record), captureKind: runCaptureKind(record) };
+}
+
 /** Old records stored the run-id token as the family; canonical families never contain underscores. */
 export function retainedRunFamily(record: Pick<RunRecord, 'family' | 'captureKind'>): AgentFamily | null {
   if (runCaptureKind(record) === 'coordinator') { return null; }

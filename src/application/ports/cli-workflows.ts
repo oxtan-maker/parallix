@@ -302,6 +302,8 @@ export interface StatsWorkflowPort<Row = unknown> {
 export interface StatsMissionFlow {
   readonly repo: string;
   readonly mission: string;
+  /** Earliest retained lifecycle fact; absent only from legacy or injected readers. */
+  readonly createdAt?: string;
   readonly closedAt: string;
   readonly labels: readonly string[];
   readonly implementer?: string | null;

@@ -33,6 +33,7 @@ import type { UsageFilter, UsageRecord, UsageRepository } from '../../../../src/
 import type { BoardLaneEventRepository } from '../../../../src/application/ports/operation-history.js';
 import type { MissionOutcome } from '../../../../src/domain/usage.js';
 import type { MetricSeries } from '../../../../src/application/projections/board.js';
+import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 
 const id1 = missionId('task-0001');
 const id2 = missionId('task-0002');
@@ -806,6 +807,51 @@ class ThroughputInMemoryUsageRepository implements UsageRepository {
   async saveAll(): Promise<void> {}
   async clear(): Promise<void> {}
 }
+
+test('FLOW scopes retained runs without narrowing the repository verification breakdown (PX-0055.04)', async () => {
+  let flowRequested: ReadonlySet<string> | undefined;
+  let scopedReadCalled = false;
+  let metadataRequested: ReadonlySet<string> | undefined;
+  const laneEventRepo: BoardLaneEventRepository = {
+    ...emptyBoardRepositories().laneEventRepo,
+    findByRepositoryId: async () => [
+      { repositoryId: 'parallix', missionId: 'task-delivered', fromStatus: 'integration', toStatus: 'done',
+        trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-22T09:00:00Z', idempotencyKey: 'task-delivered:done' },
+      { repositoryId: 'parallix', missionId: 'task-old-delivery', fromStatus: 'integration', toStatus: 'done',
+        trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-01T09:00:00Z', idempotencyKey: 'task-old-delivery:done' },
+    ],
+  };
+  const adapter = new ConcreteMetricsReadAdapter({ laneEventRepo,
+    usageRepo: new ThroughputInMemoryUsageRepository([
+      { repo: 'parallix', mission: 'task-delivered', date: '2026-07-22', duration_minutes: 10 },
+      { repo: 'parallix', mission: 'task-old-delivery', date: '2026-07-01', duration_minutes: 10 },
+    ]), repositoryId: fixtureRepositoryId('parallix'), clock: () => now,
+    cohortMetadata: async missions => { metadataRequested = missions; return new Map(); },
+    verification: {
+      async read() { scopedReadCalled = true; return verificationStatistics({ repositoryId: 'parallix', history: [], operations: [], lifecycle: [] }); },
+      async readRepository(missions) {
+        flowRequested = missions;
+        return verificationStatistics({ repositoryId: 'parallix', history: [], operations: [], lifecycle: [
+          { repositoryId: 'parallix', missionId: 'task-delivered', fromStatus: 'integration', toStatus: 'done',
+            trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-22T09:00:00Z', idempotencyKey: 'delivered' },
+          { repositoryId: 'parallix', missionId: 'task-old-delivery', fromStatus: 'integration', toStatus: 'done',
+            trigger: 'integrate', agent: 'codex', occurredAt: '2026-07-01T09:00:00Z', idempotencyKey: 'old' },
+        ], runs: [] }, undefined, missions);
+      },
+    },
+  });
+
+  const metrics = await adapter.buildMetrics(new Map([[missionId('unrelated-open-mission'), 'active']]));
+
+  assert.equal(scopedReadCalled, false, 'the board uses the repository breakdown contract');
+  assert.deepEqual([...flowRequested ?? []], ['task-delivered'],
+    'open and out-of-window historical Missions must not enter the retained-run scan used by public FLOW');
+  assert.equal(metrics.verification?.completedMissions, 2,
+    'verification remains repository-scoped independently of the weekly FLOW population');
+  assert.deepEqual(metrics.verification?.flowMissions.map(mission => mission.missionId), ['task-delivered']);
+  assert.deepEqual([...metadataRequested ?? []], ['task-delivered'],
+    'out-of-window historical Missions must not enter the retained review-proof audit used by public FLOW');
+});
 
 test('throughput excludes active and review telemetry (task-2347.04)', async () => {
   const adapter = new ConcreteMetricsReadAdapter({

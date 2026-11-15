@@ -17,7 +17,7 @@ import type { AgentAvailabilityRow } from './agent-status.js';
 import { buildMetrics, closedLaneDwellMinutes } from './metrics.js';
 import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { utcHourBucket } from '../services/statistics-service.js';
-import { weeklyDecisionWindows } from '../../domain/decision-window.js';
+import { decisionWindowContains, weeklyDecisionWindows } from '../../domain/decision-window.js';
 import { FLOW_DWELL_STATES, flowStatistics, type FlowMissionFacts } from './flow-statistics.js';
 import { EMPTY_FLOW_MISSION_OBSERVATION } from './flow-mission-facts.js';
 import type { VerificationStatistics } from './verification-statistics.js';
@@ -40,6 +40,8 @@ function flowMissionFact(outcome: MissionOutcome, observed: VerificationStatisti
     actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
     agentLaunches: observation.agentLaunches,
     observedDisqualifiers: observation.observedDisqualifiers,
+    returnProvenanceCutover: observation.returnProvenanceCutover,
+    returnProvenanceStartedAt: outcome.createdAt,
     reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics ?? reviewStatistics(null) };
 }
 
@@ -157,7 +159,7 @@ export interface ConcreteMetricsReadAdapterOptions {
    */
   readonly netEngineeringLines?: () => Promise<ReadonlyMap<MissionId, number | null>>;
   /** Canonical Mission metadata for cohort labels and implementers. */
-  readonly cohortMetadata?: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
+  readonly cohortMetadata?: (_missions?: ReadonlySet<string>) => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
   /** Lightweight revision of non-lifecycle evidence used by FLOW and review summaries. */
   readonly evidenceRevision?: () => Promise<string>;
 }
@@ -176,7 +178,7 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
   private readonly historyRepo: OperationalHistoryRepository | undefined;
   private readonly cohortDimension: CohortDimension;
   private readonly netEngineeringLines: () => Promise<ReadonlyMap<MissionId, number | null>>;
-  private readonly cohortMetadata: () => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
+  private readonly cohortMetadata: (_missions?: ReadonlySet<string>) => Promise<ReadonlyMap<MissionId, MissionCohortMetadata>>;
   private readonly evidenceRevision: () => Promise<string>;
 
   constructor(options: ConcreteMetricsReadAdapterOptions) {
@@ -206,7 +208,13 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     const transitionRows = this.entriesToTransitions(entries);
     const outcomeRows = usageRecordsToOutcomes(usageRecords, this.repositoryId, entries);
     const transitions = transitionRows.transitions;
-    const metadata = await this.cohortMetadata();
+    const asOf = this.clock();
+    const decisionWindows = weeklyDecisionWindows(asOf);
+    const metadataMissions = new Set(outcomeRows.outcomes
+      .filter(outcome => decisionWindowContains(decisionWindows.current, outcome.closedAt)
+        || decisionWindowContains(decisionWindows.previous, outcome.closedAt))
+      .map(outcome => String(outcome.missionId)));
+    const metadata = await this.cohortMetadata(metadataMissions);
     options.signal?.throwIfAborted();
     const outcomes = this.withCanonicalCohortMetadata(outcomeRows.outcomes, metadata);
     const scopedUsageRecords = usageRecords.filter((record) => record.repo === this.repositoryId);
@@ -221,8 +229,6 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     // One clock reading feeds both the `asOf` of the current-state metrics and
     // the rolling decision windows, so the board cannot report a window that
     // disagrees with the instant it was evaluated at.
-    const asOf = this.clock();
-    const decisionWindows = weeklyDecisionWindows(asOf);
     const metrics = buildMetrics({
       initialStates,
       transitions,
@@ -270,14 +276,17 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     signal: AbortSignal | undefined,
   ): Promise<Pick<BoardMetrics, 'flow' | 'flowUnavailable' | 'verification'>> {
     let flowUnavailable: string | undefined;
-    const verification = await this.verification?.read().catch((error: unknown) => {
+    const flowOutcomes = outcomes.filter(outcome => decisionWindowContains(decisionWindows.current, outcome.closedAt)
+      || decisionWindowContains(decisionWindows.previous, outcome.closedAt));
+    const flowMissions = new Set(flowOutcomes.map(outcome => String(outcome.missionId)));
+    const verification = await this.verification?.readRepository(flowMissions).catch((error: unknown) => {
       flowUnavailable = `FLOW observations could not be read: ${error instanceof Error ? error.message : String(error)}`;
       return null;
     });
     signal?.throwIfAborted();
     const dwell = closedLaneDwellMinutes(transitions);
     const flow = verification
-      ? flowStatistics(outcomes.map(outcome => flowMissionFact(
+      ? flowStatistics(flowOutcomes.map(outcome => flowMissionFact(
         outcome,
         verification.flowMissions.find(item => item.missionId === outcome.missionId),
         dwell,

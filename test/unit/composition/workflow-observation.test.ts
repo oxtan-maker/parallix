@@ -556,6 +556,51 @@ test('observer child serializes board and terminal reads and closes its shared g
   assert.equal((responses[0] as { id: number }).id, 1);
 });
 
+test('observer child completes cold work before building the fresh next board request (PX-0055.04)', async t => {
+  const { runWorkflowObservation } = await import('../../../src/composition/workflow-observation.js');
+  t.after(() => mock.restoreAll());
+  let receive: (input: unknown) => void = () => {};
+  let disconnect: () => void = () => {};
+  mock.method(process, 'on', (_event: string, listener: typeof receive) => { receive = listener; return process; });
+  mock.method(process, 'once', (_event: string, listener: () => void) => { disconnect = listener; return process; });
+  const originalConnected = Object.getOwnPropertyDescriptor(process, 'connected');
+  const originalSend = Object.getOwnPropertyDescriptor(process, 'send');
+  t.after(() => {
+    mock.restoreAll();
+    for (const [key, descriptor] of [['connected', originalConnected], ['send', originalSend]] as const) {
+      if (descriptor) { Object.defineProperty(process, key, descriptor); } else { Reflect.deleteProperty(process, key); }
+    }
+  });
+  Object.defineProperty(process, 'connected', { configurable: true, value: true });
+  const responses: Array<{ id: number; value: unknown }> = [];
+  Object.defineProperty(process, 'send', { configurable: true, writable: true,
+    value: (value: { id: number; value: unknown }) => { responses.push(value); return true; } });
+  mock.method(process, 'exit', () => undefined as never);
+  const releases: Array<(value: unknown) => void> = [];
+  let builds = 0;
+  const graphFactory = async () => ({ mission: { repositoryId: 'repo' },
+    operatorState: { close: async () => {} }, presentationCapabilities: { boardProjection: {
+      build: async () => { builds++; return new Promise(resolve => releases.push(resolve)); },
+    } } });
+  runWorkflowObservation('/unused', resolveConfiguration({}), (() => ({})) as never, graphFactory as never);
+
+  receive({ id: 1, observation: { kind: 'board' } });
+  receive({ id: 2, observation: { kind: 'board' } });
+  for (let turn = 0; turn < 20 && releases.length < 1; turn++) { await Promise.resolve(); }
+  releases[0]!({ revision: 'cold' });
+  for (let turn = 0; turn < 20 && releases.length < 2; turn++) { await Promise.resolve(); }
+  releases[1]!({ revision: 'fresh' });
+  for (let turn = 0; turn < 20 && responses.length < 2; turn++) { await Promise.resolve(); }
+
+  assert.equal(builds, 2);
+  assert.deepEqual(responses, [
+    { id: 1, value: { revision: 'cold' } },
+    { id: 2, value: { revision: 'fresh' } },
+  ], 'each completed request receives the projection built for it, never the preceding completed value');
+  disconnect();
+  for (let turn = 0; turn < 20; turn++) { await Promise.resolve(); }
+});
+
 test('one-shot observation always closes the reader after a response (TASK-2750)', async t => {
   const { observeWorkflow } = await import('../../../src/composition/workflow-observation.js');
   t.after(() => mock.restoreAll());

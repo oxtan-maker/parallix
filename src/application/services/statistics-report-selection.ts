@@ -36,6 +36,8 @@ function sharedFlowFact(outcome: StatsMissionFlow) {
     actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
     agentLaunches: observation.agentLaunches,
     observedDisqualifiers: observation.observedDisqualifiers,
+    returnProvenanceCutover: observation.returnProvenanceCutover,
+    returnProvenanceStartedAt: outcome.createdAt ?? null,
     reviewStatistics: outcome.reviewStatistics ?? reviewStatistics(null),
   };
 }

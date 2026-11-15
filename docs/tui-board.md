@@ -517,6 +517,9 @@ current. After a board command changes state, its response waits for the same
 retained
 projection to refresh, so the browser's immediate follow-up read cannot present
 the earlier board as fresh.
+While historical FLOW reconstruction is pending, the retained projection names
+that condition instead of displaying zeroes or a generic missing projection; a
+later detected refresh publishes the loaded analytics.
 Closing `px web` also stops its board readers.
 
 If a projection refresh fails, the browser keeps the last validated board visible

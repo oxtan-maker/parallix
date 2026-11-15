@@ -44,6 +44,20 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
       eventData: String(row.event_data), createdAt: String(row.created_at) }));
   }
 
+  async findByTypesForMissions(types: readonly string[], missionIds: readonly string[], repositoryId: string): Promise<readonly OperationalHistoryEntry[]> {
+    if (types.length === 0 || missionIds.length === 0) { return []; }
+    const rows = await this.db.query<{ id: unknown; event_type: unknown; event_data: unknown; created_at: unknown }>(
+      `SELECT id, event_type, event_data, created_at FROM operational_history
+       WHERE event_type IN (${types.map(() => '?').join(',')})
+         AND json_valid(event_data)
+         AND json_extract(event_data, '$.missionId') IN (${missionIds.map(() => '?').join(',')})
+         AND (json_extract(event_data, '$.repositoryId') = ?
+           OR json_extract(event_data, '$.repositoryId') IS NULL)
+       ORDER BY id ASC`, [...types, ...missionIds, repositoryId]);
+    return rows.map(row => ({ id: Number(row.id), eventType: String(row.event_type),
+      eventData: String(row.event_data), createdAt: String(row.created_at) }));
+  }
+
   async revisionForTypes(types: readonly string[]): Promise<string> {
     if (types.length === 0) { return '0:0:'; }
     const rows = await this.db.query<{ row_count: unknown; newest_id: unknown; newest_at: unknown }>(
@@ -94,7 +108,7 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
   async findReboundRepairs(): Promise<readonly ReboundRepairHistoryEntry[]> {
     const rows = await this.db.query<{ mission_id: unknown; occurrence_id: unknown; reason_kind: unknown;
       area: unknown; agent: unknown; head_before: unknown; duration_ms: unknown;
-      return_identity_json: unknown; created_at: unknown }>(
+      return_identity_json: unknown; repository_id: unknown; created_at: unknown }>(
       `SELECT json_extract(event_data, '$.missionId') AS mission_id,
               json_extract(event_data, '$.occurrenceId') AS occurrence_id,
               json_extract(event_data, '$.reasonKind') AS reason_kind,
@@ -103,6 +117,7 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
               json_extract(event_data, '$.headBefore') AS head_before,
               json_extract(event_data, '$.durationMs') AS duration_ms,
               json_extract(event_data, '$.returnIdentity') AS return_identity_json,
+              json_extract(event_data, '$.repositoryId') AS repository_id,
               created_at
        FROM operational_history
        WHERE event_type = 'rebound.repair' AND json_valid(event_data)
@@ -113,7 +128,7 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
       const parsed = parseReboundRepairHistoryEntry({ missionId: row.mission_id,
         occurrenceId: row.occurrence_id, reasonKind: row.reason_kind, area: row.area,
         agent: row.agent, headBefore: row.head_before, durationMs: row.duration_ms,
-        returnIdentity: row.return_identity_json }, String(row.created_at));
+        returnIdentity: row.return_identity_json, repositoryId: row.repository_id }, String(row.created_at));
       return parsed ? [parsed] : [];
     });
   }

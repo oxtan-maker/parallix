@@ -39,7 +39,12 @@ const graph = await createProductionApplicationServices(process.cwd(), undefined
 assert.ok(graph.presentationCapabilities, 'presentation capabilities unavailable');
 
 const started = performance.now();
-const projection = await graph.presentationCapabilities.boardProjection.build();
+let projection = await graph.presentationCapabilities.boardProjection.build();
+const projectionDeadline = Date.now() + 180_000;
+while (!projection.metrics.flow && Date.now() < projectionDeadline) {
+  await new Promise(resolve => setTimeout(resolve, 1_000));
+  projection = await graph.presentationCapabilities.boardProjection.build();
+}
 const buildMs = Math.round(performance.now() - started);
 const flow = projection.metrics.flow;
 assert.ok(flow, projection.metrics.flowUnavailable ?? 'FLOW projection unavailable');

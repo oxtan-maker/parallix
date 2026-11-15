@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { incidentDirName } from '../../application/recovery-evidence.js';
-import { attributeRunRecord, legacyMissionTokens } from '../../application/mission-terminal-compat.js';
+import { attributeRunRecord, legacyMissionTokens, retainedRunRecord } from '../../application/mission-terminal-compat.js';
 import { missionId } from '../../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../git/repository-identity.js';
 import { missionRepositoryKey } from './mission-repository-key.js';
@@ -145,6 +145,33 @@ export function preserveWorktreeRunHistory(worktree: string, repositoryRoot: str
     }
   }
   return moved;
+}
+
+/**
+ * Every retained run record in the canonical repository store, read with one
+ * directory pass instead of a per-Mission `history()` probe (PX-0055.04).
+ * Verification consumers need repository-wide agent-run observations; the
+ * per-Mission reader additionally probes legacy names and Mission worktrees and
+ * is far more expensive when the Mission population is the whole repository.
+ * Records are attributed exactly as the per-Mission reader attributes them.
+ */
+export function retainedRepositoryRunRecords(checkout: string): RunRecord[] {
+  const base = runHistoryRoot(historyRepositoryRoot(checkout));
+  const records: RunRecord[] = [];
+  for (const missionStore of runHistoryFileSystem.listDirs(base)) {
+    const runsDir = path.join(base, missionStore);
+    for (const runId of runHistoryFileSystem.listDirs(runsDir)) {
+      if (!isRunHistoryId(runId)) { continue; }
+      const raw = runHistoryFileSystem.readText(path.join(runsDir, runId, RUN_RECORD_FILE));
+      if (raw === null) { continue; }
+      let record: RunRecord;
+      try { record = JSON.parse(raw) as RunRecord; } catch { continue; }
+      if (record.runId !== runId) { continue; }
+      try { records.push(retainedRunRecord(record)); }
+      catch { /* a record with an invalid agent family stays unattributed */ }
+    }
+  }
+  return records;
 }
 
 /** Create the history root and keep it out of `git status`. */

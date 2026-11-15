@@ -47,7 +47,7 @@ export function createStatsMissionFlowReader(options: StatsCompositionOptions): 
         ?? createVerificationStatisticsReader(options.rootDir ?? process.cwd(), options.configuration);
       const verification = await verificationReader?.read(new Set(outcomes.map(outcome => String(outcome.missionId)))).catch(() => null) ?? null;
       return outcomes.map(outcome => ({
-        repo: String(repo), mission: String(outcome.missionId), closedAt: outcome.closedAt,
+        repo: String(repo), mission: String(outcome.missionId), createdAt: outcome.createdAt, closedAt: outcome.closedAt,
         labels: outcome.labels, implementer: outcome.implementer,
         reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics,
         ...(verification?.flowMissions.find(item => item.missionId === outcome.missionId)

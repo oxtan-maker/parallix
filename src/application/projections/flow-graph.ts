@@ -76,7 +76,7 @@ export function flowGraph(facts: readonly FlowGraphFacts[]): FlowGraph {
   const agentRounds = episodes.filter(item => item.actor === 'agent').length;
   const humanRounds = episodes.filter(item => item.actor === 'human').length;
   const reviewMissions = observed(fact => fact.reviewStatistics.total !== null);
-  const placed = returns.map(item => ({ item, from: returnSource(item.origin) }));
+  const placed = returns.map(item => ({ item, from: flowReturnSource(item.origin) }));
   const returnsFrom = (from: FlowNodeId | null) => placed.filter(value => value.from === from).length;
   const leadRecoveries = facts.reduce((sum, fact) => sum + fact.lead.recoveries, 0);
   const escalations = facts.reduce((sum, fact) => sum + fact.lead.escalations, 0);
@@ -127,7 +127,8 @@ export function flowGraph(facts: readonly FlowGraphFacts[]): FlowGraph {
 }
 
 /** The node a return leaves from: its recorded review actor, or the gate its typed cause names. */
-function returnSource(origin: ReviewStatistics['returns'][number]['origin']): FlowNodeId | null {
+/** The retained sending node for a return, or null when its stored facts do not name one. */
+export function flowReturnSource(origin: ReviewStatistics['returns'][number]['origin']): FlowNodeId | null {
   if (origin.stage !== 'workflow') { return origin.stage; }
   // Historical rows recorded only a coarse cause; fresh producers name the stage above.
   if (origin.cause === 'repair') { return 'declared-gates'; }

@@ -164,7 +164,7 @@ async function readReboundRepairs(history: WorkflowHistoryReader, missionId: str
 }
 
 function reboundRepairMove(row: ReboundRepairHistoryEntry): ReboundRepairMove {
-  const { missionId: _missionId, durationMs: _durationMs, ...move } = row;
+  const { missionId: _missionId, durationMs: _durationMs, repositoryId: _repositoryId, ...move } = row;
   return { ...move, occurredAt: attemptStartedAt(row.occurredAt, row.durationMs ?? null) };
 }
 

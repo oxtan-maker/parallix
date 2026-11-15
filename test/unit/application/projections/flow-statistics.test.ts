@@ -9,7 +9,9 @@ import type { VerificationMeasurement } from '../../../../src/application/ports/
 import { reviewStatistics } from '../../../../src/application/services/review-statistics.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { missionId } from '../../../../src/domain/mission.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
+import { MAX_RUNS_PER_MISSION, type RunRecord } from '../../../../src/application/run-history-types.js';
 
 function flowFact(overrides: Partial<FlowMissionFacts> & Pick<FlowMissionFacts, 'missionId' | 'reviewStatistics'>): FlowMissionFacts {
   return { repositoryId: 'repo', closedAt: '2026-11-03T12:00:00Z', implementer: 'codex',
@@ -20,6 +22,21 @@ function flowFact(overrides: Partial<FlowMissionFacts> & Pick<FlowMissionFacts, 
       { stage: 'integration-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not configured', outcomes: [] },
     ], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 },
     actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], ...overrides };
+}
+
+function runRecord(runId: string, captureKind: 'agent' | 'coordinator', family: 'codex' | 'parallix',
+  model: string | null, attempt: number, mission = 'launch-identity'): RunRecord {
+  const startedAt = new Date(Date.parse('2026-11-03T11:00:00Z') + attempt * 1_000).toISOString();
+  return {
+    version: 1, runId, repositoryId: 'repo', missionId: mission, captureKind,
+    operationId: `operation-${attempt}`, operationGeneration: attempt, sourceId: runId, revision: `revision-${attempt}`,
+    configuredModel: model, dependencies: [], execution: null, role: captureKind === 'agent' ? 'execute' : 'coordinate',
+    family: agentFamily(family), attempt, terminalHost: 'pipe', hostFallbackReason: null, tmux: null, supervisorPid: 1,
+    state: 'exited', startedAt, endedAt: new Date(Date.parse(startedAt) + 1_000).toISOString(),
+    exitCode: 0, signal: null, providerSessionId: null, redacted: false,
+    streams: { stdout: { bytes: 0, retainedBytes: 0, omitted: [] },
+      stderr: { bytes: 0, retainedBytes: 0, omitted: [] } }, sources: [], omissions: [],
+  };
 }
 
 test('rebase applicability starts at each stage-specific retained observation (PX-0055.03)', () => {
@@ -262,6 +279,71 @@ test('FLOW completeness includes applicable rebases and unplaced return provenan
     'one unplaced return has one diagnostic');
 });
 
+test('workflow returns without a retained sending stage remain incomplete (PX-0055.04)', () => {
+  const missingReturn = (identity: string, at: string) => reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [{
+    identity, author: 'codex', at, source: 'rebound',
+    origin: { actor: 'workflow', stage: 'workflow', decisionIdentity: identity, revision: null,
+      sender: 'parallix', cause: 'rebound' },
+  }] });
+  const result = flowStatistics([
+    flowFact({ missionId: 'pre-instrumentation', reviewStatistics: missingReturn('lane:pre', '2026-11-03T10:30:00Z'),
+      returnProvenanceCutover: '2026-11-03T11:00:00Z', returnProvenanceStartedAt: '2026-11-03T10:00:00Z',
+      ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 1 }] }),
+    flowFact({ missionId: 'straddling', reviewStatistics: missingReturn('lane:straddling', '2026-11-03T11:30:00Z'),
+      returnProvenanceCutover: '2026-11-03T11:00:00Z', returnProvenanceStartedAt: '2026-11-03T10:00:00Z',
+      ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 1 }] }),
+    flowFact({ missionId: 'fully-fresh', reviewStatistics: missingReturn('lane:fresh', '2026-11-03T11:30:00Z'),
+      returnProvenanceCutover: '2026-11-03T11:00:00Z', returnProvenanceStartedAt: '2026-11-03T11:10:00Z',
+      ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 1 }] }),
+  ],
+  weeklyDecisionWindows('2026-11-03', 'UTC')).current;
+
+  assert.deepEqual(result.observation, { complete: 0, partial: 3, unobserved: 0 },
+    'a known workflow actor does not make its missing sending stage complete');
+  assert.deepEqual(result.returns.map(item => [item.identity, item.coverage]), [
+    ['lane:pre', 'pre-instrumentation'], ['lane:straddling', 'straddling'], ['lane:fresh', 'fully-fresh'],
+  ]);
+  assert.ok(result.defects.some(defect => defect.includes('lane:pre') && defect.includes('pre-instrumentation workflow')));
+  assert.ok(result.defects.some(defect => defect.includes('lane:straddling') && defect.includes('straddling workflow')));
+  assert.ok(result.defects.some(defect => defect.includes('lane:fresh') && defect.includes('fully fresh workflow')));
+});
+
+test('the first retained staged return establishes the return-provenance cutover (PX-0055.04)', () => {
+  const lifecycle = [
+    { repositoryId: 'foreign', missionId: 'foreign-cutover', fromStatus: 'review', toStatus: 'active',
+      trigger: 'rebound-to-active', agent: 'codex', occurredAt: '2026-11-03T10:00:00Z', idempotencyKey: 'foreign-return',
+      returnIdentity: { stage: 'agent-review', operationId: null, operationGeneration: null } },
+    { repositoryId: 'repo', missionId: 'cutover-proof', fromStatus: 'review', toStatus: 'active',
+      trigger: 'rebound-to-active', agent: 'codex', occurredAt: '2026-11-03T11:00:00Z', idempotencyKey: 'return',
+      returnIdentity: { stage: 'agent-review', operationId: null, operationGeneration: null } },
+    { repositoryId: 'repo', missionId: 'classified', fromStatus: 'integration', toStatus: 'done',
+      trigger: 'integrate', agent: 'codex', occurredAt: '2026-11-03T12:00:00Z', idempotencyKey: 'done' },
+  ] as const;
+
+  const observed = observedFlowMissions({ repositoryId: 'repo', lifecycle, operations: [] }, null, [], []);
+
+  assert.equal(observed.find(mission => mission.missionId === 'classified')?.returnProvenanceCutover,
+    '2026-11-03T11:00:00Z');
+});
+
+test('a staged rebound repair alone establishes the return-provenance cutover (PX-0055.04)', () => {
+  const lifecycle = [
+    { repositoryId: 'repo', missionId: 'fresh', fromStatus: 'active', toStatus: 'review',
+      trigger: 'review-submit', agent: 'codex', occurredAt: '2026-11-03T10:30:00Z', idempotencyKey: 'begin' },
+    { repositoryId: 'repo', missionId: 'fresh', fromStatus: 'integration', toStatus: 'done',
+      trigger: 'integrate', agent: 'codex', occurredAt: '2026-11-03T12:00:00Z', idempotencyKey: 'done' },
+  ] as const;
+  const repair = (repositoryId: string | undefined, occurredAt: string) => ({ missionId: 'fresh', occurrenceId: 'r',
+    reasonKind: 'gate', area: null, agent: 'codex', headBefore: null, occurredAt,
+    returnIdentity: { stage: 'pre-review-rebase' as const, operationId: null, operationGeneration: null },
+    ...(repositoryId ? { repositoryId } : {}) });
+  const cutover = (reboundRepairs: ReturnType<typeof repair>[]) => observedFlowMissions(
+    { repositoryId: 'repo', lifecycle, operations: [], reboundRepairs }, null, [], [])[0]?.returnProvenanceCutover;
+
+  assert.equal(cutover([repair('repo', '2026-11-03T10:00:00Z')]), '2026-11-03T10:00:00Z');
+  assert.equal(cutover([repair('foreign', '2026-11-03T10:00:00Z'), repair(undefined, '2026-11-03T09:00:00Z')]), null);
+});
+
 test('placed workflow returns do not manufacture FLOW diagnostics (PX-0055.03)', () => {
   const placedReturn = reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [{
     identity: 'repair:placed', author: 'codex', at: '2026-11-03T11:30:00Z', source: 'repair',
@@ -286,6 +368,80 @@ test('model identity has one run-diagnostic owner and is not re-derived from lau
   assert.deepEqual(defects.filter(defect => defect.includes('Concrete model identity missing')), [
     'Concrete model identity missing for repo/one-model-defect run run-missing-model (source=run-missing-model); inspect retained run history',
   ]);
+});
+
+test('retained run cap makes otherwise complete FLOW attribution a lower bound (PX-0055.04)', () => {
+  const startedAt = '2026-11-03T11:00:00Z';
+  const mission = 'retained-run-cap';
+  const lifecycle = [{ repositoryId: 'repo', missionId: mission, fromStatus: 'integration', toStatus: 'done',
+    occurredAt: '2026-11-03T12:00:00Z', trigger: 'land', agent: 'codex', idempotencyKey: 'done' }] as const;
+  const runs = [
+    ...Array.from({ length: 30 }, (_, index) => runRecord(
+      `retained-agent-${index + 1}`, 'agent', 'codex', 'gpt-6.1-sol', index, mission)),
+    ...Array.from({ length: MAX_RUNS_PER_MISSION - 30 }, (_, index) => runRecord(
+      `retained-coordinator-${index + 1}`, 'coordinator', 'parallix', null, index + 30, mission)),
+  ];
+  const observed = observedFlowMissions({ repositoryId: 'repo', lifecycle, operations: [], runs }, null, [], [])[0]!;
+  assert.equal(observed.actualAgentLaunches, 30);
+  assert.equal(observed.agentLaunchesLowerBound, true,
+    'the union of retained agent and coordinator captures owns the retention bound');
+
+  const baseline = flowFact({ missionId: mission,
+    window: { startedAt, finishedAt: '2026-11-03T12:00:00Z' },
+    ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 3_600_000 }],
+    reviewStatistics: reviewStatisticsObservation('codex', 0) });
+  const fact = { ...baseline, ...observed, window: baseline.window, ownership: baseline.ownership,
+    rebaseStages: baseline.rebaseStages };
+
+  const result = flowStatistics([fact], weeklyDecisionWindows('2026-11-03', 'UTC')).current;
+  assert.deepEqual(result.observation, { complete: 0, partial: 1, unobserved: 0 },
+    'reaching the retained-run cap means retired launch identities and models cannot be certified complete');
+  assert.equal(result.extraAgentLaunches.lowerBound, true,
+    'the observed launch count remains an explicit lower bound instead of inventing retired runs');
+  assert.ok(result.defects.includes(
+    'Agent launch attribution is retention-bounded for repo/retained-run-cap; inspect retained run history; launch and model totals are lower bounds'));
+});
+
+test('capped coordinator-only history keeps agent launch and model facts unavailable (PX-0055.04)', () => {
+  const mission = 'coordinator-only-cap';
+  const lifecycle = [{ repositoryId: 'repo', missionId: mission, fromStatus: 'integration', toStatus: 'done',
+    occurredAt: '2026-11-03T12:00:00Z', trigger: 'land', agent: 'codex', idempotencyKey: 'done' }] as const;
+  const runs = Array.from({ length: MAX_RUNS_PER_MISSION }, (_, index) => runRecord(
+    `retained-coordinator-${index + 1}`, 'coordinator', 'parallix', null, index, mission));
+  const observed = observedFlowMissions({ repositoryId: 'repo', lifecycle, operations: [], runs }, null, [], [])[0]!;
+
+  assert.equal(observed.actualAgentLaunches, null,
+    'a capped population without an agent identity is unavailable, not a measured zero');
+  assert.equal(observed.agentLaunchesLowerBound, true);
+  assert.deepEqual(observed.agentLaunches, []);
+
+  const baseline = flowFact({ missionId: mission,
+    window: { startedAt: '2026-11-03T11:00:00Z', finishedAt: '2026-11-03T12:00:00Z' },
+    ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 3_600_000 }],
+    reviewStatistics: reviewStatisticsObservation('codex', 0) });
+  const result = flowStatistics([{ ...baseline, ...observed, window: baseline.window, ownership: baseline.ownership,
+    rebaseStages: baseline.rebaseStages }], weeklyDecisionWindows('2026-11-03', 'UTC')).current;
+  assert.deepEqual({ total: result.extraAgentLaunches.total, n: result.extraAgentLaunches.n,
+    lowerBound: result.extraAgentLaunches.lowerBound }, { total: null, n: 0, lowerBound: true });
+  assert.ok(result.defects.includes(
+    'Agent launch identities are unavailable within retention-bounded history for repo/coordinator-only-cap; inspect retained run history; no retained agent identity remains, so launch and model totals are unavailable rather than zero'));
+});
+
+test('FLOW launch attribution excludes coordinator captures and preserves retry models (PX-0055.04)', () => {
+  const lifecycle = [{ repositoryId: 'repo', missionId: 'launch-identity', fromStatus: 'integration', toStatus: 'done',
+    occurredAt: '2026-11-03T12:00:00Z', trigger: 'land', agent: 'codex', idempotencyKey: 'done' }] as const;
+  const observed = observedFlowMissions({ repositoryId: 'repo', lifecycle, operations: [], runs: [
+    runRecord('workflow-coordinator', 'coordinator', 'parallix', null, 1),
+    runRecord('agent-codex-first', 'agent', 'codex', 'gpt-6.1-sol', 1),
+    runRecord('agent-codex-replacement', 'agent', 'codex', 'gpt-6.1-terra', 2),
+  ] }, null, [], [])[0]!;
+
+  assert.equal(observed.actualAgentLaunches, 2, 'coordinator history is not an agent launch');
+  assert.equal(observed.agentLaunchesLowerBound, false);
+  assert.deepEqual(observed.agentLaunches.map(({ runId, family, model }) => ({ runId, family, model })), [
+    { runId: 'agent-codex-first', family: 'codex', model: 'gpt-6.1-sol' },
+    { runId: 'agent-codex-replacement', family: 'codex', model: 'gpt-6.1-terra' },
+  ], 'retries and replacements retain the actor and model recorded by the run-history owner');
 });
 
 test('rebase completeness distinguishes observed zero, running, interrupted and inapplicable stages (PX-0055.03)', () => {

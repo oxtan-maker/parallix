@@ -6,7 +6,7 @@ import type { FlowGateRun, FlowLeadEpisodes, FlowRebaseRun,
   FlowRebaseStage, FlowRebaseStageFact, FlowRebaseStageState, ScopedFlowRebaseStageFact } from './flow-mission-facts.js';
 import { formatObservationDiagnostic, type ObservationDiagnostic } from './verification-diagnostic.js';
 import { scopeFlowRebaseStages } from './flow-mission-facts.js';
-import { flowGraph, type FlowGraph, type FlowLaneId } from './flow-graph.js';
+import { flowGraph, flowReturnSource, type FlowGraph, type FlowLaneId } from './flow-graph.js';
 import type { ReviewStatistics } from '../services/review-statistics.js';
 import { isRebaseObservationStage } from '../ports/rebase-workflow.js';
 import { selectFlowRebaseStageDetails } from '../presentation/flow-rebase-stage-details.js';
@@ -40,6 +40,9 @@ export interface FlowMissionFacts {
   readonly observedDisqualifiers: readonly string[] | null;
   /** Named upstream exclusions that make this measured subset incomplete. */
   readonly diagnostics: readonly ObservationDiagnostic[];
+  /** Durable producer boundary and this mission's earliest retained telemetry classify missing return stages. */
+  readonly returnProvenanceCutover?: string | null;
+  readonly returnProvenanceStartedAt?: string | null;
   readonly reviewStatistics: ReviewStatistics;
 }
 
@@ -112,7 +115,8 @@ export interface FlowWindowStatistics {
     readonly at: string | null; readonly author: string | null; readonly responsibleModel: string | null;
     readonly actor: import('../services/review-statistics.js').ReviewSendingActor;
     readonly stage: string; readonly cause: string | null; readonly decisionIdentity: string | null;
-    readonly revision: string | null; readonly sender: string | null }[];
+    readonly revision: string | null; readonly sender: string | null;
+    readonly coverage: ReturnProvenanceCoverage | null }[];
   readonly episodes: readonly { readonly repositoryId: string; readonly missionId: string;
     readonly identity: string; readonly actor: 'agent' | 'human'; readonly stage: string;
     readonly startedAt: string; readonly endedAt: string; readonly revision: string | null; readonly sender: string }[];
@@ -189,7 +193,7 @@ function projectWindow(facts: readonly FlowMissionFacts[], window: DecisionWindo
     firstPassYield: rate(firstPass, observedFirstPass.length, facts.length),
     extraAgentLaunches: { total: extraTotal,
       meanPerMission: extraTotal !== null ? extraTotal / launchFacts.length : null, n: launchFacts.length,
-      lowerBound: launchFacts.some(fact => fact.agentLaunchesLowerBound === true), reworkJobs,
+      lowerBound: facts.some(fact => fact.agentLaunchesLowerBound === true), reworkJobs,
       reworkMeanPerMission: reworkJobs !== null ? reworkJobs / reworkFacts.length : null, reworkN: reworkFacts.length },
     sendBacks: { agent: aggregateSendBacks(facts, 'agent'), human: aggregateSendBacks(facts, 'human') },
     returns: facts.flatMap(fact => fact.reviewStatistics.returns.map(item => ({ repositoryId: fact.repositoryId,
@@ -197,7 +201,7 @@ function projectWindow(facts: readonly FlowMissionFacts[], window: DecisionWindo
       responsibleModel: responsibleModel(fact, item.author, item.at),
       actor: item.origin?.actor ?? null, stage: item.origin?.stage ?? 'workflow', cause: item.origin?.cause ?? null,
       decisionIdentity: item.origin?.decisionIdentity ?? null, revision: item.origin?.revision ?? null,
-      sender: item.origin?.sender ?? null }))),
+      sender: item.origin?.sender ?? null, coverage: returnProvenanceCoverage(fact, item) }))),
     episodes: facts.flatMap(fact => (fact.reviewStatistics.episodes ?? []).map(item => ({ repositoryId: fact.repositoryId,
       missionId: fact.missionId, ...item }))),
     time: { rows, largestHolder: largest ? { step: largest.step, actor: largest.actor, model: largest.model, state: largest.state,
@@ -243,6 +247,32 @@ const REBASE_STAGE_DEFECTS: Readonly<Partial<Record<FlowRebaseStageState, {
   'historical-unavailable': { kind: 'coverage', state: 'absent', status: 'historically unavailable' },
 };
 
+type DiagnosticArguments = readonly [
+  kind: ObservationDiagnostic['kind'],
+  state: ObservationDiagnostic['state'],
+  stage: string,
+  message: string,
+  recovery: string,
+];
+
+function agentLaunchDiagnostic(fact: FlowMissionFacts): DiagnosticArguments | null {
+  if (fact.actualAgentLaunches === null && fact.agentLaunchesLowerBound === true) {
+    return ['coverage', 'absent', 'agent-launch',
+      `Agent launch identities are unavailable within retention-bounded history for ${fact.repositoryId}/${fact.missionId}`,
+      'inspect retained run history; no retained agent identity remains, so launch and model totals are unavailable rather than zero'];
+  }
+  if (fact.actualAgentLaunches === null) {
+    return ['coverage', 'absent', 'agent-launch',
+      `Agent launch observations missing for ${fact.repositoryId}/${fact.missionId}`,
+      'inspect retained run history and rerun the fresh workflow'];
+  }
+  return fact.agentLaunchesLowerBound === true
+    ? ['coverage', 'absent', 'agent-launch',
+      `Agent launch attribution is retention-bounded for ${fact.repositoryId}/${fact.missionId}`,
+      'inspect retained run history; launch and model totals are lower bounds']
+    : null;
+}
+
 function derivedObservationDiagnostics(fact: FlowMissionFacts): ObservationDiagnostic[] {
   const diagnostics: ObservationDiagnostic[] = [];
   const add = (kind: ObservationDiagnostic['kind'], state: ObservationDiagnostic['state'], stage: string,
@@ -253,9 +283,8 @@ function derivedObservationDiagnostics(fact: FlowMissionFacts): ObservationDiagn
   if (fact.observedDisqualifiers === null || fact.reviewStatistics.total === null) {
     add('coverage', 'absent', 'first-pass', `First-pass observations missing for ${fact.repositoryId}/${fact.missionId}`, 'inspect retained review and verification history');
   }
-  if (fact.actualAgentLaunches === null) {
-    add('coverage', 'absent', 'agent-launch', `Agent launch observations missing for ${fact.repositoryId}/${fact.missionId}`, 'inspect retained run history and rerun the fresh workflow');
-  }
+  const launchDiagnostic = agentLaunchDiagnostic(fact);
+  if (launchDiagnostic) { add(...launchDiagnostic); }
   if (fact.ownership.length === 0) {
     add('coverage', 'absent', 'elapsed-ownership', `Elapsed ownership missing for ${fact.repositoryId}/${fact.missionId}`, 'inspect refined-to-first-delivery boundaries');
   } else if (fact.window) {
@@ -274,7 +303,38 @@ function derivedObservationDiagnostics(fact: FlowMissionFacts): ObservationDiagn
   for (const item of fact.reviewStatistics.returns.filter(value => value.origin.actor === null)) {
     add('provenance', 'absent', 'return', `Return ${item.identity} has unplaced provenance for ${fact.repositoryId}/${fact.missionId}`, 'inspect retained return producer context');
   }
+  for (const item of fact.reviewStatistics.returns.filter(value => value.origin.actor !== null
+    && flowReturnSource(value.origin) === null)) {
+    const coverage = returnProvenanceCoverage(fact, item);
+    add('provenance', 'absent', 'return',
+      `Return ${item.identity} has an unrecorded sending stage in a ${coverageLabel(coverage)} for ${fact.repositoryId}/${fact.missionId}`,
+      coverage === 'fully-fresh'
+        ? 'inspect the current return producer; no stage is inferred'
+        : 'inspect retained return producer context; no stage is inferred');
+  }
   return diagnostics;
+}
+
+export type ReturnProvenanceCoverage = 'pre-instrumentation' | 'straddling' | 'fully-fresh' | 'unclassified';
+
+function returnProvenanceCoverage(fact: FlowMissionFacts,
+  item: FlowMissionFacts['reviewStatistics']['returns'][number]): ReturnProvenanceCoverage | null {
+  if (item.origin.actor === null || flowReturnSource(item.origin) !== null) { return null; }
+  const returnedAt = item.at ? Date.parse(item.at) : NaN;
+  const cutover = fact.returnProvenanceCutover ? Date.parse(fact.returnProvenanceCutover) : NaN;
+  const startedAt = fact.returnProvenanceStartedAt ? Date.parse(fact.returnProvenanceStartedAt) : NaN;
+  if (!Number.isFinite(returnedAt) || !Number.isFinite(cutover) || !Number.isFinite(startedAt)) {
+    return 'unclassified';
+  }
+  if (returnedAt < cutover) { return 'pre-instrumentation'; }
+  return startedAt < cutover ? 'straddling' : 'fully-fresh';
+}
+
+function coverageLabel(coverage: ReturnProvenanceCoverage | null): string {
+  if (coverage === 'pre-instrumentation') { return 'pre-instrumentation workflow'; }
+  if (coverage === 'straddling') { return 'straddling workflow'; }
+  if (coverage === 'fully-fresh') { return 'fully fresh workflow'; }
+  return 'workflow with unavailable instrumentation coverage';
 }
 
 /** Observed ownership averages and shares, plus separate wall-time coverage diagnostics. */

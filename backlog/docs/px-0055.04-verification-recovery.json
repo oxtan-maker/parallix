@@ -1,0 +1,184 @@
+{
+  "mission": "px-0055.04",
+  "finding": "F6",
+  "recordedAt": "2026-11-15T05:06:12.352Z",
+  "sourceRevision": "13b90aa851e48894b822ad8b895d8c3f96fdb57e",
+  "staleBundle": {
+    "expectedVersion": "1.5.546",
+    "observedVersion": "1.5.545",
+    "failingCase": "px version is equivalent to --version",
+    "test": "test/integration/cli/px-runner.test.ts",
+    "repairCommand": "npm run build",
+    "rebuiltVersion": "1.5.546"
+  },
+  "certification": [
+    {
+      "checkpoint": "CP-6",
+      "verified": true,
+      "receipt": {
+        "missionId": "px-0055.04",
+        "command": "./scripts/verify-local.sh static-analysis",
+        "worktree": "/mnt/data/code/parallix-px-0055.04",
+        "executionRevision": "13b90aa851e48894b822ad8b895d8c3f96fdb57e",
+        "executionMissionRevision": 157,
+        "checkpointEvidenceRevision": 121,
+        "authorizedGates": [
+          "./scripts/verify-local.sh all"
+        ],
+        "authorizedCriteria": [
+          "Keep FLOW launch/model attribution durable beyond transcript retirement, or expose bounded coverage honestly. Reuse the final px-0036 telemetry/model owner; preserve actual actor/model across retries and replacement. No guessed model, competing collector, unrelated CPU/cost UI, quota change or resource-policy rewrite.",
+          "Recover retained facts in isolation only from authoritative evidence; preserve raw events and provenance. Supply an unrecoverable inventory and preview any proposed backfill. No live operator backfill, mission replay, synthetic measurement, hidden affected mission or missing-to-zero conversion is authorized.",
+          "Reproduce the audit with a consistent retained-evidence copy; classify pre-instrumentation, straddling and fully fresh workflows; preserve repository, first-delivery, local-window and family scope; and reconcile every affected web and CLI value and diagnostic to raw identities.",
+          "Manually verify final built public web and CLI on isolated real evidence plus disposable newly admitted workflows covering returns, stop/resume, lead/human handoffs, gate repair, rebase outcomes and cleanup. Resolve the relevant public-route timeout through its owner; direct-projection-only or mock-only proof fails. Repeat after final changes.",
+          "Provide the final acceptance map from every audited gap to producer, retained fact, shared reader, focused parent-red/fix-green regression and manual observation. Follow doc standards for minimal behavior docs; units meet 500ms headroom, modified integration cases and suites stay <=3.5s, and no gate, budget or deadline is added or weakened."
+        ],
+        "verifiedOccurrence": {
+          "openedMissionRevision": 116,
+          "worktree": "/mnt/data/code/parallix-px-0055.04",
+          "failureRevision": "1223786df96bca755b009aa8e1c19e403679c7e2",
+          "failureEvidenceId": "cc1aa0de82df474b9cef741c66b9f404a61bd13e959a8d0dfc7a693650e9e22f:1",
+          "checkpoint": "CP-6",
+          "incidentId": "integration:1223786df96bca755b009aa8e1c19e403679c7e2",
+          "attempt": 1
+        },
+        "coveredOccurrences": [],
+        "producer": "harness-exact-check",
+        "verifiedMissionRevision": 158,
+        "execution": {
+          "id": "c8a88f06-b5fb-47bd-acf7-e8fba4bd203f",
+          "producer": "rebound-exact-verifier",
+          "startedAt": "2026-11-15T05:01:58.524Z",
+          "completedAt": "2026-11-15T05:04:39.456Z",
+          "exitCode": 0
+        }
+      }
+    },
+    {
+      "checkpoint": "CP-7",
+      "verified": true,
+      "receipt": {
+        "missionId": "px-0055.04",
+        "command": "PARALLIX_TEST_COVERAGE=1 npm run test:integration:ci:prebuilt",
+        "worktree": "/mnt/data/code/parallix-px-0055.04",
+        "executionRevision": "13b90aa851e48894b822ad8b895d8c3f96fdb57e",
+        "executionMissionRevision": 157,
+        "checkpointEvidenceRevision": 126,
+        "authorizedGates": [
+          "./scripts/verify-local.sh all"
+        ],
+        "authorizedCriteria": [
+          "Keep FLOW launch/model attribution durable beyond transcript retirement, or expose bounded coverage honestly. Reuse the final px-0036 telemetry/model owner; preserve actual actor/model across retries and replacement. No guessed model, competing collector, unrelated CPU/cost UI, quota change or resource-policy rewrite.",
+          "Recover retained facts in isolation only from authoritative evidence; preserve raw events and provenance. Supply an unrecoverable inventory and preview any proposed backfill. No live operator backfill, mission replay, synthetic measurement, hidden affected mission or missing-to-zero conversion is authorized.",
+          "Reproduce the audit with a consistent retained-evidence copy; classify pre-instrumentation, straddling and fully fresh workflows; preserve repository, first-delivery, local-window and family scope; and reconcile every affected web and CLI value and diagnostic to raw identities.",
+          "Manually verify final built public web and CLI on isolated real evidence plus disposable newly admitted workflows covering returns, stop/resume, lead/human handoffs, gate repair, rebase outcomes and cleanup. Resolve the relevant public-route timeout through its owner; direct-projection-only or mock-only proof fails. Repeat after final changes.",
+          "Provide the final acceptance map from every audited gap to producer, retained fact, shared reader, focused parent-red/fix-green regression and manual observation. Follow doc standards for minimal behavior docs; units meet 500ms headroom, modified integration cases and suites stay <=3.5s, and no gate, budget or deadline is added or weakened."
+        ],
+        "verifiedOccurrence": {
+          "openedMissionRevision": 117,
+          "worktree": "/mnt/data/code/parallix-px-0055.04",
+          "failureRevision": "1223786df96bca755b009aa8e1c19e403679c7e2",
+          "failureEvidenceId": "e6e437e692687a8eeb0f1761a5e5c07c38ae93e6402e11eb3a85c78ea03e16bc:1",
+          "checkpoint": "CP-7",
+          "incidentId": "integration:1223786df96bca755b009aa8e1c19e403679c7e2",
+          "attempt": 1
+        },
+        "coveredOccurrences": [],
+        "producer": "harness-exact-check",
+        "verifiedMissionRevision": 158,
+        "execution": {
+          "id": "0edc9815-0f26-491b-8f84-9b62865e8f4a",
+          "producer": "rebound-exact-verifier",
+          "startedAt": "2026-11-15T05:01:58.524Z",
+          "completedAt": "2026-11-15T05:04:39.456Z",
+          "exitCode": 0
+        }
+      }
+    }
+  ],
+  "coveredCpuCases": [
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "normal stats and board reads reconcile Review history before backfill without writing measurements (TASK-2818)",
+      "profile": "covered",
+      "cpuMs": 452.468,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "defect C: unknown review-fix rounds survive to presentation > stores an unknown count as SQL NULL and excludes it from cohort aggregates",
+      "profile": "covered",
+      "cpuMs": 19.231,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "defect C: unknown review-fix rounds survive to presentation > keeps a measured zero distinct from an unknown count in the outcome model",
+      "profile": "covered",
+      "cpuMs": 9.493,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "classifier measurements retain retry cost and precision (TASK-2658)",
+      "profile": "covered",
+      "cpuMs": 5.094,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "local review authority supplies decided totals independently of cross-week samples (TASK-2658)",
+      "profile": "covered",
+      "cpuMs": 10.125,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "bounded panel telemetry survives persistence without multiplying workflow counts (TASK-2716)",
+      "profile": "covered",
+      "cpuMs": 8.953,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "mechanical attribution survives SQLite reload without samples (TASK-2734)",
+      "profile": "covered",
+      "cpuMs": 5.854,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "classifier decision heads survive SQLite reload for both verdicts (TASK-2752)",
+      "profile": "covered",
+      "cpuMs": 6.637,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "obligation shadow probabilities and aggregate survive SQLite readback (TASK-2753)",
+      "profile": "covered",
+      "cpuMs": 2.867,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/metrics-review-fix-observations.test.ts",
+      "name": "operator-only corrections retain their author and do not count as reviewer decisions (px-0020)",
+      "profile": "covered",
+      "cpuMs": 5.756,
+      "limitMs": 750
+    },
+    {
+      "file": "integration/stats/stats-population.test.ts",
+      "name": "defect D: lifecycle `done` is the only completion definition > reports exactly the lifecycle-completed missions as outcomes",
+      "profile": "covered",
+      "cpuMs": 76.714,
+      "limitMs": 1200
+    },
+    {
+      "file": "integration/stats/stats-population.test.ts",
+      "name": "defect D: lifecycle `done` is the only completion definition > gives the shared CLI mission-flow report the same population as the board",
+      "profile": "covered",
+      "cpuMs": 791.661,
+      "limitMs": 1200
+    }
+  ]
+}

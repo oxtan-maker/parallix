@@ -1,4 +1,4 @@
-import type { OperationalHistoryEntry, BoardLaneEventEntry } from '../ports/operation-history.js';
+import type { OperationalHistoryEntry, BoardLaneEventEntry, ReboundRepairHistoryEntry } from '../ports/operation-history.js';
 import type { VerificationMeasurement } from '../ports/verification-observation.js';
 import { workflowObservationAuthorization, type WorkflowOperation } from '../../domain/workflow-operation.js';
 import { flowElapsedOwnership, type FlowElapsedOwnership } from './flow-elapsed-ownership.js';
@@ -18,6 +18,10 @@ export interface VerificationStatisticsInput {
   readonly operations: readonly WorkflowOperation[];
   readonly lifecycle: readonly BoardLaneEventEntry[];
   readonly runs?: readonly RunRecord[];
+  readonly flowRuns?: readonly RunRecord[]; // per-Mission FLOW runs; narrower than the repository-wide `runs`
+  /** Applied-at boundary of the durable workflow return-stage producer. */
+  readonly returnProvenanceCutover?: string;
+  readonly reboundRepairs?: readonly ReboundRepairHistoryEntry[]; // staged rows are return-stage producers
   /** Storage rows excluded from the readable measured subset, already named by the owning adapter. */
   readonly repositoryDiagnostics?: readonly string[];
 }
@@ -445,8 +449,7 @@ function controlledComparisons(attempts: readonly VerificationMeasurement[], unk
   return [...controlled.values()];
 }
 
-export function verificationStatistics(input: VerificationStatisticsInput,
-  missions?: ReadonlySet<string>): VerificationStatistics {
+export function verificationStatistics(input: VerificationStatisticsInput, missions?: ReadonlySet<string>, flowMissions = missions): VerificationStatistics {
   const unknowns = new Set<string>(input.repositoryDiagnostics ?? []);
   const diagnostics: ObservationDiagnostic[] = [];
   const attempts = observedAttempts(input, unknowns, diagnostics).filter(a => !missions || a.missionId !== null && missions.has(a.missionId));
@@ -474,8 +477,8 @@ export function verificationStatistics(input: VerificationStatisticsInput,
   }
   const recoveryAttempts = executed.filter(a => execution(a).some(([start, end]) => recoveries.some(([a, b]) => start >= a && end <= b)));
   const comparisons = revisionComparisons(executed), controlled = controlledComparisons(attempts, unknowns);
-  const flowMissions = observedFlowMissions(input, ownership, attempts, rebases, observedRebaseCutovers(input), diagnostics);
-  const visibleMissionIds = new Set(flowMissions.map(mission => mission.missionId));
+  const observedFlow = observedFlowMissions(input, ownership, attempts, rebases, observedRebaseCutovers(input), diagnostics, flowMissions);
+  const visibleMissionIds = new Set(observedFlow.map(mission => mission.missionId));
   for (const diagnostic of diagnostics.filter(value => !visibleMissionIds.has(value.missionId))) {
     unknowns.add(diagnostic.message);
   }
@@ -488,7 +491,7 @@ export function verificationStatistics(input: VerificationStatisticsInput,
     recovery: { ...cpuCost(recoveryAttempts), wallMs: recoveries.length ? intervalUnionMs(recoveries) : null },
     repairMs: activity.repairMs, reReviewMs: activity.reReviewMs,
     criticalPathMs: dependencyPath?.durationMs ?? (batches.length === 1 ? batches[0].criticalPathMs : null),
-    dependencyPath, elapsedOwnership: ownership, agentResources: resources, flowMissions, rebases, batches,
+    dependencyPath, elapsedOwnership: ownership, agentResources: resources, flowMissions: observedFlow, rebases, batches,
     ranked: [...new Set(executed.map(a => a.gate))].map(gate => { const rows = executed.filter(a => a.gate === gate);
       const c = cost(rows); return { gate, attempts: rows.length, wallMs: c.wallMs, cpuUs: c.cpuUs };
     }).sort((a, b) => (b.wallMs ?? -1) - (a.wallMs ?? -1)),

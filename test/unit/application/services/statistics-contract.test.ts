@@ -43,6 +43,7 @@ import { reviewStatistics, type ReviewStatistics } from '../../../../src/applica
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 import { flowElapsedOwnership } from '../../../../src/application/projections/flow-elapsed-ownership.js';
 import { flowStatistics, type FlowMissionFacts } from '../../../../src/application/projections/flow-statistics.js';
+import { EMPTY_FLOW_MISSION_OBSERVATION } from '../../../../src/application/projections/flow-mission-facts.js';
 import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../../../../src/application/ports/verification-observation.js';
 import { renderVerificationStatistics } from '../../../../src/application/presentation/verification-statistics.js';
 import { controlledVerificationComparisons } from '../../../../src/application/projections/verification-profile-comparison.js';
@@ -392,6 +393,8 @@ test('dependency path scopes mission ownership and never sums concurrent cohort 
   const one = verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle, history }, new Set(['m1']));
   assert.equal(one.elapsedOwnership?.totalMs, 10);
   assert.equal(one.dependencyPath?.durationMs, 10);
+  assert.deepEqual(one.flowMissions.map(mission => mission.missionId), ['m1'],
+    'the per-Mission FLOW projection must retain the same requested cohort scope');
   assert.ok(one.dependencyPath?.nodeIds.every(id => id.includes('m1')));
   assert.equal(one.unknowns.some(value => value.includes('m2')), false, 'out-of-cohort missions emit no observation diagnostics');
   assert.equal(one.unknowns.some(value => value.includes('Activity identity incomplete')), false,
@@ -985,4 +988,13 @@ test('stats CLI renders the application-selected population without selecting co
     }).execute(request);
     assert.deepEqual(result.selection, selection);
   }
+});
+test('stats CLI retains return-provenance coverage from the shared FLOW reader (PX-0055.04)', async () => {
+  const { selectStatsReport } = await import('../../../../src/application/services/statistics-report-selection.js');
+  const missingReturn = reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [{ identity: 'lane:straddling', author: 'codex',
+    at: '2026-06-23T11:30:00Z', source: 'rebound', origin: { actor: 'workflow', stage: 'workflow', decisionIdentity: 'lane:straddling', revision: null, sender: 'parallix', cause: 'rebound' } }] }),
+    flowObservation = { ...EMPTY_FLOW_MISSION_OBSERVATION, missionId: 'task-straddling', returnProvenanceCutover: '2026-06-23T11:00:00Z' };
+  const selected = selectStatsReport([], [{ repo: 'r', mission: 'task-straddling', createdAt: '2026-06-23T10:00:00Z', closedAt: '2026-06-23T12:00:00Z', labels: [], reviewStatistics: missingReturn, flowObservation }], { mode: 'weekly', today: '2026-06-23', timeZone: 'UTC' });
+  assert.equal(selected.flowStatistics?.current.returns[0]?.coverage, 'straddling'); assert.ok(selected.flowStatistics?.current.defects
+    .some(defect => defect.includes('lane:straddling') && defect.includes('straddling workflow')));
 });

@@ -30,6 +30,8 @@ export interface ReboundRepairHistoryEntry {
   readonly durationMs?: number | null;
   readonly occurredAt: string;
   readonly returnIdentity?: WorkflowReturnIdentity;
+  /** Repository the repair was recorded for; absent on rows written before it was stored. */
+  readonly repositoryId?: string;
 }
 
 /** Decode the one minimal rebound-repair history shape at either storage boundary. */
@@ -45,7 +47,12 @@ export function parseReboundRepairHistoryEntry(value: unknown, occurredAt: strin
   return { missionId, occurrenceId, reasonKind: String(row.reasonKind ?? ''),
     area: typeof row.area === 'string' ? row.area : null, agent: String(row.agent ?? ''),
     headBefore: typeof row.headBefore === 'string' ? row.headBefore : null,
-    durationMs, occurredAt, ...(returnIdentity ? { returnIdentity } : {}) };
+    durationMs, occurredAt, ...(returnIdentity ? { returnIdentity } : {}), ...parseRepositoryScope(row.repositoryId) };
+}
+
+/** Repository scope of a retained row; absent on rows written before it was stored. */
+function parseRepositoryScope(value: unknown): { readonly repositoryId?: string } {
+  return typeof value === 'string' && value ? { repositoryId: value } : {};
 }
 
 function parseReturnIdentity(value: unknown): WorkflowReturnIdentity | undefined {
@@ -58,6 +65,8 @@ export interface OperationalHistoryRepository {
   findAll(): Promise<readonly OperationalHistoryEntry[]>;
   /** Selected analytical event families without loading unrelated retained payloads. */
   findByTypes?(_types: readonly string[]): Promise<readonly OperationalHistoryEntry[]>;
+  /** Selected analytical event families for an explicit Mission population. */
+  findByTypesForMissions?(_types: readonly string[], _missionIds: readonly string[], _repositoryId: string): Promise<readonly OperationalHistoryEntry[]>;
   /** Append-only revision for selected analytical families, without loading their payloads. */
   revisionForTypes?(_types: readonly string[]): Promise<string>;
   /** Minimal first observation for legacy Missions with no lane-transition history. */
