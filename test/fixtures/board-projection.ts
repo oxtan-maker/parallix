@@ -25,6 +25,7 @@ const emptySeries: MetricSeries = { series: [], missingHistoryFallback: 'skip' }
 
 export const emptyMetrics: BoardMetrics = {
   health: { state: 'no-telemetry' },
+  analytics: { freshness: 'fresh', revision: 'history-fixture', refreshedAt: '2026-01-01T00:00:00.000Z', reason: null },
   provenance: {
     repositoryId: fixtureRepositoryId('test-repo'),
     evaluatedWindow: { startedAt: null, endedAt: null },

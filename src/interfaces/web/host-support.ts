@@ -2,7 +2,7 @@ import { findBoardMission, type BoardProjection } from '../../application/projec
 import type { BoardCommandRequest } from '../../application/controller/board-command.js';
 import type { WebCommandRequest, WebBoardSnapshot, WebCommandResult } from './transport.js';
 import { toWebBoardSnapshot } from './transport.js';
-import type { SharedProjectionRead } from './shared-build.js';
+import type { SharedProjectionRead, ProjectionFreshness } from './shared-build.js';
 import { validateWebEditMissionRequest } from './transport-edit-mission.js';
 import { missionVersion } from '../../application/domain-ports.js';
 import type { FastifyReply } from 'fastify';
@@ -19,12 +19,23 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Surface deferred historical work without claiming that its values are current. */
-export function withAnalyticsFreshness(read: SharedProjectionRead<BoardProjection>): SharedProjectionRead<BoardProjection> {
-  const analytics = read.projection.metrics.analytics;
-  if (read.freshness.state === 'stale' || analytics === undefined || analytics.freshness === 'fresh') { return read; }
-  return { ...read, freshness: { ...read.freshness, state: 'stale',
-    reason: analytics.reason ?? 'Historical analytics are unavailable.' } };
+/**
+ * The historical analytics family's own freshness (TASK-2854.04). It comes from
+ * the analytics evidence inside the projection, never from the workflow
+ * family's observation, and it never travels the other way: a deferred or
+ * failed historical refresh is reported here alone.
+ */
+export function analyticsFamilyFreshness(projection: BoardProjection): ProjectionFreshness {
+  const analytics = projection.metrics.analytics;
+  // The historical reader stamps every projection it builds. A projection with
+  // no stamp was never observed for history, and borrowing the workflow
+  // observation would present unobserved analytics as fresh.
+  if (analytics === undefined) {
+    return { state: 'unavailable', revision: null, refreshedAt: null,
+      reason: 'this projection carries no historical analytics observation' };
+  }
+  return { state: analytics.freshness, revision: analytics.revision, refreshedAt: analytics.refreshedAt,
+    reason: analytics.reason };
 }
 
 /** Every body this host answers with for a command is the safe wire envelope. */

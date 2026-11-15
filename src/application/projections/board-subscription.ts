@@ -28,6 +28,16 @@ import { isOpenWorkflow } from '../../domain/workflow-operation.js';
 export const BOARD_REFRESH_INTERVAL_MS = 2_000;
 /** Idle boards need only bounded reconciliation for external changes. */
 export const BOARD_IDLE_REFRESH_INTERVAL_MS = 5_000;
+/** Writes arrive in bursts; one rebuild after the burst settles is enough. */
+export const BOARD_WAKE_DEBOUNCE_MS = 50;
+
+/**
+ * Starts delivering "durable state may have changed" hints and returns the
+ * stop function. A hint only brings the next reconciliation forward; the
+ * fingerprint comparison still decides whether anything changed, so a spurious
+ * or missed hint costs latency, never correctness.
+ */
+export type BoardWakeSource = (_wake: () => void) => () => void;
 
 export interface BoardSubscriptionOptions {
   /** Active reconciliation cadence; retained for existing callers. */
@@ -53,6 +63,8 @@ export interface BoardSubscriptionOptions {
    * keep moving while the Ink label is still.
    */
   readonly displayedCountdown?: boolean;
+  /** Brings reconciliation forward when durable state changes; the poll stays as the fallback. */
+  readonly wakeSource?: BoardWakeSource;
 }
 
 export type BoardProjectionListener = (_projection: BoardProjection) => void;
@@ -93,8 +105,13 @@ export function subscribeToBoardProjection(
   let lastFingerprint: string | null = null;
   let active = true;
   let failures = 0;
+  let running = false;
+  let wakeScheduled = false;
+  let wakeArrivedWhileRunning = false;
 
   const tick = async () => {
+    running = true;
+    wakeScheduled = false;
     try {
       const built = await build();
       const projection = isDetectedProjection(built) ? built.projection : built;
@@ -111,18 +128,31 @@ export function subscribeToBoardProjection(
       failures += 1;
       options.onError?.(error);
     } finally {
+      running = false;
       if (!stopped) {
         const cadence = active ? intervalMs : idleIntervalMs;
         const delay = failures === 0 ? cadence : Math.max(cadence, Math.min(idleIntervalMs, intervalMs * 2 ** Math.min(failures - 1, 8)));
         handle = setTimer(() => { void tick(); }, delay);
+        if (wakeArrivedWhileRunning) { wakeArrivedWhileRunning = false; wake(); }
       }
     }
   };
 
+  function wake(): void {
+    // A failing build is retried on its own backoff; a durable-change signal must not shorten it.
+    if (stopped || wakeScheduled || failures > 0) { return; }
+    if (running) { wakeArrivedWhileRunning = true; return; }
+    wakeScheduled = true;
+    clearTimer(handle);
+    handle = setTimer(() => { void tick(); }, BOARD_WAKE_DEBOUNCE_MS);
+  }
+
   handle = setTimer(() => { void tick(); }, intervalMs);
+  const stopWake = options.wakeSource?.(wake);
 
   return () => {
     stopped = true;
+    stopWake?.();
     clearTimer(handle);
     handle = null;
   };

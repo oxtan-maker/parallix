@@ -7,7 +7,7 @@ import type { RepairBudgetFacts } from '../../application/projections/repair-bud
 
 
 
-export const WEB_TRANSPORT_VERSION = 3 as const;
+export const WEB_TRANSPORT_VERSION = 4 as const;
 export type WebTransportVersion = typeof WEB_TRANSPORT_VERSION;
 export const SUPPORTED_WEB_TRANSPORT_VERSIONS: readonly number[] = [WEB_TRANSPORT_VERSION];
 
@@ -278,12 +278,27 @@ export interface WebBoardSnapshot {
   readonly inFlightWip: number;
   readonly operationLog: readonly WebOperationLogEntry[];
   readonly agentAvailability: readonly WebAgentAvailability[];
-  readonly metrics: WebBoardMetrics;
   /** One fact per `(source, status, value)` tuple; repeats are collapsed by the projection. */
   readonly sourceFacts: readonly WebSourceFact[];
 }
 
+/**
+ * The historical analytics family, delivered apart from the current workflow
+ * snapshot (`GET /api/board/analytics`). Its `freshness` is the analytics
+ * family's own observation, never the workflow family's: a deferred or failed
+ * analytics refresh leaves the workflow snapshot fresh, and a fresh workflow
+ * snapshot never makes these metrics fresh.
+ */
+export interface WebBoardAnalytics {
+  readonly kind: 'board-analytics';
+  readonly transportVersion: WebTransportVersion;
+  readonly repositoryId: string;
+  readonly freshness: WebProjectionFreshness;
+  readonly metrics: WebBoardMetrics;
+}
+
 export interface WebProjectionFreshness {
+  /** One family's own observation: never borrowed from another family. */
   readonly state: 'fresh' | 'stale' | 'unavailable';
   readonly revision: string | null;
   readonly refreshedAt: string | null;

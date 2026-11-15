@@ -27,7 +27,9 @@ import { Shell } from '../../../../web/src/shell.js';
 import { durationText, isSpinning } from '../../../../web/src/format.js';
 import { C, TYPE } from '../../../../web/src/palette.js';
 import { validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
-import type { WebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import type { WebBoardMetrics, WebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
+import { TopBar } from '../../../../web/src/top-bar.js';
+import type { AnalyticsState } from '../../../../web/src/board-data.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import type { AgentAvailabilityMetric } from '../../../../src/application/projections/board.js';
 import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
@@ -44,6 +46,14 @@ const browserSources = fs.readdirSync(webSrc)
 
 const render = (snapshot: WebBoardSnapshot): string =>
   renderToStaticMarkup(React.createElement(Board, { snapshot, onRefresh: async () => {} }));
+
+/** The top bar with the historical analytics family as a settled browser read (TASK-2854.04). */
+const analyticsRead = (overrides: Partial<WebBoardMetrics> = {}): AnalyticsState => {
+  const analytics = webProjection.analytics(makeProjection());
+  return { kind: 'ready', analytics: { ...analytics, metrics: { ...analytics.metrics, ...overrides } } };
+};
+const renderTopBar = (snapshot: WebBoardSnapshot, analytics: AnalyticsState): string =>
+  renderToStaticMarkup(React.createElement(TopBar, { snapshot, analytics, onNavigate: () => {}, onCreate: () => {} }));
 
 const snapshotOf = (overrides: Partial<BoardProjection>): WebBoardSnapshot =>
   webProjection.snapshot({ ...makeProjection(), ...overrides });
@@ -357,9 +367,7 @@ test('running-agent summaries retain observed counts without command-session wor
 });
 
 test('the top bar renders the server-owned decision-window completion count between WIP and attention', () => {
-  const html = renderToStaticMarkup(React.createElement(Board, {
-    snapshot: { ...populated(), inFlightWip: 5, metrics: { ...populated().metrics, weeklyCompletedMissions: 21 } }, onRefresh: async () => {},
-  }));
+  const html = renderTopBar({ ...populated(), inFlightWip: 5 }, analyticsRead({ weeklyCompletedMissions: 21 }));
   assert.match(html, /wip <span[^>]*>5<\/span> · 21 missions\/wk · attention <span[^>]*>1<\/span>/);
 });
 
@@ -739,9 +747,11 @@ test('production browser code uses no browser persistence; history polling is co
 
 test('production browser code reads snapshots and mission history while keeping one guarded mutation route', () => {
   const fetches = browserSources.flatMap((file) => (file.text.match(/\bfetch\(/g) ?? []).map(() => file.name)).sort();
-  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'board-data.ts', 'mission-history-data.ts'], 'snapshot, detail, command and mission history requests stay in typed clients');
+  assert.deepEqual(fetches, ['board-data.ts', 'board-data.ts', 'board-data.ts', 'board-data.ts', 'mission-history-data.ts'],
+    'snapshot, analytics, detail, command and mission history requests stay in typed clients');
   const data = browserSources.find((file) => file.name === 'board-data.ts')?.text ?? '';
   assert.match(data, /COMMANDS_PATH = '\/api\/commands'/);
+  assert.match(data, /BOARD_ANALYTICS_PATH = '\/api\/board\/analytics'/, 'the historical analytics family is read on its own typed path');
   assert.match(browserSources.find((file) => file.name === 'mission-history-data.ts')?.text ?? '', /`\/api\/terminal\/\$\{encodeURIComponent\(missionId\)\}`/);
   assert.match(data, /method: 'POST'/);
   for (const file of browserSources.filter((file) => file.name !== 'board-data.ts')) {
@@ -757,6 +767,8 @@ test('production browser code contains no mock mission data or invented metric',
     'flow-graph.tsx': ['median'],
     'flow-time-table.tsx': ['median'],
     'top-bar.tsx': ['missions/wk', 'throughput'],
+    // The delivery count prints with the freshness its own family reported (TASK-2854.04).
+    'format.ts': ['missions/wk', 'throughput'],
     'palette.ts': ['throughput'],
   };
   for (const file of browserSources) {
@@ -822,8 +834,7 @@ test('the client adds no router, browser state framework, server-rendering layer
 });
 
 test('weekly missions use the delivery cohort instead of current DONE stock (TASK-2688)', () => {
-  const snapshot = populated();
-  const html = render({ ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: 3 } });
+  const html = renderTopBar(populated(), analyticsRead({ weeklyCompletedMissions: 3 }));
   assert.match(html, /3 missions\/wk/);
   assert.doesNotMatch(html, /21 missions\/wk/);
 });

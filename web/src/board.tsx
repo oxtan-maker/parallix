@@ -10,6 +10,7 @@ import { MissionEditor } from './mission-editor.js';
  * (`Parallix Board GPU.dc.html` in the reference acceptance artifact).
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent } from 'react';
+import { useBoardAnalytics, workflowObservationKey } from './board-data.js';
 import type { DragEvent } from 'react';
 import type { WebBoardSnapshot, WebCommandAction, WebMissionCard } from '../../src/interfaces/web/transport.js';
 import { VisibleCommandOutcomes } from './command-outcome.js';
@@ -221,6 +222,9 @@ cancelPrompt !== null && (
 
 export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onRefresh: () => Promise<void> }) {
   const { root, moveSelection, selectTerminal, pressedAction, publishOutcome, view, setView, setCreateFrom, selectedId, pendingCommands, setSelectedId, open, startDrag, dropAction, canDrop, cancelPrompt, setCancelPrompt, outcomes, pendingRef, dispatch, editRequest, setEditRequest, createFrom, closeCreate, terminalMission, closeTerminal } = useBoardModel(snapshot, onRefresh);
+  // The historical analytics family is read on its own path, off the workflow
+  // observation, and renders with its own freshness (TASK-2854.04).
+  const analytics = useBoardAnalytics(workflowObservationKey(snapshot.freshness));
   const [doneDisclosure, setDoneDisclosure] = useState({ rail: false, history: false });
   const onDoneDisclosure = (level: 'rail' | 'history', open: boolean) => {
     setDoneDisclosure(current => current[level] === open ? current : { ...current, [level]: open });
@@ -255,8 +259,8 @@ export function Board({ snapshot, onRefresh }: { snapshot: WebBoardSnapshot; onR
         event.preventDefault(); event.stopPropagation();
         publishOutcome(pressed.missionId, 'Action was not sent: the control changed during the press. Select the refreshed action to try again.');
       }}>
-      {view === 'flow' ? <FlowPanel snapshot={snapshot} onNavigate={setView} /> : <>
-      <TopBar snapshot={snapshot} onNavigate={setView} onCreate={setCreateFrom} />
+      {view === 'flow' ? <FlowPanel snapshot={snapshot} analytics={analytics.state} onReobserve={analytics.reobserve} onNavigate={setView} /> : <>
+      <TopBar snapshot={snapshot} analytics={analytics.state} onNavigate={setView} onCreate={setCreateFrom} />
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <AttentionRail reasonCards={[...intake.flatMap(stage => stage.cards), ...flight.flatMap(stage => stage.cards)]} snapshot={snapshot} selectedId={selectedId} pendingCommands={pendingCommands} onSelect={setSelectedId} onAction={(item, control, agent) => {
           const card = snapshot.stages.flatMap((stage) => stage.cards).find((candidate) => candidate.id === item.missionId);

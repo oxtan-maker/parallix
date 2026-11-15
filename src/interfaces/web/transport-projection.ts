@@ -8,7 +8,7 @@ import { projectMissionActivity, type CoordinatorEvidence, type MissionWorkActiv
 import type { BoardCommand, CommandAvailability, MissionCard } from '../../application/projections/mission-board.js';
 import { isIntegratedCapability, unavailableReason } from '../../application/controller/board-command.js';
 import type { ApplicationOutcome, ProgressEvent, SourceFact } from '../../application/contracts.js';
-import { WEB_TRANSPORT_VERSION, WebTransportError, type WebBoardCommandKind, type WebDurationMs, type WebMissionWork, type WebCoordinatorEvidence, type WebCommandAction, type WebMissionCard, type WebAttentionItem, type WebOperationLogEntry, type WebAgentAvailability, type WebSourceFact, type WebBoardMetrics, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebMissionDetail, type WebProjectionFreshness, type WebReviewRoundDetail } from './transport-types.js';
+import { WEB_TRANSPORT_VERSION, WebTransportError, type WebBoardCommandKind, type WebDurationMs, type WebMissionWork, type WebCoordinatorEvidence, type WebCommandAction, type WebMissionCard, type WebAttentionItem, type WebOperationLogEntry, type WebAgentAvailability, type WebSourceFact, type WebBoardAnalytics, type WebBoardMetrics, type WebBoardSnapshot, type WebCommandResult, type WebProgressEvent, type WebMissionDetail, type WebProjectionFreshness, type WebReviewRoundDetail } from './transport-types.js';
 import { renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
 
 export const BOARD_COMMAND_KINDS: Readonly<Record<BoardCommand, WebBoardCommandKind>> = {
@@ -266,8 +266,31 @@ export function toWebBoardSnapshot(
     inFlightWip: projection.inFlightWip,
     operationLog: projection.operationLog.map(toLogEntry),
     agentAvailability: projection.metrics.agentAvailability.map(toAgentAvailability),
-    metrics: toWebMetrics(projection.metrics),
     sourceFacts: projection.sourceFacts.map(toSourceFact),
+  };
+}
+
+/**
+ * Project the historical analytics family for its own read. The bulky FLOW
+ * window never travels inside the current workflow snapshot; the browser asks
+ * for this envelope when a consumer actually renders historical metrics.
+ */
+export function toWebBoardAnalytics(
+  projection: BoardProjection,
+  freshness: WebProjectionFreshness,
+): WebBoardAnalytics {
+  if (projection.version !== BOARD_PROJECTION_VERSION) {
+    throw new WebTransportError(
+      'unsupported-projection-version',
+      `projection version ${String(projection.version)} is not supported by transport v${WEB_TRANSPORT_VERSION}`,
+    );
+  }
+  return {
+    kind: 'board-analytics',
+    transportVersion: WEB_TRANSPORT_VERSION,
+    repositoryId: projection.repositoryId,
+    freshness,
+    metrics: toWebMetrics(projection.metrics),
   };
 }
 

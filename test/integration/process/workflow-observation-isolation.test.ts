@@ -64,9 +64,14 @@ test('held historical reconstruction cannot delay current board or terminal read
     assert.ok(['unavailable', 'stale'].includes(board.metrics.analytics?.freshness ?? ''));
     assert.match(board.metrics.analytics?.reason ?? '', /Historical analytics/);
 
-    const snapshot = await within((await workflowHttp(host)).snapshot());
-    assert.equal(snapshot.freshness.state, 'stale');
-    assert.match(snapshot.freshness.reason, /Historical analytics/);
+    // A held historical refresh is the analytics family's alone: it never demotes the workflow
+    // snapshot (TASK-2854.04), and the analytics read reports its own unobserved state.
+    const http = await workflowHttp(host);
+    const snapshot = await within(http.snapshot());
+    assert.equal(snapshot.freshness.state, 'fresh');
+    const analytics = await within(http.analytics());
+    assert.ok(['unavailable', 'stale'].includes(analytics.freshness.state));
+    assert.match(analytics.freshness.reason, /Historical analytics/);
   } finally { fs.writeFileSync(release, 'release'); }
 
   await within(new Promise<void>(resolve => {

@@ -6,7 +6,16 @@ import type { BoardProjection } from '../../../../src/application/projections/bo
 import type { WebMissionCard } from '../../../../src/interfaces/web/transport.js';
 import { createSharedProjection } from '../../../../src/interfaces/web/shared-build.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { flowReferenceProjection } from '../../../fixtures/flow-reference.js';
 import { webFreshness, webProjection } from '../../../fixtures/web-projection.js';
+
+/**
+ * Bound for the current workflow family alone (stages, attention, actions,
+ * wip, operation log, agent availability, source facts, identity, freshness).
+ * Historical metrics and mission detail ride their own reads, so this bound
+ * never pays for a populated FLOW window.
+ */
+const WORKFLOW_PAYLOAD_BOUND_BYTES = 64 * 1024;
 
 const CARD_COUNT = 12;
 const CHECKPOINT_COUNT = 6;
@@ -68,9 +77,25 @@ test('common projection delivery keeps representative bulk detail deferred and b
     builds += 1;
     sharedIpcBytes += projectionBytes;
     return projection;
-  }, value => webFreshness(value).revision);
+  }, value => webFreshness(value).revision ?? '');
   await Promise.all([source.read(), source.read(), source.read()]);
   assert.equal(builds, 1, 'three concurrent clients reuse one completed projection');
   assert.ok(sharedIpcBytes <= repeatedIpcBytes * 0.34,
     `one retained completion must cut identical three-client IPC bytes by at least 66%: ${sharedIpcBytes} vs ${repeatedIpcBytes}`);
+});
+
+test('the current workflow payload carries no historical metrics and stays bounded (TASK-2854.04)', () => {
+  // Representative populated workload: bulk card detail on the workflow side
+  // and a fully populated FLOW window on the historical side.
+  const populated = { ...representativeProjection(), metrics: flowReferenceProjection().metrics };
+  const snapshot = webProjection.snapshot(populated);
+  const workflowBytes = Buffer.byteLength(JSON.stringify(snapshot));
+  const historicalBytes = Buffer.byteLength(JSON.stringify(populated.metrics));
+
+  assert.ok(!('metrics' in snapshot),
+    'historical metrics ride their own read path; the current workflow payload never carries them');
+  assert.ok(historicalBytes > workflowBytes,
+    `the representative workload really is dominated by historical metrics: ${workflowBytes} vs ${historicalBytes}`);
+  assert.ok(workflowBytes <= WORKFLOW_PAYLOAD_BOUND_BYTES,
+    `current workflow family stays within its bound: ${workflowBytes} > ${WORKFLOW_PAYLOAD_BOUND_BYTES}`);
 });

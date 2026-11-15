@@ -42,7 +42,7 @@ function validateFamily(reply: FastifyReply, agent: string | undefined,
     sendCommandResult(reply, 503, failure('unavailable', read.freshness.reason ?? 'Agent availability cannot be checked; refresh and retry'));
     return false;
   }
-  const snapshot = toWebBoardSnapshot(read.projection, read.freshness);
+  const snapshot = toWebBoardSnapshot(read.projection, read.families.workflow);
   const family = snapshot.agentAvailability.find(candidate => candidate.family === agent);
   if (family?.available && family.blockedFor.kind === 'finite' && family.blockedFor.ms === 0) { return true; }
   sendCommandResult(reply, 409, rejected('validation', `Agent ${agent} is unknown or unavailable. Refresh and choose an available family.`));

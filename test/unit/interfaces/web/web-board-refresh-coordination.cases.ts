@@ -1,4 +1,4 @@
-import { webProjection } from '../../../fixtures/web-projection.js';
+import { webFreshness, webProjection } from '../../../fixtures/web-projection.js';
 const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
 /**
  * Refresh-coordination contract for the browser shell (TASK-2655): every
@@ -24,9 +24,10 @@ import { COMMANDS_PATH } from '../../../../web/src/board-data.js';
 import { createRefreshCoordinator } from '../../../../web/src/refresh-coordinator.js';
 import { EMPTY_LIVE_PROGRESS, OPERATION_LOG_LIMIT, observeStreamId, recordProgress, withLiveProgress } from '../../../../web/src/operation-log.js';
 import { toWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../../src/interfaces/web/transport.js';
-import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { emptyMetrics, makeCard, makeProjection } from '../../../fixtures/board-projection.js';
 import { missionId } from '../../../../src/domain/mission.js';
 import { createSharedProjection } from '../../../../src/interfaces/web/shared-build.js';
+import { analyticsFamilyFreshness } from '../../../../src/interfaces/web/host-support.js';
 
 /** The window after which a burst of stream events becomes one read. */
 const COALESCE_MS = 150;
@@ -760,4 +761,69 @@ test('stream demands across many windows retain one queued read behind a slow re
     assert.equal(settles.length, 2, 'nothing retries after the signals stop');
     assert.deepEqual(superseded, [true, false]);
   } finally { sync.dispose(); }
+});
+
+/**
+ * The delivered board families (TASK-2854.04): the current workflow read and
+ * the historical analytics read are separate reads, each stating its own
+ * freshness. A deferred or failed analytics refresh never demotes the current
+ * workflow families, and never reaches the browser inside the workflow payload.
+ */
+function projectionWithAnalytics(
+  analytics: NonNullable<typeof emptyMetrics.analytics>,
+): ReturnType<typeof makeProjection> {
+  const projection = makeProjection({ active: [makeCard({ id: missionId('task-2854-04') })] });
+  return { ...projection, metrics: { ...projection.metrics, analytics } };
+}
+
+async function boardReadHost(analytics: NonNullable<typeof emptyMetrics.analytics>) {
+  const { default: Fastify } = await import('fastify');
+  const { registerBoardReadRoutes } = await import('../../../../src/interfaces/web/board-read-routes.js');
+  const projection = projectionWithAnalytics(analytics);
+  const app = Fastify();
+  registerBoardReadRoutes(app, createSharedProjection(async () => projection, value => webFreshness(value).revision ?? '',
+    undefined, value => ({ analytics: analyticsFamilyFreshness(value) })));
+  return app;
+}
+
+test('a deferred analytics build delivers the workflow family fresh and the analytics family on its own read (TASK-2854.04)', async context => {
+  const app = await boardReadHost({
+    freshness: 'unavailable', revision: 'history-v1', refreshedAt: null,
+    reason: 'Historical analytics refresh is in progress.',
+  });
+  context.after(async () => { await app.close(); });
+
+  const workflow = await app.inject({ method: 'GET', url: '/api/board' });
+  assert.equal(workflow.statusCode, 200);
+  const snapshot = JSON.parse(workflow.body) as Record<string, unknown>;
+  assert.equal((snapshot.freshness as { state: string }).state, 'fresh',
+    'a deferred historical refresh never demotes the current workflow families');
+  assert.ok(!('metrics' in snapshot), 'the workflow payload carries no historical metrics');
+
+  const analytics = await app.inject({ method: 'GET', url: '/api/board/analytics' });
+  assert.equal(analytics.statusCode, 200, 'the historical analytics family has its own read path');
+  const body = JSON.parse(analytics.body) as { freshness: { state: string; revision: string | null; refreshedAt: string | null; reason: string | null } };
+  assert.deepEqual(body.freshness, {
+    state: 'unavailable', revision: 'history-v1', refreshedAt: null,
+    reason: 'Historical analytics refresh is in progress.',
+  }, 'the analytics family states its own state, revision, refreshedAt and reason');
+});
+
+test('a stale retained analytics family stays stale on its own read while the workflow family stays fresh (TASK-2854.04)', async context => {
+  const app = await boardReadHost({
+    freshness: 'stale', revision: 'history-v1', refreshedAt: '2026-11-12T09:00:00.000Z',
+    reason: 'Durable analytics evidence changed; refresh is in progress.',
+  });
+  context.after(async () => { await app.close(); });
+
+  const snapshot = JSON.parse((await app.inject({ method: 'GET', url: '/api/board' })).body) as Record<string, unknown>;
+  assert.equal((snapshot.freshness as { state: string; reason: string | null }).state, 'fresh',
+    'a retained stale analytics cache never satisfies a fresh workflow observation');
+  const body = JSON.parse((await app.inject({ method: 'GET', url: '/api/board/analytics' })).body) as {
+    freshness: { state: string; revision: string | null; refreshedAt: string | null; reason: string | null };
+  };
+  assert.deepEqual(body.freshness, {
+    state: 'stale', revision: 'history-v1', refreshedAt: '2026-11-12T09:00:00.000Z',
+    reason: 'Durable analytics evidence changed; refresh is in progress.',
+  });
 });

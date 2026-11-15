@@ -43,7 +43,7 @@ function observer(root: string, configuration: ParallixConfiguration, cli: CliIn
     // modules now so the child can reuse them before the host eventually exits.
     flushCompileCache();
     const launched = workflowObservationSystem.spawn(cli.command, [...cli.args, '--workflow-observe', root], {
-      cwd: root, env: { ...configuration.forwardedEnvironment }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], serialization: 'advanced',
+      cwd: root, env: { ...configuration.forwardedEnvironment }, stdio: ['ignore', 'ignore', configuration.storage.debugSql ? 'inherit' : 'ignore', 'ipc'], serialization: 'advanced',
     });
     child = launched;
     const fail = (error: Error) => {

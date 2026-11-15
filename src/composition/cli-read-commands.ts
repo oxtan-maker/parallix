@@ -83,8 +83,16 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
           const { workflowObservationCapabilities } = await import('./workflow-observation.js');
           const observation = workflowObservationCapabilities(rootDir, configuration);
           const missionTerminal = observation.terminal;
+          // Boot the observer and warm its graph while the host binds and the
+          // browser loads; the first page read then joins this flight instead
+          // of paying child startup. A failure surfaces on the real read.
+          void observation.board().catch(() => undefined);
+          const [{ databaseChangeSignal }, { resolveDatabasePath }] = await Promise.all([
+            import('../adapters/sqlite/database-change-signal.js'), import('../adapters/sqlite/database-path-resolver.js'),
+          ]);
           return {
             buildProjection: observation.board,
+            changeSignal: databaseChangeSignal(resolveDatabasePath({ configuration })),
             // The same guarded BoardCommandController instance the TUI dispatches
             // through (built by composition from the production execute ports,
             // Mission services, current-work port, and Mission store). The web

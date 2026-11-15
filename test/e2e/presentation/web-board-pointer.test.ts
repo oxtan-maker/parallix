@@ -47,7 +47,8 @@ test('Mission Flow controls keep one cohort and remain keyboard-operable (TASK-2
   const { page } = fixture;
   try {
     await page.setViewportSize({ width: 1288, height: 900 });
-    await fixture.render(webProjection.snapshot(flowReferenceProjection()));
+    const flowProjection = flowReferenceProjection();
+    await fixture.render(webProjection.snapshot(flowProjection), false, [], webProjection.analytics(flowProjection));
     const flowNav = page.getByRole('button', { name: 'Flow', exact: true });
     await flowNav.focus();
     await page.keyboard.press('Enter');
@@ -284,7 +285,7 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     ? { runId: operation.runId, stream: 'stdout', from: 0, to: 27, text: 'Checkpoint terminal output\n', hasEarlier: false, atEnd: true, running: false, gaps: [] } satisfies HistoryPage
     : { missionId: mission.id, state: 'ended', probe: { kind: 'absent' }, operations: [operation], unattributed: [], notices: [] } satisfies HistoryOverview }));
   await page.route('**/api/commands', route => route.fulfill({ json: {
-    kind: 'command-result', transportVersion: 3, status: 'completed', error: null, durableEvidence: [],
+    kind: 'command-result', transportVersion: 4, status: 'completed', error: null, durableEvidence: [],
     value: { missionId: mission.id, version: 1, title: mission.title, description: '', context: '', labels: [], successCriteria: ['visible'], successCriterionIds: ['sc-1'], dependencies: [] },
   } }));
   try {

@@ -1,11 +1,14 @@
 /**
  * The top bar: repository identity, the server's own WIP and attention
  * counts, and the agent-family strip as the reference's rounded pills. Every
- * number here is the server's; the bar computes no rate and no average.
+ * number here is the server's; the bar computes no rate and no average. The
+ * historical throughput figure comes from the analytics family, so it is shown
+ * as pending, stale or unknown whenever that family was not observed fresh.
  */
 import type { WebBoardSnapshot } from '../../src/interfaces/web/transport.js';
+import type { AnalyticsState } from './board-data.js';
 import { C, DISPLAY, FLOW, FLOW_TYPE, RADIUS, SPACE, TRACK, TYPE } from './palette.js';
-import { familyAccent, sessionsText } from './format.js';
+import { familyAccent, sessionsText, throughputText } from './format.js';
 
 export type BoardView = 'board' | 'flow';
 
@@ -44,13 +47,13 @@ export function ViewNav({ view, onNavigate, compact = false }: { view: BoardView
   );
 }
 
-export function TopBar({ snapshot, onNavigate, onCreate }: {
+export function TopBar({ snapshot, analytics, onNavigate, onCreate }: {
   snapshot: WebBoardSnapshot;
+  analytics: AnalyticsState;
   onNavigate: (view: BoardView) => void;
   onCreate: (opener: HTMLButtonElement) => void;
 }) {
   const wip = snapshot.inFlightWip;
-  const throughput = snapshot.metrics.weeklyCompletedMissions;
   return (
     <header
       style={{
@@ -72,7 +75,7 @@ export function TopBar({ snapshot, onNavigate, onCreate }: {
       </div>
       <div style={{ color: C.dim, whiteSpace: 'nowrap', flexShrink: 0, fontSize: TYPE.meta, letterSpacing: TRACK.normal }}>
         {snapshot.wipCounts.length > 0 && <>wip <span style={{ color: C.text }}>{wip}</span> · </>}
-        {throughput === null || throughput === undefined ? 'missions/wk unknown · ' : `${throughput} missions/wk · `}
+        {throughputText(analytics)} ·
         attention <span style={{ color: C.amber }}>{snapshot.attentionQueue.length}</span>
       </div>
       <div style={{ flex: 1, minWidth: SPACE.lg }} />

@@ -8,6 +8,7 @@
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { BoardProjection } from '../../application/projections/board.js';
+import type { BoardWakeSource } from '../../application/projections/board-subscription.js';
 import type {
   BoardCommandDispatcher,
   BoardProgressSink,
@@ -30,6 +31,8 @@ export interface WebBoardSource {
   readonly commandDispatcher?: BoardCommandDispatcher | null;
   /** The application's mission terminal capability, read-only part. */
   readonly missionTerminal?: WebMissionTerminal;
+  /** Hints that durable state changed, so the host refreshes before its next poll. */
+  readonly changeSignal?: BoardWakeSource;
   /** Releases the services behind the source; runs when the host shuts down. */
   readonly close: () => Promise<void>;
 }
@@ -94,6 +97,9 @@ export async function runWebCommand(args: string[] = [], cli: WebCliOptions = {}
       : undefined,
     missionTerminal: cli.createBoardSource
       ? () => source?.missionTerminal ?? null
+      : undefined,
+    changeSignal: cli.createBoardSource
+      ? () => source?.changeSignal ?? null
       : undefined,
   });
   let info: WebHostInfo;

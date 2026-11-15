@@ -9,5 +9,6 @@ export async function workflowHttp(host: WebHostInfo) {
       headers: { origin: host.origin, cookie: `${sessionCookieName(host)}=${token}`, 'x-px-csrf': token, 'content-type': 'application/json' },
       body: JSON.stringify({ missionId, kind: 'active:execute', missionStatusAtRequest: 'refined', requestKey }) }),
     snapshot: async () => (await fetch(`${host.origin}/api/board`)).json(),
+    analytics: async () => (await fetch(`${host.origin}/api/board/analytics`)).json(),
   };
 }

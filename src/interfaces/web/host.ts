@@ -21,12 +21,13 @@ import * as crypto from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { createSharedProjection } from './shared-build.js';
 import { registerBoardReadRoutes } from './board-read-routes.js';
-export { WEB_MISSION_DETAIL_PATH, WEB_SNAPSHOT_PATH, type WebBoardSnapshotError } from './board-read-routes.js';
+export { WEB_BOARD_ANALYTICS_PATH, WEB_MISSION_DETAIL_PATH, WEB_SNAPSHOT_PATH, type WebBoardSnapshotError } from './board-read-routes.js';
 import type { BoardProjection } from '../../application/projections/board.js';
 import {
   subscribeToBoardProjection,
   boardFingerprint,
   type BoardSubscriptionOptions,
+  type BoardWakeSource,
 } from '../../application/projections/board-subscription.js';
 import type {
   BoardCommandDispatcher,
@@ -47,7 +48,7 @@ import {
   type LoopbackLiteral,
 } from './security.js';
 import { createShellBootstrap } from './shell-bootstrap.js';
-import { errorMessage } from './host-support.js';
+import { analyticsFamilyFreshness, errorMessage } from './host-support.js';
 import { registerTerminalRoute, type WebMissionTerminal } from './terminal-route.js';
 export { WEB_TERMINAL_PATH, WEB_TERMINAL_HISTORY_PATH, WEB_TERMINAL_LIVE_PATH, WEB_TERMINAL_SEARCH_PATH, type WebMissionTerminal } from './terminal-route.js';
 
@@ -97,6 +98,12 @@ export interface WebHostOptions {
    * default `BOARD_REFRESH_INTERVAL_MS` poll.
    */
   subscription?: BoardSubscriptionOptions;
+  /**
+   * Durable-change hint injected by composition (never a watcher the web layer
+   * builds itself). Read at start, like `commandDispatcher`, because the board
+   * source is resolved after the host is constructed.
+   */
+  changeSignal?: () => BoardWakeSource | null;
   missionTerminal?: () => WebMissionTerminal | null; // Mission history reads (TASK-2749); `null` when not wired.
 }
 
@@ -135,6 +142,11 @@ export function createWebHost(options: WebHostOptions): WebHost {
       displayedCountdown: options.subscription?.displayedCountdown,
       deferredDetails: true,
     })).digest('hex'),
+    undefined,
+    // One freshness per family: the historical analytics family reports its own
+    // observation, so a deferred or failed historical refresh cannot demote the
+    // current workflow families (TASK-2854.04).
+    projection => ({ analytics: analyticsFamilyFreshness(projection) }),
   );
   const { manifest } = options.assets;
   if (manifest['index.html'] === undefined) {
@@ -199,14 +211,16 @@ export function createWebHost(options: WebHostOptions): WebHost {
       const source = projectionSource;
       if (source !== undefined) {
         // The only board-change detector in web code. No SQLite, no Git, no
-        // process scan, no watcher: one shared subscription that publishes a
-        // payload-free "refetch" when the fingerprint moves or freshness
-        // recovers from stale to fresh (ADR 0051).
+        // process scan, no watcher of its own: one shared subscription that
+        // publishes a payload-free "refetch" when the fingerprint moves or
+        // freshness recovers from stale to fresh (ADR 0051). Composition may
+        // inject a durable-change hint that only brings the next poll forward.
         unsubscribeProjection = subscribeToBoardProjection(
           () => source.refresh(),
           () => { stream.publishInvalidation(); },
           {
             ...options.subscription,
+            wakeSource: options.subscription?.wakeSource ?? options.changeSignal?.() ?? undefined,
             onError: (error) => {
               // A failed rebuild is surfaced, never fabricated into an empty
               // board, and the subscription keeps ticking so the next attempt

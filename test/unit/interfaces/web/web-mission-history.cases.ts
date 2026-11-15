@@ -103,8 +103,11 @@ test('selecting a mission card opens retained mission history through GET reads 
   await view.click('[data-board-card]');
   assert.match(view.dialog(), /mission history/);
   assert.match(view.dialog(), /No terminal and no retained history for this mission/);
-  assert.ok(view.reads.length > 0 && view.reads.every(read => read.init?.method === undefined), 'history reads never send a mutation method');
-  assert.ok(view.reads.every(read => read.path.startsWith(`/api/terminal/${encodeURIComponent(MISSION)}`)), 'the browser passes only the canonical Mission ID');
+  const historyReads = view.reads.filter(read => read.path.startsWith('/api/terminal/'));
+  assert.ok(historyReads.length > 0 && historyReads.every(read => read.init?.method === undefined), 'history reads never send a mutation method');
+  assert.ok(historyReads.every(read => read.path.startsWith(`/api/terminal/${encodeURIComponent(MISSION)}`)), 'the browser passes only the canonical Mission ID');
+  assert.deepEqual(view.reads.filter(read => !read.path.startsWith('/api/terminal/')).map(read => read.path),
+    ['/api/board/analytics'], 'the historical analytics family is read separately from history (TASK-2854.04)');
   const dialog = view.mount.querySelector<DomHtmlElement>('[role="dialog"]');
   assert.ok(dialog);
   const style = dialog.getAttribute('style') ?? '';

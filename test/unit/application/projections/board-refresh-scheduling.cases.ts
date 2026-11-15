@@ -1,7 +1,7 @@
 // Regression provenance: TASK-2373.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BOARD_IDLE_REFRESH_INTERVAL_MS, BOARD_REFRESH_INTERVAL_MS, boardFingerprint, subscribeToBoardProjection } from '../../../../src/application/projections/board-subscription.js';
+import { BOARD_IDLE_REFRESH_INTERVAL_MS, BOARD_REFRESH_INTERVAL_MS, BOARD_WAKE_DEBOUNCE_MS, boardFingerprint, subscribeToBoardProjection } from '../../../../src/application/projections/board-subscription.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
@@ -64,6 +64,99 @@ test('SC6: a recovery-only state change (confirmed provider count) repaints the 
   assert.equal(changes, 2, 'a change limited to the confirmed provider count triggers a repaint');
   unsubscribe();
 });
+
+test('a durable-change wake replaces the pending poll with one debounced refresh (TASK-2854.04)', async () => {
+  const timers = new Map<number, { callback: () => void; ms: number }>();
+  let nextHandle = 0;
+  let wake: (() => void) | undefined;
+  let stopped = 0;
+  let builds = 0;
+  const unsubscribe = subscribeToBoardProjection(async () => { builds += 1; return makeProjection(); }, () => {}, {
+    setTimer: (callback, ms) => { timers.set(++nextHandle, { callback, ms }); return nextHandle; },
+    clearTimer: handle => { timers.delete(handle as number); },
+    wakeSource: callback => { wake = callback; return () => { stopped += 1; }; },
+  });
+  assert.equal(timers.size, 1);
+  wake!(); wake!(); wake!();
+  assert.deepEqual([...timers.values()].map(timer => timer.ms), [BOARD_WAKE_DEBOUNCE_MS],
+    'a burst of wakes leaves one debounced timer in place of the pending poll');
+  const [handle, due] = [...timers][0]!;
+  timers.delete(handle);
+  due.callback();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(builds, 1);
+  assert.ok([...timers.values()].some(timer => timer.ms >= BOARD_REFRESH_INTERVAL_MS), 'the poll resumes after the woken refresh');
+  unsubscribe();
+  assert.equal(stopped, 1, 'unsubscribing stops the wake source');
+  wake!();
+  assert.equal(builds, 1, 'a wake after unsubscribe builds nothing');
+});
+
+test('a wake during a running refresh queues one follow-up without overlap (TASK-2854.04)', async () => {
+  const timers = new Map<number, () => void>();
+  let nextHandle = 0;
+  let wake: (() => void) | undefined;
+  let active = 0;
+  let peak = 0;
+  let builds = 0;
+  let release: (() => void) | undefined;
+  const unsubscribe = subscribeToBoardProjection(async () => {
+    builds += 1; active += 1; peak = Math.max(peak, active);
+    await new Promise<void>((resolve) => { release = resolve; });
+    active -= 1;
+    return makeProjection();
+  }, () => {}, {
+    setTimer: callback => { timers.set(++nextHandle, callback); return nextHandle; },
+    clearTimer: handle => { timers.delete(handle as number); },
+    wakeSource: callback => { wake = callback; return () => {}; },
+  });
+  fire(timers);
+  await new Promise((resolve) => setImmediate(resolve));
+  wake!(); wake!();
+  assert.equal(active, 1);
+  release!();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(timers.size, 1, 'the follow-up replaces the poll rather than adding to it');
+  fire(timers);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(builds, 2);
+  assert.equal(peak, 1);
+  release!();
+  unsubscribe();
+});
+
+test('a wake during failing builds never replaces the failure backoff (TASK-2854.04)', async () => {
+  const timers = new Map<number, { callback: () => void; ms: number }>();
+  let nextHandle = 0;
+  let wake: (() => void) | undefined;
+  let builds = 0;
+  const unsubscribe = subscribeToBoardProjection(async () => { builds += 1; throw new Error('observer unavailable'); }, () => {}, {
+    setTimer: (callback, ms) => { timers.set(++nextHandle, { callback, ms }); return nextHandle; },
+    clearTimer: handle => { timers.delete(handle as number); },
+    wakeSource: callback => { wake = callback; return () => {}; },
+    onError: () => {},
+  });
+  const fireNext = async () => {
+    const [handle, due] = [...timers][0]!;
+    timers.delete(handle);
+    due.callback();
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+  await fireNext();
+  assert.equal(builds, 1);
+  const backoff = [...timers.values()].map(timer => timer.ms);
+  assert.equal(backoff.length, 1);
+  wake!(); wake!();
+  assert.deepEqual([...timers.values()].map(timer => timer.ms), backoff, 'a wake after a failure leaves the backoff timer in place');
+  assert.equal(builds, 1, 'external writes do not rebuild a failing board');
+  unsubscribe();
+});
+
+function fire(timers: Map<number, () => void>): void {
+  const [handle, callback] = [...timers][0]!;
+  timers.delete(handle);
+  callback();
+}
 
 function withProviderCount(count: number): BoardProjection {
   const projection = makeProjection();

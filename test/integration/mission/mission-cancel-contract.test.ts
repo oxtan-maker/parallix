@@ -550,10 +550,14 @@ describe('Cancel surfaces', () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     globalThis.requestAnimationFrame = (callback) => { callback(0); return 0; };
     const calls: RequestInit[] = [];
-    globalThis.fetch = async (_url, init) => {
+    globalThis.fetch = async (url, init) => {
+      // The historical analytics family is its own GET (TASK-2854.04); it is not a command.
+      if (String(url).endsWith('/api/board/analytics')) {
+        return new Response(JSON.stringify(webProjection.analytics(makeProjection({}))), { headers: { 'content-type': 'application/json' } });
+      }
       calls.push(init!);
       return new Response(
-        JSON.stringify({ kind: 'command-result', transportVersion: 3, status: 'completed', value: { slug: SLUG, cleanupCommand: 'git worktree remove /tmp/x && git branch -D mission/x' }, error: null, durableEvidence: [] }),
+        JSON.stringify({ kind: 'command-result', transportVersion: 4, status: 'completed', value: { slug: SLUG, cleanupCommand: 'git worktree remove /tmp/x && git branch -D mission/x' }, error: null, durableEvidence: [] }),
         { headers: { 'content-type': 'application/json' } },
       );
     };

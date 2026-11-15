@@ -191,6 +191,7 @@ export class SqliteDatabaseAdapter {
   /** Synchronous counterpart of `query`. */
   querySync<T extends QueryRow>(sql: string, params?: readonly SQLInputValue[]): readonly T[] {
     this.assertOpen();
+    this.traceSql('query', sql);
     const stmt = this.db!.prepare(sql);
     const rows = (params && params.length > 0
       ? stmt.all(...params) as T[]
@@ -257,9 +258,7 @@ export class SqliteDatabaseAdapter {
   async execute(sql: string, params?: readonly SQLInputValue[]): Promise<number> {
     this.assertOpen();
     const debug = this._configuration.storage.debugSql;
-    if (debug) {
-      process.stderr.write(`[sql-exec] ${this.config?.path ?? 'unknown'} | ${sql.trim().replace(/\s+/g, ' ').slice(0, 120)}\n`);
-    }
+    this.traceSql('exec', sql);
     try {
       if (params && params.length > 0) {
         const result = this.db!.prepare(sql).run(...params);
@@ -272,6 +271,12 @@ export class SqliteDatabaseAdapter {
       this.writeFailureDiagnostic(debug);
       throw err;
     }
+  }
+
+  /** One debug line per statement under PARALLIX_DEBUG_SQL, so a run's statement counts are observable. */
+  private traceSql(kind: 'exec' | 'query', sql: string): void {
+    if (!this._configuration.storage.debugSql) { return; }
+    process.stderr.write(`[sql-${kind}] ${this.config?.path ?? 'unknown'} | ${sql.trim().replace(/\s+/g, ' ').slice(0, 120)}\n`);
   }
 
   private writeFailureDiagnostic(debug: ParallixConfiguration['storage']['debugSql']): void {
@@ -293,12 +298,7 @@ export class SqliteDatabaseAdapter {
     sql: string,
     params?: readonly SQLInputValue[],
   ): Promise<readonly T[]> {
-    this.assertOpen();
-    const stmt = this.db!.prepare(sql);
-    const rows = (params && params.length > 0
-      ? stmt.all(...params) as T[]
-      : stmt.all() as T[]);
-    return Object.freeze(rows);
+    return this.querySync<T>(sql, params);
   }
 
   /**

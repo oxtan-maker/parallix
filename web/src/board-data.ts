@@ -1,19 +1,23 @@
 import type { WebEditMissionRequest } from '../../src/interfaces/web/transport-edit-mission.js';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 /**
- * The browser's only network read: `GET /api/board`, validated by the shared
- * transport contract (`src/interfaces/web/transport.ts`) before anything
- * renders. Every failure the contract distinguishes stays a distinct state —
+ * The browser's typed reads, one per board data family, each validated by the
+ * shared transport contract (`src/interfaces/web/transport.ts`) before anything
+ * renders: the current workflow snapshot (`GET /api/board`), the historical
+ * analytics family (`GET /api/board/analytics`) and the on-demand mission
+ * detail. Every failure the contract distinguishes stays a distinct state —
  * a transport-rejected payload never degrades into "no data", and a previously
- * fetched snapshot is never shown as current (ADR 0054, ADR 0055).
+ * fetched family is never shown as current (ADR 0054, ADR 0055, TASK-2854.04).
  *
- * No caching, no retry, no polling: `board-sync.ts` decides when to read, and
- * each call performs exactly one read.
+ * No caching, no retry, no polling: `board-sync.ts` decides when to read the
+ * workflow family, and each call performs exactly one read.
  */
-import { validateWebBoardSnapshot, validateWebMissionDetail, validateWebCommandResult, type WebBoardSnapshot, type WebMissionDetail, type WebCommandRequest, type WebCommandResult, type WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
+import { validateWebBoardSnapshot, validateWebBoardAnalytics, validateWebMissionDetail, validateWebCommandResult, type WebBoardAnalytics, type WebProjectionFreshness, type WebBoardSnapshot, type WebMissionDetail, type WebCommandRequest, type WebCommandResult, type WebCreateMissionRequest } from '../../src/interfaces/web/transport.js';
 
 /** The snapshot read path. This client has no mutation route. */
 export const SNAPSHOT_PATH = '/api/board';
+/** The historical analytics family's own read path (TASK-2854.04). */
+export const BOARD_ANALYTICS_PATH = '/api/board/analytics';
 export const COMMANDS_PATH = '/api/commands';
 export const missionDetailPath = (missionId: string) => `/api/board/${encodeURIComponent(missionId)}/detail`;
 
@@ -27,6 +31,20 @@ export type SnapshotState =
 
 /** A settled state: `loadSnapshot` never resolves to `loading`. */
 export type SettledSnapshotState = Exclude<SnapshotState, { kind: 'loading' }>;
+
+/**
+ * The analytics family's own read state. It is never derived from the snapshot
+ * state: a fresh board says nothing about whether historical metrics were
+ * observed, and a deferred historical build says nothing about the board.
+ */
+export type AnalyticsState =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly analytics: WebBoardAnalytics }
+  | { readonly kind: 'request-failed'; readonly detail: string }
+  | { readonly kind: 'malformed'; readonly problems: readonly string[] }
+  | { readonly kind: 'incompatible'; readonly received: unknown; readonly supported: readonly number[] };
+
+export type SettledAnalyticsState = Exclude<AnalyticsState, { kind: 'loading' }>;
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -60,6 +78,100 @@ export async function loadSnapshot(): Promise<SettledSnapshotState> {
     return { kind: 'malformed', problems: validation.problems };
   }
   return { kind: 'ready', snapshot: validation.value };
+}
+
+/** Read the historical analytics family once, apart from the workflow snapshot. */
+export async function loadAnalytics(): Promise<SettledAnalyticsState> {
+  let response: Response;
+  try {
+    response = await fetch(BOARD_ANALYTICS_PATH, { headers: { accept: 'application/json' } });
+  } catch (error) {
+    return { kind: 'request-failed', detail: describe(error) };
+  }
+  if (!response.ok) {
+    return { kind: 'request-failed', detail: `HTTP ${response.status} ${response.statusText}`.trim() };
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    return { kind: 'malformed', problems: [`response body is not JSON: ${describe(error)}`] };
+  }
+  const validation = validateWebBoardAnalytics(payload);
+  if ('supported' in validation) {
+    return { kind: 'incompatible', received: validation.received, supported: validation.supported };
+  }
+  if ('problems' in validation) {
+    return { kind: 'malformed', problems: validation.problems };
+  }
+  return { kind: 'ready', analytics: validation.value };
+}
+
+/** How far a rendered historical value may be claimed as current. */
+export type AnalyticsPresentation = 'pending' | 'fresh' | 'stale' | 'unavailable';
+
+export function analyticsPresentation(state: AnalyticsState): AnalyticsPresentation {
+  if (state.kind === 'loading') { return 'pending'; }
+  if (state.kind !== 'ready') { return 'unavailable'; }
+  const freshness = state.analytics.freshness;
+  return freshness.state === 'fresh' ? 'fresh' : freshness.state === 'stale' ? 'stale' : 'unavailable';
+}
+
+/** Why the analytics family cannot be shown as current, in its own words. */
+export function analyticsReason(state: AnalyticsState): string {
+  if (state.kind === 'loading') { return 'historical analytics are being observed on their own read'; }
+  if (state.kind === 'ready') {
+    const freshness = state.analytics.freshness;
+    return freshness.reason ?? `historical analytics are ${freshness.state}`;
+  }
+  if (state.kind === 'request-failed') { return `historical analytics read failed: ${state.detail}`; }
+  if (state.kind === 'malformed') { return `historical analytics payload is invalid: ${state.problems.join('; ')}`; }
+  return `historical analytics transport ${String(state.received)} is incompatible`;
+}
+
+/**
+ * Identity of one completed workflow observation. A new key means the host
+ * published a refreshed observation, including a recovery from stale under an
+ * unchanged revision, so the analytics family must be read again.
+ */
+export function workflowObservationKey(freshness: WebProjectionFreshness): string {
+  return `${freshness.revision ?? ''}|${freshness.state}|${freshness.refreshedAt ?? ''}`;
+}
+
+/**
+ * One analytics state machine: read on mount, re-observe on demand and whenever
+ * the workflow observation moves, never assume fresh. `observed` is the
+ * `workflowObservationKey` the board currently shows; the board fingerprint
+ * includes the historical evidence, so a new observation means the retained
+ * analytics may be out of date. Until the new read answers, a retained value is shown stale.
+ */
+export function useBoardAnalytics(observed: string | null): { readonly state: AnalyticsState; readonly reobserve: () => void } {
+  // Each read remembers the observation it answered, so a newer observation is
+  // recognised during render and never presents the retained read as current.
+  const [read, setRead] = useState<{ readonly state: AnalyticsState; readonly answered: string | null }>({ state: { kind: 'loading' }, answered: observed });
+  const [observation, setObservation] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void loadAnalytics().then(result => { if (live) { setRead({ state: result, answered: observed }); } });
+    return () => { live = false; };
+  }, [observation, observed]);
+  const reobserve = useCallback(() => {
+    setRead(current => ({ state: { kind: 'loading' }, answered: current.answered }));
+    setObservation(value => value + 1);
+  }, []);
+  return { reobserve, state: presentAnalyticsRead(read, observed) };
+}
+
+/**
+ * What a retained read may claim for the observation now shown: a fresh value
+ * that answered an older observation is stale until its replacement settles.
+ * Derived during render, so no commit ever shows it as current.
+ */
+export function presentAnalyticsRead(read: { readonly state: AnalyticsState; readonly answered: string | null }, observed: string | null): AnalyticsState {
+  const { state } = read;
+  if (read.answered === observed || state.kind !== 'ready' || state.analytics.freshness.state !== 'fresh') { return state; }
+  return { kind: 'ready', analytics: { ...state.analytics, freshness: { ...state.analytics.freshness,
+    state: 'stale', reason: 'historical analytics are being re-observed after the board changed' } } };
 }
 
 /** Explain why deferred facts do not describe the rendered board projection. */

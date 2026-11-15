@@ -7,6 +7,7 @@ import {
   toWebBoardSnapshot,
   toWebCommandResult,
   toWebProgressEvent,
+  validateWebBoardAnalytics,
   validateWebBoardSnapshot,
   validateWebMissionDetail,
   validateWebCommandResult,
@@ -32,34 +33,37 @@ import type { AgentAvailabilityMetric } from '../../../../src/application/projec
 test('web FLOW transport carries shared verification wording without recalculation (px-0025)', () => {
   const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
   const flow = flowStatistics([], weeklyDecisionWindows('2026-11-03', 'UTC'));
-  const snapshot = webProjection.snapshot(makeProjection({}));
   const projection = { ...makeProjection({}), metrics: { ...emptyMetrics, verification, flow } };
-  const output = webProjection.snapshot(projection);
-  assert.ok(snapshot.metrics.verification);
+  // Historical metrics ride the analytics envelope, not the workflow snapshot (TASK-2854.04).
+  const output = webProjection.analytics(projection);
+  assert.ok(!('metrics' in webProjection.snapshot(projection)), 'the workflow snapshot never carries the historical family');
+  assert.ok(output.metrics.verification);
   assert.match(output.metrics.verification!.join('\n'), /historical work is unavailable, not zero/);
   assert.deepEqual(output.metrics.flow, flow);
-  const parsed = validateWebBoardSnapshot(JSON.parse(JSON.stringify(output)));
+  const parsed = validateWebBoardAnalytics(JSON.parse(JSON.stringify(output)));
   assert.ok(parsed.ok);
   assert.deepEqual(parsed.value, output);
   const stage = { repositoryId: 'repo', missionId: 'px-1', stage: 'direct-rebase', state: 'measured',
     operationId: 'operation', sourceId: 'source', reason: 'retained terminal rebase outcome', outcomes: ['conflict', 'resolved'] };
   const withStage = { ...output, metrics: { ...output.metrics, flow: { ...flow,
     current: { ...flow.current, rebaseStages: { visible: [stage], omitted: 0 } } } } };
-  assert.equal(validateWebBoardSnapshot(withStage).ok, true, 'typed stage outcomes survive web transport');
-  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: { ...flow,
+  assert.equal(validateWebBoardAnalytics(withStage).ok, true, 'typed stage outcomes survive web transport');
+  assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: { ...flow,
     current: { ...flow.current, defects: [{ kind: 'coverage' }] },
   } } } as unknown).ok, false, 'internal diagnostic records are rejected at the web boundary');
-  assert.equal(validateWebBoardSnapshot({ ...withStage, metrics: { ...withStage.metrics, flow: { ...withStage.metrics.flow!,
+  assert.equal(validateWebBoardAnalytics({ ...withStage, metrics: { ...withStage.metrics, flow: { ...withStage.metrics.flow!,
     current: { ...withStage.metrics.flow!.current,
       rebaseStages: { visible: [{ ...stage, outcomes: ['invented'] }], omitted: 0 } } } } }).ok, false);
-  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, verification: [4] } }).ok, false);
-  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: [] } }).ok, false);
-  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: {
+  assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, verification: [4] } }).ok, false);
+  assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: [] } }).ok, false);
+  assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: {
     ...flow, current: { ...flow.current, firstPassYield: { ...flow.current.firstPassYield, value: '100%' } },
-  } } }).ok, false);
-  assert.equal(validateWebBoardSnapshot({ ...output, metrics: { ...output.metrics, flow: {
+  } } } as unknown).ok, false);
+  assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: {
     ...flow, current: { ...flow.current, time: { ...flow.current.time, unobservedMs: 'unknown' } },
-  } } }).ok, false);
+  } } } as unknown).ok, false);
+  assert.equal(validateWebBoardAnalytics({ ...output, freshness: { ...output.freshness, state: 'expired' } } as unknown).ok, false,
+    'the analytics family states only the freshness it observed');
 });
 import type { LiveMissionWork, MissionCard, ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -816,12 +820,20 @@ test('snapshot validation accepts the extended card and fails closed on malforme
   }
 });
 
-test('transport version 3 rejects v2 payloads as incompatible clients, not invalid payloads', () => {
-  assert.equal(WEB_TRANSPORT_VERSION, 3);
-  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [3]);
+test('transport version 4 rejects v2 and v3 payloads as incompatible clients, not invalid payloads', () => {
+  assert.equal(WEB_TRANSPORT_VERSION, 4);
+  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [4]);
 
   const snapshot = webProjection.snapshot(makeProjection({}));
-  assert.equal(snapshot.transportVersion, 3);
+  assert.equal(snapshot.transportVersion, 4);
+  // v3 carried historical metrics inside the snapshot; a v3 client must be
+  // told its transport is incompatible rather than shown a partial payload.
+  const v3Snapshot = validateWebBoardSnapshot({ ...snapshot, metrics: {}, transportVersion: 3 });
+  assert.equal(v3Snapshot.ok, false);
+  assert.ok(!v3Snapshot.ok && v3Snapshot.code === 'incompatible-client', 'a v3 snapshot is rejected as an incompatible transport');
+  const v3Analytics = validateWebBoardAnalytics({ ...webProjection.analytics(makeProjection({})), transportVersion: 3 });
+  assert.equal(v3Analytics.ok, false);
+  assert.ok(!v3Analytics.ok && v3Analytics.code === 'incompatible-client', 'a v3 analytics payload is rejected as an incompatible transport');
 
   const v2Snapshot = validateWebBoardSnapshot({ ...snapshot, transportVersion: 2 });
   assert.deepStrictEqual(v2Snapshot, {
@@ -829,7 +841,7 @@ test('transport version 3 rejects v2 payloads as incompatible clients, not inval
     code: 'incompatible-client',
     field: 'transportVersion',
     received: 2,
-    supported: [3],
+    supported: [4],
   });
 
   const v2Result = validateWebCommandResult({
@@ -898,11 +910,11 @@ test('stamped checkpoint repair evidence validates after web projection (TASK-26
   assert.equal(validateWebBoardSnapshot(empty).ok, true);
 });
 
-test('snapshot metrics are projected and malformed metrics fail closed', () => {
-  const snapshot = webProjection.snapshot(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 } } }));
-  assert.equal(snapshot.metrics.health.state, 'healthy');
-  assert.equal(snapshot.metrics.provenance.sampleSize, 3);
-  assert.equal(validateWebBoardSnapshot({ ...snapshot, metrics: {} }).ok, false);
+test('analytics metrics are projected and malformed metrics fail closed', () => {
+  const analytics = webProjection.analytics(projectionWith({ metrics: { ...emptyMetrics, health: { state: 'healthy' }, provenance: { ...emptyMetrics.provenance, sampleSize: 3 } } }));
+  assert.equal(analytics.metrics.health.state, 'healthy');
+  assert.equal(analytics.metrics.provenance.sampleSize, 3);
+  assert.equal(validateWebBoardAnalytics({ ...analytics, metrics: {} }).ok, false);
 });
 
 test('conversion is pure: the source projection is not mutated and the output is deterministic', () => {
@@ -926,13 +938,13 @@ test('conversion is pure: the source projection is not mutated and the output is
 });
 
 test('weekly delivery count survives transport and rejects malformed values (TASK-2688)', () => {
-  const snapshot = webProjection.snapshot(projectionWith({}));
+  const analytics = webProjection.analytics(projectionWith({}));
   for (const value of [0, 3]) {
-    const wire = { ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: value } };
-    assert.equal(validateWebBoardSnapshot(JSON.parse(JSON.stringify(wire))).ok, true);
+    const wire = { ...analytics, metrics: { ...analytics.metrics, weeklyCompletedMissions: value } };
+    assert.equal(validateWebBoardAnalytics(JSON.parse(JSON.stringify(wire))).ok, true);
   }
   for (const value of ['3', Number.NaN, Number.POSITIVE_INFINITY]) {
-    assert.equal(validateWebBoardSnapshot({ ...snapshot, metrics: { ...snapshot.metrics, weeklyCompletedMissions: value } }).ok, false);
+    assert.equal(validateWebBoardAnalytics({ ...analytics, metrics: { ...analytics.metrics, weeklyCompletedMissions: value } } as unknown).ok, false);
   }
 });
 

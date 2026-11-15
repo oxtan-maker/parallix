@@ -463,8 +463,11 @@ action for that mission clears or replaces it.
 The web host keeps one completed board projection. Change detection performs the
 next build; every connected browser reuses that completed result, including
 checkpoint, review and terminal detail reads, until detection replaces it.
-Snapshot and detail responses identify the projection and its observation time.
-After a board command changes state, its response waits for the same retained
+The current workflow board, the historical analytics family and mission detail
+answer on their own paths, and each response carries the freshness of the family
+it delivers: its state, its revision, when it was observed and why it is not
+current. After a board command changes state, its response waits for the same
+retained
 projection to refresh, so the browser's immediate follow-up read cannot present
 the earlier board as fresh.
 Closing `px web` also stops its board readers.
@@ -472,10 +475,13 @@ Closing `px web` also stops its board readers.
 If a projection refresh fails, the browser keeps the last validated board visible
 with its prior identity, a stale warning and the server's failure message. A
 failure before any projection completes is unavailable, never an empty board.
-Historical FLOW reconstruction runs after the current board response. While it
-is still running, the browser keeps current mission and operation facts visible
-but marks the response stale with the analytics reason; a prior historical
-summary remains explicitly stale, and an absent summary remains unavailable.
+Historical FLOW reconstruction runs on its own read, after the current board
+response. While that read is pending the board keeps its own fresh state, and the
+flow view says the historical family is not observed yet instead of showing empty
+or zero statistics. A prior historical summary stays explicitly stale with its
+own revision, observation time and reason, and an absent summary stays
+unavailable; neither is presented as current. A stale or unavailable historical
+family offers re-observation on its own read without touching the current board.
 Stream errors request a
 coordinated refresh; only a successful read begun after the latest failure can
 clear it. Recovery reads are serial and coalesced. A failed recovery waits for

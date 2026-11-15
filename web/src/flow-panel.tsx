@@ -1,28 +1,29 @@
 /**
  * Mission flow: the board's Flow view. It renders the shared typed FLOW
- * projection (`metrics.flow`) for one visible cohort — every agent or one
+ * projection (`analytics.metrics.flow`) for one visible cohort — every agent or one
  * concrete implementer family, the current or the previous delivery window —
  * and never recomputes a count, rate, interval or attribution. Missing data
  * stays visible: an unavailable projection, unobserved nodes and the
  * projection's observation diagnostics are shown, never zeroed or hidden.
  */
 import { useState } from 'react';
-import type { WebBoardSnapshot, WebFlowWindow } from '../../src/interfaces/web/transport.js';
+import type { WebBoardAnalytics, WebBoardSnapshot, WebFlowWindow } from '../../src/interfaces/web/transport.js';
+import { analyticsPresentation, analyticsReason, type AnalyticsState } from './board-data.js';
 import { FLOW, FLOW_TYPE } from './palette.js';
 import { FlowGraph } from './flow-graph.js';
 import { FlowTimeTable, segment, type FlowSort } from './flow-time-table.js';
 import { hoursText, laneTitle, percentText, windowText } from './flow-format.js';
+import { throughputText } from './format.js';
 import { ViewNav, type BoardView } from './top-bar.js';
 
 const CONTENT_WIDTH = 1232;
 
-function FlowHeader({ snapshot, chip, onNavigate }: { readonly snapshot: WebBoardSnapshot; readonly chip: string; readonly onNavigate: (view: BoardView) => void }) {
-  const throughput = snapshot.metrics.weeklyCompletedMissions;
+function FlowHeader({ snapshot, analytics, chip, onNavigate }: { readonly snapshot: WebBoardSnapshot; readonly analytics: AnalyticsState; readonly chip: string; readonly onNavigate: (view: BoardView) => void }) {
   return <header style={{ display: 'flex', alignItems: 'center', height: 62, boxSizing: 'border-box', padding: '0 31px 0 28px', background: FLOW.header,
     borderBottom: `1px solid ${FLOW.surfaceEdge}`, flexShrink: 0, gap: 0, whiteSpace: 'nowrap', overflowX: 'auto' }}>
     <h1 style={{ margin: 0, color: FLOW.bright, fontSize: FLOW_TYPE.wordmark, fontWeight: 700, letterSpacing: 3, textTransform: 'uppercase' }}>Parallix</h1>
     <div style={{ marginLeft: 23, color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
-      @ {snapshot.repositoryId} · wip {snapshot.inFlightWip} · {throughput === undefined ? 'missions/wk unknown' : `${throughput} missions/wk`} · attention <span style={{ color: FLOW.amberText }}>{snapshot.attentionQueue.length}</span>
+      @ {snapshot.repositoryId} · wip {snapshot.inFlightWip} · {throughputText(analytics)} · attention <span style={{ color: FLOW.amberText }}>{snapshot.attentionQueue.length}</span>
     </div>
     <div style={{ flex: 1, minWidth: 16 }} />
     <ViewNav view="flow" onNavigate={onNavigate} />
@@ -99,16 +100,42 @@ function Kpis({ flow, previous }: { readonly flow: WebFlowWindow; readonly previ
   </ul>;
 }
 
-function Unavailable({ reason }: { readonly reason: string }) {
+/** One ask for a fresh observation of the analytics family, on its own read. */
+function Reobserve({ onReobserve }: { readonly onReobserve: () => void }) {
+  return <p style={{ margin: '8px 0 0' }}><button type="button" data-analytics-reobserve onClick={onReobserve}
+    style={{ background: 'none', border: `1px solid ${FLOW.surfaceEdge}`, borderRadius: 6, color: FLOW.control,
+      cursor: 'pointer', fontFamily: 'inherit', fontSize: FLOW_TYPE.meta, padding: '4px 10px' }}>
+    re-observe historical analytics
+  </button></p>;
+}
+
+/** The analytics family's own freshness, shown whenever it cannot be claimed as current. */
+function AnalyticsNotice({ analytics, onReobserve }: { readonly analytics: AnalyticsState; readonly onReobserve: () => void }) {
+  const presentation = analyticsPresentation(analytics);
+  const freshness = analytics.kind === 'ready' ? analytics.analytics.freshness : null;
+  const title = presentation === 'pending' ? 'Historical analytics not observed yet'
+    : presentation === 'stale' ? 'Historical analytics are stale' : 'Historical analytics unavailable';
+  return <section role="status" data-analytics-freshness={presentation} style={{ marginTop: 19, background: FLOW.surface,
+    border: `1px solid ${FLOW.surfaceEdge}`, borderTop: `2px solid ${FLOW.amberText}`, borderRadius: 8, padding: '14px 16px',
+    color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
+    <h2 style={{ margin: 0, color: FLOW.text, fontSize: FLOW_TYPE.heading }}>{title}</h2>
+    <p style={{ margin: '8px 0 0' }}>{analyticsReason(analytics)}</p>
+    <p style={{ margin: '4px 0 0' }}>analytics revision {freshness?.revision ?? 'unavailable'} · observed {freshness?.refreshedAt ?? 'never'}</p>
+    <Reobserve onReobserve={onReobserve} />
+  </section>;
+}
+
+function Unavailable({ reason, onReobserve }: { readonly reason: string; readonly onReobserve: () => void }) {
   return <section role="status" data-flow-region="unavailable" style={{ marginTop: 19, background: FLOW.surface, border: `1px solid ${FLOW.surfaceEdge}`,
     borderTop: `2px solid ${FLOW.red}`, borderRadius: 8, padding: '14px 16px', color: FLOW.control, fontSize: FLOW_TYPE.body }}>
     <h2 style={{ margin: 0, color: FLOW.text, fontSize: FLOW_TYPE.heading }}>FLOW statistics unavailable</h2>
     <p style={{ margin: '8px 0 0' }}>{reason}</p>
     <p style={{ margin: '4px 0 0', color: FLOW.muted }}>No flow values are shown in place of the missing projection.</p>
+    <Reobserve onReobserve={onReobserve} />
   </section>;
 }
 
-type FlowStatistics = NonNullable<WebBoardSnapshot['metrics']['flow']>;
+type FlowStatistics = NonNullable<WebBoardAnalytics['metrics']['flow']>;
 
 function FlowFilters({ statistics, selected, previous, onSelectFamily, onTogglePrevious }: {
   readonly statistics: FlowStatistics | undefined; readonly selected: string | null; readonly previous: boolean;
@@ -167,28 +194,46 @@ function FlowData({ flow, previous, sort, onSort }: { readonly flow: WebFlowWind
   </>;
 }
 
+/** Why no FLOW values render, in the analytics family's own words. */
+function flowUnavailableReason(analytics: AnalyticsState): string {
+  if (analytics.kind !== 'ready' || analyticsPresentation(analytics) !== 'fresh') { return analyticsReason(analytics); }
+  return analytics.analytics.metrics.flowUnavailable ?? 'The analytics family carries no FLOW statistics.';
+}
+
 function flowChip(flow: WebFlowWindow | undefined): string {
   if (!flow) { return 'unavailable'; }
   if (flow.completedMissions > 0 && flow.observation.complete === flow.completedMissions) { return 'measured'; }
   return `${flow.observation.complete} of ${flow.completedMissions} measured`;
 }
 
-export function FlowPanel({ snapshot, onNavigate }: { readonly snapshot: WebBoardSnapshot; readonly onNavigate: (view: BoardView) => void }) {
+export function FlowPanel({ snapshot, analytics, onReobserve, onNavigate }: {
+  readonly snapshot: WebBoardSnapshot; readonly analytics: AnalyticsState;
+  readonly onReobserve: () => void; readonly onNavigate: (view: BoardView) => void }) {
   const [family, setFamily] = useState<string | null>(null);
   const [previous, setPrevious] = useState(false);
   const [sort, setSort] = useState<FlowSort>('mission');
-  const statistics = snapshot.metrics.flow;
+  // FLOW statistics come from the analytics family only; the workflow snapshot
+  // never carries them (TASK-2854.04). A family that was not observed, or whose
+  // own freshness says unavailable, renders no historical values.
+  const presentation = analyticsPresentation(analytics);
+  const statistics = presentation === 'fresh' || presentation === 'stale'
+    ? (analytics.kind === 'ready' ? analytics.analytics.metrics.flow : undefined)
+    : undefined;
   const cohort = (family === null ? undefined : statistics?.families.find(item => item.family === family)) ?? statistics;
   const selected = cohort === statistics ? null : family;
   const flow = cohort ? previous ? cohort.previous : cohort.current : undefined;
   return <div data-flow-view style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', background: FLOW.page, color: FLOW.text }}>
-    <FlowHeader snapshot={snapshot} chip={flowChip(flow)} onNavigate={onNavigate} />
+    <FlowHeader snapshot={snapshot} analytics={analytics} chip={flowChip(flow)} onNavigate={onNavigate} />
     <div style={{ flex: 1, overflow: 'auto' }}>
       <div role="region" aria-label="Mission flow" style={{ boxSizing: 'border-box', maxWidth: CONTENT_WIDTH + 56, padding: '0 28px 82px' }}>
         <FlowControls flow={flow} statistics={statistics} selected={selected} previous={previous}
           onSelectFamily={setFamily} onTogglePrevious={() => setPrevious(value => !value)} />
-        {!flow ? <Unavailable reason={snapshot.metrics.flowUnavailable ?? 'The board projection carries no FLOW statistics.'} />
-          : <FlowData flow={flow} previous={previous} sort={sort} onSort={setSort} />}
+        {!flow ? <>
+            {/* A stale family keeps its own state, revision and observation time even when it carries no FLOW series. */}
+            {presentation === 'stale' && <AnalyticsNotice analytics={analytics} onReobserve={onReobserve} />}
+            <Unavailable reason={flowUnavailableReason(analytics)} onReobserve={onReobserve} /></>
+          : <>{presentation !== 'fresh' && <AnalyticsNotice analytics={analytics} onReobserve={onReobserve} />}
+            <FlowData flow={flow} previous={previous} sort={sort} onSort={setSort} /></>}
       </div>
     </div>
   </div>;

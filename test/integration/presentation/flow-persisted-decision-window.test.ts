@@ -164,9 +164,10 @@ describe("production certification: persisted weekly FLOW decision surface", () 
         assert.deepEqual(new Set(done.historyCards?.map(card => card.id)),
           new Set(['task-old-unclosed', 'task-unknown-delivery']));
         const snapshot = webProjection.snapshot(projection);
-        assert.equal(snapshot.stages.find(stage => stage.lane === 'done')!.count, snapshot.metrics.weeklyCompletedMissions);
+        assert.equal(snapshot.stages.find(stage => stage.lane === 'done')!.count,
+          webProjection.analytics(projection).metrics.weeklyCompletedMissions);
         assert.equal(projection.metrics.weeklyCumulativeFlow?.series.at(-1)?.counts.done, 31);
-        assert.equal(webProjection.snapshot(projection).metrics.weeklyCompletedMissions, 31);
+        assert.equal(webProjection.analytics(projection).metrics.weeklyCompletedMissions, 31);
 
         // Hand-computed oracle: 31 current missions × 40 min; old 240 × 1000
         // min and the 28 previous missions are deliberately outside Aug 5–11.

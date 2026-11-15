@@ -1,4 +1,5 @@
 import { webProjection } from '../../../fixtures/web-projection.js';
+import { WEB_TRANSPORT_VERSION, type WebBoardAnalytics } from '../../../../src/interfaces/web/transport.js';
 import { renderBoard as renderBoardFixture } from './web-board-harness.fixture.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import test from 'node:test';
@@ -7,12 +8,13 @@ import { Window, Element as DomElement, HTMLButtonElement as DomButton, HTMLElem
 import { act } from 'react';
 import { EMPTY_FLIGHT_LANE_WIDTH_PX, FLIGHT_LANE_MIN_WIDTH_PX, restoreActionFocus } from '../../../../web/src/board.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { presentAnalyticsRead } from '../../../../web/src/board-data.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
 const action = { command: 'review', enabled: true, reason: null, targetLane: 'review' } as const;
 const cancel = { command: 'cancel', enabled: true, reason: null, targetLane: null, label: 'cancel ✕' } as const;
 const request = { missionId: 'task-2436-interaction', kind: 'review:submit', missionStatusAtRequest: 'active' };
-const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result' as const, transportVersion: 3, status, value: null, error, durableEvidence: [] });
+const commandResult = (status = 'completed', error: { readonly kind: string; readonly message: string } | null = null) => ({ kind: 'command-result' as const, transportVersion: WEB_TRANSPORT_VERSION, status, value: null, error, durableEvidence: [] });
 
 function snapshot(cards = [makeCard({ id: missionId('task-2436-interaction'), status: 'active', lane: 'active', commands: [action] })]) {
   return webProjection.snapshot(makeProjection({ active: cards }));
@@ -914,4 +916,52 @@ test('selected cards activate progress by keyboard while nested controls retain 
       assert.equal(page.mount.querySelector('[aria-label^="Mission progress for"]'), null);
     }
   } finally { await page.close(); }
+});
+
+test('the browser re-observes the analytics family when the workflow revision moves and marks the retained value stale meanwhile (TASK-2854.04)', async () => {
+  const board = snapshot();
+  const pending = { ...webProjection.analytics(makeProjection()), freshness: { state: 'unavailable' as const, revision: 'history-v1',
+    refreshedAt: null, reason: 'Historical analytics refresh is in progress.' } };
+  const base = webProjection.analytics(makeProjection());
+  const fresh = { ...base, metrics: { ...base.metrics, weeklyCompletedMissions: 7 } };
+  let answer: WebBoardAnalytics = pending;
+  const page = await renderBoard({ board, analytics: () => answer });
+  try {
+    assert.equal(page.analyticsReads, 1);
+    assert.match(page.mount.textContent ?? '', /unknown/, 'an unobserved analytics family renders no value');
+    answer = fresh;
+    await page.rerender({ ...board, freshness: { ...board.freshness } });
+    assert.equal(page.analyticsReads, 1, 'a re-render under the same workflow observation does not re-read');
+    await page.rerender({ ...board, freshness: { ...board.freshness, revision: 'workflow-next' } });
+    assert.equal(page.analyticsReads, 2, 'a new workflow revision re-observes the analytics family');
+    assert.match(page.mount.textContent ?? '', /7 missions\/wk/, 'the settled fresh read replaces the pending state');
+  } finally { await page.close(); }
+});
+
+test('the browser re-reads analytics when the workflow family recovers from stale under an unchanged revision (TASK-2854.04)', async () => {
+  const board = snapshot();
+  const base = webProjection.analytics(makeProjection());
+  const staleAnalytics = { ...base, metrics: { ...base.metrics, weeklyCompletedMissions: 3 },
+    freshness: { ...base.freshness, state: 'stale' as const, reason: 'projection refresh failed' } };
+  const recovered = { ...base, metrics: { ...base.metrics, weeklyCompletedMissions: 7 } };
+  let answer: WebBoardAnalytics = staleAnalytics;
+  const page = await renderBoard({ board, analytics: () => answer });
+  try {
+    assert.match(page.mount.textContent ?? '', /3 missions\/wk \(stale\)/);
+    answer = recovered;
+    // The host publishes the recovery with the same projection revision but a newer observation.
+    await page.rerender({ ...board, freshness: { ...board.freshness, refreshedAt: '2026-11-15T12:00:00.000Z' } });
+    assert.equal(page.analyticsReads, 2, 'a newer workflow observation re-reads even when the revision is unchanged');
+    assert.match(page.mount.textContent ?? '', /7 missions\/wk(?! \(stale\))/, 'the recovered family clears the stale state');
+  } finally { await page.close(); }
+});
+
+test('a retained fresh analytics read is presented stale in the same render a newer observation arrives (TASK-2854.04)', () => {
+  const analytics = webProjection.analytics(makeProjection());
+  const read = { state: { kind: 'ready' as const, analytics }, answered: 'rev-1|fresh|t1' };
+  assert.equal(presentAnalyticsRead(read, 'rev-1|fresh|t1'), read.state, 'the read that answered the shown observation stays fresh');
+  const next = presentAnalyticsRead(read, 'rev-1|fresh|t2');
+  assert.equal(next.kind === 'ready' && next.analytics.freshness.state, 'stale', 'a newer observation never renders the retained read fresh');
+  const unavailable = { state: { kind: 'loading' as const }, answered: 'rev-1|fresh|t1' };
+  assert.equal(presentAnalyticsRead(unavailable, 'rev-1|fresh|t2'), unavailable.state, 'a read that claimed nothing keeps its own state');
 });

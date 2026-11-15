@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { makeCard, makeProjection } from './board-projection.js';
 import { toWebBoardSnapshot } from '../../src/interfaces/web/transport.js';
 import { missionId } from '../../src/domain/mission.js';
-import type { WebCommandRequest, WebMissionDetail } from '../../src/interfaces/web/transport.js';
+import type { WebBoardAnalytics, WebCommandRequest, WebMissionDetail } from '../../src/interfaces/web/transport.js';
 import { fixtureMission } from './mission-builders.js';
 import { availableBoardCommands, type BoardCommand } from '../../src/application/projections/mission-board.js';
 
@@ -78,11 +78,18 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
   let responseDelay: Promise<void> | undefined;
   const streams = new Set<import('node:http').ServerResponse>();
   const missionDetails = new Map<string, WebMissionDetail>();
+  let analytics: WebBoardAnalytics | undefined;
   const server = createServer(async (req, res) => {
     if (req.url === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream' });
       streams.add(res); res.write(': connected\n\n');
       req.on('close', () => streams.delete(res)); return;
+    }
+    // The historical analytics family is its own read (TASK-2854.04); a case that renders
+    // history supplies it through render().
+    if (req.method === 'GET' && new URL(req.url ?? '/', 'http://fixture').pathname === '/api/board/analytics' && analytics !== undefined) {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(analytics)); return;
     }
     const detailMatch = /^\/api\/board\/([^/]+)\/detail$/.exec(new URL(req.url ?? '/', 'http://fixture').pathname);
     if (req.method === 'GET' && detailMatch !== null) {
@@ -99,7 +106,7 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
       try { await onCommand?.(command); }
       catch (error) { res.writeHead(500); res.end(JSON.stringify({error: String(error)})); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({kind: 'command-result', transportVersion: 3, status: 'completed', value: null, error: null, durableEvidence: []})); return;
+      res.end(JSON.stringify({kind: 'command-result', transportVersion: 4, status: 'completed', value: null, error: null, durableEvidence: []})); return;
     }
     res.setHeader('content-type', req.url === '/board.js' ? 'text/javascript' : req.url === '/board.css' ? 'text/css' : 'text/html');
     res.end(req.url === '/board.js' ? js : req.url === '/board.css' ? css : '<link rel="stylesheet" href="/board.css"><div id="root"></div><script src="/board.js"></script>');
@@ -146,8 +153,9 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
       await page.waitForFunction((previous: number) => window.boardInput.ups > previous, seen, { timeout: 5000 });
       await page.evaluate('window.boardSettled()');
     },
-    async render(snapshot: ReturnType<typeof toWebBoardSnapshot>, sse = false, details: readonly WebMissionDetail[] = []) {
+    async render(snapshot: ReturnType<typeof toWebBoardSnapshot>, sse = false, details: readonly WebMissionDetail[] = [], family?: WebBoardAnalytics) {
       missionDetails.clear();
+      analytics = family;
       for (const detail of details) { missionDetails.set(detail.missionId, detail); }
       const applied = await page.evaluate(() => window.boardRenders);
       if (sse) {

@@ -116,7 +116,7 @@ test('the command client sends one typed request to the guarded route', async ()
   Object.defineProperty(globalThis, 'document', { configurable: true, value: undefined });
   try {
     const calls = await withFetch(
-      () => jsonResponse({ kind: 'command-result', transportVersion: 3, status: 'completed', error: null, durableEvidence: [] }),
+      () => jsonResponse({ kind: 'command-result', transportVersion: WEB_TRANSPORT_VERSION, status: 'completed', error: null, durableEvidence: [] }),
       async recorded => {
         await sendCommand({ missionId: 'task-2433', kind: 'active:execute', missionStatusAtRequest: 'active' });
         return recorded;

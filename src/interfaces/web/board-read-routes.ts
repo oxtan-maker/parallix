@@ -3,14 +3,16 @@ import { findBoardMission, type BoardProjection } from '../../application/projec
 import type { SharedProjectionRead } from './shared-build.js';
 import {
   toWebBoardSnapshot,
+  toWebBoardAnalytics,
   toWebMissionDetail,
   WEB_TRANSPORT_VERSION,
   type WebCommandError,
   type WebTransportVersion,
 } from './transport.js';
-import { errorMessage, withAnalyticsFreshness } from './host-support.js';
+import { errorMessage } from './host-support.js';
 
 export const WEB_SNAPSHOT_PATH = '/api/board';
+export const WEB_BOARD_ANALYTICS_PATH = '/api/board/analytics';
 export const WEB_MISSION_DETAIL_PATH = '/api/board/:missionId/detail';
 
 export interface WebBoardSnapshotError {
@@ -27,7 +29,7 @@ function snapshotError(kind: WebCommandError['kind'], message: string): WebBoard
   return { kind: 'board-snapshot-error', transportVersion: WEB_TRANSPORT_VERSION, error: { kind, message } };
 }
 
-/** Register the two application-projection reads exposed by the web host. */
+/** Register the board reads exposed by the web host: one per data family. */
 export function registerBoardReadRoutes(app: FastifyInstance, source: WebBoardProjectionSource | undefined): void {
   app.get(WEB_SNAPSHOT_PATH, async (_request, reply) => {
     if (source === undefined) {
@@ -37,8 +39,26 @@ export function registerBoardReadRoutes(app: FastifyInstance, source: WebBoardPr
     try { read = await source.read(); }
     catch (error) { return reply.code(503).send(snapshotError('unavailable', errorMessage(error))); }
     try {
-      const response = withAnalyticsFreshness(read);
-      return reply.type('application/json; charset=utf-8').send(toWebBoardSnapshot(response.projection, response.freshness));
+      // The current workflow family only; historical metrics ride their own read.
+      return reply.type('application/json; charset=utf-8')
+        .send(toWebBoardSnapshot(read.projection, read.families.workflow));
+    }
+    catch (error) { return reply.code(500).send(snapshotError('execution', errorMessage(error))); }
+  });
+
+  app.get(WEB_BOARD_ANALYTICS_PATH, async (_request, reply) => {
+    if (source === undefined) {
+      return reply.code(503).send(snapshotError('unavailable', 'board projection port is not wired'));
+    }
+    let read: SharedProjectionRead<BoardProjection>;
+    try { read = await source.read(); }
+    catch (error) { return reply.code(503).send(snapshotError('unavailable', errorMessage(error))); }
+    try {
+      // Bulky historical metrics on their own path with the analytics family's own
+      // freshness: a deferred or failed historical refresh never touches the
+      // current workflow family, and vice versa.
+      return reply.type('application/json; charset=utf-8')
+        .send(toWebBoardAnalytics(read.projection, read.families.analytics));
     }
     catch (error) { return reply.code(500).send(snapshotError('execution', errorMessage(error))); }
   });
@@ -58,9 +78,8 @@ export function registerBoardReadRoutes(app: FastifyInstance, source: WebBoardPr
       return reply.code(404).send(snapshotError('execution', `mission ${missionId} is not on the board`));
     }
     try {
-      const response = withAnalyticsFreshness(read);
       return reply.type('application/json; charset=utf-8')
-        .send(toWebMissionDetail(response.projection, missionId, response.freshness));
+        .send(toWebMissionDetail(read.projection, missionId, read.families.detail));
     } catch (error) {
       return reply.code(500).send(snapshotError('execution', errorMessage(error)));
     }

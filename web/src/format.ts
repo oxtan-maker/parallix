@@ -8,6 +8,7 @@ import type {
   WebDurationMs,
   WebMissionCard,
 } from '../../src/interfaces/web/transport.js';
+import type { AnalyticsState } from './board-data.js';
 import { C } from './palette.js';
 
 /** `finite` renders as its remaining span; `indefinite` never collapses to a number. */
@@ -111,4 +112,19 @@ export function sessionsText(metric: WebAgentAvailability): string {
   }
   if (metric.runningSessions !== undefined) { parts.push(String(metric.runningSessions)); }
   return parts.join(' · ');
+}
+
+/**
+ * The weekly delivery count printed with the freshness the analytics family
+ * itself reported (TASK-2854.04). An unobserved, failed or incompatible family
+ * prints as unknown; it never collapses to zero and never borrows the current
+ * workflow family's freshness.
+ */
+export function throughputText(state: AnalyticsState): string {
+  if (state.kind === 'loading') { return 'missions/wk pending'; }
+  if (state.kind !== 'ready') { return 'missions/wk unknown'; }
+  const freshness = state.analytics.freshness;
+  const value = state.analytics.metrics.weeklyCompletedMissions;
+  if (freshness.state === 'unavailable' || value === undefined || value === null) { return 'missions/wk unknown'; }
+  return freshness.state === 'fresh' ? `${value} missions/wk` : `${value} missions/wk (stale)`;
 }
