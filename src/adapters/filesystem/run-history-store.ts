@@ -420,6 +420,10 @@ export function createRunHistoryStore(options: { readonly repositoryRoot: string
   return {
     fs: runHistoryFileSystem,
     locations: identity => missionHistoryLocations(options.repositoryRoot, identity.missionId, options.resolveWorktree?.(identity.missionId) ?? null),
+    missionIds: () => {
+      const listed = runHistoryFileSystem.inspectDirs?.(runHistoryRoot(options.repositoryRoot)) ?? { ok: false as const };
+      return listed.ok ? { ok: true, names: listed.names } : { ok: false };
+    },
     isAlive: supervisorAlive,
     executionAlive: options.executionAlive,
     attribute: (identity, record, location) => attributeRunRecord(identity, record, location, options.repositoryKey ?? missionRepositoryKey(options.repositoryRoot)),

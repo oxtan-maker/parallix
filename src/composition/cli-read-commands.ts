@@ -80,8 +80,9 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
             await services.operatorState.close();
             throw new Error('board projection is unavailable for px web');
           }
-          const { workflowObservationCapabilities } = await import('./workflow-observation.js');
-          const observation = workflowObservationCapabilities(rootDir, configuration);
+          const [{ workflowObservationCapabilities }, { resolveMissionRepository }] = await Promise.all([import('./workflow-observation.js'), import('./mission-terminal-capability.js')]);
+          // Resolved once at start-up so the sampler's observer never runs Git.
+          const observation = workflowObservationCapabilities(rootDir, configuration, undefined, resolveMissionRepository(rootDir));
           const missionTerminal = observation.terminal;
           // Boot the observer and warm its graph while the host binds and the
           // browser loads; the first page read then joins this flight instead
@@ -100,6 +101,7 @@ export function createReadCommands(context: CliCommandContext): Record<string, C
             // progress sink is this host's SSE sink.
             commandDispatcher: capabilities.commandController,
             missionTerminal,
+            providerExecution: observation.providerExecution,
             close: async () => { await observation.close(); await services.operatorState.close(); },
           };
         },

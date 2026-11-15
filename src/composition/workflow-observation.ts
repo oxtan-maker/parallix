@@ -2,14 +2,16 @@ import { spawn } from 'node:child_process';
 import { flushCompileCache } from 'node:module';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { BoardProjection } from '../application/projections/board.js';
+import type { ProviderExecutionSnapshot } from '../application/projections/provider-execution.js';
+import { resolveKnownAgentFamilies } from '../adapters/agents/known-agent-families.js';
 import type { MissionHistoryPageRequest, MissionHistorySearchQuery } from '../application/ports/mission-terminal.js';
 import { cliInvocation, type CliInvocation } from '../adapters/process/cli-invocation.js';
 import { createProductionApplicationServices } from './application-services.js';
-import { createMissionTerminalCapability } from './mission-terminal-capability.js';
+import { createMissionTerminalCapability, type ResolvedMissionRepository } from './mission-terminal-capability.js';
 
 export const workflowObservationSystem = { spawn };
 
-type Observation = { readonly kind: 'board' } | { readonly kind: 'overview'; readonly mission: string } | { readonly kind: 'live'; readonly mission: string }
+type Observation = { readonly kind: 'board' } | { readonly kind: 'provider-execution'; readonly repository?: ResolvedMissionRepository } | { readonly kind: 'overview'; readonly mission: string } | { readonly kind: 'live'; readonly mission: string }
   | { readonly kind: 'page'; readonly mission: string; readonly request: MissionHistoryPageRequest }
   | { readonly kind: 'search'; readonly mission: string; readonly request: MissionHistorySearchQuery };
 type ObservationRequest = { readonly id: number; readonly observation: Observation; readonly deadlineAt?: number };
@@ -130,6 +132,7 @@ export function runWorkflowObservation(root: string, configuration: ParallixConf
   createGraph: typeof createProductionApplicationServices = createProductionApplicationServices): void {
   let graph: Awaited<ReturnType<typeof createProductionApplicationServices>> | null = null;
   let terminal: ReturnType<typeof createMissionTerminalCapability> | null = null;
+  let providerTerminal: ReturnType<typeof createMissionTerminalCapability> | null = null;
   type QueuedObservation = { readonly observation: Observation; readonly callers: Array<{ readonly id: number; readonly deadlineAt: number }> };
   const queue: QueuedObservation[] = [];
   let callerCount = 0;
@@ -143,6 +146,24 @@ export function runWorkflowObservation(root: string, configuration: ParallixConf
     await graph?.operatorState.close();
     process.exit(0);
   };
+  const read = async (observation: Observation): Promise<unknown> => {
+    if (observation.kind === 'provider-execution') {
+      // Run metadata only: no application graph, no Git worktree resolution, no board or history projection.
+      providerTerminal ??= terminalFactory(root, configuration, () => null, observation.repository);
+      if (!providerTerminal.providerSnapshot) { throw new Error('Provider execution snapshot unavailable'); }
+      return providerTerminal.providerSnapshot(resolveKnownAgentFamilies(root));
+    }
+    graph ??= await createGraph(root, undefined, { configuration });
+    if (observation.kind === 'board') {
+      if (!graph.presentationCapabilities || !graph.mission) { throw new Error('Board authority unavailable'); }
+      return graph.presentationCapabilities.boardProjection.build();
+    }
+    terminal ??= terminalFactory(root, configuration);
+    return observation.kind === 'overview' ? terminal.overview(observation.mission)
+      : observation.kind === 'live' ? terminal.live(observation.mission)
+      : observation.kind === 'page' ? terminal.page(observation.mission, observation.request)
+      : terminal.search(observation.mission, observation.request);
+  };
   const respond = async (job: QueuedObservation) => {
     const now = Date.now();
     const expired = job.callers.filter(caller => caller.deadlineAt <= now);
@@ -153,18 +174,7 @@ export function runWorkflowObservation(root: string, configuration: ParallixConf
     callerCount -= expired.length;
     if (live.length === 0) { return; }
     try {
-      graph ??= await createGraph(root, undefined, { configuration });
-      let value: unknown;
-      if (job.observation.kind === 'board') {
-        if (!graph.presentationCapabilities || !graph.mission) { throw new Error('Board authority unavailable'); }
-        value = await graph.presentationCapabilities.boardProjection.build();
-      } else {
-        terminal ??= terminalFactory(root, configuration);
-        value = job.observation.kind === 'overview' ? terminal.overview(job.observation.mission)
-          : job.observation.kind === 'live' ? terminal.live(job.observation.mission)
-          : job.observation.kind === 'page' ? terminal.page(job.observation.mission, job.observation.request)
-          : terminal.search(job.observation.mission, job.observation.request);
-      }
+      const value = await read(job.observation);
       for (const caller of live) { send({ id: caller.id, value }); }
     } catch (error) {
       for (const caller of live) { send({ id: caller.id, error: error instanceof Error ? error.message : String(error) }); }
@@ -212,11 +222,15 @@ export function runWorkflowObservation(root: string, configuration: ParallixConf
   });
 }
 
-export function workflowObservationCapabilities(root: string, configuration: ParallixConfiguration, cli?: CliInvocation) {
+/** `repository` is the identity the host already resolved; the provider observer then performs no Git at all. */
+export function workflowObservationCapabilities(root: string, configuration: ParallixConfiguration, cli?: CliInvocation, repository?: ResolvedMissionRepository) {
   const reader = observer(root, configuration, cli ?? cliInvocation(process.argv[1]));
   const terminalReader = observer(root, configuration, cli ?? cliInvocation(process.argv[1]));
+  // A sampler's cheap read never queues behind board builds or history pages; the child starts on first use.
+  const providerReader = observer(root, configuration, cli ?? cliInvocation(process.argv[1]));
   return {
-    close: async () => { await Promise.all([reader.close(), terminalReader.close()]); },
+    close: async () => { await Promise.all([reader.close(), terminalReader.close(), providerReader.close()]); },
+    providerExecution: () => providerReader.request<ProviderExecutionSnapshot>({ kind: 'provider-execution', ...(repository ? { repository } : {}) }),
     board: () => reader.request<BoardProjection>({ kind: 'board' }),
     terminal: {
       overview: (mission: string) => terminalReader.request<ReturnType<ReturnType<typeof createMissionTerminalCapability>['overview']>>({ kind: 'overview', mission }),

@@ -1,4 +1,4 @@
-import { observeProviderExecution } from './projections/provider-execution.js';
+import { observeProviderExecution, observeRepositoryProviderExecution } from './projections/provider-execution.js';
 /**
  * Mission terminal and retained-history service (TASK-2749).
  *
@@ -226,6 +226,7 @@ export function createMissionTerminalService(deps: MissionTerminalServiceDeps): 
   return {
     identify,
     execution: (mission, currentOperationId) => withIdentity(mission, identity => observeProviderExecution(deps.store, identity, currentOperationId)),
+    providerSnapshot: knownFamilies => observeRepositoryProviderExecution(deps.store, repositoryId(deps.repositoryId), knownFamilies),
     probe: mission => withIdentity(mission, identity => hostedTerminal(deps.host, identity).probe),
     overview: mission => withIdentity(mission, identity => overviewOf(deps, identity, attributed)),
     page: (mission, request) => withIdentity(mission, identity => pageOf(deps, identity, request, attributed)),

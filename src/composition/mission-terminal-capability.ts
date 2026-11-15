@@ -1,13 +1,15 @@
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { MissionTerminalCapability } from '../application/ports/mission-terminal.js';
 import { createRecordedOutputRenderer } from '../adapters/agents/recorded-output-renderer.js';
-import { createMissionTerminalResources } from '../adapters/cli/commands/mission-terminal-resources.js';
+import { createMissionTerminalResources, resolveMissionRepository, type ResolvedMissionRepository } from '../adapters/cli/commands/mission-terminal-resources.js';
 
 /**
  * The published mission terminal capability for one repository (TASK-2749).
  * The web host, the CLI and board actions resolve a Mission's terminal and
  * retained history through this one binding; none derives native handles.
  */
-export function createMissionTerminalCapability(rootDir: string, configuration: ParallixConfiguration, resolveWorktree?: (_missionId: string) => string | null): MissionTerminalCapability {
-  return createMissionTerminalResources(rootDir, { configuration, ...(resolveWorktree ? { resolveWorktreeFn: resolveWorktree } : {}), renderer: createRecordedOutputRenderer() });
+export function createMissionTerminalCapability(rootDir: string, configuration: ParallixConfiguration, resolveWorktree?: (_missionId: string) => string | null, repository?: ResolvedMissionRepository): MissionTerminalCapability {
+  return createMissionTerminalResources(rootDir, { configuration, ...(repository ? { repository } : {}), ...(resolveWorktree ? { resolveWorktreeFn: resolveWorktree } : {}), renderer: createRecordedOutputRenderer() });
 }
+
+export { resolveMissionRepository, type ResolvedMissionRepository };

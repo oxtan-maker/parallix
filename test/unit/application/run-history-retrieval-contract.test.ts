@@ -1,4 +1,4 @@
-import { observeProviderExecution, projectExecutionMetrics } from '../../../src/application/projections/provider-execution.js';
+import { observeProviderExecution, observeRepositoryProviderExecution, projectExecutionMetrics } from '../../../src/application/projections/provider-execution.js';
 /**
  * Agent-run history capture and bounded retrieval contract (TASK-2643).
  *
@@ -743,4 +743,194 @@ test('a running Pi capture without a recorded provider process is stopped, not l
   assert.deepEqual(observed.limitations, []);
   f.add('execute-pi-a1-held', { state: 'running', exitCode: null, supervisorPid: 123, execution: { pid: 5, processIdentity: 'worker' }, family: 'pi' as never, operationId: 'op' });
   assert.equal(observeProviderExecution(f.store, f.identity, 'op').invocations.length, 1, 'the spawned Pi worker is counted from its recorded process');
+});
+
+/** Several Missions over the retained-observation fixtures: one repository store, one Mission directory each. */
+function repositoryObservationFixture(missions: Record<string, ReturnType<typeof retainedObservationFixture>>) {
+  const first = Object.values(missions)[0];
+  const live = { state: 'running' as const, exitCode: null, supervisorPid: 123, execution: { pid: 456, processIdentity: 'live' } };
+  return {
+    live,
+    store: { ...first.store,
+      missionIds: () => ({ ok: true as const, names: Object.keys(missions) }),
+      locations: (identity: { missionId: string }) => [{ runsDir: `/retained/${identity.missionId}`, legacy: false }],
+      fs: { ...first.store.fs,
+        inspectDirs: (dir: string) => ({ ok: true as const, names: [...(missions[dir.split('/').at(-1)!]?.records.keys() ?? [])] }),
+        readText: (file: string) => { const record = missions[file.split('/').at(-3)!]?.records.get(file.split('/').at(-2)!); return record ? JSON.stringify(record) : null; } },
+    },
+  };
+}
+const repository = 'abc123' as Parameters<typeof observeRepositoryProviderExecution>[1];
+const families = ['claude', 'codex', 'custom'].map(agentFamily);
+const countOf = (snapshot: ReturnType<typeof observeRepositoryProviderExecution>, family: string) => snapshot.families.find(entry => entry.family === family)?.running;
+
+test('repository provider snapshot matches board family counts and excludes coordinator work (TASK-2856)', () => {
+  const first = retainedObservationFixture(); const second = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-1': first, 'task-2': second });
+  first.add('execute-codex-a1-live', { ...f.live, missionId: 'task-1', operationId: 'op-1' });
+  first.add('draft-codex-a1-wrap', { ...f.live, captureKind: 'coordinator', missionId: 'task-1', execution: { pid: 789, processIdentity: 'wrapper' } });
+  second.add('review-claude-a1-live', { ...f.live, missionId: 'task-2', family: 'claude' as never, role: 'review' });
+  second.add('execute-codex-a1-done', { state: 'exited', missionId: 'task-2' });
+  const snapshot = observeRepositoryProviderExecution(f.store, repository, families);
+  assert.deepEqual([snapshot.kind, snapshot.version, snapshot.health, snapshot.limitations], ['provider-execution-snapshot', 1, 'complete', []]);
+  assert.ok(!Number.isNaN(Date.parse(snapshot.observedAt)));
+  assert.deepEqual(snapshot.invocations.map(run => [run.missionId, run.runId, run.family, run.role, run.operationId]).sort(),
+    [['task-1', 'execute-codex-a1-live', 'codex', 'execute', 'op-1'], ['task-2', 'review-claude-a1-live', 'claude', 'review', null]]);
+  const board = projectExecutionMetrics(makeProjection({ active: ['task-1', 'task-2'].map(id => makeCard({ id: missionId(id) as never,
+    execution: observeProviderExecution(f.store, { repositoryId: repository, missionId: missionId(id) }) })) }));
+  const boardCount = (family: string) => board.metrics.agentAvailability.find(agent => agent.family === family)?.runningSessions ?? 0;
+  assert.deepEqual(snapshot.families.map(entry => [entry.family, entry.running]), [['claude', 1], ['codex', 1], ['custom', 0]], 'a clean observation reports integer zero');
+  for (const entry of snapshot.families) { assert.equal(entry.running, boardCount(entry.family), `${entry.family} parity with the board`); }
+});
+
+test('repository provider snapshot turns missing evidence into unknown counts and keeps confirmed siblings (TASK-2856)', () => {
+  const first = retainedObservationFixture(); const second = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-1': first, 'task-2': second });
+  second.add('review-claude-a1-live', { ...f.live, missionId: 'task-2', family: 'claude' as never, role: 'review' });
+  first.add('execute-codex-a1-live', { ...f.live, missionId: 'task-1' });
+  const base = () => observeRepositoryProviderExecution(f.store, repository, families);
+  assert.equal(countOf(base(), 'codex'), 1);
+
+  // Unreadable run metadata: the run id still names the family whose count it could change.
+  const unreadable = { ...f.store, fs: { ...f.store.fs, readText: (file: string) => file.endsWith('execute-codex-a1-live/run.json') ? null : f.store.fs.readText(file) } };
+  let snapshot = observeRepositoryProviderExecution(unreadable, repository, families);
+  assert.equal(snapshot.health, 'limited');
+  assert.deepEqual([countOf(snapshot, 'codex'), countOf(snapshot, 'claude'), countOf(snapshot, 'custom')], [null, 1, 0], 'only the affected family is unknown');
+  assert.deepEqual(snapshot.limitations, [{ missionId: 'task-1', message: 'execute-codex-a1-live: unreadable run metadata' }]);
+  assert.equal(snapshot.invocations.length, 1, 'the confirmed sibling stays visible');
+
+  // An unavailable process probe on a potentially current run.
+  snapshot = observeRepositoryProviderExecution({ ...f.store, executionAlive: execution => execution.processIdentity === 'live' && execution.pid === 456 ? null : true }, repository, families);
+  assert.deepEqual([snapshot.health, countOf(snapshot, 'codex'), countOf(snapshot, 'claude')], ['limited', null, null]);
+
+  // A legacy live run without a recorded family is a limitation, never a guessed family.
+  first.add('execute-legacy-a1-legacy', { ...f.live, missionId: 'task-1', family: undefined as never });
+  snapshot = base();
+  assert.equal(snapshot.health, 'limited');
+  assert.ok(snapshot.limitations.some(note => /execute-legacy-a1-legacy/.test(note.message)));
+  assert.ok(!snapshot.invocations.some(run => run.runId === 'execute-legacy-a1-legacy'), 'the run is not counted under a guessed family');
+  assert.equal(countOf(snapshot, 'legacy'), null);
+  assert.equal(snapshot.invocations.length, 2, 'confirmed invocations are still listed');
+  first.records.delete('execute-legacy-a1-legacy');
+
+  // Exhausted per-Mission probe budget.
+  for (let index = 1; index <= MAX_RUNS_PER_MISSION + 1; index++) {
+    first.add(`execute-codex-a1-n${index.toString(36)}`, { ...f.live, missionId: 'task-1', execution: { pid: 1000 + index, processIdentity: `start-${index}` } });
+  }
+  snapshot = base();
+  assert.ok(snapshot.limitations.some(note => note.missionId === 'task-1' && /probe budget reached/.test(note.message)));
+  assert.equal(countOf(snapshot, 'codex'), null);
+  assert.equal(countOf(snapshot, 'claude'), 1, 'another family on another Mission stays known');
+});
+
+test('repository provider snapshot reports reader failures without a fabricated zero (TASK-2856)', () => {
+  const only = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-1': only, 'task-2': retainedObservationFixture() });
+  only.add('execute-codex-a1-live', { ...f.live, missionId: 'task-1' });
+  const failing = observeRepositoryProviderExecution({ ...f.store, locations: identity => { if (identity.missionId === 'task-2') { throw new Error('boom'); } return f.store.locations(identity); } }, repository, families);
+  assert.equal(failing.health, 'limited');
+  assert.deepEqual(failing.families.map(entry => entry.running), [null, null, null], 'a failed Mission could hide any family');
+  assert.equal(failing.invocations.length, 1, 'the sibling Mission stays visible');
+  assert.ok(failing.limitations.some(note => note.missionId === 'task-2'));
+
+  const unavailable = observeRepositoryProviderExecution({ ...f.store, missionIds: () => ({ ok: false as const }) }, repository, families);
+  assert.deepEqual([unavailable.health, unavailable.invocations.length, unavailable.families.map(entry => entry.running)], ['unavailable', 0, [null, null, null]]);
+  assert.equal(observeRepositoryProviderExecution({ ...f.store, missionIds: undefined }, repository, families).health, 'unavailable', 'a store that cannot enumerate Missions is unavailable, not empty');
+});
+
+test('the mission terminal capability publishes the repository snapshot over the real run-history store (TASK-2856)', () => {
+  const root = mkdtemp('px-repository-snapshot-');
+  const live = open(root, {}, 'task-9'); live.observeExecution(123, 'start-1');
+  const other = open(root, {}, 'task-10'); other.observeExecution(456, 'start-2');
+  const service = createMissionTerminalService({ repositoryId: 'abc123' as never, host: {} as MissionTerminalHostPort,
+    store: createRunHistoryStore({ repositoryRoot: root, repositoryKey: 'abc123', executionAlive: execution => execution.pid === 123 }) });
+  const snapshot = service.providerSnapshot!([agentFamily('codex')]);
+  assert.deepEqual(snapshot.invocations.map(run => [run.missionId, run.family]), [['task-9', 'codex']]);
+  assert.deepEqual([snapshot.health, countOf(snapshot, 'codex')], ['complete', 1]);
+  live.finish({ exitCode: 0, signal: null }); other.finish({ exitCode: 0, signal: null });
+  assert.equal(countOf(service.providerSnapshot!([agentFamily('codex')]), 'codex'), 0);
+  assert.equal(createMissionTerminalService({ repositoryId: 'abc123' as never, host: {} as MissionTerminalHostPort,
+    store: createRunHistoryStore({ repositoryRoot: path.join(root, 'absent'), repositoryKey: 'abc123' }) }).providerSnapshot!([]).health, 'complete', 'a repository with no retained history is a clean zero');
+});
+
+test('repository provider snapshot keeps invocations that share a run id across Missions and counts a legacy directory once (TASK-2856)', () => {
+  const first = retainedObservationFixture(); const second = retainedObservationFixture(); const legacy = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-1': first, 'task-2': second, 'task-3.1': legacy, 'task-3_1': legacy });
+  first.add('execute-codex-a1-same', { ...f.live, missionId: 'task-1' });
+  second.add('execute-codex-a1-same', { ...f.live, missionId: 'task-2' });
+  legacy.add('execute-codex-a1-old', { ...f.live, missionId: 'task-3_1' });
+  const snapshot = observeRepositoryProviderExecution({ ...f.store, locations: identity => [{ runsDir: `/retained/${identity.missionId}`, legacy: false },
+    ...(identity.missionId === 'task-3.1' ? [{ runsDir: '/retained/task-3_1', legacy: true }] : [])] }, repository, families);
+  assert.deepEqual(snapshot.invocations.map(run => `${run.missionId}:${run.runId}`).sort(), ['task-1:execute-codex-a1-same', 'task-2:execute-codex-a1-same', 'task-3.1:execute-codex-a1-old']);
+  assert.equal(countOf(snapshot, 'codex'), 3, 'a shared run id is not one invocation, and a legacy directory is not a second Mission');
+});
+
+test('repository provider snapshot attributes a legacy-token directory to the canonical Mission its records name (TASK-2856)', () => {
+  const legacy = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-3_1': legacy });
+  legacy.add('execute-codex-a1-old', { ...f.live, missionId: 'task-3.1', operationId: 'op-legacy' });
+  const snapshot = observeRepositoryProviderExecution(f.store, repository, families);
+  assert.deepEqual(snapshot.invocations.map(run => [run.missionId, run.runId, run.operationId]), [['task-3.1', 'execute-codex-a1-old', 'op-legacy']]);
+  assert.deepEqual([snapshot.health, countOf(snapshot, 'codex'), snapshot.limitations], ['complete', 1, []], 'an attributable legacy record is neither unreadable nor unknown');
+});
+
+test('repository provider snapshot never reads zero past an exhausted probe budget even for an older orphan candidate (TASK-2856)', () => {
+  const only = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-1': only });
+  for (let index = 1; index <= MAX_RUNS_PER_MISSION; index++) {
+    only.add(`execute-claude-a1-n${index.toString(36)}`, { ...f.live, missionId: 'task-1', family: 'claude' as never, execution: { pid: 2000 + index, processIdentity: `start-${index}` } });
+  }
+  // Older run whose supervisor died: not current, so the board stays silent, but it may be a live orphan.
+  only.add('execute-codex-a1-1', { ...f.live, missionId: 'task-1', supervisorPid: 999, execution: { pid: 5, processIdentity: 'orphan' } });
+  const facts = observeProviderExecution({ ...f.store, locations: f.store.locations }, { repositoryId: repository, missionId: missionId('task-1') });
+  assert.deepEqual(facts.limitations, [], 'the board path keeps its existing silence for historical candidates');
+  const snapshot = observeRepositoryProviderExecution(f.store, repository, families);
+  assert.equal(snapshot.health, 'limited');
+  assert.equal(countOf(snapshot, 'codex'), null, 'the unprobed orphan candidate makes its family unknown, not zero');
+  assert.equal(countOf(snapshot, 'claude'), MAX_RUNS_PER_MISSION);
+  assert.ok(snapshot.limitations.some(note => note.missionId === 'task-1' && /execute-codex-a1-1: provider execution probe budget reached/.test(note.message)));
+});
+
+test('repository provider snapshot never reads zero for an orphan whose process probe is unavailable (TASK-2856)', () => {
+  const only = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-1': only });
+  // Supervisor gone, provider process recorded but not probeable: the board stays silent for history, a sampler must not read zero.
+  only.add('execute-codex-a1-orphan', { ...f.live, missionId: 'task-1', supervisorPid: 999, execution: { pid: 5, processIdentity: null } });
+  const unprobeable = { ...f.store, executionAlive: () => null };
+  assert.deepEqual(observeProviderExecution(unprobeable, { repositoryId: repository, missionId: missionId('task-1') }).limitations, [], 'board semantics stay unchanged');
+  const snapshot = observeRepositoryProviderExecution(unprobeable, repository, families);
+  assert.equal(snapshot.health, 'limited');
+  assert.deepEqual([countOf(snapshot, 'codex'), countOf(snapshot, 'claude')], [null, 0]);
+  assert.deepEqual(snapshot.limitations, [{ missionId: 'task-1', message: 'execute-codex-a1-orphan: provider process probe unavailable' }]);
+  assert.equal(countOf(observeRepositoryProviderExecution(f.store, repository, families), 'codex'), 1, 'the same record with a probeable process is counted live');
+});
+
+test('repository provider snapshot scopes a recovered legacy-directory diagnostic to the canonical Mission (TASK-2856)', () => {
+  const legacy = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-3_1': legacy });
+  legacy.add('execute-codex-a1-orphan', { ...f.live, missionId: 'task-3.1', supervisorPid: 999, execution: { pid: 5, processIdentity: null } });
+  const snapshot = observeRepositoryProviderExecution({ ...f.store, executionAlive: () => null }, repository, families);
+  assert.deepEqual(snapshot.limitations, [{ missionId: 'task-3.1', message: 'execute-codex-a1-orphan: provider process probe unavailable' }], 'the legacy token is not a Mission');
+  assert.equal(countOf(snapshot, 'codex'), null);
+});
+
+test('repository provider snapshot leaves an unattributable legacy-directory diagnostic unscoped instead of naming a storage token (TASK-2856)', () => {
+  const legacy = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-3_1': legacy });
+  legacy.add('execute-codex-a1-broken', { ...f.live, missionId: 'task-3.1' });
+  const broken = { ...f.store, fs: { ...f.store.fs, readText: () => '{not json' } };
+  const snapshot = observeRepositoryProviderExecution(broken, repository, families);
+  assert.deepEqual(snapshot.limitations, [{ missionId: null, message: 'execute-codex-a1-broken: unreadable run metadata' }], 'task-3_1 is a storage token, not a Mission');
+  assert.equal(snapshot.health, 'limited');
+  assert.equal(countOf(snapshot, 'codex'), null);
+});
+
+test('repository provider snapshot never publishes a legacy storage token as a Mission id (TASK-2856)', () => {
+  const legacy = retainedObservationFixture();
+  const f = repositoryObservationFixture({ 'task-3_1': legacy });
+  legacy.add('execute-codex-a1-old', { ...f.live, missionId: 'task-3_1' });
+  const snapshot = observeRepositoryProviderExecution(f.store, repository, families);
+  assert.deepEqual(snapshot.invocations.map(run => [run.missionId, run.runId]), [[null, 'execute-codex-a1-old']]);
+  assert.equal(countOf(snapshot, 'codex'), 1, 'the confirmed provider is still counted');
+  assert.deepEqual([snapshot.health, snapshot.limitations.map(note => note.missionId)], ['limited', [null]]);
 });

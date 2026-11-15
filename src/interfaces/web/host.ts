@@ -50,6 +50,8 @@ import {
 import { createShellBootstrap } from './shell-bootstrap.js';
 import { analyticsFamilyFreshness, errorMessage } from './host-support.js';
 import { registerTerminalRoute, type WebMissionTerminal } from './terminal-route.js';
+import { registerProviderExecutionRoute, type WebProviderExecution } from './provider-execution-route.js';
+export { WEB_PROVIDER_EXECUTION_PATH, type WebProviderExecution, type WebProviderExecutionError } from './provider-execution-route.js';
 export { WEB_TERMINAL_PATH, WEB_TERMINAL_HISTORY_PATH, WEB_TERMINAL_LIVE_PATH, WEB_TERMINAL_SEARCH_PATH, type WebMissionTerminal } from './terminal-route.js';
 
 export { PROTECTION_HEADERS, WEB_CSRF_HEADER } from './host-request-policy.js';
@@ -105,6 +107,8 @@ export interface WebHostOptions {
    */
   changeSignal?: () => BoardWakeSource | null;
   missionTerminal?: () => WebMissionTerminal | null; // Mission history reads (TASK-2749); `null` when not wired.
+  /** Read-only provider snapshot port for same-host samplers; `null` or absent answers 503, never an empty snapshot. */
+  providerExecution?: () => WebProviderExecution | null;
 }
 
 export interface WebHostInfo extends LoopbackBinding {
@@ -178,6 +182,7 @@ export function createWebHost(options: WebHostOptions): WebHost {
       registerEventRoute(app, stream, clients);
 
       registerBoardReadRoutes(app, projectionSource);
+      registerProviderExecutionRoute(app, () => options.providerExecution?.() ?? null);
       // Terminal, detail, and command eligibility reads reuse the completed board.
       registerTerminalRoute(app, { ...options, buildProjection: projectionSource === undefined
         ? undefined : async () => (await projectionSource.read()).projection });

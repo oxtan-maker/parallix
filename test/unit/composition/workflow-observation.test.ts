@@ -568,3 +568,57 @@ test('one-shot observation always closes the reader after a response (TASK-2750)
   assert.equal(await observeWorkflow('/unused', resolveConfiguration({}), { kind: 'board' }, { command: 'unused', args: [] }), 'board result');
   assert.equal(disconnected, true);
 });
+
+test('provider execution reads use their own observer and skip the board graph and Git worktree resolution (TASK-2856)', async t => {
+  const { runWorkflowObservation } = await import('../../../src/composition/workflow-observation.js');
+  t.after(() => mock.restoreAll());
+  const requests: Array<{ id: number; observation: unknown }> = [];
+  const children: EventEmitter[] = [];
+  mock.method(workflowObservationSystem, 'spawn', () => {
+    const child = Object.assign(new EventEmitter(), { connected: true,
+      send: (request: { id: number; observation: unknown }) => { requests.push(request); },
+      disconnect: () => { queueMicrotask(() => child.emit('exit', 0)); } });
+    children.push(child);
+    return child;
+  });
+  const repository = { root: '/unused', id: repositoryId('unused'), key: 'abc' };
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] }, repository);
+  t.after(() => observe.close());
+  const snapshot = observe.providerExecution();
+  assert.deepEqual(requests.map(request => request.observation), [{ kind: 'provider-execution', repository }], 'the host resolves the repository identity once and the observer reuses it');
+  assert.equal(children.length, 1, 'only the provider observer starts; no board or terminal child');
+  children[0].emit('message', { id: requests[0].id, value: 'snapshot' });
+  assert.equal(await snapshot, 'snapshot');
+
+  let receive: (input: unknown) => void = () => {};
+  let disconnect: () => void = () => {};
+  mock.method(process, 'on', (_event: string, listener: typeof receive) => { receive = listener; return process; });
+  mock.method(process, 'once', (_event: string, listener: () => void) => { disconnect = listener; return process; });
+  const originalConnected = Object.getOwnPropertyDescriptor(process, 'connected');
+  const originalSend = Object.getOwnPropertyDescriptor(process, 'send');
+  t.after(() => {
+    for (const [key, descriptor] of [['connected', originalConnected], ['send', originalSend]] as const) {
+      if (descriptor) { Object.defineProperty(process, key, descriptor); } else { Reflect.deleteProperty(process, key); }
+    }
+  });
+  Object.defineProperty(process, 'connected', { configurable: true, value: true });
+  const responses: unknown[] = [];
+  Object.defineProperty(process, 'send', { configurable: true, writable: true, value: (value: unknown) => { responses.push(value); return true; } });
+  let exited = false;
+  mock.method(process, 'exit', () => { exited = true; return undefined as never; });
+  let resolvers = 0;
+  const terminalFactory = (_root: string, _configuration: unknown, resolveWorktree?: (_mission: string) => string | null, identity?: unknown) => {
+    resolvers += resolveWorktree === undefined ? 0 : 1;
+    assert.deepEqual(identity, repository, 'the provider terminal is bound to the host-resolved identity, so it runs no Git');
+    assert.equal(resolveWorktree?.('task-1'), null, 'the sampler read never resolves a Git worktree');
+    return { providerSnapshot: (families: readonly string[]) => ({ kind: 'provider-execution-snapshot', families }) };
+  };
+  runWorkflowObservation('/unused', resolveConfiguration({}), terminalFactory as never, (() => assert.fail('provider reads never compose the application graph')) as never);
+  receive({ id: 1, observation: { kind: 'provider-execution', repository } });
+  for (let turn = 0; turn < 50 && responses.length < 1; turn++) { await Promise.resolve(); }
+  disconnect();
+  for (let turn = 0; turn < 50 && !exited; turn++) { await Promise.resolve(); }
+  assert.deepEqual(responses, [{ id: 1, value: { kind: 'provider-execution-snapshot', families: [] } }]);
+  assert.equal(resolvers, 1);
+  assert.equal(exited, true);
+});

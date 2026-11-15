@@ -13,7 +13,7 @@ import type {
   BoardCommandDispatcher,
   BoardProgressSink,
 } from '../../application/controller/board-command.js';
-import { createWebHost, type WebAssets, type WebHostInfo, type WebMissionTerminal } from '../web/host.js';
+import { createWebHost, type WebAssets, type WebHostInfo, type WebMissionTerminal, type WebProviderExecution } from '../web/host.js';
 import type { LoopbackLiteral } from '../web/security.js';
 
 /**
@@ -33,6 +33,8 @@ export interface WebBoardSource {
   readonly missionTerminal?: WebMissionTerminal;
   /** Hints that durable state changed, so the host refreshes before its next poll. */
   readonly changeSignal?: BoardWakeSource;
+  /** Read-only provider execution snapshot for same-host samplers. */
+  readonly providerExecution?: WebProviderExecution;
   /** Releases the services behind the source; runs when the host shuts down. */
   readonly close: () => Promise<void>;
 }
@@ -100,6 +102,9 @@ export async function runWebCommand(args: string[] = [], cli: WebCliOptions = {}
       : undefined,
     changeSignal: cli.createBoardSource
       ? () => source?.changeSignal ?? null
+      : undefined,
+    providerExecution: cli.createBoardSource
+      ? () => source?.providerExecution ?? null
       : undefined,
   });
   let info: WebHostInfo;

@@ -11,11 +11,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as net from 'node:net';
-import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebMissionTerminal, type WebHostInfo } from '../../../src/interfaces/web/host.js';
+import { createWebHost, PROTECTION_HEADERS, WEB_COMMANDS_PATH, WEB_EVENTS_PATH, WEB_PROVIDER_EXECUTION_PATH, WEB_SNAPSHOT_PATH, WEB_TERMINAL_PATH, type WebMissionTerminal, type WebHostInfo } from '../../../src/interfaces/web/host.js';
 import { validateWebBoardSnapshot, validateWebProgressEvent, WEB_TRANSPORT_VERSION } from '../../../src/interfaces/web/transport.js';
 import { WEB_EVENT_BUFFER_LIMIT } from '../../../src/interfaces/web/stream.js';
 import { sessionCookieName } from '../../../src/interfaces/web/security.js';
 import type { BoardProgressSink } from '../../../src/application/controller/board-command.js';
+import { agentFamily } from '../../../src/domain/agents.js';
 import { runWebCommand } from '../../../src/interfaces/cli/web.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 import { makeCards, makeProjection } from '../../fixtures/board-projection.js';
@@ -622,6 +623,43 @@ test('web host: a failing projection build surfaces an error, never an empty boa
   });
 });
 
+const PROVIDER_SNAPSHOT = { kind: 'provider-execution-snapshot', version: 1, observedAt: '2026-11-15T00:00:00.000Z', invocations: [], health: 'complete', limitations: [],
+  families: [{ family: agentFamily('codex'), running: 0 }] } as const;
+
+test('web host: provider execution route is a credential-free, GET/HEAD-only read that never builds the board (TASK-2856)', async () => {
+  let boardBuilds = 0;
+  await withHost({ buildProjection: async () => { boardBuilds += 1; return makeProjection(); }, providerExecution: () => async () => PROVIDER_SNAPSHOT }, async info => {
+    const res = await fetch(`${info.origin}${WEB_PROVIDER_EXECUTION_PATH}`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('content-type') ?? '', /^application\/json/);
+    assert.equal(res.headers.get('content-security-policy'), PROTECTION_HEADERS['content-security-policy']);
+    assert.deepEqual(await res.json(), PROVIDER_SNAPSHOT);
+    assert.equal((await fetch(`${info.origin}${WEB_PROVIDER_EXECUTION_PATH}`, { method: 'HEAD' })).status, 200);
+    assert.equal(await rawRequest(info, 'evil.example', WEB_PROVIDER_EXECUTION_PATH), 403);
+    assert.equal(await rawRequest(info, `127.0.0.1:${info.port + 1}`, WEB_PROVIDER_EXECUTION_PATH), 403);
+    for (const method of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+      const { status } = await fetch(`${info.origin}${WEB_PROVIDER_EXECUTION_PATH}`, { method });
+      assert.ok(status === 403 || status === 411, `${method} without credentials is rejected (got ${status})`);
+    }
+    assert.equal(boardBuilds, 0, 'the sampler read never calls the board projection source');
+  });
+});
+
+test('web host: provider execution source failure or absence is a typed 503, never an empty snapshot (TASK-2856)', async () => {
+  await withHost({ buildProjection: async () => makeProjection(), providerExecution: () => async () => { throw new Error('observer exited'); } }, async info => {
+    const res = await fetch(`${info.origin}${WEB_PROVIDER_EXECUTION_PATH}`);
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { kind: 'provider-execution-error', version: 1, error: { kind: 'unavailable', message: 'observer exited' } });
+  });
+  for (const providerExecution of [undefined, () => null, () => { throw new Error('accessor failed'); }]) {
+    await withHost({ providerExecution }, async info => {
+      const res = await fetch(`${info.origin}${WEB_PROVIDER_EXECUTION_PATH}`);
+      assert.equal(res.status, 503);
+      assert.equal(((await res.json()) as { kind: string }).kind, 'provider-execution-error');
+    });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Server-Sent Events stream (TASK-2432, ADR 0055)
 // ---------------------------------------------------------------------------
@@ -849,6 +887,7 @@ test('web cli: createBoardSource gets the host sink, its build port serves, clos
         sink.value = progress;
         return Promise.resolve({
           buildProjection: async () => makeProjection(),
+          providerExecution: async () => PROVIDER_SNAPSHOT,
           close: async () => { sourceClosed = true; },
         });
       },
@@ -866,6 +905,7 @@ test('web cli: createBoardSource gets the host sink, its build port serves, clos
     const res = await fetch(`${origin}/api/board`);
     assert.equal(res.status, 200);
     assert.ok(validateWebBoardSnapshot(await res.json()).ok, 'the wired build port must serve a valid snapshot');
+    assert.deepEqual(await (await fetch(`${origin}${WEB_PROVIDER_EXECUTION_PATH}`)).json(), PROVIDER_SNAPSHOT, 'the source provider port is what the sampler route serves');
     // The sink handed to the source is the host's SSE sink: publishing on it
     // reaches a fresh client through the replay buffer.
     assert.ok(sink.value, 'createBoardSource must receive the host progress sink');

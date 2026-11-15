@@ -424,6 +424,53 @@ launch. `px ui` continues to launch the same board explicitly. To opt out of the
 default for one invocation, run `PARALLIX_NO_TUI=1 px`; set that environment
 variable in your shell environment to keep usage help as the no-command default.
 
+## Provider execution for same-host samplers
+
+`px web` binds an OS-selected loopback port by default. A sampler that must find
+the host without reading its start-up line needs a stable address, so start it
+with an operator-selected fixed port:
+
+```sh
+px web --port 47810
+```
+
+`GET http://127.0.0.1:47810/api/provider-execution` returns a small, versioned
+JSON read of the provider invocations that are confirmed live right now. It
+needs no credentials, and it does not build the board, analytics, workflow or
+Git state. Only a sampler on the same host may use it: the host binds loopback
+only, rejects any `Host` header other than its exact origin, and accepts only
+`GET` and `HEAD` here. Nothing about this route relaxes the web host boundary.
+
+```json
+{
+  "kind": "provider-execution-snapshot",
+  "version": 1,
+  "observedAt": "2026-11-15T10:00:00.000Z",
+  "invocations": [
+    { "missionId": "task-1", "runId": "execute-codex-a1-mx1", "family": "codex", "role": "execute", "operationId": "op-1" }
+  ],
+  "families": [{ "family": "claude", "running": 0 }, { "family": "codex", "running": 1 }],
+  "health": "complete",
+  "limitations": []
+}
+```
+
+`families[].running` counts every confirmed live provider in every Mission that
+retains run history in this repository, including a Mission no longer on the
+board, so it equals the board's per-family running sessions whenever every
+Mission with a live provider is on the board and is otherwise higher. Coordinator captures, workflow operations, wrappers, supervisors and
+waiting processes are never counted. `running` is an integer only when the
+evidence is complete. When run metadata is unreadable, a process probe is
+unavailable, the per-Mission probe budget is exhausted or a Mission could not be
+read, `health` is `limited` (or `unavailable` when the run history cannot be
+listed at all) and every family the missing evidence could affect has
+`running: null`. Treat `null` as unknown, never as zero. Confirmed invocations
+stay listed, and each limitation names its Mission, or carries `missionId: null` when the evidence cannot be attributed to one. A live provider retained only under a pre-lossless storage token is still counted but listed with `missionId: null`, and health is `limited`. A failed read answers
+`503` with `kind: "provider-execution-error"` and never an empty snapshot.
+
+The route does not read worktree-local run history written before repository-level
+run history; such a run is not part of the snapshot.
+
 ## Browser freshness and operation history
 
 The web board keeps informational body and metadata text at 11px or larger,

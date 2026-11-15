@@ -1,4 +1,5 @@
-import type { ProviderExecutionFacts } from '../projections/provider-execution.js';
+import type { AgentFamily } from '../../domain/agents.js';
+import type { ProviderExecutionFacts, ProviderExecutionSnapshot } from '../projections/provider-execution.js';
 /**
  * Mission terminal and retained-history capability (TASK-2749).
  *
@@ -72,6 +73,8 @@ export interface MissionHistoryLocation {
 export interface MissionHistoryStorePort {
   readonly fs: RunHistoryFileSystem;
   locations(_identity: MissionTerminalScope): readonly MissionHistoryLocation[];
+  /** Mission tokens that retain run history in the repository store; `ok: false` when the store root cannot be read. */
+  missionIds?(): { readonly ok: true; readonly names: readonly string[] } | { readonly ok: false };
   /** Supervisor liveness, so an abandoned `running` record reads as interrupted. */
   isAlive(_pid: number): boolean;
   executionAlive?(_execution: { readonly pid: number; readonly processIdentity: string | null }): boolean | null;
@@ -182,6 +185,8 @@ export type MissionLiveView =
 export interface MissionTerminalCapability {
   /** Canonical identity for this repository, or a typed `invalid` error. */
   execution?(_mission: string, _currentOperationId?: string): ProviderExecutionFacts | MissionHistoryError;
+  /** Repository-wide confirmed live provider invocations, without any board projection. */
+  providerSnapshot?(_knownFamilies: readonly AgentFamily[]): ProviderExecutionSnapshot;
   identify(_mission: string): { readonly ok: true; readonly identity: MissionTerminalScope } | MissionHistoryError;
   probe(_mission: string): MissionTerminalProbe | MissionHistoryError;
   overview(_mission: string): MissionHistoryOverview | MissionHistoryError;

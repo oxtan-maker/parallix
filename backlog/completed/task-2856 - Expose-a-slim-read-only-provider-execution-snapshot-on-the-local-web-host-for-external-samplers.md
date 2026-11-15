@@ -3,8 +3,8 @@ id: TASK-2856
 title: >-
   Expose a slim read-only provider-execution snapshot on the local web host for
   external samplers
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-11-15 04:40'
 labels:
   - web
