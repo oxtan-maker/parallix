@@ -80,14 +80,16 @@ export interface ReviewLoopState extends ReviewStateData {
 }
 
 /** Review-round persistence for one Mission. */
+export type ReviewObservationRecordResult = 'recorded' | 'ignored';
+
 export interface ReviewStatePort {
   read(): Promise<ReviewLoopState | null>;
   verdictBlock?(): Promise<import('../review-verdict-readiness.js').VerdictBlock | null>;
   /** Persist an already-decided state; throws when the write does not commit. */
   persist(_state: ReviewLoopState): Promise<void>;
   /** Record an observed reviewer approval through the authoritative decision/lifecycle owner. */
-  recordApproval(_state: ReviewLoopState, _observation?: ProviderApproval): Promise<void>;
-  recordRequestedChanges(_state: ReviewLoopState, _observation: ProviderReviewChanges): Promise<void>;
+  recordApproval(_state: ReviewLoopState, _observation?: ProviderApproval): Promise<ReviewObservationRecordResult>;
+  recordRequestedChanges(_state: ReviewLoopState, _observation: ProviderReviewChanges): Promise<ReviewObservationRecordResult>;
   recordResolution(_state: ReviewLoopState, _observation: ProviderResolution): Promise<void>;
   /** Discard the persisted state; true when a reset was committed. */
   reset(): Promise<boolean>;
@@ -189,9 +191,19 @@ export interface ProviderApproval {
   readonly revision: string | null;
   readonly decidedAt: string;
   readonly comment: string | null;
+  readonly actor?: string | null;
+  readonly provenance?: ProviderReviewProvenance;
 }
 
 export type ProviderReviewObservation = ProviderApproval | ProviderReviewChanges;
+
+/** Durable identity embedded in a workflow-published provider review. */
+export interface ProviderReviewProvenance {
+  readonly slug: string;
+  readonly round: number;
+  readonly actor: string;
+  readonly revision: string;
+}
 
 export interface ProviderReviewChanges {
   readonly source?: OperatorReviewSource;
@@ -200,6 +212,8 @@ export interface ProviderReviewChanges {
   readonly comment: string;
   readonly revision: string | null;
   readonly decidedAt: string;
+  readonly actor?: string | null;
+  readonly provenance?: ProviderReviewProvenance;
 }
 
 export interface ProviderResolution {

@@ -835,7 +835,10 @@ async function getLatestReviewForPr(prNumber: number, reviewerUser: string, sinc
       return (r.state === 'REQUEST_CHANGES' || r.user?.login === reviewerUser) && !!submittedAt
         && new Date(submittedAt).getTime() >= since && !r.dismissed;
     })
-    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string}} r */ (r) => ({ state: r.state!, submittedAt: r.submitted_at || r.created_at || '', body: r.body || '', revision: r.commit_id ?? null }))
+    .map(/** @param {{state?: string, submitted_at?: string, created_at?: string, user?: {login?: string}}} r */ (r) => ({
+      state: r.state!, submittedAt: r.submitted_at || r.created_at || '', body: r.body || '',
+      revision: r.commit_id ?? null, actor: r.user?.login ?? null,
+    }))
     .sort(/** @param {{submittedAt: string}} a @param {{submittedAt: string}} b */ (a, b) => new Date(a.submittedAt).getTime() - new Date(b.submittedAt).getTime());
 
   return eligible.length > 0 ? eligible[eligible.length - 1] : null;

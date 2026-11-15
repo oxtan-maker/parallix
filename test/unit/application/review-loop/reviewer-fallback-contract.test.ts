@@ -359,7 +359,7 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
           ...(reviewStatus(store.mission().review!) === 'approved' ? { phase: 'approved' as const, disposition: 'APPROVED' } : { phase: 'reviewing' as const }) }),
         ...observationRecorder, recordApproval: async (state: Parameters<typeof observationRecorder.recordApproval>[0], observation: Parameters<typeof observationRecorder.recordApproval>[1]) => {
             approvalWrites.push({ reviewer: state.reviewer, observation });
-            await observationRecorder.recordApproval(state, observation);
+            return await observationRecorder.recordApproval(state, observation);
           },
         persist: async next => {
           const mission = store.mission(); const round = currentReviewRound(mission.review!);

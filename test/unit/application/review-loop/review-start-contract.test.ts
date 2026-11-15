@@ -334,6 +334,7 @@ for (const refused of [false, true]) {
           assert.equal(state.phase, 'approved');
           effects.push('decision');
           if (refused) { throw new Error('approval lifecycle refused'); }
+          return 'recorded';
         },
       },
       task: { mirrorApproved: async () => { effects.push('mirror'); } },
@@ -456,6 +457,7 @@ function changedRepairScenario(status: 'active' | 'review' = 'active', approvedR
         const result = await recordApproval(slug, { comment: 'fresh review', revision: observation?.revision ?? fake.ports.preReview.head(),
           decidedAt: observation?.decidedAt ?? '2026-10-02T12:00:00Z' }, { missionStore: store, lifecycleService: lifecycle });
         assert.notEqual(result.outcome, 'failed', JSON.stringify(result));
+        return 'recorded';
       },
     },
     reviewPreparation: { reviewPreparation: async () => {

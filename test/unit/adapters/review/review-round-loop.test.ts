@@ -11,6 +11,7 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { openReviewRound } from '../../../../src/adapters/review/review-round-open.js';
 import { reviewFindingId } from '../../../../src/domain/review.js';
 import { persistReviewerRunAttribution, reviewerResultAttribution } from '../../../../src/adapters/review/reviewer-result-attribution.js';
+import { reviewPublicationBody } from '../../../../src/adapters/review/review-publication.js';
 
 /**
  * The request-changes review contract over an injected MissionTransitionStore.
@@ -456,7 +457,7 @@ it('polled changes and resolution advance through their owners to round two (TAS
 it('provider polling preserves the judged revision and submission time after HEAD moves (TASK-2821 review P4)', async () => {
   const { store, lifecycle } = await reviewInProgress();
   const decidedAt = '2026-08-16T14:00:00.000Z';
-  const observed = { state: 'APPROVED', revision: 'rev-1', submittedAt: decidedAt, body: 'Reviewed A' };
+  const observed = { state: 'APPROVED', revision: 'rev-1', submittedAt: decidedAt, body: 'Reviewed A', actor: 'codex' };
   const recorder = createReviewObservationRecorder(String(MISSION), () => 'unreviewed-B', true, { missionStore: store, lifecycleService: lifecycle });
   const fake = fakeReviewLoopPorts({
     slug: String(MISSION), missionStore: store, lifecycle,
@@ -480,6 +481,163 @@ it('provider polling preserves the judged revision and submission time after HEA
   assert.equal(assessApprovalCoverage(review, { landedRevision: changeRevision('unreviewed-B'), sameChange: false })?.kind, 'stale');
   await recorder.recordApproval(fake.current()!);
   assert.deepEqual(currentReviewRound(store.mission().review!).decision, decision, 'replay preserves the original provider judgment');
+  assert.equal(store.events.length, 1);
+});
+
+it('ignores a recovered round-22 publication submitted after repair opens round 26 (TASK-2855)', async () => {
+  const repairStartedAt = '2026-11-14T10:00:00.000Z';
+  const secondaryReviewer = agentFamily('claude');
+  const base = startReview(
+    { change, revision: changeRevision('round-26-revision') },
+    reviewer,
+    implementer,
+    repairStartedAt,
+    eligibility,
+  );
+  const opened = currentReviewRound(base);
+  const review: Review = { ...base, rounds: [{ ...opened, number: 26, reviewerPolicy: {
+    revision: changeRevision('round-26-revision'), mode: 'two-independent', requiredApprovals: 2,
+    selected: [reviewer, secondaryReviewer], independentAvailable: 2, unavailable: [], rerouted: [], fallbackReason: null,
+  } }] };
+  const store = inMemoryTransitionStore(fixtureMission(String(MISSION), {
+    status: 'review', assignee: implementer, review,
+  }));
+  const recorder = createReviewObservationRecorder(String(MISSION), () => 'round-26-revision', true, {
+    missionStore: store,
+    lifecycleService: new MissionLifecycleService(store),
+  });
+  const state = (await readReviewState(String(MISSION), '/fixture', store))!;
+  const secondaryStore = inMemoryTransitionStore(fixtureMission(String(MISSION), {
+    status: 'review', assignee: implementer, review,
+  }));
+  const secondaryState = (await readReviewState(String(MISSION), '/fixture', secondaryStore))!;
+  secondaryState.reviewer = String(secondaryReviewer);
+  const secondaryApproval = providerReviewObservation({
+    state: 'APPROVED', submittedAt: '2026-11-14T10:04:00.000Z',
+    body: reviewPublicationBody('Current secondary approval', {
+      slug: String(MISSION), round: 26, actor: String(secondaryReviewer), revision: 'round-26-revision',
+      eventType: 'reviewer_outcome', target: 'review',
+    }),
+    revision: 'round-26-revision', actor: String(secondaryReviewer),
+  });
+  assert.ok(secondaryApproval?.disposition === 'APPROVED');
+  await createReviewObservationRecorder(String(MISSION), () => 'round-26-revision', true, {
+    missionStore: secondaryStore,
+    lifecycleService: new MissionLifecycleService(secondaryStore),
+  }).recordApproval(secondaryState, secondaryApproval);
+  const secondaryRound = currentReviewRound(secondaryStore.mission().review!);
+  assert.equal(secondaryRound.decision, null, 'a selected secondary approval remains held for its peer');
+  assert.equal(secondaryRound.reviewerResults?.[0]?.agentFamily, secondaryReviewer);
+  const historicalBody = reviewPublicationBody('## F1: historical round-22 finding', {
+    slug: String(MISSION),
+    round: 22,
+    actor: 'custom',
+    revision: 'round-22-revision',
+    eventType: 'reviewer_outcome',
+    target: 'review',
+  });
+  const historicalRaw = {
+    state: 'REQUEST_CHANGES',
+    submittedAt: '2026-11-14T10:05:00.000Z',
+    body: historicalBody,
+    revision: 'round-22-revision',
+    actor: 'custom',
+  };
+  const historical = providerReviewObservation(historicalRaw);
+  assert.ok(historical?.disposition === 'REQUEST_CHANGES');
+
+  assert.equal(await recorder.recordRequestedChanges(state, historical), 'ignored');
+
+  const mission = store.mission();
+  const current = currentReviewRound(mission.review!);
+  assert.equal(current.number, 26);
+  assert.equal(current.decision, null, 'the historical publication cannot decide the repair round');
+  assert.equal(mission.status, 'review', 'the historical publication cannot transition the mission');
+  assert.equal(store.events.length, 0, 'the historical publication cannot add lifecycle events');
+
+  const approvalBody = reviewPublicationBody('Current primary approval', {
+    slug: String(MISSION), round: 26, actor: String(reviewer), revision: 'round-26-revision',
+    eventType: 'reviewer_outcome', target: 'review',
+  });
+  const approval = providerReviewObservation({
+    state: 'APPROVED', submittedAt: '2026-11-14T10:05:30.000Z', body: approvalBody,
+    revision: 'round-26-revision', actor: String(reviewer),
+  });
+  assert.ok(approval?.disposition === 'APPROVED');
+  assert.equal(await recorder.recordApproval(state, approval), 'recorded');
+  assert.equal(currentReviewRound(store.mission().review!).decision, null, 'the first selected result remains held');
+
+  const currentBody = reviewPublicationBody('## F26: current round finding', {
+    slug: String(MISSION),
+    round: 26,
+    actor: String(secondaryReviewer),
+    revision: 'round-26-revision',
+    eventType: 'reviewer_outcome',
+    target: 'review',
+  });
+  const matching = providerReviewObservation({
+    state: 'REQUEST_CHANGES',
+    submittedAt: '2026-11-14T10:06:00.000Z',
+    body: currentBody,
+    revision: 'round-26-revision',
+    actor: String(secondaryReviewer),
+  });
+  assert.ok(matching?.disposition === 'REQUEST_CHANGES');
+  assert.equal(state.reviewer, String(reviewer), 'a resumed state retains the round primary reviewer');
+  assert.equal(await recorder.recordRequestedChanges(state, matching), 'recorded');
+  const decided = currentReviewRound(store.mission().review!);
+  assert.equal(decided.decision?.kind, 'changes-requested');
+  assert.deepEqual(decided.decision?.kind === 'changes-requested'
+    ? decided.decision.findings.map(finding => finding.id) : [], ['F26']);
+  assert.equal(decided.decision?.revision, 'round-26-revision');
+});
+
+it('provider request-changes settles a governed round without changing decision authority (TASK-2855 F6)', async () => {
+  const startedAt = '2026-11-14T10:00:00.000Z';
+  const reviewedRevision = 'reviewed-head';
+  const secondaryReviewer = agentFamily('claude');
+  const base = startReview(
+    { change, revision: changeRevision('round-26-revision') },
+    reviewer,
+    implementer,
+    startedAt,
+    eligibility,
+  );
+  const opened = currentReviewRound(base);
+  const review: Review = { ...base, rounds: [{ ...opened, number: 26, reviewerPolicy: {
+    revision: changeRevision(reviewedRevision), mode: 'two-independent', requiredApprovals: 2,
+    selected: [reviewer, secondaryReviewer], independentAvailable: 2, unavailable: [], rerouted: [], fallbackReason: null,
+  } }] };
+  const store = inMemoryTransitionStore(fixtureMission(String(MISSION), {
+    status: 'review', assignee: implementer, review,
+  }));
+  const recorder = createReviewObservationRecorder(String(MISSION), () => reviewedRevision, true, {
+    missionStore: store,
+    lifecycleService: new MissionLifecycleService(store),
+  });
+  const state = (await readReviewState(String(MISSION), '/fixture', store))!;
+  const observation = providerReviewObservation({
+    state: 'REQUEST_CHANGES', submittedAt: '2026-11-14T10:06:00.000Z',
+    body: reviewPublicationBody('## F26: current round finding', {
+      slug: String(MISSION), round: 26, actor: String(reviewer), revision: reviewedRevision,
+      eventType: 'reviewer_outcome', target: 'review',
+    }),
+    revision: reviewedRevision, actor: String(reviewer),
+  });
+  assert.ok(observation?.disposition === 'REQUEST_CHANGES');
+  assert.equal(currentReviewRound(store.mission().review!).subject.revision, 'round-26-revision',
+    'the round-open subject remains distinct from the governed review revision');
+
+  assert.equal(await recorder.recordRequestedChanges(state, observation), 'recorded');
+  const mission = store.mission();
+  const decided = currentReviewRound(mission.review!);
+  assert.equal(decided.decision?.kind, 'changes-requested');
+  assert.deepEqual(decided.decision?.kind === 'changes-requested'
+    ? decided.decision.findings.map(finding => finding.id) : [], ['F26']);
+  assert.equal(decided.decision?.revision, reviewedRevision);
+  assert.deepEqual(decided.reviewerResults?.map(result => String(result.agentFamily)), ['codex'],
+    'the existing decision owner remains responsible for the settled verdict');
+  assert.equal(mission.status, 'active');
   assert.equal(store.events.length, 1);
 });
 

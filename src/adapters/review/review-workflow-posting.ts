@@ -17,7 +17,9 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 import { reviewerResultAttribution } from './reviewer-result-attribution.js';
 import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 import { missionId } from '../../domain/mission.js';
+import { currentReviewRound } from '../../domain/review.js';
 import {
+  currentReviewPublication,
   markReviewPublication,
   parseReviewPublication,
   reviewPublicationBody,
@@ -452,12 +454,18 @@ export async function recoverReviewPublications(
 ): Promise<{ ok: boolean; pending: number }> {
   const loaded = await options.missionStore.load(missionId(slug));
   if (loaded.kind !== 'found' || !loaded.mission.review) { return { ok: true, pending: 0 }; }
+  const round = currentReviewRound(loaded.mission.review);
   const pending = loaded.mission.review.reviewEvents.filter(event => {
     const publication = parseReviewPublication(event.followUpReference);
     return publication && publication.eventType !== 'blocked_publication' && publication.state !== 'completed';
   });
   for (const event of pending) {
     const publication = parseReviewPublication(event.followUpReference)!;
+    if (!currentReviewPublication(slug, publication, event, round)) {
+      await markReviewPublication(options.missionStore, slug, publication.key, 'completed');
+      options.log?.(`Ignoring superseded review publication for round ${publication.round}; current round is ${round.number}.`);
+      continue;
+    }
     const identity: ReviewPublicationIdentity = {
       slug,
       round: publication.round,

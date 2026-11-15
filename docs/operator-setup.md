@@ -730,6 +730,12 @@ changes and their findings stay intact, and a round reopened by an
 integration-gate repair must pass normal review or the unchanged-patch
 restoration check first.
 
+Workflow-published provider reviews carry their original round, actor and
+reviewed revision. On resume, Parallix applies that evidence only when all three
+still match the authoritative current round. Recovery retires superseded
+publication attempts without reposting their verdicts; ordinary current human
+feedback remains available through the operator-correction path above.
+
 ## Summary Checklist
 
 After setup, an operator should be able to:

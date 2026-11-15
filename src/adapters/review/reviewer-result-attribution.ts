@@ -10,6 +10,7 @@ import {
   type ReviewerResultAttribution,
 } from '../../domain/review.js';
 import { attributeReviewerRun } from '../../domain/reviewer-result.js';
+import { isRoundReviewer } from '../../domain/reviewer-policy.js';
 
 export interface ReviewerProcessResult {
   readonly status?: number | null;
@@ -107,7 +108,7 @@ function authorizedReviewerFamily(
 ): string {
   const attributed = input.result?.agentFamily;
   if (!attributed) { return round.reviewer; }
-  if (!round.reviewerPolicy?.selected.includes(attributed)) { return round.reviewer; }
+  if (!isRoundReviewer(round, attributed)) { return round.reviewer; }
   return attributed;
 }
 

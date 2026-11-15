@@ -99,8 +99,8 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
   const state: ReviewStatePort = {
     read: async () => current,
     persist: async next => { current = next; writes.push(JSON.parse(JSON.stringify(next))); },
-    recordApproval: async next => { await state.persist(next); },
-    recordRequestedChanges: async () => {},
+    recordApproval: async next => { await state.persist(next); return 'recorded'; },
+    recordRequestedChanges: async () => 'recorded',
     recordResolution: async () => {},
     reset: async () => { current = null; return true; },
     create: identity => new ReviewState(slug, identity),

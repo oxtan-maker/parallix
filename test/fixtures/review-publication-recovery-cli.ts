@@ -12,7 +12,13 @@ import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
 import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-identity.js';
 import { agentFamily } from '../../src/domain/agents.js';
 import { missionId, missionLabels } from '../../src/domain/mission.js';
-import { beginNextReviewRound, changeRevision, ConfiguredReviewerEligibility, startReview } from '../../src/domain/review.js';
+import {
+  beginNextReviewRound,
+  changeRevision,
+  ConfiguredReviewerEligibility,
+  currentReviewRound,
+  startReview,
+} from '../../src/domain/review.js';
 import { parseReviewPublication } from '../../src/adapters/review/review-publication.js';
 import { run as runCli } from '../../src/composition/create-cli.js';
 import { fixtureMission } from './mission-builders.js';
@@ -28,7 +34,19 @@ export type ReviewPublicationRecoveryObservation = {
   cleaned: boolean;
 };
 
-export async function exerciseReviewPublicationRecoveryCli(cli: PxEntryLoader): Promise<ReviewPublicationRecoveryObservation> {
+export type HistoricalReviewPublicationObservation = ReviewPublicationRecoveryObservation & {
+  currentRound: number;
+  currentDecision: string | null;
+  currentRevisionMatches: boolean;
+  currentFindingIds: string[];
+  historicalReviewPosts: number;
+};
+
+export function exerciseReviewPublicationRecoveryCli(cli: PxEntryLoader): Promise<ReviewPublicationRecoveryObservation>;
+export function exerciseReviewPublicationRecoveryCli(cli: PxEntryLoader,
+  options: { deferHistoricalReview: true }): Promise<HistoricalReviewPublicationObservation>;
+export async function exerciseReviewPublicationRecoveryCli(cli: PxEntryLoader,
+  options: { deferHistoricalReview?: boolean } = {}): Promise<ReviewPublicationRecoveryObservation | HistoricalReviewPublicationObservation> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'px-review-publication-'));
   const worktree = path.join(root, 'repo');
   const operatorHome = path.join(root, 'operator');
@@ -53,6 +71,12 @@ export async function exerciseReviewPublicationRecoveryCli(cli: PxEntryLoader): 
     git('config', 'user.name', 'Disposable publication exercise');
     git('config', 'user.email', 'fixture@example.invalid');
     fs.writeFileSync(path.join(worktree, 'payload.txt'), 'isolated publication recovery\n');
+    fs.mkdirSync(path.join(worktree, 'backlog', 'tasks'), { recursive: true });
+    fs.writeFileSync(path.join(worktree, 'backlog', 'tasks', `${slug} - Publication-recovery.md`), [
+      '---', `id: ${slug.toUpperCase()}`, 'title: Publication recovery', 'status: review',
+      'assignee: [codex]', 'labels: [ai_sdlc]', 'dependencies: []', '---', '',
+      'Disposable public CLI publication recovery exercise.', '',
+    ].join('\n'));
     git('add', '.');
     git('commit', '-qm', 'fixture');
     git('worktree', 'add', '-qb', 'main', path.join(root, 'base'));
@@ -129,7 +153,7 @@ export async function exerciseReviewPublicationRecoveryCli(cli: PxEntryLoader): 
       fs.symlinkSync(realCurl, path.join(curlBin, 'curl'));
       env.PATH = `${curlBin}${path.delimiter}${env.PATH ?? ''}`;
     }
-    const recoveryPath = env.PATH;
+    const recoveryPath = env.PATH ?? process.env.PATH ?? '';
     const interruptedRequest = path.join(root, 'interrupted-request.json');
     const interruptBin = path.join(root, 'interrupt-bin');
     fs.mkdirSync(interruptBin);
@@ -189,9 +213,13 @@ printf '%s\\n200' "$data"
       created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     interruptNextComment = false;
     env.PATH = recoveryPath;
-    const recovered = await run(verdict);
-    assert.equal(recovered.code, 0, recovered.output);
-    assert.deepEqual([comments.length, reviews.length], [1, 1]);
+    const recovered = options.deferHistoricalReview ? null : await run(verdict);
+    if (recovered) {
+      assert.equal(recovered.code, 0, recovered.output);
+      assert.deepEqual([comments.length, reviews.length], [1, 1]);
+    } else {
+      assert.deepEqual([comments.length, reviews.length], [1, 0]);
+    }
 
     fs.writeFileSync(path.join(worktree, 'repair.txt'), 'controlled repair\n');
     git('add', '.');
@@ -239,17 +267,75 @@ printf '%s\\n200' "$data"
     if (loaded.kind !== 'found') { throw new Error('fixture mission disappeared'); }
     const next = beginNextReviewRound(loaded.mission.review!, agentFamily('claude'), agentFamily('codex'), new Date().toISOString(), eligibility);
     await store.save({ ...loaded.mission, status: 'review', rawStatus: 'review', closedAt: null, review: next }, loaded.version);
-    const approved = await run(['verdict', 'approve', '--slug', slug, '--actor', 'claude', '--comment', 'Repair approved.']);
+    const resumed = options.deferHistoricalReview
+      ? await run(['review', slug, '--dry-run', '--max-attempts', '2']) : null;
+    if (resumed) {
+      assert.equal(resumed.code, 0, resumed.output);
+      assert.deepEqual([comments.length, reviews.length], [3, 0], 'dry-run resume retires stale recovery without provider mutation');
+    }
+    const approvedRequest = path.join(root, 'approved-request.json');
+    const approvedBin = path.join(root, 'approved-bin');
+    fs.mkdirSync(approvedBin);
+    fs.writeFileSync(path.join(approvedBin, 'curl'), `#!/bin/sh
+method=
+url=
+while test "$#" -gt 0; do
+  if test "$1" = -X; then shift; method="$1"; fi
+  url="$1"
+  shift
+done
+if test "$method" = POST; then
+  body=$(cat)
+  printf '%s\\t%s\\n' "$url" "$body" >> '${approvedRequest}'
+  printf '{}\\n200'
+  exit 0
+fi
+case "$url" in
+  *issues/739/comments*) data='${JSON.stringify(comments)}' ;;
+  *pulls/739/reviews*) data='${JSON.stringify(reviews)}' ;;
+  *pulls/739*) data='${JSON.stringify(pull)}' ;;
+  *) data='[${JSON.stringify(pull)}]' ;;
+esac
+printf '%s\\n200' "$data"
+`, { mode: 0o755 });
+    const approved = await runInProcess(
+      ['verdict', 'approve', '--slug', slug, '--actor', 'claude', '--comment', 'Repair approved.'],
+      `${approvedBin}${path.delimiter}${recoveryPath}`);
     assert.equal(approved.code, 0, approved.output);
+    for (const line of fs.readFileSync(approvedRequest, 'utf8').trim().split('\n')) {
+      const [url, body] = line.split('\t');
+      const parsed = JSON.parse(body ?? '') as Record<string, unknown>;
+      if (url?.includes('/issues/739/comments')) {
+        comments.push({ id: comments.length + 1, body: String(parsed.body ?? ''), user: { login: 'claude' },
+          created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      } else if (url?.includes('/pulls/739/reviews')) {
+        reviews.push({ id: reviews.length + 1, body: String(parsed.body ?? ''), state: String(parsed.event ?? ''),
+          commit_id: parsed.commit_id ?? pull.head.sha, user: { login: 'claude' }, submitted_at: new Date().toISOString(), dismissed: false });
+      }
+    }
     loaded = await store.load(missionId(slug));
     assert.equal(loaded.kind, 'found');
     if (loaded.kind !== 'found') { throw new Error('approved fixture mission disappeared'); }
-    assert.deepEqual([comments.length, reviews.length], [4, 2]);
+    assert.deepEqual([comments.length, reviews.length], options.deferHistoricalReview ? [4, 1] : [4, 2]);
+    const current = currentReviewRound(loaded.mission.review!);
+    const currentFindingIds = current.decision?.kind === 'changes-requested'
+      ? current.decision.findings.map(finding => String(finding.id)) : [];
+    assert.equal(current.number, 2);
+    assert.equal(current.decision?.kind, 'approved');
+    assert.equal(current.decision?.revision, fixedRevision);
+    assert.deepEqual(currentFindingIds, []);
+    const historicalReviewPosts = reviews.filter(entry => {
+      const body = String(entry.body ?? '');
+      return body.includes('round 1;') || body.includes('## F1:');
+    }).length;
+    if (options.deferHistoricalReview) {
+      assert.equal(historicalReviewPosts, 0, 'superseded request-changes review is retired before provider mutation');
+    }
     const providerEntries = [...comments, ...reviews];
     assert.ok(providerEntries.every(entry => /Review provenance: round \d+; actor (claude|codex); revision [0-9a-f]+/.test(String(entry.body))),
       JSON.stringify(providerEntries.map(entry => entry.body)));
     const markers = providerEntries.map(entry => /parallix-publication:([^ ]+) -->/.exec(String(entry.body))?.[1]);
-    assert.equal(new Set(markers).size, 6);
+    assert.equal(new Set(markers).size, options.deferHistoricalReview ? 5 : 6);
     const publications = loaded.mission.review!.reviewEvents.flatMap(event => {
       const publication = parseReviewPublication(event.followUpReference);
       return publication ? [publication] : [];
@@ -259,9 +345,14 @@ printf '%s\\n200' "$data"
     const usage = await database.query<{ count: number }>('SELECT COUNT(*) AS count FROM usage_statistics');
     const usageRows = Number(usage[0]?.count ?? -1);
     assert.equal(usageRows, 0);
-    return { exits: [interrupted.code, recovered.code, resolved.code, approved.code],
-      comments: comments.length, reviews: reviews.length, completedPublications: publications.length,
+    const common = { comments: comments.length, reviews: reviews.length, completedPublications: publications.length,
       uniquePublicationMarkers: new Set(markers).size, usageRows, cleaned: true };
+    return options.deferHistoricalReview
+      ? { ...common, exits: [interrupted.code, resolved.code, resumed!.code, approved.code],
+        currentRound: current.number, currentDecision: current.decision?.kind ?? null,
+        currentRevisionMatches: current.decision?.revision === fixedRevision,
+        currentFindingIds, historicalReviewPosts }
+      : { ...common, exits: [interrupted.code, recovered!.code, resolved.code, approved.code] };
   } finally {
     await database.close();
     if (provider) { await new Promise<void>(resolve => provider!.close(() => resolve())); }

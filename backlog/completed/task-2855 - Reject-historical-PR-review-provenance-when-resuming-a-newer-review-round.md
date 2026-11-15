@@ -1,8 +1,8 @@
 ---
 id: TASK-2855
 title: Reject historical PR review provenance when resuming a newer review round
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-14 09:16'
 labels:
   - bug

@@ -99,6 +99,37 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
     assert.ok(fake.logs.some(m => m.includes('Re-launching implementer')), `Expected re-launch log message for PARKED; got: ${fake.logs.join(' | ')}`);
   });
 
+  test('fixing resume normalizes a rejected historical review before prompting the implementer (TASK-2855 F2)', async () => {
+    const slug = 'task-2855-fixing-resume';
+    const stale = {
+      disposition: 'REQUEST_CHANGES' as const,
+      findings: [{ id: 'F22' as never, summary: 'historical round-22 finding', location: null }],
+      comment: 'historical round-22 finding', revision: 'round-22-revision',
+      decidedAt: '2026-11-14T10:05:00.000Z', actor: 'custom',
+      provenance: { slug, round: 22, actor: 'custom', revision: 'round-22-revision' },
+    };
+    const fake = fakeReviewLoopPorts({
+      slug,
+      state: new ReviewState(slug, { reviewer: 'custom', implementer: 'codex', round: 26, phase: 'fixing' }),
+      routing: { eligibleFamilies: () => ['custom', 'codex'], nominate: () => 'custom' },
+      provider: {
+        latestReview: async () => stale,
+        pollDisposition: async () => 'BLOCKED',
+      },
+      agents: { launch: async () => ({ agent: 'codex' }) },
+      artifacts: { consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'BLOCKED' }) },
+      stateport: { recordRequestedChanges: async () => 'ignored' },
+      preReview: { head: () => null },
+    });
+
+    await runReviewLoop({ slug, isContinue: true, maxAttempts: 26 }, fake.ports);
+
+    const launch = fake.launches.find(candidate => candidate.role === 'implementer');
+    assert.ok(launch, 'the existing fixing round still launches its implementer');
+    assert.equal((launch.prompt as { reviewOutcome?: unknown }).reviewOutcome, 'REQUEST_CHANGES');
+    assert.doesNotMatch(JSON.stringify(launch.prompt), /\[object Object\]/);
+  });
+
   test('Skip-check non-BLOCKED/PARKED disposition still skips (existing behaviour preserved)', async () => {
     const { fake } = continueFixing('task-1221-skip-normal', { pollDisposition: () => 'CHANGES_MADE' });
     await runReviewLoop({ slug: 'task-1221-skip-normal', isContinue: true, maxAttempts: 1 }, fake.ports);
@@ -165,6 +196,71 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries even when poll returns null (got ${reviewerLaunches(fake)} reviewer launches)`);
     assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
       `should escalate with the recovery dossier, not a bare non-submission error. Errors: ${fake.errors.join(' | ')}`);
+  });
+
+  test('historical provider findings cannot launch the implementer after recorder rejection (TASK-2855 F4)', async () => {
+    const slug = 'task-2855-loop-rejection';
+    let rejectedWrites = 0;
+    const stale = {
+      disposition: 'REQUEST_CHANGES' as const,
+      findings: [{ id: 'F22' as never, summary: 'historical round-22 finding', location: null }],
+      comment: 'historical round-22 finding', revision: 'round-22-revision',
+      decidedAt: '2026-11-14T10:05:00.000Z', actor: 'custom',
+      provenance: { slug, round: 22, actor: 'custom', revision: 'round-22-revision' },
+    };
+    const fake = fakeReviewLoopPorts({
+      slug,
+      state: new ReviewState(slug, { reviewer: 'custom', implementer: 'codex', round: 26, phase: 'reviewing' }),
+      routing: { eligibleFamilies: () => ['custom', 'claude'], nominate: () => 'custom' },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
+      provider: { pollReview: async () => stale },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: null }) },
+      stateport: {
+        recordRequestedChanges: async () => {
+          rejectedWrites += 1;
+          return 'ignored';
+        },
+      },
+    });
+
+    await runReviewLoop({ slug, maxAttempts: 26, reboundsPerRound: 0, skipReviewPreparation: true }, fake.ports);
+
+    assert.ok(rejectedWrites > 0, 'the provider observation reaches the authoritative recorder');
+    assert.equal(fake.launches.filter(launch => launch.role === 'implementer').length, 0,
+      'an ignored observation cannot launch act-on-review');
+    assert.ok(!fake.mirrors.includes('active'), 'an ignored observation cannot mutate the task lane');
+  });
+
+  test('historical provider approval cannot approve the task after recorder rejection (TASK-2855 F4)', async () => {
+    const slug = 'task-2855-loop-approval-rejection';
+    let rejectedWrites = 0;
+    const fake = fakeReviewLoopPorts({
+      slug,
+      state: new ReviewState(slug, { reviewer: 'custom', implementer: 'codex', round: 26, phase: 'reviewing' }),
+      routing: { eligibleFamilies: () => ['custom'], nominate: () => 'custom' },
+      reviewPreparation: { reviewPreparation: async () => ({ ok: true as const }) },
+      provider: { pollReview: async () => ({
+        disposition: 'APPROVED', comment: 'historical approval', revision: 'round-22-revision',
+        decidedAt: '2026-11-14T10:05:00.000Z', actor: 'custom',
+        provenance: { slug, round: 22, actor: 'custom', revision: 'round-22-revision' },
+      }) },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: null }) },
+      stateport: {
+        recordApproval: async () => {
+          rejectedWrites += 1;
+          return 'ignored';
+        },
+      },
+    });
+
+    await runReviewLoop({ slug, maxAttempts: 26, reboundsPerRound: 0, skipReviewPreparation: true }, fake.ports);
+
+    assert.equal(rejectedWrites, 1, 'the provider approval reaches the authoritative recorder');
+    assert.ok(!fake.mirrors.includes('approved'), 'an ignored approval cannot mutate the task lane');
+    assert.equal(fake.current()?.phase, 'reviewing');
+    assert.equal(fake.current()?.disposition, 'REBOUNDS_PER_ROUND_EXHAUSTED');
+    assert.deepEqual(fake.stops, ['REBOUNDS_PER_ROUND_EXHAUSTED'],
+      'an ignored approval enters bounded reviewer recovery instead of ending silently');
   });
 
   test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on null reviewState', async () => {
@@ -423,7 +519,7 @@ describe('preferred reviewer runtime fallback authority', () => {
           fallbackPersists.push({ phase: next.phase, reviewer: next.reviewer });
           authoritative = new ReviewState(slug, { ...next });
         },
-        recordApproval: async () => { approvalWrites++; },
+        recordApproval: async () => { approvalWrites++; return 'recorded'; },
       },
       routing: { eligibleFamilies: () => ['codex', 'vibe', 'custom'], nominate: () => 'codex' },
       agents: {

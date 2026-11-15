@@ -596,14 +596,14 @@ test('pollForReview waits asynchronously between retries', async () => {
   const state = await pollForReview(41, 'claude', '2026-04-18T10:00:00Z', 'fake-token', { configuration: resolveConfiguration(process.env),
     async getLatestReviewForPrFn() {
       attempts += 1;
-      return attempts === 2 ? { state: 'APPROVED', submittedAt: '2026-04-18T10:01:00Z', body: 'Reviewed', revision: 'reviewed-A' } : null;
+      return attempts === 2 ? { state: 'APPROVED', submittedAt: '2026-04-18T10:01:00Z', body: 'Reviewed', revision: 'reviewed-A', actor: 'claude' } : null;
     },
     async sleepFn(ms) {
       sleeps.push(ms);
     }
   });
 
-  assert.deepEqual(state, { state: 'APPROVED', submittedAt: '2026-04-18T10:01:00Z', body: 'Reviewed', revision: 'reviewed-A' });
+  assert.deepEqual(state, { state: 'APPROVED', submittedAt: '2026-04-18T10:01:00Z', body: 'Reviewed', revision: 'reviewed-A', actor: 'claude' });
   assert.equal(attempts, 2);
   assert.deepEqual(sleeps, [10_000]);
 });
@@ -668,12 +668,12 @@ test('pollForReview emits a progress line on every tick when verbose=true', asyn
       verbose: true,
       async getLatestReviewForPrFn() {
         attempts += 1;
-        return attempts === 3 ? { state: 'COMMENT', submittedAt: '2026-04-18T10:01:00Z', body: 'Review comment', revision: 'reviewed-A' } : null;
+        return attempts === 3 ? { state: 'COMMENT', submittedAt: '2026-04-18T10:01:00Z', body: 'Review comment', revision: 'reviewed-A', actor: 'claude' } : null;
       },
       async sleepFn() {}
     });
 
-    assert.deepEqual(state, { state: 'COMMENT', submittedAt: '2026-04-18T10:01:00Z', body: 'Review comment', revision: 'reviewed-A' });
+    assert.deepEqual(state, { state: 'COMMENT', submittedAt: '2026-04-18T10:01:00Z', body: 'Review comment', revision: 'reviewed-A', actor: 'claude' });
     const stillWaitingLines = logs.filter(l => l.includes('still waiting'));
     // verbose=true -> should log on every tick we didn't already return on (attempts 1 and 2).
     assert.equal(stillWaitingLines.length, 2, `expected 2 progress lines, got: ${logs.join(' | ')}`);
@@ -855,7 +855,9 @@ test('getLatestReviewForPr accepts a human request after round start but exclude
       { user: { login: 'human' }, submitted_at: '2026-04-26T10:00:01Z', state: 'REQUEST_CHANGES' },
     ] })),
   });
-  assert.deepEqual(review, { state: 'REQUEST_CHANGES', submittedAt: '2026-04-26T10:00:01Z', body: '', revision: null });
+  assert.deepEqual(review, {
+    state: 'REQUEST_CHANGES', submittedAt: '2026-04-26T10:00:01Z', body: '', revision: null, actor: 'human',
+  });
 });
 
 test('getLatestReviewForPr correctly sorts mixed-precision ISO timestamps', async () => {

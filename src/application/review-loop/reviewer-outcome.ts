@@ -1,5 +1,7 @@
 import type { LoopContext, ReviewRound, RoundStep } from './round.js';
 
+export type ReviewerOutcomeStep = RoundStep | 'ignored';
+
 /** Read only a decision for the exact loop round represented by `state`. */
 export function persistedReviewerOutcome(
   state: Pick<LoopContext['state'], 'round'>,
@@ -12,7 +14,7 @@ export function persistedReviewerOutcome(
 }
 
 /** Apply only an authoritative reviewer outcome to loop state and task mirroring. */
-export async function applyReviewerOutcome(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<RoundStep> {
+export async function applyReviewerOutcome(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<ReviewerOutcomeStep> {
   const { ports, state, slug } = context;
   if (reviewState !== 'APPROVED') {
     state.transitionTo('fixing');
@@ -32,10 +34,18 @@ export async function applyReviewerOutcome(context: LoopContext, round: ReviewRo
     await ports.task.mirrorApproved();
     return 'stop';
   }
+  const previousPhase = state.phase;
+  const previousDisposition = state.disposition;
   state.transitionTo('approved');
   state.disposition = reviewState;
   try {
-    await ports.state.recordApproval(state, round.providerApproval);
+    const recorded = await ports.state.recordApproval(state, round.providerApproval);
+    if (recorded === 'ignored') {
+      state.phase = previousPhase;
+      state.disposition = previousDisposition;
+      round.providerApproval = undefined;
+      return 'ignored';
+    }
   } catch (err) {
     context.emit({ kind: 'approval-transition-failed', slug, diagnostic: err instanceof Error ? err.message : String(err) });
     context.emit({ kind: 'approval-recovery-guidance', slug });

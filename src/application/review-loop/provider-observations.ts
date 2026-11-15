@@ -1,4 +1,4 @@
-import type { ProviderPollRequest, ProviderReviewObservation, ProviderPoll, ProviderReviewChanges } from '../ports/review-round.js';
+import { POLL_TIMEOUT, type ProviderPollRequest, type ProviderReviewObservation, type ProviderPoll, type ProviderReviewChanges } from '../ports/review-round.js';
 import { missionId } from '../../domain/mission.js';
 import { currentReviewRound, type ReviewRound as StoredRound } from '../../domain/review.js';
 import type { LoopContext, ReviewRound } from './round.js';
@@ -17,14 +17,16 @@ async function observedRound(context: LoopContext): Promise<StoredRound | null> 
 }
 
 /** Record provider findings before launching implementation or mirroring its lane. */
-export async function recordProviderChanges(context: LoopContext, scratch: ReviewRound, outcome: unknown, observed?: ProviderReviewChanges): Promise<void> {
+export async function recordProviderChanges(context: LoopContext, scratch: ReviewRound, outcome: unknown, observed?: ProviderReviewChanges): Promise<boolean> {
   const { ports, state, identities } = context;
-  if (!ports.provider || context.dryRun) { return; }
-  if (await settleRecordedChanges(context, scratch)) { return; }
+  if (!ports.provider || context.dryRun) { return true; }
+  if (await settleRecordedChanges(context, scratch)) { return true; }
   const observation = observed ?? await ports.provider.readRequestedChanges(identities.reviewer, state.startedAt);
   if (!observation || observation.disposition !== outcome) { throw new Error('Provider change request does not match the observed outcome'); }
-  await ports.state.recordRequestedChanges(state, observation);
+  const recorded = await ports.state.recordRequestedChanges(state, observation);
+  if (recorded === 'ignored') { return false; }
   scratch.blockingFindings = [...observation.findings];
+  return true;
 }
 
 /** A saved decision is complete only after its review → active boundary settles. */
@@ -62,6 +64,9 @@ export async function observeProviderReview(context: LoopContext, round: ReviewR
     ? observation : null;
   if (fact?.disposition === 'APPROVED') { round.providerApproval = fact; }
   const outcome = fact?.disposition ?? observation;
-  if (typeof outcome === 'string' && outcome && outcome !== 'APPROVED') { await recordProviderChanges(context, round, outcome, fact?.disposition === 'APPROVED' ? undefined : fact ?? undefined); }
+  if (typeof outcome === 'string' && outcome && outcome !== 'APPROVED'
+    && !await recordProviderChanges(context, round, outcome, fact?.disposition === 'APPROVED' ? undefined : fact ?? undefined)) {
+    return POLL_TIMEOUT;
+  }
   return outcome;
 }

@@ -1,16 +1,32 @@
 import { readReviewForDecision } from './review-round-read.js';
 import { currentReviewRound, currentRevisionApprovals } from '../../domain/review.js';
-import { approvalRequirementMet } from '../../domain/reviewer-policy.js';
+import { approvalRequirementMet, isRoundReviewer, reviewerRequirementRevision } from '../../domain/reviewer-policy.js';
 import type { ProviderApproval, ReviewStatePort, ReviewLoopState } from '../../application/ports/review-round.js';
 import type { ReviewRoundPorts, ReviewRoundResult } from './review-round.js';
 import type { Review, ReviewerResult, ReviewerResultAttribution } from '../../domain/review.js';
 import { reviewerResultAttribution } from './reviewer-result-attribution.js';
 import { recordApproval, recordRequestedChanges, recordImplementerResolution } from './review-round.js';
+import { missionId } from '../../domain/mission.js';
+import type { ProviderReviewObservation } from '../../application/ports/review-round.js';
 
 /** Bind observed provider facts to the existing decision/resolution owners. */
 export function createReviewObservationRecorder(slug: string, head: () => string | null, providerEnabled: boolean,
   ports: ReviewRoundPorts): Pick<ReviewStatePort, 'recordApproval' | 'recordRequestedChanges' | 'recordResolution'> {
   const observedRound = (state: ReviewLoopState) => ({ number: state.round, startedAt: state.startedAt });
+  const currentPublication = async (state: ReviewLoopState, observation: ProviderReviewObservation) => {
+    if (!observation.provenance) { return true; }
+    const loaded = await ports.missionStore!.load(missionId(slug));
+    if (loaded.kind !== 'found' || !loaded.mission.review) { throw new Error('Provider observation requires a recorded review'); }
+    const round = currentReviewRound(loaded.mission.review);
+    const revision = reviewerRequirementRevision(round);
+    return round.number === state.round && round.startedAt === state.startedAt
+      && observation.provenance.slug === slug
+      && observation.provenance.round === round.number
+      && isRoundReviewer(round, observation.provenance.actor)
+      && observation.actor === observation.provenance.actor
+      && observation.provenance.revision === revision
+      && observation.revision === revision;
+  };
   const requireLifecycle = () => {
     if (!ports.missionStore || !ports.lifecycleService) { throw new Error('Review observation requires the Mission store and lifecycle service'); }
   };
@@ -21,6 +37,7 @@ export function createReviewObservationRecorder(slug: string, head: () => string
       if (!observation) {
         ({ observation, result } = await recoverApprovalEvidence(slug, state, providerEnabled, ports));
       }
+      if (observation && !await currentPublication(state, observation)) { return 'ignored'; }
       const judgment = observation ?? { comment: null, decidedAt: new Date().toISOString(), revision: head() };
       // A polled approval is the running reviewer's own verdict: it is attributed, so a policy that still owes
       // another approval holds it instead of deciding the round.
@@ -29,10 +46,16 @@ export function createReviewObservationRecorder(slug: string, head: () => string
         result,
         source: providerEnabled ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
       }, ports));
+      return 'recorded';
     },
     async recordRequestedChanges(state, observation) {
       requireLifecycle();
-      await requireRecorded(() => recordRequestedChanges(slug, { ...observation, observedRound: observedRound(state) }, ports));
+      if (!await currentPublication(state, observation)) { return 'ignored'; }
+      await requireRecorded(() => recordRequestedChanges(slug, {
+        ...observation,
+        observedRound: observedRound(state),
+      }, ports));
+      return 'recorded';
     },
     async recordResolution(state, observation) {
       const resultingRevision = head();
@@ -58,7 +81,7 @@ async function recoverApprovalEvidence(slug: string, state: ReviewLoopState, pro
 function recoveredApproval(review: Review): { observation?: ProviderApproval; recorded?: ReviewerResult; governed: boolean } {
   const round = currentReviewRound(review);
   const decision = round.decision;
-  const revision = round.reviewerPolicy?.revision ?? round.subject.revision;
+  const revision = reviewerRequirementRevision(round);
   const recorded = currentRevisionApprovals(review, revision)
     .find(approval => approval.agentFamily === round.reviewer && (!round.reviewerPolicy || round.reviewerPolicy.selected.includes(approval.agentFamily)));
   let observation: ProviderApproval | undefined;

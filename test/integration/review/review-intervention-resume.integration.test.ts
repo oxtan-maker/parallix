@@ -489,8 +489,9 @@ it('retries a persisted operator correction after failed revocation and a databa
       stateport: { ...real.state,
         recordRequestedChanges: async (state, observation) => {
           if (failDecision) { throw new Error('injected decision write failure'); }
-          await real.state.recordRequestedChanges(state, observation);
+          const result = await real.state.recordRequestedChanges(state, observation);
           applied.push(...observation.findings.map(finding => finding.id));
+          return result;
         },
       },
       routing: { eligibleFamilies: () => [REVIEWER, IMPLEMENTER] },

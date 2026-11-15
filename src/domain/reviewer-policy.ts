@@ -46,6 +46,11 @@ export interface ReviewerPolicy {
   readonly fallbackReason: string | null;
 }
 
+/** Exact revision governed by the recorded reviewer requirement, with legacy fallback. */
+export function reviewerRequirementRevision(round: ReviewRound): ChangeRevision {
+  return round.reviewerPolicy?.revision ?? round.subject.revision;
+}
+
 /**
  * Routing facts the planner may read.  Only a family the launcher reports as
  * unsupported is unavailable: queued or live capacity, unknown liveness,
@@ -144,6 +149,14 @@ function approvedFamilies(review: Review, revision: ChangeRevision): ReadonlySet
 
 function currentRound(review: Review): ReviewRound {
   return review.rounds[review.rounds.length - 1];
+}
+
+/** Whether an actor is authorized to review this round. */
+export function isRoundReviewer(round: ReviewRound, reviewer: string): boolean {
+  const selected = round.reviewerPolicy?.selected;
+  return selected
+    ? selected.some(candidate => candidate === reviewer)
+    : round.reviewer === reviewer;
 }
 
 /** True when a valid, non-revoked negative verdict exists for the exact revision. */

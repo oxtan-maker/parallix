@@ -468,6 +468,19 @@ test('public CLI recovers interrupted review publication exactly once and cleans
   console.log(`PX-0054.02 public CLI observation: ${JSON.stringify(observed)}`);
 });
 
+test('public CLI retires a historical review before a later round resumes (TASK-2855)', async () => {
+  assert.equal(fs.existsSync(PREBUILT_PX_ENTRY), true, 'run npm run bundle before this public-CLI contract');
+  const historical = await exerciseReviewPublicationRecoveryCli(
+    { entry: PREBUILT_PX_ENTRY, loader: '' }, { deferHistoricalReview: true });
+  assert.deepEqual(historical, {
+    exits: [1, 0, 0, 0], comments: 4, reviews: 1, completedPublications: 6,
+    uniquePublicationMarkers: 5, usageRows: 0, cleaned: true,
+    currentRound: 2, currentDecision: 'approved', currentRevisionMatches: true,
+    currentFindingIds: [], historicalReviewPosts: 0,
+  });
+  console.log(`TASK-2855 historical public CLI observation: ${JSON.stringify(historical)}`);
+});
+
 // TASK-2521.04 (was test/task-2521.04-mission-dependencies.integration.test.ts)
 describe('Mission dependencies CLI', () => {
   /**

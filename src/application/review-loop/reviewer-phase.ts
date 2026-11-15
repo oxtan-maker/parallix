@@ -316,6 +316,7 @@ async function resumeFixingPhaseReview(context: LoopContext, round: ReviewRound)
   let reviewState: unknown = ports.provider
     ? await observeProviderReview(context, round, await ports.provider.latestReview(identities.reviewer, state.startedAt))
     : state.disposition || null;
+  if (isPollTimeout(reviewState)) { reviewState = null; }
   if (!reviewState) {
     context.emit({ kind: 'missing-resumed-review', providerEnabled: Boolean(ports.provider), reviewer: identities.reviewer, startedAt: state.startedAt });
     reviewState = 'REQUEST_CHANGES';
@@ -366,11 +367,23 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
     if (continued.action === 'return') { return continued.value; }
     reviewState = continued.reviewState;
   }
-  if (await applyReviewerOutcome(context, round, reviewState)) { return { outcome: 'stop' }; }
-  return { reviewState };
+  return await finishReviewerOutcome(context, round, reviewState);
 }
 
 type FreshReviewerResult = { action: 'return'; value: ReviewOutcome } | { action: 'continue'; reviewState: unknown };
+
+async function finishReviewerOutcome(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<ReviewOutcome> {
+  const applied = await applyReviewerOutcome(context, round, reviewState);
+  if (applied !== 'ignored') { return applied ? { outcome: 'stop' } : { reviewState }; }
+  const recovered = await recoverReviewerTimeout(context, round, POLL_TIMEOUT);
+  if (recovered.step) { return { outcome: 'stop' }; }
+  const retried = await applyReviewerOutcome(context, round, recovered.reviewState);
+  if (retried === 'ignored') {
+    await context.escalateToHumanReview('REVIEWER_NON_APPROVAL');
+    return { outcome: 'stop' };
+  }
+  return retried ? { outcome: 'stop' } : { reviewState: recovered.reviewState };
+}
 
 async function continueResumedApproval(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
   const next = await nextOutstandingReviewer(context, round, new Set([context.identities.reviewer]));
