@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../../src/adapters/agents/agents.js';
 import { run } from '../../../src/composition/create-cli.js';
-import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
+import { integrationRepairCheckpoint, openRepairFixture } from '../../lib/integration-repair-fixture.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
@@ -49,7 +49,7 @@ test('unchanged validated integration repair retains original approval without m
       fixture.git(fixture.repo, ['add', 'upstream.txt']);
       fixture.git(fixture.repo, ['commit', '-m', 'Advance base during live repair']);
       fs.writeFileSync(path.join(process.env.PARALLIX_HOME!, 'green'), 'ok');
-      const checkpoint = /Harness-created repair checkpoint: (CP-\d+);/.exec(prompt)?.[1];
+      const checkpoint = integrationRepairCheckpoint(prompt);
       assert.ok(checkpoint);
       assert.equal(await run(['checkpoint', 'record', '--slug', fixture.slug, '--name', checkpoint,
         '--criterion', 'feature ships', '--evidence', 'feature.txt; transient gate fixed', '--next', 'Revalidate and retain when patch unchanged'],

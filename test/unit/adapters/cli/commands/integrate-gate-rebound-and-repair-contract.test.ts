@@ -4,7 +4,7 @@ import { rebaseWorkflowFixture } from '../../../../helpers/rebase-workflow-fixtu
 import { draftMissionServicesFixture } from '../../../../helpers/draft-mission-services.js';
 import type { IntegrateWorkflowPorts, IntegrationAgentFallbackOptions, IntegrationGateFailureRequest, IntegrationGateRoute } from '../../../../../src/application/ports/integrate-workflow.js';
 import { phaseGateResult } from '../../../../helpers/phase-gate-result.js';
-import { noFactIntegrationRepairClassifier, fixtureMission, pendingReview, approvedReview, requestedChangesReview } from '../../../../fixtures/mission-builders.js';
+import { noFactIntegrationRepairClassifier, fixtureMission, pendingReview, approvedReview, requestedChangesReview, inMemoryTransitionStore } from '../../../../fixtures/mission-builders.js';
 import { missionVersion, type MissionVersion } from '../../../../../src/application/domain-ports.js';
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../../../fixtures/integration-context.js';
@@ -55,6 +55,7 @@ const { createReviewWorkflowAdapter } = await import('../../../../../src/adapter
 const { bindReviewOperatorResume } = await import('../../../../../src/composition/review-operator-resume.js');
 const { reviewStateDataFrom } = await import('../../../../../src/adapters/review/review-state-mapping.js');
 const { ReviewState } = await import('../../../../../src/adapters/review/review-state.js');
+const { applyAgentFallback } = await import('../../../../../src/adapters/review/review-agent-fallback.js');
 const { getLatestReviewForPr, getLatestReviewDecision } = await import('../../../../../src/adapters/forgejo/forgejo.js');
 // ---- task-2565 gate rebound lifecycle (consolidated from test/task-2565-lifecycle-repro.test.ts, TASK-2622.09) ----
 describe("gate rebound lifecycle", () => {
@@ -138,20 +139,13 @@ describe("rebound active mission context", () => {
     });
   });
 
-  test('TASK-2651: rebound fallback persists the live current round, not a stale snapshot round', async () => {
-    // The integration context was built from round 7. The rebound advances the
-    // live aggregate to round 8 before the custom-to-claude fallback persists.
-    // Persisting the stale round below
-    // the current round trips the TASK-2385 stale-flattened-write guard and
-    // drops the fallback identity write. The snapshot must be aligned to the
-    // live current round before it is handed to the fallback.
-    const previousRound = { ...approvedReview(slug).rounds[0], number: 7, implementer: agentFamily('custom'), reviewer: agentFamily('codex') };
-    const currentRound = { ...requestedChangesReview(slug, { startedAt: '2026-08-04T11:00:00Z', decidedAt: '2026-08-04T11:30:00Z' }).rounds[0], number: 8, implementer: agentFamily('custom'), reviewer: agentFamily('codex') };
-    const contextReview = { kind: 'found' as const, mission: fixtureMission(slug, { status: 'integration', repositoryId: fixtureRepositoryId('repo'), review: { ...pendingReview(slug), rounds: [previousRound] } }), version: missionVersion(1) };
-    const liveReview = { kind: 'found' as const, mission: fixtureMission(slug, { status: 'integration', repositoryId: fixtureRepositoryId('repo'), review: { ...pendingReview(slug), rounds: [previousRound, currentRound] } }), version: missionVersion(2) };
-    const staleSnapshot = { implementer: 'custom', reviewer: 'codex', phase: 'approved', round: 7 };
-    let persistedImplementer = '';
-
+  test('PX-0063: rebound fallback records its active implementer without replaying retained approval', async () => {
+    const approved = approvedReview(slug);
+    const round = { ...approved.rounds[0], number: 7, implementer: agentFamily('custom'), reviewer: agentFamily('codex') };
+    const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'integration', assignee: agentFamily('custom'),
+      repositoryId: fixtureRepositoryId('repo'), review: { ...approved, rounds: [round] } }));
+    const lifecycle = new MissionLifecycleService(store);
+    const staleSnapshot = { implementer: 'custom', reviewer: 'codex', phase: 'approved', round: 6 };
     const { runRequiredLocalGates } = createIntegrationGateStep(stubIntegrateWorkflowPorts({
       gates: {
         resolveIntegrationVerificationWorktree: () => '/mission-worktree',
@@ -160,32 +154,33 @@ describe("rebound active mission context", () => {
         loadRequirePreIntegration: () => false,
         runPhaseGates: async () => (phaseGateResult({ ok: false as const, skipped: false, cancelled: false, failedGate: { key: 'required' }, error: 'red' })),
       },
+      review: { readReviewState: async () => reviewStateDataFrom(store.mission().review!) },
       landing: { createAbort: () => new Error('abort') },
       verification: { formatVerificationCommand: () => 'npm test' },
     }));
-
-    await runRequiredLocalGates({
+    await assert.rejects(runRequiredLocalGates({
       slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState: staleSnapshot }),
-      missionLoad: contextReview, missionServices: integrationServices({ store: { load: async () => liveReview }, lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }),
+      missionLoad: await store.load(), missionServices: integrationServices({ store, lifecycle }),
       dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({ agent: 'claude', result: { status: 0 } }), transitionTaskFn: () => true,
-        applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => {
-          const state = options.state as { round: number; implementer: string };
-          assert.notEqual(state, staleSnapshot, 'a aligned copy is passed, not the stale snapshot');
-          assert.equal(state.round, 8, 'the fallback persists the live current round');
-          assert.equal(state.implementer, 'custom', 'the snapshot identity is preserved for the fallback to override');
-          persistedImplementer = 'claude';
-          return 'claude';
+        applyAgentFallbackFn: options => {
+          assert.notStrictEqual(options.state, staleSnapshot); assert.equal(options.state.round, 7);
+          assert.equal(options.state.phase, 'approved'); assert.equal(options.state.implementer, 'claude');
+          return applyAgentFallback(options as Parameters<typeof applyAgentFallback>[0]);
         },
         routeIntegrationGateFailureFn: async (options: IntegrationGateFailureRequest) => {
-          assert.ok(options.applyAgentFallbackFn);
-          await options.applyAgentFallbackFn({ original: 'custom', launchResult: { agent: 'claude' } });
+          await options.reactivateMissionFn!(slug);
+          const applyFallback = options.applyAgentFallbackFn; assert.ok(applyFallback);
+          await applyFallback({ original: 'custom', launchResult: { agent: 'claude' } });
           return { route: 'fixed', rebounds: 1 };
         },
       },
-    });
-    assert.equal(persistedImplementer, 'claude', 'the fallback identity is persisted against live round 8');
+    }), /abort/);
+    const mission = store.mission(), repaired = currentReviewRound(mission.review!);
+    assert.equal(mission.status, 'active'); assert.equal(mission.assignee, 'claude'); assert.equal(repaired.implementer, 'claude');
+    assert.equal(repaired.phase, 'approved'); assert.equal(repaired.decision?.kind, 'approved');
+    assert.equal(repaired.integrationRepairAssessment?.outcome, 'pending');
   });
 
   test('TASK-2651: unavailable live aggregate keeps the fallback snapshot', async () => {
@@ -700,7 +695,7 @@ describe("integration repair", () => {
         captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fixture', commit: 'approved', tree: 'approved' }),
         loadPhaseGates: () => [{ key: 'agent-smoke', command: 'agent-smoke', order: 1 }],
         loadRequirePreIntegration: () => true,
-        runPhaseGates: async () => phaseGateResult(++gateRuns === 1 ? { ok: false, failedGate, error: 'temporary model capacity' } : { ok: true }),
+        runPhaseGates: async () => phaseGateResult(++gateRuns === 1 ? { ok: false, failedGate, error: 'temporary model capacity' } : { ok: true, gates: [{ key: failedGate.key, command: failedGate.command, order: 1 }], executed: 1, outcomes: [{ ...failedGate, exitCode: 0, stdout: '', stderr: '' }] }),
       },
       landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
       verification: { formatVerificationCommand: () => 'agent-smoke' },
@@ -752,7 +747,7 @@ describe("integration repair", () => {
         captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fixture', commit: repaired ? 'repair' : 'approved', tree: repaired ? 'repair' : 'approved' }),
         loadPhaseGates: () => [{ key: 'integration', command: 'gate', order: 1 }],
         loadRequirePreIntegration: () => true,
-        runPhaseGates: async () => { gateRuns++; return phaseGateResult(repaired ? { ok: true } : { ok: false, failedGate, error: 'red' }); },
+        runPhaseGates: async () => { gateRuns++; return phaseGateResult(repaired ? { ok: true, gates: [{ key: failedGate.key, command: failedGate.command, order: 1 }], executed: 1, outcomes: [{ ...failedGate, exitCode: 0, stdout: '', stderr: '' }] } : { ok: false, failedGate, error: 'red' }); },
       },
       landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }) },
       verification: { formatVerificationCommand: () => 'gate' },

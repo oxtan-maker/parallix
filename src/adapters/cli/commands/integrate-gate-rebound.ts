@@ -97,6 +97,7 @@ export function integrationGateFailureReason(
   const coverageNote = integrationOnlyCoverageNote(failedGate.command, opts.verificationCommand ?? null);
   const reason: GateFailureReason = {
     kind: 'gate-failure',
+    gateKey: failedGate.key,
     signal: failedGate.signal ?? null,
     failureReason: failedGate.failureReason ?? gateFailureReasonFromProcess({ status: failedGate.exitCode, signal: failedGate.signal, stdout: failedGate.stdout, stderr: failedGate.stderr }),
     area: `integration gate ${failedGate.key}`,
@@ -363,9 +364,7 @@ function integrationReboundContext(opts: IntegrationGateRouteOptions, failedGate
     head: opts.testedRevision ?? preRepairRevision ?? undefined,
     readHead: () => committedRevision(captureFinalTreeFn(opts.missionWorktree)),
     ...(opts.testedRevision ? { repairIncidentId: `integration:${opts.testedRevision}` } : {}),
-    ...(opts.failedGates && failedGates.length > 1 ? {
-      repairObligations: failedGates.map((gate, index) => ({ gateKey: gate.key, reason: failureReasons[index] })),
-    } : {}),
+    repairObligations: failedGates.map((gate, index) => ({ gateKey: gate.key, reason: failureReasons[index] })),
     maxAttempts: INTEGRATION_GATE_REBOUND_ATTEMPTS_PER_INVOCATION,
     startAgent: opts.startAgentFn,
     transitionToImplementer: opts.reactivateMissionFn ?? opts.transitionTaskFn,
@@ -402,6 +401,7 @@ function greenGateRun(result: PhaseGateRunResult): boolean { return result.ok &&
 function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGates: readonly GateRunOutcome[],
   approvedRevision: string | null, log: (_message: string) => void): ReboundContext['verify'] {
   const { missionWorktree, slug, gates, captureFinalTreeFn = captureFinalIntegrationTree, runPhaseGatesFn = runPhaseGates } = opts;
+  const repairGates = [...failedGates];
   let requiredCommand = failedGates[0].command;
   return async () => {
     const tree = captureFinalTreeFn(missionWorktree);
@@ -411,15 +411,18 @@ function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGates: re
       realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
     const after = captureFinalTreeFn(missionWorktree);
     if (!after.ok || after.commit !== tree.commit) { return { ok: false, diagnostic: 'Mission tree changed during integration verification' }; }
-    if (failedGates.length > 1 && greenGateRun(rerun) && !completeIntegrationGateRunReceipt(gates, rerun)) {
+    if (greenGateRun(rerun) && !completeIntegrationGateRunReceipt(gates, rerun)) {
       return { ok: false, command: requiredCommand, diagnostic: 'Aggregate integration rerun did not return complete passing coverage for every configured gate' };
     }
     await recordRepairValidation(opts, tree.commit, rerun, failedGates[0], log);
     if (greenGateRun(rerun)) {
       return { ok: true, command: requiredCommand, diagnostic: '',
-        exactExecutions: failedGates.map(gate => ({ command: gate.command, worktree: missionWorktree, exitCode: 0 as const })) };
+        exactExecutions: repairGates.map(gate => ({ command: gate.command, worktree: missionWorktree, exitCode: 0 as const })) };
     }
-    if (rerun.failedGate) { requiredCommand = rerun.failedGate.command; }
+    if (rerun.failedGate) {
+      requiredCommand = rerun.failedGate.command;
+      if (!repairGates.some(gate => gate.key === rerun.failedGate!.key)) { repairGates.push(rerun.failedGate); }
+    }
     return integrationGateRerunFailure(rerun, opts.verificationCommand, approvedRevision);
   };
 }

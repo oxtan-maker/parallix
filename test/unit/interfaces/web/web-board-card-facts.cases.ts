@@ -5,9 +5,10 @@ import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Board } from '../../../../web/src/board.js';
-import type { MissionCard } from '../../../../src/application/projections/mission-board.js';
+import { projectMissionCard, type MissionCard } from '../../../../src/application/projections/mission-board.js';
 import { validateWebBoardSnapshot } from '../../../../src/interfaces/web/transport.js';
 import { makeCard, makeFullCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
 
 // TASK-2784: retired card facts belong to the production Board, after wire validation.
 function renderedCard(card: MissionCard): string {
@@ -48,5 +49,38 @@ test('Board identifies a PR with null URL without inventing a PR anchor (TASK-27
   assert.match(html, /<span[^>]*>PR #77<\/span>/);
   assert.doesNotMatch(html, /<a\b[^>]*>PR /);
   assert.doesNotMatch(html, /href="[^"]*(?:77|pull|pr\/)/);
+});
+
+test('repair verification controls reduced and complete web checkpoint progress (TASK-2858)', () => {
+  const webMissionId = fixtureMission('task-repair-web-progress').id;
+  const mission = fixtureMission('task-repair-web-progress', { status: 'active', checkpoints: [
+    { missionId: webMissionId, name: 'CP-1', firstLine: 'Implement',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/interfaces/web/web-board-card-facts.cases.ts' }],
+      nextActionText: 'Run verification' },
+    { missionId: webMissionId, name: 'CP-2', firstLine: 'Repair verification',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/interfaces/web/web-board-card-facts.cases.ts',
+        carriedFrom: 'CP-1' }],
+      nextActionText: 'Repair the failed gate', repair: { incidentId: 'integration-1', command: 'npm test',
+        authorizedGates: ['npm test'], authorizedCriteria: ['delivers'], attempt: 1,
+        evidenceRecorded: false, verified: false },
+    },
+  ] });
+  const facts = { latestGate: 'failed' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+  const open = projectMissionCard(mission, facts);
+  const openHtml = renderedCard(open);
+  assert.equal(open.currentCheckpoint, 'CP-2');
+  assert.match(openHtml, /aria-description="1\/2 completed · Current: CP-2 · Recorded: CP-2"/);
+  assert.match(openHtml, /data-checkpoint-fill=""[^>]*width:50%/);
+  assert.doesNotMatch(openHtml, /data-checkpoint-complete=""/);
+
+  const verified = projectMissionCard({ ...mission, checkpoints: mission.checkpoints.map(checkpoint => checkpoint.repair
+    ? { ...checkpoint, repair: { ...checkpoint.repair, evidenceRecorded: true, verified: true } }
+    : checkpoint) }, facts);
+  const verifiedHtml = renderedCard(verified);
+  assert.equal(verified.currentCheckpoint, null);
+  assert.match(verifiedHtml, /aria-description="2\/2 completed · Recorded: CP-2"/);
+  assert.match(verifiedHtml, /data-checkpoint-fill=""[^>]*width:100%/);
+  assert.equal((verifiedHtml.match(/data-checkpoint-complete=""/g) ?? []).length, 1);
+  assert.doesNotMatch(verifiedHtml, /Current: CP-2/);
 });
 

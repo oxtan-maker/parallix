@@ -1,5 +1,6 @@
 import { workflowEligible } from '../../../src/domain/workflow-command-policy.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+import { recoveryEvidenceRef } from '../../fixtures/recovery-evidence.js';
 import { replaceCurrentRound } from '../../../src/domain/review.js';
 import { fixtureMission as typedMissionFixture } from '../../fixtures/mission-builders.js';
 /**
@@ -551,7 +552,10 @@ test('live repair compares and records the candidate baseline when the base adva
   } });
   const failedGate = { key: 'unit', command: 'verify', exitCode: 1, stdout: '', stderr: 'transient failure' };
   const capture = () => ({ ok: true as const, rootDir: '/repo', tree: head, commit: head });
-  const runGates = async () => phaseGateResult(advanced ? { ok: true } : { ok: false, failedGate, error: 'red' });
+  const runGates = async () => phaseGateResult(advanced
+    ? { ok: true, gates: [{ key: 'unit', command: 'verify', order: 1 }], executed: 1,
+      outcomes: [{ ...failedGate, exitCode: 0, stdout: '', stderr: '' }] }
+    : { ok: false, failedGate, error: 'red' });
   const ports = stubIntegrateWorkflowPorts({
     git: { git: args => ({ status: 0, stdout: args.includes('merge-base') ? 'base' : advanced ? 'advanced-base' : 'base', stderr: '' }) },
     gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: capture,
@@ -665,6 +669,7 @@ test('pending retention rejection crosses the lifecycle port with structured ide
 });
 
 import { certifyPendingIntegrationRepair } from '../../../src/application/integrate/repair-resumption.js';
+import { RepairCheckpointService } from '../../../src/application/repair-checkpoint-service.js';
 import { ExecuteMissionService } from '../../../src/application/execute-mission-service.js';
 import { ExecuteReviewPreparationService } from '../../../src/application/execute-review-preparation-service.js';
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
@@ -674,16 +679,26 @@ import { attentionAction, attentionReason } from '../../../src/application/proje
 for (const status of ['active', 'review'] as const) {
   test(`execute resumes ${status} retained repair certification before any agent or review entry (TASK-2814, TASK-2829)`, async () => {
     const s = retentionScenario();
-    await s.store.save({ ...s.active, status, closedAt: null });
-    const marker = (await s.evidence.validation('task-2620'))!;
+    const commands = ['verify', 'lint'], criteria = ['unit passes', 'lint passes'];
+    const checkpoints: CheckpointData[] = commands.map((command, index) => ({ missionId: s.active.id, name: `CP-${index + 1}`,
+      nextActionText: 'resume repair', recording: { recordedAt: '2026-09-20T11:06:00Z', recordedRound: 1, missionRevision: 1 },
+      goalCheck: [{ criterion: criteria[index], evidence: 'test/unit/application/integration-repair-review-projection.test.ts', recordedRound: 1 }],
+      repair: { incidentId: `repair-${index + 1}`, gateKey: index ? 'lint' : 'unit', command, authorizedGates: commands,
+        authorizedCriteria: criteria, attempt: 1, verified: false, evidenceRecorded: true,
+        occurrence: { openedMissionRevision: 1, worktree: '/fixture', failureRevision: 'candidate', failureEvidenceId: `failure:${index + 1}` } } }));
+    await s.store.save({ ...s.active, status, closedAt: null, declaredGates: commands, successCriteria: criteria, checkpoints });
+    const marker = { ...(await s.evidence.validation('task-2620'))!, hooks: ['unit', 'lint'] };
     s.evidence.validation = async () => null;
     let verifications = 0;
+    const gates = commands.map((command, index) => ({ key: index ? 'lint' : 'unit', command, order: index + 1 }));
     const ports = stubIntegrateWorkflowPorts({
       process: { cwd: () => '/fixture' },
       missionPaths: { resolveWorktree: () => '/fixture', resolveMissionBaseBranch: () => 'main', resolveBaseWorktree: () => '/fixture', missionBranchName: () => 'mission/task-2620' },
       git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
       gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
-        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { verifications++; return { ok: true }; } },
+        loadPhaseGates: () => gates, runPhaseGates: async () => { verifications++; return { ok: true, phase: 'integration', gates,
+          executed: gates.length, skipped: false, dryRun: false, failedGate: null, failures: [],
+          outcomes: gates.map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })), error: null }; } },
     });
     const services = { ...s.services, operationalHistory: { loadLatestByTypeForMission: async () => null,
       recordIntegrationValidation: async () => { s.evidence.validation = async () => marker; } } };
@@ -691,7 +706,11 @@ for (const status of ['active', 'review'] as const) {
     const { ports: execution } = makeExecutePorts({ missionTransitions: s.store,
       agentExecution: { select: unexpected, prepare: unexpected, launch: unexpected },
       reviewPreparationExecution: { run: unexpected, repairHygiene: unexpected }, autonomousReview: { start: unexpected },
-      integrationRepair: { resume: async slug => { const result = await certifyPendingIntegrationRepair(slug, services, ports, missionExecutionContext({ missionId: slug })); return result?.outcome === 'retained' ? 'retained' : 'blocked'; } },
+      integrationRepair: { resume: async slug => { const result = await certifyPendingIntegrationRepair(slug, services, ports,
+        missionExecutionContext({ missionId: slug, missionWorktree: '/fixture', baseWorktree: '/fixture' }), undefined, {
+          read: async command => ({ evidence: recoveryEvidenceRef(command, '/fixture', command), stdout: 'failed', stderr: '' }),
+          verify: async () => assert.fail('aggregate Execute must use the configured gate owner'), checkpoints: new RepairCheckpointService(s.store),
+        }); return result?.outcome === 'retained' ? 'retained' : 'blocked'; } },
     });
     const before = s.store.mission();
     const card = projectMissionCard(before, { latestGate: 'unconfigured', reviewApproval: null, currentWork: null, blockingReason: null, flags: [] });

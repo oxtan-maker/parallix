@@ -22,6 +22,7 @@ import { log } from '../../../src/application/presentation/cli-format.js';
 import { commandInvocation } from '../../../src/composition/command-invocation.js';
 import { main } from '../../../src/interfaces/cli/runtime.js';
 import { runIntegrateEntry } from '../../../src/application/integrate-entry.js';
+import { failureReason } from '../../../src/domain/failure-reason.js';
 
 const integration = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>(
   '../../../src/adapters/cli/commands/integrate.js', import.meta.url);
@@ -176,7 +177,8 @@ async function integrationCompletion(t: TestContext, control: { code?: 0 | 1; er
         commandFns: f.commands, exitFn, cwdFn: () => '/fixture', runtime: resolveConfiguration({}).runtime,
         ensureStandaloneGitRepoFn: () => ({}), loadAliasesFn: () => ({}),
       }));
-      return status === 0 ? completed({}) : failure('execution', `Workflow exited with status ${status}`);
+      return status === 0 ? completed({}) : failure('execution', `Workflow exited with status ${status}`, [],
+        failureReason('process-failed', 'process', { workflowOperationExit: true, exitCode: status }));
     } finally { configureMissionWriteAuthorization(null); }
   });
   return { status, row, publications, released, diagnostics,
@@ -205,7 +207,7 @@ for (const control of [
     const f = await integrationCompletion(t, control);
     assert.equal(f.row.phase, 'blocked');
     assert.notEqual(f.status, 0);
-    assert.equal(f.facts.blockingReason, control.cleanup ? control.reason : 'Workflow exited with status 1');
+    assert.equal(f.facts.blockingReason, control.reason);
     assert.equal(f.released, true);
     if (control.error) { assert.ok(f.diagnostics.some(message => message.includes(control.error!.message))); }
     assert.ok(f.publications.some(event => event.state === 'blocked' && event.reason === control.reason));

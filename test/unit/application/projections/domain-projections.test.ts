@@ -7,7 +7,12 @@ import { projectAgentAvailability } from '../../../../src/application/projection
 import { cumulativeFlow, medianCycleTimeSeries } from '../../../../src/application/projections/analytics.js';
 import { availableBoardCommands, attentionQueue, boardLane, projectMissionCard, wipCounts } from '../../../../src/application/projections/mission-board.js';
 import { projectRepairBudget } from '../../../../src/application/projections/repair-budget.js';
-import type { CheckpointData } from '../../../../src/domain/checkpoint.js';
+import {
+  isPlannedCheckpoint,
+  latestEvidencedCheckpoint,
+  missingCheckpointEvidence,
+  type CheckpointData,
+} from '../../../../src/domain/checkpoint.js';
 import { projectMissionDetail } from '../../../../src/application/projections/mission-detail.js';
 import { projectRepositorySelector } from '../../../../src/application/projections/repository-selector.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -498,6 +503,108 @@ test('mission card preserves planned-only, partial and empty checkpoint plans (T
   assert.deepEqual(complete.checkpointEvidence.map(cp => cp.state), ['completed', 'completed', 'completed']);
   const gap = projectMissionCard({ ...mission, checkpoints: [checkpoints[0], { ...checkpoints[1], goalCheck: [{ criterion: 'done', evidence: 'npm test' }], nextActionText: 'resume CP-1' }, checkpoints[2]] }, facts);
   assert.deepEqual(gap.checkpointEvidence.map(cp => cp.state), ['current', 'completed', 'future']);
+});
+
+test('mission card keeps an unverified repair with carried Goal Check rows current (TASK-2858)', () => {
+  const mission = fixtureMission('task-repair-progress', { status: 'active', checkpoints: [
+    { missionId: id, name: 'CP-1', firstLine: 'Implement',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts' }],
+      nextActionText: 'Run verification' },
+    { missionId: id, name: 'CP-2', firstLine: 'Repair verification',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts',
+        carriedFrom: 'CP-1' }],
+      nextActionText: 'Repair the failed gate',
+      repair: { ...repairRow(1, 1), evidenceRecorded: false, verified: false } },
+  ] });
+  const card = projectMissionCard(mission, {
+    latestGate: 'failed', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+  });
+
+  assert.equal(card.currentCheckpoint, 'CP-2');
+  assert.deepEqual(card.checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'current']);
+});
+
+test('repair checkpoint state follows verification across active and inactive lanes (TASK-2858)', () => {
+  const planned = fixtureMission('task-repair-lanes', { status: 'active', checkpoints: [
+    { missionId: id, name: 'CP-1', firstLine: 'Implement',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts' }],
+      nextActionText: 'Run verification' },
+    { missionId: id, name: 'CP-2', firstLine: 'Repair npm test',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts',
+        carriedFrom: 'CP-1' }],
+      nextActionText: 'Repair the failed gate',
+      repair: { ...repairRow(1, 1), gateKey: 'npm test', evidenceRecorded: false, verified: false } },
+  ] });
+  const facts = { latestGate: 'failed' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+
+  assert.deepEqual(projectMissionCard(planned, facts).checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'current']);
+  for (const status of ['backlog', 'refined', 'review', 'integration', 'done'] as const) {
+    const laneMission = fixtureMission('task-repair-lanes', {
+      status,
+      checkpoints: planned.checkpoints,
+      ...(status === 'done' ? { closedAt: '2026-11-16T00:00:00Z' } : {}),
+    });
+    const card = projectMissionCard(laneMission, facts);
+    assert.equal(card.currentCheckpoint, null, status);
+    assert.deepEqual(card.checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'future'], status);
+  }
+
+  const verified = projectMissionCard({ ...planned, checkpoints: planned.checkpoints.map(checkpoint => checkpoint.repair
+    ? { ...checkpoint, repair: { ...checkpoint.repair, evidenceRecorded: true, verified: true } }
+    : checkpoint) }, facts);
+  assert.equal(verified.currentCheckpoint, null);
+  assert.deepEqual(verified.checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'completed']);
+});
+
+test('each failed gate repair remains outstanding through blockers until its own verification (TASK-2858)', () => {
+  const blocker = { command: 'npm test', diagnostic: 'Locked criterion requires an operator decision',
+    authorityReason: 'The mission contract is authoritative', proposedCorrection: 'Clarify the criterion' };
+  const repair = (name: string, gateKey: string, verified = false, blocked = false): CheckpointData => ({
+    missionId: id, name, firstLine: `Repair ${gateKey}`,
+    goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts',
+      carriedFrom: 'CP-1' }],
+    nextActionText: `Repair ${gateKey}`,
+    repair: { ...repairRow(1, 1, verified), incidentId: 'aggregate-incident', gateKey, command: gateKey,
+      authorizedGates: [gateKey], evidenceRecorded: verified, verified, ...(blocked ? { blocker } : {}) },
+  });
+  const checkpoints: readonly CheckpointData[] = [
+    { missionId: id, name: 'CP-1', firstLine: 'Implement',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts' }],
+      nextActionText: 'Run gates' },
+    repair('CP-2', 'npm test', false, true),
+    repair('CP-3', 'npm run typecheck'),
+  ];
+  const mission = fixtureMission('task-multiple-repairs', { status: 'active', checkpoints });
+  const facts = { latestGate: 'failed' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+
+  const bothOpen = projectMissionCard(mission, facts);
+  assert.equal(bothOpen.currentCheckpoint, 'CP-2');
+  assert.deepEqual(bothOpen.checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'current', 'future']);
+
+  const firstVerified = projectMissionCard({ ...mission, checkpoints: [checkpoints[0]!, repair('CP-2', 'npm test', true), checkpoints[2]!] }, facts);
+  assert.equal(firstVerified.currentCheckpoint, 'CP-3');
+  assert.deepEqual(firstVerified.checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'completed', 'current']);
+});
+
+test('board repair progress leaves ordinary, legacy and evidence-domain contracts unchanged (TASK-2858)', () => {
+  const ordinary: CheckpointData = { missionId: id, name: 'CP-1', firstLine: 'Ordinary evidence',
+    goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts' }],
+    nextActionText: 'Continue' };
+  const legacy: CheckpointData = { missionId: id, name: 'CP-2', rawFilename: 'CP-2.md', firstLine: 'Legacy evidence',
+    goalCheck: [], nextActionText: 'Continue' };
+  const repair: CheckpointData = { missionId: id, name: 'CP-3', firstLine: 'Repair',
+    goalCheck: [{ criterion: 'delivers', evidence: 'test/unit/application/projections/domain-projections.test.ts',
+      carriedFrom: 'CP-1' }],
+    nextActionText: 'Repair', repair: { ...repairRow(1, 1), evidenceRecorded: false, verified: false } };
+  const mission = fixtureMission('task-compatible-progress', { status: 'active', checkpoints: [ordinary, legacy, repair] });
+  const card = projectMissionCard(mission, {
+    latestGate: 'failed', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
+  });
+
+  assert.deepEqual(card.checkpointEvidence.map(checkpoint => checkpoint.state), ['completed', 'completed', 'current']);
+  assert.equal(isPlannedCheckpoint(repair), false);
+  assert.equal(latestEvidencedCheckpoint([ordinary, repair]), repair);
+  assert.deepEqual(missingCheckpointEvidence([ordinary, legacy, repair]), [legacy, repair]);
 });
 
 function repairRow(attemptsUsed: number, maxAttempts?: number, verified = false): NonNullable<CheckpointData['repair']> {

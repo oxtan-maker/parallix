@@ -31,6 +31,7 @@ import { approvedReview, fixtureMission, inMemoryTransitionStore } from '../../.
 import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 import { parseReviewPublication } from '../../../../../src/adapters/review/review-publication.js';
 import { changeRevision } from '../../../../../src/domain/review.js';
+import { reboundWithGateRepairEvidence } from '../../../../helpers/gate-repair-rebound.js';
 
 const SLUG = 'task-2528-fixture';
 const GATE_COMMAND = 'npm run test:integration';
@@ -89,7 +90,8 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
     captureFinalTreeFn: (() => ({ ok: true as const, rootDir: '/tmp/mission', commit: h.head.commit, tree: h.head.tree })),
     // The identical gate set re-runs green once the repair is in place.
     runPhaseGatesFn: (async (_phase, o) => ({
-      ok: true as const, phase: 'integration' as const, gates: o.gates ?? [], executed: 1, skipped: false, dryRun: false, failedGate: null, error: null,
+      ok: true as const, phase: 'integration' as const, gates: o.gates ?? [], executed: 1, skipped: false, dryRun: false, failedGate: null,
+      outcomes: (o.gates ?? []).map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })), error: null,
     })),
     invalidateApprovalFn: (async opts => {
       h.invalidations.push({ slug: opts.slug, branch: opts.branch });
@@ -99,6 +101,7 @@ function routeArgs(h: Harness, repairChangesDiff: boolean): IntegrationGateRoute
     error: (m: string) => h.messages.push(m),
     gateRunLog: (m: string) => h.messages.push(m),
     gateRunError: (m: string) => h.messages.push(m),
+    reboundFn: reboundWithGateRepairEvidence,
   };
 }
 

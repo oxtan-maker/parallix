@@ -347,13 +347,12 @@ test('submitReviewRound cannot fabricate a Review when none exists (TASK-2821)',
 test('submitReviewRound records an exact-revision same-agent result when reviewer is the PR author (PX-0046.03 F8)', async () => {
   // task-1255: same-agent-reviewer fallback. postWorkflowReview skips the
   // Forgejo POST (returns ok:true, skipped:true) — submitReviewRound must record
-  // locally and warn, NOT exit(1).
+  // locally after publishing the comment, NOT exit(1).
   let exited = false;
   let postCalled = false;
   const transitions: string[] = [];
   const authority = verdictAuthority(true);
-  let recordedVerdict: { value: string | undefined | null } = { value: null };
-  const warnings: string[] = [];
+  let commentBody = '';
   // Force forgejoUser to resolve from state.reviewer (= 'custom') regardless of
   // the ambient FORGEJO_USER env so the reviewer==author case is exercised.
   const prevEnv = process.env.FORGEJO_USER;
@@ -365,14 +364,14 @@ test('submitReviewRound records an exact-revision same-agent result when reviewe
       isForgejoReviewEnabledFn: () => true,
       readReviewStateFn: () => state,
       ...authority,
-      createEventFn: async (slug, type, params) => { recordedVerdict.value = params.verdict; return { ok: true as const, path: '/mock' }; },
+      postCommentFn: (_branch, _token, body) => { commentBody = body; return { data: null, status: 201, statusCode: 201, stderr: null, error: null, ok: true as const }; },
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom', // reviewer == PR author
       resolveTaskFileFn: () => ({ ok: true, taskFile: '/mock/backlog/tasks/test-slug.md', matches: [] }),
       getTaskStatusFn: () => 'active',
       transitionTaskFn: async (_slug, status) => { transitions.push(status); return true; },
       postReviewFn: () => { postCalled = true; return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }; },
-      log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
+      log: () => {},
       error: () => {},
       exit: () => { exited = true; }
     });
@@ -391,8 +390,7 @@ test('submitReviewRound records an exact-revision same-agent result when reviewe
     revision: result.revision,
     decision: result.decision,
   })), [{ family: 'custom', revision: 'review-head', decision: 'approved' }], 'the selected same-agent reviewer is attributed before integration');
-  assert.equal(recordedVerdict.value, 'approve', 'reviewer_outcome event recorded locally');
-  assert.ok(warnings.some(w => /self-review was recorded as a provenance comment.*Human inspection remains optional/.test(w)), 'must describe visible self-review provenance and optional human inspection without approval debt');
+  assert.match(commentBody, /^Verdict: approve\n/, 'the verdict is visible as a provider comment');
 });
 
 test('submitReviewRound exits(1) on a genuine review failure (non-author path)', async () => {

@@ -1,4 +1,4 @@
-import { fixtureMission } from '../../fixtures/mission-builders.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { missionVersion, type MissionVersion } from '../../../src/application/domain-ports.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it, after } from 'node:test';
-import { postWorkflowReview } from '../../../src/adapters/review/review-artifacts.js';
+import { consumeReviewerArtifacts, postWorkflowReview } from '../../../src/adapters/review/review-artifacts.js';
 import { continueReviewInvalidatesBlocker } from '../../../src/adapters/review/review-commands.js';
 import { readAllEvents } from '../../../src/adapters/review/review-events.js';
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../src/adapters/review/review-state-mapping.js';
@@ -125,11 +125,9 @@ describe("stale review round repro", { concurrency: false }, () => {
      * A 2-round mission in the operator store. Round 2 is current. This test
      * drives the production verdict writer through `bindReviewPersistence`, then
      * reads its typed output through `reviewLoopBindings`, with a real bound
-     * store. It does NOT inject `readReviewStateFn` into
-     * `postWorkflowReview`, so the verdict can only persist if the production path
-     * forwards the bound reader (and `missionStore`) to `recordLocalReviewVerdict`.
-     * A regression that drops that forward (TASK-2385 F1) makes the verdict read
-     * miss and throws, so this test fails until the forward is present.
+     * store. It does NOT inject `readReviewStateFn` into `postWorkflowReview`;
+     * the artifact consumer must retain the bound reader and Mission store
+     * when recording the verdict (TASK-2385 F1).
      */
     function twoRoundStore() {
       const base: ReviewRound = {
@@ -222,33 +220,23 @@ describe("stale review round repro", { concurrency: false }, () => {
 
   describe("verdict recording read miss", () => {
     it('fails closed when review state cannot be read instead of fabricating round 1', async () => {
-      let verdictStateWritten = false;
-      await assert.rejects(
-        postWorkflowReview('task-2385-verdict', 'approve', 'looks good', {
-          executionContext: missionExecutionContext({ missionId: 'task-2385-verdict', missionWorktree: '/fixture' }),
-          forgejoUser: 'reviewer-agent',
-          readTokenFn: () => 'mock-token',
-          getPrAuthorFn: () => 'reviewer-agent', // self-author => local verdict path
-          postReviewFn: () => ({ data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true as const }),
-          readReviewStateFn: () => null, // read miss: no review state
-          writeReviewStateFn: () => {
-            verdictStateWritten = true;
-            return Promise.resolve({ outcome: 'committed' as const });
-          },
-          createEventFn: () => ({ ok: true as const, path: '/mock' }),
-          buildMetadataFooterFn: () => '',
-          log: () => {},
-          error: () => {},
-        }),
-        /no review state found|fabricate round 1/i,
-        'a verdict read miss must fail closed rather than record a fabricated round 1',
-      );
-      assert.equal(verdictStateWritten, false, 'no verdict state must be written on a read miss');
+      const slug = 'task-2385-verdict';
+      const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', review: null }));
+      const result = await consumeReviewerArtifacts(slug, 'claude', {
+        executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }),
+        missionStore: store, revision: 'reviewed-head', providerEnabled: false,
+        output: { verdict: 'approve', findings: [], comment: 'looks good' },
+        readReviewStateFn: () => null, log: () => {}, error: () => {},
+      });
+      assert.equal(result.ok, false);
+      assert.match(result.diagnostic ?? '', /no review/i);
+      assert.equal(store.mission().review, null, 'a read miss cannot fabricate round 1');
+      assert.equal(store.events.length, 0, 'no integration transition');
     });
   });
 
   describe("verdict persistence to the Review aggregate", () => {
-    it('retains advisory self-review on the current round without approving (TASK-2778 F2)', async () => {
+    it('publishes an author verdict without rewriting the current round (TASK-2778 F2)', async () => {
       let captured: unknown;
       const result = await postWorkflowReview(
         'task-2385-persist',
@@ -258,7 +246,8 @@ describe("stale review round repro", { concurrency: false }, () => {
           executionContext: missionExecutionContext({ missionId: 'task-2385-persist', missionWorktree: '/fixture' }),
           forgejoUser: 'reviewer-agent',
           readTokenFn: () => 'mock-token',
-          getPrAuthorFn: () => 'reviewer-agent', // self-author => local verdict path
+          getPrAuthorFn: () => 'reviewer-agent',
+          postCommentFn: () => ({ data: null, status: 201, statusCode: 201, stderr: null, error: null, ok: true as const }),
           readReviewStateFn: () => ({ round: 2, phase: 'reviewing' as const, reviewer: 'claude', implementer: 'codex' }),
           writeReviewStateFn: (_slug: string, state: unknown) => {
             captured = state;
@@ -271,13 +260,9 @@ describe("stale review round repro", { concurrency: false }, () => {
         },
       );
 
-      assert.equal(result.ok, false, 'self-author review cannot grant approval');
+      assert.equal(result.ok, true, 'author verdict uses the comment transport');
       assert.equal(result.skipped, true, 'the provider POST is skipped on self-approval');
-      assert.ok(captured instanceof ReviewState, 'the persisted verdict is a ReviewState aggregate');
-      const capturedState = captured as ReviewState;
-      assert.equal(capturedState.round, 2, 'the verdict attaches to the current round 2, not a fabricated round 1');
-      assert.notEqual(capturedState.disposition, 'APPROVED', 'advisory review does not approve');
-      assert.equal(capturedState.phase, 'reviewing', 'the round still awaits independent approval');
+      assert.equal(captured, undefined, 'publication cannot rewrite the round or independently approve');
     });
   });
 });

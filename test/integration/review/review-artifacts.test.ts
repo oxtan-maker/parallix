@@ -317,7 +317,6 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   let commentBody = '';
   let writtenState: { value: Record<string, unknown> | import("../../../src/adapters/review/review-state.js").ReviewState | import("../../../src/application/ports/review-persistence.js").ReviewStateData | null } = { value: null };
   let recordedEvent: { value: { slug: string; type: string; params: CreateEventParams; } | null } = { value: null };
-  const warnings: string[] = [];
   const fixture = reviewVerdictFixture('test-slug', 'custom', 'custom');
   const publication = { slug: 'test-slug', round: 1, actor: 'custom', revision: fixture.revision,
     eventType: 'reviewer_outcome' as const, target: 'review' as const };
@@ -340,7 +339,7 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
     writeReviewStateFn: reviewStateWriterFixture((slug, state) => { writtenState.value = state; }),
     createEventFn: (slug, type, params) => { recordedEvent.value = { slug, type, params }; return { ok: true as const, path: '/mock' }; },
     buildMetadataFooterFn: () => '',
-    log: (msg) => { if (/WARN/.test(msg)) warnings.push(msg); },
+    log: () => {},
     error: () => {}
   });
 
@@ -354,17 +353,11 @@ test('postWorkflowReview skips the Forgejo POST when reviewer is the PR author',
   assert.equal(fixture.missionStore.mission().review?.reviewEvents.filter(event => event.eventType === 'reviewer_outcome').length, 1,
     'the provider path must not add an unreferenced outcome that bypasses controller publication fencing');
 
-  // The configured single-family verdict is recorded locally.
-  assert.ok(writtenState.value, 'review-state must be written locally');
-  assert.equal(writtenState.value.disposition, 'APPROVED');
+  assert.equal(writtenState.value, null, 'publication leaves the verdict to the review decision owner');
   assert.equal(recordedEvent.value, null,
     'the durable outcome obligation is authoritative; no unreferenced complete-looking outcome may be added');
 
-  // WARN mentions the self-approval and instructs a different agent/human to post.
-  assert.equal(warnings.length, 1);
-  const warn = warnings[0];
-  assert.ok(/self-approval|approve your own pull/.test(warn), `WARN should mention self-approval: ${warn}`);
-  assert.ok(/different agent or .*human|human/i.test(warn), `WARN should instruct a different agent or human: ${warn}`);
+  assert.match(commentBody, /^Verdict: approve\n/, 'the author verdict remains visible without a formal self-review');
 });
 
 test('postWorkflowReview surfaces real 422 status and body instead of "API error"', async () => {

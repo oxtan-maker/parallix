@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
+import type { GitReader } from '../../../../src/adapters/git/git.js';
 import { mkdtemp as registeredMkdtemp, mkdtemp } from '../../../helpers/temp-dir.js';
 import { getConflictFiles, findLastNonNoiseCommit, squashTrailingBacklogNoiseIntoPreviousMission, softResetTrailingBacklogNoise, findMissionDocInBranches, isMissionArtifact } from '../../../../src/adapters/filesystem/mission-utils.js';
 import { checkBacklogIntegrity, pruneStaleBacklogDuplicates, resolveTaskFile } from '../../../../src/adapters/backlog/backlog.js';
@@ -350,6 +351,41 @@ describe("snapshotWorktreeTopology composition export", async () => {
     assert.equal(worktreeForBranch(topology, 'mission/task-2777')?.path, '/repo mission');
     assert.equal(worktreeForBranch(topology, 'mission/stale')?.prunable, true);
     assert.equal(registeredWorktreeAt(topology, '/repo mission')?.branch, 'refs/heads/mission/task-2777');
+  });
+
+  // PX-0058.05 F2: a consumer that wants every mission worktree takes the map from
+  // the snapshot the build already read, instead of listing the repository again.
+  test('a topology snapshot maps every mission worktree from its one listing (PX-0058.05 F2)', () => {
+    let listings = 0;
+    const runner: GitReader = args => {
+      if (args.join(' ').endsWith('worktree list --porcelain')) {
+        listings += 1;
+        return { status: 0, stderr: '', stdout: ['worktree /repo main', 'branch refs/heads/main', '',
+          'worktree /repo mission', 'branch refs/heads/mission/task-2777', '', 'worktree /repo bare', 'bare', ''].join('\n') };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    };
+    const snapshot = snapshotWorktreeTopology({ cwd: '/repo main', gitFn: runner });
+    assert.deepEqual([...(snapshot.missionWorktrees() ?? [])], [['/repo mission', 'task-2777']],
+      'only branches under the mission prefix are mission worktrees');
+    snapshot.missionWorktrees();
+    assert.equal(listings, 1, 'the map reuses the topology read instead of listing again');
+  });
+
+  test('a topology snapshot preserves an unavailable worktree listing (PX-0058.05 F6)', () => {
+    const unavailable = snapshotWorktreeTopology({
+      cwd: '/repo main',
+      gitFn: () => ({ status: 128, stdout: '', stderr: 'fatal: not a git repository' }),
+    });
+    assert.equal(unavailable.missionWorktrees(), null,
+      'a failed listing stays distinct from a successful repository with no mission worktrees');
+
+    const empty = snapshotWorktreeTopology({
+      cwd: '/repo main',
+      gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+    });
+    assert.deepEqual([...(empty.missionWorktrees() ?? [])], [],
+      'a successful empty listing remains authoritative');
   });
 
   /**

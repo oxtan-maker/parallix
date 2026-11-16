@@ -46,6 +46,7 @@ type SubmitReviewOptions = {
   revision?: string;
   readTokenFn?: typeof readToken;
   postReviewFn?: typeof postReview;
+  postCommentFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['postCommentFn'];
   getPrAuthorFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['getPrAuthorFn'];
   createEventFn?: typeof createEvent;
   buildMetadataFooterFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['buildMetadataFooterFn'];
@@ -272,6 +273,7 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     reviewIdentity: reviewIdentity || undefined,
     readTokenFn: options.readTokenFn,
     postReviewFn: options.postReviewFn,
+    postCommentFn: options.postCommentFn,
     getPrAuthorFn: options.getPrAuthorFn,
     writeReviewStateFn: options.writeReviewStateFn,
     createEventFn: options.createEventFn,
@@ -284,31 +286,13 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     configuration: options.configuration,
   });
 
-  if (result.skipped && result.reason === 'self-author') {
-    if (!result.ok) {
-      error(fmt.status('WARN', result.error || 'Independent review is required before approval or integration.'));
-      exit(1);
-      return;
-    }
-    const { resolveTaskFileFn, getTaskStatusFn, transitionTaskFn } = providerReviewBindings(options);
-    await repairStaleActiveTaskAfterReview(slug, {
-      executionContext: options.executionContext, resolveTaskFileFn, getTaskStatusFn, transitionTaskFn, log, error,
-    });
-    return;
-  }
-
   if (!result.ok) {
     exit(1);
     return;
   }
 
-  // Provider POST succeeded: record the authoritative approve now that the
-  // external side-effect is durable, so a failed POST (handled above) never
-  // leaves an approval behind. A self-author skip already recorded inside
-  // postWorkflowReview and returned early, so reaching here means a real POST
-  // went out. Without a bound Mission authority there is nothing to record on
-  // the aggregate (the flat review-state write below still mirrors the
-  // disposition), matching the no-store WARN taken before the POST.
+  // A formal review or author-attributed comment is now durable. The Mission
+  // owns approval authority independently of the provider's authorship rule.
   if (outcome === 'approve') {
     const decision = await recordApprovalDecision(slug, outcome, message, options, log, error, true);
     if (decision.stop) { exit(1); return; }
@@ -318,6 +302,13 @@ async function submitProviderReview(slug: string, outcome: string, message: stri
     }
   }
 
+  if (result.skipped && result.reason === 'self-author') {
+    const { resolveTaskFileFn, getTaskStatusFn, transitionTaskFn } = providerReviewBindings(options);
+    await repairStaleActiveTaskAfterReview(slug, {
+      executionContext: options.executionContext, resolveTaskFileFn, getTaskStatusFn, transitionTaskFn, log, error,
+    });
+    return;
+  }
   await mirrorSubmittedReview(slug, outcome, true, worktree, options, log);
 }
 

@@ -80,25 +80,16 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
       ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 10 },
         { step: 'human-review', actor: 'human', model: null, state: 'held', durationMs: 20 }] };
   };
-  const result = flowStatistics([
-    fact('task-current-a', '2026-11-03T12:00:00Z', 1),
-    fact('task-current-b', '2026-11-02T12:00:00Z', 3, true),
-    fact('task-previous', '2026-10-25T12:00:00Z', 2),
-  ], windows);
+  const result = flowStatistics([ fact('task-current-a', '2026-11-03T12:00:00Z', 1), fact('task-current-b', '2026-11-02T12:00:00Z', 3, true), fact('task-previous', '2026-10-25T12:00:00Z', 2), ], windows);
   assert.deepEqual(result.current.diagram, { nodeCount: 4, edgeCount: 2 });
-  assert.deepEqual(result.current.firstPassYield, { numerator: 1, denominator: 2, observed: 2, population: 2, coverage: 1,
-    state: 'measured', value: 0.5 });
+  assert.deepEqual(result.current.firstPassYield, { numerator: 1, denominator: 2, observed: 2, population: 2, coverage: 1, state: 'measured', value: 0.5 });
   assert.deepEqual(result.current.extraAgentLaunches, { total: 2, meanPerMission: 1, n: 2,
     lowerBound: false, reworkJobs: 1, reworkMeanPerMission: 0.5, reworkN: 2 });
-  assert.deepEqual(result.current.sendBacks.human, { numerator: 1, denominator: 1, observed: 2, population: 2, coverage: 1,
-    state: 'measured', value: 1 });
+  assert.deepEqual(result.current.sendBacks.human, { numerator: 1, denominator: 1, observed: 2, population: 2, coverage: 1, state: 'measured', value: 1 });
   assert.equal(result.current.returns[0]?.responsibleModel, 'gpt-6.1-sol');
-  assert.deepEqual(result.current.time.rows.map(row => [row.step, row.state, row.totalMs, row.meanMs, row.p90Ms, row.n]), [
-    ['human-review', 'held', 40, 20, 20, 2], ['implement', 'working', 20, 10, 10, 2],
-  ]);
+  assert.deepEqual(result.current.time.rows.map(row => [row.step, row.state, row.totalMs, row.meanMs, row.p90Ms, row.n]), [ ['human-review', 'held', 40, 20, 20, 2], ['implement', 'working', 20, 10, 10, 2], ]);
   assert.equal(result.current.time.rows.find(row => row.step === 'implement')?.model, 'gpt-6.1-sol');
-  assert.deepEqual(result.current.time.largestHolder, { step: 'human-review', actor: 'human', model: null, state: 'held',
-    totalMs: 40, share: 2 / 3 });
+  assert.deepEqual(result.current.time.largestHolder, { step: 'human-review', actor: 'human', model: null, state: 'held', totalMs: 40, share: 2 / 3 });
   assert.equal(result.current.graph.nodes.find(node => node.id === 'pre-review-rebase')?.count, 2);
   assert.equal(result.current.graph.edges.find(edge => edge.kind === 'rebase-conflict')?.count, 1);
   assert.deepEqual(result.current.stateDwell.find(row => row.state === 'active'), { state: 'active', medianMs: 20, p90Ms: 30, n: 2 });
@@ -159,60 +150,36 @@ function attempt(id: string, start: number, end: number, extra: Partial<Verifica
     cpu: { userUs: 1000, systemUs: 0, boundary: id, parent: null, provenance: 'bash-time-waited-tree' },
     profile: null, ...extra };
 }
-function verificationReport(attempts: readonly VerificationMeasurement[], lifecycle: readonly BoardLaneEventEntry[] = []) {
-  return verificationStatistics({ repositoryId: 'repo', operations: [], lifecycle,
+function verificationReport(attempts: readonly VerificationMeasurement[], lifecycle: readonly BoardLaneEventEntry[] = [], repo = 'repo') {
+  return verificationStatistics({ repositoryId: repo, operations: [], lifecycle,
     history: attempts.map(a => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(a), createdAt: a.finishedAt ?? a.requestedAt })) });
 }
 test('fully observed repair chain reports a measured cross-batch dependency path (TASK-2835)', () => {
-  const first = attempt('failed-gate', 0, 10, { batchId: 'pre-review-1', plan: ['check'], gate: 'check',
-    result: 'failed', exitCode: 1, failureReason: { version: 1, code: 'gate-failed' },
-    ...({ dependencies: [] } as object) });
-  const second = attempt('successful-gate', 25, 35, { batchId: 'pre-review-2', plan: ['check'], gate: 'check',
-    revision: 'fixed', ...({ dependencies: ['review-1'] } as object) });
-  const history = [first, second].map(value => ({ eventType: VERIFICATION_MEASUREMENT_EVENT,
-    eventData: JSON.stringify(value), createdAt: value.finishedAt ?? value.requestedAt }));
+  const first = attempt('failed-gate', 0, 10, { batchId: 'pre-review-1', plan: ['check'], gate: 'check', result: 'failed', exitCode: 1, failureReason: { version: 1, code: 'gate-failed' }, ...({ dependencies: [] } as object) });
+  const second = attempt('successful-gate', 25, 35, { batchId: 'pre-review-2', plan: ['check'], gate: 'check', revision: 'fixed', ...({ dependencies: ['review-1'] } as object) });
+  const history = [first, second].map(value => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(value), createdAt: value.finishedAt ?? value.requestedAt }));
   history.push(...[
-    { id: 'repair-1', dependencies: ['failed-gate'], phase: 'repair', state: 'running', at: 10 },
-    { id: 'repair-1', dependencies: ['failed-gate'], phase: 'repair', state: 'ended', at: 20 },
-    { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'running', at: 20 },
-    { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'ended', at: 25 },
-  ].map(value => ({ eventType: 'mission.current-work', createdAt: instant(value.at), eventData: JSON.stringify({
-    repositoryId: 'repo', missionId: 'px-1', operationId: 'op', sourceId: value.id,
-    operationGeneration: 1, revision: 'rev', dependencies: value.dependencies, phase: value.phase, state: value.state,
-  }) })));
+    { id: 'repair-1', dependencies: ['failed-gate'], phase: 'repair', state: 'running', at: 10 }, { id: 'repair-1', dependencies: ['failed-gate'], phase: 'repair', state: 'ended', at: 20 },
+    { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'running', at: 20 }, { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'ended', at: 25 },
+  ].map(value => ({ eventType: 'mission.current-work', createdAt: instant(value.at), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', sourceId: value.id, operationGeneration: 1, revision: 'rev', dependencies: value.dependencies, phase: value.phase, state: value.state, }) })));
   const operation = workflowOperation({ updatedAt: instant(35) });
 
   const report = verificationStatistics({ repositoryId: 'repo', history, operations: [operation], lifecycle: [] });
   const measured = report as typeof report & { dependencyPath?: { durationMs: number; nodeIds: readonly string[] } };
   assert.equal(report.criticalPathMs, 35);
-  assert.deepEqual(measured.dependencyPath, {
-    durationMs: 35,
-    nodeIds: ['failed-gate', 'repair-1', 'review-1', 'successful-gate'],
-  });
+  assert.deepEqual(measured.dependencyPath, { durationMs: 35, nodeIds: ['failed-gate', 'repair-1', 'review-1', 'successful-gate'], });
   assert.equal(report.unknowns.some(value => value.includes('End-to-end critical path unknown')), false);
 });
 test('exclusive elapsed ownership reconciles overlap from observed ownership rather than row order (TASK-2835)', () => {
   const gate = attempt('gate', 25, 35, { gate: 'check', plan: ['check'], requestedAt: instant(25) });
   const history = [
-    { eventType: 'mission.current-work', createdAt: instant(0), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'queue', dependencies: [], revision: 'rev',
-      phase: 'waiting', state: 'running', actor: 'parallix', model: null, timeState: 'waiting' }) },
-    { eventType: 'mission.current-work', createdAt: instant(10), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'queue', dependencies: [], revision: 'rev',
-      phase: 'waiting', state: 'ended', actor: 'parallix', model: null, timeState: 'waiting' }) },
-    { eventType: 'mission.current-work', createdAt: instant(10), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'agent', dependencies: [], revision: 'rev',
-      phase: 'execute', state: 'running', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
-    { eventType: 'mission.current-work', createdAt: instant(30), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'agent', dependencies: [], revision: 'rev',
-      phase: 'execute', state: 'ended', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
+    { eventType: 'mission.current-work', createdAt: instant(0), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'queue', dependencies: [], revision: 'rev', phase: 'waiting', state: 'running', actor: 'parallix', model: null, timeState: 'waiting' }) },
+    { eventType: 'mission.current-work', createdAt: instant(10), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'queue', dependencies: [], revision: 'rev', phase: 'waiting', state: 'ended', actor: 'parallix', model: null, timeState: 'waiting' }) },
+    { eventType: 'mission.current-work', createdAt: instant(10), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'agent', dependencies: [], revision: 'rev', phase: 'execute', state: 'running', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
+    { eventType: 'mission.current-work', createdAt: instant(30), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'agent', dependencies: [], revision: 'rev', phase: 'execute', state: 'ended', actor: 'codex', model: 'gpt-6.1-sol', timeState: 'working' }) },
     { eventType: VERIFICATION_MEASUREMENT_EVENT, createdAt: instant(35), eventData: JSON.stringify(gate) },
-    { eventType: 'mission.current-work', createdAt: instant(35), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
-      phase: 'review', state: 'blocked', actor: 'human', model: null, timeState: 'held' }) },
-    { eventType: 'mission.current-work', createdAt: instant(50), eventData: JSON.stringify({ repositoryId: 'repo',
-      missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev',
-      phase: 'review', state: 'ended', actor: 'human', model: null, timeState: 'held' }) },
+    { eventType: 'mission.current-work', createdAt: instant(35), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev', phase: 'review', state: 'blocked', actor: 'human', model: null, timeState: 'held' }) },
+    { eventType: 'mission.current-work', createdAt: instant(50), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId: 'human-review', dependencies: ['gate'], revision: 'rev', phase: 'review', state: 'ended', actor: 'human', model: null, timeState: 'held' }) },
   ];
   const report = verificationStatistics({ repositoryId: 'repo', history, operations: [], lifecycle: [
     { id: 1, repositoryId: 'repo', missionId: 'px-1', fromStatus: null, toStatus: 'refined', occurredAt: instant(0), trigger: 'refine', agent: 'human', idempotencyKey: 'refined' },
@@ -223,10 +190,8 @@ test('exclusive elapsed ownership reconciles overlap from observed ownership rat
   assert.equal(report.elapsedOwnership?.totalMs, 50);
   assert.equal(report.elapsedOwnership?.unexplainedMs, 0);
   assert.deepEqual(report.elapsedOwnership?.rows, [
-    { step: 'workflow-admission', actor: 'parallix', model: null, state: 'waiting', durationMs: 10 },
-    { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 15 },
-    { step: 'declared-gates', actor: 'parallix', model: null, state: 'working', durationMs: 10 },
-    { step: 'human-review', actor: 'human', model: null, state: 'held', durationMs: 15 },
+    { step: 'workflow-admission', actor: 'parallix', model: null, state: 'waiting', durationMs: 10 }, { step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 15 },
+    { step: 'declared-gates', actor: 'parallix', model: null, state: 'working', durationMs: 10 }, { step: 'human-review', actor: 'human', model: null, state: 'held', durationMs: 15 },
   ]);
   assert.deepEqual(report.elapsedOwnership?.terminalStates, { blocked: 1, interrupted: 0, cancelled: 0 });
   assert.equal(report.executionMs, 10, 'exclusive elapsed ownership does not replace true gate work');
@@ -759,15 +724,10 @@ const ROWS: readonly UsageRecord[] = [
 
 test('task-2347.08 repro: CLI and board agree on identity, completions, and cycle time', async () => {
   const cli = summarizeCompletedMissionWindow(ROWS, WINDOW, new Set([`${REPOSITORY}::task-2347.08`]));
-  const board = new ConcreteMetricsReadAdapter({
-    laneEventRepo: new DoneLaneEventRepository(),
-    usageRepo: new MemoryUsageRepository(ROWS),
-    repositoryId: REPOSITORY,
-    // Both sides report the same decision window. The CLI window above ends on
-    // 2026-08-03, so the board's rolling window is evaluated on that day too;
-    // otherwise the comparison is between two different weeks.
-    clock: () => '2026-08-03T12:00:00.000Z',
-  });
+  // Both sides report the same decision window: the CLI window above ends on 2026-08-03, so the board's rolling window is
+  // evaluated on that day too; otherwise the comparison is between two different weeks.
+  const board = new ConcreteMetricsReadAdapter({ laneEventRepo: new DoneLaneEventRepository(), usageRepo: new MemoryUsageRepository(ROWS),
+    repositoryId: REPOSITORY, clock: () => '2026-08-03T12:00:00.000Z' });
   const outcomes = await board.readOutcomes();
   const metrics = await board.buildMetrics(new Map<MissionId, MissionStatus>());
 
@@ -781,8 +741,8 @@ test('task-2347.08 repro: CLI and board agree on identity, completions, and cycl
 // ---------------------------------------------------------------------------
 
 test('task-2347.08: CLI delegates identity, completion, and window rules to statistics service', () => {
-  // The stats command's report rendering lives in stats-report-rendering.ts
-  // (task-2369.02); the delegation rule covers both halves of the command.
+  // The stats command's report rendering lives in stats-report-rendering.ts (task-2369.02); the delegation rule covers
+  // both halves of the command.
   const source = [
     'src/adapters/cli/commands/stats.ts',
     'src/adapters/cli/commands/stats-report-rendering.ts',
@@ -997,4 +957,40 @@ test('stats CLI retains return-provenance coverage from the shared FLOW reader (
   const selected = selectStatsReport([], [{ repo: 'r', mission: 'task-straddling', createdAt: '2026-06-23T10:00:00Z', closedAt: '2026-06-23T12:00:00Z', labels: [], reviewStatistics: missingReturn, flowObservation }], { mode: 'weekly', today: '2026-06-23', timeZone: 'UTC' });
   assert.equal(selected.flowStatistics?.current.returns[0]?.coverage, 'straddling'); assert.ok(selected.flowStatistics?.current.defects
     .some(defect => defect.includes('lane:straddling') && defect.includes('straddling workflow')));
+});
+
+// PX-0061: one FlowMissionFacts producer means the CLI stats report and the board metrics cannot drift apart.
+const PARITY_CLOCK = '2026-08-03T12:00:00.000Z';
+const PARITY_DONE: BoardLaneEventEntry = { repositoryId: repository, missionId: 'px-0061-parity', fromStatus: 'backlog', toStatus: 'done',
+  trigger: 'integrate', agent: 'codex', occurredAt: '2026-08-03T09:00:00Z', idempotencyKey: 'px-0061-done' };
+
+async function parityFlows(entries: readonly BoardLaneEventEntry[]) {
+  const { selectStatsReport } = await import('../../../../src/application/services/statistics-report-selection.js');
+  const records: readonly UsageRecord[] = [{ repo: repository, mission: 'px-0061-parity', date: '2026-08-03', classification: 'ai_sdlc',
+    duration_minutes: 30, pr_fix_rounds: 1 }];
+  const report = verificationReport([{ ...attempt('gate-1', 0, 10, { missionId: 'px-0061-parity' }), repositoryId: repository }], entries, repository);
+  const metadata = new Map([[fixtureMissionId('px-0061-parity') as MissionId, { labels: [], assignee: agentFamily('codex'),
+    reviewStatistics: reviewStatisticsObservation('codex', 1) }]]);
+  const board = new ConcreteMetricsReadAdapter({ repositoryId: repository, laneEventRepo: laneRepo(entries), usageRepo: usageRepo(records),
+    verification: { read: async () => report, readRepository: async () => report }, cohortMetadata: async () => metadata, clock: () => PARITY_CLOCK });
+  const [outcomes, metrics] = await Promise.all([board.readOutcomes(), board.buildMetrics(new Map())]);
+  const cli = selectStatsReport(records, outcomes.map(outcome => ({ repo: String(repository), mission: String(outcome.missionId),
+    createdAt: outcome.createdAt, closedAt: outcome.closedAt, labels: outcome.labels, implementer: outcome.implementer,
+    reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics,
+    flowObservation: report.flowMissions.find(item => item.missionId === outcome.missionId) })),
+    { mode: 'weekly', today: PARITY_CLOCK }).flowStatistics;
+  return [metrics.flow, cli] as const;
+}
+
+test('PX-0061: CLI selection and board metrics report identical FlowStatistics for the same outcomes', async () => {
+  const [boardFlow, cliFlow] = await parityFlows([PARITY_DONE]);
+  assert.ok(boardFlow && cliFlow, 'both readers report FLOW for the same completed cohort');
+  assert.deepEqual(cliFlow, boardFlow, 'the CLI stats report and the board metrics agree field by field');
+});
+
+test('PX-0061: the one deliberate divergence is the CLI dwell decision, which stays unavailable', async () => {
+  const [boardFlow, cliFlow] = await parityFlows([{ ...PARITY_DONE, fromStatus: 'backlog', toStatus: 'active',
+    occurredAt: '2026-08-03T08:00:00Z', idempotencyKey: 'px-0061-active' }, PARITY_DONE]);
+  assert.ok(boardFlow!.current.stateDwell.some(state => state.n === 1 && state.medianMs! > 0), 'the board path measures closed lane dwell');
+  assert.ok(cliFlow!.current.stateDwell.every(state => state.n === 0), 'the stats report reads no lane transitions, so it declares dwell unavailable');
 });

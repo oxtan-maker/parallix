@@ -136,7 +136,7 @@ export type StartAgentLoopState = {
 
 export type PreparedLaunch = {
   launcher: AgentLauncher;
-  agentEnv: Record<string, string>;
+  agentEnv: NodeJS.ProcessEnv;
   resume: boolean;
   sessionId: string | null;
   launchSessionMarkerPort: SessionMarkerPort | undefined;

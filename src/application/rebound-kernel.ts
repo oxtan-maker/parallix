@@ -182,7 +182,7 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   // here, before the transient-verifier loop can refresh `diagnostic`, so the fix
   // prompt can still show what originally failed alongside the latest output.
   const firstDiagnostic = reboundDiagnostic(reason);
-  const state: ReboundState = { implementer: context.implementer, reason, originalReason: reason, classification: classifyReboundReason(reason, log), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [], occurrenceId: context.repairIncidentId ?? globalThis.crypto.randomUUID(), capturedEvidence: context.retainedFailure, slug };
+  const state: ReboundState = { implementer: context.implementer, reason, originalReason: reason, classification: classifyReboundReason(reason, log), diagnostic: firstDiagnostic, originalDiagnostic: firstDiagnostic, history: [failureFingerprint(reason)], launchFailures: 0, attempts: 0, attemptsDetail: [], occurrenceId: context.repairIncidentId ?? globalThis.crypto.randomUUID(), capturedEvidence: context.retainedFailure, repairObligations: context.repairObligations ? [...context.repairObligations] : undefined, slug };
   if (reboundRequiresHuman(state.reason, state.classification)) { return humanOnlyOutcome(state, context, error); }
   const transientOutcome = await retryTransientVerification(state, verify, maxTransientRetries, log);
   if (transientOutcome) { return transientOutcome; }
@@ -197,15 +197,20 @@ async function reboundImpl(reason: ReboundReason, context: ReboundContext): Prom
   const repairOutcome = await runRepairAttempts(state, { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, applyAgentFallback, log, error });
   if (repairOutcome) { return repairOutcome; }
   const exhaustion = reboundExhaustion(state.classification, state.attempts, maxAttempts);
-  const why = exhaustion === 'human'
-    ? 'the fresh structured failure requires human action'
-    : exhaustion === 'repair-budget'
-      ? `implementer repair budget (${maxAttempts}): attempt budget spent (${state.attempts})`
-      : `launcher budget spent (${maxLaunchRetries} session retries; ${state.launchFailures} failed launches)`;
+  const why = exhaustionReason(exhaustion, state, maxAttempts, maxLaunchRetries);
   const dossier = recoveryDossier(state.reason, context, state.history, state.diagnostic, why, state.attemptsDetail, state.capturedEvidence, state.launchFailure);
   error(fmt.status('FAIL', dossier));
   recordRepairTelemetry(context, { strategy: state.attemptsDetail.at(-1)?.strategy || 'fresh-diagnostic', outcome: 'escalate' });
   return { outcome: 'exhausted', attempts: state.attempts, diagnostic: state.diagnostic, classification: state.classification, implementer: state.implementer, dossier, ...outcomeEvidence(state) };
+}
+
+function exhaustionReason(exhaustion: ReturnType<typeof reboundExhaustion>, state: ReboundState,
+  maxAttempts: number, maxLaunchRetries: number): string {
+  if (exhaustion === 'human') { return 'the fresh structured failure requires human action'; }
+  if (exhaustion === 'repair-budget') {
+    return `implementer repair budget (${maxAttempts}): attempt budget spent (${state.attempts})`;
+  }
+  return `launcher budget spent (${maxLaunchRetries} session retries; ${state.launchFailures} failed launches)`;
 }
 
 export async function rebound(reason: ReboundReason, context: ReboundContext): Promise<ReboundOutcome> {
@@ -214,7 +219,7 @@ export async function rebound(reason: ReboundReason, context: ReboundContext): P
   return outcome;
 }
 
-interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; aggregateEvidence?: Array<{ gateKey: string; evidence?: RecoveryEvidenceRef }>; launchFailure?: LaunchFailure; }
+interface ReboundState { occurrenceId: string; slug: string; implementer: string; reason: ReboundReason; originalReason: ReboundReason; classification: ReboundClassification; diagnostic: string; originalDiagnostic: string; history: string[]; launchFailures: number; attempts: number; attemptsDetail: RepairEvidence[]; /** Retained evidence of the original failed command, persisted before the first repair launch. */ capturedEvidence?: RecoveryEvidenceRef | null; repairObligations?: Array<NonNullable<ReboundContext['repairObligations']>[number]>; aggregateEvidence?: Array<{ gateKey: string; evidence?: RecoveryEvidenceRef }>; launchFailure?: LaunchFailure; }
 
 function humanOnlyOutcome(state: ReboundState, context: ReboundContext, error: ReboundContext['error']): ReboundOutcome {
   error?.(fmt.status('FAIL', `${state.classification.label}: ${state.classification.failureClass} (${state.classification.dispatchAction}). Human intervention required — not bouncing.`));
@@ -242,6 +247,13 @@ async function retryTransientVerification(state: ReboundState, verify: ReboundCo
 function refreshReboundState(state: ReboundState, result: VerifyResult, log: ReboundContext['log']) {
   const previous = state.history[state.history.length - 1];
   state.reason = refreshedReason(state.reason, result);
+  const refreshed = state.reason;
+  if (refreshed.kind === 'gate-failure' && refreshed.gateKey && state.repairObligations) {
+    const index = state.repairObligations.findIndex(item => item.gateKey === refreshed.gateKey);
+    const obligation = { gateKey: refreshed.gateKey, reason: refreshed };
+    if (index < 0) { state.repairObligations.push(obligation); }
+    else { state.repairObligations[index] = obligation; }
+  }
   state.diagnostic = reboundDiagnostic(state.reason);
   state.classification = classifyReboundReason(state.reason, log);
   const fingerprint = failureFingerprint(state.reason);

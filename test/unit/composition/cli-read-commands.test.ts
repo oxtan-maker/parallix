@@ -1,6 +1,6 @@
 import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
+import { mockModule, installModuleMocks, moduleMockOptions } from '../../lib/module-mock.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import type { CliCommandContext } from '../../../src/composition/cli-service-scope.js';
 import type { ProductionApplicationServices } from '../../../src/composition/application-services.js';
@@ -16,8 +16,18 @@ const web = mockModule<typeof import('../../../src/interfaces/cli/web.js')>(
   '../../../src/interfaces/cli/web.js', import.meta.url);
 const assets = mockModule<typeof import('../../../src/adapters/web/asset-store.js')>(
   '../../../src/adapters/web/asset-store.js', import.meta.url);
-const observation = mockModule<typeof import('../../../src/composition/workflow-observation.js')>(
-  '../../../src/composition/workflow-observation.js', import.meta.url);
+type WorkflowObservationModule = typeof import('../../../src/composition/workflow-observation.js');
+const observation: Pick<WorkflowObservationModule, 'workflowObservationCapabilities'> = {
+  workflowObservationCapabilities: (..._args: Parameters<WorkflowObservationModule['workflowObservationCapabilities']>): ReturnType<WorkflowObservationModule['workflowObservationCapabilities']> => {
+    throw new Error('workflow observation test double is not configured');
+  },
+};
+// This composition case owns the web wiring, not the observer implementation.
+// Register its explicit facade without evaluating the real observer in a second
+// isolated coverage process; the observer's owning suite executes the real module.
+mock.module(new URL('../../../src/composition/workflow-observation.js', import.meta.url).href,
+  moduleMockOptions({ workflowObservationCapabilities: (...args: Parameters<WorkflowObservationModule['workflowObservationCapabilities']>) =>
+    observation.workflowObservationCapabilities(...args) }));
 await installModuleMocks();
 const { createReadCommands } = await import('../../../src/composition/cli-read-commands.js');
 const { workflowAttachmentSystem } = await import('../../../src/composition/workflow-operations.js');

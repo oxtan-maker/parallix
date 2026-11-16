@@ -307,42 +307,36 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
       `fallback diagnostics must name every unavailable family and reason: ${selectionLogs.join(' | ')}`,
     );
 
-    let writtenState: { value: import('../../../../src/application/ports/review-persistence.js').ReviewStateData | null } = { value: null };
-    const events: { type: string; params: unknown; }[] = [];
+    const comments: string[] = [];
     const singleReviewer = fixtureAgentFamily('custom');
     const singleStartedAt = '2026-10-25T00:00:00Z';
     const singleReview = startReview({ change: { kind: 'local-branch', sourceBranch: 'mission/task-2384', targetBranch: 'main' }, revision: changeRevision('head') }, singleReviewer, singleReviewer, singleStartedAt, ConfiguredReviewerEligibility.fromReviewStep({ eligible: [singleReviewer], strategy: 'random' }));
     const singleStore = inMemoryTransitionStore(fixtureMission('task-2384', { status: 'review', assignee: singleReviewer, review: singleReview }));
-    const outcome = await postWorkflowReview('task-2384', 'approve', 'looks good', {
+    const outcome = await consumeReviewerArtifacts('task-2384', 'custom', {
+      revision: 'head', providerEnabled: true,
+      output: { verdict: 'approve', findings: [], comment: 'looks good' },
       executionContext: missionExecutionContext({ missionId: 'task-2384', missionWorktree: '/fixture' }),
       missionStore: singleStore, lifecycleService: new MissionLifecycleService(singleStore),
-      reviewIdentity: 'custom',
       readTokenFn: () => 'token',
       getPrAuthorFn: () => 'custom',
       postReviewFn: () => { throw new Error('self approval must not reach Forgejo'); },
       readReviewStateFn: () => ({ reviewer: 'custom', implementer: 'custom', round: 1, startedAt: singleStartedAt, phase: 'reviewing' }),
-      writeReviewStateFn: async (_slug: string, state) => {
-        writtenState.value = state;
-        return { outcome: 'committed' as const };
-      },
-      createEventFn: (_slug: string, type: string, params: unknown) => {
-        events.push({ type, params });
-        return { ok: true as const, path: '/mock' };
+      getCommentsFn: async () => [],
+      createEventFn: () => ({ ok: true, path: null }),
+      postCommentFn: (_branch, _token, body) => {
+        comments.push(body);
+        return { ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null };
       },
       buildMetadataFooterFn: () => '',
       log: () => {},
       error: () => {},
     });
 
-    assert.equal(outcome.skipped, true);
-    assert.ok(writtenState.value);
-    assert.equal(outcome.ok, true);
-    assert.equal(writtenState.value.disposition, 'APPROVED', 'single-family local approval is allowed by corrected SC9 (TASK-2778)');
-    assert.equal(writtenState.value.metadata?.approvalOwed, false, 'a same-agent review leaves no approval debt (PX-0046.03)');
-    assert.deepEqual(events, [{
-      type: 'reviewer_outcome',
-      params: { verdict: 'approve', content: 'Single-family self-author verdict: approve' },
-    }], 'the same-agent verdict records no approval-owed marker');
+    assert.equal(outcome.ok, true, outcome.diagnostic ?? '');
+    assert.equal(outcome.reviewState, 'APPROVED');
+    assert.equal(singleStore.mission().review!.rounds.at(-1)!.decision?.kind, 'approved');
+    assert.equal(singleStore.mission().status, 'integration');
+    assert.equal(comments.length, 2, 'findings and verdict are mirrored without a formal self-review');
 
     const card = projectMissionCard(singleStore.mission(), {
       latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
@@ -369,7 +363,7 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
   });
 });
 
-test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 F2)', async () => {
+test('publishing a PR-author comment cannot itself grant a local Mission approval (TASK-2778 F2)', async () => {
   const slug = 'task-2778';
   const review = startReview({ change: { kind: 'pull-request', provider: 'forgejo', id: '739', url: null,
     sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head') },
@@ -381,6 +375,7 @@ test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 
     executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }), revision: 'head', reviewIdentity: 'claude', missionStore: store, lifecycleService: lifecycle,
     readTokenFn: () => 'claude-token', getPrAuthorFn: () => 'claude',
     postReviewFn: () => assert.fail('self approval must not reach provider'),
+    postCommentFn: () => ({ ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }),
     readReviewStateFn: async () => ReviewState.from(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
     writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store }),
     createEventFn: () => ({ ok: true, path: null }), log: () => {}, error: () => {},
@@ -394,11 +389,11 @@ test('PR 739 drift cannot grant a self-author local Mission approval (TASK-2778 
 for (const { author, reviewer, implementer } of [
   { author: 'claude', reviewer: 'claude', implementer: 'codex' },
   { author: 'codex', reviewer: 'claude', implementer: 'codex' },
-  // TASK-2804: original author is advisory after reassignment; a third reviewer can approve.
+  // The original PR author can review after the implementer changes.
   { author: 'codex', reviewer: 'codex', implementer: 'claude' },
   { author: 'codex', reviewer: 'custom', implementer: 'claude' },
 ]) {
-  test(`provider verdict by ${reviewer} for ${implementer} with PR author ${author} requires independent approval before local authority (TASK-2778 F2)`, async () => {
+  test(`provider verdict by ${reviewer} for ${implementer} with PR author ${author} publishes before granting local authority (TASK-2778 F2)`, async () => {
     const slug = 'task-2778';
     const review = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' }, revision: changeRevision('head') },
       fixtureAgentFamily(reviewer), fixtureAgentFamily(implementer), '2026-10-19T10:00:00Z',
@@ -418,18 +413,15 @@ for (const { author, reviewer, implementer } of [
       writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store }),
       createEventFn: () => ({ ok: true, path: null }), buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
     });
-    assert.equal(result.ok, author !== reviewer, result.diagnostic ?? '');
+    assert.equal(result.ok, true, result.diagnostic ?? '');
     assert.equal(posts, author === reviewer ? 0 : 1);
-    assert.equal(store.mission().status, author === reviewer ? 'review' : 'integration');
-    assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind ?? null, author === reviewer ? null : 'approved');
+    assert.equal(store.mission().status, 'integration');
+    assert.equal(store.mission().review!.rounds.at(-1)!.decision?.kind, 'approved');
     assert.equal(store.mission().assignee, implementer);
     assert.equal(store.mission().review!.rounds.at(-1)!.implementer, implementer);
-    if (author === reviewer) assert.equal(store.events.length, 0, 'original author cannot authorize integration');
-    if (author !== reviewer) {
-      const decision = store.mission().review!.rounds.at(-1)!.decision;
-      assert.ok(decision?.kind === 'approved');
-      assert.equal(decision.source.kind, 'provider');
-    }
+    const decision = store.mission().review!.rounds.at(-1)!.decision;
+    assert.ok(decision?.kind === 'approved');
+    assert.equal(decision.source.kind, 'provider');
   });
 }
 
@@ -442,19 +434,24 @@ test('self-author approval cannot leave fixing without a decision (TASK-2821 rev
   const store = inMemoryTransitionStore(fixtureMission(slug, { status: 'review', assignee: family, review: broken }));
   const before = structuredClone(store.mission());
   const { readReviewState, writeReviewState } = await import('../../../../src/adapters/review/review-state.js');
-  await assert.rejects(() => postWorkflowReview(slug, 'approve', 'looks good', {
+  const rejected = await consumeReviewerArtifacts(slug, 'custom', {
+    revision: 'head', providerEnabled: true,
+    output: { verdict: 'approve', findings: [], comment: 'looks good' },
     missionStore: store, lifecycleService: new MissionLifecycleService(store),
     executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }),
-    reviewIdentity: 'custom', readTokenFn: () => 'fake', getPrAuthorFn: () => 'custom',
+    readTokenFn: () => 'fake', getPrAuthorFn: () => 'custom',
     readReviewStateFn: () => readReviewState(slug, '/fixture', store),
     writeReviewStateFn: (_slug, state) => writeReviewState(_slug, state, '/fixture', { missionStore: store }),
-    createEventFn: () => assert.fail('an illegal approval must not write an event'),
+    createEventFn: () => ({ ok: true, path: null }),
     postReviewFn: () => assert.fail('self-author must not POST approval'), log: () => {}, error: () => {},
-  }), /phase|cannot move/);
+  });
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.diagnostic ?? '', /phase|cannot move/);
   const { recordApproval } = await import('../../../../src/adapters/review/review-round.js');
   const direct = await recordApproval(slug, { comment: null, decidedAt: '2026-10-25T01:00:00Z' }, { missionStore: store, lifecycleService: new MissionLifecycleService(store) });
   assert.equal(direct.outcome, 'failed');
   if (direct.outcome === 'failed') { assert.match(direct.diagnostic, /phase|cannot move/); }
-  assert.deepEqual(store.mission(), before);
+  assert.deepEqual(store.mission().review!.rounds, before.review!.rounds);
+  assert.equal(store.mission().status, before.status);
   assert.equal(store.events.length, 0);
 });

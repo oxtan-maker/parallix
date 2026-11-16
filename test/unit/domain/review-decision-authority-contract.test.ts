@@ -343,21 +343,16 @@ describe("SC2: approve on a fixing round fails loudly", () => {
   });
 });
 
-describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () => {
-  // Drives the exported postWorkflowReview self-author path, which records the
-  // verdict through recordLocalReviewVerdict — the second approve path the task
-  // names. reviewer === PR author selects the local-record branch.
+describe("provider comment publication has no decision authority", () => {
   function selfAuthorOpts(store: Awaited<ReturnType<typeof awaitingReview>>['store']) {
-    // F4: hermetic — run in a temp worktree with a stubbed event writer so the
-    // self-author verdict path never drops a real markdown file into a live
-    // mission's review-events directory (which fails EROFS on a read-only CI
-    // checkout). The Mission store is an isolated in-memory port double.
+    // The provider comment is doubled; the Mission store is isolated.
     const worktree = registeredMkdtemp('parallix-selfauthor-');
     temporaryDirectories.push(worktree);
     return {
       reviewIdentity: 'codex',
       readTokenFn: () => 'mock-token',
       getPrAuthorFn: () => 'codex',
+      postCommentFn: () => ({ ok: true as const, status: 0, statusCode: 200, stderr: null, data: null, error: null }),
       buildMetadataFooterFn: () => '',
       missionStore: store,
       executionContext: missionExecutionContext({ missionId: 'task-2398', missionWorktree: worktree }),
@@ -368,17 +363,17 @@ describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () 
     } as Parameters<typeof postWorkflowReview>[3];
   }
 
-  it('retains self-author review as advisory without approving (TASK-2778 F2)', async () => {
+  it('publishes the author comment without independently approving (TASK-2778 F2)', async () => {
     const { store } = await awaitingReview();
     const result = await postWorkflowReview('task-2398', 'approve', 'LGTM', selfAuthorOpts(store));
-    assert.equal(result.ok, false);
+    assert.equal(result.ok, true);
     assert.equal(result.skipped, true);
     const loaded = await store.load(MISSION);
     assert.equal(loaded.kind, 'found');
     assert.equal(currentReviewRound(loaded.mission.review!).decision, null);
   });
 
-  it('fails loudly on a fixing round and leaves the changes-requested decision', async () => {
+  it('publishing an author comment preserves a fixing round and its changes-requested decision', async () => {
     const { store } = await awaitingReview();
     await recordRequestedChanges(
       'task-2398',
@@ -386,8 +381,7 @@ describe("SC3: review-artifacts.ts approve path (recordLocalReviewVerdict)", () 
       { missionStore: store },
     );
     const result = await postWorkflowReview('task-2398', 'approve', 'APPROVED', selfAuthorOpts(store));
-    assert.equal(result.ok, false, 'a fixing round cannot legally approve; the path fails loudly');
-    assert.match(result.error ?? '', /independent review is required/i);
+    assert.equal(result.ok, true, 'publication has no authority to change a fixing round');
     const loaded = await store.load(MISSION);
     assert.equal(loaded.kind, 'found');
     assert.equal(currentReviewRound(loaded.mission.review!).decision?.kind, 'changes-requested');
@@ -480,43 +474,53 @@ describe("SC3: review-commands.ts submitReviewRound approve path", () => {
     assert.equal(recordCalled, false, 'the approve was NOT recorded after a failed POST — the mission stays in review');
   });
 
-  it('provider-backed: a successful POST records the authoritative approve', async () => {
-    const { store } = await awaitingReview();
-    let postCalled = false;
-    let recordCalled = false;
-    let order: string[] = []; const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
-    await submitReviewRound('task-2398', 'approve', 'LGTM', {
-      configuration,
-      executionContext: executionContext(), revision: 'reviewed-head',
-      isForgejoReviewEnabledFn: () => true,
-      readReviewStateFn: () => new ReviewState('task-2398', { round: 1, startedAt: '2026-08-21T07:00:00.000Z', reviewer, implementer }),
-      reviewerRouting: { eligibleFamilies: () => [reviewer, implementer], nominate: () => reviewer,
-        launcherStatus: () => ({ supported: true, detail: 'installed' }), runtimeMatrix: () => [] },
-      writeReviewStateFn: reviewStateWriterFixture(() => {}),
-      resolveReviewUserFn: (user, received) => { assert.strictEqual(received, configuration); return user; }, readTokenFn: (_user, options) => { assert.strictEqual(options?.configuration, configuration); return 'token'; },
-      getPrAuthorFn: () => 'someone-else',
-      postReviewFn: (_branch, _token, _outcome, _summary, options) => {
-        assert.strictEqual(options?.configuration, configuration);
-        postCalled = true;
-        order.push('post');
-        return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true };
-      },
-      missionStore: store,
-      recordApprovalFn: (async () => {
-        recordCalled = true;
-        order.push('record');
-        return { outcome: 'recorded' };
-      }),
-      transitionTaskFn: (async () => true),
-      resolveTaskFileFn: () => ({ matches: [], reason: 'missing',  ok: false }),
-      getTaskStatusFn: () => null,
-      log: () => {},
-      error: () => {},
+  for (const author of ['someone-else', reviewer]) {
+    it(`provider-backed: a successful publication with PR author ${author} records the authoritative approve`, async () => {
+      const { store } = await awaitingReview();
+      let postCalled = false;
+      let recordCalled = false;
+      let order: string[] = []; const configuration = resolveConfiguration({ FORGEJO_HOME: '/isolated/forgejo' });
+      await submitReviewRound('task-2398', 'approve', 'LGTM', {
+        configuration,
+        executionContext: executionContext(), revision: 'reviewed-head',
+        isForgejoReviewEnabledFn: () => true,
+        readReviewStateFn: () => new ReviewState('task-2398', { round: 1, startedAt: '2026-08-21T07:00:00.000Z', reviewer, implementer }),
+        reviewerRouting: { eligibleFamilies: () => [reviewer, implementer], nominate: () => reviewer,
+          launcherStatus: () => ({ supported: true, detail: 'installed' }), runtimeMatrix: () => [] },
+        writeReviewStateFn: reviewStateWriterFixture(() => {}),
+        resolveReviewUserFn: (user, received) => { assert.strictEqual(received, configuration); return user; }, readTokenFn: (_user, options) => { assert.strictEqual(options?.configuration, configuration); return 'token'; },
+        getPrAuthorFn: () => author,
+        postCommentFn: (_branch, _token, _summary, options) => {
+          assert.strictEqual(options?.configuration, configuration);
+          assert.equal(author, reviewer);
+          postCalled = true;
+          order.push('post');
+          return { data: null, status: 201, statusCode: 201, stderr: null, error: null, ok: true };
+        },
+        postReviewFn: (_branch, _token, _outcome, _summary, options) => {
+          assert.strictEqual(options?.configuration, configuration);
+          assert.notEqual(author, reviewer, 'the PR author uses a comment');
+          postCalled = true;
+          order.push('post');
+          return { data: null, status: null, statusCode: null, stderr: null, error: null,  ok: true };
+        },
+        missionStore: store,
+        recordApprovalFn: (async () => {
+          recordCalled = true;
+          order.push('record');
+          return { outcome: 'recorded' };
+        }),
+        transitionTaskFn: (async () => true),
+        resolveTaskFileFn: () => ({ matches: [], reason: 'missing',  ok: false }),
+        getTaskStatusFn: () => null,
+        log: () => {},
+        error: () => {},
+      });
+      assert.equal(postCalled, true, 'the provider POST was attempted');
+      assert.equal(recordCalled, true, 'the approve is recorded after a successful POST');
+      assert.deepEqual(order, ['post', 'record'], 'recordApproval runs only after the POST succeeded');
     });
-    assert.equal(postCalled, true, 'the provider POST was attempted');
-    assert.equal(recordCalled, true, 'the approve is recorded after a successful POST');
-    assert.deepEqual(order, ['post', 'record'], 'recordApproval runs only after the POST succeeded');
-  });
+  }
 });
 
 it('classifier decision preserves review authority and rejects stale/partial scope (TASK-2658)', async () => {

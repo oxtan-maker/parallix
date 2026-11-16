@@ -2,7 +2,7 @@ import { StructuredFailure, failureReason } from '../../domain/failure-reason.js
 import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
 import type { RetainedRepairPort } from '../ports/review-round.js';
 import { createIntegrationRebase } from './rebase.js';
-import { integrationRepairCertified, verifyRestartedRepair } from './repair-certification.js';
+import { integrationRepairCertified, isLegacyScalarRepair, verifyRestartedRepair } from './repair-certification.js';
 import {
   integrationGateWithdrawals, integrationRepairNeedsReview, pendingIntegrationApproval,
 } from '../../domain/integration-repair-policy.js';
@@ -148,9 +148,10 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
     backlogMirrorOwnership(loaded.mission));
   if (exact) {
     const obligations = effectiveRepairObligations(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria, worktree);
-    const command = obligations.at(-1)?.repair?.command;
-    if (command) {
-      // Read immutable original diagnostics before running the authorized verifier.
+    const commands = [...new Set(obligations.map(checkpoint => checkpoint.repair!.command))];
+    // Read immutable original diagnostics for every distinct failed command
+    // before consuming either the exact verifier or the configured phase rerun.
+    for (const command of commands) {
       const retained = await exact.read(command).catch(cause => {
         throw new StructuredFailure('Original repair evidence is unavailable', failureReason('incomplete-evidence', 'verification'), cause);
       });
@@ -158,6 +159,9 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
         || retained.evidence.exitCode === 0 || !retained.evidence.captureComplete) {
         throw new StructuredFailure('Original repair evidence is incomplete or mismatched', failureReason('incomplete-evidence', 'verification'));
       }
+    }
+    const command = isLegacyScalarRepair(obligations) ? commands[0] : undefined;
+    if (command) {
       await verifyRestartedRepair({ slug, services, worktree, revision: execution.revision,
         gates: [{ key: 'repair', command, order: 1 }], head: () => committedRepairHead(execution),
         run: async () => { throw new Error('Exact verification owns this check'); },

@@ -16,6 +16,7 @@ import {
 
 export type { GitReader } from './git.js';
 import type { GitReader } from './git.js';
+import type { MissionId } from '../../domain/mission.js';
 
 /** @param {string|GitReader} rootDirOrGitFn @param {GitReader|null} [maybeGitFn] */
 function configuredPrimaryBranch(rootDir: string, listLocalBranches: () => string[]): string | null {
@@ -339,6 +340,14 @@ function workTreeRootFor(candidate: string, runGit: GitReader): string {
 
 export interface WorktreeTopologySnapshot {
   resolveWorktree(_slug: string, _options?: { cwd?: string }): string | null;
+  /**
+   * Every mission worktree path of this repository mapped to its mission id, read
+   * from the same topology listing. A consumer that wants the whole map takes it
+   * here instead of spawning a second `git worktree list`. Null means that the
+   * shared listing failed; a successful repository with no mission worktrees is
+   * represented by an empty map.
+   */
+  missionWorktrees(): ReadonlyMap<string, MissionId> | null;
 }
 
 export interface RepositoryWorktree {
@@ -400,14 +409,26 @@ export function snapshotWorktreeTopology(options: { cwd?: string; gitFn?: GitRea
   const currentBranch = options.currentBranch || gitModule.getCurrentBranch;
   const normalizedRoots = new Map<string, string>();
   let branchAtCwd: string | null | undefined;
+  let missionPaths: ReadonlyMap<string, MissionId> | null = null;
+  let topologyAvailable = false;
   const entries: Array<{ path: string; branch: string | null; prunable: boolean }> = [];
   try {
     entries.push(...readRepositoryWorktrees(cwd, runGit));
+    topologyAvailable = true;
   } catch {
     // The ordinary resolver retains its branch-based cwd fallback below.
   }
 
   return Object.freeze({
+    missionWorktrees(): ReadonlyMap<string, MissionId> | null {
+      if (!topologyAvailable) { return null; }
+      if (missionPaths === null) {
+        const prefix = `refs/heads/${missionBranchPrefix(cwd)}`;
+        missionPaths = new Map(entries.flatMap(entry => entry.branch?.startsWith(prefix) === true
+          ? [[entry.path, entry.branch.slice(prefix.length) as MissionId] as [string, MissionId]] : []));
+      }
+      return missionPaths;
+    },
     resolveWorktree(slug: string, resolveOptions: { cwd?: string } = {}): string | null {
       const lookupCwd = resolveOptions.cwd || cwd;
       const branchRef = missionBranchRef(slug, lookupCwd);

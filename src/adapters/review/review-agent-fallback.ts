@@ -18,6 +18,7 @@ import type { MissionStore } from '../../application/domain-ports.js';
 import { resolveStageTelemetry } from '../agents/stage-telemetry.js';
 import { persistReviewerRunAttribution } from './reviewer-result-attribution.js';
 import * as statsModule from '../cli/commands/stats.js';
+import { missionId } from '../../domain/mission.js';
 
 type FallbackReviewState = ReviewStateData;
 type StageStatsOptions = {
@@ -152,6 +153,28 @@ export async function recordStageStatsSafe(
 // fallback identity selected by the launcher.
 // This helper detects the fallback, persists the new identity to review state
 // and the Backlog assignee, and returns the identity that should be polled for.
+function launchedFallback(original: string, launchResult?: { agent?: string | null } | null): string | null {
+  const agent = launchResult?.agent;
+  return agent && agent !== original ? agent : null;
+}
+
+async function aggregateAlreadyRecordsFallback(role: string, fallback: string, slug: string,
+  missionStore: MissionStore | null): Promise<boolean> {
+  if (role !== 'implementer' || !missionStore) { return false; }
+  const loaded = await missionStore.load(missionId(slug));
+  if (loaded.kind !== 'found' || loaded.mission.assignee !== fallback) { return false; }
+  const round = loaded.mission.review?.rounds.at(-1);
+  return !round || round.implementer === fallback;
+}
+
+function updateFallbackIdentity(role: string, state: FallbackReviewState, fallback: string): void {
+  if (role === 'reviewer') {
+    state.reviewer = fallback;
+  } else {
+    state.implementer = fallback;
+  }
+}
+
 export async function applyAgentFallback(opts: {
   role: string;
   original: string;
@@ -166,17 +189,18 @@ export async function applyAgentFallback(opts: {
   missionStore?: MissionStore | null;
 }): Promise<string> {
   const { role, original, launchResult, state = {}, slug, executionContext, taskResolution, log = fmt.log.plain, writeReviewStateFn = writeReviewState, enforceTaskAssigneeFn, missionStore = null } = opts;
-  if (!launchResult || !launchResult.agent || launchResult.agent === original) {
-    return original;
-  }
-  const fallback = launchResult.agent;
+  const fallback = launchedFallback(original, launchResult);
+  if (!fallback) { return original; }
   log(fmt.status('INFO', `${role} fell back from ${original} to ${fallback}; updating identity before polling.`));
-  if (role === 'reviewer') {
-    state.reviewer = fallback;
-  } else {
-    state.implementer = fallback;
+  const aggregateIdentityRecorded = await aggregateAlreadyRecordsFallback(role, fallback, slug, missionStore);
+  updateFallbackIdentity(role, state, fallback);
+  // Integration rebound records the actual launched implementer through Mission
+  // lifecycle authority first. Rewriting the same identity through flattened
+  // loop state would replay its retained approved phase while the Mission is
+  // active; that guard must remain fail-closed because the write is unnecessary.
+  if (!aggregateIdentityRecorded) {
+    await persistReviewStateOrThrow(writeReviewStateFn, slug, state, executionContext.missionWorktree, missionStore);
   }
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, executionContext.missionWorktree, missionStore);
   if (role === 'implementer' && taskResolution && taskResolution.ok) {
     if (enforceTaskAssigneeFn && !enforceTaskAssigneeFn(taskResolution.taskFile, fallback)) {
       log(fmt.status('WARN', `Could not enforce fallback implementer ${fallback} in backlog task.`));

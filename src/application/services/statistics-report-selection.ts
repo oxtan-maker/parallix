@@ -5,7 +5,7 @@ import { weeklyDecisionWindows, reportingWindowContains, type ReportingWindow } 
 import { createRangeWindow } from './statistics-row.js';
 import { statisticsMissionKey, statisticsRowInWindow, type StatisticsRow } from './statistics-service.js';
 import { flowStatistics, type FlowStatistics } from '../projections/flow-statistics.js';
-import { EMPTY_FLOW_MISSION_OBSERVATION } from '../projections/flow-mission-facts.js';
+import { flowMissionFact } from '../projections/flow-mission-facts.js';
 
 export interface StatsReportWindow<Row extends StatisticsRow = StatisticsRow> {
   readonly window: ReportingWindow & { readonly label: string };
@@ -22,24 +22,6 @@ export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow>
   readonly current: StatsReportWindow<Row>;
   readonly previous?: StatsReportWindow<Row>;
   readonly flowStatistics?: FlowStatistics;
-}
-
-function sharedFlowFact(outcome: StatsMissionFlow) {
-  const observation = outcome.flowObservation ?? EMPTY_FLOW_MISSION_OBSERVATION;
-  return {
-    repositoryId: outcome.repo, missionId: outcome.mission, closedAt: outcome.closedAt,
-    implementer: outcome.implementer ?? null, laneDwellMs: null,
-    diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
-    ownership: observation.ownership, window: observation.window,
-    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseStages: observation.rebaseStages, lead: observation.lead,
-    diagnostics: observation.diagnostics,
-    actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
-    agentLaunches: observation.agentLaunches,
-    observedDisqualifiers: observation.observedDisqualifiers,
-    returnProvenanceCutover: observation.returnProvenanceCutover,
-    returnProvenanceStartedAt: outcome.createdAt ?? null,
-    reviewStatistics: outcome.reviewStatistics ?? reviewStatistics(null),
-  };
 }
 
 /** Select lifecycle completions by canonical delivery day, telemetry spend by measurement day. */
@@ -81,7 +63,14 @@ export function selectStatsReport<Row extends StatisticsRow>(
   };
   const periods = [windows.current, ...(windows.previous ? [windows.previous] : [])];
   const sharedFlow = decisionWindows && missionFlow !== null && missionFlow.some(outcome => outcome.flowObservation)
-    ? flowStatistics(missionFlow.map(sharedFlowFact), decisionWindows) : undefined;
+    ? flowStatistics(missionFlow.map(outcome => flowMissionFact({
+      repositoryId: outcome.repo, missionId: outcome.mission, closedAt: outcome.closedAt,
+      implementer: outcome.implementer ?? null, observation: outcome.flowObservation,
+      // The stats report reads no lifecycle transitions, so closed lane dwell stays unavailable.
+      laneDwellMs: null,
+      returnProvenanceStartedAt: outcome.createdAt ?? null,
+      reviewStatistics: outcome.reviewStatistics ?? null,
+    })), decisionWindows) : undefined;
   return {
     bugTrend: missionFlow === null ? null : periods.flatMap(window => selectBugTrend(missionFlow, window.start, window.end, window.timeZone) ?? []),
     current: select(windows.current), previous: windows.previous ? select(windows.previous) : undefined,

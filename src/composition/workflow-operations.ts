@@ -7,6 +7,7 @@ import { ACTIVE_WORKFLOW_OBSERVATION_MS, type workflowCliObserver } from './work
 import type { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { missionLabels } from '../domain/mission.js';
 import { completed, failure } from '../application/contracts.js';
+import { failureReason } from '../domain/failure-reason.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
 import { configureMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
 import { randomUUID } from 'node:crypto';
@@ -210,7 +211,8 @@ async function executeWorkflowCommand(id: string, operation: import('../applicat
     if (operation.invocation) {
       const { run } = await import('./create-cli.js');
       const status = await run([operation.invocation.command, ...operation.invocation.args], { baseCwd: root, environment: configuration.forwardedEnvironment, operatorInvocation: operation.operatorInvocation === true });
-      return status === 0 ? completed({ operationId: id }) : failure('execution', `Workflow exited with status ${status}`);
+      return status === 0 ? completed({ operationId: id }) : failure('execution', `Workflow exited with status ${status}`, [],
+        failureReason('process-failed', 'process', { workflowOperationExit: true, exitCode: status }));
     }
     return await controller.dispatch(request);
   }

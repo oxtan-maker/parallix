@@ -463,3 +463,82 @@ test('board analytical read scopes a rebound repair read to the Mission when no 
     assert.equal(projection.metrics.flow?.current.returns.length, 1, 'the mission-scoped read attributes the same return');
   } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
 });
+
+// PX-0058.05 F2: one board build reads the repository worktree topology once and
+// shares that read with the running-session scan. Red on the parent revision,
+// where the scan listed worktrees through its own `git` runner, so the topology
+// the build already held never reached it and this slug-less session stayed
+// unattributed.
+test('a board build shares its worktree topology with running-session detection (PX-0058.05 F2)', async () => {
+  const rootDir = createTempBacklog({});
+  const repo = repositoryId('test-repo');
+  const id = missionId('task-2858-topology');
+  const worktree = path.join(rootDir, 'wt', 'task-2858-topology');
+  const mission: Mission = { id, repositoryId: repo, title: 'Shared topology', labels: missionLabels(['user_value']),
+    assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null, status: 'active',
+    closedAt: null, declaredGates: [] };
+  const store: MissionStore = { load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
+    save: async () => missionVersion(1), loadByRepository: async () => [mission] };
+  let worktreeListings = 0;
+  const gitFn = (args: string[]) => {
+    if (args.join(' ').endsWith('worktree list --porcelain')) {
+      worktreeListings += 1;
+      return { status: 0, stderr: '', stdout: `worktree ${rootDir}\nbranch refs/heads/main\n\n`
+        + `worktree ${worktree}\nbranch refs/heads/mission/${id}\n\n` };
+    }
+    return { status: 0, stdout: '', stderr: '' };
+  };
+  try {
+    const builder = composeBoardProjection({
+      rootDir, missionStore: store, repositoryId: repo, blocklistRepo: new MockBlocklistRepo(),
+      historyRepo: new MockHistoryRepo(), laneEventRepo: new MockLaneEventRepo(), usageRepo: new MockUsageRepo(),
+      knownAgentFamilies: [], launcherProbe: () => ({ available: true, detail: null }), readAgentConfig: () => null,
+      // A slug-less `px review` can only be attributed through a worktree path, and the
+      // process table is injected so the case never scans the live OS.
+      listRunningProcesses: async () => [{ pid: 4242, elapsedSeconds: 45, args: `node ${worktree}/node_modules/.bin/px review` }],
+      providerExecution: { observe: () => ({ observedAt: new Date().toISOString(), complete: true, invocations: [], limitations: [] }) },
+      gitFn, gateEvidence: { readDeclaredGates: async () => ({ checkout: { kind: 'absent' }, gates: [] }),
+        readIntegrationGates: async () => ({ checkout: { kind: 'absent' }, configured: [], gates: [], running: null }) },
+    }).builder;
+    const board = await builder.build();
+    const card = board.stages.flatMap(stage => stage.cards).find(entry => entry.id === id);
+    assert.ok(card, 'the Mission is on the board');
+    assert.equal(card?.liveSession?.missionId, id, 'the session resolves through the build topology');
+    assert.equal(worktreeListings, 1, 'one git worktree listing per board build');
+  } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
+});
+
+test('a failed shared worktree listing keeps running-session evidence unknown (PX-0058.05 F6)', async () => {
+  const rootDir = createTempBacklog({});
+  const repo = repositoryId('test-repo');
+  const id = missionId('task-2858-topology-failure');
+  const mission: Mission = { id, repositoryId: repo, title: 'Unavailable topology', labels: missionLabels(['user_value']),
+    assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null, status: 'active',
+    closedAt: null, declaredGates: [] };
+  const store: MissionStore = { load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
+    save: async () => missionVersion(1), loadByRepository: async () => [mission] };
+  let worktreeListings = 0;
+  try {
+    const builder = composeBoardProjection({
+      rootDir, missionStore: store, repositoryId: repo, blocklistRepo: new MockBlocklistRepo(),
+      historyRepo: new MockHistoryRepo(), laneEventRepo: new MockLaneEventRepo(), usageRepo: new MockUsageRepo(),
+      knownAgentFamilies: [], launcherProbe: () => ({ available: true, detail: null }), readAgentConfig: () => null,
+      listRunningProcesses: async () => [{ pid: 4243, elapsedSeconds: 45, args: 'node px review' }],
+      providerExecution: { observe: () => ({ observedAt: new Date().toISOString(), complete: true, invocations: [], limitations: [] }) },
+      gitFn: args => {
+        if (args.join(' ').endsWith('worktree list --porcelain')) {
+          worktreeListings += 1;
+          return { status: 128, stderr: 'fatal: worktree listing unavailable', stdout: '' };
+        }
+        return { status: 0, stdout: '', stderr: '' };
+      },
+      gateEvidence: { readDeclaredGates: async () => ({ checkout: { kind: 'absent' }, gates: [] }),
+        readIntegrationGates: async () => ({ checkout: { kind: 'absent' }, configured: [], gates: [], running: null }) },
+    }).builder;
+    const board = await builder.build();
+    const card = board.stages.flatMap(stage => stage.cards).find(entry => entry.id === id);
+    assert.ok(card, 'the Mission is on the board');
+    assert.equal(card?.liveSession, undefined, 'failed attribution stays unknown instead of reporting a confident zero');
+    assert.equal(worktreeListings, 1, 'the failed shared listing is not repeated by the session scan');
+  } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
+});

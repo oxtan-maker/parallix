@@ -26,6 +26,8 @@ const TEST_ROOT_FILES = /^(?:bootstrap-[a-z0-9-]+|run-[a-z0-9-]+)\.ts$/;
 const TEST_SUPPORT_DIRECTORIES = ['lib', 'helpers', 'fixtures'];
 /** Repository-wide checks with no single code owner (`test/unit/repository/`). */
 const REPOSITORY_OWNER = 'repository';
+/** Top-level TypeScript owners whose unit suites mirror outside `src/`. */
+const DIRECT_OWNER_ROOTS = ['scripts', 'test', 'web', REPOSITORY_OWNER];
 
 /**
  * Intentional fixture test programs: test-named files that are inputs of a
@@ -155,7 +157,7 @@ function validateUnitMirror(file: string, ownerSegments: string[], directories: 
   const owner = ownerSegments.join('/');
   if (ownerSegments[0] === 'src') {
     errors.push(`${file}: drop the extra src/ level; test/unit/<dir> mirrors src/<dir>`);
-  } else if (['scripts', 'test', 'web', REPOSITORY_OWNER].includes(ownerSegments[0])) {
+  } else if (DIRECT_OWNER_ROOTS.includes(ownerSegments[0])) {
     if (directories.has(`src/${ownerSegments[0]}`)) {
       errors.push(`${file}: owner root ${ownerSegments[0]} collides with src/${ownerSegments[0]}/; resolve ownership explicitly`);
     } else if (ownerSegments[0] === 'test' && ownerSegments[1] !== 'lib') {

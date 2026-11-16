@@ -399,8 +399,10 @@ cannot be replaced with reviewer or owner credentials. Supported implementer
 reassignment preserves the existing open PR, including its number, discussion
 and reviews. The original author remains unchanged while continuation rebases
 and publishes the branch for the current implementer and selected eligible
-reviewer. A PR author's review remains advisory: independent review is required
-before local approval or integration.
+reviewer. When the original PR author becomes an eligible reviewer for another
+implementer, its verdict is published as a comment because Forgejo forbids a
+formal self-review. The Mission's current reviewer policy still determines
+whether that verdict counts and how many approvals are required.
 
 Before a fresh rebase, Parallix pins the selected local target. When a complete,
 bounded inspection proves that the target is a single-parent squash whose tree
@@ -537,8 +539,8 @@ recorded brief still require their mission document.
 
 Backlog intake tasks continue to reflect workflow status even when the Mission
 contract lives in the database. A successful single-family self-author review
-also repairs a stale `active` Backlog task to `review`; advisory reviews that
-require another reviewer do not advance it.
+also repairs a stale `active` Backlog task to `review`; a verdict that leaves
+required reviewer approvals outstanding does not advance it.
 
 An integration-gate failure follows an automatic repair path. Before launching
 an implementer, Parallix moves the mission to active repair while retaining the
@@ -546,13 +548,15 @@ original approval, bound to the revision it judged. Historical approval does not
 authorize landing: pending repair, failed or cancelled gates and uncommitted work
 block integration, including after interruption. Resume verification with
 `px integrate <slug>`.
-When one integration execution finds several independent failures, Parallix opens
-one durable repair checkpoint for each failed gate before one implementer handoff.
+Every failed gate, including a lone failure, opens one durable gate-keyed repair
+checkpoint before one implementer handoff. When one integration execution finds
+several independent failures, it opens one checkpoint for each failed gate.
 Blocked and cancelled gates remain visible execution status but are not repair
 obligations. Every failed-gate checkpoint needs fresh authorized evidence, and
-the complete configured integration plan must rerun green before the checkpoints
-are certified together or integration can resume. Retrying or restarting the
-same tested revision reuses the incident-and-gate checkpoints.
+the same authorized rerun of the complete configured integration plan must pass
+before all checkpoints from that execution are certified together, live or after
+`px integrate` restarts. Retrying or restarting the same tested revision reuses
+the incident-and-gate checkpoints.
 `px review <slug>` and `px active <slug>` also resume the authorized exact check,
 repair certification and pending patch assessment before review preparation.
 This includes an approved mission already in review with preparation pending;

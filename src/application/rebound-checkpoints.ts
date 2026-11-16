@@ -31,6 +31,7 @@ type RepairPromptState = {
   diagnostic: string;
   originalDiagnostic: string;
   capturedEvidence?: RecoveryEvidenceRef | null;
+  repairObligations?: readonly NonNullable<ReboundContext['repairObligations']>[number][];
   aggregateEvidence?: Array<{ gateKey: string; evidence?: RecoveryEvidenceRef }>;
 };
 
@@ -46,9 +47,9 @@ interface PreparedRepairPrompt {
 /** Retains attempt usage only after an agent repair process actually ran. */
 export async function recordConsumedRepairAttempts(slug: string, prepared: PreparedRepairPrompt,
   launch: Pick<FixLaunch, 'repairAttempted'>, attempt: number): Promise<string | null> {
-  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
+  const { repairPort, repairCheckpoint } = prepared;
   if (!launch.repairAttempted || !repairCheckpoint) { return null; }
-  const checkpoints = repairCheckpointRefs.length ? repairCheckpointRefs : [repairCheckpoint];
+  const checkpoints = preparedCheckpointSet(prepared);
   try {
     for (const checkpoint of checkpoints) {
       await repairPort!.recordAttempt?.(slug, checkpoint.name, attempt);
@@ -60,9 +61,9 @@ export async function recordConsumedRepairAttempts(slug: string, prepared: Prepa
 /** Reads the first blocker from the prepared checkpoint set. */
 export async function readRepairCheckpointBlocker(slug: string,
   prepared: PreparedRepairPrompt): Promise<InvalidContractBlocker | undefined> {
-  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
+  const { repairPort } = prepared;
   let blocker: InvalidContractBlocker | undefined;
-  for (const checkpoint of repairCheckpointRefs.length ? repairCheckpointRefs : repairCheckpoint ? [repairCheckpoint] : []) {
+  for (const checkpoint of preparedCheckpointSet(prepared)) {
     blocker ??= await repairPort!.readBlocker(slug, checkpoint.name);
   }
   return blocker;
@@ -105,19 +106,22 @@ async function prepareCheckpointRepairPrompt(state: RepairPromptState, context: 
   // A phase rerun can expose a different failed gate. Authorize the check
   // named by this launch, while retaining the original diagnostic for history.
   const command = repairCommand(state.reason);
-  const obligations = context.repairObligations?.length ? context.repairObligations : null;
+  const obligations = state.repairObligations?.length ? state.repairObligations : null;
   await captureAggregateEvidence(state, context, obligations, command);
-  const { repairCheckpoint, repairCheckpointRefs } = await openRepairCheckpointSet(
+  const opened = await openRepairCheckpointSet(
     state, context, obligations, repairPort, command, attempt, maxAttempts);
+  const { repairCheckpoint } = opened;
+  const repairCheckpointRefs = obligations && opened.repairCheckpointRefs.length
+    ? opened.repairCheckpointRefs : undefined;
   const lookup = recoveryPromptLookup(context);
   const slots = { label: state.classification.label, slug, worktree, diagnostic: state.diagnostic,
     originalDiagnostic: state.originalDiagnostic, classification: state.classification, attempt, maxAttempts,
     ...promptSlotsFor(state.reason, slug), ...lookup,
     recoveryEvidence: state.capturedEvidence ?? lookup.recoveryEvidence,
     recoveryEvidenceAll: state.aggregateEvidence?.flatMap(item => item.evidence ? [{ gateKey: item.gateKey, evidence: item.evidence }] : []),
-    repairCheckpoint, repairCheckpointRefs };
+    repairCheckpoint, ...(repairCheckpointRefs ? { repairCheckpointRefs } : {}) };
   const fixPrompt = buildFreshDiagnosticRepairPrompt(slots);
-  return { fixPrompt, repairPort, repairCheckpoint, repairCheckpointRefs };
+  return { fixPrompt, repairPort, repairCheckpoint, ...(repairCheckpointRefs ? { repairCheckpointRefs } : {}) };
 }
 
 function repairCommand(reason: ReboundReason): string {
@@ -127,9 +131,10 @@ function repairCommand(reason: ReboundReason): string {
 
 async function captureAggregateEvidence(state: RepairPromptState, context: ReboundContext,
   obligations: ReboundContext['repairObligations'] | null, command: string): Promise<void> {
-  if (!obligations || state.aggregateEvidence) { return; }
-  state.aggregateEvidence = [];
+  if (!obligations) { return; }
+  state.aggregateEvidence ??= [];
   for (const obligation of obligations) {
+    if (state.aggregateEvidence.some(item => item.gateKey === obligation.gateKey)) { continue; }
     const evidence = reuseCapturedEvidence(state, obligation.reason, command)
       ? state.capturedEvidence ?? undefined
       : await captureGateFailureEvidence(obligation.reason, context.worktree, context);
@@ -172,15 +177,16 @@ function recoveryPromptLookup(context: ReboundContext) {
 
 /** The harness snapshots authority before the exact verifier and certifies only its success. */
 export async function runCheckpointVerification(context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, attempt: number) {
-  const { repairPort, repairCheckpoint, repairCheckpointRefs = [] } = prepared;
+  const { repairPort, repairCheckpoint, repairCheckpointRefs } = prepared;
+  const collectionBased = repairCheckpointRefs !== undefined;
   const readHead = async () => await context.readHead?.() ?? context.head ?? null;
   const executionRevision = await readHead();
-  const refs = repairCheckpointRefs.length ? repairCheckpointRefs : repairCheckpoint ? [{ gateKey: '', command: '', ...repairCheckpoint }] : [];
+  const refs = repairCheckpointRefs ?? (repairCheckpoint ? [{ gateKey: '', command: '', ...repairCheckpoint }] : []);
   const snapshots = await Promise.all(refs.map(async ref => ({ ref,
     snapshot: await repairPort?.prepareVerification?.(context.slug, ref.name,
       { worktree: context.worktree, executionRevision }) })));
-  if (refs.length > 1 && snapshots.some(item => !item.snapshot)) {
-    throw new Error('Every aggregate repair checkpoint needs fresh authorized evidence before the integration gates rerun');
+  if (collectionBased && snapshots.some(item => !item.snapshot)) {
+    throw new Error('Every gate repair checkpoint needs fresh authorized evidence before the integration gates rerun');
   }
   const startedAt = new Date().toISOString();
   const verified = await context.verify(attempt);
@@ -197,15 +203,19 @@ export async function runCheckpointVerification(context: ReboundContext, prepare
             completedAt: new Date().toISOString(), exitCode: 0 as const },
         } }] : [];
       });
-      if (refs.length > 1) {
-        if (checks.length !== refs.length) { throw new Error('Authoritative aggregate rerun coverage is incomplete'); }
-        if (!repairPort?.verifyAll) { throw new Error('Aggregate repair checkpoint authority is unavailable'); }
+      if (collectionBased) {
+        if (checks.length !== refs.length) { throw new Error('Authoritative gate rerun coverage is incomplete'); }
+        if (!repairPort?.verifyAll) { throw new Error('Gate repair checkpoint collection authority is unavailable'); }
         await repairPort.verifyAll(context.slug, checks);
       } else if (refs[0]) {
         await repairPort!.verify(context.slug, refs[0].name, ...(checks[0] ? [checks[0].proof] : []));
       }
     }
   } };
+}
+
+function preparedCheckpointSet(prepared: PreparedRepairPrompt): readonly { readonly name: string }[] {
+  return prepared.repairCheckpointRefs ?? (prepared.repairCheckpoint ? [prepared.repairCheckpoint] : []);
 }
 
 function failureOccurrence(command: string, worktree: string, failure?: RecoveryEvidenceRef | null): Pick<OpenRepairCheckpoint, 'worktree' | 'failureRevision' | 'failureEvidenceId'> {

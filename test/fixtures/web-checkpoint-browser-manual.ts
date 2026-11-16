@@ -5,6 +5,8 @@ import type { Locator } from 'playwright-core';
 import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeProjection } from './board-projection.js';
 import { missionId } from '../../src/domain/mission.js';
+import { fixtureMission } from './mission-builders.js';
+import { projectMissionCard } from '../../src/application/projections/mission-board.js';
 
 type Checkpoint = NonNullable<ReturnType<typeof makeCard>['checkpointEvidence']>[number];
 
@@ -141,6 +143,34 @@ try {
   assert.match(await repair.locator('[data-repair-budget]').getAttribute('title') ?? '', /Autonomous review window: 5 attempts per review entry/);
   await repair.locator('[data-review-recovery] > summary').click();
   assert.equal(await repair.getByText('Acknowledge the stop and resume.', { exact: true }).isVisible(), true);
+
+  const repairMission = fixtureMission('task-repair-verification-progress', { status: 'active', checkpoints: [
+    { missionId: missionId('task-repair-verification-progress'), name: 'CP-1', firstLine: 'Implement',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/fixtures/web-checkpoint-browser-manual.ts' }],
+      nextActionText: 'Run verification' },
+    { missionId: missionId('task-repair-verification-progress'), name: 'CP-2', firstLine: 'Repair verification',
+      goalCheck: [{ criterion: 'delivers', evidence: 'test/fixtures/web-checkpoint-browser-manual.ts',
+        carriedFrom: 'CP-1' }],
+      nextActionText: 'Repair the failed gate', repair: { incidentId: 'integration-1', command: 'npm test',
+        authorizedGates: ['npm test'], authorizedCriteria: ['delivers'], attempt: 1,
+        evidenceRecorded: false, verified: false },
+    },
+  ] });
+  const repairFacts = { latestGate: 'failed' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+  const openRepair = projectMissionCard(repairMission, repairFacts);
+  await fixture.render(webProjection.snapshot(makeProjection({ active: [openRepair] })));
+  const projectedRepair = fixture.page.locator('[data-board-card="task-repair-verification-progress"]');
+  assert.match(await projectedRepair.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '',
+    /1\/2 completed · Current: CP-2/);
+  assert.equal(await projectedRepair.locator('[data-checkpoint-complete]').count(), 0);
+
+  const verifiedRepair = projectMissionCard({ ...repairMission, checkpoints: repairMission.checkpoints.map(checkpoint => checkpoint.repair
+    ? { ...checkpoint, repair: { ...checkpoint.repair, evidenceRecorded: true, verified: true } }
+    : checkpoint) }, repairFacts);
+  await fixture.render(webProjection.snapshot(makeProjection({ active: [verifiedRepair] })));
+  assert.match(await projectedRepair.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /2\/2 completed/);
+  assert.doesNotMatch(await projectedRepair.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /Current:/);
+  assert.equal(await projectedRepair.locator('[data-checkpoint-complete]').count(), 1);
   assert.equal(fixture.requests.length, 0);
-  console.log('PASS: checkpoints → gates → review stays compact at desktop/narrow widths with accessible dialogs and zero command writes');
+  console.log('PASS: checkpoint UI stays compact and observes unverified repair 1/2 current → verified repair 2/2 complete with zero command writes');
 } finally { await fixture.close(); }

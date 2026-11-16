@@ -15,6 +15,8 @@ import { classifyFailure, DispatchAction, FailureClass, type DispatchActionType,
 /** A declared verification gate ran and exited non-zero. */
 export interface GateFailureReason {
   kind: 'gate-failure';
+  /** Stable configured-gate identity when the adapter can name it. */
+  gateKey?: string;
   failureReason?: unknown;
   signal?: string | null;
   /** Agent-discovered locked contract problem, distinct from declaration validation. */

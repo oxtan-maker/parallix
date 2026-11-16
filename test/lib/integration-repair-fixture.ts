@@ -79,6 +79,13 @@ const GATE_COMMAND = 'test -f repaired.txt || { echo "AssertionError: repaired.t
 
 export function integrationGateCommand(): string { return GATE_COMMAND; }
 
+/** Read both legacy scalar and gate-collection checkpoint authority from a repair prompt. */
+export function integrationRepairCheckpoint(prompt: string): string | null {
+  return /Harness-created repair checkpoint: (CP-\d+)/.exec(prompt)?.[1]
+    ?? /— (CP-\d+) \(Mission version/.exec(prompt)?.[1]
+    ?? null;
+}
+
 function git(cwd: string, args: string[]): string {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, `git ${args.join(' ')}: ${result.stderr}`);

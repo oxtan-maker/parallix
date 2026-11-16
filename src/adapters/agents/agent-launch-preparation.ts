@@ -274,9 +274,12 @@ async function assembleLaunch(state: StartAgentLoopState, deps: StartAgentLoopDe
   log(fmt.status('INFO', `Selected agent for step "${step}": ${fmt.agent(chosen, chosen, customRunner)}${state.iteration > 1 ? ` (attempt ${state.iteration})` : ''}`));
 
   // Enforce the agent family as the Forgejo identity (ADR 0029 / architecture migration).
+  // Native Node coverage belongs to the workflow process, not the external
+  // provider CLI. Leaving it inherited makes a sandboxed provider write into
+  // the runner's read-only coverage directory and corrupt the merged report.
   // FORGEJO_USER is set last so the harness-selected identity always wins;
   // a caller-supplied env.FORGEJO_USER cannot override it.
-  const agentEnv = { ...deps.env, FORGEJO_USER: chosen };
+  const agentEnv: NodeJS.ProcessEnv = { ...deps.env, NODE_V8_COVERAGE: undefined, FORGEJO_USER: chosen };
 
   // Decide whether to resume the agent's prior session for this (slug, role).
   // Only honored when the caller passed slug+role+worktree AND the previous

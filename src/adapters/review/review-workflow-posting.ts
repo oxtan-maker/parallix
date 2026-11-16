@@ -1,20 +1,17 @@
-import { assertReviewPhaseTransition } from '../../domain/review-phase-policy.js';
 /**
- * Workflow comment and review posting to the provider, with local
- * review-verdict recording.
+ * Workflow comment and review publication. Mission decisions remain with
+ * the review round owner; provider authorship selects the transport only.
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
 import { missionBranchName } from '../filesystem/mission-utils.js';
-import { readReviewState, writeReviewState, ReviewState, resolveReviewIdentity, persistReviewStateOrThrow } from './review-state.js';
+import { readReviewState, writeReviewState, resolveReviewIdentity } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { readToken, postComment, postReview, getPrAuthor, getComments } from './review-adapter.js';
-import { createEvent, VALID_EVENT_TYPES } from './review-events.js';
 import { recordApproval } from './review-round.js';
 import type { MissionLifecycleService } from '../../application/mission-lifecycle-service.js';
 import { buildMetadataFooter, type CreateEventFn, type ReviewStateReader } from './review-artifact-files.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
-import { reviewerResultAttribution } from './reviewer-result-attribution.js';
 import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
 import { missionId } from '../../domain/mission.js';
 import { currentReviewRound } from '../../domain/review.js';
@@ -171,86 +168,6 @@ function describeProviderFailure(result: unknown): string {
   return (r.error as string) || (r.raw as string) || 'API error';
 }
 
-/** Only an advisory approve owes an independent approval; a same-agent review is a complete agent review. */
-function advisoryApprovalOwed(outcome: string, selfReviewAllowed: boolean): boolean {
-  return outcome === 'approve' && !selfReviewAllowed;
-}
-
-function localReviewOutcomeEvent(outcome: string, selfReviewAllowed: boolean) {
-  return {
-    verdict: selfReviewAllowed ? outcome : 'comment',
-    content: selfReviewAllowed ? `Single-family self-author verdict: ${outcome}` : `Advisory self-author verdict: ${outcome}`,
-    ...(advisoryApprovalOwed(outcome, selfReviewAllowed) ? { blockedReason: 'external-formal-approval-owed' } : {}),
-  };
-}
-
-/**
- * Record a review verdict on the mission's Review.
- */
-async function recordLocalReviewVerdict(
-  slug: string,
-  outcome: string,
-  options: {
-    executionContext: LiveMissionExecutionContext;
-    writeReviewStateFn?: typeof writeReviewState;
-    createEventFn?: CreateEventFn;
-    readReviewStateFn?: ReviewStateReader;
-    log?: (_msg: string) => void;
-    error?: (_msg: string) => void;
-    missionStore?: MissionStore | null;
-    revision?: string;
-    recordApprovalFn?: typeof recordApproval;
-    lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
-    recordOutcomeEvent?: boolean;
-  }
-): Promise<boolean> {
-  const { missionStore, worktree, writeReviewStateFn, createEventFn, readReviewStateFn, log, error } = recordLocalReviewVerdictBindings(options);
-  const existing = await Promise.resolve(readReviewStateFn(slug, worktree, missionStore));
-  // TASK-2385: a read miss must not fabricate a round-1 verdict. The old
-  // `round: 1` fallback silently downgraded the round and fed the stale-round
-  // producer observed on task-2377.05. A verdict can only attach to a review
-  // `px review` started, so fail closed rather than invent one.
-  if (!existing) {
-    throw new Error(
-      `Cannot record review verdict for ${slug}: no review state found. A review must be started with \`px review ${slug}\` before recording a verdict; refusing to fabricate round 1`,
-    );
-  }
-  const selfReviewAllowed = Boolean(existing.reviewer && existing.reviewer === existing.implementer);
-  const state = existing instanceof ReviewState
-    ? existing
-    : new ReviewState(slug, existing);
-  // A same-agent review is a complete agent review; it leaves no approval debt. Only an advisory (non-authoritative) verdict owes one.
-  state.metadata = { ...state.metadata, approvalOwed: advisoryApprovalOwed(outcome, selfReviewAllowed) };
-  if (selfReviewAllowed) {
-    state.disposition = outcome === 'approve' ? 'APPROVED' : outcome === 'request-changes' ? 'REQUEST_CHANGES' : 'COMMENT';
-    if (outcome === 'approve' && state.phase !== 'approved') {
-      assertReviewPhaseTransition(state.phase, 'approved');
-      const decision = await (options.recordApprovalFn ?? recordApproval)(slug, {
-        comment: null,
-        decidedAt: new Date().toISOString(),
-        revision: options.revision,
-        observedRound: { number: state.round, startedAt: state.startedAt },
-        result: reviewerResultAttribution(existing.reviewer ?? 'reviewer', null),
-      }, { missionStore, lifecycleService: options.lifecycleService });
-      if (decision.outcome === 'failed') { throw new Error(decision.diagnostic); }
-      state.phase = 'approved';
-    }
-  }
-  await persistReviewStateOrThrow(writeReviewStateFn, slug, state, worktree, missionStore);
-  if (options.recordOutcomeEvent !== false) {
-    const outcomeResult = await createEventFn(
-      slug,
-      VALID_EVENT_TYPES.REVIEWER_OUTCOME,
-      localReviewOutcomeEvent(outcome, selfReviewAllowed),
-      { executionContext: options.executionContext, log: log, error, missionStore },
-    );
-    if (!outcomeResult.ok) {
-      throw new Error(`Cannot store review event for "${slug}": the operator database rejected the write.`);
-    }
-  }
-  return selfReviewAllowed;
-}
-
 /**
  * Submit a review outcome to the provider.
  */
@@ -297,45 +214,14 @@ export async function postWorkflowReview(
   const getPrAuthorFn = options.getPrAuthorFn || getPrAuthor;
   const prAuthor = providerPrAuthor(getPrAuthorFn, branch, token, reviewIdentity, worktree, options.configuration);
   if (prAuthor && prAuthor === reviewIdentity) {
-    const diagnostic = `Reviewer "${reviewIdentity}" is the PR author for ${branch}; independent review is required. Self-author verdict "${outcome}" is advisory and cannot approve the Mission or advance integration.`;
-    const allowed = await recordLocalReviewVerdict(slug, outcome, {
-      executionContext: options.executionContext,
-      writeReviewStateFn: options.writeReviewStateFn,
-      createEventFn: options.createEventFn,
-      readReviewStateFn: readReviewStateFn,
-      log: log,
-      error,
-      missionStore,
-      lifecycleService: options.lifecycleService,
-      recordApprovalFn: options.recordApprovalFn,
-      revision: options.revision,
-      // The accepted artifact already installed this exact publication
-      // obligation in the decision CAS. A second unreferenced outcome would
-      // look complete to controller consumption before the PR mirror exists.
-      recordOutcomeEvent: !options.publication,
+    // Provider authorship controls only the transport. The Mission's current
+    // reviewer policy owns verdict authority, including after reassignment.
+    const mirrored = await postWorkflowComment(slug, `Verdict: ${outcome}\n\n${message}`, {
+      ...options,
+      reviewIdentity,
+      ...(options.publication ? { publication: { ...options.publication, target: 'comment' } } : {}),
     });
-    if (allowed && options.publication) {
-      const storedBody = options.publicationStoredBody ? message
-        : message + await Promise.resolve(buildMetadataFooterFn(slug, worktree, missionStore));
-      const mirrored = await postWorkflowComment(slug, storedBody, {
-        executionContext: options.executionContext,
-        reviewIdentity,
-        readTokenFn: options.readTokenFn,
-        getCommentsFn: options.getCommentsFn,
-        postCommentFn: options.postCommentFn,
-        missionStore,
-        configuration: options.configuration,
-        publication: { ...options.publication, target: 'comment' },
-        publicationStoredBody: true,
-        log,
-        error,
-      });
-      if (!mirrored.ok) { return { ...mirrored, skipped: true, reason: 'self-author', prAuthor }; }
-    }
-    log(fmt.status('WARN', allowed
-      ? `Provider self-review was recorded as a provenance comment because Forgejo forbids self-approval reviews. Human inspection remains optional.`
-      : `Provider self-approval POST skipped; a different agent or a human must supply formal approval.`));
-    return { ok: allowed, skipped: true, reason: 'self-author', prAuthor, ...(allowed ? {} : { error: diagnostic }) };
+    return { ...mirrored, skipped: true, reason: 'self-author', prAuthor };
   }
 
   return postPreparedWorkflowReview(slug, outcome, message, {
@@ -396,18 +282,6 @@ function postWorkflowCommentBindings(options: NonNullable<Parameters<typeof post
   const buildMetadataFooterFn = options.buildMetadataFooterFn || buildMetadataFooter;
   const readReviewStateFn = options.readReviewStateFn || readReviewState;
   return { log, error, readTokenFn, postCommentFn, buildMetadataFooterFn, readReviewStateFn };
-}
-
-function recordLocalReviewVerdictBindings(options: NonNullable<Parameters<typeof recordLocalReviewVerdict>[2]>) {
-  const missionStore = options.missionStore ?? null;
-  const worktree = options.executionContext.missionWorktree;
-  const writeReviewStateFn = options.writeReviewStateFn || writeReviewState;
-  const createEventFn = options.createEventFn || createEvent;
-  const readReviewStateFn = options.readReviewStateFn || readReviewState;
-  const log = options.log || fmt.log.plain;
-  const error = options.error || fmt.log.plainError;
-
-  return { missionStore, worktree, writeReviewStateFn, createEventFn, readReviewStateFn, log, error };
 }
 
 function postWorkflowReviewBindings(options: NonNullable<Parameters<typeof postWorkflowReview>[3]>) {

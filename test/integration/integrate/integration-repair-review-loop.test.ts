@@ -42,7 +42,7 @@ import '../../../src/adapters/sqlite/session-marker-repository.js';
 import '../../../src/application/status-command-use-case.js';
 import '../../../src/interfaces/cli/status.js';
 import '../../../src/adapters/cli/commands/status-adapter.js';
-import { openRepairFixture, seedGit } from '../../lib/integration-repair-fixture.js';
+import { integrationRepairCheckpoint, openRepairFixture, seedGit } from '../../lib/integration-repair-fixture.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { revokeApprovedDecision, reviewStatus } from '../../../src/domain/review.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
@@ -88,7 +88,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
         seedGit(fixture.worktree, [['add', 'repaired.txt'], ['commit', '-m', 'repair']]);
         // TASK-2665: a committed fix also needs fresh repair-round proof before
         // the real handoff can resume independent review.
-        const checkpointName = /Harness-created repair checkpoint: (CP-\d+);/.exec(prompt)?.[1];
+        const checkpointName = integrationRepairCheckpoint(prompt);
         assert.ok(checkpointName, 'the repair prompt identifies its durable checkpoint');
         const recorded = await run(['checkpoint', 'record', '--slug', fixture.slug,
           '--name', checkpointName, '--expected-version', String(await fixture.version()),

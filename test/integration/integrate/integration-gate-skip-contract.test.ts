@@ -475,20 +475,33 @@ test('a recorded completed rebase carries validated hooks across upstream source
 
 // ── SC1: the rebound green-validation path persists the skip marker ──────────
 
+const REBOUND_GATES = [
+  { key: 'unit', command: 'u', order: 1 },
+  { key: 'integration-ci', command: 'i', order: 2 },
+];
+
+function completeGreenReboundResult() {
+  return phaseGateResult({
+    gates: REBOUND_GATES,
+    executed: REBOUND_GATES.length,
+    outcomes: REBOUND_GATES.map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })),
+  });
+}
+
 test('rebound verify rerun green records the skip marker keyed on the fix commit (SC1)', async () => {
   let recorded: { value: { missionId: string; sha: string; hooks: string[] } | null } = { value: null };
   const route = await routeIntegrationGateFailure({
     slug: SLUG,
     missionWorktree: '/fw',
     failedGate: { key: 'integration-ci', command: 'int', exitCode: 1, stdout: '', stderr: '' },
-    gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }],
+    gates: REBOUND_GATES,
     implementer: 'custom',
     repositoryId: 'unknown',
     // The kernel bounces the mission active, the implementer fixes, and the
     // verify seam re-runs the identical gate set green. Replaying context.verify()
     // drives the real verify seam (my injected runPhaseGatesFn + captureFinalTreeFn)
     // so the marker is recorded, then report the bounce fixed.
-    runPhaseGatesFn: async () => (phaseGateResult({ ok: true as const })),
+    runPhaseGatesFn: async () => completeGreenReboundResult(),
     captureFinalTreeFn: () => ({ ok: true as const, rootDir: '/fw', commit: 'fixsha123', tree: 't' }),
     reboundFn: async (reason, ctx) => { await ctx.verify(1); return { attempts: 1, outcome: 'fixed', diagnostic: '', implementer: ctx.implementer, classification: classifyReboundReason(reason) }; },
     startAgentFn: async () => ({ agent: 'custom', result: { status: 0 } }),
@@ -509,10 +522,10 @@ test('rebound verify rerun green with no recording store leaves the full suite t
     slug: SLUG,
     missionWorktree: '/fw',
     failedGate: { key: 'integration-ci', command: 'int', exitCode: 1, stdout: '', stderr: '' },
-    gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }],
+    gates: REBOUND_GATES,
     implementer: 'custom',
     repositoryId: 'unknown',
-    runPhaseGatesFn: async () => (phaseGateResult({ ok: true as const })),
+    runPhaseGatesFn: async () => completeGreenReboundResult(),
     captureFinalTreeFn: () => ({ ok: true as const, rootDir: '/fw', commit: 'fixsha123', tree: 't' }),
     startAgentFn: async () => { throw new Error('Unexpected launch'); },
     transitionTaskFn: async () => { throw new Error('Unexpected transition'); },

@@ -161,7 +161,7 @@ test('finite slow cold projection retains its observer and subsequent warm reads
   assert.equal(starts, 1, 'cold deadlines must not cause repeated observer startup');
 });
 
-test('expired queued board work is skipped before a later unchanged observation (TASK-2854.01)', async t => {
+test('board callers arriving while timed-out work still runs share it instead of queueing duplicates (TASK-2854.01, PX-0058.05)', async t => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
   t.after(() => mock.restoreAll());
   type BoardRequest = { id: number; deadlineAt?: number };
@@ -212,9 +212,9 @@ test('expired queued board work is skipped before a later unchanged observation 
   await Promise.resolve();
   t.mock.timers.tick(1);
 
-  assert.equal(await later, 'board:3');
-  assert.deepEqual(skipped, [2], 'the child must discard expired queued work before starting it');
-  assert.deepEqual(built, [1, 3], 'only the cold build and later unchanged observation may run');
+  assert.equal(await later, 'board:1', 'the later caller receives the completed original build');
+  assert.deepEqual(skipped, [], 'no duplicate request was queued behind the running build');
+  assert.deepEqual(built, [1], 'repeated caller timeouts never start the board build again');
 });
 
 test('observation shares persistent readers, routes responses and rejects reads on close (TASK-2750 F7)', async t => {
@@ -383,26 +383,55 @@ test('observer close bounds an unresponsive child and forcefully releases owners
 
 test('terminal observation preserves page and search requests and correlates concurrent replies (TASK-2750)', async t => {
   t.after(() => mock.restoreAll());
-  const requests: Array<{ id: number; observation: unknown }> = [];
-  const child = Object.assign(new EventEmitter(), { connected: true,
-    send: (request: { id: number; observation: unknown }) => { requests.push(request); },
-    disconnect: () => { queueMicrotask(() => child.emit('exit', 0)); },
+  const children: Array<EventEmitter & { requests: Array<{ id: number; observation: unknown }> }> = [];
+  mock.method(workflowObservationSystem, 'spawn', () => {
+    const child = Object.assign(new EventEmitter(), { connected: true, requests: [] as Array<{ id: number; observation: unknown }>,
+      send: (request: { id: number; observation: unknown }) => { child.requests.push(request); },
+      disconnect: () => { queueMicrotask(() => child.emit('exit', 0)); },
+    });
+    children.push(child); return child;
   });
-  mock.method(workflowObservationSystem, 'spawn', () => child);
   const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
   t.after(() => observe.close());
   const pageRequest = { runId: 'run', stream: 'stdout' as const, limit: 10 };
   const searchRequest = { pattern: 'needle' };
+  const live = observe.terminal.live('task-test');
   const page = observe.terminal.page('task-test', pageRequest);
   const search = observe.terminal.search('task-test', searchRequest);
-  const live = observe.terminal.live('task-test');
-  assert.deepEqual(requests.map(request => request.observation), [
+  assert.equal(children.length, 2, 'current-state and history reads use separate observer processes');
+  assert.deepEqual(children[0]!.requests.map(request => request.observation), [{ kind: 'live', mission: 'task-test' }]);
+  assert.deepEqual(children[1]!.requests.map(request => request.observation), [
     { kind: 'page', mission: 'task-test', request: pageRequest },
     { kind: 'search', mission: 'task-test', request: searchRequest },
-    { kind: 'live', mission: 'task-test' },
   ]);
-  for (const request of [...requests].reverse()) { child.emit('message', { id: request.id, value: request.id }); }
-  assert.deepEqual(await Promise.all([page, search, live]), [1, 2, 3]);
+  for (const request of [...children[1]!.requests].reverse()) { children[1]!.emit('message', { id: request.id, value: `history:${request.id}` }); }
+  children[0]!.emit('message', { id: children[0]!.requests[0]!.id, value: 'live' });
+  assert.deepEqual(await Promise.all([page, search, live]), ['history:1', 'history:2', 'live']);
+});
+
+test('a slow history read holds only its own observer process, never current-state reads (PX-0058.05)', async t => {
+  t.after(() => mock.restoreAll());
+  const children: Array<EventEmitter & { requests: Array<{ id: number; observation: { kind: string } }> }> = [];
+  mock.method(workflowObservationSystem, 'spawn', () => {
+    const child = Object.assign(new EventEmitter(), { connected: true, requests: [] as Array<{ id: number; observation: { kind: string } }>,
+      send: (request: { id: number; observation: { kind: string } }) => { child.requests.push(request); },
+      disconnect: () => { queueMicrotask(() => child.emit('exit', 0)); },
+    });
+    children.push(child); return child;
+  });
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  const search = observe.terminal.search('mission-a', { pattern: 'slow' });
+  search.catch(() => {});
+  const overview = observe.terminal.overview('mission-b');
+  const live = observe.terminal.live('mission-c');
+  const owner = (kind: string) => children.findIndex(child => child.requests.some(request => request.observation.kind === kind));
+  assert.notEqual(owner('search'), owner('overview'), 'a synchronous search must not share a process with current-state reads');
+  assert.equal(owner('overview'), owner('live'));
+  const current = children[owner('overview')]!;
+  for (const request of current.requests) { current.emit('message', { id: request.id, value: request.observation.kind }); }
+  assert.deepEqual(await Promise.all([overview, live]), ['overview', 'live'], 'current-state reads answer while the search is still unanswered');
+  assert.deepEqual(observe.counters().history, { queued: 0, running: 0, expired: 0 });
 });
 
 test('observer child drops expired queued callers and bounds duplicate board work (TASK-2854.01)', async t => {
@@ -475,9 +504,9 @@ test('observer child rejects expired input, reports work failures and closes whi
     }
   });
   Object.defineProperty(process, 'connected', { configurable: true, value: true });
-  const responses: Array<{ id: number; error?: string; deadlineExpired?: true }> = [];
+  const responses: Array<{ id: number; error?: string; deadlineExpired?: true; queue?: unknown }> = [];
   Object.defineProperty(process, 'send', { configurable: true, writable: true,
-    value: (value: { id: number; error?: string; deadlineExpired?: true }) => { responses.push(value); return true; } });
+    value: (value: { id: number; error?: string; deadlineExpired?: true; queue?: unknown }) => { responses.push(value); return true; } });
   let exited = false;
   mock.method(process, 'exit', () => { exited = true; return undefined as never; });
   let closed = false;
@@ -489,10 +518,11 @@ test('observer child rejects expired input, reports work failures and closes whi
   receive({ id: 2, deadlineAt: 2_000, observation: { kind: 'board' } });
   for (let turn = 0; turn < 50 && responses.length < 2; turn++) { await Promise.resolve(); }
 
-  assert.deepEqual(responses, [
+  assert.deepEqual(responses.map(({ queue: _queue, ...response }) => response), [
     { id: 1, error: 'Workflow observation expired before execution', deadlineExpired: true },
     { id: 2, error: 'Board authority unavailable' },
   ]);
+  assert.deepEqual(responses.at(-1)?.queue, { queued: 0, running: 0, expired: 1 });
   await new Promise(resolve => setImmediate(resolve));
   disconnect();
   for (let turn = 0; turn < 50 && !exited; turn++) { await Promise.resolve(); }
@@ -516,9 +546,9 @@ test('observer child serializes board and terminal reads and closes its shared g
     }
   });
   Object.defineProperty(process, 'connected', { configurable: true, value: true });
-  const responses: unknown[] = [];
+  const responses: Array<{ id: number; value?: unknown }> = [];
   Object.defineProperty(process, 'send', { configurable: true, writable: true,
-    value: (value: unknown) => { responses.push(value); return true; } });
+    value: (value: { id: number; value?: unknown }) => { responses.push(value); return true; } });
   let exited = false;
   mock.method(process, 'exit', () => { exited = true; return undefined as never; });
   let compositions = 0;
@@ -549,11 +579,9 @@ test('observer child serializes board and terminal reads and closes its shared g
   assert.equal(closed, true);
   assert.equal(compositions, 1);
   assert.equal(terminalCompositions, 1, 'terminal attribution and cursors stay warm across observer IPC messages');
-  assert.deepEqual(responses.slice(1), [
-    { id: 2, value: 'overview:task-test' }, { id: 3, value: 'live:task-test' },
-    { id: 4, value: { runId: 'run' } }, { id: 5, value: { pattern: 'needle' } },
-  ]);
-  assert.equal((responses[0] as { id: number }).id, 1);
+  const byId = new Map(responses.map(response => [response.id, response.value]));
+  assert.deepEqual([byId.get(2), byId.get(3), byId.get(4), byId.get(5)], ['overview:task-test', 'live:task-test', { runId: 'run' }, { pattern: 'needle' }]);
+  assert.deepEqual(responses.filter(response => response.id <= 3).map(response => response.id), [1, 2, 3], 'current-state reads stay serialized in arrival order');
 });
 
 test('observer child completes cold work before building the fresh next board request (PX-0055.04)', async t => {
@@ -572,9 +600,9 @@ test('observer child completes cold work before building the fresh next board re
     }
   });
   Object.defineProperty(process, 'connected', { configurable: true, value: true });
-  const responses: Array<{ id: number; value: unknown }> = [];
+  const responses: Array<{ id: number; value: unknown; queue?: unknown }> = [];
   Object.defineProperty(process, 'send', { configurable: true, writable: true,
-    value: (value: { id: number; value: unknown }) => { responses.push(value); return true; } });
+    value: (value: { id: number; value: unknown; queue?: unknown }) => { responses.push(value); return true; } });
   mock.method(process, 'exit', () => undefined as never);
   const releases: Array<(value: unknown) => void> = [];
   let builds = 0;
@@ -593,7 +621,7 @@ test('observer child completes cold work before building the fresh next board re
   for (let turn = 0; turn < 20 && responses.length < 2; turn++) { await Promise.resolve(); }
 
   assert.equal(builds, 2);
-  assert.deepEqual(responses, [
+  assert.deepEqual(responses.map(({ queue: _queue, ...response }) => response), [
     { id: 1, value: { revision: 'cold' } },
     { id: 2, value: { revision: 'fresh' } },
   ], 'each completed request receives the projection built for it, never the preceding completed value');
@@ -663,7 +691,222 @@ test('provider execution reads use their own observer and skip the board graph a
   for (let turn = 0; turn < 50 && responses.length < 1; turn++) { await Promise.resolve(); }
   disconnect();
   for (let turn = 0; turn < 50 && !exited; turn++) { await Promise.resolve(); }
-  assert.deepEqual(responses, [{ id: 1, value: { kind: 'provider-execution-snapshot', families: [] } }]);
+  assert.deepEqual(responses, [{ id: 1, value: { kind: 'provider-execution-snapshot', families: [] },
+    queue: { queued: 0, running: 0, expired: 0 } }]);
   assert.equal(resolvers, 1);
   assert.equal(exited, true);
+});
+
+type ChildReply = { id: number; value?: unknown; error?: string; queue?: { queued: number; running: number; expired: number } };
+
+/** Drives runWorkflowObservation in-process: scripted clock, captured IPC replies and a controllable board build. */
+async function observerChildHarness(t: { after(_fn: () => void): void }, terminal: Record<string, unknown>, failFirstGraph = false) {
+  const { runWorkflowObservation } = await import('../../../src/composition/workflow-observation.js');
+  t.after(() => mock.restoreAll());
+  const clock = { now: 1_000 };
+  mock.method(Date, 'now', () => clock.now);
+  const hooks = { receive: (_input: unknown) => {}, disconnect: () => {} };
+  mock.method(process, 'on', (_event: string, listener: typeof hooks.receive) => { hooks.receive = listener; return process; });
+  mock.method(process, 'once', (_event: string, listener: () => void) => { hooks.disconnect = listener; return process; });
+  const originalConnected = Object.getOwnPropertyDescriptor(process, 'connected');
+  const originalSend = Object.getOwnPropertyDescriptor(process, 'send');
+  t.after(() => {
+    mock.restoreAll();
+    for (const [key, descriptor] of [['connected', originalConnected], ['send', originalSend]] as const) {
+      if (descriptor) { Object.defineProperty(process, key, descriptor); } else { Reflect.deleteProperty(process, key); }
+    }
+  });
+  Object.defineProperty(process, 'connected', { configurable: true, value: true });
+  const responses: ChildReply[] = [];
+  Object.defineProperty(process, 'send', { configurable: true, writable: true, value: (value: ChildReply) => { responses.push(value); return true; } });
+  const state = { exited: false };
+  mock.method(process, 'exit', () => { state.exited = true; return undefined as never; });
+  let releaseBoard!: () => void;
+  const blocked = new Promise<void>(resolve => { releaseBoard = resolve; });
+  let graphAttempts = 0;
+  const graphFactory = async () => {
+    if (failFirstGraph && ++graphAttempts === 1) { throw new Error('transient graph failure'); }
+    return { mission: { repositoryId: 'repo' }, operatorState: { close: async () => {} },
+      presentationCapabilities: { boardProjection: { build: async () => { await blocked; return 'board'; } } } };
+  };
+  runWorkflowObservation('/unused', resolveConfiguration({}), (() => terminal) as never, graphFactory as never);
+  const settle = async (done: () => boolean) => { for (let turn = 0; turn < 200 && !done(); turn++) { await Promise.resolve(); } };
+  return { clock, responses, releaseBoard, settle, state, ...hooks, receive: (input: unknown) => hooks.receive(input), disconnect: () => hooks.disconnect() };
+}
+
+test('expired queued terminal work never executes, frees its queue slots and lets another mission be served (PX-0058.05)', async t => {
+  const pagesRun: string[] = [];
+  const child = await observerChildHarness(t, {
+    overview: (mission: string) => `overview:${mission}`,
+    page: (mission: string, request: { runId: string }) => { pagesRun.push(`${mission}:${request.runId}`); return request; },
+  });
+  child.receive({ id: 1, deadlineAt: 100_000, observation: { kind: 'board' } });
+  // Fill the observer's finite caller budget with history pages whose callers time out while board work is blocked.
+  for (let id = 2; id <= 64; id++) { child.receive({ id, deadlineAt: 1_500, observation: { kind: 'page', mission: 'mission-a', request: { runId: `run-${id}` } } }); }
+  child.clock.now = 2_000;
+  child.receive({ id: 100, deadlineAt: 9_000, observation: { kind: 'overview', mission: 'mission-b' } });
+  child.releaseBoard();
+  await child.settle(() => child.responses.some(response => response.id === 100));
+
+  const reply = child.responses.find(response => response.id === 100);
+  assert.equal(reply?.value, 'overview:mission-b', 'expired queued demand must not starve a current read from another mission');
+  assert.deepEqual(pagesRun, [], 'a request whose caller already timed out must never execute');
+  assert.deepEqual(reply?.queue && { queued: reply.queue.queued, expired: reply.queue.expired }, { queued: 0, expired: 63 }, 'queue counters expose expired work and the queue returns to its bound');
+  child.disconnect();
+  await child.settle(() => child.state.exited);
+  assert.equal(child.state.exited, true);
+});
+
+test('observer child rotates current-state reads fairly across missions (PX-0058.05)', async t => {
+  const child = await observerChildHarness(t, {
+    overview: (mission: string) => `overview:${mission}`, live: (mission: string) => `live:${mission}`,
+    page: (mission: string) => `page:${mission}`,
+  });
+  child.receive({ id: 1, observation: { kind: 'board' } });
+  child.receive({ id: 2, observation: { kind: 'page', mission: 'mission-c', request: { runId: 'old' } } });
+  child.receive({ id: 3, observation: { kind: 'overview', mission: 'mission-a' } });
+  child.receive({ id: 4, observation: { kind: 'live', mission: 'mission-a' } });
+  child.receive({ id: 5, observation: { kind: 'overview', mission: 'mission-b' } });
+  child.releaseBoard();
+  await child.settle(() => child.responses.length === 5);
+  assert.deepEqual(child.responses.map(response => response.id).filter(id => id !== 2), [1, 3, 5, 4],
+    'the least recently served mission goes next within current-state reads');
+  child.disconnect();
+  await child.settle(() => child.state.exited);
+});
+
+test('a queued current-state read is not bypassed by arrivals from new missions (PX-0058.05 F4)', async t => {
+  let releasePump!: (_value: string) => void;
+  const pump = new Promise<string>(resolve => { releasePump = resolve; });
+  const child = await observerChildHarness(t, {
+    overview: (mission: string) => `overview:${mission}`,
+    live: (mission: string) => `live:${mission}`,
+    page: () => pump,
+  });
+  child.receive({ id: 1, observation: { kind: 'board' } });
+  child.receive({ id: 2, observation: { kind: 'overview', mission: 'mission-a' } });
+  child.releaseBoard();
+  await child.settle(() => child.responses.some(response => response.id === 2));
+  // A held history read keeps the queue waiting while mission-a's live read and ten
+  // never-seen missions arrive behind it.
+  child.receive({ id: 3, observation: { kind: 'page', mission: 'mission-pump', request: { runId: 'pump', stream: 'stdout' } } });
+  child.receive({ id: 4, observation: { kind: 'live', mission: 'mission-a' } });
+  for (let index = 0; index < 10; index++) {
+    child.receive({ id: 10 + index, observation: { kind: 'overview', mission: `mission-${String.fromCharCode(98 + index)}` } });
+  }
+  releasePump('pump');
+  await child.settle(() => child.responses.length === 14);
+  assert.deepEqual(child.responses.map(response => response.id), [1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+    'a read queued by an already served mission outranks later arrivals from new missions, which then rotate among themselves');
+  child.disconnect();
+  await child.settle(() => child.state.exited);
+});
+
+test('equivalent concurrent terminal reads share one IPC request and expose observer counters (PX-0058.05)', async t => {
+  t.after(() => mock.restoreAll());
+  const sent: Array<{ id: number; observation: { kind: string; mission?: string } }> = [];
+  const child = Object.assign(new EventEmitter(), { connected: true,
+    send(request: { id: number; observation: { kind: string; mission?: string } }) { sent.push(request); },
+    disconnect() { queueMicrotask(() => child.emit('exit', 0)); }, kill() { return true; } });
+  mock.method(workflowObservationSystem, 'spawn', () => child);
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  const first = observe.terminal.overview('mission-a');
+  const second = observe.terminal.overview('mission-a');
+  const other = observe.terminal.overview('mission-b');
+  assert.deepEqual(sent.map(request => request.observation.mission), ['mission-a', 'mission-b'], 'equivalent demand coalesces before IPC');
+  child.emit('message', { id: sent[0]!.id, value: 'a', queue: { queued: 1, running: 0, expired: 4 } });
+  child.emit('message', { id: sent[1]!.id, value: 'b' });
+  assert.deepEqual(await Promise.all([first, second, other]), ['a', 'a', 'b']);
+  assert.deepEqual(observe.counters().terminal, { queued: 1, running: 0, expired: 4 });
+});
+
+test('equivalent reads built with reordered fields share one IPC request (PX-0058.05 F5)', async t => {
+  t.after(() => mock.restoreAll());
+  const sent: Array<{ id: number; observation: { kind: string; request?: { runId: string } } }> = [];
+  const child = Object.assign(new EventEmitter(), { connected: true,
+    send(request: { id: number; observation: { kind: string; request?: { runId: string } } }) { sent.push(request); },
+    disconnect() { queueMicrotask(() => child.emit('exit', 0)); }, kill() { return true; } });
+  mock.method(workflowObservationSystem, 'spawn', () => child);
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  const ordered = observe.terminal.page('mission-a', { runId: 'run-1', stream: 'stdout', before: 4_096, limit: 2_048 });
+  const reordered = observe.terminal.page('mission-a', { limit: 2_048, before: 4_096, stream: 'stdout', runId: 'run-1' });
+  const search = observe.terminal.search('mission-a', { pattern: 'error', regex: false, maxHits: 20 });
+  const searchReordered = observe.terminal.search('mission-a', { maxHits: 20, pattern: 'error', regex: false });
+  assert.deepEqual(sent.map(request => request.observation.kind), ['page', 'search'],
+    'field order in a typed request cannot duplicate IPC work');
+  assert.equal(sent[0]!.observation.request?.runId, 'run-1');
+  child.emit('message', { id: sent[0]!.id, value: 'page' });
+  child.emit('message', { id: sent[1]!.id, value: 'search' });
+  assert.deepEqual(await Promise.all([ordered, reordered, search, searchReordered]), ['page', 'page', 'search', 'search'],
+    'the joining caller gets the same result as the caller that started the request');
+});
+
+test('a failed graph composition is retried by the next board read instead of poisoning the observer (PX-0058.05)', async t => {
+  const child = await observerChildHarness(t, {}, true);
+  child.receive({ id: 1, observation: { kind: 'board' } });
+  await child.settle(() => child.responses.length === 1);
+  assert.equal(child.responses[0]?.error, 'transient graph failure');
+  child.releaseBoard();
+  child.receive({ id: 2, observation: { kind: 'board' } });
+  await child.settle(() => child.responses.length === 2);
+  assert.equal(child.responses[1]?.value, 'board', 'the warm observer recovers without a restart');
+  child.disconnect();
+  await child.settle(() => child.state.exited);
+  assert.equal(child.state.exited, true);
+});
+
+test('repeated timeouts of one history read emit one IPC request and a late caller shares its result (PX-0058.05)', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
+  t.after(() => mock.restoreAll());
+  const requests: Array<{ id: number; deadlineAt: number }> = [];
+  const child = Object.assign(new EventEmitter(), { connected: true,
+    send(request: { id: number; deadlineAt: number }) { requests.push(request); },
+    disconnect() { child.connected = false; queueMicrotask(() => child.emit('exit', 0)); },
+    kill() { queueMicrotask(() => child.emit('exit', 1)); return true; },
+  });
+  mock.method(workflowObservationSystem, 'spawn', () => child);
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  const query = { pattern: 'slow' };
+  // The synchronous history child never drains IPC; each caller times out in turn.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const timedOut = assert.rejects(observe.terminal.search('mission-a', query), /timed out/);
+    t.mock.timers.tick(10_000);
+    await timedOut;
+  }
+  assert.equal(requests.length, 1, 'a flight outlives its callers, so timeouts never stack identical IPC behind a busy child');
+  const late = observe.terminal.search('mission-a', query);
+  assert.equal(requests.length, 1, 'a late caller joins the running flight');
+  child.emit('message', { id: requests[0]!.id, value: 'original result' });
+  assert.equal(await late, 'original result');
+  const next = observe.terminal.search('mission-a', query);
+  assert.equal(requests.length, 2, 'an answered flight is gone; the next read starts a new one');
+  void next.catch(() => {});
+});
+
+test('outstanding IPC requests stay bounded when callers time out against a stalled observer (PX-0058.05)', async t => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1_000 });
+  t.after(() => mock.restoreAll());
+  let sent = 0;
+  const child = Object.assign(new EventEmitter(), { connected: true, send() { sent++; },
+    disconnect() { child.connected = false; queueMicrotask(() => child.emit('exit', 0)); },
+    kill() { queueMicrotask(() => child.emit('exit', 1)); return true; },
+  });
+  mock.method(workflowObservationSystem, 'spawn', () => child);
+  const observe = workflowObservationCapabilities('/unused', resolveConfiguration({}), { command: 'unused', args: [] });
+  t.after(() => observe.close());
+  let refused = 0;
+  for (let index = 0; index < 100; index++) {
+    const read = observe.terminal.page(`mission-${index}`, {
+      runId: 'run',
+      stream: 'stdout',
+    });
+    read.catch((error: Error) => { if (/busy/.test(error.message)) { refused++; } });
+    t.mock.timers.tick(10_000);
+    await read.catch(() => {});
+  }
+  assert.equal(sent, 64, 'distinct timed-out reads cannot grow the stalled child backlog past the observer bound');
+  assert.equal(refused, 36);
 });

@@ -47,6 +47,7 @@ import {
   staleApprovalSentence,
 } from '../../../src/domain/approval-coverage.js';
 import { type MissionTransitionStore } from '../../../src/application/domain-ports.js';
+import { reboundWithGateRepairEvidence } from '../../helpers/gate-repair-rebound.js';
 
 // Regression provenance: TASK-2543.
 describe("revoke review", { concurrency: false }, () => {
@@ -456,12 +457,13 @@ describe("stand down", { concurrency: false }, () => {
       startAgentFn: (async () => { head = { commit: 'repaired-commit', tree: 'repaired-tree' }; return { agent: 'codex', result: { status: 0 } }; }),
       transitionTaskFn: async () => true,
       captureFinalTreeFn: (() => ({ ok: true as const, rootDir: '/tmp/mission', commit: head.commit, tree: head.tree })),
-      runPhaseGatesFn: (async () => phaseGateResult()),
+      runPhaseGatesFn: (async () => phaseGateResult({ gates: [{ key: 'integration-suite', command: 'npm run test:integration', order: 1 }], executed: 1, outcomes: [{ key: 'integration-suite', command: 'npm run test:integration', exitCode: 0, stdout: '', stderr: '' }] })),
       invalidateApprovalFn: (async () => ({ ok: true as const, dismissed: ['qwen'], errors: [] })),
       log: (m: string) => messages.push(m),
       error: (m: string) => messages.push(m),
       gateRunLog: () => {},
       gateRunError: () => {},
+      reboundFn: reboundWithGateRepairEvidence,
     };
   }
 

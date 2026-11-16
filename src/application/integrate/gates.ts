@@ -29,6 +29,7 @@ import type { IntegrateGatesPort, IntegrateWorkflowPorts } from '../ports/integr
 import type { MissionStore } from '../domain-ports.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
 import { completeIntegrationGateRunReceipt } from './integration-gate-receipt.js';
+import { recordImplementerLaunch } from '../rebase-identity.js';
 
 /**
  * Minimal shape of a configured gate the skip resolver needs. Kept local to
@@ -64,28 +65,21 @@ function approvedRevisionOf(missionLoad: MissionLoadResult): string | null {
 /**
  * The flattened review-state snapshot the integration context read at build time.
  *
- * TASK-2642: the rebound repair advances the live review aggregate to a new
- * current round, but this snapshot is read once at context-build and keeps its
- * original round. Persisting a round lower than the aggregate's current round
- * trips the stale-flattened-write guard (TASK-2385) and drops the repair's
- * identity write. Align the snapshot to the live current round so the fallback
- * lands on the round the repair is actually on. When no live aggregate is
- * available the snapshot is returned unchanged.
+ * A rebound can change the Mission lane, round, phase and implementer after the
+ * integration context was built. Reload the complete adapter-owned projection
+ * at the persistence boundary; carrying only the new round leaves stale phase
+ * authority in the snapshot. When the live projection is unavailable, preserve
+ * the original snapshot and let the downstream writer fail closed as before.
  */
-async function currentRepairState(missionStore: MissionStore | null | undefined, slug: string, snapshot: IntegrationReviewSnapshot | null | undefined): Promise<IntegrationReviewSnapshot> {
-  // The rebound changes the aggregate after the integration context was built.
-  // Load it at the persistence boundary rather than reusing that stale read.
-  let missionLoad;
+async function currentRepairState(readReviewState: IntegrateWorkflowPorts['review']['readReviewState'],
+  missionStore: MissionStore | null | undefined, slug: string, worktree: string,
+  snapshot: IntegrationReviewSnapshot | null | undefined): Promise<IntegrationReviewSnapshot> {
   try {
-    missionLoad = missionStore ? await missionStore.load(missionId(slug)) : null;
+    const current = await Promise.resolve(readReviewState(slug, worktree, missionStore));
+    return current ?? snapshot ?? {};
   } catch {
     return snapshot ?? {};
   }
-  const currentNumber = missionLoad?.kind === 'found' ? missionLoad.mission.review?.rounds.at(-1)?.number : undefined;
-  if (currentNumber !== undefined) {
-    return { ...snapshot, round: currentNumber };
-  }
-  return snapshot ?? {};
 }
 
 /** Output kept with a withdrawn approval; enough to diagnose, bounded for storage. */
@@ -115,9 +109,9 @@ export interface GateStepRequest {
   seams: IntegrateSeams;
 }
 
-function composeIntegrationGateStepDependencies({ gates, landing, verification, git: gitPort }: IntegrateWorkflowPorts) {
+function composeIntegrationGateStepDependencies({ gates, landing, verification, git: gitPort, review }: IntegrateWorkflowPorts) {
 
-  return { gates, landing, verification, gitPort };
+  return { gates, landing, verification, gitPort, review };
 }
 
 export function createIntegrationGateStep(ports: IntegrateWorkflowPorts) {
@@ -372,16 +366,17 @@ class IntegrationGateStep {
       transitionTaskFn: (bounceSlug: string) => projectBacklogTransition(context.mirrorOwnership, seams.transitionTaskFn, bounceSlug, 'active'),
       reactivateMissionFn: reactivateMission,
       assessRepairFn: () => repairStarted ? this.assessRepair(slug, checkout, context, missionServices) : Promise.resolve('not-pending'),
-      applyAgentFallbackFn: async ({ launchResult, original }) => seams.applyAgentFallbackFn({
-        launchResult,
-        original,
-        role: 'implementer',
-        slug,
-        executionContext: context.executionContext,
-        state: await currentRepairState(missionServices.store, slug, context.reviewState),
-        taskResolution: context.task,
-        missionStore: missionServices.store,
-      }),
+      applyAgentFallbackFn: async ({ launchResult, original }) => {
+        const actual = launchResult?.agent;
+        if (actual && actual !== original) {
+          await recordImplementerLaunch(slug, actual, missionServices.store, missionServices.lifecycle);
+        }
+        return seams.applyAgentFallbackFn({ launchResult, original, role: 'implementer', slug,
+          executionContext: context.executionContext,
+          state: await currentRepairState(this.dependencies.review.readReviewState, missionServices.store,
+            slug, context.executionContext.missionWorktree, context.reviewState),
+          taskResolution: context.task, missionStore: missionServices.store });
+      },
       // TASK-2625: when the rebound verify reruns green against the fixed tree,
       // persist the sha-keyed whitelist of validated hooks so a later integrate
       // can skip them. Keyed on the fix commit the rerun ran against. Inert

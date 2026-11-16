@@ -1,4 +1,6 @@
 import type { LifecycleHistoryEntry, ReboundRepairHistoryEntry } from '../ports/operation-history.js';
+import { reviewStatistics, type ReviewStatistics } from '../services/review-statistics.js';
+import type { FlowMissionFacts } from './flow-statistics.js';
 import type { VerificationMeasurement } from '../ports/verification-observation.js';
 import type { RunRecord } from '../run-history-types.js';
 import { agentRunModel, MAX_RUNS_PER_MISSION, runCaptureKind } from '../run-history-types.js';
@@ -89,6 +91,42 @@ export const EMPTY_FLOW_MISSION_OBSERVATION: Omit<ObservedFlowMission, 'missionI
   observedDisqualifiers: null, agentLaunchesLowerBound: false,
   returnProvenanceCutover: null,
 };
+
+/** Every measured FLOW fact except the outcome identity and the explicit per-path arguments. */
+export type FlowMissionObservation = Omit<FlowMissionFacts, 'repositoryId' | 'missionId' | 'closedAt'
+  | 'implementer' | 'laneDwellMs' | 'reviewStatistics' | 'returnProvenanceStartedAt'>;
+
+/**
+ * The only producer of FlowMissionFacts. Each FLOW path supplies its own outcome identity, its
+ * optional observation, and the arguments its read path can or cannot provide, so the CLI stats
+ * report and the board metrics adapter cannot drift field by field.
+ */
+export function flowMissionFact(input: {
+  readonly repositoryId: string;
+  readonly missionId: string;
+  readonly closedAt: string;
+  readonly implementer: string | null;
+  readonly observation?: FlowMissionObservation | null;
+  /** Required with no default: a path that read no lifecycle transitions declares null. */
+  readonly laneDwellMs: FlowMissionFacts['laneDwellMs'];
+  readonly returnProvenanceStartedAt: string | null;
+  readonly reviewStatistics?: ReviewStatistics | null;
+}): FlowMissionFacts {
+  const observation = input.observation ?? EMPTY_FLOW_MISSION_OBSERVATION;
+  return {
+    repositoryId: input.repositoryId, missionId: input.missionId, closedAt: input.closedAt,
+    implementer: input.implementer, laneDwellMs: input.laneDwellMs,
+    diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
+    ownership: observation.ownership, window: observation.window,
+    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseStages: observation.rebaseStages,
+    lead: observation.lead, diagnostics: observation.diagnostics,
+    actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
+    agentLaunches: observation.agentLaunches, observedDisqualifiers: observation.observedDisqualifiers,
+    returnProvenanceCutover: observation.returnProvenanceCutover,
+    returnProvenanceStartedAt: input.returnProvenanceStartedAt,
+    reviewStatistics: input.reviewStatistics ?? reviewStatistics(null),
+  };
+}
 
 /** Extract per-mission diagram, launch, disqualifier and ownership facts before review evidence is joined. */
 export function observedFlowMissions(input: { readonly repositoryId: string;

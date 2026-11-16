@@ -241,14 +241,18 @@ export interface CheckpointEvidence {
  * not just the latest evidenced one, so a client can walk the mission's checkpoint
  * history and its evidence in one snapshot. Planned checkpoints carry their
  * description with an empty Goal Check list; recorded checkpoints carry their rows.
+ * A repair remains unfinished until its repair verification succeeds.
  */
 function checkpointEvidence(checkpoints: readonly CheckpointData[], status: MissionStatus): CheckpointEvidence[] {
-  const current = status === 'active' ? checkpoints.find(isPlannedCheckpoint) : undefined;
+  const completed = (checkpoint: CheckpointData) => checkpoint.repair
+    ? checkpoint.repair.verified
+    : !isPlannedCheckpoint(checkpoint);
+  const current = status === 'active' ? checkpoints.find(checkpoint => !completed(checkpoint)) : undefined;
   return checkpoints.map((checkpoint) => ({
     name: checkpoint.name,
     description: checkpoint.firstLine ?? '',
     goalCheck: checkpoint.goalCheck,
-    state: !isPlannedCheckpoint(checkpoint) ? 'completed' : checkpoint === current ? 'current' : 'future',
+    state: completed(checkpoint) ? 'completed' : checkpoint === current ? 'current' : 'future',
   }));
 }
 

@@ -1,12 +1,12 @@
 import { pendingIntegrationApproval } from '../domain/integration-repair-policy.js';
 import { workflowEligible } from '../domain/workflow-command-policy.js';
-import type { ExecutionActivity } from '../domain/execution-activity.js';
+import type { ExecutionActivity, ExecutionActivitySnapshot } from '../domain/execution-activity.js';
 import { reviewOperation } from '../domain/review-command-policy.js';
 import { agentFamily } from '../domain/agents.js';
 import { missionId } from '../domain/mission.js';
 import type { RepositoryId } from '../domain/repository.js';
 import { isOpenWorkflow, isWorkflowCommand, requireWorkflowOwner, workflowOperation, claimWorkflow, settleWorkflowStop, finishWorkflow, requestWorkflowStop, loseWorkflowOwner, type WorkflowCommand } from '../domain/workflow-operation.js';
-import { completed, failure, rejected, type ApplicationOutcome } from './contracts.js';
+import { completed, failure, rejected, type ApplicationError, type ApplicationOutcome } from './contracts.js';
 import type { BoardCommandDispatcher, BoardCommandRequest, BoardCommandResult } from './controller/board-command.js';
 import type { MissionTransitionStore, MissionLoadResult } from './domain-ports.js';
 import { ExecutionStartService, ExecutionStartRefusal } from './execution-start-service.js';
@@ -298,11 +298,17 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     let outcome: ApplicationOutcome<unknown>;
     try { outcome = await (execute ?? (r => this._dispatcher.dispatch(r)))(request); }
     catch (error) { outcome = failure('execution', message(error)); }
+    const outcomeReason = outcome.error?.message ?? null;
+    let retainedBlocker: string | null = null;
+    if (genericWorkflowExit(outcome.error)) {
+      try { retainedBlocker = actionableBlocker(await this._operations.activity.loadMissionCurrentWork(operation.missionId), operation.id); }
+      catch { /* Preserve the original failure when retained activity is unavailable. */ }
+    }
     await this._operations.transaction(async () => {
       const current = await this._operations.get(id);
       if (!current || current.generation !== operation.generation || current.phase === 'stopping' || !isOpenWorkflow(current)) { return; }
       if (outcome.status !== 'completed' && !current.providerStarted) { await this.compensate(current); }
-      const ended = { ...current, ...finishWorkflow(current, operation.generation, outcome.status === 'completed', outcome.error?.message ?? null, new Date().toISOString()) };
+      const ended = { ...current, ...finishWorkflow(current, operation.generation, outcome.status === 'completed', retainedBlocker ?? outcomeReason, new Date().toISOString()) };
       await this._operations.replace(ended, current.generation);
       await this.publish(ended, ended.phase === 'completed' ? 'ended' : 'blocked', ended.reason ?? 'workflow completed');
       return ended;
@@ -428,6 +434,19 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
 
 }
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+
+function genericWorkflowExit(error: ApplicationError | undefined): boolean {
+  const reason = error?.failureReason;
+  return reason?.version === 1 && reason.code === 'process-failed' && reason.source === 'process'
+    && reason.context?.workflowOperationExit === true;
+}
+
+function actionableBlocker(snapshots: readonly ExecutionActivitySnapshot[], operationId: string): string | null {
+  const snapshot = snapshots.find(item => item.operationId === operationId);
+  const event = [...(snapshot?.frames ?? [])].reverse()
+    .find(frame => frame.event.state === 'blocked' && frame.event.blockedReason)?.event;
+  return event?.blockedReason?.trim() || null;
+}
 
 function executionActivity(operation: WorkflowOperation, state: ExecutionActivity['state'], summary: string,
   publisher = operation.owner, revision: string | null = null): ExecutionActivity {

@@ -234,6 +234,74 @@ test('restart recovery completes a same-agent self-author approval as one PR com
   assert.equal(parseReviewPublication(store.mission().review?.reviewEvents[0]?.followUpReference)?.state, 'completed');
 });
 
+for (const verdict of ['approve', 'request-changes', 'comment']) {
+  test(`restart publishes the original PR author's ${verdict} without changing the current round`, async () => {
+    const review = pendingReview(slug);
+    const identity: ReviewPublicationIdentity = {
+      slug, round: 1, actor: 'claude', revision: 'fixture-revision', eventType: 'reviewer_outcome', target: 'review',
+    };
+    const store = inMemoryTransitionStore(fixtureMission(slug, { review: {
+      ...review,
+      reviewEvents: [{ position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing',
+        actor: 'claude', content: `Retained ${verdict}`, verdict, disposition: null, itemDispositions: null,
+        blockedReason: null, followUpReference: reviewPublicationReference(identity), createdAt: '2026-11-13T00:00:00.000Z' }],
+    } }));
+    const before = structuredClone(store.mission().review!.rounds);
+    const comments: { body: string }[] = [];
+    const options = {
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/controlled-review-worktree' }),
+      missionStore: store, readTokenFn: () => 'token', getCommentsFn: async () => comments,
+      getPrAuthorFn: () => 'claude',
+      postReviewFn: () => assert.fail('Forgejo forbids formal reviews from the PR author'),
+      postCommentFn: (_branch: string, _token: string, body: string) => {
+        comments.push({ body });
+        return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+      },
+      log: () => {}, error: () => {},
+    };
+    assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 1 });
+    assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 0 });
+    assert.equal(comments.length, 1);
+    assert.ok(comments[0]!.body.startsWith(`Verdict: ${verdict}\n`));
+    assert.match(comments[0]!.body, /round 1; actor claude; revision fixture-revision/);
+    assert.deepEqual(store.mission().review!.rounds, before, 'publication cannot rewrite decisions or implementer responses');
+    assert.equal(store.mission().status, 'active', 'publication cannot advance the Mission');
+    assert.equal(parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)?.state, 'completed');
+  });
+}
+
+test('an interrupted PR-author comment recovers its marker without a duplicate verdict or decision', async () => {
+  const review = pendingReview(slug);
+  const identity: ReviewPublicationIdentity = {
+    slug, round: 1, actor: 'claude', revision: 'fixture-revision', eventType: 'reviewer_outcome', target: 'review',
+  };
+  const store = inMemoryTransitionStore(fixtureMission(slug, { review: { ...review, reviewEvents: [{
+    position: 0, eventType: 'reviewer_outcome', roundNumber: 1, phase: 'reviewing', actor: 'claude',
+    content: 'Changes required', verdict: 'request-changes', disposition: null, itemDispositions: null,
+    blockedReason: null, followUpReference: reviewPublicationReference(identity), createdAt: '2026-11-13T00:00:00.000Z',
+  }] } }));
+  const before = structuredClone(store.mission().review!.rounds);
+  const comments: { body: string }[] = [];
+  let posts = 0;
+  const options = {
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/controlled-review-worktree' }),
+    missionStore: store, readTokenFn: () => 'token', getCommentsFn: async () => comments,
+    getPrAuthorFn: () => 'claude', postReviewFn: () => assert.fail('PR author must publish a comment'),
+    postCommentFn: (_branch: string, _token: string, body: string): never => {
+      posts++;
+      comments.push({ body });
+      throw new Error('connection closed after acceptance');
+    },
+    log: () => {}, error: () => {},
+  };
+  assert.deepEqual(await recoverReviewPublications(slug, options), { ok: false, pending: 1 });
+  assert.equal(parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)?.state, 'failed');
+  assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 1 });
+  assert.equal(posts, 1);
+  assert.equal(store.mission().review!.reviewEvents.length, 1);
+  assert.deepEqual(store.mission().review!.rounds, before);
+});
+
 test('publication body carries visible round actor revision provenance and a stable marker (PX-0054.02)', () => {
   const first = reviewPublicationBody('finding', publication);
   const second = reviewPublicationBody('finding', publication);

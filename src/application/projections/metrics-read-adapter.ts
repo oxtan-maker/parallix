@@ -19,30 +19,14 @@ import { compareCohorts, type CohortDimension } from './cohorts.js';
 import { utcHourBucket } from '../services/statistics-service.js';
 import { decisionWindowContains, weeklyDecisionWindows } from '../../domain/decision-window.js';
 import { FLOW_DWELL_STATES, flowStatistics, type FlowMissionFacts } from './flow-statistics.js';
-import { EMPTY_FLOW_MISSION_OBSERVATION } from './flow-mission-facts.js';
-import type { VerificationStatistics } from './verification-statistics.js';
+import { flowMissionFact } from './flow-mission-facts.js';
 
-function flowMissionFact(outcome: MissionOutcome, observed: VerificationStatistics['flowMissions'][number] | undefined,
-  dwell: ReturnType<typeof closedLaneDwellMinutes>, metadata: ReadonlyMap<MissionId, MissionCohortMetadata>,
-  repositoryId: RepositoryId): FlowMissionFacts {
-  const observation = observed ?? EMPTY_FLOW_MISSION_OBSERVATION;
-  return { repositoryId: String(repositoryId), missionId: String(outcome.missionId), closedAt: outcome.closedAt,
-    implementer: outcome.implementer === null ? null : String(outcome.implementer),
-    diagramNodeIds: observation.diagramNodeIds, diagramEdgeIds: observation.diagramEdgeIds,
-    ownership: observation.ownership, window: observation.window,
-    gateRuns: observation.gateRuns, rebaseRuns: observation.rebaseRuns, rebaseStages: observation.rebaseStages,
-    diagnostics: observation.diagnostics,
-    lead: observation.lead,
-    laneDwellMs: Object.fromEntries(FLOW_DWELL_STATES.flatMap(state => {
-      const minutes = dwell.get(state)?.get(outcome.missionId);
-      return minutes === undefined ? [] : [[state, minutes * 60_000]];
-    })),
-    actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
-    agentLaunches: observation.agentLaunches,
-    observedDisqualifiers: observation.observedDisqualifiers,
-    returnProvenanceCutover: observation.returnProvenanceCutover,
-    returnProvenanceStartedAt: outcome.createdAt,
-    reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics ?? reviewStatistics(null) };
+/** Closed lifecycle dwell per FLOW state for one mission; the board path is the only reader of transitions. */
+function closedLaneDwellMs(dwell: ReturnType<typeof closedLaneDwellMinutes>, missionId: MissionId): FlowMissionFacts['laneDwellMs'] {
+  return Object.fromEntries(FLOW_DWELL_STATES.flatMap(state => {
+    const minutes = dwell.get(state)?.get(missionId);
+    return minutes === undefined ? [] : [[state, minutes * 60_000]];
+  }));
 }
 
 /** Delivery belongs to the recorded final review implementer, never an attempt. */
@@ -286,13 +270,14 @@ export class ConcreteMetricsReadAdapter implements MetricsReadAdapter {
     signal?.throwIfAborted();
     const dwell = closedLaneDwellMinutes(transitions);
     const flow = verification
-      ? flowStatistics(flowOutcomes.map(outcome => flowMissionFact(
-        outcome,
-        verification.flowMissions.find(item => item.missionId === outcome.missionId),
-        dwell,
-        metadata,
-        this.repositoryId,
-      )), decisionWindows)
+      ? flowStatistics(flowOutcomes.map(outcome => flowMissionFact({
+        repositoryId: String(this.repositoryId), missionId: String(outcome.missionId), closedAt: outcome.closedAt,
+        implementer: outcome.implementer === null ? null : String(outcome.implementer),
+        observation: verification.flowMissions.find(item => item.missionId === outcome.missionId),
+        laneDwellMs: closedLaneDwellMs(dwell, outcome.missionId),
+        returnProvenanceStartedAt: outcome.createdAt,
+        reviewStatistics: metadata.get(outcome.missionId)?.reviewStatistics ?? null,
+      })), decisionWindows)
       : undefined;
     return {
       ...(flow ? { flow } : {}),

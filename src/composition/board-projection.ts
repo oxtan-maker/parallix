@@ -36,7 +36,7 @@ import { BoardCommandController, type BoardMissionServices } from '../applicatio
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { MissionStore } from '../application/domain-ports.js';
-import type { Mission } from '../domain/mission.js';
+import type { Mission, MissionId } from '../domain/mission.js';
 import type { ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
@@ -73,6 +73,8 @@ export interface BoardProjectionCompositionDeps {
   readonly readAgentConfig?: () => import('../adapters/agents/agent-config.js').AgentConfig | null;
   /** Running-session detection for the agent strip; defaults to the live process scan. */
   readonly detectRunningSessions?: () => readonly import('../adapters/agents/running-sessions.js').RunningMissionSession[] | null;
+  /** Process table for the running-session scan; defaults to one live OS scan per build. */
+  readonly listRunningProcesses?: () => Promise<readonly import('../adapters/agents/running-sessions.js').ProcessEntry[] | null>;
   /** Provider observation boundary; defaults to the repository's retained execution evidence. */
   readonly providerExecution?: ProviderExecutionReader;
   /** Authoritative workflow ownership and liveness facts for Review recovery. */
@@ -100,21 +102,33 @@ const REBOUND_REPAIR_HISTORY_TYPE = 'rebound.repair';
  * beside the build's synchronous reads; one read answers every reader within
  * the build, and the next build starts from a fresh one.
  */
-function createRunningSessionScan(deps: Pick<BoardProjectionCompositionDeps, 'rootDir' | 'detectRunningSessions'>) {
+function createRunningSessionScan(
+  deps: Pick<BoardProjectionCompositionDeps, 'rootDir' | 'detectRunningSessions' | 'listRunningProcesses'>,
+  // The board build has already read the repository topology; the scan reuses that
+  // listing instead of spawning a second `git worktree list` for the same build.
+  worktrees: () => ReadonlyMap<string, MissionId> | null,
+) {
   let processTable: Promise<readonly ProcessEntry[] | null> | undefined;
   let scan: Promise<readonly RunningMissionSession[] | null> | undefined;
   return {
     detect: () => {
       scan ??= (async () => {
         if (deps.detectRunningSessions) { return deps.detectRunningSessions(); }
-        const table = await (processTable ??= startProcessTableRead());
-        return detectRunningMissionSessions({ rootDir: deps.rootDir, listProcesses: () => table });
+        const table = await (processTable ??= deps.listRunningProcesses ? deps.listRunningProcesses() : startProcessTableRead());
+        const listed = worktrees();
+        return detectRunningMissionSessions({
+          rootDir: deps.rootDir,
+          listProcesses: () => table,
+          listWorktrees: () => listed,
+        });
       })();
       return scan;
     },
     beginRead: () => {
       scan = undefined;
-      processTable = deps.detectRunningSessions ? undefined : startProcessTableRead();
+      processTable = deps.detectRunningSessions || deps.listRunningProcesses
+        ? undefined
+        : startProcessTableRead();
     },
   };
 }
@@ -330,11 +344,11 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const missions = missionReader.missions;
   const currentWork = deps.executionActivity ?? (deps.database ? new SqliteExecutionActivityStore(deps.database, deps.repositoryId) : undefined);
   const workflowOperations = deps.database ? new SqliteWorkflowOperationStore(deps.database, deps.repositoryId) : undefined;
-  const runningSessions = createRunningSessionScan(deps);
-  const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
-  const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
   const metricsSession = createMetricsReadSession(deps);
   let topology: ReturnType<typeof snapshotWorktreeTopology> | null = null;
+  const runningSessions = createRunningSessionScan(deps, () => topology?.missionWorktrees() ?? null);
+  const changeIdentity = createGitChangeIdentity(deps.rootDir, deps.gitFn ?? undefined, { snapshotBranchHeads: true });
+  const completedMissionRetentionDays = loadEffectiveConfig(deps.rootDir).adapters.web.completedMissionRetentionDays;
   const gateEvidence = createBoardGateEvidence(deps,
     mission => topology?.resolveWorktree(mission, { cwd: deps.rootDir }) ?? null);
   const gates = new VerificationGateObserver(gateEvidence);

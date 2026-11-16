@@ -67,7 +67,7 @@ If the human who may approve integration uses a Forgejo login other than `human`
 - Re-running `px setup` lets you change config and rotate the local token files.
 - `px setup-review` still exists as a narrower Forgejo-only repair path if you only need to refresh token or remote wiring.
 
-Publication prefers the actual implementer’s credentials and can fall back to the Parallix repository account after bootstrap fails. The Mission keeps the actual implementer identity regardless of the publication account. Review prefers another runnable agent family; when only one family can run, self-author review can approve locally while formal provider approval remains owed. `px review --push` uses the recorded Mission implementer rather than the reviewer. Its `--implementer` flag checks that identity; it does not reassign the Mission.
+Publication prefers the actual implementer’s credentials and can fall back to the Parallix repository account after bootstrap fails. The Mission keeps the actual implementer identity regardless of the publication account. Review prefers another runnable agent family; when only one family can run, its fresh review can approve locally. A reviewer who originally opened the PR publishes its verdict as a comment; the Mission's current reviewer policy determines whether it counts. `px review --push` uses the recorded Mission implementer rather than the reviewer. Its `--implementer` flag checks that identity; it does not reassign the Mission.
 
 Between review rounds, automatic publication retries a stale lease once after fetching the review branch. If another publisher advances the branch again, publication reports failure and preserves that remote commit; the review loop continues to the next round.
 

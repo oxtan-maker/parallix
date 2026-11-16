@@ -158,6 +158,13 @@ legacy plans with omitted states show completion unknown as a disclosure without
 an empty progress track, even when evidence is present. Checkpoint tracks
 never blink.
 
+A repair checkpoint counts as completed only after its own repair verification.
+Carried Goal Check rows keep earlier accepted evidence visible but do not fill the
+progress track. While a mission is active, its first unverified repair is current
+and later unverified repairs are future; outside the active lane they remain
+future. Full progress and the completion check return only after every repair in
+the supplied plan is verified.
+
 Click the checkpoint track, or focus it and press Enter or Space, to open the
 checkpoint dialog, including in intake cards and the expanded done rail. A
 checkmark to the right means every supplied checkpoint is explicitly completed.
@@ -521,6 +528,18 @@ While historical FLOW reconstruction is pending, the retained projection names
 that condition instead of displaying zeroes or a generic missing projection; a
 later detected refresh publishes the loaded analytics.
 Closing `px web` also stops its board readers.
+
+Each observer process stays warm, so a caller that gives up never restarts it.
+Board reads, current-state terminal reads (overview, live) and history reads
+(pages, searches) each use their own observer, started on first use. An observer
+holds at most 64 waiting or running callers and refuses further demand as busy,
+rotating across missions within its queue. Identical reads in flight share one
+request, which outlives its callers' timeouts until the observer answers, and an
+observer is never sent more than 64 unanswered requests. A request whose caller has timed out is dropped before it can start, and
+every observer reply reports its queued, running and expired caller counts.
+History reads are synchronous, so a slow search holds only the history observer
+and never delays a current-state read. A deadline ends only the caller's wait, so
+an observer still building its first board keeps that finite work for the next read.
 
 If a projection refresh fails, the browser keeps the last validated board visible
 with its prior identity, a stale warning and the server's failure message. A

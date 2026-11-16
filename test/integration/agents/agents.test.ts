@@ -1410,6 +1410,30 @@ test('startAgent merges caller-supplied env with FORGEJO_USER', async () => {
   assert.ok(result.invocation.options.env.HOME);
 });
 
+test('startAgent keeps native test coverage state out of provider subprocesses (px-0061 repair)', async () => {
+  let launched: AgentLauncherInput | undefined;
+  await startAgent('review', {
+    configuration: resolveConfiguration({ ...process.env, NODE_V8_COVERAGE: '/var/tmp/runner-coverage' }),
+    prompt: 'Execute the mission.',
+    worktree: '/tmp/mission-task-095',
+    agent: 'codex',
+    env: { SOME_CUSTOM_VAR: 'custom-value', NODE_V8_COVERAGE: '/var/tmp/caller-coverage' },
+    isAgentBlockedFn: () => false,
+    launchAgentFn: (options) => {
+      launched = options;
+      return {
+        invocation: { command: 'codex', args: [], options: { env: options.env } },
+        resultPromise: Promise.resolve({ status: 0, stdout: '', stderr: '' }),
+      };
+    },
+  });
+
+  assert.ok(launched?.env);
+  assert.equal(launched.env.NODE_V8_COVERAGE, undefined);
+  assert.equal(launched.env.SOME_CUSTOM_VAR, 'custom-value');
+  assert.equal(launched.env.FORGEJO_USER, 'codex');
+});
+
 test('startAgent harness identity wins over caller-supplied FORGEJO_USER', async () => {
   // Regression: merge order must be { ...env, FORGEJO_USER: agent } so a
   // conflicting caller-supplied FORGEJO_USER cannot override the harness selection.

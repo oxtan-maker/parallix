@@ -6,6 +6,7 @@ import { ExecuteMissionService } from '../../../src/application/execute-mission-
 import { makeExecutePorts } from '../../fixtures/execute-mission-ports.js';
 import { missionBrief } from '../../../src/domain/mission-brief.js';
 import { missionLabels } from '../../../src/domain/mission.js';
+import { failureReason } from '../../../src/domain/failure-reason.js';
 // Admission/owner contract is new: execution-service tests own launch ordering,
 // while this suite owns durable command identity, exclusion and recovery policy.
 import test from 'node:test';
@@ -247,6 +248,60 @@ test('failed nested work survives bracket cleanup until supported parent continu
     assert.equal(continued.frames[0].event.summary, 'supported continuation');
     return completed({});
   });
+});
+
+test('workflow settlement retains an actionable child blocker over a generic exit status (PX-0063)', async () => {
+  const f = fixture();
+  await f.service.admit(request());
+  await f.service.run('request-one', async () => {
+    await f.service.activity('request-one', 1, {
+      missionId: missionId('task-one'), operationId: 'request-one', phase: 'execute', state: 'blocked',
+      summary: 'repair certification blocked', agent: null, processId: 100,
+      blockedReason: 'Outstanding repair requires its original authorized verifier before integration',
+      occurredAt: new Date().toISOString(),
+    }, 'request-one');
+    return failure('execution', 'Child workflow returned a nonzero status', [],
+      failureReason('process-failed', 'process', { workflowOperationExit: true, exitCode: 1 }));
+  });
+  const operation = await f.service.operation('request-one');
+  assert.equal(operation?.phase, 'blocked');
+  assert.equal(operation?.reason, 'Outstanding repair requires its original authorized verifier before integration');
+
+  const unavailable = fixture();
+  await unavailable.service.admit(request());
+  unavailable.activity.loadMissionCurrentWork = async () => { throw new Error('activity unavailable'); };
+  await unavailable.service.run('request-one', async () => failure('execution', 'Workflow exited with status 1', [],
+    failureReason('process-failed', 'process', { workflowOperationExit: true, exitCode: 1 })));
+  assert.equal((await unavailable.service.operation('request-one'))?.reason, 'Workflow exited with status 1');
+
+  const stale = fixture();
+  await stale.service.admit(request());
+  const older = {
+    missionId: missionId('task-one'), operationId: 'older-operation', phase: 'recovery' as const,
+    state: 'blocked' as const, summary: 'older blocker', agent: null, processId: 99,
+    blockedReason: 'An older operation was blocked', occurredAt: new Date().toISOString(),
+  };
+  stale.activity.loadMissionCurrentWork = async () => [{
+    missionId: missionId('task-one'), operationId: 'request-one', frames: [], closedSources: [],
+    supersededOperations: [], retainedBlocker: older, terminal: null,
+  }];
+  await stale.service.run('request-one', async () => failure('execution', 'Workflow exited with status 1', [],
+    failureReason('process-failed', 'process', { workflowOperationExit: true, exitCode: 1 })));
+  assert.equal((await stale.service.operation('request-one'))?.reason, 'Workflow exited with status 1',
+    'an older recovery blocker cannot replace this operation response');
+
+  const unmarked = fixture();
+  await unmarked.service.admit(request());
+  await unmarked.service.run('request-one', async () => {
+    await unmarked.service.activity('request-one', 1, {
+      missionId: missionId('task-one'), operationId: 'request-one', phase: 'integrate', state: 'blocked',
+      summary: 'current blocker', agent: null, processId: 100,
+      blockedReason: 'A current operation blocker', occurredAt: new Date().toISOString(),
+    }, 'request-one');
+    return failure('execution', 'Workflow exited with status 1');
+  });
+  assert.equal((await unmarked.service.operation('request-one'))?.reason, 'Workflow exited with status 1',
+    'diagnostic wording without the structured wrapper marker cannot substitute a blocker');
 });
 
 test('agent selection occurs outside admission writes and settled retries do not repeat it (TASK-2750)', async () => {

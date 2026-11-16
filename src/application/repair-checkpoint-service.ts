@@ -164,10 +164,10 @@ export class RepairCheckpointService implements RepairCheckpointPort {
       ? { ...cp, repair: { ...checkpoint.repair!, verified: true, ...(exactSuccessCoverage ? { exactSuccessCoverage } : {}) } } : cp) } as Mission, loaded.version);
   }
 
-  /** One aggregate rerun is one CAS write: no gate can settle while a sibling remains unverified. */
+  /** One authorized gate rerun is one CAS write for its whole checkpoint collection. */
   async verifyAll(slug: string, checks: readonly { readonly name: string; readonly proof: RepairVerificationProof }[]): Promise<void> {
-    if (checks.length < 2 || new Set(checks.map(check => check.name)).size !== checks.length) {
-      throw new Error('Aggregate repair verification requires distinct checkpoints');
+    if (!checks.length || new Set(checks.map(check => check.name)).size !== checks.length) {
+      throw new Error('Gate repair verification requires a non-empty collection of distinct checkpoints');
     }
     const loaded = await this.load(slug);
     const byName = new Map(checks.map(check => [check.name, check]));

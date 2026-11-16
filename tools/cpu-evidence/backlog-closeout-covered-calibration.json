@@ -1,0 +1,23 @@
+{
+  "date": "2026-11-16",
+  "reason": "The covered TASK-2712 archive-deletion case retained all behavioral assertions but exceeded its 600 ms cap once during the pre-integration gate. The retained gate measured 636 ms; a fresh full gate passed unchanged, and three current focused covered profiles stayed below 365 ms.",
+  "measurement": "PARALLIX_TEST_COVERAGE=1 PARALLIX_PREBUILT_PACK=1 PARALLIX_TEST_CPU_PROFILE_DIR=<isolated-directory> PARALLIX_INTEGRATION_TEST_CPU_BUDGET_MS=3500 npm test -- --integration-ci test/integration/integrate/integration-backlog-closeout.test.ts",
+  "revision": "7fad218fd5f37db7d2d484f5633f6b874469aa48",
+  "file": "integration/integrate/integration-backlog-closeout.test.ts",
+  "profile": "covered",
+  "case": "a mission explicitly deleting an inherited archive path can land without losing completed history (TASK-2712)",
+  "focusedCpuMs": [
+    352.879,
+    358.64,
+    364.628
+  ],
+  "retainedGateCpuMs": 636,
+  "retainedIncident": "80a3eb40cc43937e040db6628af46bf616c1ea96159bf51ce627ac163ac9217c",
+  "previousBudgetMs": 600,
+  "budgetMs": 800,
+  "marginOverRetainedGatePercent": 25.8,
+  "marginOverFocusedPeakPercent": 119.4,
+  "plainBudgetMs": 450,
+  "earlyCiCutoffMs": 3500,
+  "behavioralAssertionsChanged": false
+}

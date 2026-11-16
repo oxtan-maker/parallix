@@ -13,6 +13,7 @@ import {
   type IntegrationGateRouteOptions,
 } from '../../../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 import type { GateRunOutcome } from '../../../../../src/adapters/config/repository-gates.js';
+import { reboundWithGateRepairEvidence } from '../../../../helpers/gate-repair-rebound.js';
 
 const GATE_COMMAND = 'npm run test:integration';
 
@@ -39,11 +40,17 @@ function routeArgs(prompts: string[], messages: string[], treeFinalized: boolean
     captureFinalTreeFn: (() => (treeFinalized
       ? { ok: true, rootDir: '/tmp/mission', commit: 'c', tree: 't' }
       : { ok: false, error: 'selected execution root is not finalized (dirty tree): /tmp/mission' })),
-    runPhaseGatesFn: (async (_p: string, o) => ({ ok: true as const, phase: 'integration' as const, gates: o.gates, executed: 1, skipped: false, dryRun: false, failedGate: null, error: null })),
+    runPhaseGatesFn: (async (_p: string, o) => {
+      assert.ok(o.gates, 'the repair rerun receives the configured gate collection');
+      return { ok: true as const, phase: 'integration' as const, gates: o.gates, executed: 1, skipped: false,
+        dryRun: false, failedGate: null,
+        outcomes: o.gates.map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })), error: null };
+    }),
     log: (m: string) => messages.push(m),
     error: (m: string) => messages.push(m),
     gateRunLog: (m: string) => messages.push(m),
     gateRunError: (m: string) => messages.push(m),
+    reboundFn: reboundWithGateRepairEvidence,
   } as IntegrationGateRouteOptions;
 }
 
@@ -98,7 +105,8 @@ test('fresh repair reruns the authorized integration gates on the committed tree
     assert.equal(phase, 'integration');
     assert.deepEqual(options.gates, args.gates);
     assert.equal(options.checkoutPath, args.missionWorktree);
-    return phaseGateResult();
+    return phaseGateResult({ gates: options.gates, executed: options.gates.length,
+      outcomes: options.gates.map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })) });
   });
   assert.equal((await routeIntegrationGateFailure(args)).route, 'fixed');
   assert.equal(runs, 1);

@@ -6,9 +6,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fixtureMission } from './mission-builders.js';
 import { agentFamily } from '../../src/domain/agents.js';
-import { missionId } from '../../src/domain/mission.js';
-import { applyReviewerCommand, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, startReview } from '../../src/domain/review.js';
+import { missionId, missionLabels } from '../../src/domain/mission.js';
+import { applyReviewerCommand, changeRevision, ConfiguredReviewerEligibility, currentReviewRound, replaceCurrentRound, startReview } from '../../src/domain/review.js';
 import { decideMission } from '../../src/domain/mission-workflow.js';
+import { recordImplementerLaunch } from '../../src/application/rebase-identity.js';
 import { createMissionApplicationServices } from '../../src/composition/application-services.js';
 import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
@@ -17,8 +18,11 @@ import { run } from '../../src/composition/create-cli.js';
 
 const equivalent = process.argv.includes('--equivalent');
 const failingCheck = process.argv.includes('--failing-check');
+const aggregateMode = process.argv.includes('--aggregate-review') || process.argv.includes('--aggregate-execute');
+const aggregateExecute = process.argv.includes('--aggregate-execute');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-changed-repair-manual-'));
 const exactCommand = `test -f ${temporary}/allow-check`;
+const aggregateCommands = [`test -f ${temporary}/allow-static`, `test -f ${temporary}/allow-integration`];
 const repo = path.join(temporary, 'repo');
 const worktree = path.join(temporary, 'repo-task-manual-repair');
 const slug = 'task-manual-repair';
@@ -38,7 +42,9 @@ try {
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
     verification: { command: ':', defaultArea: 'all' },
-    gates: { preIntegration: [{ key: 'unit', command: equivalent ? exactCommand : ':', order: 1 }] }, review: { provider: 'none', tmpDir: path.join(temporary, 'review') },
+    gates: { preIntegration: aggregateMode
+      ? aggregateCommands.map((command, index) => ({ key: index ? 'integration-ci' : 'static-analysis', command, order: index + 1 }))
+      : [{ key: 'unit', command: equivalent ? exactCommand : ':', order: 1 }] }, review: { provider: 'none', tmpDir: path.join(temporary, 'review') },
   } }));
   fs.writeFileSync(path.join(repo, 'config', 'agents.json'), JSON.stringify({ steps: {
     draft: { eligible: ['custom'], selection: 'random' }, active: { eligible: ['codex', 'custom'], selection: 'random' },
@@ -74,17 +80,84 @@ try {
     type: 'approve', revision: changeRevision(approvedRevision), decidedAt: '2026-10-01T09:00:00Z', comment: 'historical approval', source: { kind: 'local' },
   });
   const approved = fixtureMission(slug, { repositoryId: services.repositoryId, status: 'integration', assignee: agentFamily('codex'), review,
+    labels: missionLabels(['ai_sdlc']),
     brief: { goal: 'Review repaired behavior', why: 'Avoid historical approval replay', scope: 'deliverable.txt', outOfScope: ['Landing'] },
-    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: [':'],
+    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands : [':'],
     checkpoints: [{ missionId: missionId(slug), name: 'CP-1', goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt:1', recordedRound: 1 }], nextActionText: 'Independent review',
       recording: { recordedAt: '2026-10-02T09:00:00Z', recordedRound: 1, missionRevision: 2 },
       repair: { incidentId: 'manual-successful-repair', command: ':', attempt: 1, authorizedGates: [':'],
         authorizedCriteria: ['The deliverable is repaired'], evidenceRecorded: true, verified: true } }],
   });
   const active = decideMission(approved, { type: 'rebound-to-active', agent: agentFamily('codex'),
-    cause: { kind: 'integration-gate-failure', gate: 'unit', command: ':' }, occurredAt: '2026-10-01T10:00:00Z' });
-  await services.store.save({ ...active, status: equivalent ? 'review' : lane, ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
-  if (equivalent) {
+    cause: { kind: 'integration-gate-failure', gate: aggregateMode ? 'static-analysis' : 'unit',
+      command: aggregateMode ? aggregateCommands[0] : ':' }, occurredAt: '2026-10-01T10:00:00Z' });
+  await services.store.save({ ...active, status: equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
+    ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
+  if (aggregateMode) {
+    const { captureRecoveryEvidence } = await import('../../src/application/recovery-evidence.js');
+    const references = aggregateCommands.map((command, index) => {
+      const captured = captureRecoveryEvidence({ missionId: slug, command, cwd: worktree,
+        capturedRevision: approvedRevision, exitCode: index + 1, signal: null, stdout: '', stderr: `original failure ${index + 1}`, diagnostic: `failed ${command}` });
+      assert.ok(captured.ok && captured.ref);
+      if (!captured.ok || !captured.ref) { throw new Error('aggregate failure capture failed'); }
+      return captured.ref;
+    });
+    await recordImplementerLaunch(slug, 'claude', services.store, services.lifecycle);
+    const loaded = await services.store.load(missionId(slug));
+    if (loaded.kind !== 'found') { throw new Error('missing aggregate fixture'); }
+    const round = currentReviewRound(loaded.mission.review!);
+    await services.store.save({ ...loaded.mission, assignee: agentFamily('claude'),
+      review: { ...loaded.mission.review!, rounds: replaceCurrentRound(loaded.mission.review!, { ...round, implementer: agentFamily('claude') }) },
+      declaredGates: aggregateCommands, checkpoints: references.map((reference, index) => ({
+        missionId: missionId(slug), name: `CP-${index + 1}`, nextActionText: 'Resume the interrupted configured verification',
+        goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt', recordedRound: 1 }],
+        recording: { recordedAt: '2026-10-02T09:00:00Z', recordedRound: 1, missionRevision: loaded.version },
+        repair: { incidentId: `aggregate-${index + 1}`, gateKey: index ? 'integration-ci' : 'static-analysis',
+          command: aggregateCommands[index], attempt: 1, authorizedGates: aggregateCommands,
+          authorizedCriteria: ['The deliverable is repaired'], evidenceRecorded: true, verified: false,
+          occurrence: { openedMissionRevision: loaded.version, worktree, failureRevision: approvedRevision,
+            failureEvidenceId: `${reference.incidentId}:${reference.attempt}` } },
+      })) }, loaded.version);
+    for (const marker of ['allow-static', 'allow-integration']) { fs.writeFileSync(path.join(temporary, marker), 'green\n'); }
+    let reviewerLaunches = 0;
+    setCommandPathProbe(() => '/disposable-reviewer');
+    setLauncherHealthProbe(() => ({ ok: true }));
+    setWorkflowLaunchPort(({ prompt, worktree: launchedWorktree }) => ({
+      invocation: { command: 'disposable-independent-reviewer', args: [], options: { cwd: launchedWorktree } },
+      resultPromise: (async () => {
+        reviewerLaunches++;
+        assert.match(prompt, /Mode: review\./);
+        const reviewing = await services.store.load(missionId(slug));
+        assert.equal(reviewing.kind, 'found');
+        if (reviewing.kind !== 'found') { throw new Error('missing aggregate review'); }
+        const fresh = currentReviewRound(reviewing.mission.review!);
+        assert.equal(fresh.number, 2);
+        assert.equal(fresh.implementer, 'claude');
+        assert.equal(fresh.decision, null);
+        assert.equal(await run(['verdict', 'approve', '--actor', 'custom'], { baseCwd: launchedWorktree }), 0);
+        return { status: 0, stdout: '', stderr: '' };
+      })(),
+    }));
+    const command = aggregateExecute ? ['active', slug] : ['review', slug, '--reviewer', 'custom'];
+    console.log(`COMMAND: px ${command.join(' ')}`);
+    assert.equal(await run(command, { baseCwd: worktree }), 0);
+    const result = await services.store.load(missionId(slug));
+    assert.equal(result.kind, 'found');
+    if (result.kind !== 'found') { throw new Error('missing aggregate result'); }
+    const repairs = result.mission.checkpoints.map(checkpoint => checkpoint.repair!);
+    assert.deepEqual(repairs.map(repair => repair.verified), [true, true]);
+    assert.equal(repairs[0].exactSuccessCoverage?.verifiedMissionRevision, repairs[1].exactSuccessCoverage?.verifiedMissionRevision);
+    assert.equal(currentReviewRound(result.mission.review!).decision?.kind, 'approved');
+    assert.equal(currentReviewRound(result.mission.review!).implementer, 'claude');
+    assert.equal(result.mission.status, 'integration');
+    assert.equal(reviewerLaunches, 1);
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), baseline, 'human landing never ran');
+    assert.deepEqual(references.map(reference => fs.readFileSync(reference.stderrPath, 'utf8')), ['original failure 1', 'original failure 2']);
+    console.log(JSON.stringify({ observation: aggregateExecute ? 'public Execute aggregate restart' : 'public Review aggregate restart',
+      seededInterruption: true, fallbackImplementer: result.mission.assignee, configuredCommands: aggregateCommands,
+      verifiedMissionRevision: repairs[0].exactSuccessCoverage?.verifiedMissionRevision, reviewerLaunches,
+      finalLane: result.mission.status, landed: false, boundaries: 'disposable Git/SQLite/operator home; stubbed reviewer/provider' }));
+  } else if (equivalent) {
     const { captureRecoveryEvidence } = await import('../../src/application/recovery-evidence.js');
     const { RepairCheckpointService } = await import('../../src/application/repair-checkpoint-service.js');
     const { MissionCheckpointService } = await import('../../src/application/mission-checkpoint-service.js');
