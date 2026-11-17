@@ -19,6 +19,12 @@ const STAGES = ['draft', 'execute', 'review', 'act-on-review', 'portfolio'] as c
 const GRAPHIFY_GUIDANCE = 'Parallix updates existing Graphify graphs after successful squash integration on the receiving base worktree; review, edits and checkpoints do not trigger updates.';
 const REVIEW_COVERAGE_GUIDANCE =
   'Do not run large batched test coverage commands that Parallix has already run or intentionally schedules for a later verification phase. Run a focused test only when it validates a specific review finding.';
+const DRAFT_NEL_GUIDANCE =
+  '- You own sizing and splitting for each mission before execution. Keep NEL out of execution scope constraints, success criteria, checkpoints and review requirements; implementers and reviewers do not enforce NEL. Never defer decomposition to either role or ask them to compress code to fit an estimate.';
+const EXECUTE_NEL_GUIDANCE =
+  '- NEL sizing and mission splitting are the drafter\'s responsibility. Do not enforce NEL caps, stop over NEL, add NEL checkpoint evidence, or compress code to meet an estimate. Deliver the mission\'s behavior with readable code; a copied NEL constraint is not an execution requirement.';
+const REVIEW_NEL_GUIDANCE =
+  '- NEL sizing and mission splitting belong to the drafter. Do not assess NEL, enforce copied NEL constraints, or request changes or block review over NEL. Judge readability and maintainability directly without a line budget.';
 
 function realRepoRoot(): string {
   let dir = path.dirname(fileURLToPath(import.meta.url));
@@ -63,12 +69,25 @@ function parentPrompt(stage: string): string {
 }
 
 // The fixture owns the shipped assembled baseline, including draft and
-// execute's existing-owner opinions. Review is deliberately repository-local
-// and newer than that baseline, so only review needs its checked-in opinion
-// overlaid here. This keeps the byte-for-byte reconstruction check authoritative
-// without counting an opinion twice after the fixture itself is refreshed.
+// execute's existing-owner opinions. Later authorized mandatory additions are
+// named here so the source-owner check still detects any other core drift.
+// Review is deliberately repository-local and newer than the fixture, so its
+// checked-in opinion is overlaid without counting that opinion twice.
 function expectedSourcePrompt(stage: string): string {
-  const parent = parentPrompt(stage);
+  let parent = parentPrompt(stage);
+  if (stage === 'draft') {
+    parent = parent.replace(
+      '- predict the size of the change as a net engineering lines (NEL) bucket — Small (0–80), Medium (81–235) or Large (235+)',
+      `- predict the size of the change as a net engineering lines (NEL) bucket — Small (0–80), Medium (81–235) or Large (235+)\n${DRAFT_NEL_GUIDANCE}`,
+    );
+  } else if (stage === 'execute') {
+    parent = parent.replace('Execution requirements:', `Execution requirements:\n${EXECUTE_NEL_GUIDANCE}`);
+  } else if (stage === 'review') {
+    parent = parent.replace(
+      '- Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.',
+      `- Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.\n${REVIEW_NEL_GUIDANCE}`,
+    );
+  }
   if (stage !== 'review') {return parent;}
   const repositoryOpinion = fs.readFileSync(path.join(realRepoRoot(), 'prompts', 'review.md'), 'utf8');
   assert.ok(repositoryOpinion.includes(REVIEW_COVERAGE_GUIDANCE), 'repository review opinion must retain the prior coverage guidance');
@@ -113,10 +132,14 @@ for (const [i, stage] of STAGES.entries()) {
     const got = counts([...nonBlank(core).filter(l => l !== heading), ...nonBlank(def)]);
     const want = counts(nonBlank(expectedSourcePrompt(stage)));
     assert.ok(multisetEqual(got, want), `${stage}: core+opinion non-blank multiset must equal the authorized source prompt`);
-    // Repository-local additions belong in the opinion; the added heading is
-    // still the only core line that is not in the parent baseline.
+    // The file heading and the named mandatory policy amendment are the only
+    // core lines newer than the frozen split baseline.
     const extra = nonBlank(core).filter(l => !nonBlank(parentPrompt(stage)).includes(l));
-    assert.deepEqual(extra, [heading], `${stage}: only the added heading may be new`);
+    const amendment = stage === 'draft' ? DRAFT_NEL_GUIDANCE
+      : stage === 'execute' ? EXECUTE_NEL_GUIDANCE
+        : stage === 'review' ? REVIEW_NEL_GUIDANCE : undefined;
+    assert.deepEqual(extra, amendment ? [heading, amendment] : [heading],
+      `${stage}: only the heading and authorized mandatory amendment may be new`);
   });
 }
 

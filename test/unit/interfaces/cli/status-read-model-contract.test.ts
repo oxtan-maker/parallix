@@ -846,3 +846,15 @@ test('root status renders uncertain worktree authority without stale or cleanup 
   assert.match(output, /Uncertain: Mission authority unavailable; no cleanup advised/);
   assert.doesNotMatch(output, /Stale worktree:|Cleanup:|recover-landed/);
 });
+
+test('status renders the ordered verification-policy history, a fixed-policy fallback, and nothing when off (TASK-2859.07)', async () => {
+  const mission = fixtureMission('task-policy', { checkpoints: [] });
+  const render = async (verificationHistoryFn?: () => Promise<never>) => { const lines: string[] = [];
+    const board = createStatusBoardAdapter({ buildProjectionFn: async () => ({ async buildMissionCard() { return null; } } as any),
+      loadMissionFn: async () => ({ mission, version: 1 }), verificationHistoryFn });
+    renderStatus(statusResult({ slug: mission.id, missionData: await board.getMissionData(mission.id, '/repo') }), line => lines.push(line)); return lines.join('\n'); };
+  const entries = [{ kind: 'verdict', check: 'human', passed: false }, { kind: 'repair', check: 'human' }, { kind: 'unmodelled-change' }];
+  assert.doesNotMatch(await render(), /Verification policy history/);
+  assert.match(await render((async () => ({ entries, tests: 'unobserved' })) as never), /integration tests unobserved[\s\S]*human verdict failed[\s\S]*human repair/);
+  assert.match(await render((async () => ({ fallback: 'missing' })) as never), /Verification policy history: fixed policy \(missing\)/);
+});

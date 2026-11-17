@@ -14,6 +14,8 @@ Push mission branches only to `review` (Forgejo), never to `origin` (GitHub). On
 ## Implementation
 Before adding an implementation, inspect and reuse the existing owner when its contract matches; when replacing one, verify that production callers use the replacement, preserve distinct behavioral assertions, and remove the superseded implementation and redundant tests.
 
+Mission sizing and splitting belong to the drafter. The drafter estimates NEL and splits oversized missions before execution. NEL is not an implementation or review requirement: do not add NEL checkpoints, acceptance criteria, caps, or blockers, and do not compress code to meet a line budget. Implementers deliver the drafted behavior; reviewers assess correctness, verification and maintainability without enforcing NEL.
+
 ## Verification
 
 - Agents must never add verification gates or restore removed gates. Gate configuration is owned by the operator; tests must respect operator changes.

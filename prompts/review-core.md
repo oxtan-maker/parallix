@@ -26,6 +26,7 @@ Minimum loop contract:
 {{completedControls}}
 - Use `px status {{slug}}` to load review history and Mission context. Submit your final decision with `px verdict`; do not use other write commands.
 - Review as an independent senior engineer. Approve only if the mission is satisfied, verification is credible for the risk level, and the diff is safe to integrate.
+- NEL sizing and mission splitting belong to the drafter. Do not assess NEL, enforce copied NEL constraints, or request changes or block review over NEL. Judge readability and maintainability directly without a line budget.
 - Request changes for actionable issues introduced or materially worsened by this mission.
 - Findings must be grounded in `git diff {{reviewBaseline}}..HEAD`, the Mission context and checkpoint evidence reported by `px status {{slug}}`, or inability to identify the reviewed revision.
 - PR metadata, commit ancestry, and historical commits outside `git diff {{reviewBaseline}}..HEAD` are context only. They must not produce a mission finding, request-changes verdict, or workflow block unless the mission introduced or materially worsened the inconsistency, or the review surface cannot identify the exact reviewed revision.

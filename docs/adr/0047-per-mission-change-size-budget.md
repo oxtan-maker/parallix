@@ -90,6 +90,13 @@ tamper-evident) and recorded alongside the draft bucket. This produces, per miss
 `(predicted bucket, actual NEL, actual bucket, review rounds)` record — the
 prediction-vs-actual series the workflow has never had.
 
+Sizing and splitting are the drafter's responsibility, completed per mission
+before execution. NEL is not an implementer or reviewer requirement and must not
+become a checkpoint, acceptance criterion, execution cap or review blocker.
+Implementers deliver readable code and reviewers judge its behavior and quality;
+neither role compresses code or requests decomposition to satisfy NEL. Actual NEL
+remains a recorded measurement for calibration.
+
 ### 4. Why these buckets — the data
 
 Binning the 29 archived missions into terciles by NEL, against the share needing

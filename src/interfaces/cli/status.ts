@@ -356,7 +356,16 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log('Last checkpoint: none');
   }
   logReviewRounds(missionData, log);
+  logVerificationHistory(missionData.verificationHistory, log);
   logReviewLiveness(slug, missionData, log);
+}
+
+function logVerificationHistory(history: StatusMissionData['verificationHistory'], log: (_msg: string) => void): void {
+  if (!history) { return; }
+  if ('fallback' in history) { log(`Verification policy history: fixed policy (${history.fallback})`); return; }
+  log(`Verification policy history: ${history.entries.length} entries; integration tests ${history.tests}`);
+  history.entries.forEach((entry, index) => log(`  ${index + 1}. ${entry.kind === 'unmodelled-change' ? entry.kind
+    : `${entry.check} ${entry.kind}${entry.kind === 'verdict' ? ` ${entry.passed ? 'passed' : 'failed'}` : ''}`}`));
 }
 
 function logReviewLiveness(_slug: string, data: StatusMissionData, log: (_msg: string) => void): void {

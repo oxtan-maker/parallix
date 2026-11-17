@@ -29,6 +29,7 @@ Off or an absent block performs no policy artifact or history reads, writes or
 queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
 path, relative to the checkout or absolute. Pilot currently behaves as shadow;
 verification sequencing and merge requirements remain unchanged.
+When enabled, `px status <mission>` reports the ordered policy history or its typed fixed-policy fallback reason.
 
 `px config` validates the configured artifact and displays its canonical SHA-256
 identity or a fixed-policy fallback reason. Missing, unreadable, invalid or

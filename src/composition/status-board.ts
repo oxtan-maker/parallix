@@ -5,7 +5,7 @@
  * from the same authority with the same precedence: the task-card title
  * first, then the title recorded in the Mission store.
  */
-import type { StatusBoardPort } from '../application/ports/cli-workflows.js';
+import type { StatusBoardPort, StatusMissionData } from '../application/ports/cli-workflows.js';
 import { createStatusBoardAdapter } from '../adapters/cli/commands/status-adapter.js';
 import { missionId } from '../domain/mission.js';
 import type { MissionStore } from '../application/domain-ports.js';
@@ -13,6 +13,13 @@ import type { BoardProjectionBuilder } from '../application/projections/board-re
 import type { ProductionApplicationServices } from './application-services.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import { createReviewLivenessReader } from './review-liveness.js';
+import { readVerificationHistory } from '../application/verification-policy/history-adapter.js';
+import { loadEffectiveConfig } from '../adapters/config/product-config.js';
+import { createPolicyArtifactLoader } from '../adapters/config/verification-policy.js';
+import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
+import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
+import { VerificationGateEvidenceReader } from '../adapters/verification/gate-evidence-reader.js';
+import { processLivenessProbe } from '../adapters/process/process-liveness.js';
 
 interface StatusBoardServices {
   presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
@@ -37,12 +44,26 @@ export async function createStatusReadBoard(
     laneEventRepo: repositories.boardLaneEvents, usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir), sessionMarkers: new SqliteSessionMarkerRepository(db, mission.repositoryId), reviewExecution,
   });
-  return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } });
+  const policy = loadEffectiveConfig(rootDir).verificationPolicy;
+  const loadPolicy = policy.mode === 'off' ? null : createPolicyArtifactLoader(rootDir, policy);
+  const verificationHistoryFn = loadPolicy ? async (slug: string): Promise<StatusMissionData['verificationHistory']> => {
+    const artifact = loadPolicy();
+    if (artifact.mode === 'fixed') { return { fallback: artifact.reason }; }
+    const topology = snapshotWorktreeTopology({ cwd: rootDir });
+    const validations = new SqliteIntegrationValidationReader(db);
+    const gates = new VerificationGateEvidenceReader({ configuration, resolveWorktree: id => topology.resolveWorktree(id, { cwd: rootDir }),
+      integrationValidation: id => validations.read(id), isProcessAlive: processLivenessProbe });
+    const result = await readVerificationHistory({ store: mission.store, gates, history: mission.operationalHistory },
+      { repositoryId: mission.repositoryId, missionId: missionId(slug) });
+    return result.ok ? { entries: result.entries, tests: result.tests } : { fallback: `${result.failure.kind}: ${result.failure.message}` };
+  } : undefined;
+  return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } }, verificationHistoryFn);
 }
 
 /** Build the StatusBoardPort `px status` reads a Mission through. */
-export function createStatusBoardFor(services: StatusBoardServices): StatusBoardPort {
+export function createStatusBoardFor(services: StatusBoardServices, verificationHistoryFn?: (slug: string) => Promise<StatusMissionData['verificationHistory']>): StatusBoardPort {
   return createStatusBoardAdapter({
+    verificationHistoryFn,
     buildProjectionFn: async () => {
       const builder = services.presentationCapabilities?.boardProjection;
       if (!builder) { throw new Error('board projection is unavailable'); }

@@ -121,6 +121,8 @@ export function createStatusBoardAdapter(options: {
     readonly mission: import('../../../domain/mission.js').Mission;
     readonly version: number;
   } | null>;
+  /** Absent when verificationPolicy is off; reads nothing in that case. */
+  readonly verificationHistoryFn?: (_slug: string) => Promise<StatusMissionData['verificationHistory']>;
 }): StatusBoardPort {
   const inferSlugFn = options.inferSlugFn || inferSlug;
   return {
@@ -144,7 +146,9 @@ export function createStatusBoardAdapter(options: {
         const waveChildren = recorded?.mission.wave && options.loadMissionFn
           ? (await Promise.all(recorded.mission.wave.children.map(id => options.loadMissionFn!(id)))).flatMap(entry => entry ? [entry.mission] : [])
           : [];
-        return projectStatusMissionData(recorded, card, slug, rootDir, waveChildren);
+        const verificationHistory = await options.verificationHistoryFn?.(slug.toLowerCase());
+        const data = projectStatusMissionData(recorded, card, slug, rootDir, waveChildren);
+        return verificationHistory ? { ...data, verificationHistory } : data;
       } catch { /* projection unavailable */ }
       return null;
     },

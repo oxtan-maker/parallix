@@ -94,6 +94,10 @@ export interface StatusMissionData {
    * and the board cannot report different facts about the same round (TASK-2846).
    */
   readonly reviewHistory: readonly ReviewRoundSummary[];
+  /** Ordered verification-policy history; absent unless verificationPolicy is enabled. A fallback names the fixed-policy reason. */
+  readonly verificationHistory?: { readonly fallback: string } | {
+    readonly entries: readonly import('../verification-policy/belief.js').VerificationHistoryEntry[]; readonly tests: 'observed' | 'unobserved';
+  };
   /**
    * The mission's activity in the shared read model the TUI renders from.
    * Absent or `null` when the board projection could not supply one, in which
