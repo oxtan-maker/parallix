@@ -398,7 +398,7 @@ const REPAIR_TRANSCRIPT = 'gate output line\n'.repeat(20_000);
 function repairedMissionFixture() {
   const repo = repositoryId('test-repo');
   const id = missionId('task-2854-repair');
-  const closedAt = '2026-11-10T12:00:00.000Z';
+  const closedAt = new Date().toISOString();
   const mission: Mission = { id, repositoryId: repo, title: 'Repaired return', labels: missionLabels(['user_value']),
     assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null, status: 'done', closedAt, declaredGates: [] };
   const store: MissionStore = { load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
