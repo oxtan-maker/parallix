@@ -42,6 +42,19 @@ test('config reports malformed JSON as fallback defaults and exits non-zero', as
   });
 });
 
+test('config keeps policy failures non-blocking and reports the fallback (TASK-2859.06)', async () => {
+  await withTempDir(async root => {
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Preserved' }, verificationPolicy: { mode: 'shadow', artifact: 'missing.json' },
+    }));
+    const result = await runConfig(root);
+    assert.equal(result.exitCode, null);
+    assert.deepEqual(result.errors, []);
+    assert.match(result.logs.join('\n'), /Verification policy: fixed \(missing\)/);
+    assert.match(result.logs.join('\n'), /Preserved/);
+  });
+});
+
 test('config reports structurally invalid overrides as fallback defaults and exits non-zero', async () => {
   await withTempDir(async (root) => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: [] }));

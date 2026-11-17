@@ -2,7 +2,9 @@
 
 import * as fmt from '../../../application/presentation/cli-format.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
+import type { PolicyLoadResult } from '../../../application/ports/verification-policy.js';
 import { loadEffectiveConfig, loadWorkflowConfig, validateWorkflowConfig, hasGitRepository, resolveIntegrationMode } from '../../config/product-config.js';
+import { createPolicyArtifactLoader } from '../../config/verification-policy.js';
 
 interface ConfigOptions {
   configuration?: ParallixConfiguration;
@@ -19,6 +21,10 @@ interface ConfigOptions {
 // truth to drift from (architecture migration Scope Amendment).
 function wantsConfigWrite(args: string[]): boolean {
   return args.includes('--write');
+}
+
+function describePolicy(policy: Exclude<PolicyLoadResult, { mode: 'off' }>): string {
+  return policy.mode === 'shadow' ? `shadow (${policy.hash})` : `fixed (${policy.reason})`;
 }
 
 async function config(_args: string[] = [], opts: ConfigOptions = {}) {
@@ -76,7 +82,12 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
     logFn(`Integration mode: ${resolveIntegrationMode(rootDir)}`);
   }
 
-  logFn(JSON.stringify(loadEffectiveConfig(rootDir), null, 2));
+  const effective = loadEffectiveConfig(rootDir);
+  const policy = createPolicyArtifactLoader(rootDir, effective.verificationPolicy)();
+  if (policy.mode !== 'off') {
+    logFn(`Verification policy: ${describePolicy(policy)}`);
+  }
+  logFn(JSON.stringify(effective, null, 2));
 }
 
 export default config;

@@ -37,6 +37,7 @@ await installModuleMocks();
 
 import { MissionIntegrationService } from '../../../src/application/mission-integration-service.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
+import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
 import type { Mission, MissionStatus } from '../../../src/domain/mission.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from '../../fixtures/mission-builders.js';
@@ -225,7 +226,10 @@ async function runIntegrate(scenario: Scenario) {
     mock.reset();
     fs.rmSync(root, { recursive: true, force: true });
   }
-  return { error, exitCode, launches, seamLaunches, logs, captured, gateRuns, reviews, mission: services.store.mission() };
+  const mission = services.store.mission();
+  return { error, exitCode, launches, seamLaunches, logs, captured, gateRuns, reviews, mission,
+    laneEvents: services.store.events.map(event => `${event.from}>${event.to}:${event.trigger}`),
+    statistics: reviewStatistics(mission.review).total };
 }
 
 // A red integration gate calls the routing seam with the failed gate, the gate
@@ -265,6 +269,10 @@ test('TASK-2620: after repair and re-approval integration stops in the integrati
   assert.equal(result.gateRuns, 1, 'integration is not restarted after the re-review');
   assert.equal(result.reviews, 1);
   assert.equal(result.mission.status, 'integration', 'the re-approved mission waits for a human to integrate');
+  assert.deepEqual(result.laneEvents, ['review>integration:approve', 'integration>active:rebound-to-active'],
+    'approval entry and landing failure each have one durable event (TASK-2859.11)');
+  assert.equal(result.statistics, 2,
+    'the landing-gate return and the deterministic re-review return remain distinct (TASK-2859.11)');
   assert.ok(result.mission.review!.rounds[0].decision?.kind === 'approved' && result.mission.review!.rounds[0].decision.revocation);
   assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
 });

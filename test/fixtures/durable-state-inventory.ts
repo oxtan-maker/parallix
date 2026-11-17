@@ -888,6 +888,15 @@ export const ADR0053_PERSISTENCE_INVENTORY: readonly ADR0053BoundaryEntry[] = [
     cutoverTask: null,
   },
   {
+    id: 'config-read-verification-policy-artifact',
+    concept: 'Configuration',
+    pathType: 'default',
+    fileLocation: 'src/adapters/config/verification-policy.ts',
+    operation: 'read',
+    classification: 'configuration-or-secret',
+    cutoverTask: null,
+  },
+  {
     id: 'config-read-agents-json',
     concept: 'Configuration',
     pathType: 'default',

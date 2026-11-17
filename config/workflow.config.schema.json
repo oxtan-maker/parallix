@@ -6,6 +6,16 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "verificationPolicy": {
+      "type": "object",
+      "description": "Invalid policy configuration disables only this block. Pilot currently behaves as shadow.",
+      "properties": {
+        "mode": { "enum": ["off", "shadow", "pilot"], "default": "off" },
+        "artifact": { "type": "string", "pattern": "\\S" }
+      },
+      "if": { "properties": { "mode": { "enum": ["shadow", "pilot"] } }, "required": ["mode"] },
+      "then": { "required": ["artifact"] }
+    },
     "product": {
       "type": "object",
       "additionalProperties": true,

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { retainedRepairCase } from '../../fixtures/review-repair-recovery.js';
 import { parityCase, type ParityScenario } from '../../fixtures/review-entry-parity.js';
 import { reviewStatus } from '../../../src/domain/review.js';
+import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
 
 // Recovery and a failed original check run through the CLI and the board entry:
 // both reach the same review owner, so the observable outcome must be identical.
@@ -21,11 +22,11 @@ for (const phase of ['recovery', 'failed-check'] as const) {
 // round and lane-event counts: no duplicate round, no duplicate lane event, and an
 // approval only where a reviewer launch recorded one (TASK-2817).
 const HANDOFF_LANES = ['active>review', 'review>integration'];
-const PARITY: ReadonlyArray<{ scenario: ParityScenario; rounds: number; launches: string[]; lanes: string[]; code: number; status: string }> = [
-  { scenario: "first-review preparation", rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration' },
-  { scenario: 'interrupted-pending-review', rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration' },
-  { scenario: 'findings-resolution', rounds: 2, launches: ['review', 'implement', 'review'], lanes: ['active>review', 'review>active', 'active>review', 'review>integration'], code: 0, status: 'integration' },
-  { scenario: 'human-intervention', rounds: 1, launches: [], lanes: [], code: 1, status: 'active' },
+const PARITY: ReadonlyArray<{ scenario: ParityScenario; rounds: number; launches: string[]; lanes: string[]; code: number; status: string; returns: number | null }> = [
+  { scenario: "first-review preparation", rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration', returns: 0 },
+  { scenario: 'interrupted-pending-review', rounds: 1, launches: ['review'], lanes: HANDOFF_LANES, code: 0, status: 'integration', returns: 0 },
+  { scenario: 'findings-resolution', rounds: 2, launches: ['review', 'implement', 'review'], lanes: ['active>review', 'review>active', 'active>review', 'review>integration'], code: 0, status: 'integration', returns: 1 },
+  { scenario: 'human-intervention', rounds: 1, launches: [], lanes: [], code: 1, status: 'active', returns: null },
 ];
 for (const expected of PARITY) {
   for (const entry of ['cli', 'board'] as const) {
@@ -36,6 +37,8 @@ for (const expected of PARITY) {
       assert.equal(outcome.mission.review!.rounds.length, expected.rounds, 'no duplicate round');
       assert.deepEqual(outcome.launches, expected.launches);
       assert.deepEqual(outcome.laneEvents.map(event => `${event.from_status}>${event.to_status}`), expected.lanes, 'no duplicate lane event');
+      assert.equal(reviewStatistics(outcome.mission.review!).total, expected.returns,
+        'the public entry preserves the fixed-sequence statistics trace (TASK-2859.11)');
       if (expected.scenario === 'human-intervention') {
         assert.notEqual(outcome.mission.review!.intervention ?? null, null, 'an automatic entry cannot clear the stop');
       } else {
@@ -55,6 +58,8 @@ for (const entry of ['cli', 'board'] as const) {
     assert.equal(outcome.mission.review!.rounds.length, 1);
     assert.deepEqual(outcome.launches, [], 'a terminal approval launches no agent');
     assert.deepEqual(outcome.laneEvents.map(event => `${event.from_status}>${event.to_status}`), ['review>integration']);
+    assert.equal(reviewStatistics(outcome.mission.review!).total, 0,
+      'retained approval adds no repair return to existing statistics (TASK-2859.11)');
     assert.equal(decisions.filter(kind => kind === 'approved').length, 1 + outcome.launches.filter(kind => kind === 'review').length, 'every approval beyond the seeded one has a reviewer launch');
   });
 }

@@ -15,10 +15,27 @@ reports the specific issues, prints the built-in defaults it fell back to, and
 exits non-zero. The fallback is whole-file: a configuration with one rejected
 field contributes none of its overrides to the effective configuration, so fix
 the reported issue rather than relying on the rest of the file still applying.
+The `verificationPolicy` block is an exception: an invalid block disables only
+that feature and reports once per checkout in the process; other overrides apply.
 
 Sections not marked as closed below accept extra keys, matching the schema.
 An extra key is not an override: only the fields documented here have an
 effect.
+
+## Verification policy
+
+`verificationPolicy.mode` accepts `off` (default), `shadow` or `pilot`.
+Off or an absent block performs no policy artifact or history reads, writes or
+queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
+path, relative to the checkout or absolute. Pilot currently behaves as shadow;
+verification sequencing and merge requirements remain unchanged.
+
+`px config` validates the configured artifact and displays its canonical SHA-256
+identity or a fixed-policy fallback reason. Missing, unreadable, invalid or
+hash-mismatched artifacts keep the fixed policy usable. Each loader retains its
+first successful artifact and hash, so replacing the file does not change an
+existing pin. Canonical bytes are compact UTF-8 JSON of the validated artifact
+with recursively sorted object keys and preserved array order.
 
 ## Decision provider setup
 

@@ -133,6 +133,14 @@ test('dependency graph honors an explicitly owned legacy exception', () => {
 
 test('dependency graph production scan has no violation outside the owned allowlist', () => {
   assert.deepEqual(findProductionDependencyViolations(process.cwd()), []);
+  for (const root of ['src', 'web']) {
+    for (const file of fs.readdirSync(root, { recursive: true, withFileTypes: true })) {
+      if (file.isFile() && /\.[cm]?[jt]sx?$/.test(file.name)) {
+        assert.doesNotMatch(fs.readFileSync(path.join(file.parentPath, file.name), 'utf8'), /\bresearch[\\/]|['"`]research['"`]/,
+          'production must load only the configured artifact (TASK-2859.06)');
+      }
+    }
+  }
 });
 
 test('production dependency exceptions are retired', () => {

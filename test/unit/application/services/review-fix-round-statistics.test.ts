@@ -39,6 +39,32 @@ function providerRequest(id: number, login: string, observedAt: string,
     classification: 'direct-observation', raw: { id, state: 'REQUEST_CHANGES', user: { login } } };
 }
 
+test('fixed-sequence scenarios keep immutable golden statistics traces (TASK-2859.11)', () => {
+  const approved = (number: number) => round(number, { decision: {
+    ...approval, revision: round(number).subject.revision,
+  } });
+  const gateFailure = round(1, { decision: { ...approval, revision: round(1).subject.revision, revocation: {
+    revokedAt: '2026-10-01T00:02:00Z', revokedBy: 'integration', reason: 'landing gate failed',
+    cause: { kind: 'integration-gate-failure', gate: 'integration-suite' },
+  } } });
+  const scenarios: ReadonlyArray<[string, Review, unknown]> = [
+    ['all pass', review([approved(1)]), [0, [], [['agent', 'agent-review']]]],
+    ['agent failure and repair', review([round(1), approved(2)]), [1, [['agent', 'changes-requested']], [['agent', 'agent-review'], ['agent', 'agent-review']]]],
+    ['human send-back', review([round(1, { decision: humanRejection(1) }), approved(2)]), [1, [['human', 'changes-requested']], [['human', 'human-review'], ['agent', 'agent-review']]]],
+    ['landing gate failure and repair', review([gateFailure, approved(2)]), [1, [['workflow', 'integration-gate-failure']], [['agent', 'agent-review'], ['agent', 'agent-review']]]],
+    ['retained approval', review([approved(1)]), [0, [], [['agent', 'agent-review']]]],
+    ['restart mid-action', review([round(1, { decision: null })]), [null, [], []]],
+  ];
+  for (const [name, aggregate, golden] of scenarios) {
+    const observed = reviewStatistics(aggregate);
+    assert.deepEqual([
+      observed.total,
+      observed.returns.map(item => [item.origin.actor, item.origin.cause]),
+      observed.episodes.map(item => [item.actor, item.stage]),
+    ], golden, `${name} statistics changed; this parent-commit trace is immutable`);
+  }
+});
+
 test('counts human corrections without reviewer outcomes (TASK-2818)', () => {
   assert.equal(reviewStatistics(review([round(1, { decision: approval })], [
     event(1, { eventType: 'human_note', actor: 'operator' }),

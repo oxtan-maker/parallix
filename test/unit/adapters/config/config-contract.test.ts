@@ -1,3 +1,5 @@
+import { createPolicyArtifactLoader } from '../../../../src/adapters/config/verification-policy.js';
+import { policyArtifactFixture as fixture } from '../../application/verification-policy/policy-artifact.fixture.js';
 // In-process config cases share this owner and worker; real Git cases remain integration.
 import './product-config.cases.js';
 // Historical regression provenance: TASK-1233, TASK-2500.01, TASK-2455.01, TASK-2455.02.
@@ -7,7 +9,7 @@ import './product-config.cases.js';
 // config-contract-deferral (task-1233), integration-mode-config (task-2500.01),
 // task-2455.01-target-user-repro and task-2455.02-task-provider-config-repro
 // suites (TASK-2622.14).
-import { describe, test } from 'node:test';
+import { describe, test, mock } from 'node:test';
 import { resolveGateResources, resolveVerificationResource, resolveMaxConcurrentGates } from '../../../../src/adapters/config/product-config.js';
 import { normalizeGates } from '../../../../src/adapters/config/repository-gate-schema.js';
 import { loadPhaseGateParallelism } from '../../../../src/adapters/config/repository-gates.js';
@@ -57,6 +59,54 @@ function withConfig(config: unknown | null, run: (_root: string) => void): void 
     run(root);
   });
 }
+
+test('policy loader pins canonical identity across replacement and keeps pilot in shadow (TASK-2859.06)', () => {
+  let reads = 0;
+  let input = JSON.stringify(fixture());
+  const load = createPolicyArtifactLoader('/repo', { mode: 'pilot', artifact: 'policy.json' }, file => {
+    assert.equal(file, '/repo/policy.json'); reads++; return input;
+  });
+  const first = load(); assert.equal(first.mode, 'shadow');
+  assert.ok(first.mode === 'shadow');
+  assert.equal(first.hash, '680cfb4f366cb2b853f4d2a7b5651c0ad328a2d5571511ffb41f3ca4d0d0b4c3');
+  const reordered = JSON.stringify(Object.fromEntries(Object.entries(fixture()).reverse()), null, 2);
+  assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: '/policy.json' }, () => reordered)(), first);
+  input = JSON.stringify({ ...fixture(), solverVersion: 'replacement' });
+  assert.deepEqual(load(first.hash), first); assert.equal(reads, 1);
+  assert.deepEqual(load('other-pin'), { mode: 'fixed', reason: 'hash-mismatch' });
+  assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => input)(first.hash),
+    { mode: 'fixed', reason: 'hash-mismatch' });
+});
+
+test('policy loader off does no I/O and failures return typed fixed-policy reasons (TASK-2859.06)', () => {
+  assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'off', artifact: 'ignored' }, () => { throw Error('off read'); })(), { mode: 'off' });
+  for (const [code, reason] of [['ENOENT', 'missing'], ['EACCES', 'unreadable']]) {
+    assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => { throw { code }; })(),
+      { mode: 'fixed', reason });
+  }
+  const invalid = createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => '{}')();
+  assert.ok(invalid.mode === 'fixed' && invalid.reason === 'invalid' && invalid.rejection?.code === 'missing-field');
+});
+
+test('verificationPolicy invalid block disables only itself and reports once (TASK-2859.06)', () => {
+  for (const block of [null, [], 'shadow', { mode: 'unknown' }, { mode: 'shadow' }, { artifact: 4 }, { mode: 'pilot', artifact: ' ' }]) {
+    withConfig({ product: { name: 'Kept' }, verificationPolicy: block }, root => {
+      const report = mock.method(console, 'error', () => {});
+      try {
+        assert.deepEqual(validateWorkflowConfig({ verificationPolicy: block }), []);
+        assert.equal(loadEffectiveConfig(root).product.name, 'Kept');
+        assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode: 'off' });
+        assert.equal(report.mock.callCount(), 1);
+      } finally { report.mock.restore(); }
+    });
+  }
+  for (const mode of ['off', 'shadow', 'pilot']) {
+    withConfig({ verificationPolicy: { mode, artifact: 'policy.json' } }, root => {
+      assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode, artifact: 'policy.json' });
+    });
+  }
+  withConfig(null, root => assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode: 'off' }));
+});
 
 describe("workflow.config.json discovery and readiness", () => {
   // GAP from CP-2 row 2: malformed JSON reaches the parseError -> 'invalid' branch

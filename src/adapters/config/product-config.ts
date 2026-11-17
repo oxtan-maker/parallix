@@ -12,6 +12,8 @@ import {
   type IntegrationMode,
 } from '../../domain/integration.js';
 import type { GithubPublishConfig } from '../../application/ports/github-publish.js';
+import type { VerificationPolicyConfiguration } from '../../application/ports/verification-policy.js';
+import { verificationPolicyConfig } from './verification-policy.js';
 
 const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
@@ -23,6 +25,7 @@ const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'a
 export const SUPPORTED_TASK_PROVIDERS = ['backlog-md'] as const;
 
 const DEFAULT_CONFIG = Object.freeze({
+  verificationPolicy: { mode: 'off' } as VerificationPolicyConfiguration,
   product: {
     name: 'Workflow',
   },
@@ -117,6 +120,7 @@ export function loadWorkflowConfig(rootDir: string = process.cwd()): LoadedConfi
   }
 }
 
+const reportedPolicyConfigs = new Set<string>();
 export function loadEffectiveConfig(rootDir: string = process.cwd()): typeof DEFAULT_CONFIG {
   const loaded = loadWorkflowConfig(rootDir);
   if (!loaded.found || loaded.parseError || !isPlainObject(loaded.config)) {
@@ -125,7 +129,11 @@ export function loadEffectiveConfig(rootDir: string = process.cwd()): typeof DEF
   if (validateWorkflowConfig(loaded.config).length > 0) {
     return defaultConfig();
   }
-  return deepMerge(defaultConfig(), loaded.config as PlainObject) as typeof DEFAULT_CONFIG;
+  const verificationPolicy = verificationPolicyConfig(loaded.config.verificationPolicy, message => {
+    const key = path.resolve(rootDir);
+    if (!reportedPolicyConfigs.has(key)) { reportedPolicyConfigs.add(key); console.error(message); }
+  });
+  return { ...deepMerge(defaultConfig(), loaded.config), verificationPolicy } as typeof DEFAULT_CONFIG;
 }
 
 function isSupportedTaskProvider(value: unknown): boolean {
