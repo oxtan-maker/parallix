@@ -1,6 +1,15 @@
 # Development install settings for the Parallix repository (ADR 0063). The
 # published package is still built and installed with npm.
+audit:
+  ignore:
+    # Operator-approved through 2026-11-24; no patched picomatch release yet.
+    # TASK-2863 owns removal/review; pnpm does not automatically expire ignores.
+    - GHSA-fc5q-39xc-vjpf
 overrides:
+  fast-uri@>=3.0.0 <3.1.9: ^3.1.9
+  fast-uri@>=4.0.0 <4.2.3: ^4.2.3
+  fastify@>=5.12.2 <5.12.6: ^5.12.6
+  minimatch@>=7.0.0 <11.0.1: ^11.0.1
   source-map-js: 1.2.2
   undici: 8.12.3
 packageImportMethod: auto
