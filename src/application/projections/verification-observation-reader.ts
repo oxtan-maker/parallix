@@ -37,6 +37,8 @@ export interface RebaseMeasurement {
   readonly stage: RebaseObservationStage; readonly attempt: number;
   readonly outcome: RebaseObservationOutcome;
   readonly inapplicability?: string;
+  /** Target branch used by the rebase; required to compare stable change identities. */
+  readonly baseBranch?: string | null;
   readonly revisionBefore: string | null; readonly revisionAfter: string | null;
   readonly conflicts: readonly string[]; readonly occurredAt: string;
 }
@@ -93,6 +95,7 @@ function validRebase(value: RebaseMeasurement): boolean {
   return Boolean(value.id && value.missionId && value.sourceId && value.operationId) && Number.isSafeInteger(value.attempt)
     && REBASE_OBSERVATION_STAGES.includes(value.stage)
     && REBASE_OBSERVATION_OUTCOMES.includes(value.outcome)
+    && (value.baseBranch === undefined || value.baseBranch === null || typeof value.baseBranch === 'string')
     && (value.outcome !== 'inapplicable' || Boolean(value.inapplicability));
 }
 

@@ -466,6 +466,7 @@ test('shared reader deduplicates rebase snapshots without collapsing repeated cy
   const observation = (id: string, operationId: string, generation: number, outcome: string, at: number) => ({
     eventType: 'flow.rebase', createdAt: instant(at), eventData: JSON.stringify({ id, repositoryId: 'repo', missionId: 'px-1',
       operationId, generation, sourceId: id, stage: 'pre-review-rebase', attempt: 1, outcome,
+      baseBranch: 'main',
       revisionBefore: 'before', revisionAfter: outcome === 'resolved' ? 'after' : 'before', conflicts: outcome === 'conflict' ? ['shared.ts'] : [],
       dependencies: [], occurredAt: instant(at) }),
   });
@@ -478,6 +479,8 @@ test('shared reader deduplicates rebase snapshots without collapsing repeated cy
   assert.deepEqual(report.rebases.map(value => [value.id, value.outcome]), [
     ['cycle-1', 'running'], ['cycle-1', 'conflict'], ['cycle-1', 'resolved'], ['cycle-2', 'running'], ['cycle-2', 'no-op'],
   ]);
+  assert.ok(report.rebases.every(value => value.baseBranch === 'main'),
+    'stable change-identity metadata is retained without changing rebase population or metric meaning');
   assert.equal(report.unknowns.some(value => value.includes('Rebase workflow join missing')), false);
 });
 

@@ -20,6 +20,8 @@ import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import { VerificationGateEvidenceReader } from '../adapters/verification/gate-evidence-reader.js';
 import { processLivenessProbe } from '../adapters/process/process-liveness.js';
+import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
+import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
 
 interface StatusBoardServices {
   presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
@@ -46,6 +48,8 @@ export async function createStatusReadBoard(
   });
   const policy = loadEffectiveConfig(rootDir).verificationPolicy;
   const loadPolicy = policy.mode === 'off' ? null : createPolicyArtifactLoader(rootDir, policy);
+  const policyIdentity = loadPolicy ? createGitChangeIdentity(rootDir, undefined, { snapshotBranchHeads: true }) : null;
+  const policyOperations = loadPolicy ? new SqliteWorkflowOperationStore(db, mission.repositoryId) : null;
   const verificationHistoryFn = loadPolicy ? async (slug: string): Promise<StatusMissionData['verificationHistory']> => {
     const artifact = loadPolicy();
     if (artifact.mode === 'fixed') { return { fallback: artifact.reason }; }
@@ -53,7 +57,8 @@ export async function createStatusReadBoard(
     const validations = new SqliteIntegrationValidationReader(db);
     const gates = new VerificationGateEvidenceReader({ configuration, resolveWorktree: id => topology.resolveWorktree(id, { cwd: rootDir }),
       integrationValidation: id => validations.read(id), isProcessAlive: processLivenessProbe });
-    const result = await readVerificationHistory({ store: mission.store, gates, history: mission.operationalHistory },
+    const result = await readVerificationHistory({ store: mission.store, gates, history: mission.operationalHistory,
+      lifecycle: repositories.boardLaneEvents, operations: policyOperations!, identity: policyIdentity! },
       { repositoryId: mission.repositoryId, missionId: missionId(slug) });
     return result.ok ? { entries: result.entries, tests: result.tests } : { fallback: `${result.failure.kind}: ${result.failure.message}` };
   } : undefined;

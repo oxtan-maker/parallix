@@ -1,12 +1,25 @@
 import type { Review, ReviewRound } from '../../domain/review.js'; import type { CheckpointData } from '../../domain/checkpoint.js';
+import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { GateEvidenceReader, GateEvidenceScope, IntegrationGateEvidence } from '../ports/gate-evidence.js';
-import type { OperationalHistoryEntry } from '../ports/operation-history.js';
+import type { LifecycleHistoryEntry, OperationalHistoryEntry } from '../ports/operation-history.js';
+import { isSuccessfulRebaseOutcome } from '../ports/rebase-workflow.js';
+import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
+import { assessApprovalCoverage } from '../../domain/approval-coverage.js';
+import { observeLandedChange, type ChangeIdentityPort } from '../approval-coverage.js';
+import { observedRebases, type RebaseMeasurement } from '../projections/verification-observation-reader.js';
 import type { VerificationHistoryEntry } from './belief.js';
 export type PolicyHistory = { readonly ok: true; readonly entries: readonly VerificationHistoryEntry[]; readonly tests: 'observed' | 'unobserved' } | { readonly ok: false; readonly failure: { readonly kind: 'unavailable' | 'invalid' | 'contradiction' | 'unmodelled-history'; readonly message: string } };
 type FailureKind = Extract<PolicyHistory, { ok: false }>['failure']['kind'];
 type Slot = { readonly at: number; readonly order: number; readonly entry: VerificationHistoryEntry }; type Repair = { readonly occurrence: string; readonly gates: ReadonlySet<string>; readonly at: number; readonly complete: boolean };
+type ApprovedDecision = Extract<NonNullable<ReviewRound['decision']>, { readonly kind: 'approved' }>;
+export interface VerificationHistoryFacts {
+  readonly rebases?: readonly RebaseMeasurement[];
+  readonly lifecycle?: readonly LifecycleHistoryEntry[];
+  readonly identity?: ChangeIdentityPort;
+  readonly approvalCoverage?: ReadonlyMap<number, ApprovalCoverage | null>;
+}
 class Unmapped extends Error { constructor(readonly kind: FailureKind, message: string) { super(message); } }
 const reject = (kind: FailureKind, message: string): never => { throw new Unmapped(kind, message); };
 const instant = (value: unknown, label: string): number => { const parsed = typeof value === 'string' ? Date.parse(value) : Number.NaN;
@@ -48,47 +61,144 @@ function changeSlots(round: ReviewRound, decided: number, label: string): Slot[]
   if (responded < decided) { reject('contradiction', `${label} repair predates its verdict`); }
   return [...slots, { at: responded, order: round.number * 10 + 1, entry: { kind: 'repair', check } }];
 }
-function gateIncident(round: ReviewRound, gate: string, label: string) {
+function integrationIncidentGate(round: ReviewRound, decision: ApprovedDecision, label: string): string | null {
   const assessment = round.integrationRepairAssessment, incident = assessment?.repair;
-  if (!incident || assessment?.failedGate !== gate || incident.cause.gate !== gate) { throw new Unmapped('unmodelled-history', `${label} gate failure has no matching repair assessment`); } return incident;
+  if (!incident && !decision.revocation) { return null; }
+  const revocation = decision.revocation;
+  const revokedGate = revocation?.cause?.kind === 'integration-gate-failure'
+    && typeof revocation.cause.gate === 'string' ? revocation.cause.gate : null;
+  const gate: string | null | undefined = revokedGate ?? incident?.cause.gate;
+  if (!gate || !incident || assessment?.failedGate !== gate || incident.cause.gate !== gate) {
+    throw new Unmapped('unmodelled-history', `${label} gate failure has no matching repair assessment`);
+  }
+  return gate;
+}
+function incidentRepair(gate: string, failed: number, next: ReviewRound | undefined,
+  repairs: readonly Repair[]): Repair | undefined {
+  const nextDecision = next?.decision ? instant(next.decision.decidedAt, `round ${next.number} decision`) : Number.POSITIVE_INFINITY;
+  const nextRepair = next?.integrationRepairAssessment?.repair;
+  const nextIncident = next && nextRepair?.startedAt
+    ? instant(nextRepair.startedAt, `round ${next.number} gate failure`) : Number.POSITIVE_INFINITY;
+  return repairs.find(item => item.complete && item.gates.has(gate)
+    && item.at >= failed && item.at <= Math.min(nextDecision, nextIncident));
+}
+function integrationIncidentSlots(round: ReviewRound, next: ReviewRound | undefined,
+  repairs: readonly Repair[], decision: ApprovedDecision, label: string): Slot[] {
+  const gate = integrationIncidentGate(round, decision, label);
+  if (gate === null) { return []; }
+  const incident = round.integrationRepairAssessment!.repair!;
+  const failed = instant(incident.startedAt, `${label} gate failure`);
+  if (decision.revocation && instant(decision.revocation.revokedAt, `${label} revocation`) < failed) {
+    reject('contradiction', `${label} revocation predates its gate failure`);
+  }
+  const repaired = incidentRepair(gate, failed, next, repairs);
+  const slots: Slot[] = [{ at: failed, order: round.number * 10 + 2, entry: { kind: 'verdict', check: 'tests', passed: false } }];
+  return repaired?.gates.size === 1
+    ? [...slots, { at: repaired.at, order: round.number * 10 + 3, entry: { kind: 'repair', check: 'tests' } }]
+    : slots;
 }
 function approvalSlots(round: ReviewRound, next: ReviewRound | undefined, repairs: readonly Repair[], decided: number, label: string): Slot[] {
   const decision = round.decision!;
   if (decision.kind !== 'approved') { return []; }
-  if (decision.source.kind === 'mechanical-restoration') { reject('unmodelled-history', `${label} uses a retained approval`); }
-  const slots: Slot[] = [{ at: decided, order: round.number * 10, entry: { kind: 'verdict', check: 'agent', passed: true } }];
-  if (!decision.revocation) { return slots; }
-  const revoked = decision.revocation, cause = decision.revocation.cause, revokedAt = instant(revoked.revokedAt, `${label} revocation`);
-  if (cause?.kind !== 'integration-gate-failure') { return [...slots, { at: revokedAt, order: round.number * 10 + 1, entry: { kind: 'unmodelled-change' } }]; }
-  if (!cause.gate) { throw new Unmapped('unmodelled-history', `${label} gate failure has no matching repair assessment`); }
-  const gate = cause.gate, incident = gateIncident(round, gate, label);
-  const failed = instant(incident.startedAt, `${label} gate failure`);
-  if (revokedAt < failed) { reject('contradiction', `${label} revocation predates its gate failure`); }
-  const nextDecision = next?.decision ? instant(next.decision.decidedAt, `round ${next.number} decision`) : Number.POSITIVE_INFINITY, nextIncident = next?.integrationRepairAssessment?.repair?.startedAt ? instant(next.integrationRepairAssessment.repair.startedAt, `round ${next.number} gate failure`) : Number.POSITIVE_INFINITY;
-  const repaired = repairs.find(item => item.complete && item.gates.has(gate) && item.at >= failed && item.at <= Math.min(nextDecision, nextIncident));
-  slots.push({ at: failed, order: round.number * 10 + 2, entry: { kind: 'verdict', check: 'tests', passed: false } });
-  if (repaired) { slots.push({ at: repaired.at, order: round.number * 10 + 3, entry: { kind: 'repair', check: 'tests' } }); }
-  return slots;
+  if (decision.source.kind === 'mechanical-restoration') { reject('unmodelled-history', `${label} uses a retained approval without coverage`); }
+  const approved: Slot = { at: decided, order: round.number * 10, entry: { kind: 'verdict', check: 'agent', passed: true } };
+  if (decision.revocation && decision.revocation.cause?.kind !== 'integration-gate-failure') {
+    const revokedAt = instant(decision.revocation.revokedAt, `${label} revocation`);
+    return [approved, { at: revokedAt, order: round.number * 10 + 1, entry: { kind: 'unmodelled-change' } }];
+  }
+  return [approved, ...integrationIncidentSlots(round, next, repairs, decision, label)];
 }
-function validateRoundIdentity(round: ReviewRound, prior: ReviewRound | undefined): void {
+function sameChange(left: ReviewRound['subject']['change'], right: ReviewRound['subject']['change']): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+function expectedNextRevision(prior: ReviewRound): string | null {
+  if (prior.response) { return prior.response.resultingRevision; }
+  const repair = prior.integrationRepairAssessment;
+  if (repair?.repair) { return repair.candidateRevision; }
+  return prior.subject.revision;
+}
+function hasSameRevisionIdentity(left: string | null, right: string | null, targetBranch: string,
+  identity: ChangeIdentityPort | undefined): boolean {
+  if (left === right) { return true; }
+  if (!left || !right || !identity) { return false; }
+  const leftIdentity = identity.changeIdentity(left, targetBranch);
+  const rightIdentity = identity.changeIdentity(right, targetBranch);
+  if (leftIdentity === null || rightIdentity === null) {
+    reject('unavailable', `change identity for ${targetBranch} is unavailable`);
+  }
+  return leftIdentity === rightIdentity;
+}
+function validateRoundIdentity(round: ReviewRound, prior: ReviewRound | undefined,
+  identity: ChangeIdentityPort | undefined): { slots: Slot[]; decisionMatches: boolean } {
   if (prior && round.number <= prior.number) { reject('invalid', 'review rounds are not strictly ordered'); }
+  const slots: Slot[] = [];
+  const targetBranch = round.subject.change.targetBranch;
+  if (prior && (round.decision || round.response) && (!sameChange(prior.subject.change, round.subject.change)
+    || !hasSameRevisionIdentity(expectedNextRevision(prior), round.subject.revision, targetBranch, identity))) {
+    slots.push({ at: instant(round.startedAt, `round ${round.number} start`), order: round.number * 10 - 1,
+      entry: { kind: 'unmodelled-change' } });
+  }
+  const revision = round.decision?.revision;
+  if (round.decision && !revision) { reject('unmodelled-history', `round ${round.number} decision has no revision`); }
+  const decisionMatches = !revision
+    || hasSameRevisionIdentity(round.subject.revision, revision, targetBranch, identity);
+  if (revision && !decisionMatches) {
+    slots.push({ at: instant(round.decision!.decidedAt, `round ${round.number} decision`), order: round.number * 10,
+      entry: { kind: 'unmodelled-change' } });
+  }
+  return { slots, decisionMatches };
 }
-function roundSlots(rounds: readonly ReviewRound[], repairs: readonly Repair[]): Slot[] {
+function retainedApprovalSlot(round: ReviewRound, coverage: ApprovalCoverage | null | undefined, at: number): Slot[] {
+  const retained = round.integrationRepairAssessment?.outcome === 'retained'
+    || round.decision?.kind === 'approved' && round.decision.source.kind === 'mechanical-restoration';
+  if (!retained) { return []; }
+  if (!coverage) { throw new Unmapped('unmodelled-history', `round ${round.number} retained approval has no coverage`); }
+  if (coverage.kind === 'unverifiable') { reject('unavailable', `round ${round.number} retained approval is unverifiable: ${coverage.reason}`); }
+  if (coverage.kind !== 'covers' || coverage.round !== round.number) {
+    reject('contradiction', `round ${round.number} retained approval is not covered`);
+  }
+  return [{ at, order: round.number * 10 + 4, entry: { kind: 'retained-pass', check: 'agent' } }];
+}
+function roundSlots(rounds: readonly ReviewRound[], repairs: readonly Repair[],
+  coverage: ReadonlyMap<number, ApprovalCoverage | null>, identity: ChangeIdentityPort | undefined): Slot[] {
   return rounds.flatMap((round, index) => {
     const prior = rounds[index - 1], next = rounds.slice(index + 1).find(item => item.decision || item.integrationRepairAssessment?.repair), label = `round ${round.number}`;
-    validateRoundIdentity(round, prior);
+    const validation = validateRoundIdentity(round, prior, identity);
     const decision = round.decision;
-    if (!decision) { return []; }
+    if (!decision) { return validation.slots; }
     const decided = instant(decision.decidedAt, `${label} decision`);
-    return decision.kind === 'changes-requested' ? changeSlots(round, decided, label) : approvalSlots(round, next, repairs, decided, label);
+    if (!validation.decisionMatches) { return validation.slots; }
+    if (decision.kind === 'changes-requested') { return [...validation.slots, ...changeSlots(round, decided, label)]; }
+    if (decision.source.kind === 'mechanical-restoration') {
+      return [...validation.slots, ...retainedApprovalSlot(round, coverage.get(round.number), decided)];
+    }
+    const approvals = approvalSlots(round, next, repairs, decided, label);
+    const repairedAt = approvals.find(item => item.entry.kind === 'repair' && item.entry.check === 'tests')?.at;
+    const retainedAt = repairedAt === undefined ? decided
+      : Math.max(repairedAt, instant(round.integrationRepairAssessment?.assessedAt, `${label} retention assessment`));
+    return [...validation.slots, ...approvals, ...retainedApprovalSlot(round, coverage.get(round.number), retainedAt)];
   });
 }
-function gateSlot(gates: IntegrationGateEvidence | null, testsAlreadyFailed: boolean): { slot?: Slot; observed: boolean } {
+function gateResultMatchesCheckout(revision: string | null, checkoutRevision: string,
+  targetBranch: string | undefined, identity: ChangeIdentityPort | undefined): boolean {
+  if (revision === checkoutRevision) { return true; }
+  return targetBranch ? hasSameRevisionIdentity(revision, checkoutRevision, targetBranch, identity) : false;
+}
+function gateSlot(gates: IntegrationGateEvidence | null, testsAlreadyFailed: boolean,
+  targetBranch: string | undefined, identity: ChangeIdentityPort | undefined): { slot?: Slot; observed: boolean } {
   if (!gates || gates.checkout.kind !== 'present' || gates.configured.length === 0) { return { observed: false }; }
+  const checkoutRevision = gates.checkout.revision;
   const outcomes = gates.configured.map(key => gates.gates.find(item => item.key === key));
   if (outcomes.some(item => !item)) { return { observed: true }; }
   for (const item of outcomes) {
     if (item!.proof.state === 'current' && item!.failure?.state === 'current') { reject('contradiction', `gate ${item!.key} both passed and failed`); }
+  }
+  const mismatched = outcomes.flatMap(item => [item!.proof.state === 'current' ? item!.proof : null,
+    item!.failure?.state === 'current' ? item!.failure : null])
+    .filter(item => item && !gateResultMatchesCheckout(item.revision, checkoutRevision, targetBranch, identity));
+  if (mismatched.length) {
+    return { observed: true, slot: { at: Math.max(...mismatched.map(item => instant(item!.observedAt, 'gate result'))),
+      order: 1e6, entry: { kind: 'unmodelled-change' } } };
   }
   const failures = outcomes.flatMap(item => item!.failure?.state === 'current' ? [item!.failure] : []);
   if (failures.length && !testsAlreadyFailed) {
@@ -99,15 +209,75 @@ function gateSlot(gates: IntegrationGateEvidence | null, testsAlreadyFailed: boo
   }
   return { observed: true };
 }
+function rebaseSlots(rebases: readonly RebaseMeasurement[], identity: ChangeIdentityPort | undefined): Slot[] {
+  return rebases.flatMap((rebase, index) => {
+    if (!isSuccessfulRebaseOutcome(rebase.outcome)) { return []; }
+    if (rebase.revisionBefore === rebase.revisionAfter) { return []; }
+    if (!identity || !rebase.baseBranch || !rebase.revisionBefore || !rebase.revisionAfter) {
+      reject('unmodelled-history', `rebase ${rebase.id} has no comparable change identity`);
+    }
+    const comparableIdentity = identity as ChangeIdentityPort;
+    const baseBranch = rebase.baseBranch as string, beforeRevision = rebase.revisionBefore as string,
+      afterRevision = rebase.revisionAfter as string;
+    const before = comparableIdentity.changeIdentity(beforeRevision, baseBranch);
+    const after = comparableIdentity.changeIdentity(afterRevision, baseBranch);
+    if (before === null || after === null) { reject('unavailable', `rebase ${rebase.id} change identity is unavailable`); }
+    return before === after ? [] : [{ at: instant(rebase.occurredAt, 'rebase observation'), order: 2e6 + index,
+      entry: { kind: 'unmodelled-change' } as const }];
+  });
+}
+function lifecycleSlots(lifecycle: readonly LifecycleHistoryEntry[]): Slot[] {
+  return lifecycle.flatMap((event, index) => {
+    if (event.returnIdentityDefect) { reject('invalid', event.returnIdentityDefect); }
+    return event.returnIdentity?.stage === 'declared-gates'
+      ? [{ at: instant(event.occurredAt, 'declared-gates return'), order: 3e6 + index,
+        entry: { kind: 'unmodelled-change' } as const }] : [];
+  });
+}
+function ambiguousRepairSlots(repairs: readonly Repair[]): Slot[] {
+  return repairs.flatMap((repair, index) => repair.complete && repair.gates.size > 1
+    ? [{ at: repair.at, order: 4e6 + index, entry: { kind: 'unmodelled-change' } as const }] : []);
+}
+function truncateAtPendingRepair(slots: Slot[]): Slot[] {
+  let pending = false;
+  const retained: Slot[] = [];
+  for (const slot of slots) {
+    if (pending && slot.entry.kind !== 'repair' && slot.entry.kind !== 'unmodelled-change') { break; }
+    retained.push(slot);
+    if (slot.entry.kind === 'verdict' && !slot.entry.passed) { pending = true; }
+    else if (slot.entry.kind === 'repair' || slot.entry.kind === 'unmodelled-change') { pending = false; }
+  }
+  return retained;
+}
+function mappedHistorySlots(review: Review | null, repairRows: readonly OperationalHistoryEntry[],
+  repairCheckpoints: readonly CheckpointData[], facts: VerificationHistoryFacts): Slot[] {
+  const repairs = repairsFrom(repairRows, repairCheckpoints);
+  const slots = [...roundSlots(review?.rounds ?? [], repairs, facts.approvalCoverage ?? new Map(), facts.identity),
+    ...rebaseSlots(facts.rebases ?? [], facts.identity), ...lifecycleSlots(facts.lifecycle ?? []),
+    ...ambiguousRepairSlots(repairs)];
+  slots.sort((left, right) => left.at - right.at || left.order - right.order);
+  return truncateAtPendingRepair(slots);
+}
+function withGateSlot(mapped: Slot[], gates: IntegrationGateEvidence | null, review: Review | null,
+  identity: ChangeIdentityPort | undefined) {
+  const testsFailed = mapped.some(item => item.entry.kind === 'verdict'
+    && item.entry.check === 'tests' && !item.entry.passed);
+  const targetBranch = review?.rounds.at(-1)?.subject.change.targetBranch;
+  const gate = gateSlot(gates, testsFailed, targetBranch, identity);
+  const latest = mapped.at(-1)?.entry;
+  const pendingFailedVerdict = latest?.kind === 'verdict' && !latest.passed;
+  if (gate.slot && (!pendingFailedVerdict || gate.slot.entry.kind === 'unmodelled-change')) { mapped.push(gate.slot); }
+  mapped.sort((left, right) => left.at - right.at || left.order - right.order);
+  return { mapped, observed: gate.observed };
+}
 /** Pure mapping of authoritative review, gate and completed-repair facts into ordered policy history. */
 export function adaptVerificationHistory(review: Review | null, gates: IntegrationGateEvidence | null,
-  repairRows: readonly OperationalHistoryEntry[] = [], repairCheckpoints: readonly CheckpointData[] = []): PolicyHistory {
+  repairRows: readonly OperationalHistoryEntry[] = [], repairCheckpoints: readonly CheckpointData[] = [],
+  facts: VerificationHistoryFacts = {}): PolicyHistory {
   try {
-    const slots = roundSlots(review?.rounds ?? [], repairsFrom(repairRows, repairCheckpoints));
-    slots.sort((left, right) => left.at - right.at || left.order - right.order); const pending = slots.findIndex((slot, index) => slot.entry.kind === 'verdict' && !slot.entry.passed && slots[index + 1]?.entry.kind !== 'repair'); if (pending >= 0) { slots.splice(pending + 1); }
-    const gate = gateSlot(gates, slots.some(item => item.entry.kind === 'verdict' && item.entry.check === 'tests' && !item.entry.passed)); if (gate.slot && pending < 0) { slots.push(gate.slot); }
-    slots.sort((left, right) => left.at - right.at || left.order - right.order);
-    return { ok: true, entries: slots.map(item => item.entry), tests: gate.observed ? 'observed' : 'unobserved' };
+    const { mapped, observed } = withGateSlot(mappedHistorySlots(review, repairRows, repairCheckpoints, facts),
+      gates, review, facts.identity);
+    return { ok: true, entries: mapped.map(item => item.entry), tests: observed ? 'observed' : 'unobserved' };
   } catch (error) {
     const failure = error instanceof Unmapped ? { kind: error.kind, message: error.message }
       : { kind: 'invalid' as const, message: 'recorded facts could not be read' };
@@ -118,15 +288,42 @@ export interface PolicyHistoryPorts {
   readonly store: Pick<MissionStore, 'load'>;
   readonly gates: Pick<GateEvidenceReader, 'readIntegrationGates'>;
   readonly history: Pick<OperationalHistoryService, 'loadAllByTypeForMission'>;
+  readonly lifecycle: { findByMissionId(_missionId: string): Promise<readonly LifecycleHistoryEntry[]> };
+  readonly operations: { all(): Promise<readonly WorkflowOperation[]> };
+  readonly identity: ChangeIdentityPort & { beginRead?(): void };
+}
+function coverageByRound(review: Review | null, identity: ChangeIdentityPort): ReadonlyMap<number, ApprovalCoverage | null> {
+  const coverage = new Map<number, ApprovalCoverage | null>();
+  review?.rounds.forEach((round, index) => {
+    if (round.decision?.kind !== 'approved') { return; }
+    const prefix = { ...review, rounds: review.rounds.slice(0, index + 1) as unknown as Review['rounds'] };
+    const landedRevision = round.integrationRepairAssessment?.candidateRevision
+      ?? (round.decision.source.kind === 'mechanical-restoration' ? round.decision.source.candidateRevision : round.decision.revision);
+    coverage.set(round.number, assessApprovalCoverage(prefix,
+      observeLandedChange(prefix, identity, { landedRevision: landedRevision ?? null })));
+  });
+  return coverage;
 }
 /** Read through the existing typed owners only; unavailable facts fail to the fixed policy. */
 export async function readVerificationHistory(ports: PolicyHistoryPorts, scope: GateEvidenceScope): Promise<PolicyHistory> {
   try {
     const loaded = await ports.store.load(scope.missionId);
     if (loaded.kind !== 'found') { return { ok: false, failure: { kind: 'unavailable', message: 'the Mission record could not be read' } }; }
-    const [gates, repairs] = await Promise.all([
+    ports.identity.beginRead?.();
+    const [gates, repairs, rebaseRows, lifecycle, operations] = await Promise.all([
       ports.gates.readIntegrationGates(scope, null), ports.history.loadAllByTypeForMission('rebound.repair', scope.missionId),
+      ports.history.loadAllByTypeForMission('flow.rebase', scope.missionId), ports.lifecycle.findByMissionId(scope.missionId), ports.operations.all(),
     ]);
-    return adaptVerificationHistory(loaded.mission.review ?? null, gates, repairs, loaded.mission.checkpoints);
+    if (lifecycle.some(event => event.repositoryId !== scope.repositoryId || event.missionId !== scope.missionId)) {
+      return { ok: false, failure: { kind: 'unmodelled-history', message: 'lifecycle history identity does not match the Mission' } };
+    }
+    const unknowns = new Set<string>(), diagnostics: import('../projections/verification-diagnostic.js').ObservationDiagnostic[] = [];
+    const rebases = observedRebases({ repositoryId: scope.repositoryId, history: rebaseRows, operations }, unknowns, diagnostics);
+    if (unknowns.size || diagnostics.length) {
+      return { ok: false, failure: { kind: 'unmodelled-history', message: [...unknowns, ...diagnostics.map(item => item.message)].join('; ') } };
+    }
+    const review = loaded.mission.review ?? null;
+    return adaptVerificationHistory(review, gates, repairs, loaded.mission.checkpoints,
+      { rebases, lifecycle, identity: ports.identity, approvalCoverage: coverageByRound(review, ports.identity) });
   } catch { return { ok: false, failure: { kind: 'unavailable', message: 'verification history could not be read' } }; }
 }

@@ -30,6 +30,12 @@ queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
 path, relative to the checkout or absolute. Pilot currently behaves as shadow;
 verification sequencing and merge requirements remain unchanged.
 When enabled, `px status <mission>` reports the ordered policy history or its typed fixed-policy fallback reason.
+History preserves only observations whose recorded identity and authority are
+unambiguous. Stable-identity rebases add nothing; changed or otherwise
+unmodelled work resets the history as `unmodelled-change`. Approval passes are
+retained only when the recorded approval coverage still covers the change, and
+landing-gate failures appear as a failed tests verdict followed by a completed
+repair when that repair addresses exactly the failed check.
 
 `px config` validates the configured artifact and displays its canonical SHA-256
 identity or a fixed-policy fallback reason. Missing, unreadable, invalid or
