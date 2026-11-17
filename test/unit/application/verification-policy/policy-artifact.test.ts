@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { deriveBelief, type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
-import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
+import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyAction, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
+import { recommend } from '../../../../src/application/verification-policy/recommend.js';
+import { selectAlpha, type AlphaVector } from '../../../../research/verification-pomdp/alpha-policy.js';
+import { buildPolicyArtifact } from '../../../../research/verification-pomdp/artifact.js';
 import { updateBelief, type SolverModel } from '../../../../research/verification-pomdp/solver-model.js';
 import { policyArtifactFixture as fixture, oneHot, half, type Json } from './policy-artifact.fixture.js';
 
@@ -119,4 +122,82 @@ test('matches the research filter deterministically and stays normalized over 20
   assert.ok(Math.abs(actual.belief.reduce((sum, value) => sum + value, 0) - 1) <= 1e-9);
   actual.belief.forEach((value, index) => assert.ok(Math.abs(value - expected[index]) < 1e-12));
   assert.deepEqual(deriveBelief(a, history), actual);
+});
+
+test('selects only permitted vectors and reports each predicted pass probability (TASK-2859.05)', () => {
+  const a = artifact();
+  const belief = Array<number>(27).fill(0);
+  Object.assign(belief, { 0: 0.1, 9: 0.2, 4: 0.3, 26: 0.4 });
+  const unrestricted = recommend(a, belief, new Set(POLICY_ACTIONS));
+  assert.ok(unrestricted.kind === 'recommendation');
+  assert.equal(unrestricted.action, 'human');
+  assert.ok(Math.abs(unrestricted.passProbabilities.tests - 0.6) < 1e-12);
+  assert.ok(Math.abs(unrestricted.passProbabilities.agent - 0.7) < 1e-12);
+  assert.ok(Math.abs(unrestricted.passProbabilities.human - 0.7) < 1e-12);
+  const restricted = recommend(a, belief, new Set<PolicyAction>(['tests', 'agent']));
+  assert.ok(restricted.kind === 'recommendation'); assert.equal(restricted.action, 'tests');
+  assert.equal(recommend(a, belief, new Set()).kind, 'no-recommendation');
+});
+
+test('rejects malformed beliefs before selection or probability calculation (TASK-2859.05 F1)', () => {
+  const a = artifact(); const permitted = new Set(POLICY_ACTIONS);
+  const negative = oneHot(0); negative[0] = 1.1; negative[1] = -0.1;
+  const unnormalized = oneHot(0); unnormalized[0] = 0.5;
+  const cases: Array<[unknown, string]> = [
+    [[1], 'dimensions'], [Array(28).fill(1 / 28), 'dimensions'],
+    [Array(27).fill(NaN), 'non-finite'], [negative, 'negative'], [unnormalized, 'not-normalized'],
+  ];
+  for (const [belief, reason] of cases) {
+    const result = recommend(a, belief as readonly number[], permitted);
+    assert.deepEqual(result, { kind: 'invalid-belief', reason });
+    assert.equal('action' in result, false); assert.equal('passProbabilities' in result, false);
+  }
+});
+
+test('matches the solver best vector on 1000 beliefs reached from a synthetic emitted artifact (TASK-2859.05)', () => {
+  const states = artifact().states;
+  const fresh = [0.03, 0.07, 0.11, 0.13, 0.17, 0.19, 0.14, 0.16];
+  const freshStates = [0, 1, 3, 4, 9, 10, 12, 13];
+  const code = { 'would-fail': 0, 'would-pass': 1, passed: 2 } as const;
+  const transition = POLICY_ACTIONS.map((action, slot) => states.map((state, index) => {
+    const row = Array<number>(27).fill(0);
+    if (index === 26 || state[action] === 'passed') { row[index] = 1; }
+    else if (state[action] === 'would-pass') {
+      const statuses = POLICY_ACTIONS.map(check => code[state[check]]);
+      statuses[slot] = 2;
+      row[9 * statuses[0] + 3 * statuses[1] + statuses[2]] = 1;
+    } else { freshStates.forEach((next, position) => { row[next] = fresh[position]; }); }
+    return row;
+  }));
+  const observation = POLICY_ACTIONS.map(action => states.map(state => state[action] === 'passed' ? [0, 1] : [1, 0]));
+  const prior = Array<number>(27).fill(0); freshStates.forEach((state, index) => { prior[state] = fresh[index]; });
+  const model: SolverModel = { objective: 'T', discount: 0.99, transition, observation,
+    cost: POLICY_ACTIONS.map((_action, slot) => states.map((_state, index) => index === 26 ? 0 : slot + 1)), prior };
+  const vectors: AlphaVector[] = POLICY_ACTIONS.flatMap((action, slot) => [
+    { action, values: states.map((state, index) => 7 * code[state[action]] - (index * (slot + 2) % 11)) },
+    { action, values: states.map((state, index) => 4 * code[state[action]] + (index * (slot + 3) % 13) - 8) },
+  ]);
+  const emitted = buildPolicyArtifact({ model, objective: 'T', solverVersion: 'synthetic-unit',
+    parameterFileSha256: '0'.repeat(64), vectors, bounds: { lower: -20, upper: 20 }, policyValue: 0, currentSequenceValue: 0 });
+  const parsed = parsePolicyArtifact(emitted.canonical); assert.ok(parsed.ok);
+  const a = parsed.artifact;
+  const permitted = new Set(POLICY_ACTIONS);
+  let seed = 2_859_005; const random = () => ((seed = seed * 48_271 % 2_147_483_647) - 1) / 2_147_483_646;
+  const sample = (distribution: readonly number[]) => {
+    const target = random(); let cumulative = 0;
+    for (let index = 0; index < distribution.length; index += 1) { cumulative += distribution[index]; if (target < cumulative) { return index; } }
+    return distribution.length - 1;
+  };
+  let belief = [...model.prior]; let hidden = sample(model.prior); const selected = new Set<PolicyAction>();
+  for (let compared = 0; compared < 1000; compared += 1) {
+    const expected = selectAlpha(vectors, belief);
+    const actual = recommend(a, belief, permitted);
+    assert.ok(actual.kind === 'recommendation'); assert.equal(actual.action, expected.action); selected.add(actual.action);
+    const action = Math.floor(random() * POLICY_ACTIONS.length) as 0 | 1 | 2;
+    hidden = sample(model.transition[action][hidden]);
+    const observed = sample(model.observation[action][hidden]) as 0 | 1;
+    belief = updateBelief(model, belief, action, observed).belief;
+    if (hidden === 26) { hidden = sample(model.prior); belief = [...model.prior]; }
+  }
+  assert.ok(selected.size > 1, 'the reachable-belief comparison must exercise more than one selected action');
 });
