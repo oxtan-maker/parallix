@@ -48,14 +48,14 @@ import { type Command } from '../interfaces/cli/runtime.js';
 import { createProductionApplicationServices } from './application-services.js';
 import { statusMissionTitle } from './status-board.js';
 import { createReviewLivenessReader } from './review-liveness.js';
-import { bindReviewPersistence, reviewLoopBindings } from './review-persistence.js';
+import { bindReviewPersistence, createPersistentReviewLoopPorts } from './review-persistence.js';
 import { SqliteSessionMarkerAdapter } from '../adapters/sqlite/session-marker-adapter.js';
 import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
-import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
 import type { ReviewLoopObservers } from '../adapters/review/review-workflow-adapter.js';
 import type { StartReviewRound } from '../application/ports/review-round.js';
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 import type { CliCommandContext } from './cli-service-scope.js';
+import { createTestsActionPolicyFactory } from './review-start-observation.js';
 
 export function createLifecycleCommands(context: CliCommandContext): Record<string, Command> {
   const { rootDir, configuration, scope } = context;
@@ -73,10 +73,16 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewerSessionPort,
       );
       const reviewLiveness = createReviewLivenessReader(services, rootDir, configuration);
+      const integrationRepairPolicy = services.operatorState.db && services.operatorState.repositories
+        ? createTestsActionPolicyFactory(configuration, {
+          db: services.operatorState.db, store: mission.store, history: mission.operationalHistory,
+          lifecycle: services.operatorState.repositories.boardLaneEvents, repositoryId: mission.repositoryId,
+        }) : undefined;
       const ownedOperation = configuration.runtime.workflowOperation && services.operatorState.db
         ? await new SqliteWorkflowOperationStore(services.operatorState.db, mission.repositoryId).get(configuration.runtime.workflowOperation) : null;
       const adapter = createReviewWorkflowAdapter({
         ...options,
+        operatorInvocation: context.operatorInvocation === true,
         configuration,
         rootDir,
         operatorResume: bindReviewOperatorResume(services.mission.store, context.operatorReview ?? false, options ?? {}, reviewLiveness, ownedOperation?.reviewOperatorResume),
@@ -96,17 +102,16 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         lifecycleService: mission.lifecycle,
         // The composition root binds the review-loop mechanisms; the
         // application review loop decides how they are sequenced.
-        reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createReviewLoopPorts(request.slug, {
+        reviewLoopMechanisms: (request: StartReviewRound, observers: ReviewLoopObservers) => createPersistentReviewLoopPorts(request.slug, {
           ...request,
         }, {
           ...observers,
           configuration,
-          integrationRepair: integrationRepairContinuation(mission, configuration, rootDir),
+          integrationRepair: integrationRepairContinuation(mission, configuration, rootDir, integrationRepairPolicy),
           integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
           classification: createReviewClassification(request.slug, request.executionContext.missionWorktree, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
-          ...reviewLoopBindings(mission.store, mission.lifecycle, reviewerSessionPort),
-        }),
+        }, { mission, operatorState: services.operatorState, sessionMarker: reviewerSessionPort }),
       });
       const result = await createReviewCommand(new ReviewCommandUseCase(adapter, services.currentWork))(args, options);
       // TASK-2620: `px review` never chains into `px integrate`.
@@ -201,6 +206,14 @@ function createIntegrationRunner(context: CliCommandContext, runReview: (args: s
       // carries command/exit fields, so this is where that identity is handed
       // over — the same way resolveConflict and draft receive it (TASK-2777).
       configuration,
+      operatorInvocation: context.operatorInvocation === true,
+      verificationActionPolicy: services.mission && services.operatorState.db && services.operatorState.repositories
+        ? createTestsActionPolicyFactory(configuration, {
+          db: services.operatorState.db, store: services.mission.store,
+          history: services.mission.operationalHistory,
+          lifecycle: services.operatorState.repositories.boardLaneEvents,
+          repositoryId: services.mission.repositoryId,
+        }) : undefined,
       // In-process CLI and board workflows must return through their owners:
       // process.exit skips current-work cleanup and caller verification.
       exitFn: typeof innerOptions.exitFn === 'function' ? innerOptions.exitFn as (_code: number) => void : ((code: number) => {

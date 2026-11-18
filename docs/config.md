@@ -30,6 +30,9 @@ queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
 path, relative to the checkout or absolute. Pilot currently behaves as shadow;
 verification sequencing and merge requirements remain unchanged.
 When enabled, `px status <mission>` reports the ordered policy history or its typed fixed-policy fallback reason.
+Agent-review, human-review and non-empty integration-test starts append
+observational policy decisions. Observation failures never change review or
+integration-gate outcomes.
 History preserves only observations whose recorded identity and authority are
 unambiguous. Stable-identity rebases add nothing; changed or otherwise
 unmodelled work resets the history as `unmodelled-change`. Approval passes are

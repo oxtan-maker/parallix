@@ -1,8 +1,10 @@
 import type { VerificationReadSnapshot } from './verification-read-snapshot.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
-import type { IntegrationGateEvidenceOutcome, IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
+import type { IntegrationGateEvidenceOutcome, IntegrationTestsActionObservationPort,
+  IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
 import type { IntegrationRunOwner } from '../../application/ports/integration-verification-evidence.js';
 import { loadAdapterConfig } from '../config/product-config.js';
 import { git } from '../git/git.js';
@@ -18,7 +20,7 @@ type Identity = Extract<ReturnType<typeof createActiveVerificationIdentity>, { o
 interface Coverage { command: string; checks: Record<string, string[]> }
 type RunStatus = 'running' | 'passed' | 'failed' | 'cancelled';
 /** The executor's own record of one integration gate phase attempt. */
-interface RunMeta { attempt: string | null; owner: IntegrationRunOwner | null; startedAt: string; finishedAt: string | null; inputIdentity: string | null; toolchain?: string | null }
+interface RunMeta { gateRunId: string; attempt: string | null; owner: IntegrationRunOwner | null; startedAt: string; finishedAt: string | null; inputIdentity: string | null; toolchain?: string | null }
 interface Evidence {
   policy: 'integration-verification-v1';
   scope: string;
@@ -114,7 +116,8 @@ function successfulOutcomes(pending: Pending, outcomes: readonly Outcome[]): boo
 function startedRun(root: string, gates: readonly Gate[], configuration?: ParallixConfiguration,
   owner: IntegrationRunOwner | null = null): RunMeta {
   const inputs = runIdentity(root, gates, configuration);
-  return { attempt: attemptOf(configuration), owner, startedAt: new Date().toISOString(), finishedAt: null,
+  return { gateRunId: randomUUID(), attempt: attemptOf(configuration), owner,
+    startedAt: new Date().toISOString(), finishedAt: null,
     inputIdentity: inputs?.identity ?? null, toolchain: inputs?.toolchain ?? null };
 }
 
@@ -188,6 +191,7 @@ export interface IntegrationGateRun {
   /** Completed rebases that carried this run, on the same toolchain, to the checked-out HEAD. */
   readonly carried: CompletedRebaseLineage | null;
   readonly status: RunStatus;
+  readonly gateRunId: string | null;
   readonly attempt: string | null;
   readonly owner: IntegrationRunOwner | null;
   readonly startedAt: string;
@@ -233,6 +237,11 @@ function storedRevision(data: StoredRun): string {
   if (typeof data.revision === 'string') { return data.revision; }
   return typeof data.coveredCommit === 'string' ? data.coveredCommit : '';
 }
+
+function storedGateRunId(data: StoredRun): string | null {
+  const gateRunId = data.run?.gateRunId;
+  return typeof gateRunId === 'string' && gateRunId ? gateRunId : null;
+}
 /** Whether the run covers the current inputs, or completed rebases carried it there on the same toolchain. */
 function runCurrency(root: string, data: StoredRun, revision: string, gates: readonly Gate[],
   configuration?: ParallixConfiguration, snapshot?: VerificationReadSnapshot) {
@@ -264,6 +273,7 @@ export function readIntegrationGateRun(root: string, configuration?: ParallixCon
     return {
       ...runCurrency(root, data, revision, observedGates, configuration, snapshot),
       status, attempt: typeof stored?.attempt === 'string' ? stored.attempt : null,
+      gateRunId: storedGateRunId(data),
       owner: runOwner(data),
       startedAt, finishedAt,
       revision,
@@ -333,9 +343,15 @@ export function readIntegrationVerificationProof(command: string, root: string, 
 
 /** Bound by CLI composition; the generic gate executor imports only the port. */
 export function createIntegrationVerificationEvidencePort(configuration?: ParallixConfiguration,
-  owner: IntegrationRunOwner | null = null): IntegrationVerificationEvidencePort {
-  return { start: (root, gates) => {
+  owner: IntegrationRunOwner | null = null,
+  testsAction?: IntegrationTestsActionObservationPort): IntegrationVerificationEvidencePort {
+  return { start: async (root, gates, context) => {
     const pending = beginIntegrationRun(root, gates, configuration, owner);
+    if (pending && testsAction) {
+      await testsAction.observe({ missionId: context.missionId, actualAction: 'tests', revision: pending.revision,
+        verdictCorrelation: pending.run.gateRunId, agentRunId: null, gateRunId: pending.run.gateRunId,
+        operatorInvocation: context.operatorInvocation }).catch(() => undefined);
+    }
     return pending ? { complete: (outcomes, disposition) => finishIntegrationRun(pending, outcomes, disposition, configuration) } : null;
   } };
 }

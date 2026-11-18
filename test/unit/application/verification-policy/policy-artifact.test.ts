@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveBelief, type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
+import { deriveBelief, verificationCheckStates, verificationIntegrationEligible,
+  type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyAction, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
 import { recommend } from '../../../../src/application/verification-policy/recommend.js';
 import { selectAlpha, type AlphaVector } from '../../../../research/verification-pomdp/alpha-policy.js';
@@ -101,6 +102,58 @@ test('returns typed contradictions, invalid inputs and unmodelled history withou
   const invalid = [{ kind: 'verdict', check: 'unknown', passed: true }] as unknown as VerificationHistoryEntry[];
   assert.doesNotThrow(() => deriveBelief(null as unknown as PolicyArtifact, invalid));
   assert.equal(failure(deriveBelief(artifact(), invalid)), 'invalid');
+});
+
+function checkOrders(values: readonly PolicyAction[]): PolicyAction[][] {
+  return values.length === 0 ? [[]] : values.flatMap((value, index) =>
+    checkOrders(values.filter((_other, otherIndex) => otherIndex !== index)).map(rest => [value, ...rest]));
+}
+
+test('all check orders preserve passes and explicit unknowns until all three are eligible (TASK-2859.13)', () => {
+  const orders = checkOrders(POLICY_ACTIONS);
+  assert.equal(orders.length, 6);
+  assert.ok(orders.some(order => order[0] === 'human'));
+  assert.ok(orders.some(order => order[0] === 'tests'));
+  for (const order of orders) {
+    const history: VerificationHistoryEntry[] = [];
+    for (const check of order) {
+      history.push({ kind: 'verdict', check, passed: true });
+      const result = deriveBelief(artifact(), history);
+      assert.ok(result.ok, 'passing history must derive a belief');
+      const observed = new Set(history.map(entry => 'check' in entry ? entry.check : null));
+      assert.deepEqual(verificationCheckStates(result.record), Object.fromEntries(POLICY_ACTIONS.map(candidate =>
+        [candidate, observed.has(candidate) ? 'passed' : 'unknown'])));
+      assert.equal(verificationIntegrationEligible(result.record), history.length === POLICY_ACTIONS.length);
+    }
+  }
+  const retained = deriveBelief(artifact(), [
+    { kind: 'retained-pass', check: 'agent' },
+    { kind: 'verdict', check: 'human', passed: true },
+    { kind: 'verdict', check: 'tests', passed: true },
+  ]);
+  assert.equal(retained.ok && verificationIntegrationEligible(retained.record), true);
+});
+
+test('request-changes enters pending repair without losing earlier passes or hiding failures (TASK-2859.13)', () => {
+  const humanFirst = deriveBelief(artifact(), [
+    { kind: 'verdict', check: 'human', passed: true },
+    { kind: 'verdict', check: 'agent', passed: false },
+  ]);
+  assert.deepEqual(humanFirst.ok && humanFirst.record,
+    { kind: 'pending-repair', check: 'agent', passed: ['human'] });
+  assert.equal(humanFirst.ok && verificationIntegrationEligible(humanFirst.record), false);
+
+  for (const check of ['agent', 'human'] as const) {
+    const pending = deriveBelief(artifact(), [{ kind: 'verdict', check, passed: false }]);
+    assert.deepEqual(pending.ok && pending.record, { kind: 'pending-repair', check, passed: [] });
+    const skipped = deriveBelief(artifact(), [
+      { kind: 'verdict', check, passed: false },
+      { kind: 'verdict', check: 'tests', passed: true },
+    ]);
+    assert.equal(skipped.ok, false);
+    assert.equal(skipped.ok ? null : skipped.failure.kind, 'unmodelled-history');
+    assert.equal('record' in skipped, false);
+  }
 });
 
 test('matches the research filter deterministically and stays normalized over 200 fixed-seed steps (TASK-2859.04)', () => {

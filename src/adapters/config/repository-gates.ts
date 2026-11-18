@@ -25,6 +25,7 @@ import { assertIndependentGateInvocation, gateAdmission, type GateAdmissionPort,
 import { runGateCommand } from './gate-command-runner.js';
 export { runGateCommand } from './gate-command-runner.js';
 import type { IntegrationVerificationEvidencePort, ReusableVerificationProofPort } from '../../application/ports/integration-verification-evidence.js';
+import { missionId } from '../../domain/mission.js';
 import { GateDashboard } from './gate-dashboard.js';
 import { blockDependents, evidenceOutcomes, phaseSummary, renderGateOutput, type BlockedGate, type GateRunOutcome, type PhaseGateRunResult } from './phase-gate-outcomes.js';
 import { PhaseGateResources } from './phase-gate-resources.js';
@@ -106,6 +107,10 @@ export interface PhaseGateOptions {
   signal?: AbortSignal;
   configuration?: ParallixConfiguration;
   verificationEvidence?: IntegrationVerificationEvidencePort;
+  /** Whether a human directly invoked this integration action. */
+  operatorInvocation?: boolean;
+  /** Receiving branch used only by an active verification-policy observer. */
+  targetBranch?: string;
   slug: string;
   checkoutPath: string;
   gates?: RepositoryGate[];
@@ -204,12 +209,12 @@ function phaseExecutionState(phase: GatePhase, opts: PhaseGateOptions, gates: Re
 
   const outcomes: GateRunOutcome[] = [];
 
-  const coverage = phase === 'integration' ? opts.verificationEvidence?.start(checkoutPath, gates) : null;
-
   const pending = [...gates];
   const completed = new Set<string>();
   const running = new Set<Promise<GateRunOutcome>>();
-  return { phase, failFast, opts, gates, log, error, slug, checkoutPath, runner, env, maxParallel, phaseStarted, controller, cancelByOperator, dashboard, liveSerial, failure, executed, outcomes, coverage, pending, completed, running, cancellation };
+  return { phase, failFast, opts, gates, log, error, slug, checkoutPath, runner, env, maxParallel, phaseStarted, controller, cancelByOperator, dashboard, liveSerial, failure, executed, outcomes,
+    coverage: null as Awaited<ReturnType<IntegrationVerificationEvidencePort['start']>>,
+    pending, completed, running, cancellation };
 }
 
 class PhaseGateExecution {
@@ -387,6 +392,11 @@ class PhaseGateExecution {
   }
 
   private async executeGates(): Promise<PhaseGateRunResult> {
+    if (this.state.phase === 'integration' && this.state.opts.verificationEvidence) {
+      this.state.coverage = await this.state.opts.verificationEvidence.start(this.state.checkoutPath, this.state.gates, {
+        missionId: missionId(this.state.slug), operatorInvocation: this.state.opts.operatorInvocation === true,
+      }).catch(() => null);
+    }
     while (this.state.pending.length > 0 || this.state.running.size > 0) {
       await this.startPending();
       if (this.state.running.size === 0) {

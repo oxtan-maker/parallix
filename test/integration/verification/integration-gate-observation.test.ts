@@ -8,7 +8,8 @@ import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runPhaseGates } from '../../../src/adapters/config/repository-gates.js';
 import { VerificationGateEvidenceReader } from '../../../src/adapters/verification/gate-evidence-reader.js';
-import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { createIntegrationVerificationEvidencePort, readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
+import type { TestsActionStartFacts } from '../../../src/application/ports/verification-policy.js';
 import { processIdentity, processLivenessProbe } from '../../../src/adapters/process/process-liveness.js';
 import type { ParallixConfiguration } from '../../../src/application/ports/configuration.js';
 import { VerificationGateObserver } from '../../../src/application/projections/gate-observation.js';
@@ -101,21 +102,46 @@ test('a failing integration gate settles the board run instead of leaving it run
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 
+test('integration start and authoritative settlement share one gate run correlation (TASK-2859.10)', async () => {
+  const checkout = gateBoardCheckout(['true']);
+  try {
+    const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(checkout, '.git', 'home') });
+    const starts: TestsActionStartFacts[] = [];
+    const evidence = createIntegrationVerificationEvidencePort(configuration, null,
+      { observe: async facts => { starts.push(facts); } });
+    const result = await runPhaseGates('integration', { slug: 'task-2859.10', checkoutPath: checkout,
+      gates: [{ key: 'unit', command: 'true', order: 1 }], commandRunner: () => ({ status: 0, stdout: '', stderr: '' }),
+      operatorInvocation: true, verificationEvidence: evidence, log: () => {}, error: () => {} });
+    const settled = readIntegrationGateRun(checkout, configuration);
+    assert.equal(result.ok, true);
+    assert.equal(starts.length, 1);
+    assert.ok(starts[0]!.gateRunId);
+    assert.equal(starts[0]!.verdictCorrelation, starts[0]!.gateRunId);
+    assert.equal(starts[0]!.operatorInvocation, true);
+    assert.equal(settled?.gateRunId, starts[0]!.gateRunId);
+    assert.equal(settled?.status, 'passed');
+    assert.deepEqual(settled?.outcomes.map(outcome => outcome.result), ['passed']);
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
 test('cancelled and interrupted integration attempts cannot inherit a prior pass (TASK-2775)', async () => {
   const checkout = gateBoardCheckout(['true']);
   try {
     const { configuration, observer } = gateBoardObserver(checkout);
     const port = createIntegrationVerificationEvidencePort(configuration);
     const gates = [{ key: 'unit', command: 'true' }];
-    const passed = port.start(checkout, gates)!;
+    const passed = (await port.start(checkout, gates,
+      { missionId: GATE_BOARD_MISSION.id, operatorInvocation: false }))!;
     passed.complete([{ ...gates[0], exitCode: 0 }], 'passed');
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'passed');
-    const retry = port.start(checkout, gates)!;
+    const retry = (await port.start(checkout, gates,
+      { missionId: GATE_BOARD_MISSION.id, operatorInvocation: false }))!;
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'running');
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, { ...GATE_BOARD_ATTEMPT, phase: 'interrupted' }), 'not-run');
     retry.complete([{ ...gates[0], exitCode: null }], 'cancelled');
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'failed');
-    const repair = port.start(checkout, gates)!;
+    const repair = (await port.start(checkout, gates,
+      { missionId: GATE_BOARD_MISSION.id, operatorInvocation: false }))!;
     repair.complete([{ ...gates[0], exitCode: 0 }], 'passed');
     assert.equal(await observer.observeGate(GATE_BOARD_MISSION, GATE_BOARD_ATTEMPT), 'passed');
     const { spawnSync } = await import('node:child_process');
@@ -161,7 +187,8 @@ test('an aggregate integration run persists every failure, blocked and cancelled
     assert.equal(evidence.gates.find(gate => gate.key === 'good')!.proof.state, 'current');
 
     const port = createIntegrationVerificationEvidencePort(configuration);
-    port.start(checkout, plan)!.complete([
+    (await port.start(checkout, plan,
+      { missionId: GATE_BOARD_MISSION.id, operatorInvocation: false }))!.complete([
       { key: 'unit', command: plan[0].command, exitCode: null, result: 'cancelled', signal: 'SIGTERM' },
       { key: 'good', command: 'true', exitCode: null, result: 'cancelled' },
     ], 'cancelled');

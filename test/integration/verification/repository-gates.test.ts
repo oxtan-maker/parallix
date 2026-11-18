@@ -465,6 +465,42 @@ test('dry run resolves the integration plan without executing any gate', async (
   }
 });
 
+test('integration evidence observes one linked action before execution and declared gates stay outside it (TASK-2859.10)', async () => {
+  const checkout = makeCheckout();
+  try {
+    const events: string[] = [];
+    const starts: Array<{ missionId: string; operatorInvocation: boolean }> = [];
+    const settlements: Array<{ disposition: string; results: Array<string | undefined> }> = [];
+    const verificationEvidence = {
+      start: async (_root: string, _gates: readonly { key: string; command: string }[], context: { missionId: string; operatorInvocation: boolean }) => {
+        events.push('start');
+        starts.push(context);
+        return { complete: (outcomes: readonly { result?: string }[], disposition: string) => {
+          events.push('complete'); settlements.push({ disposition, results: outcomes.map(outcome => outcome.result) }); return false;
+        } };
+      },
+    } as NonNullable<Parameters<typeof runPhaseGates>[1]['verificationEvidence']>;
+    const runner: GateCommandRunner = () => { events.push('execute'); return { status: 0, stdout: '', stderr: '' }; };
+    const options = { slug: 'task-2859.10', checkoutPath: checkout,
+      gates: [{ key: 'unit', command: 'true', order: 1 }], verificationEvidence,
+      operatorInvocation: true, commandRunner: runner, log: () => {}, error: () => {} };
+
+    assert.equal((await runPhaseGates('integration', options)).ok, true);
+    assert.deepEqual(events, ['start', 'execute', 'complete']);
+    assert.deepEqual(starts, [{ missionId: 'task-2859.10', operatorInvocation: true }]);
+    assert.deepEqual(settlements, [{ disposition: 'passed', results: ['passed'] }]);
+
+    for (const phase of ['handoff', 'review'] as const) {
+      await runPhaseGates(phase, options);
+    }
+    assert.equal(starts.length, 1, 'declared preparation gates never start a modelled tests action');
+
+    const isolated = await runPhaseGates('integration', { ...options,
+      verificationEvidence: { start: async () => { throw new Error('shadow writer unavailable'); } } });
+    assert.equal(isolated.ok, true, 'observation failure cannot change the gate result');
+  } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
+});
+
 test('parallel gates overlap within the configured bound', async () => {
   const checkout = makeCheckout();
   try {

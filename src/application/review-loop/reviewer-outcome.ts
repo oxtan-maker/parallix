@@ -1,4 +1,5 @@
 import type { LoopContext, ReviewRound, RoundStep } from './round.js';
+import { observeHumanReviewStart } from './review-start-observation.js';
 
 export type ReviewerOutcomeStep = RoundStep | 'ignored';
 
@@ -29,6 +30,7 @@ export async function applyReviewerOutcome(context: LoopContext, round: ReviewRo
       state.reviewer = authoritative.reviewer;
       context.identities.reviewer = authoritative.reviewer;
     }
+    await observeHumanReviewStart(context);
     context.emit({ kind: 'review-verdict', disposition: state.disposition, findings: [], verbose: context.verbose, round: state.round });
     context.emit({ kind: 'reviewer-approved' });
     await ports.task.mirrorApproved();
@@ -52,6 +54,7 @@ export async function applyReviewerOutcome(context: LoopContext, round: ReviewRo
     context.exit(1);
     return 'stop';
   }
+  await observeHumanReviewStart(context);
   context.emit({ kind: 'review-verdict', disposition: state.disposition, findings: [], verbose: context.verbose, round: state.round });
   context.emit({ kind: 'reviewer-approved' });
   await ports.task.mirrorApproved();

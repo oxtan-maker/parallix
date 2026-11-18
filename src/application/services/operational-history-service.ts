@@ -1,5 +1,7 @@
-import type { OperationalHistoryEntry, OperationalHistoryRepository } from '../ports/operation-history.js';
+import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../ports/operation-history.js';
+import type { ReviewStartDecision, ReviewStartDecisionInput } from '../ports/verification-policy.js';
 import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_TYPE } from '../integrate/validation-marker.js';
+import { REVIEW_START_DECISION_EVENT, reviewStartDecision } from '../verification-policy/review-start-decision.js';
 
 /**
  * Application boundary for operational history recording and querying.
@@ -12,9 +14,9 @@ import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_
  * Maps to ADR 0053 classification: `database-owned-domain-state`.
  */
 export class OperationalHistoryService {
-  private readonly repository: OperationalHistoryRepository;
+  private readonly repository: IdempotentOperationalHistoryRepository;
 
-  constructor(repository: OperationalHistoryRepository) {
+  constructor(repository: IdempotentOperationalHistoryRepository) {
     this.repository = repository;
   }
 
@@ -108,5 +110,39 @@ export class OperationalHistoryService {
       throw new Error('operational history repository does not support per-mission lookup');
     }
     return await findByTypeForMission.call(this.repository, type, missionId);
+  }
+
+  private async reviewStartDecisions(missionId: string): Promise<readonly ReviewStartDecision[]> {
+    const rows = await this.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId);
+    return rows.map(entry => JSON.parse(entry.eventData) as ReviewStartDecision);
+  }
+
+  private sameReviewStart(left: ReviewStartDecision, right: ReviewStartDecisionInput): boolean {
+    if (left.changeIdentity !== right.changeIdentity || left.actualAction !== right.actualAction) { return false; }
+    if (right.actualAction === 'tests') { return right.gateRunId !== null && left.gateRunId === right.gateRunId; }
+    if (right.actualAction === 'agent' && right.agentRunId !== null) { return left.agentRunId === right.agentRunId; }
+    if (right.actualAction === 'human') { return left.verdictCorrelation === right.verdictCorrelation; }
+    return left.verdictCorrelation === right.verdictCorrelation && left.operationId === right.operationId;
+  }
+
+  /**
+   * Append one review start and allocate its sequence at the writer. Parallel
+   * starts may race on a candidate sequence; the idempotent append elects one
+   * and the loser re-reads before claiming the next number.
+   */
+  async recordReviewStartDecision(input: ReviewStartDecisionInput): Promise<boolean> {
+    for (;;) {
+      const records = await this.reviewStartDecisions(input.missionId);
+      if (records.some(record => this.sameReviewStart(record, input))) { return false; }
+      const actionSequence = records
+        .filter(record => record.changeIdentity === input.changeIdentity)
+        .reduce((highest, record) => Math.max(highest, record.actionSequence), 0) + 1;
+      const decision = reviewStartDecision(input, actionSequence);
+      if (await this.repository.appendIdempotent({
+        eventType: REVIEW_START_DECISION_EVENT,
+        eventData: JSON.stringify(decision),
+        createdAt: decision.recordedAt,
+      }, decision.idempotencyKey)) { return true; }
+    }
   }
 }

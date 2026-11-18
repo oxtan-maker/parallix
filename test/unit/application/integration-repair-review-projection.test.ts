@@ -408,7 +408,8 @@ for (const fault of ['missing', 'other-baseline', 'missing-baseline'] as const) 
       git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
       gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
         loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async (_phase, options) => {
-          assert.equal(options.realAgent, 'codex'); assert.equal(options.realAgentModel, 'operator-model'); runs++;
+          assert.equal(options.realAgent, 'codex'); assert.equal(options.realAgentModel, 'operator-model');
+          assert.equal(options.targetBranch, 'main', 'resumed repair preserves policy identity target'); runs++;
           return { ok: true };
         } },
     });

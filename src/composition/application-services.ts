@@ -38,8 +38,10 @@ import { git } from '../adapters/git/git.js';
 import { createDefaultExecuteMissionRuntime, createExecuteMissionPorts } from '../adapters/mission/execute-mission-adapters.js';
 import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
 import integrate from '../adapters/cli/commands/integrate.js';
-import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
-import { reviewLoopBindings } from './review-persistence.js';
+import type { ReviewLoopBindings, ReviewLoopTarget } from '../adapters/review/review-loop.js';
+import { createPersistentReviewLoopPorts } from './review-persistence.js';
+import { createTestsActionPolicyFactory } from './review-start-observation.js';
+import type { VerificationActionPolicyFactory } from '../application/ports/verification-policy.js';
 import { StatsRecoveryAdapter } from '../adapters/mission/stats-backfill-adapter.js';
 import { collectForgejoStatsRecovery } from '../adapters/forgejo/forgejo-stats-recovery.js';
 import { readToken, resolveForgejoUser } from '../adapters/forgejo/forgejo-auth.js';
@@ -52,7 +54,7 @@ import type {
 } from '../application/ports/agent-blocklist.js';
 import type { KnownRepositoriesRepository } from '../application/ports/repository-catalog.js';
 import type { UIPreferencesRepository } from '../application/ports/operator-preferences.js';
-import type { OperationalHistoryRepository, BoardLaneEventRepository } from '../application/ports/operation-history.js';
+import type { IdempotentOperationalHistoryRepository, BoardLaneEventRepository } from '../application/ports/operation-history.js';
 import type { UsageRepository } from '../application/ports/mission-measurements.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import type { ProductionCapabilities } from './production-capabilities.js';
@@ -91,7 +93,7 @@ export interface OperatorStateRepositories {
   readonly agentBlocklist: AgentBlocklistRepository;
   readonly knownRepositories: KnownRepositoriesRepository;
   readonly uiPreferences: UIPreferencesRepository;
-  readonly operationalHistory: OperationalHistoryRepository;
+  readonly operationalHistory: IdempotentOperationalHistoryRepository;
   readonly boardLaneEvents: BoardLaneEventRepository;
   readonly usage: UsageRepository;
 }
@@ -174,13 +176,14 @@ export interface ProductionApplicationServices {
  */
 export function createBoardIntegrateService(mission: import('../application/ports/integration-records.js').IntegrationMissionServices, currentWork: ExecutionActivityPort, configuration?: ParallixConfiguration, rootDir = process.cwd(),
   observeCheckout: typeof observeMissionCheckout = (slug, root, config) => observeMissionCheckout(slug, root, config,
-    args => git(args), (baseWorktree, landedSlug) => findLandedSquashOnBaseBranch(baseWorktree, landedSlug))): IntegrateCommandUseCase {
+    args => git(args), (baseWorktree, landedSlug) => findLandedSquashOnBaseBranch(baseWorktree, landedSlug)),
+  verificationActionPolicy?: VerificationActionPolicyFactory): IntegrateCommandUseCase {
   return new IntegrateCommandUseCase({
     async execute(args) {
       const observed = observeCheckout(args[0], rootDir, configuration ?? resolveProcessConfiguration());
       if (!observed.ok) { throw new Error(observed.reason); }
       await integrate(args, {
-        configuration, executionRoot: rootDir,
+        configuration, executionRoot: rootDir, operatorInvocation: false, verificationActionPolicy,
         missionServicesFn: async () => mission,
         exitFn: (code) => { if (code !== 0) { throw new Error(`integration workflow exited with code ${code}`); } },
       });
@@ -235,6 +238,19 @@ function bindOperatorServices(repositories: OperatorStateRepositories | null) {
   };
 }
 
+function createMissionTestsActionPolicy(configuration: ParallixConfiguration,
+  mission: MissionApplicationServices | null,
+  operatorState: OperatorStateServices): VerificationActionPolicyFactory | undefined {
+  if (!mission || !operatorState.db || !operatorState.repositories) { return undefined; }
+  return createTestsActionPolicyFactory(configuration, {
+    db: operatorState.db,
+    store: mission.store,
+    history: mission.operationalHistory,
+    lifecycle: operatorState.repositories.boardLaneEvents,
+    repositoryId: mission.repositoryId,
+  });
+}
+
 async function bindPresentationCapabilities(
   rootDir: string, options: ProductionApplicationServiceOptions, operatorState: OperatorStateServices,
   mission: MissionApplicationServices | null, sessionMarkers: SessionMarkerRepository | null,
@@ -251,7 +267,8 @@ async function bindPresentationCapabilities(
       activeProgress,
       operatorState.db,
       { configuration: options.configuration },
-      mission ? createBoardIntegrateService(mission, currentWork, options.configuration, rootDir) : undefined,
+      mission ? createBoardIntegrateService(mission, currentWork, options.configuration, rootDir,
+        undefined, createMissionTestsActionPolicy(options.configuration, mission, operatorState)) : undefined,
     )
     : null;
 }
@@ -272,6 +289,7 @@ export async function createProductionApplicationServices(
     : await createMissionApplicationServices(rootDir, {
       configuration: options.configuration, inheritWorkflowAuthorization: options.inheritWorkflowAuthorization,
     });
+  const integrationRepairPolicy = createMissionTestsActionPolicy(options.configuration, mission, operatorState);
 
   // Build a SessionMarkerPort from the shared database connection so that
   // startAgent reuses the composition root's SQLite handle instead of opening
@@ -300,14 +318,13 @@ export async function createProductionApplicationServices(
           };
         },
       }),
-    reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createReviewLoopPorts(reviewSlug, target, {
+    reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createPersistentReviewLoopPorts(reviewSlug, target, {
       ...bindings,
       configuration: options.configuration,
-      integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir),
+      integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir, integrationRepairPolicy),
       classification: createReviewClassification(reviewSlug, target.executionContext.missionWorktree, options.configuration.decision, options.configuration),
       performReviewPreparationFn: reviewPreparationWithMissionServices!,
-      ...reviewLoopBindings(mission.store, mission.lifecycle, sessionMarkerPort),
-    }),
+    }, { mission, operatorState, sessionMarker: sessionMarkerPort }),
   } : defaultExecuteRuntime;
   const mechanisms = createExecuteMissionPorts(rootDir, {
     configuration: options.configuration,
@@ -315,7 +332,9 @@ export async function createProductionApplicationServices(
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
   }, executeRuntime);
-  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? { integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir) } : {}) };
+  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? {
+    integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir, integrationRepairPolicy),
+  } : {}) };
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second execution activity projection.
   const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);

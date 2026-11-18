@@ -11,6 +11,9 @@ import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 import type { BoardLaneEventEntry } from '../../../../src/application/ports/operation-history.js';
+import type { OperationalHistoryEntry } from '../../../../src/application/ports/operation-history.js';
+import { collectLocalStatsRecovery } from '../../../../src/adapters/review/stats-recovery-collector.js';
+import { REVIEW_START_DECISION_EVENT } from '../../../../src/application/verification-policy/review-start-decision.js';
 
 const instant = (ms: number) => new Date(Date.UTC(2026, 10, 2) + ms).toISOString();
 const operation = (): WorkflowOperation => ({ id: 'op', repositoryId: repositoryId('repo'), missionId: missionId('px-1'),
@@ -28,6 +31,22 @@ function verificationReport(attempts: readonly VerificationMeasurement[], lifecy
     history: attempts.map(value => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, eventData: JSON.stringify(value),
       createdAt: value.finishedAt ?? value.requestedAt })) });
 }
+
+test('verification action decisions leave existing statistics and projections unchanged (TASK-2859.09, TASK-2859.10)', () => {
+  const decision = (actualAction: 'agent' | 'tests'): OperationalHistoryEntry => ({
+    id: 1, eventType: REVIEW_START_DECISION_EVENT, createdAt: '2026-11-18T10:00:00.000Z',
+    eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'task-2859.10', actualAction,
+      actionSequence: 1, predictedPassProbability: { agent: 0.8, human: 0.7, tests: 0.9 } }),
+  });
+  const statistics = (history: readonly OperationalHistoryEntry[]) => verificationStatistics({
+    repositoryId: 'repo', history, operations: [], lifecycle: [],
+  });
+  assert.deepEqual(statistics([decision('agent'), decision('tests')]), statistics([]));
+  const recovery = (operationalHistory: readonly OperationalHistoryEntry[]) => collectLocalStatsRecovery({
+    missions: [], laneMoves: [], operationalHistory,
+  }, 'repo');
+  assert.deepEqual(recovery([decision('agent'), decision('tests')]), recovery([]));
+});
 
 test('activity identity without a mission remains a repository diagnostic (PX-0055.03)', () => {
   const createdAt = '2026-11-02T00:00:00.001Z';

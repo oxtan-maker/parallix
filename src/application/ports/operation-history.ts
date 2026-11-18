@@ -86,6 +86,11 @@ export interface OperationalHistoryRepository {
   clear(): Promise<void>;
 }
 
+/** Write authority used where restart-safe event identity is part of the contract. */
+export type IdempotentOperationalHistoryRepository = OperationalHistoryRepository & {
+  appendIdempotent(_entry: OperationalHistoryEntry, _idempotencyKey: string): Promise<boolean>;
+};
+
 export interface BoardLaneEventEntry {
   readonly id?: number;
   readonly repositoryId: string;

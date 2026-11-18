@@ -34,6 +34,7 @@ async function fixture(result: IntegrationGateRunResult, configured = gates) {
   let repairRoutes = 0;
   const repairRequests: IntegrationGateFailureRequest[] = [];
   let runnerDryRun: boolean | undefined;
+  let targetBranch: string | undefined;
   const unsuccessful: unknown[] = [];
   const services = integrationServices({ operationalHistory: {
     loadLatestByTypeForMission: async () => null,
@@ -46,7 +47,7 @@ async function fixture(result: IntegrationGateRunResult, configured = gates) {
       captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture/mission', commit: 'a'.repeat(40), tree: 'b'.repeat(40) }),
       loadPhaseGates: () => configured,
       loadRequirePreIntegration: () => true,
-      runPhaseGates: async (_phase, options) => { runnerDryRun = options.dryRun; return result; },
+      runPhaseGates: async (_phase, options) => { runnerDryRun = options.dryRun; targetBranch = options.targetBranch; return result; },
       routeIntegrationGateFailure: async () => { repairRoutes++; return { route: 'fixed' }; },
     },
     verification: { formatVerificationCommand: () => 'npm test' },
@@ -62,7 +63,7 @@ async function fixture(result: IntegrationGateRunResult, configured = gates) {
       applyAgentFallbackFn: async () => { throw new Error('fixture route must own fallback selection'); },
     },
   };
-  return { step, request, observations: () => ({ repairRoutes, repairRequests, runnerDryRun, unsuccessful }) };
+  return { step, request, observations: () => ({ repairRoutes, repairRequests, runnerDryRun, targetBranch, unsuccessful }) };
 }
 
 async function quiet<T>(run: () => Promise<T>): Promise<T> {
@@ -74,6 +75,7 @@ test('integration dry-run executes the complete selected plan through the live r
   const { step, request, observations } = await fixture(receipt());
   assert.equal(await quiet(() => step.runRequiredLocalGates(request)), '2 integration gate(s) passed');
   assert.equal(observations().runnerDryRun, false);
+  assert.equal(observations().targetBranch, request.context.baseBranch);
   assert.equal(observations().repairRoutes, 0);
 });
 

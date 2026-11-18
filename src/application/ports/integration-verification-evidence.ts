@@ -1,5 +1,7 @@
 import type { ParallixConfiguration } from './configuration.js';
 import type { ProcessIdentity } from './process-identity.js';
+import type { MissionId } from '../../domain/mission.js';
+import type { TestsActionStartFacts } from './verification-policy.js';
 
 export type IntegrationRunOwner = ProcessIdentity;
 
@@ -8,10 +10,18 @@ export type IntegrationRunOwner = ProcessIdentity;
  * evidence adapter owns persistence and input identity. Neither capability
  * grants review or publication authority. */
 export interface IntegrationVerificationEvidencePort {
-  start(_root: string, _gates: readonly { key: string; command: string }[]): {
+  start(_root: string, _gates: readonly { key: string; command: string }[], _context: {
+    readonly missionId: MissionId;
+    readonly operatorInvocation: boolean;
+  }): Promise<{
     complete(_outcomes: readonly IntegrationGateEvidenceOutcome[],
       _disposition: 'passed' | 'failed' | 'cancelled'): boolean;
-  } | null;
+  } | null>;
+}
+
+/** Optional shadow observer, composed only while verification policy is active. */
+export interface IntegrationTestsActionObservationPort {
+  observe(_facts: TestsActionStartFacts): Promise<void>;
 }
 
 /** One configured gate's settled part of an integration run. Blocked and cancelled

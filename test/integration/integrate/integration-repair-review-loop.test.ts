@@ -48,6 +48,11 @@ import { revokeApprovedDecision, reviewStatus } from '../../../src/domain/review
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
+import { REVIEW_START_DECISION_EVENT } from '../../../src/application/verification-policy/review-start-decision.js';
+import type { ReviewStartDecision } from '../../../src/application/ports/verification-policy.js';
+import { readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
+import { policyArtifactFixture } from '../../unit/application/verification-policy/policy-artifact.fixture.js';
 
 async function integrate(slug: string, worktree: string, args: string[] = []): Promise<number> {
   return await run(['integrate', slug, ...args], {
@@ -210,4 +215,36 @@ test('persisted integration repair resumes through dry-run review and stops befo
   assert.equal(fixture.git(fixture.worktree, ['status', '--porcelain']), '');
   assert.match(output.join('\n'), /re-reviewed and approved; stopping before integration/);
   assert.match(output.join('\n'), /run px integrate task-2819 to land/);
+});
+
+test('public integrate dry-run records one linked tests action and leaves landing human-owned (TASK-2859.10)', async (t) => {
+  const fixture = await openRepairFixture({ slug: 'task-2859.10', gateCommand: 'true',
+    verificationPolicy: { mode: 'shadow', artifact: 'synthetic-policy.json',
+      content: JSON.stringify(policyArtifactFixture()) } });
+  t.after(() => fixture.close());
+  const output: string[] = [];
+  const previousLogger = setLogger({ log: line => { output.push(String(line)); }, error: line => { output.push(String(line)); } });
+  t.after(() => setLogger(previousLogger));
+  const baseBefore = fixture.git(fixture.repo, ['rev-parse', 'main']);
+
+  const code = await integrate(fixture.slug, fixture.worktree, ['--dry-run']);
+  const rows = await fixture.database.query<{ event_data: string }>(
+    'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [REVIEW_START_DECISION_EVENT]);
+  const decisions = rows.map(row => JSON.parse(row.event_data) as ReviewStartDecision);
+  const gateRun = readIntegrationGateRun(fixture.worktree, resolveConfiguration(process.env));
+
+  assert.equal(code, 0, output.join('\n'));
+  assert.equal(decisions.length, 1);
+  assert.equal(decisions[0]!.actualAction, 'tests');
+  assert.equal(decisions[0]!.gateRunId, gateRun?.gateRunId);
+  assert.equal(decisions[0]!.verdictCorrelation, gateRun?.gateRunId);
+  assert.equal(decisions[0]!.operatorOverride, true, 'the explicit public command is an operator action');
+  assert.equal(decisions[0]!.configuredMode, 'shadow');
+  assert.ok(decisions[0]!.artifactSha256);
+  assert.equal(gateRun?.status, 'passed');
+  assert.deepEqual(gateRun?.outcomes.map(outcome => outcome.result), ['passed']);
+  assert.match(output.join('\n'), /All integration gates passed/);
+  assert.match(output.join('\n'), /Dry run complete\. Integration preflight passed\./);
+  assert.equal((await fixture.load()).status, 'integration');
+  assert.equal(fixture.git(fixture.repo, ['rev-parse', 'main']), baseBefore, 'dry-run does not land');
 });

@@ -210,22 +210,41 @@ export class SqliteOperationalHistoryRepository implements OperationalHistoryRep
 
   async append(entry: OperationalHistoryEntry): Promise<void> {
     if (!authorizedOperationId()) {
-      await this.db.execute(
-        'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?);',
-        [entry.eventType, entry.eventData, entry.createdAt],
-      );
+      await this.insert(entry);
       return;
     }
-    const data = JSON.parse(entry.eventData) as { missionId?: string };
     await this.db.beginWriteTransaction();
     try {
-      if (data.missionId) { await authorizeSqliteMissionWrite(this.db, data.missionId); }
-      await this.db.execute(
-        'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?);',
-        [entry.eventType, entry.eventData, entry.createdAt],
-      );
+      await this.insert(entry);
       await this.db.commitTransaction();
     } catch (error) { await this.db.rollbackTransaction(); throw error; }
+  }
+
+  async appendIdempotent(entry: OperationalHistoryEntry, idempotencyKey: string): Promise<boolean> {
+    await this.db.beginWriteTransaction();
+    try {
+      const existing = await this.db.query<{ found: unknown }>(
+        `SELECT 1 AS found FROM operational_history
+         WHERE event_type = ? AND json_valid(event_data)
+           AND json_extract(event_data, '$.idempotencyKey') = ? LIMIT 1`,
+        [entry.eventType, idempotencyKey],
+      );
+      if (existing.length > 0) { await this.db.commitTransaction(); return false; }
+      await this.insert(entry);
+      await this.db.commitTransaction();
+      return true;
+    } catch (error) { await this.db.rollbackTransaction(); throw error; }
+  }
+
+  private async insert(entry: OperationalHistoryEntry): Promise<void> {
+    if (authorizedOperationId()) {
+      const data = JSON.parse(entry.eventData) as { missionId?: string };
+      if (data.missionId) { await authorizeSqliteMissionWrite(this.db, data.missionId); }
+    }
+    await this.db.execute(
+      'INSERT INTO operational_history (event_type, event_data, created_at) VALUES (?, ?, ?);',
+      [entry.eventType, entry.eventData, entry.createdAt],
+    );
   }
 
   async clear(): Promise<void> {

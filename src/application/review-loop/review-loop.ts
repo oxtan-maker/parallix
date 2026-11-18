@@ -275,6 +275,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const state = await startState(persisted, identities, prepared.pullRequest, start.dryRun, ports, out);
   const context: LoopContext = {
     ...out, ...start, ports, state, identities, maxAttempts,
+    operatorInvocation: request.operatorInvocation ?? false,
     ...loopSettings(request),
     initialRound: state.round,
     escalateToHumanReview: async reason => {

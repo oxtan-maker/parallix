@@ -13,15 +13,7 @@ import type { BoardProjectionBuilder } from '../application/projections/board-re
 import type { ProductionApplicationServices } from './application-services.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import { createReviewLivenessReader } from './review-liveness.js';
-import { readVerificationHistory } from '../application/verification-policy/history-adapter.js';
-import { loadEffectiveConfig } from '../adapters/config/product-config.js';
-import { createPolicyArtifactLoader } from '../adapters/config/verification-policy.js';
-import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
-import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
-import { VerificationGateEvidenceReader } from '../adapters/verification/gate-evidence-reader.js';
-import { processLivenessProbe } from '../adapters/process/process-liveness.js';
-import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
-import { SqliteWorkflowOperationStore } from '../adapters/sqlite/workflow-operation-store.js';
+import { createVerificationPolicyReaders } from './verification-policy-readers.js';
 
 interface StatusBoardServices {
   presentationCapabilities?: { boardProjection: Pick<BoardProjectionBuilder, 'buildMissionCard'> } | null;
@@ -46,20 +38,14 @@ export async function createStatusReadBoard(
     laneEventRepo: repositories.boardLaneEvents, usageRepo: repositories.usage,
     knownAgentFamilies: resolveKnownAgentFamilies(rootDir), sessionMarkers: new SqliteSessionMarkerRepository(db, mission.repositoryId), reviewExecution,
   });
-  const policy = loadEffectiveConfig(rootDir).verificationPolicy;
-  const loadPolicy = policy.mode === 'off' ? null : createPolicyArtifactLoader(rootDir, policy);
-  const policyIdentity = loadPolicy ? createGitChangeIdentity(rootDir, undefined, { snapshotBranchHeads: true }) : null;
-  const policyOperations = loadPolicy ? new SqliteWorkflowOperationStore(db, mission.repositoryId) : null;
-  const verificationHistoryFn = loadPolicy ? async (slug: string): Promise<StatusMissionData['verificationHistory']> => {
-    const artifact = loadPolicy();
+  const policyReaders = createVerificationPolicyReaders(rootDir, configuration, {
+    db, store: mission.store, history: mission.operationalHistory,
+    lifecycle: repositories.boardLaneEvents, repositoryId: mission.repositoryId,
+  });
+  const verificationHistoryFn = policyReaders ? async (slug: string): Promise<StatusMissionData['verificationHistory']> => {
+    const artifact = policyReaders.loadPolicy();
     if (artifact.mode === 'fixed') { return { fallback: artifact.reason }; }
-    const topology = snapshotWorktreeTopology({ cwd: rootDir });
-    const validations = new SqliteIntegrationValidationReader(db);
-    const gates = new VerificationGateEvidenceReader({ configuration, resolveWorktree: id => topology.resolveWorktree(id, { cwd: rootDir }),
-      integrationValidation: id => validations.read(id), isProcessAlive: processLivenessProbe });
-    const result = await readVerificationHistory({ store: mission.store, gates, history: mission.operationalHistory,
-      lifecycle: repositories.boardLaneEvents, operations: policyOperations!, identity: policyIdentity! },
-      { repositoryId: mission.repositoryId, missionId: missionId(slug) });
+    const result = await policyReaders.readHistoryFor(slug);
     return result.ok ? { entries: result.entries, tests: result.tests } : { fallback: `${result.failure.kind}: ${result.failure.message}` };
   } : undefined;
   return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } }, verificationHistoryFn);

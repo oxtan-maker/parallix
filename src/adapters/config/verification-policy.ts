@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { parsePolicyArtifact } from '../../application/verification-policy/policy-artifact.js';
-import type { PolicyArtifactLoader, PolicyLoadResult, VerificationPolicyConfiguration } from '../../application/ports/verification-policy.js';
+import type { ActiveVerificationPolicyConfiguration, PolicyArtifactLoader, PolicyLoadResult,
+  VerificationPolicyConfiguration } from '../../application/ports/verification-policy.js';
 
 export function verificationPolicyConfig(value: unknown, report: (message: string) => void): VerificationPolicyConfiguration {
   if (value === undefined) { return { mode: 'off' }; }
@@ -27,6 +28,10 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
+export function createPolicyArtifactLoader(rootDir: string, config: ActiveVerificationPolicyConfiguration,
+  read?: (file: string) => string): (_expectedHash?: string) => Exclude<PolicyLoadResult, { mode: 'off' }>;
+export function createPolicyArtifactLoader(rootDir: string, config: VerificationPolicyConfiguration,
+  read?: (file: string) => string): PolicyArtifactLoader;
 export function createPolicyArtifactLoader(rootDir: string, config: VerificationPolicyConfiguration,
   read: (file: string) => string = file => fs.readFileSync(file, 'utf8')): PolicyArtifactLoader {
   let pinned: Extract<PolicyLoadResult, { mode: 'shadow' }> | undefined;

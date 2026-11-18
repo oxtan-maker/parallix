@@ -268,6 +268,20 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
   assert.equal(exits.at(-1), 3);
 });
 
+test('review carries the existing operator-invocation fact into the loop (TASK-2859.09 F5)', async () => {
+  for (const operatorInvocation of [false, true]) {
+    const received: { value: ObservedLoop | null } = { value: null };
+    await review(['task-2859'], {
+      operatorInvocation,
+      inferSlugFn: slug => slug ?? 'task-2859',
+      log: () => {}, error: () => {}, exit: () => {},
+      readReviewStateFn: async slug => new ReviewState(slug, { round: 1, startedAt: '2026-01-01T00:00:00Z' }),
+      reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
+    });
+    assert.equal(received.value?.operatorInvocation, operatorInvocation);
+  }
+});
+
 test('a manual review continuation renews the five-round budget at the current round', async () => {
   let received: { value: ObservedLoop | null } = { value: null };
 

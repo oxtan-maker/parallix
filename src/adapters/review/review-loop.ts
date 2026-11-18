@@ -45,7 +45,6 @@ import type {
   ReviewLoopState, ReviewPromptFacts, ReviewProviderPort, StartReviewRound,
 } from '../../application/ports/review-round.js';
 import { startAgent } from '../agents/agents.js';
-
 import { rebaseBeforeReviewRound } from './rebase.js';
 import { packageRoot } from '../filesystem/package-root.js';
 import { resolvePollIntervalMs, resolvePollTimeoutMs, pollForReview, pollForDisposition } from './review-polling.js';
@@ -62,11 +61,12 @@ import { backlogMirrorOwnership, missionId } from '../../domain/mission.js';
 import { dismissProviderApproval } from './review-adapter.js';
 import { persistedReviewerOutcome } from '../../application/review-loop/reviewer-outcome.js';
 import { recoverReviewPublications } from './review-workflow-posting.js';
+import { reviewStartObservationBinding, type ReviewStartObservationBindings } from './review-start-observation.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 /** The production review authority a composition root binds for one loop. */
-export interface ReviewLoopBindings {
+export interface ReviewLoopBindings extends ReviewStartObservationBindings {
   readonly startAgent?: typeof startAgent;
   readonly integrationRepair?: ReviewLoopPorts['integrationRepair'];
   readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
@@ -245,7 +245,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
         } } : {}),
         ...(launchSessionPolicy === undefined ? {} : { sessionPolicy: launchSessionPolicy }),
         // A bare repair launch is not review work the board reports.
-        onLaunch: async ({ agent: launched, model, runId }: { agent: string; model: string | null; runId?: string | null }) => {
+        onLaunch: async ({ agent: launched, model, runId }) => {
           if (role === 'implementer' && bindings.missionStore) {
             await recordImplementerLaunch(slug, launched, bindings.missionStore, bindings.lifecycleService);
           }
@@ -466,6 +466,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       },
       head: () => headRevision(worktree),
     },
+    ...reviewStartObservationBinding(bindings, log),
     output: { emit: event => renderReviewLoopEvent(event, { log, error }), log, error, exit, onAgentLaunched: bindings.onAgentLaunched, onAutonomousStop: bindings.onAutonomousStop },
     lock: {
       tryAcquire: () => (activeReviewControllers.has(key) ? false : (activeReviewControllers.add(key), true)),

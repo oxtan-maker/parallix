@@ -67,6 +67,8 @@ export function integrationGateReboundCases(): void {
       const { rerunOk = true, ...rest } = over;
       return {
         slug: SLUG, missionWorktree: harness.root, baseWorktree: '/tmp/base', baseBranch: 'main',
+        executionContext: { missionId: SLUG, missionWorktree: harness.root, missionBranch: `mission/${SLUG}`,
+          baseWorktree: '/tmp/base', baseBranch: 'main' },
         verificationCommand: VERIFY_COMMAND, failedGate: failedGate(),
         gateError: 'Repository gate "integration-suite" exited with code 1 for integration.',
         gates: [{ key: 'integration-suite', command: GATE_COMMAND, order: 3 }],
@@ -76,6 +78,7 @@ export function integrationGateReboundCases(): void {
         captureFinalTreeFn: () => ({ ok: true as const, rootDir: harness.root, commit: 'c', tree: 't' }),
         runPhaseGatesFn: async (_p: string, o) => {
           assert.ok(o.gates, 'the repair rerun receives the configured gate collection');
+          assert.equal(o.targetBranch, 'main', 'the repair rerun preserves the receiving branch for policy identity');
           return rerunOk
             ? { ok: true, phase: 'integration', gates: o.gates, executed: 1, skipped: false, dryRun: false,
                 failedGate: null, outcomes: o.gates.map(gate => ({ ...gate, exitCode: 0, stdout: '', stderr: '' })), error: null }

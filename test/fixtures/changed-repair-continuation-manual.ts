@@ -14,12 +14,19 @@ import { createMissionApplicationServices } from '../../src/composition/applicat
 import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
 import { configureMissionWriteAuthorization } from '../../src/application/ports/mission-write-authorization.js';
+import type { ReviewStartDecision } from '../../src/application/ports/verification-policy.js';
+import { REVIEW_START_DECISION_EVENT } from '../../src/application/verification-policy/review-start-decision.js';
 import { run } from '../../src/composition/create-cli.js';
+import { recordApproval } from '../../src/adapters/review/review-round.js';
+import { reviewerResultAttribution } from '../../src/adapters/review/reviewer-result-attribution.js';
 
 const equivalent = process.argv.includes('--equivalent');
 const failingCheck = process.argv.includes('--failing-check');
 const aggregateMode = process.argv.includes('--aggregate-review') || process.argv.includes('--aggregate-execute');
 const aggregateExecute = process.argv.includes('--aggregate-execute');
+const reviewStartPolicy = process.argv.includes('--review-start-policy');
+const parallelReviewers = process.argv.includes('--parallel-reviewers');
+const reviewFamilies = parallelReviewers ? ['custom', 'claude'] : ['custom'];
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-changed-repair-manual-'));
 const exactCommand = `test -f ${temporary}/allow-check`;
 const aggregateCommands = [`test -f ${temporary}/allow-static`, `test -f ${temporary}/allow-integration`];
@@ -37,9 +44,10 @@ const git = (cwd: string, ...args: string[]) => {
 try {
   fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
-  fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'manual-repair', targetUser: 'probe' }, adapters: {
+  fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'manual-repair', targetUser: 'probe' },
+    ...(reviewStartPolicy ? { verificationPolicy: { mode: 'shadow', artifact: 'missing-policy.json' } } : {}), adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-    agents: { models: { custom: 'stub/custom' } },
+    agents: { models: { custom: 'stub/custom', claude: 'stub/claude' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
     verification: { command: ':', defaultArea: 'all' },
     gates: { preIntegration: aggregateMode
@@ -48,7 +56,7 @@ try {
   } }));
   fs.writeFileSync(path.join(repo, 'config', 'agents.json'), JSON.stringify({ steps: {
     draft: { eligible: ['custom'], selection: 'random' }, active: { eligible: ['codex', 'custom'], selection: 'random' },
-    review: { eligible: ['custom'], selection: 'random' },
+    review: { eligible: reviewFamilies, selection: 'random' },
   } }));
   fs.writeFileSync(path.join(repo, 'config', 'state-map.json'), JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
   fs.writeFileSync(path.join(repo, 'README.md'), '# Disposable repair exercise\n');
@@ -74,7 +82,7 @@ try {
   await clearOperatorStateCache();
   const services = await createMissionApplicationServices(worktree);
   configureMissionWriteAuthorization({ operationId: 'disposable-manual-review', async assert(id) { assert.equal(id, slug); } });
-  const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('custom')], strategy: 'random' });
+  const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: reviewFamilies.map(agentFamily), strategy: 'random' });
   const review = applyReviewerCommand(startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
     revision: changeRevision(approvedRevision), baseline: changeRevision(baseline) }, agentFamily('custom'), agentFamily('codex'), '2026-10-01T08:00:00Z', eligibility), {
     type: 'approve', revision: changeRevision(approvedRevision), decidedAt: '2026-10-01T09:00:00Z', comment: 'historical approval', source: { kind: 'local' },
@@ -204,9 +212,10 @@ try {
   const checkpointsBefore = structuredClone(seeded.mission.checkpoints);
   let reviewerLaunches = 0;
   let reviewedRevision = '';
+  let verdictTail = Promise.resolve();
   setCommandPathProbe(() => '/disposable-reviewer');
   setLauncherHealthProbe(() => ({ ok: true }));
-  setWorkflowLaunchPort(({ prompt, worktree: launchedWorktree }) => ({
+  setWorkflowLaunchPort(({ prompt, worktree: launchedWorktree, model }) => ({
     invocation: { command: 'disposable-independent-reviewer', args: [], options: { cwd: launchedWorktree } },
     resultPromise: (async () => {
       reviewerLaunches++;
@@ -222,9 +231,20 @@ try {
       reviewedRevision = git(worktree, 'rev-parse', 'HEAD');
       assert.equal(current.subject.revision, reviewedRevision);
       assert.equal(current.decision, null);
-      console.log(JSON.stringify({ observation: 'independent reviewer launched', reviewer: current.reviewer, implementer: current.implementer,
+      const reviewer = model === 'stub/claude' ? 'claude' : 'custom';
+      console.log(JSON.stringify({ observation: 'independent reviewer launched', reviewer, implementer: current.implementer,
         round: current.number, revision: current.subject.revision, lane: loaded.mission.status, goal: loaded.mission.brief?.goal }));
-      assert.equal(await run(['verdict', 'approve', '--actor', 'custom'], { baseCwd: worktree }), 0);
+      const verdict = verdictTail.then(async () => {
+        if (!parallelReviewers) { return await run(['verdict', 'approve', '--actor', reviewer], { baseCwd: worktree }); }
+        const recorded = await recordApproval(slug, { comment: null, decidedAt: new Date().toISOString(),
+          revision: reviewedRevision, source: { kind: 'local' },
+          result: reviewerResultAttribution(reviewer, { status: 0, runId: `manual-${reviewer}` }) },
+        { missionStore: services.store, lifecycleService: services.lifecycle });
+        assert.notEqual(recorded.outcome, 'failed', JSON.stringify(recorded));
+        return 0;
+      });
+      verdictTail = verdict.then(() => {}, () => {});
+      assert.equal(await verdict, 0);
       return { status: 0, stdout: '', stderr: '' };
     })(),
   }));
@@ -234,7 +254,7 @@ try {
   assert.equal(result.kind, 'found');
   if (result.kind !== 'found') { throw new Error('disposable Mission missing'); }
   const current = currentReviewRound(result.mission.review!);
-  assert.equal(reviewerLaunches, 1);
+  assert.equal(reviewerLaunches, parallelReviewers ? 2 : 1);
   assert.equal(current.number, 2);
   assert.equal(current.decision?.kind, 'approved');
   assert.equal(current.decision?.revision, reviewedRevision);
@@ -243,9 +263,33 @@ try {
   assert.equal(result.mission.status, 'integration');
   assert.deepEqual(result.mission.checkpoints, checkpointsBefore);
   assert.equal(git(repo, 'rev-parse', 'HEAD'), baseline, 'human integration never ran');
+  const decisions = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
+    .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision).sort((left, right) => left.actionSequence - right.actionSequence);
+  if (reviewStartPolicy) {
+    assert.deepEqual(decisions.map(decision => decision.actualAction), parallelReviewers ? ['agent', 'agent', 'human'] : ['agent', 'human']);
+    assert.deepEqual(decisions.map(decision => decision.failureReason?.kind), decisions.map(() => 'artifact-missing'));
+    assert.deepEqual(decisions.map(decision => decision.verdictCorrelation), parallelReviewers
+      ? ['review:2:agent:custom-verdict', 'review:2:agent:claude-verdict', 'review:2:human-verdict']
+      : ['review:2:agent:custom-verdict', 'review:2:human-verdict']);
+    assert.deepEqual(decisions.map(decision => decision.actionSequence), parallelReviewers ? [1, 2, 3] : [1, 2]);
+    assert.ok(decisions.filter(decision => decision.actualAction === 'agent').every(decision => decision.agentRunId),
+      'each agent review row retains its available run link');
+    assert.equal(decisions.at(-1)?.agentRunId, null);
+    const keys = decisions.map(decision => decision.idempotencyKey);
+    assert.equal(await run(['review', slug, '--reviewer', 'custom'], { baseCwd: worktree }), 0);
+    const replay = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
+      .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision);
+    assert.deepEqual(replay.map(decision => decision.idempotencyKey), keys, 'public restart must not duplicate start rows');
+    assert.equal(reviewerLaunches, parallelReviewers ? 2 : 1, 'public restart must not relaunch an accepted reviewer');
+  } else {
+    assert.deepEqual(decisions, [], 'absent policy must append no review-start rows');
+  }
   console.log(JSON.stringify({ observation: 'fresh decision persisted', approvedRevision, repairedRevision,
     decisionRevision: current.decision?.revision, round: current.number, lane: result.mission.status, reviewerLaunches,
-    boundaries: 'canonical public px review/verdict CLI; real Git, SQLite, preparation, prompts and patch comparison; injected deterministic reviewer launch only' }));
+    policyMode: reviewStartPolicy ? 'shadow' : 'off', reviewStartDecisions: decisions,
+    boundaries: parallelReviewers
+      ? 'canonical public px review CLI; real Git, SQLite, preparation, prompts and patch comparison; injected deterministic reviewer launches and approval writes only'
+      : 'canonical public px review/verdict CLI; real Git, SQLite, preparation, prompts and patch comparison; injected deterministic reviewer launch only' }));
   }
 } finally {
   configureMissionWriteAuthorization(null);

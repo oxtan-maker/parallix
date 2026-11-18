@@ -244,6 +244,7 @@ class IntegrationGateStep {
     const result = await this.dependencies.gates.runPhaseGates('integration', {
       slug,
       checkoutPath: checkout,
+      targetBranch: context.baseBranch,
       gates: gatesToRun.gates,
       log: fmt.log.plain,
       error: fmt.log.fail,

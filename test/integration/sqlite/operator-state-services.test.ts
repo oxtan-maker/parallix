@@ -15,6 +15,7 @@ import { KnownRepositoryService } from '../../../src/application/services/known-
 import { UIPreferencesService } from '../../../src/application/services/ui-preferences-service.js';
 import { OperationalHistoryService } from '../../../src/application/services/operational-history-service.js';
 import { AgentBlockService } from '../../../src/application/services/agent-block-service.js';
+import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
 
 // ---------------------------------------------------------------------------
@@ -313,6 +314,35 @@ describe('OperationalHistoryService: ordered events and failure handling', () =>
       assert.ok((err as Error).message.includes('database failure'), 'Error must indicate database failure');
     }
     assert.ok(errorCaught, 'Database failure on append must propagate to caller');
+  });
+
+  it('atomically deduplicates a review-start decision after restart (TASK-2859.09)', async () => {
+    const input = {
+      missionId: missionId('task-2859.09'), repositoryId: repositoryId('repository-1'), changeIdentity: 'patch-123',
+      configuredMode: 'shadow' as const, effectiveMode: 'shadow' as const,
+      artifactSha256: null, recommendedAction: null,
+      predictedPassProbability: { agent: null, human: null, tests: null },
+      actualAction: 'agent' as const, operatorOverride: false,
+      verdictCorrelation: 'review:round-1:claude', agentRunId: 'claude-run-1', gateRunId: null,
+      operationId: null,
+      failureReason: { kind: 'artifact-missing' as const, message: 'artifact unavailable' },
+    };
+    const replacement = { ...input, verdictCorrelation: 'review:round-1:qwen', agentRunId: 'qwen-run-1' };
+    assert.deepEqual(await Promise.all([
+      service.recordReviewStartDecision(input),
+      service.recordReviewStartDecision(replacement),
+    ]), [true, true]);
+    const restarted = new OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
+    assert.equal(await restarted.recordReviewStartDecision(input), false);
+    const rows = await restarted.loadByType('verification.review-start-decision');
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map(row => {
+      const event = JSON.parse(row.eventData) as { idempotencyKey: string; agentRunId: string };
+      return [event.idempotencyKey, event.agentRunId];
+    }), [
+      ['review-start:task-2859.09:patch-123:1', 'claude-run-1'],
+      ['review-start:task-2859.09:patch-123:2', 'qwen-run-1'],
+    ]);
   });
 });
 

@@ -227,7 +227,8 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
   const gates = ports.gates.loadPhaseGates(worktree, 'preIntegration');
   if (!gates.length) { throw abortWith(ports.landing, 'No integration evidence can establish approval retention.'); }
   const passed = await verifyRestartedRepair({ slug, services, worktree, revision, gates, head: () => committedRepairHead(execution),
-    run: () => ports.gates.runPhaseGates('integration', { slug, checkoutPath: worktree, gates,
+    run: () => ports.gates.runPhaseGates('integration', { slug, checkoutPath: worktree,
+      targetBranch: execution.executionContext.baseBranch, gates,
       realAgent: execution.verification.realAgent, realAgentModel: execution.verification.realAgentModel }) });
   if (committedRepairHead(execution) !== revision) { throw abortWith(ports.landing, 'Integration repair changed during verification.'); }
   await services.operationalHistory?.recordIntegrationValidation({ missionId: slug, sha: revision,

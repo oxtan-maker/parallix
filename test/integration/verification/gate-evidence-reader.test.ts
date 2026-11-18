@@ -133,7 +133,8 @@ test('gate evidence reader scopes integration execution to its owning attempt (T
     const runReader = new VerificationGateEvidenceReader({ configuration: runConfiguration, resolveWorktree: () => root,
       integrationValidation: async () => marker });
     const runGates = [{ key: 'unit', command: 'true' }, { key: 'docs', command: 'true' }];
-    const run = createIntegrationVerificationEvidencePort(runConfiguration).start(root, runGates);
+    const run = await createIntegrationVerificationEvidencePort(runConfiguration).start(root, runGates,
+      { missionId: scope.missionId, operatorInvocation: false });
     if (!run) { throw new Error('a configured plan with a matching run must start observable'); }
     const running = await runReader.readIntegrationGates(scope, { id: 'op-9', generation: 2, phase: 'executing' });
     assert.equal(running.running?.attempt, 'op-9:2', 'the executor records a run for the attempt that started it');
@@ -163,7 +164,8 @@ test('a dry-run uses its recorded executor identity as its running authority (PX
     const scope = { repositoryId: repositoryId('px-0052-repository'), missionId: missionId('px-0052-gate') };
     const gates = [{ key: 'unit', command: 'true' }];
     const owner = { pid: 42, startId: 'executor-start' };
-    const run = createIntegrationVerificationEvidencePort(configuration, owner).start(root, gates);
+    const run = await createIntegrationVerificationEvidencePort(configuration, owner).start(root, gates,
+      { missionId: scope.missionId, operatorInvocation: false });
     assert.ok(run, 'the dry-run record starts without a workflow operation');
     const reader = (active: boolean) => new VerificationGateEvidenceReader({
       configuration, resolveWorktree: () => root, integrationValidation: async () => null,
@@ -175,7 +177,8 @@ test('a dry-run uses its recorded executor identity as its running authority (PX
     assert.equal((await reader(false).readIntegrationGates(scope, null)).running, null,
       'an unsettled record without its live executor is not running');
     const unknownOwner = { pid: 43, startId: null };
-    const unknown = createIntegrationVerificationEvidencePort(configuration, unknownOwner).start(root, gates);
+    const unknown = await createIntegrationVerificationEvidencePort(configuration, unknownOwner).start(root, gates,
+      { missionId: scope.missionId, operatorInvocation: false });
     assert.ok(unknown, 'a dry-run still records its executor when the start identity is unavailable');
     const unreadable = new VerificationGateEvidenceReader({
       configuration, resolveWorktree: () => root, integrationValidation: async () => null,
@@ -240,7 +243,8 @@ test('gate evidence reader keeps marker and run results current across completed
     const validated = head();
     const marker = { sha: validated, hooks: ['unit'], createdAt: '2026-10-18T09:00:00.000Z' };
     const reader = new VerificationGateEvidenceReader({ configuration, resolveWorktree: () => root, integrationValidation: async () => marker });
-    const run = createIntegrationVerificationEvidencePort(configuration).start(root, gates);
+    const run = await createIntegrationVerificationEvidencePort(configuration).start(root, gates,
+      { missionId: scope.missionId, operatorInvocation: false });
     assert.ok(run, 'the run record starts and installs the completed-rebase recorder');
     run.complete(gates.map(({ key, command }) => ({ key, command, exitCode: 0 })), 'passed');
     repo.git('checkout', 'main');

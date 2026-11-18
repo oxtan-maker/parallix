@@ -4,6 +4,9 @@ import { initOperatorState } from '../../sqlite/adapter-factory.js';
 import { createIntegrationVerificationEvidencePort } from '../../verification/integration-verification-proof.js';
 import { processIdentityForObservation } from '../../process/process-liveness.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
+import type { VerificationActionPolicyFactory } from '../../../application/ports/verification-policy.js';
+import { testsActionObservationBinding } from '../../review/review-start-observation.js';
+import * as fmt from '../../../application/presentation/cli-format.js';
 import { DEFAULT_CONFIGURATION } from '../../../application/ports/configuration.js';
 /**
  * Integrate command adapter (TASK-2512).
@@ -42,16 +45,29 @@ import * as execution from '../../git/mission-execution-context.js';
 import * as post from './integrate-post.js';
 import type { IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
 
+function createIntegrationGateRunner(configuration: ParallixConfiguration | undefined,
+  policyFactory: VerificationActionPolicyFactory | undefined,
+  operatorInvocation: boolean): typeof repositoryGates.runPhaseGates {
+  return (phase, options) => {
+    const policy = phase === 'integration' && options.targetBranch
+      ? policyFactory?.({ rootDir: options.checkoutPath, targetBranch: options.targetBranch, slug: options.slug }) : undefined;
+    return repositoryGates.runPhaseGates(phase, {
+      ...options, configuration, operatorInvocation,
+      verificationEvidence: createIntegrationVerificationEvidencePort(configuration,
+        processIdentityForObservation(process.pid), testsActionObservationBinding(policy, fmt.log.plain)),
+    });
+  };
+}
+
 /**
  * Bind the concrete mechanisms to the workflow ports. Every method reaches its
  * module through the imported namespace *at call time*, so a test that swaps a
  * dependency of this module (see `test/lib/module-mock.ts`) is observed by the
  * workflow — the `createReviewPreparationPorts` pattern.
  */
-export function createIntegratePorts(configuration?: ParallixConfiguration): IntegrateWorkflowPorts {
-  const runIntegrationGates: typeof repositoryGates.runPhaseGates = (phase, options) => repositoryGates.runPhaseGates(phase, {
-    ...options, configuration, verificationEvidence: createIntegrationVerificationEvidencePort(configuration, processIdentityForObservation(process.pid)),
-  });
+export function createIntegratePorts(configuration?: ParallixConfiguration,
+  policyFactory?: VerificationActionPolicyFactory, operatorInvocation = false): IntegrateWorkflowPorts {
+  const runIntegrationGates = createIntegrationGateRunner(configuration, policyFactory, operatorInvocation);
   return {
     process: composeIntegrationProcess(configuration),
     fileSystem: {
@@ -224,7 +240,8 @@ const {
 } = workflow;
 
 async function integrate(args: string[], options: import('../../../application/integrate-workflow.js').IntegrateOptions = {}) {
-  return createIntegrateWorkflow(createIntegratePorts(options.configuration)).integrate(args, options);
+  return createIntegrateWorkflow(createIntegratePorts(options.configuration,
+    options.verificationActionPolicy, options.operatorInvocation === true)).integrate(args, options);
 }
 
 export {

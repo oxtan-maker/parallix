@@ -1,4 +1,5 @@
-import { assertReviewPhaseTransition, parseReviewPhase, requireReviewPhase, ReviewPhaseViolation, REVIEW_PHASES } from '../../../src/domain/review-phase-policy.js';
+import { assertReviewPhaseTransition, parseReviewPhase, planReviewRepairPhases,
+  requireReviewPhase, ReviewPhaseViolation, REVIEW_PHASES } from '../../../src/domain/review-phase-policy.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -13,6 +14,7 @@ import {
   hasRecordedStageLaunch,
   parseResolutionDispositions,
   recordStageLaunch,
+  revokeApprovedDecision,
   reviewFindingId,
   stageLaunchWindowsFrom,
   startReview,
@@ -516,4 +518,26 @@ test('one phase transition rule rejects unknown and illegal moves (TASK-2821)', 
     // @ts-expect-error Deliberately exercise runtime validation of unchecked callers.
     assert.throws(() => assertReviewPhaseTransition(current, next), ReviewPhaseViolation);
   }
+});
+
+test('repair phase planning preserves the approved-revocation boundary (TASK-2859.13)', () => {
+  assert.deepEqual(planReviewRepairPhases('reviewing'), { ok: true, phases: ['fixing'] });
+  assert.deepEqual(planReviewRepairPhases('fixing'), { ok: true, phases: [] });
+  assert.deepEqual(planReviewRepairPhases('pending-approval'), { ok: true, phases: ['reviewing', 'fixing'] });
+  assert.deepEqual(planReviewRepairPhases('approved'), { ok: false, failure: {
+    kind: 'approval-revocation-required', message: 'An effective approval must be revoked before repair can begin',
+  } });
+  assert.equal(planReviewRepairPhases('unknown').ok, false);
+
+  const approved = applyReviewerCommand(initialReview(), {
+    type: 'approve', decidedAt: '2026-08-02T09:00:00Z', revision: subject.revision,
+    comment: null, source: { kind: 'local' },
+  });
+  const reopened = revokeApprovedDecision(approved, 1, { revokedAt: '2026-08-02T09:01:00Z',
+    revokedBy: 'human', reason: 'Human requested changes', cause: { kind: 'operator' } });
+  assert.equal(currentReviewRound(reopened).phase, 'reviewing');
+  const repair = planReviewRepairPhases(currentReviewRound(reopened).phase);
+  assert.deepEqual(repair, { ok: true, phases: ['fixing'] });
+  const fixing = transitionReviewPhase(reopened, repair.ok ? repair.phases[0] : assert.fail(repair.failure.message));
+  assert.equal(currentReviewRound(fixing).phase, 'fixing');
 });

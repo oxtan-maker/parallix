@@ -18,6 +18,8 @@ export type BeliefRecord =
   | { readonly kind: 'complete'; readonly passed: readonly PolicyAction[] }
   | { readonly kind: 'pending-repair'; readonly check: PolicyAction; readonly passed: readonly PolicyAction[] };
 
+export type VerificationCheckState = 'unknown' | 'passed';
+
 export type BeliefFailureKind = 'contradiction' | 'unmodelled-history' | 'invalid';
 export type BeliefDerivation =
   | { readonly ok: true; readonly belief: readonly number[]; readonly record: BeliefRecord }
@@ -150,4 +152,16 @@ export function deriveBelief(artifact: PolicyArtifact, history: readonly Verific
   } catch {
     return failed('invalid', 'artifact or history could not be read');
   }
+}
+
+/** Exhaustive check-state projection; a missing pass remains explicitly unknown. */
+export function verificationCheckStates(record: BeliefRecord): Readonly<Record<PolicyAction, VerificationCheckState>> {
+  const passed = new Set(record.passed);
+  return Object.fromEntries(POLICY_ACTIONS.map(check => [check, passed.has(check) ? 'passed' : 'unknown'])) as
+    Record<PolicyAction, VerificationCheckState>;
+}
+
+/** Only a completed history with all three current-change passes may land. */
+export function verificationIntegrationEligible(record: BeliefRecord): boolean {
+  return record.kind === 'complete' && POLICY_ACTIONS.every(check => record.passed.includes(check));
 }

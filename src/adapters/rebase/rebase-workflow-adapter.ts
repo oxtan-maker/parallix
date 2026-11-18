@@ -105,15 +105,15 @@ function missionConflictPathPrefix(slug: string, worktreePath: string): string {
 
 /** Bind the rebase workflow to the concrete adapters, honoring the legacy seams. */
 function launchIdentityOptions(options: RebaseCommandOptions, launch: NonNullable<Parameters<typeof startAgent>[1]>) {
-  return { ...launch, configuration: options.configuration, onLaunch: async (event: { agent: string; model: string | null;
-    invocation: import('../agents/agent-process-types.js').AgentInvocation | null | undefined; startedAtMs: number }) => {
+  return { ...launch, configuration: options.configuration,
+    onLaunch: async (event: Parameters<NonNullable<typeof launch.onLaunch>>[0]) => {
     const services = options.missionIdentityServices ?? options.missionServicesFn;
     if (services) {
       const authority = await services(options.executionContext.missionWorktree);
       await recordImplementerLaunch(String(launch.slug), event.agent, authority.store, authority.lifecycle);
     }
     await launch.onLaunch?.(event);
-  } };
+    } };
 }
 
 function rebaseWorkspaceBindings(options: RebaseCommandOptions) {

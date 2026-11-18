@@ -53,6 +53,7 @@ export interface ReviewLoopFakeOverrides {
   readonly lock?: ReviewControllerLock;
   readonly missionStore?: ReviewLoopPorts['missionStore'];
   readonly lifecycle?: ReviewLoopPorts['lifecycle'];
+  readonly reviewStarts?: ReviewLoopPorts['reviewStarts'];
 }
 
 export interface ReviewLoopFake {
@@ -163,6 +164,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       head: () => 'head-1',
       ...overrides.preReview,
     },
+    ...(overrides.reviewStarts ? { reviewStarts: overrides.reviewStarts } : {}),
     output: {
       emit: event => renderReviewLoopEvent(event, ports.output),
       log: message => { logs.push(message); },
@@ -189,6 +191,7 @@ export function fakeLoopContext(fake: ReviewLoopFake, overrides: Partial<LoopCon
     reboundsPerRound: 6,
     dryRun: false,
     isContinue: false,
+    operatorInvocation: false,
     verbose: false,
     initialRound: state.round,
     state,

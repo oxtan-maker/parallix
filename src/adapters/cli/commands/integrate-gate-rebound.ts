@@ -406,7 +406,8 @@ function createRepairVerifier(opts: IntegrationGateRouteOptions, failedGates: re
   return async () => {
     const tree = captureFinalTreeFn(missionWorktree);
     if (!tree.ok) { return { ok: false, diagnostic: `The repair is not committed, so the integration gates cannot re-run: ${tree.error}` }; }
-    const rerun = await runPhaseGatesFn('integration', { slug, checkoutPath: missionWorktree, gates,
+    const rerun = await runPhaseGatesFn('integration', { slug, checkoutPath: missionWorktree,
+      targetBranch: opts.executionContext?.baseBranch, gates,
       log: opts.gateRunLog ?? fmt.log.plain, error: opts.gateRunError ?? fmt.log.fail,
       realAgent: opts.realAgent, realAgentModel: opts.realAgentModel });
     const after = captureFinalTreeFn(missionWorktree);

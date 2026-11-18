@@ -2,6 +2,7 @@ import { OperationalHistoryService } from '../application/services/operational-h
 import { SqliteOperationalHistoryRepository } from '../adapters/sqlite/operational-history-repository.js';
 import { MissionIntegrationService } from '../application/mission-integration-service.js';
 import { integrationRepairContinuation } from './integration-repair-continuation.js';
+import { createTestsActionPolicyFactory } from './review-start-observation.js';
 import { createBootstrapGitBindings } from './git-admission.js';
 import type { DraftAdapterDependencies } from '../adapters/cli/commands/draft-adapter-types.js';
 import type { GitReader } from '../adapters/git/worktree.js';
@@ -46,12 +47,11 @@ import { readAgentConfig } from '../adapters/agents/agent-config.js';
 import { missionBranchName } from '../adapters/filesystem/mission-paths.js';
 import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/worktree.js';
 import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
-import { createReviewLoopPorts } from '../adapters/review/review-loop.js';
 import { runReviewLoop } from '../application/review-loop/review-loop.js';
 import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
-import { reviewLoopBindings } from './review-persistence.js';
+import { createPersistentReviewLoopPorts } from './review-persistence.js';
 import { agentFamily } from '../domain/agents.js';
 import { createReviewLivenessReader } from './review-liveness.js';
 import { resolveMissionExecutionContext } from '../adapters/git/mission-execution-context.js';
@@ -182,10 +182,15 @@ function createBoardReviewPreparationWorkflow(
   rootDir: string,
   store: MissionStore & MissionTransitionStore,
   configuration: ParallixConfiguration,
+  persistence: {
+    readonly repositoryId: RepositoryId;
+    readonly laneEvents: BoardLaneEventRepository;
+    readonly database: SqliteDatabaseAdapter | null;
+  },
   reviewLoop: typeof runReviewLoop = runReviewLoop,
-  database?: SqliteDatabaseAdapter | null,
   resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext,
 ) {
+  const { database, repositoryId } = persistence;
   const lifecycle = new MissionLifecycleService(store);
   const missionServices = {
     operationalHistory: database ? new OperationalHistoryService(new SqliteOperationalHistoryRepository(database)) : null,
@@ -195,6 +200,11 @@ function createBoardReviewPreparationWorkflow(
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     nel: new MissionNelService(store),
   };
+  const integrationRepairPolicy = database && missionServices.operationalHistory
+    ? createTestsActionPolicyFactory(configuration, {
+      db: database, store, history: missionServices.operationalHistory,
+      lifecycle: persistence.laneEvents, repositoryId,
+    }) : undefined;
   const reviewReviewPreparation = async (slug: string, options: Parameters<typeof performReviewPreparation>[1]): Promise<Record<string, unknown>> =>
     ({ ...await performReviewPreparation(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices }) });
   return {
@@ -221,8 +231,16 @@ function createBoardReviewPreparationWorkflow(
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
         missionUnavailable: (_mission, reason) => { throw new Error(`Mission authority is unavailable for ${slug}: ${reason}`); },
         reviewRecoveryRefused: (_mission, reason) => { throw new Error(`Review recovery refused for ${slug}: ${reason}`); },
-        mechanisms: () => createReviewLoopPorts(slug, { executionContext: live.context }, { integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree), configuration, preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit, ...reviewLoopBindings(store, lifecycle), classification: createReviewClassification(slug, worktree, configuration.decision, configuration) }),
-      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null, executionContext: live.context });
+        mechanisms: () => createPersistentReviewLoopPorts(slug, { executionContext: live.context }, {
+          integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree,
+            integrationRepairPolicy), configuration,
+          preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit,
+          classification: createReviewClassification(slug, worktree, configuration.decision, configuration),
+        }, {
+          mission: { store, lifecycle, operationalHistory: missionServices.operationalHistory, repositoryId },
+          operatorState: { db: database, repositories: { boardLaneEvents: persistence.laneEvents } },
+        }),
+      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null, executionContext: live.context, operatorInvocation: false });
     },
   };
 }
@@ -257,7 +275,9 @@ export function composeProductionCapabilities(
         missionStore,
       ),
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
-      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(rootDir, missionStore, overrides.configuration, overrides.reviewPreparationReviewLoop, database, overrides.resolveMissionContext),
+      reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(rootDir, missionStore, overrides.configuration, {
+        repositoryId: owningRepositoryId, laneEvents: repositories.boardLaneEvents, database: database ?? null,
+      }, overrides.reviewPreparationReviewLoop, overrides.resolveMissionContext),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

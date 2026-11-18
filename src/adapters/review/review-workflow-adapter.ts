@@ -47,6 +47,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
     rootDir?: string;
     resolveExecutionContextFn?: (_slug: string, _root: string) => MissionExecutionContextResolution;
     readFileSync?: ReadUtf8File;
+    operatorInvocation?: boolean;
     inferSlugFn?: typeof inferSlug; log?: (_msg: string) => void; error?: (_msg: string) => void; exit?: (_code: number) => void;
     verifyReviewFn?: ReviewCommandObserver<typeof verifyReview>; submitForReviewFn?: ReviewCommandObserver<typeof submitForReview>; pushRoundFn?: ReviewCommandObserver<typeof pushRound>; readCommentsFn?: ReviewCommandObserver<typeof readComments>; commentRoundFn?: ReviewCommandObserver<typeof commentRound>; submitReviewRoundFn?: ReviewCommandObserver<typeof submitReviewRound>; closeMissionPrFn?: ReviewCommandObserver<typeof closeMissionPr>; readReviewStateFn?: ReviewStateInstanceReader; resolveWorktreeFn?: typeof resolveWorktree; reconcileInterruptedReviewPreparationFn?: typeof reconcileInterruptedReviewPreparation;
     getPrStatusFn?: typeof getPrStatus; isReviewProviderEnabledFn?: typeof isProviderEnabled;
@@ -103,7 +104,7 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
   }
   private roundRequest(context: ReviewMutationWorkflowContext): Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> {
     const poll = flagValue(context.args, '--poll-timeout-seconds');
-    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, executionContext: context.executionContext };
+    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, executionContext: context.executionContext, operatorInvocation: context.options.operatorInvocation === true };
   }
   private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
   private roundUseCase(context: ReviewMutationWorkflowContext, helperExit?: (_code: number) => never): ReviewRoundUseCase {

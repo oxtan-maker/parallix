@@ -1,0 +1,23 @@
+import type { LoopContext, ReviewRound } from './round.js';
+import { missionId } from '../../domain/mission.js';
+
+/** Observe an actual agent launch after the round-open boundary committed. */
+export async function observeAgentReviewStart(context: LoopContext, round: ReviewRound,
+  reviewer: string, runId: string | null): Promise<void> {
+  if (context.dryRun || !context.ports.reviewStarts) { return; }
+  const revision = round.verifiedRevision ?? context.ports.preReview.head();
+  if (!revision) { return; }
+  await context.ports.reviewStarts.observe({ missionId: missionId(context.slug), actualAction: 'agent', revision,
+    verdictCorrelation: `review:${round.attempt}:agent:${reviewer}-verdict`, agentRunId: runId,
+    operatorInvocation: context.operatorInvocation });
+}
+
+/** Observe the already-committed integration handoff; restart replays the same key. */
+export async function observeHumanReviewStart(context: LoopContext): Promise<void> {
+  if (context.dryRun || !context.ports.reviewStarts) { return; }
+  const revision = context.ports.preReview.head();
+  if (!revision) { return; }
+  await context.ports.reviewStarts.observe({ missionId: missionId(context.slug), actualAction: 'human', revision,
+    verdictCorrelation: `review:${context.state.round}:human-verdict`, agentRunId: null,
+    operatorInvocation: context.operatorInvocation });
+}

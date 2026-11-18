@@ -38,3 +38,30 @@ export function assertReviewPhaseTransition(current: ReviewPhase, next: ReviewPh
     throw new ReviewPhaseViolation(`Review phase "${current}" cannot move to "${next}". Allowed: ${allowed.join(', ') || 'none'}`);
   }
 }
+
+export type ReviewRepairPhasePlan =
+  | { readonly ok: true; readonly phases: readonly ReviewPhase[] }
+  | { readonly ok: false; readonly failure: {
+    readonly kind: 'invalid-phase' | 'approval-revocation-required';
+    readonly message: string;
+  } };
+
+/**
+ * Plan only legal phase moves into repair. An effective approval must first be
+ * revoked through the review aggregate, which opens a fresh reviewing round.
+ */
+export function planReviewRepairPhases(current: unknown): ReviewRepairPhasePlan {
+  const phase = parseReviewPhase(current);
+  if (phase === null) {
+    return { ok: false, failure: { kind: 'invalid-phase', message: `Cannot repair from invalid review phase: ${String(current)}` } };
+  }
+  if (phase === 'approved') {
+    return { ok: false, failure: { kind: 'approval-revocation-required',
+      message: 'An effective approval must be revoked before repair can begin' } };
+  }
+  const phases: readonly ReviewPhase[] = phase === 'fixing' ? []
+    : phase === 'pending-approval' ? ['reviewing', 'fixing'] : ['fixing'];
+  let prior: ReviewPhase = phase;
+  for (const next of phases) { assertReviewPhaseTransition(prior, next); prior = next; }
+  return { ok: true, phases };
+}

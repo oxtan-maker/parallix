@@ -106,6 +106,7 @@ export async function openRepairFixture(options: {
   extraGates?: Array<{ key: string; command: string; order: number; retries?: number }>;
   /** `undecided-review`: a review-lane mission whose round awaits a reviewer decision. */
   state?: 'approved-integration' | 'undecided-review';
+  verificationPolicy?: { mode: 'shadow' | 'pilot'; artifact: string; content: string };
 }): Promise<RepairFixture> {
   const { slug } = options;
   const root = fs.realpathSync(mkdtemp('parallix-task-2620-'));
@@ -118,6 +119,9 @@ export async function openRepairFixture(options: {
   fs.writeFileSync(path.join(repo, '.gitignore'), '.workflow/\n');
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({
     product: { name: 'parallix' },
+    ...(options.verificationPolicy ? { verificationPolicy: {
+      mode: options.verificationPolicy.mode, artifact: options.verificationPolicy.artifact,
+    } } : {}),
     adapters: {
       tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
@@ -133,6 +137,9 @@ export async function openRepairFixture(options: {
       },
     },
   }, null, 2));
+  if (options.verificationPolicy) {
+    fs.writeFileSync(path.join(repo, options.verificationPolicy.artifact), options.verificationPolicy.content);
+  }
   // One independent reviewer (codex) keeps these repair fixtures on a single review launch; reviewer count is owned by the review-policy suites.
   const agentConfig = JSON.parse(fs.readFileSync(path.resolve('config/agents.json'), 'utf8')) as { steps: { review: { eligible: string[] } } };
   agentConfig.steps.review.eligible = ['codex', 'custom'];

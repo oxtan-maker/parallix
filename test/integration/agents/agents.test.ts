@@ -1467,13 +1467,14 @@ test('startAgent supports a function for prompt and calls it with chosen agent',
   assert.equal(prompt, 'You are codex.');
 });
 
-test('startAgent reroutes when the selected agent has no launcher (missing binary)', async () => {
+test('startAgent reroutes when the selected agent has no launcher (missing binary) and keeps the durable attempt (TASK-2859.09 F13)', async () => {
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-reroute-missing-'));
   try {
     const log: string[] = [];
     const result = await withCommandPathProbe(['claude'], () => startAgent('draft', { configuration: resolveConfiguration(process.env),
       prompt: 'Execute',
       worktree,
+      slug: 'task-2859.09',
       selectAgentFn: (step, opts) => {
         if (!new Set(opts?.exclude ?? []).has('codex')) return 'codex';
         return 'claude';
@@ -1483,6 +1484,7 @@ test('startAgent reroutes when the selected agent has no launcher (missing binar
     }));
 
     assert.equal(result.agent, 'claude');
+    assert.match(result.result.runId ?? '', /-a2-/, 'the run identity uses the same durable attempt reported to the operator');
     assert.ok(log.some(m => m.includes('Agent "codex" launcher is not available')));
     assert.ok(log.some(m => m.includes('Selected agent for step "draft": claude (attempt 2)')));
   } finally {

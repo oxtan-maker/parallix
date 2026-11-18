@@ -8,6 +8,7 @@ import type { IntegrationContext } from './integrate/context.js';
 import { withBaseMutation } from './integrate/base-mutation.js';
 import { prepareBacklogPayload } from './integrate/backlog-payload.js';
 import type { ParallixConfiguration } from "./ports/configuration.js";
+import type { VerificationActionPolicyFactory } from './ports/verification-policy.js';
 import type { MissionExecutionContext } from './ports/mission-execution-context.js';
 import { liveMissionExecutionContext } from './ports/mission-execution-context.js';
 /**
@@ -50,6 +51,10 @@ import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
 /** The injection seams `px integrate` callers and the characterization suites bind. */
 export interface IntegrateOptions extends Partial<IntegrateSeams> {
   configuration?: ParallixConfiguration;
+  /** Composed only with operator-state authority; off mode returns no observer. */
+  verificationActionPolicy?: VerificationActionPolicyFactory;
+  /** Direct CLI entry is an operator action; lead, board and recovery are not. */
+  operatorInvocation?: boolean;
   missionServicesFn?: IntegrationMissionServicesFactory;
   /** Board composition receives the terminal status without terminating the UI process. */
   exitFn?: (_code: number) => void;

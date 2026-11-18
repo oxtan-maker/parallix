@@ -21,6 +21,8 @@ import type { SessionLaunchPolicy } from '../../domain/session.js';
 import type { AgentLaunchResult } from './agent-launch-result.js';
 import type { ReviewOperatorResumeAssessment } from '../review-recovery.js';
 import type { LiveMissionExecutionContext } from './mission-execution-context.js';
+import type { ReviewStartFacts } from './verification-policy.js';
+export type { ReviewStartFacts } from './verification-policy.js';
 
 /* ------------------------------------------------------------------ *
  * Entry
@@ -44,6 +46,8 @@ export interface StartReviewRound {
   readonly pollTimeoutSeconds: number | null;
   readonly missionPath?: string;
   readonly executionContext: LiveMissionExecutionContext;
+  /** Existing workflow-admission fact: true only for a direct operator invocation. */
+  readonly operatorInvocation?: boolean;
 }
 
 /** Entry facts and effects `ReviewRoundUseCase` needs before the loop runs. */
@@ -392,6 +396,10 @@ export interface PreReviewPort {
   head(): string | null;
 }
 
+export interface ReviewStartObservationPort {
+  observe(_facts: ReviewStartFacts): Promise<void>;
+}
+
 /* ------------------------------------------------------------------ *
  * Operator output, current work, and the controller fence
  * ------------------------------------------------------------------ */
@@ -435,6 +443,8 @@ export interface ReviewLoopPorts {
   readonly agents: ReviewAgentPort;
   readonly artifacts: ReviewArtifactPort;
   readonly preReview: PreReviewPort;
+  /** Absent when verificationPolicy is off, preserving zero policy work. */
+  readonly reviewStarts?: ReviewStartObservationPort;
   readonly output: ReviewLoopOutput;
   readonly lock: ReviewControllerLock;
   readonly classification?: import('./review-classification.js').ReviewClassificationPorts;
@@ -456,6 +466,8 @@ export interface ReviewLoopRequest {
   /** The caller already ran the review preparation transition (e.g. `px active` repair). */
   readonly skipReviewPreparation?: boolean;
   readonly verbose?: boolean;
+  /** Existing workflow-admission fact: true only for a direct operator invocation. */
+  readonly operatorInvocation?: boolean;
 }
 
 /** Retained diagnostics and exact execution for an unfinished gate repair. */

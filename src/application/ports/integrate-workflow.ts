@@ -238,7 +238,7 @@ export interface IntegrateGatesPort {
 
   loadPhaseGates(_rootDir: string, _phase: 'preIntegration'): IntegrationGateDefinition[];
   loadRequirePreIntegration(_rootDir: string): boolean;
-  runPhaseGates(_phase: 'integration', _options: { slug: string; checkoutPath: string; gates?: IntegrationGateDefinition[]; log?: (message: string) => void; error?: (message: string) => void; dryRun?: boolean; realAgent?: string | null; realAgentModel?: string | null }): Promise<IntegrationGateRunResult>;
+  runPhaseGates(_phase: 'integration', _options: { slug: string; checkoutPath: string; targetBranch?: string; gates?: IntegrationGateDefinition[]; log?: (message: string) => void; error?: (message: string) => void; dryRun?: boolean; realAgent?: string | null; realAgentModel?: string | null }): Promise<IntegrationGateRunResult>;
   captureFinalIntegrationTree(_rootDir: string): { ok: boolean; error?: string; rootDir?: string; commit?: string; tree?: string };
   /** Repository-relative paths whose content differs between two commits; any git failure is `ok: false`. */
   listChangedPathsBetween(_rootDir: string, _fromCommit: string, _toCommit: string): { ok: true; paths: string[] } | { ok: false; error: string };

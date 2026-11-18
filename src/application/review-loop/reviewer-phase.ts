@@ -18,6 +18,7 @@ import { selectReviewer } from './reviewer-selection.js';
 import { runParallelReviewerBatch } from './parallel-reviewers.js';
 import { applyReviewerArtifacts, incompleteReviewerDiagnostic, missingReviewerArtifacts, reviewerArtifactDiagnostic } from './reviewer-artifacts.js';
 import { applyReviewerOutcome, persistedReviewerOutcome } from './reviewer-outcome.js';
+import { observeAgentReviewStart, observeHumanReviewStart } from './review-start-observation.js';
 
 type ReviewOutcome = { outcome: 'stop' } | { reviewState: unknown };
 
@@ -106,7 +107,10 @@ async function launchReviewer(context: LoopContext, round: ReviewRound): Promise
       exclude: [identities.implementer],
       prompt: round.promptFacts(),
       sessionPolicy: 'fresh-ephemeral',
-      onStarted: async ({ agent, runId }) => await emitReviewerProgress(context, round, 'running', { reviewer: agent, runLabel: runId }),
+      onStarted: async ({ agent, runId }) => {
+        await emitReviewerProgress(context, round, 'running', { reviewer: agent, runLabel: runId });
+        await observeAgentReviewStart(context, round, agent, runId);
+      },
       ...(context.parallelReviewer ? { pinnedAgent: true } : {}),
     });
   } catch (err: unknown) {
@@ -339,6 +343,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
   const { state } = context;
   round.integrationRepair = await integrationRepairBrief(context);
   if (state.phase === 'approved') {
+    await observeHumanReviewStart(context);
     if (!context.dryRun) { await context.ports.task.mirrorApproved(); }
     return { outcome: 'stop' };
   }

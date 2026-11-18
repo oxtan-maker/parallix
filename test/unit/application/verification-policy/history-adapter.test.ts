@@ -146,6 +146,10 @@ test('preserves only coverage-backed approval after a completed landing repair (
     landedRevision: rev('c'), recorded: null };
   assert.equal(failure(mapped(retained, null, [row('landing', 'pass')], [cp('landing', 'e2e')],
     { approvalCoverage: new Map([[1, stale]]) })), 'contradiction');
+  const unverifiable: ApprovalCoverage = { kind: 'unverifiable', round: 1,
+    approvedRevision: null, reason: 'approved revision is unavailable' };
+  assert.equal(failure(mapped(retained, null, [row('landing', 'pass')], [cp('landing', 'e2e')],
+    { approvalCoverage: new Map([[1, unverifiable]]) })), 'unavailable');
 });
 
 function rebase(outcome: RebaseMeasurement['outcome'], before: string | null, after: string | null): RebaseMeasurement {

@@ -32,6 +32,7 @@ export interface LoopContext {
   readonly reboundsPerRound: number;
   readonly dryRun: boolean;
   readonly isContinue: boolean;
+  readonly operatorInvocation: boolean;
   readonly verbose: boolean;
   readonly initialRound: number;
   /** This private context owns one selected slot in a parallel reviewer batch. */
