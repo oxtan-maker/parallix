@@ -60,6 +60,8 @@ export interface StatusMissionData {
   readonly checkpointDescription?: string | null;
   /** Current review phase. */
   readonly reviewPhase?: string | null;
+  /** The board projection's authoritative human turn, carried without re-derivation. */
+  readonly humanReviewDue?: import('../verification-policy/review-start-decision.js').HumanReviewDue | null;
   /** Current review round. */
   readonly reviewRound?: number | null;
   readonly reviewLiveness?: import('../projections/review-liveness.js').ReviewLiveness | null;

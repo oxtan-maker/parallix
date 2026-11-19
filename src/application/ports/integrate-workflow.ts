@@ -156,6 +156,7 @@ export interface IntegrateProductConfigPort {
 export interface IntegrateReviewPort {
   readReviewState(_slug: string, _rootDir: string, _missionStore?: MissionStore | null): Promise<IntegrationReviewSnapshot | null> | IntegrationReviewSnapshot | null;
   submitForReview(_slug: string, _skipGate: boolean, _options: IntegrationReviewSubmissionOptions): Promise<unknown>;
+  submitApproval(_slug: string, _message: string, _options: IntegrationApprovalSubmissionOptions): Promise<{ ok: boolean; diagnostic?: string }>;
   resolveForgejoUser(_reviewer: string): string | null;
 }
 
@@ -170,6 +171,16 @@ export type IntegrationReviewSubmissionOptions = {
   executionContext: LiveMissionExecutionContext;
   occurredAt?: string;
 } & Record<string, unknown>;
+
+/** Existing review-submission boundary reused by integrate-as-human-approval. */
+export interface IntegrationApprovalSubmissionOptions {
+  readonly executionContext: LiveMissionExecutionContext;
+  readonly missionServices: Pick<IntegrationMissionServices, 'store' | 'lifecycle'>;
+  /** Revision already covered by the persisted agent decision. */
+  readonly reviewedRevision: string;
+  /** Current tested head that a configured external provider must approve. */
+  readonly revision: string;
+}
 
 export interface IntegrateRebasePort {
   createRebaseWorkflowPort(_options: { gitFn: IntegrateGitRunner; missionServicesFn?: IntegrationMissionServicesFactory;
@@ -232,7 +243,25 @@ export interface IntegrationGateFailureRequest {
   reReviewFollows?: boolean;
 }
 
+/** The gate-run writer's record of one integration gate phase: its identity, revision and per-hook results. */
+export interface IntegrationGateRunRecord {
+  readonly gateRunId: string | null;
+  readonly revision: string;
+  readonly status: 'running' | 'passed' | 'failed' | 'cancelled';
+  /** The run's recorded input identity matches the checkout now (toolchain, coverage, worktree). */
+  readonly current: boolean;
+  /** Completed rebases that carried the run to the checked-out HEAD; null when none. */
+  readonly carried: import('../../domain/integration-validation-policy.js').CompletedRebaseLineage | null;
+  readonly gates: readonly { readonly key: string; readonly command: string }[];
+  readonly outcomes: readonly { readonly key: string; readonly command: string; readonly exitCode: number | null;
+    readonly result?: 'passed' | 'failed' | 'blocked' | 'cancelled' }[];
+}
+
 export interface IntegrateGatesPort {
+  /** Read the latest recorded gate run of a checkout; an observation, never landing authority. */
+  readGateRun?(_checkout: string): IntegrationGateRunRecord | null;
+  /** Existing approval-coverage authority for the checkout's current landed change. */
+  approvalCoverage?(_checkout: string, _review: import('../../domain/review.js').Review | null): import('../../domain/approval-coverage.js').ApprovalCoverage | null;
   approvalEvidence?(_worktree: string): import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
   invalidateApproval?: (_options: { slug: string; branch: string; approval: IntegrationApproval; summary: string; approvedRevision?: string; executionContext?: LiveMissionExecutionContext; missionStore?: MissionStore }) => Promise<{ ok: boolean; dismissed: string[]; errors: string[] }>;
 

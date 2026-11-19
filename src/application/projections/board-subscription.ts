@@ -196,6 +196,7 @@ export function boardFingerprint(
       reviewPhase: card.reviewPhase,
       reviewRound: card.reviewRound,
       reviewApproved: card.reviewApproved,
+      humanReviewDue: card.humanReviewDue,
       blockingReason: card.blockingReason,
       currentWork: card.currentWork,
       workflowOperation: card.workflowOperation,

@@ -27,7 +27,7 @@ import * as fmt from './presentation/cli-format.js';
 import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import { integrationRepairNeedsReview } from './integration-repair-review.js';
-import { evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
+import { approveEligibleIntegrationShortcut, evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
 import { createIntegrationGateStep, type IntegrateSeams } from './integrate/gates.js';
 import { createGithubPrLanding } from './integrate/github-pr.js';
@@ -35,7 +35,7 @@ import { createMissionLanding } from './integrate/landing.js';
 import { createIntegrationPreflight } from './integrate/preflight.js';
 import { buildIntegrationReadiness, printIntegrationReadiness } from './integrate/readiness.js';
 import { createIntegrationRebase } from './integrate/rebase.js';
-import { createMissionRecovery } from './integrate/recovery.js';
+import { assertRecoveredIntegrationHandoff, createMissionRecovery } from './integrate/recovery.js';
 import { recoverLandedIntegration } from './integrate/landed-recovery.js';
 import type { IntegrateRunState } from './integrate/squash.js';
 import {
@@ -47,6 +47,8 @@ import {
   type IntegrateRequest,
 } from './integrate/support.js';
 import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
+import { fixedVerificationNextAction } from './verification-policy/review-start-decision.js';
+import { createTestsActionExecutor } from './integrate/tests-action.js';
 
 /** The injection seams `px integrate` callers and the characterization suites bind. */
 export interface IntegrateOptions extends Partial<IntegrateSeams> {
@@ -71,9 +73,7 @@ export interface IntegrateOptions extends Partial<IntegrateSeams> {
 
 /** A run always carries the resolved checkouts its nested steps depend on. */
 export type ResolvedIntegrateOptions = IntegrateOptions & { executionContext: MissionExecutionContext };
-
 function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
-
   const { landing, missionPaths } = ports;
 
   const { buildIntegrationContext } = createIntegrationContextBuilder(ports);
@@ -311,6 +311,8 @@ class IntegrateWorkflow {
     await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, execution, seams, request);
     const repair = await missionServices.store.load(missionId(slug));
     if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
+      const next = fixedVerificationNextAction({ mission: repair.mission });
+      if (next.kind !== 'agent-review' && next.kind !== 'repair') { return null; }
       return reviewBeforeIntegration(slug, this.executionContextFor(slug, execution).missionWorktree, this.dependencies.ports.landing, seams.reReviewFn);
     }
     return null;
@@ -378,7 +380,10 @@ class IntegrateWorkflow {
     // part of the candidate branch, but it is never lifecycle authority.
     if (!dryRun) {
       context.promoteBacklogOnCloseout = context.missionStatus === 'review';
+      if (missionLoad.kind === 'found') { await approveEligibleIntegrationShortcut(context, missionLoad, missionServices, this.dependencies.ports); }
       await this.dependencies.recoverMissionForIntegration(context, { missionServices });
+      const recovered = await missionServices.store.load(missionId(slug));
+      assertRecoveredIntegrationHandoff(recovered, this.dependencies.landing, slug);
     }
 
     if (this.dependencies.printIntegrationPreflight(context, { gitFn: this.dependencies.ports.git.git, configuration: options.configuration }).failures.length > 0) {
@@ -484,6 +489,7 @@ class IntegrateWorkflow {
     printIntegrationReadiness,
     runIntegrationRebase: this.dependencies.runIntegrationRebase,
     predictIntegrationRebase: this.dependencies.predictIntegrationRebase,
+    runTestsAction: createTestsActionExecutor(this.dependencies.ports, this.dependencies).runTestsAction,
     parseIntegrateArgs,
     resolveBounceImplementer,
     resolveIntegrationTaskPath,

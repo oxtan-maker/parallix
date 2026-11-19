@@ -22,18 +22,30 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import type { ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
 import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
 import type { LiveMissionExecutionContext, LiveMissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
+import type { FixedVerificationNextAction } from '../../application/verification-policy/review-start-decision.js';
+
+export interface ReviewerVerdictOutput {
+  readonly findings: readonly ReviewFinding[];
+  readonly comment: string | null;
+  readonly verdict: string;
+  /** Derived from the next-action owner, never inferred from actor text. */
+  readonly turn: 'agent' | 'human';
+  /** Derived from invocation authority, never from the selected turn or actor text. */
+  readonly authority: 'reviewer' | 'operator';
+}
 
 export interface RejectedVerdictInput {
   readonly slug: string;
   readonly worktree: string;
   readonly round: number;
   readonly reviewer: string;
-  readonly output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string };
+  readonly output: ReviewerVerdictOutput;
   readonly reason: string;
 }
 
 /** The existing recorders, supplied by composition. */
 export interface ReviewVerbPorts {
+  readonly verdictAuthority: ReviewerVerdictOutput['authority'];
   readonly retainRejectedVerdict?: (_input: RejectedVerdictInput) => Promise<string>;
   readonly resolveSlug: (_explicit?: string) => string | null;
   readonly resolveExecutionContext: (_slug: string) => LiveMissionExecutionContextResolution;
@@ -41,10 +53,14 @@ export interface ReviewVerbPorts {
   readonly consumeReviewerOutput: (
     _slug: string,
     _reviewer: string,
-    _output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string },
+    _output: ReviewerVerdictOutput,
     _executionContext: LiveMissionExecutionContext,
     _expectedVersion?: number,
-  ) => Promise<{ consumed: boolean; ok?: boolean; diagnostic?: string | null }>;
+  ) => Promise<{ consumed: boolean; ok?: boolean; diagnostic?: string | null; advisory?: string | null }>;
+  /** Read recorded state through the one verification next-action owner. */
+  readonly nextVerificationAction: (_slug: string, _respectOwnedAction: boolean) => Promise<FixedVerificationNextAction>;
+  /** Execute only the mechanism selected by the next-action owner. */
+  readonly continueVerificationAction?: (_slug: string, _action: FixedVerificationNextAction) => Promise<void>;
   readonly consumeImplementerOutput: (
     _slug: string,
     _implementer: string,
@@ -182,12 +198,66 @@ function slugOf(args: readonly string[], ports: ReviewVerbPorts): { slug: string
   return { slug, executionContext: resolution.context };
 }
 
+function verdictTurn(action: FixedVerificationNextAction): ReviewerVerdictOutput['turn'] {
+  return action.kind === 'human-review' ? 'human' : 'agent';
+}
+
+async function continueVerdict(ports: ReviewVerbPorts, slug: string, action: FixedVerificationNextAction): Promise<void> {
+  if (ports.continueVerificationAction) { await ports.continueVerificationAction(slug, action); }
+}
+
+async function reportVerdictCompletion(ports: ReviewVerbPorts, slug: string, worktree: string,
+  output: ReviewerVerdictOutput, originalRound: number): Promise<void> {
+  const recordedState = await ports.readReviewState(slug, worktree);
+  const next = await ports.nextVerificationAction(slug, true);
+  await continueVerdict(ports, slug, next);
+  const round = recordedState ? recordedState.round : originalRound;
+  fmt.log.plain(fmt.status('PASS', `Recorded ${output.verdict} for ${slug} (round ${round}). Next action: ${next.kind} (${next.reason}).`));
+}
+
+function verdictAction(args: readonly string[]): 'approve' | 'request-changes' {
+  const action = args[0];
+  if (action !== 'approve' && action !== 'request-changes') { fail(VERDICT_HELP); }
+  return action;
+}
+
+function verdictFindings(action: 'approve' | 'request-changes', args: readonly string[]): ReviewFinding[] {
+  const collected = findings(args);
+  if (action === 'request-changes' && collected.length === 0) {
+    fail('request-changes requires at least one --finding with a --summary');
+  }
+  if (action === 'approve' && collected.length > 0) {
+    fail('approve takes no --finding: request changes instead of approving with findings');
+  }
+  return collected;
+}
+
+async function consumeVerdict(ports: ReviewVerbPorts, input: {
+  slug: string;
+  worktree: string;
+  round: number;
+  actor: string;
+  output: ReviewerVerdictOutput;
+  executionContext: LiveMissionExecutionContext;
+  version?: number;
+}) {
+  try {
+    return await ports.consumeReviewerOutput(input.slug, input.actor, input.output, input.executionContext, input.version);
+  } catch (error) {
+    if (!(error instanceof WorkflowOwnershipError) || !ports.retainRejectedVerdict) { throw error; }
+    const location = await ports.retainRejectedVerdict({
+      slug: input.slug, worktree: input.worktree, round: input.round,
+      reviewer: input.actor, output: input.output, reason: error.message,
+    });
+    fail(`Verdict rejected: ${error.message}. Unaccepted evidence retained at ${location}`);
+  }
+}
+
 /** `px verdict approve|request-changes` */
 export function createVerdictCommand(ports: ReviewVerbPorts) {
   return async (args: string[] = []): Promise<void> => {
     if (args.length === 0 || args.includes('--help') || args.includes('-h')) { fmt.log.plain(VERDICT_HELP); return; }
-    const action = args[0];
-    if (action !== 'approve' && action !== 'request-changes') { fail(VERDICT_HELP); }
+    const action = verdictAction(args);
     const actor = required(args, '--actor');
     const comment = flag(args, '--comment');
     const version = expectedVersion(args);
@@ -199,26 +269,22 @@ export function createVerdictCommand(ports: ReviewVerbPorts) {
     }
     const round = state.sourceRound ?? state.round;
 
-    let collected: ReviewFinding[] = [];
-    if (action === 'request-changes') {
-      collected = findings(args);
-      if (collected.length === 0) { fail('request-changes requires at least one --finding with a --summary'); }
-    } else if (findings(args).length > 0) {
-      fail('approve takes no --finding: request changes instead of approving with findings');
-    }
-    const output = { findings: collected, comment, verdict: action };
-    const result = await (async () => {
-      try {
-        // Authorization is checked by the consumer before any provider effect.
-        return await ports.consumeReviewerOutput(slug, actor, output, executionContext, version);
-      } catch (error) {
-        if (!(error instanceof WorkflowOwnershipError) || !ports.retainRejectedVerdict) { throw error; }
-        const location = await ports.retainRejectedVerdict({ slug, worktree, round, reviewer: actor, output, reason: error.message });
-        fail(`Verdict rejected: ${error.message}. Unaccepted evidence retained at ${location}`);
-      }
-    })();
+    const collected = verdictFindings(action, args);
+    const currentAction = await ports.nextVerificationAction(slug, false);
+    const output: ReviewerVerdictOutput = {
+      findings: collected,
+      comment,
+      verdict: action,
+      turn: verdictTurn(currentAction),
+      authority: ports.verdictAuthority,
+    };
+    // Authorization is checked by the consumer before any provider effect.
+    const result = await consumeVerdict(ports, { slug, worktree, round, actor, output, executionContext, version });
     if (!result.consumed || !result.ok) { fail(`could not record the reviewer verdict: ${result.diagnostic ?? 'unknown error'}`); }
-    fmt.log.plain(fmt.status('PASS', `Recorded ${action} for ${slug} (round ${state.round}).`));
+    if (result.advisory) {
+      fmt.log.plain(fmt.status(result.advisory.startsWith('provider was not updated') ? 'WARN' : 'INFO', result.advisory));
+    }
+    await reportVerdictCompletion(ports, slug, worktree, output, state.round);
   };
 }
 

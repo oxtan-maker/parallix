@@ -23,6 +23,8 @@ import { runReviewerPhase } from './reviewer-phase.js';
 import { runImplementerPhase } from './implementer-phase.js';
 import { DEFAULT_REBOUNDS_PER_ROUND, ReviewRound, stopIfControllerSuperseded, type LoopContext } from './round.js';
 import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
+import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
 export const DEFAULT_MAX_ATTEMPTS = AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS;
 
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
@@ -241,13 +243,36 @@ async function resetAtEntry(request: ReviewLoopRequest, persisted: ReviewLoopSta
   return await ports.state.read();
 }
 
+function entryHasHumanEscalation(persisted: ReviewLoopState | null): persisted is ReviewLoopState {
+  return Boolean(persisted?.phase !== 'approved' && persisted?.metadata.humanEscalationReason);
+}
+
+async function currentVerificationAction(slug: string, ports: ReviewLoopPorts) {
+  if (!ports.missionStore) { return null; }
+  const loaded = await ports.missionStore.load(missionId(slug));
+  return loaded.kind === 'found' ? fixedVerificationNextAction({ mission: loaded.mission }) : null;
+}
+
+async function routeVerificationAction(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null,
+  implementer: string, ports: ReviewLoopPorts, out: Output): Promise<boolean> {
+  const next = await currentVerificationAction(start.slug, ports);
+  const repairEntry = next?.kind === 'repair'
+    || (next?.kind === 'human-handoff' && next.reason === 'recorded-blocker');
+  if (repairEntry && await resumeIntegrationAssessment(start, ports)) { return true; }
+  if (repairEntry && await resumePendingRepair(request, start, persisted, implementer, ports)) { return true; }
+  if (next?.kind !== 'human-handoff') { return false; }
+  ports.output.error(`Review entry for ${start.slug} requires human intervention.`);
+  out.exit(1);
+  return true;
+}
+
 async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopPorts, restarted = false): Promise<void> {
   const { slug } = request;
   const out: Output = { emit: event => ports.output.emit(event), exit: code => ports.output.exit(code) };
   const start = reviewStart(request);
   const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
   let persisted = await ports.state.read();
-  if (persisted?.phase !== 'approved' && persisted?.metadata.humanEscalationReason) {
+  if (entryHasHumanEscalation(persisted)) {
     ports.output.error(`Review entry blocked for ${slug}: ${persisted.metadata.humanEscalationReason}. Operator recovery: px review ${slug}.`);
     out.exit(1);
     return;
@@ -255,8 +280,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   persisted = await resetAtEntry(request, persisted, ports, out);
   const implementer = await resolveImplementer(slug, request.implementer, persisted, ports, out, start.dryRun);
   if (await stopsOnMissingTaskFile(slug, ports, out)) { return; }
-  if (await resumeIntegrationAssessment(start, ports)) { return; }
-  if (await resumePendingRepair(request, start, persisted, implementer, ports)) { return; }
+  if (await routeVerificationAction(request, start, persisted, implementer, ports, out)) { return; }
   persisted = await ports.state.read();
   const prepared = await prepareStart(start, request.skipReviewPreparation ?? false, implementer, ports, out);
   if (!prepared) { return; }
@@ -368,7 +392,8 @@ async function continuesReviewPreparation(start: Start, ports: ReviewLoopPorts):
 async function resumePendingRepair(request: ReviewLoopRequest, start: Start, persisted: ReviewLoopState | null, implementer: string, ports: ReviewLoopPorts): Promise<boolean> {
   if (!ports.missionStore) { return false; }
   const loaded = await ports.missionStore.load(missionId(start.slug));
-  if (loaded.kind !== 'found' || !(loaded.mission.status === 'active' || loaded.mission.status === 'review' && loaded.mission.reviewPreparationPending === true) || !pendingRetainedRepair(loaded.mission, ports.worktree)) { return false; }
+  if (loaded.kind !== 'found' || !retainedGateRepairIsActionable(loaded.mission)
+    || !pendingRetainedRepair(loaded.mission, ports.worktree)) { return false; }
   // Successful exact-check recovery rejoins the historical start/review preparation path.
   return !await resumeRetainedRepair(request, loaded.mission, implementer, ports, persisted?.reviewer);
 }

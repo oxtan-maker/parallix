@@ -32,14 +32,20 @@ for (const expected of PARITY) {
   for (const entry of ['cli', 'board'] as const) {
     it(`${entry} entry for ${expected.scenario} leaves the shared review outcome (TASK-2817)`, { timeout: 10000 }, async t => {
       const outcome = await parityCase(expected.scenario, entry, t);
-      assert.equal(outcome.code, expected.code, outcome.messages);
-      assert.equal(outcome.mission.status, expected.status);
-      assert.equal(outcome.mission.review!.rounds.length, expected.rounds, 'no duplicate round');
-      assert.deepEqual(outcome.launches, expected.launches);
-      assert.deepEqual(outcome.laneEvents.map(event => `${event.from_status}>${event.to_status}`), expected.lanes, 'no duplicate lane event');
-      assert.equal(reviewStatistics(outcome.mission.review!).total, expected.returns,
+      // Board review:submit carries admitted operator-resume authority; the
+      // automatic CLI fixture deliberately does not and must retain the stop.
+      const admittedBoardResume = expected.scenario === 'human-intervention' && entry === 'board';
+      const entryExpected = admittedBoardResume
+        ? { ...expected, code: 0, status: 'integration', launches: ['review'], lanes: HANDOFF_LANES, returns: 0 }
+        : expected;
+      assert.equal(outcome.code, entryExpected.code, outcome.messages);
+      assert.equal(outcome.mission.status, entryExpected.status);
+      assert.equal(outcome.mission.review!.rounds.length, entryExpected.rounds, 'no duplicate round');
+      assert.deepEqual(outcome.launches, entryExpected.launches);
+      assert.deepEqual(outcome.laneEvents.map(event => `${event.from_status}>${event.to_status}`), entryExpected.lanes, 'no duplicate lane event');
+      assert.equal(reviewStatistics(outcome.mission.review!).total, entryExpected.returns,
         'the public entry preserves the fixed-sequence statistics trace (TASK-2859.11)');
-      if (expected.scenario === 'human-intervention') {
+      if (expected.scenario === 'human-intervention' && entry === 'cli') {
         assert.notEqual(outcome.mission.review!.intervention ?? null, null, 'an automatic entry cannot clear the stop');
       } else {
         assert.equal(reviewStatus(outcome.mission.review!), 'approved', 'approval came from the reviewer launch');

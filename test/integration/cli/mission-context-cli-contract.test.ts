@@ -107,7 +107,7 @@ describe('Context CLI', () => {
       await store.save(mission, null);
       await clearOperatorStateCache();
 
-      const invoke = async (args: string[]) => {
+      const invoke = async (args: string[], operatorInvocation = true) => {
         output.length = 0;
         errors.length = 0;
         const write = process.stdout.write.bind(process.stdout);
@@ -115,7 +115,7 @@ describe('Context CLI', () => {
           output.push(String(chunk));
           return true;
         };
-        try { return await run(args, { baseCwd: repo, error: (message) => { errors.push(message); return message; } }); }
+        try { return await run(args, { baseCwd: repo, operatorInvocation, error: (message) => { errors.push(message); return message; } }); }
         finally { process.stdout.write = write; }
       };
       /** Re-read the Mission exactly as a later agent would: from the database. */
@@ -312,7 +312,7 @@ describe('Context CLI', () => {
         'verdict', 'request-changes', '--slug', SLUG, '--actor', 'reviewer',
         '--expected-version', String((await statusJson()).version),
         '--finding', 'F1', '--summary', 'needs coverage',
-      ]), 1);
+      ], false), 1);
       assert.match(errors.join('\n'), /no review state/);
       assert.equal((await statusJson()).review, null, 'the refused verdict recorded nothing');
 
@@ -339,7 +339,7 @@ describe('Context CLI', () => {
         'verdict', 'request-changes', '--slug', SLUG, '--actor', 'reviewer',
         '--expected-version', String((await statusJson()).version),
         '--finding', 'F1', '--summary', 'needs coverage', '--location', 'src/a.ts:1',
-      ]), 0, errors.join('\n'));
+      ], false), 0, errors.join('\n'));
 
       const afterVerdict = await statusJson();
       const round = afterVerdict.review?.rounds[0];

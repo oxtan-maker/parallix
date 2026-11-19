@@ -7,7 +7,7 @@ import {
   integrationGateWithdrawals, integrationRepairNeedsReview, pendingIntegrationApproval,
 } from '../../domain/integration-repair-policy.js';
 import { retentionEvidenceMatches } from '../../domain/integration-approval-retention.js';
-import { repairCheckpointFailure } from '../repair-checkpoint-service.js';
+import { repairCheckpointFailure, repairContractFailure } from '../repair-checkpoint-service.js';
 import {
   backlogMirrorOwnership, missionId, type BacklogMirrorOwnership, type Mission,
 } from '../../domain/mission.js';
@@ -21,6 +21,7 @@ import { carriedRetentionValidation, retainIntegrationApproval, type RetentionOu
 import { IntegrationStopsForHuman, reviewBeforeIntegration } from './review-before-integration.js';
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { abortWith, projectBacklogTransition } from './support.js';
+import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
 
 /** What review and execute must do next about a pending retained approval. */
 export type PendingRepairContinuation =
@@ -42,6 +43,15 @@ export async function continuePendingIntegrationRepair(slug: string, store: Pick
 export async function continuePendingIntegrationRepair(slug: string, store: Pick<MissionStore, 'load'>,
   continuation: IntegrationRepairContinuationPort | undefined, mode: 'resume' | 'preview' = 'resume'): Promise<PendingRepairContinuation> {
   const loaded = await store.load(missionId(slug));
+  if (loaded.kind === 'found') {
+    const action = fixedVerificationNextAction({ mission: loaded.mission });
+    if (action.kind === 'human-handoff' && action.reason === 'recorded-blocker') {
+      const diagnostic = repairContractFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria)
+        ?? 'Invalid locked contract requires human review.';
+      throw new StructuredFailure(diagnostic, failureReason('mission-contract-incomplete', 'verification'));
+    }
+    if (action.kind !== 'repair') { return { kind: 'not-pending' }; }
+  }
   const pending = loaded.kind === 'found' ? pendingIntegrationApproval(loaded.mission) : null;
   if (loaded.kind !== 'found' || !pending) { return { kind: 'not-pending' }; }
   const implementer = loaded.mission.assignee;
@@ -136,6 +146,13 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
   verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }, exact?: RetainedRepairPort) {
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
+  const action = fixedVerificationNextAction({ mission: loaded.mission });
+  if (action.kind === 'human-handoff' && action.reason === 'recorded-blocker') {
+    const diagnostic = repairContractFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria)
+      ?? 'Invalid locked contract requires human review.';
+    throw new StructuredFailure(diagnostic, failureReason('mission-contract-incomplete', 'verification'));
+  }
+  if (action.kind !== 'repair') { return null; }
   const pending = pendingIntegrationApproval(loaded.mission);
   if (!pending) { return null; }
   const failure = repairCheckpointFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria);
@@ -146,32 +163,35 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
   if (!worktree) { throw abortWith(ports.landing, 'Integration repair checkout is unavailable.'); }
   const execution = await resolveRepairExecution(slug, services, ports, pending, verification, context, worktree,
     backlogMirrorOwnership(loaded.mission));
-  if (exact) {
-    const obligations = effectiveRepairObligations(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria, worktree);
-    const commands = [...new Set(obligations.map(checkpoint => checkpoint.repair!.command))];
-    // Read immutable original diagnostics for every distinct failed command
-    // before consuming either the exact verifier or the configured phase rerun.
-    for (const command of commands) {
-      const retained = await exact.read(command).catch(cause => {
-        throw new StructuredFailure('Original repair evidence is unavailable', failureReason('incomplete-evidence', 'verification'), cause);
-      });
-      if (retained.evidence.command !== command || retained.evidence.cwd !== worktree
-        || retained.evidence.exitCode === 0 || !retained.evidence.captureComplete) {
-        throw new StructuredFailure('Original repair evidence is incomplete or mismatched', failureReason('incomplete-evidence', 'verification'));
-      }
-    }
-    const command = isLegacyScalarRepair(obligations) ? commands[0] : undefined;
-    if (command) {
-      await verifyRestartedRepair({ slug, services, worktree, revision: execution.revision,
-        gates: [{ key: 'repair', command, order: 1 }], head: () => committedRepairHead(execution),
-        run: async () => { throw new Error('Exact verification owns this check'); },
-        exact: () => exact.verify(command, worktree) });
-    }
-  }
+  if (exact) { await verifyExactRepairEvidence(exact, loaded.mission, execution); }
   const gatesPassed = await ensureRepairVerification(execution);
   const outcome = await retainIntegrationApproval({ slug, services, evidence: execution.evidence,
     candidate: { revision: execution.revision, baseline: execution.baseline }, worktree, head: () => committedRepairHead(execution) });
   return { execution, outcome, gatesPassed };
+}
+
+async function verifyExactRepairEvidence(exact: RetainedRepairPort, mission: Mission,
+  execution: RepairExecution): Promise<void> {
+  const { slug, services, worktree } = execution;
+  const obligations = effectiveRepairObligations(mission.checkpoints, mission.declaredGates, mission.successCriteria, worktree);
+  const commands = [...new Set(obligations.map(checkpoint => checkpoint.repair!.command))];
+  // Read immutable original diagnostics for every distinct failed command
+  // before consuming either the exact verifier or the configured phase rerun.
+  for (const command of commands) {
+    const retained = await exact.read(command).catch(cause => {
+      throw new StructuredFailure('Original repair evidence is unavailable', failureReason('incomplete-evidence', 'verification'), cause);
+    });
+    if (retained.evidence.command !== command || retained.evidence.cwd !== worktree
+      || retained.evidence.exitCode === 0 || !retained.evidence.captureComplete) {
+      throw new StructuredFailure('Original repair evidence is incomplete or mismatched', failureReason('incomplete-evidence', 'verification'));
+    }
+  }
+  const command = isLegacyScalarRepair(obligations) ? commands[0] : undefined;
+  if (!command) { return; }
+  await verifyRestartedRepair({ slug, services, worktree, revision: execution.revision,
+    gates: [{ key: 'repair', command, order: 1 }], head: () => committedRepairHead(execution),
+    run: async () => { throw new Error('Exact verification owns this check'); },
+    exact: () => exact.verify(command, worktree) });
 }
 
 async function resolveRepairExecution(slug: string, services: IntegrationMissionServices, ports: IntegrateWorkflowPorts,

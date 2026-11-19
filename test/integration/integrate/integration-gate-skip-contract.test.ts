@@ -37,7 +37,8 @@ import {
   isBookkeepingPath,
   validationSkipApplies,
 } from '../../../src/application/integrate/validation-marker.js';
-import { listChangedPathsBetween } from '../../../src/adapters/cli/commands/integrate-gates.js';
+import { captureFinalIntegrationTree, listChangedPathsBetween } from '../../../src/adapters/cli/commands/integrate-gates.js';
+import { createTestsActionExecutor } from '../../../src/application/integrate/tests-action.js';
 import { createIntegrationGateStep } from '../../../src/application/integrate/gates.js';
 import { routeIntegrationGateFailure } from '../../../src/adapters/cli/commands/integrate-gate-rebound.js';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
@@ -470,6 +471,105 @@ test('a recorded completed rebase carries validated hooks across upstream source
     assert.match(logs.join('\n'), new RegExp(`validated at ${validated.slice(0, 12)} \\(carried to finalized ${finalized.slice(0, 12)} by 1 completed rebase`));
     repo.commit({ 'src/a.ts': 'export const a = 3;\n' }, 'new implementation');
     assert.deepEqual((await resolveAtHead(repo, validated)).keys, ['unit', 'integration-ci'], 'an edit outside a completed rebase runs');
+  } finally { repo.close(); }
+});
+
+// ── TASK-2859.14 (W17): review-step tests evidence at the landing candidate ────
+// One real git rebound flow: the review-step tests action rebases and runs red,
+// the rebound kernel's verify seam re-runs green on the fix commit, then a
+// bookkeeping commit and the final landing rebase move the candidate. Landing
+// coverage is read only through the existing marker and completed-rebase owners.
+
+test('a review-step tests rebound marks only the fix commit; landing reuses it across bookkeeping and reruns after a version commit (TASK-2859.14)', async () => {
+  const repo = openGitRepo();
+  const markers: Array<{ missionId: string; sha: string; hooks: readonly string[]; failed?: boolean }> = [];
+  const previous = setLogger({ log: () => {}, error: () => {} });
+  try {
+    repo.git('checkout', '-q', '-b', 'mission');
+    repo.commit({ 'src/a.ts': 'export const a = 2;\n' }, 'feature');
+    let run: { gateRunId: string; revision: string; status: 'failed'; current: boolean; carried: null; gates: { key: string; command: string }[];
+      outcomes: { key: string; command: string; exitCode: number }[] } | null = null;
+    const gitRunner = (args: string[]) => { try { return { status: 0, stdout: execFileSync('git', args, { encoding: 'utf8' }), stderr: '' }; }
+      catch (error) { return { status: 1, stdout: '', stderr: String(error) }; } };
+    const ports = stubIntegrateWorkflowPorts({
+      process: { cwd: () => repo.root, claimIntegration: async () => async () => {} },
+      git: { git: gitRunner, getCurrentBranch: () => 'mission' },
+      gates: {
+        resolveIntegrationVerificationWorktree: () => repo.root,
+        captureFinalIntegrationTree: root => captureFinalIntegrationTree(root),
+        loadPhaseGates: () => REBOUND_GATES, loadRequirePreIntegration: () => true,
+        // The gate-run writer's red record for the tested head; its writer has its own suite.
+        runPhaseGates: async () => {
+          run = { gateRunId: 'tests-run', revision: repo.head(), status: 'failed', current: true, carried: null,
+            gates: REBOUND_GATES.map(({ key, command }) => ({ key, command })), outcomes: [{ key: 'unit', command: 'u', exitCode: 1 }] };
+          return phaseGateResult({ ok: false, gates: REBOUND_GATES, executed: 1, failedGate: { key: 'unit', command: 'u' }, error: 'red' });
+        },
+        readGateRun: () => run,
+      },
+      verification: { formatVerificationCommand: () => 'verify' },
+      landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }),
+        isAbort: error => (error as Error)?.name === 'IntegrationAbort' },
+    });
+    const services = integrationServices({ operationalHistory: {
+      loadLatestByTypeForMission: async () => null,
+      recordIntegrationValidation: async marker => { markers.push(marker); },
+    } });
+    const outcome = await createTestsActionExecutor(ports, {
+      buildIntegrationContext: async (slug, options) => integrationContext({ slug, executionContext: options.executionContext,
+        baseWorktree: repo.root, missionWorktree: repo.root, reviewState: { implementer: 'custom' } }),
+      runIntegrationRebase: async () => { repo.git('rebase', '-q', 'main', 'mission'); },
+      runRequiredLocalGates: request => createIntegrationGateStep(ports).runRequiredLocalGates(request),
+    }).runTestsAction({ slug: SLUG, policySelection: 'tests', missionServicesFn: async () => services,
+      executionContext: { missionId: SLUG, missionWorktree: repo.root, missionBranch: 'mission', baseWorktree: repo.root, baseBranch: 'main' },
+      seams: {
+        routeIntegrationGateFailureFn: input => routeIntegrationGateFailure({ ...input,
+          runPhaseGatesFn: async () => completeGreenReboundResult(),
+          invalidateApprovalFn: async () => ({ ok: true, dismissed: [], errors: [] }),
+          // The implementer's repair commit, then the kernel's own verify seam.
+          reboundFn: async (reason, ctx) => {
+            repo.commit({ 'src/a.ts': 'export const a = 3;\n' }, 'repair');
+            await ctx.verify(1);
+            return { attempts: 1, outcome: 'fixed', diagnostic: '', implementer: ctx.implementer, classification: classifyReboundReason(reason) };
+          } }),
+        startAgentFn: async () => { throw new Error('the fixture rebound owns the repair'); },
+        transitionTaskFn: async () => true,
+        applyAgentFallbackFn: async () => 'custom',
+      } });
+    assert.equal(outcome.kind === 'completed' && outcome.verdict, 'failed', JSON.stringify(outcome));
+    const validated = repo.head();
+    assert.deepEqual(markers.filter(marker => !marker.failed).map(marker => marker.sha), [validated],
+      'only the rebound green rerun records a reusable marker, keyed on the fix commit');
+
+    repo.commit({ [TASK_FILE]: 'status: review\n' }, 'backlog bookkeeping');
+    repo.git('checkout', '-q', 'main');
+    repo.commit({ 'backlog/tasks/task-9002 - Other.md': 'status: review\n' }, 'upstream bookkeeping before landing');
+    repo.git('checkout', '-q', 'mission');
+    const logs: string[] = [];
+    const landing = await resolveAfterRebase(repo, validated, logs);
+    assert.notEqual(landing.finalized, validated, 'the landing rebase moved the candidate');
+    assert.deepEqual(landing.keys, [], 'mission and upstream bookkeeping alone reuse every validated hook');
+    assert.match(logs.join('\n'), /differs only in backlog bookkeeping/);
+    repo.commit({ 'package.json': '{"version":"1.0.1"}\n' }, 'landing version bump');
+    assert.deepEqual((await resolveAtHead(repo, validated)).keys, ['unit', 'integration-ci'],
+      'a landing-time version commit (preCommitCommand) after the rebase reruns the full configured set');
+  } finally { setLogger(previous); repo.close(); }
+});
+
+test('a recorded landing rebase carries the rebound marker past mission bookkeeping and upstream source (TASK-2859.14)', async () => {
+  const repo = openGitRepo();
+  try {
+    repo.git('checkout', '-q', '-b', 'mission');
+    repo.commit({ 'src/a.ts': 'export const a = 3;\n' }, 'repair');
+    // The gate-run writer installs the recorder before every integration run.
+    ensureRebaseCompletionRecorder(repo.root, { writeJson });
+    const validated = repo.head();
+    repo.commit({ [TASK_FILE]: 'status: review\n' }, 'backlog bookkeeping');
+    repo.git('checkout', '-q', 'main');
+    repo.commit({ 'src/c.ts': 'export const c = 1;\n' }, 'upstream before landing');
+    const logs: string[] = [];
+    const landing = await resolveAfterRebase(repo, validated, logs);
+    assert.deepEqual(landing.keys, [], 'the recorded completed landing rebase carries every validated hook');
+    assert.match(logs.join('\n'), /by 1 completed rebase/);
   } finally { repo.close(); }
 });
 

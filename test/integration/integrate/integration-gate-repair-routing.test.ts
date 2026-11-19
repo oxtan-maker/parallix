@@ -42,13 +42,19 @@ import type { Mission, MissionStatus } from '../../../src/domain/mission.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
-import { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, currentReviewRound, changeRevision, ConfiguredReviewerEligibility, reviewFindingId, reviewStatus, revokeApprovedDecision } from '../../../src/domain/review.js';
+import { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, currentReviewRound, changeRevision, ConfiguredReviewerEligibility, reviewFindingId, reviewStatus, revokeApprovedDecision, type Review } from '../../../src/domain/review.js';
 
 const SLUG = 'task-2492-gate-bounce';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
 
 function createFakeStore(status: MissionStatus) {
-  return inMemoryTransitionStore(integrateCommandMission(SLUG, status, status === 'review' ? approvedReview(SLUG) : null));
+  const review = status === 'review' ? approvedReview(SLUG) : null;
+  const current = review ? currentReviewRound(review) : null;
+  const currentRevisionReview: Review | null = review && current ? {
+    ...review,
+    rounds: [{ ...current, decision: { ...current.decision!, revision: changeRevision('fixture-revision') } }],
+  } : review;
+  return inMemoryTransitionStore(integrateCommandMission(SLUG, status, currentRevisionReview));
 }
 
 function servicesFor() {
@@ -81,7 +87,9 @@ interface Scenario {
 async function runIntegrate(scenario: Scenario) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2492g-'));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' } } }));
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+    adapters: { review: { provider: 'forgejo' }, verification: { command: 'true' } },
+  }));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task.md');
   fs.writeFileSync(taskFile, 'status: approved\n');
   const services = scenario.repairs ? (() => {
@@ -130,7 +138,10 @@ async function runIntegrate(scenario: Scenario) {
     if (args.includes('--format=%cI')) { return ok('2026-09-26T10:00:00Z\n'); }
     if (joined.includes('branch --show-current')) { return ok('main\n'); }
     if (joined.includes('status --porcelain')) { return ok(''); }
-    if (args.includes('rev-parse') || args.includes('merge-base')) { return ok(`${LANDED_SHA}\n`); }
+    if (args.includes('rev-parse') || args.includes('merge-base')) {
+      const revision = scenario.repairs ? (reviews > 0 ? `repair-${reviews}-resolved` : 'fixture-revision') : LANDED_SHA;
+      return ok(`${revision}\n`);
+    }
     if (joined.includes('merge') && joined.includes('--no-commit')) { return ok(''); }
     if (joined.includes('merge') && joined.includes('--abort')) { return ok(''); }
     if (joined.includes('merge') && joined.includes('--squash')) { return ok(''); }
@@ -145,6 +156,11 @@ async function runIntegrate(scenario: Scenario) {
   mock.method(backlog, 'completeTask', () => true);
   mock.method(backlog, 'setTaskStatus', () => true);
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
+  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED',
+    defaultUserApproved: true, defaultUserApprovedAt: '2026-09-26T09:00:00Z' }));
+  mock.method(forgejo, 'readToken', () => 'token');
+  mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
+  mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(verification, 'captureVerifiedTreeProof', () => ({ ok: true as const, proof: { rootDir: root } }));
   mock.method(verification, 'assertVerifiedTreeProof', () => ({ ok: true as const }));
   mock.method(process, 'cwd', () => root);

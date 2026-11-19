@@ -1,13 +1,10 @@
-import { createReviewVerbCommands } from './cli-review-verbs.js';
+import { createReviewDecisionRevocationUseCase, createReviewVerbCommands } from './cli-review-verbs.js';
 import { createBriefWriteCommands } from './cli-brief-writes.js';
 
 import { validateDeclaredGates } from "../adapters/cli/commands/review-preparation.js";
 
 import { createRevokeReviewCommand } from '../interfaces/cli/revoke-review.js';
 import { createRiskExceptionCommand, createSplitCommand } from '../interfaces/cli/mission-wave-command.js';
-import { RevokeReviewDecisionUseCase } from '../application/revoke-review-decision-use-case.js';
-import { createGitChangeIdentity } from '../adapters/git/change-identity.js';
-import { dismissProviderApproval } from '../adapters/review/review-adapter.js';
 
 import {
   createAssignCommand,
@@ -25,28 +22,39 @@ import { type Command } from '../interfaces/cli/runtime.js';
 
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 import type { CliCommandContext } from './cli-service-scope.js';
+import type { FixedVerificationNextAction } from '../application/verification-policy/review-start-decision.js';
 import { createDefectProvenanceCommand } from '../interfaces/cli/defect-provenance-write.js';
 import { readDefectProvenanceBackfillEntries } from '../adapters/cli/commands/defect-provenance-input.js';
+
+/** Return a recorded verdict through the owner selected for its exact next action. */
+export async function continueVerdictThroughActionOwner(context: CliCommandContext, slug: string,
+  action: FixedVerificationNextAction): Promise<void> {
+  if (action.kind === 'repair' && action.reason === 'findings-pending') {
+    await context.commands().active([slug], { operatorInvocation: false });
+    return;
+  }
+  if (action.kind === 'agent-review' || (action.kind === 'repair' && action.reason === 'repair-pending')) {
+    await context.commands().review([slug], { operatorInvocation: false });
+  }
+}
 
 export function createAuthoringCommands(context: CliCommandContext): Record<string, Command> {
   const { rootDir, scope } = context;
   const { withGraph } = scope;
+  const continueOperatorVerdict = context.operatorInvocation
+    ? (slug: string, action: FixedVerificationNextAction) => continueVerdictThroughActionOwner(context, slug, action)
+    : undefined;
   const revokeReview: Command = (args) => withGraph(services => {
     if (!services.mission) { throw new Error('mission services are unavailable'); }
     return createRevokeReviewCommand(
-      new RevokeReviewDecisionUseCase(services.mission.store, services.mission.lifecycle, {
-        async dismissApproval(mission, round, reason) {
-          const decision = mission.review?.rounds.find((entry) => entry.number === round)?.decision;
-          if (decision?.kind !== 'approved') { throw new Error('matching approval is not recorded'); }
-          dismissProviderApproval(`mission/${mission.id}`, decision.decidedAt, reason, { rootDir });
-        },
-      }, createGitChangeIdentity(rootDir)),
+      createReviewDecisionRevocationUseCase(rootDir, services.mission.store, services.mission.lifecycle),
       (explicit) => inferSlug(explicit),
     )(args);
   });
   return {
     ...createBriefWriteCommands(rootDir, context.configuration),
-    ...createReviewVerbCommands(rootDir, context.configuration),
+    ...createReviewVerbCommands(rootDir, context.configuration, continueOperatorVerdict,
+      context.operatorInvocation ?? false),
     repro: (args) => withGraph(services => createReproCommand(missionWrites(services))(args)),
     provenance: (args) => withGraph(services => {
       const mission = missionWrites(services);

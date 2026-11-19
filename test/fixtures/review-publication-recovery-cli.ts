@@ -194,7 +194,7 @@ printf '%s\\n200' "$data"
       process.env.PATH = commandPath;
       let code: number;
       try {
-        code = await runCli(args, { baseCwd: worktree, environment: { ...env, PATH: commandPath },
+        code = await runCli(args, { baseCwd: worktree, environment: { ...env, PATH: commandPath }, operatorInvocation: false,
           log: line => { output.push(String(line)); return null; },
           error: line => { output.push(String(line)); return null; } });
       } finally {
@@ -213,7 +213,9 @@ printf '%s\\n200' "$data"
       created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
     interruptNextComment = false;
     env.PATH = recoveryPath;
+    env.PARALLIX_REVIEW_SOURCE_ROUND = '1';
     const recovered = options.deferHistoricalReview ? null : await run(verdict);
+    delete env.PARALLIX_REVIEW_SOURCE_ROUND;
     if (recovered) {
       assert.equal(recovered.code, 0, recovered.output);
       assert.deepEqual([comments.length, reviews.length], [1, 1]);

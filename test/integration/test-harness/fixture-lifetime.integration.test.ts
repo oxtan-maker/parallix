@@ -29,6 +29,15 @@ import { probeProcessLiveness, processStartIdentity } from '../../../src/adapter
 const testRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const fixtureUrl = (file: string) => pathToFileURL(path.join(testRoot, 'fixtures', file)).href;
 
+function hardKillFixtureEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = { ...process.env, ...overrides };
+  // These synthetic children are deliberately SIGKILLed in the lifetime
+  // cases below. A killed child cannot finish its inherited V8 JSON payload,
+  // which makes the outer worker's otherwise-green coverage report unreadable.
+  env.NODE_V8_COVERAGE = '';
+  return env;
+}
+
 // The probe is one bootstrapped worker running one node:test case in-process.
 const PROBE = `
 import test from 'node:test';
@@ -43,6 +52,8 @@ test.after(() => {
   fs.writeFileSync(process.env.LIFETIME_DISPOSED, JSON.stringify(built.map((root) => !fs.existsSync(root))));
 });
 test('probe', async (t) => {
+  assert.equal(process.env.NODE_V8_COVERAGE || null, null,
+    'a hard-killable fixture must not inherit the outer coverage destination');
   const owned = caseRoot('lifetime-probe-');
   t.after(() => owned.dispose());
   initCommittedRepository(owned.root);
@@ -78,7 +89,8 @@ function startProbe(mode: 'success' | 'failure' | 'hang'): Probe {
   ], {
     cwd: path.dirname(testRoot),
     stdio: 'ignore',
-    env: { ...process.env, LIFETIME_MODE: mode, LIFETIME_REPORT: report, LIFETIME_DISPOSED: disposed, PARALLIX_TEST_MANIFEST_DIR: manifestDir },
+    env: hardKillFixtureEnv({ LIFETIME_MODE: mode, LIFETIME_REPORT: report,
+      LIFETIME_DISPOSED: disposed, PARALLIX_TEST_MANIFEST_DIR: manifestDir }),
   });
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.on('exit', (code, signal) => resolve({ code, signal }));
@@ -123,6 +135,7 @@ function startStandInRunner(t: TestContext, mode: 'success' | 'failure' | 'hang'
   fs.symlinkSync(path.join(testRoot, '..', 'node_modules'), path.join(checkout.root, 'node_modules'));
   fs.writeFileSync(path.join(checkout.root, 'test', 'run-fast-unit-tests.ts'), [
     "import fs from 'node:fs';",
+    "if (process.env.NODE_V8_COVERAGE) throw new Error('synthetic cache fixture inherited raw coverage');",
     `fs.writeFileSync(${JSON.stringify(report)}, process.env.PARALLIX_TEST_FIXTURE_TMPDIR ?? '');`,
     mode === 'failure' ? 'process.exitCode = 1;'
       : mode === 'hang' ? 'setInterval(() => {}, 1_000);' : 'process.exitCode = 0;',
@@ -130,14 +143,13 @@ function startStandInRunner(t: TestContext, mode: 'success' | 'failure' | 'hang'
   const runner = spawn(process.execPath, ['--import', 'tsx', path.join(testRoot, 'run-default-tests.ts')], {
     cwd: path.dirname(testRoot),
     stdio: 'ignore',
-    env: {
-      ...process.env,
+    env: hardKillFixtureEnv({
       TMPDIR: cacheBase,
       PARALLIX_EXECUTION_ROOT: checkout.root,
       PARALLIX_FAST_UNIT: '1',
       PARALLIX_TEST_DISPOSABLE_STANDIN: '1',
       GITHUB_ACTIONS: 'true',
-    },
+    }),
   });
   let running = true;
   const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {

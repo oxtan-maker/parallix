@@ -243,13 +243,17 @@ export class BoardProjectionBuilder {
     );
 
     // Build mission cards with operational facts
-    const cards = await Promise.all(visibleMissions.map(async (mission) => this.composeCard(
-      mission,
-      reviews.get(mission.id) ?? { review: null, approval: null },
-      await this._gates.observeGate(mission, operations.find(operation => operation.repositoryId === mission.repositoryId && operation.missionId === mission.id) ?? null),
-      currentWorkByMission.get(mission.id) ?? NO_CURRENT_WORK,
-      runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
-    )));
+    const cards = await Promise.all(visibleMissions.map(async (mission) => {
+      const owner = operations.find(operation => operation.repositoryId === mission.repositoryId && operation.missionId === mission.id) ?? null;
+      return this.composeCard(
+        mission,
+        reviews.get(mission.id) ?? { review: null, approval: null },
+        await this._gates.observeGate(mission, owner),
+        currentWorkByMission.get(mission.id) ?? NO_CURRENT_WORK,
+        runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
+        owner,
+      );
+    }));
 
     // Build available actions from application policy
     const availableActions = this.deriveAvailableActions(cards);
@@ -314,6 +318,7 @@ export class BoardProjectionBuilder {
       gateStatus,
       work,
       liveSession,
+      owner,
     );
     return projectReviewRecoveryCard(this.observeCardExecution(card, owner), this._options?.reviewExecution);
   }
@@ -366,6 +371,7 @@ export class BoardProjectionBuilder {
     // "liveness unknown", which must not collapse into the observed
     // "nothing running" that `null` means.
     liveSession: RunningAgentSession | null | undefined,
+    owner: WorkflowOperation | null,
   ): MissionCard {
     const identity = this._options?.changeIdentity;
     const approvalCoverage = isClosedMission(mission) ? null
@@ -383,6 +389,9 @@ export class BoardProjectionBuilder {
       blockerRequiresOperator: contractStop !== null,
       flags: [],
       approvalCoverage,
+      ownedAction: owner !== null || (work.currentWork !== null
+        ? work.currentWork.freshness !== 'stale'
+        : liveSession !== null && liveSession !== undefined),
     };
     return projectMissionCard({ ...mission, review: reviewFact.review }, facts);
   }

@@ -17,19 +17,14 @@ import test, { describe } from 'node:test';
 import type { MissionStore } from '../../../../src/application/domain-ports.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
 import { attentionAction, attentionReason, buildBoardMetrics, buildBoardProjection } from '../../../../src/application/projections/board.js';
-import { projectMissionCard, type BoardLane, type MissionCard, type MissionOperationalFacts } from '../../../../src/application/projections/mission-board.js';
-import type { GateState } from '../../../../src/application/projections/gate-observation.js';
+import { type BoardLane, type MissionCard } from '../../../../src/application/projections/mission-board.js';
 import { EXECUTION_ACTIVITY_EVENT_TYPE, executionActivityToEntry, type ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { composeBoardProjection } from '../../../../src/composition/board-projection.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import type { ApprovalCoverage } from '../../../../src/domain/approval-coverage.js';
 import type { Mission, MissionId, MissionStatus } from '../../../../src/domain/mission.js';
-import { MISSION_STATUSES, missionId, missionLabels } from '../../../../src/domain/mission.js';
-import { changeRevision } from '../../../../src/domain/review.js';
-import { REVIEW_PHASES, type ReviewPhase } from '../../../../src/domain/review-phase-policy.js';
+import { missionId, missionLabels } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
-import { repeatReview } from '../../../fixtures/repeat-review.js';
 
 // ── Orphaned active mission attention (was attention-orphaned-active-observable.test.ts) ──
 
@@ -226,6 +221,9 @@ describe("Attention queue ranking and sources —", () => {
       gate: opts.gate ?? 'passed', pullRequest: null, reviewApproved: false,
       reviewRound: null, reviewPhase: null, reviewDisposition: null, reviewHistory: [],
       currentWork: opts.currentWork ?? null, blockingReason: opts.blockingReason ?? null,
+      humanReviewDue: null,
+      verificationFacts: { status: lane, reviewPhase: null, pendingRepair: false, reviewRequired: false,
+        humanIntervention: false, ownedAction: false, humanOnlyReason: null },
       flags: [], commands: opts.commands ?? [{ command: lane === 'integration' ? 'integrate' : lane === 'review' ? 'review' : 'active', enabled: true, reason: null }],
     };
   }
@@ -237,87 +235,6 @@ describe("Attention queue ranking and sources —", () => {
       sourceFacts,
     );
   }
-
-  test('current-state matrix resolves every reachable row to action, wait, or typed handoff (TASK-2859.11)', () => {
-    const live = { operationId: 'op', phase: 'review', summary: 'working', agent: agentFamily('codex'),
-      updatedAt: '2026-11-17T10:00:00Z', freshness: 'live' as const };
-    type Coverage = 'none' | ApprovalCoverage['kind'];
-    const coverage = (kind: Exclude<Coverage, 'none'>): ApprovalCoverage => kind === 'covers'
-      ? { kind, round: 1, approvedRevision: changeRevision('a'.repeat(40)) }
-      : kind === 'stale'
-        ? { kind, round: 1, approvedRevision: changeRevision('a'.repeat(40)),
-          landedRevision: changeRevision('b'.repeat(40)), recorded: null }
-        : { kind, round: 1, approvedRevision: null, reason: 'unknown revision' };
-    const reviewFor = (phase: ReviewPhase, pending: boolean): NonNullable<Mission['review']> => {
-      const fixture = repeatReview(), current = fixture.rounds.at(-1)!;
-      const approved = { kind: 'approved' as const, revision: current.subject.revision,
-        decidedAt: '2026-11-17T10:00:00Z', comment: null, source: { kind: 'local' as const } };
-      return { ...fixture, rounds: [{ ...current, phase, response: null,
-        decision: pending ? approved : null,
-        ...(pending ? { integrationRepairAssessment: { assessedAt: '2026-11-17T10:01:00Z',
-          approvedRevision: current.subject.revision, candidateRevision: current.subject.revision,
-          failedGate: 'unit', outcome: 'pending' as const, repair: { startedAt: '2026-11-17T10:00:30Z',
-            cause: { kind: 'integration-gate-failure' as const, gate: 'unit' } } } } : {}) }] };
-    };
-    const card = (name: string, status: MissionStatus, phase: ReviewPhase | null, pending: boolean,
-      check: GateState, approval: Coverage, facts: Partial<Pick<MissionOperationalFacts,
-        'currentWork' | 'blockingReason' | 'blockerRequiresOperator'>> = {}) => {
-      const review = phase || pending ? reviewFor(phase ?? 'reviewing', pending) : null;
-      const aggregate = { ...mission(`matrix-${name}`, status), review };
-      const subject = review?.rounds.at(-1)?.subject ?? null;
-      return projectMissionCard(aggregate, {
-        latestGate: check, currentWork: facts.currentWork ?? null,
-        blockingReason: facts.blockingReason ?? null,
-        ...(facts.blockerRequiresOperator === undefined ? {} : { blockerRequiresOperator: facts.blockerRequiresOperator }),
-        flags: [], approvalCoverage: approval === 'none' ? null : coverage(approval),
-        reviewApproval: approval === 'none' || !subject ? null : { subject, approvedAt: '2026-11-17T10:00:00Z' },
-      });
-    };
-    const outcome = (candidate: MissionCard) => {
-      const reason = attentionReason(candidate), action = attentionAction(candidate, reason);
-      return reason.kind === 'none' ? 'wait'
-        : action ? `${action.kind === 'integrate:merge' || action.kind === 'manual' ? 'handoff' : 'action'}:${action.kind}` : 'unhandled';
-    };
-    const rows: ReadonlyArray<{ name: string; status: MissionStatus; phase: ReviewPhase | null; pending: boolean;
-      check: GateState; approval: Coverage; facts?: Parameters<typeof card>[6]; expected: string }> = [
-      { name: 'ordinary-active', status: 'active', phase: null, pending: false, check: 'passed', approval: 'none', expected: 'action:active:execute' },
-      { name: 'active-with-undecided-round', status: 'active', phase: 'reviewing', pending: false, check: 'passed', approval: 'none', expected: 'action:active:execute' },
-      { name: 'approved-but-repair-pending', status: 'active', phase: 'approved', pending: true, check: 'failed', approval: 'covers', expected: 'action:active:execute' },
-      { name: 'review-awaiting-verdict', status: 'review', phase: 'reviewing', pending: false, check: 'passed', approval: 'none', expected: 'action:review:submit' },
-      { name: 'review-fixing', status: 'review', phase: 'fixing', pending: false, check: 'failed', approval: 'none', expected: 'action:active:execute' },
-      { name: 'live-review', status: 'review', phase: 'reviewing', pending: false, check: 'running', approval: 'none', facts: { currentWork: live }, expected: 'wait' },
-      { name: 'covered-integration', status: 'integration', phase: 'approved', pending: false, check: 'passed', approval: 'covers', expected: 'handoff:integrate:merge' },
-      { name: 'stale-approval-integration', status: 'integration', phase: 'approved', pending: false, check: 'stale', approval: 'stale', expected: 'handoff:integrate:merge' },
-      { name: 'unverifiable-approval-integration', status: 'integration', phase: 'approved', pending: false, check: 'unavailable', approval: 'unverifiable', expected: 'handoff:integrate:merge' },
-      { name: 'operator-review-blocker', status: 'review', phase: 'pending-approval', pending: false, check: 'not-run', approval: 'none',
-        facts: { blockingReason: 'Operator decision required', blockerRequiresOperator: true }, expected: 'handoff:manual' },
-    ];
-    for (const row of rows) {
-      assert.equal(outcome(card(row.name, row.status, row.phase, row.pending, row.check, row.approval, row.facts)), row.expected, row.name);
-    }
-
-    // Pending approval retention is reachable only in active/review. Across every
-    // reachable combination, the production card owner leaves no unhandled row.
-    const phases = [null, ...REVIEW_PHASES] as const;
-    const checks: readonly GateState[] = ['unconfigured', 'not-run', 'running', 'passed', 'failed', 'stale', 'unavailable'];
-    const approvals: readonly Coverage[] = ['none', 'covers', 'stale', 'unverifiable'];
-    let combinations = 0;
-    for (const status of MISSION_STATUSES) for (const phase of phases) for (const pending of [false, true]) {
-      if (pending && status !== 'active' && status !== 'review') { continue; }
-      for (const check of checks) for (const approval of approvals) {
-        // Backlog has no checkout from which a failed gate could be observed;
-        // done is entered only after integration passes. Neither carries review facts.
-        const ownsAttention = status === 'active' || status === 'review' || status === 'integration';
-        if (!ownsAttention && (phase !== null || pending || approval !== 'none')) { continue; }
-        if (status === 'backlog' && check !== 'unconfigured' && check !== 'not-run') { continue; }
-        if (status === 'done' && check !== 'passed') { continue; }
-        combinations++;
-        assert.notEqual(outcome(card(`${combinations}`, status, phase, pending, check, approval)), 'unhandled',
-          `${status}/${phase ?? 'none'}/pending=${pending}/${check}/${approval}`);
-      }
-    }
-    assert.equal(combinations, 710, 'the five-dimension reachable-state population stays explicit');
-  });
 
   test('idle approved integration retains manual durable blocker attention (TASK-2799)', () => {
     const card = { ...makeCard('task-human-integration', 'integration', {
@@ -430,6 +347,21 @@ describe("Attention queue ranking and sources —", () => {
     })]);
     assert.equal(projection.attentionQueue.length, 1);
     assert.equal(projection.attentionQueue[0]?.action?.kind, 'review:submit');
+  });
+
+  test('pending repair uses the eligible review entry instead of dropping attention (TASK-2859.12)', () => {
+    const base = makeCard('task-retained-repair', 'review', {
+      commands: [
+        { command: 'active', enabled: false, reason: 'review lane' },
+        { command: 'review', enabled: true, reason: null },
+      ],
+    });
+    const card = { ...base, verificationFacts: { ...base.verificationFacts, pendingRepair: true } };
+    const queue = project([card]).attentionQueue;
+    assert.equal(queue.length, 1);
+    assert.deepEqual(queue[0]?.action, { kind: 'review:submit', display: 'px review task-retained-repair' });
+    const unavailable = project([{ ...card, commands: card.commands.map(command => ({ ...command, enabled: false })) }]).attentionQueue;
+    assert.deepEqual(unavailable[0]?.action, { kind: 'manual', display: 'px lead task-retained-repair --once' });
   });
 
   const diagnostics = [

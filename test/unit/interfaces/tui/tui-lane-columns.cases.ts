@@ -103,6 +103,14 @@ describe('LaneColumn renders one BoardStage', () => {
 });
 
 describe('MissionCard renders projection facts', () => {
+  it('renders the projection-owned human review reason (TASK-2859.15)', async () => {
+    const detail = 'Human review is due because agent review approved the current change.';
+    const output = await renderMissionCard({ card: makeFullCard({
+      humanReviewDue: { reason: 'agent-review-approved', detail },
+    }), width: 80 });
+    assert.match(output, /Human review is due because agent review approved the current change\./);
+  });
+
   it('renders bounded shared review progress with fallback reason and next action (PX-0046.06)', async () => {
     const card = makeFullCard({ reviewApproved: false, reviewRound: 4, reviewPhase: 'reviewing',
       reviewProgress: {

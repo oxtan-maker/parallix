@@ -4,6 +4,7 @@ import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } 
 import { OperationalHistoryService } from '../../../../src/application/services/operational-history-service.js';
 import {
   REVIEW_START_DECISION_EVENT,
+  fixedVerificationNextAction,
   observePolicyReviewStart,
   observePolicyTestsStart,
   observeReviewStartDecision,
@@ -12,10 +13,246 @@ import {
 } from '../../../../src/application/verification-policy/review-start-decision.js';
 import type { ReviewStartDecision, ReviewStartDecisionInput, ReviewStartFailure,
   ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
-import { missionId } from '../../../../src/domain/mission.js';
+import { attentionAction, attentionReason } from '../../../../src/application/projections/board.js';
+import { projectMissionCard, type MissionCard, type MissionOperationalFacts } from '../../../../src/application/projections/mission-board.js';
+import type { GateState } from '../../../../src/application/projections/gate-observation.js';
+import { missionVersion } from '../../../../src/application/domain-ports.js';
+import { assertRecoveredIntegrationHandoff } from '../../../../src/application/integrate/recovery.js';
+import { agentFamily } from '../../../../src/domain/agents.js';
+import type { ApprovalCoverage } from '../../../../src/domain/approval-coverage.js';
+import type { CheckpointData } from '../../../../src/domain/checkpoint.js';
+import { MISSION_STATUSES, missionId, type Mission, type MissionStatus } from '../../../../src/domain/mission.js';
+import { changeRevision, revokeApprovedDecision } from '../../../../src/domain/review.js';
+import { REVIEW_PHASES, type ReviewPhase } from '../../../../src/domain/review-phase-policy.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
 import { parsePolicyArtifact } from '../../../../src/application/verification-policy/policy-artifact.js';
+import { approvedReview, fixtureMission } from '../../../fixtures/mission-builders.js';
+import { repeatReview } from '../../../fixtures/repeat-review.js';
+import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
 import { policyArtifactFixture } from './policy-artifact.fixture.js';
+
+function reviewFor(phase: ReviewPhase, pending: boolean): NonNullable<Mission['review']> {
+  const fixture = repeatReview(), current = fixture.rounds.at(-1)!;
+  const approved = { kind: 'approved' as const, revision: current.subject.revision,
+    decidedAt: '2026-11-17T10:00:00Z', comment: null, source: { kind: 'local' as const } };
+  return { ...fixture, rounds: [{ ...current, phase, response: null,
+    decision: pending ? approved : null,
+    ...(pending ? { integrationRepairAssessment: { assessedAt: '2026-11-17T10:01:00Z',
+      approvedRevision: current.subject.revision, candidateRevision: current.subject.revision,
+      failedGate: 'unit', outcome: 'pending' as const, repair: { startedAt: '2026-11-17T10:00:30Z',
+        cause: { kind: 'integration-gate-failure' as const, gate: 'unit' } } } } : {}) }] };
+}
+
+test('fixed next-action owner resolves every reachable state to action, wait, or typed handoff (TASK-2859.12)', () => {
+  const decide = (status: MissionStatus, reviewPhase: ReviewPhase | null, pendingRepair: boolean,
+    ownedAction = false, humanOnlyReason: string | null = null, reviewRequired = false) => fixedVerificationNextAction({
+    status, reviewPhase, pendingRepair, reviewRequired, ownedAction, humanOnlyReason, humanIntervention: false,
+  });
+  const rows = [
+    ['ordinary-active', decide('active', null, false).kind, 'agent-review'],
+    ['active-with-undecided-round', decide('active', 'reviewing', false).kind, 'agent-review'],
+    ['approved-but-repair-pending', decide('active', 'approved', true).kind, 'repair'],
+    ['retained-gate-repair-precedes-rereview', decide('review', 'reviewing', true, false, null, true).kind, 'repair'],
+    ['withdrawn-approval-needs-review', decide('review', 'reviewing', false, false, null, true).kind, 'agent-review'],
+    ['review-awaiting-verdict', decide('review', 'reviewing', false).kind, 'agent-review'],
+    ['review-fixing', decide('review', 'fixing', false).kind, 'repair'],
+    ['live-review', decide('review', 'reviewing', false, true).kind, 'wait'],
+    ['covered-integration', decide('integration', 'approved', false).kind, 'integration-handoff'],
+    ['active-approved-still-needs-review-entry', decide('active', 'approved', false).kind, 'agent-review'],
+    ['pending-approval-needs-agent-rereview', decide('review', 'pending-approval', false).kind, 'agent-review'],
+    ['review-approved-reaches-human-handoff', decide('review', 'approved', false).kind, 'human-review'],
+    ['operator-review-blocker', decide('review', 'pending-approval', false, false, 'operator').kind, 'human-handoff'],
+  ] as const;
+  for (const [name, actual, expected] of rows) { assert.equal(actual, expected, name); }
+
+  const live = { operationId: 'op', phase: 'review', summary: 'working', agent: agentFamily('codex'),
+    updatedAt: '2026-11-17T10:00:00Z', freshness: 'live' as const };
+  type Coverage = 'none' | ApprovalCoverage['kind'];
+  const coverage = (kind: Exclude<Coverage, 'none'>): ApprovalCoverage => kind === 'covers'
+    ? { kind, round: 1, approvedRevision: changeRevision('a'.repeat(40)) }
+    : kind === 'stale'
+      ? { kind, round: 1, approvedRevision: changeRevision('a'.repeat(40)),
+        landedRevision: changeRevision('b'.repeat(40)), recorded: null }
+      : { kind, round: 1, approvedRevision: null, reason: 'unknown revision' };
+  const card = (name: string, status: MissionStatus, phase: ReviewPhase | null, pending: boolean,
+    check: GateState, approval: Coverage, facts: Partial<Pick<MissionOperationalFacts,
+      'currentWork' | 'blockingReason' | 'blockerRequiresOperator'>> = {}) => {
+    const review = phase || pending ? reviewFor(phase ?? 'reviewing', pending) : null;
+    const aggregate = fixtureMission(`matrix-${name}`, { status, review });
+    const subject = review?.rounds.at(-1)?.subject ?? null;
+    return projectMissionCard(aggregate, {
+      latestGate: check, currentWork: facts.currentWork ?? null,
+      blockingReason: facts.blockingReason ?? null,
+      ...(facts.blockerRequiresOperator === undefined ? {} : { blockerRequiresOperator: facts.blockerRequiresOperator }),
+      flags: [], approvalCoverage: approval === 'none' ? null : coverage(approval),
+      reviewApproval: approval === 'none' || !subject ? null : { subject, approvedAt: '2026-11-17T10:00:00Z' },
+    });
+  };
+  const outcome = (candidate: MissionCard) => {
+    const reason = attentionReason(candidate), action = attentionAction(candidate, reason);
+    return reason.kind === 'none' ? 'wait'
+      : reason.kind === 'human-review' && action === null ? 'handoff:human-review'
+      : action ? `${action.kind === 'integrate:merge' || action.kind === 'manual' ? 'handoff' : 'action'}:${action.kind}` : 'unhandled';
+  };
+  const projectionRows: ReadonlyArray<{ name: string; status: MissionStatus; phase: ReviewPhase | null; pending: boolean;
+    check: GateState; approval: Coverage; facts?: Parameters<typeof card>[6]; expected: string }> = [
+    { name: 'ordinary-active', status: 'active', phase: null, pending: false, check: 'passed', approval: 'none', expected: 'action:active:execute' },
+    { name: 'active-with-undecided-round', status: 'active', phase: 'reviewing', pending: false, check: 'passed', approval: 'none', expected: 'action:active:execute' },
+    { name: 'approved-but-repair-pending', status: 'active', phase: 'approved', pending: true, check: 'failed', approval: 'covers', expected: 'action:active:execute' },
+    { name: 'review-awaiting-verdict', status: 'review', phase: 'reviewing', pending: false, check: 'passed', approval: 'none', expected: 'action:review:submit' },
+    { name: 'review-approved-awaits-human', status: 'review', phase: 'approved', pending: false, check: 'passed', approval: 'covers', expected: 'handoff:human-review' },
+    { name: 'review-fixing', status: 'review', phase: 'fixing', pending: false, check: 'failed', approval: 'none', expected: 'action:active:execute' },
+    { name: 'live-review', status: 'review', phase: 'reviewing', pending: false, check: 'running', approval: 'none', facts: { currentWork: live }, expected: 'wait' },
+    { name: 'covered-integration', status: 'integration', phase: 'approved', pending: false, check: 'passed', approval: 'covers', expected: 'handoff:integrate:merge' },
+    { name: 'stale-approval-integration', status: 'integration', phase: 'approved', pending: false, check: 'stale', approval: 'stale', expected: 'handoff:integrate:merge' },
+    { name: 'unverifiable-approval-integration', status: 'integration', phase: 'approved', pending: false, check: 'unavailable', approval: 'unverifiable', expected: 'handoff:integrate:merge' },
+    { name: 'operator-review-blocker', status: 'review', phase: 'pending-approval', pending: false, check: 'not-run', approval: 'none',
+      facts: { blockingReason: 'Operator decision required', blockerRequiresOperator: true }, expected: 'handoff:manual' },
+  ];
+  for (const row of projectionRows) {
+    assert.equal(outcome(card(row.name, row.status, row.phase, row.pending, row.check, row.approval, row.facts)), row.expected, row.name);
+  }
+
+  const checks: readonly GateState[] = ['unconfigured', 'not-run', 'running', 'passed', 'failed', 'stale', 'unavailable'];
+  const approvals: readonly Coverage[] = ['none', 'covers', 'stale', 'unverifiable'];
+  const phases = [null, ...REVIEW_PHASES] as const;
+  let combinations = 0;
+  for (const status of MISSION_STATUSES) for (const phase of phases) for (const pending of [false, true]) {
+    if (pending && status !== 'active' && status !== 'review') { continue; }
+    for (const check of checks) for (const approval of approvals) {
+      const ownsVerification = status === 'active' || status === 'review' || status === 'integration';
+      if (!ownsVerification && (phase !== null || pending || approval !== 'none')) { continue; }
+      if (status === 'backlog' && check !== 'unconfigured' && check !== 'not-run') { continue; }
+      if (status === 'done' && check !== 'passed') { continue; }
+      combinations++;
+      assert.notEqual(outcome(card(`${combinations}`, status, phase, pending, check, approval)), 'unhandled',
+        `${status}/${phase ?? 'none'}/pending=${pending}/${check}/${approval}`);
+    }
+  }
+  assert.equal(combinations, 710, 'the five-dimension reachable-state population stays explicit');
+});
+
+test('only a policy selection reaches the tests action; the fixed sequence never does (TASK-2859.14)', () => {
+  const decide = (status: MissionStatus, reviewPhase: ReviewPhase | null, extra: Partial<Parameters<typeof fixedVerificationNextAction>[0]> = {}) =>
+    fixedVerificationNextAction({ status, reviewPhase, pendingRepair: false, reviewRequired: false, ownedAction: false,
+      humanOnlyReason: null, humanIntervention: false, ...extra } as Parameters<typeof fixedVerificationNextAction>[0]);
+  for (const status of MISSION_STATUSES) for (const reviewPhase of [null, ...REVIEW_PHASES]) {
+    for (const pendingRepair of [false, true]) for (const reviewRequired of [false, true]) {
+      for (const policySelection of [undefined, null] as const) {
+        assert.notEqual(decide(status, reviewPhase, { pendingRepair, reviewRequired, policySelection }).kind, 'tests',
+          `${status}/${reviewPhase ?? 'none'}/repair=${pendingRepair}/review=${reviewRequired}/selection=${policySelection}`);
+      }
+    }
+  }
+  const selected = { policySelection: 'tests' as const };
+  const rows = [
+    ['review-undecided', decide('review', 'reviewing', selected), { kind: 'tests', reason: 'policy-selected' }],
+    ['review-approved-before-human', decide('review', 'approved', selected), { kind: 'tests', reason: 'policy-selected' }],
+    ['active-without-review', decide('active', null, selected), { kind: 'tests', reason: 'policy-selected' }],
+    ['fixing-repairs-first', decide('review', 'fixing', selected), { kind: 'repair', reason: 'findings-pending' }],
+    ['pending-repair-first', decide('active', 'approved', { ...selected, pendingRepair: true }), { kind: 'repair', reason: 'repair-pending' }],
+    ['withdrawn-approval-reviews-first', decide('review', 'reviewing', { ...selected, reviewRequired: true }), { kind: 'agent-review', reason: 'review-unfinished' }],
+    ['integration-lane-is-landing', decide('integration', 'approved', selected), { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }],
+    ['owned-action-waits', decide('review', 'reviewing', { ...selected, ownedAction: true }), { kind: 'wait', reason: 'action-owned' }],
+    ['blocker-hands-off', decide('review', 'reviewing', { ...selected, humanOnlyReason: 'operator' }), { kind: 'human-handoff', reason: 'recorded-blocker' }],
+    ['escalation-hands-off', decide('active', null, { ...selected, humanIntervention: true }), { kind: 'human-handoff', reason: 'human-intervention' }],
+    ['refined-not-verifying', decide('refined', null, selected), { kind: 'wait', reason: 'not-verifying' }],
+  ] as const;
+  for (const [name, actual, expected] of rows) { assert.deepEqual(actual, expected, name); }
+  const mission = fixtureMission('task-selected-tests', { status: 'review', review: reviewFor('reviewing', false) });
+  assert.deepEqual(fixedVerificationNextAction({ mission, policySelection: 'tests' }), { kind: 'tests', reason: 'policy-selected' });
+  assert.deepEqual(fixedVerificationNextAction({ mission }), { kind: 'agent-review', reason: 'review-unfinished' });
+});
+
+test('fixed owner names only exact-current agent and tests evidence as integrate-shortcut eligible (TASK-2859.16)', () => {
+  const mission = fixtureMission('task-integrate-shortcut', { status: 'review', review: approvedReview('task-integrate-shortcut') });
+  assert.deepEqual(fixedVerificationNextAction({ mission, agentReviewCurrent: true, testsCurrent: true }),
+    { kind: 'human-review', reason: 'integrate-shortcut-eligible' });
+  for (const facts of [
+    {}, { agentReviewCurrent: null, testsCurrent: null }, { agentReviewCurrent: true, testsCurrent: false },
+    { agentReviewCurrent: false, testsCurrent: true },
+  ]) {
+    assert.deepEqual(fixedVerificationNextAction({ mission, ...facts }),
+      { kind: 'human-review', reason: 'agent-review-approved' }, JSON.stringify(facts));
+  }
+  assert.deepEqual(fixedVerificationNextAction({ mission: { ...mission, status: 'integration', closedAt: null },
+    agentReviewCurrent: true, testsCurrent: true }), { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
+});
+
+test('fixed owner limits historical repair debt to the lifecycle stage that can resume it (TASK-2859.12)', () => {
+  const slug = 'task-covered-repair';
+  const occurrence = { openedMissionRevision: 1, worktree: '/fixture', failureRevision: 'old', failureEvidenceId: 'failure' };
+  const target: CheckpointData = { missionId: missionId(slug), name: 'CP-1', nextActionText: 'repair',
+    goalCheck: [{ criterion: 'feature', evidence: 'feature.ts' }], repair: { incidentId: 'old', command: 'verify',
+      authorizedGates: [], authorizedCriteria: [], attempt: 1, verified: false, evidenceRecorded: true, occurrence } };
+  const source: CheckpointData = { ...target, name: 'CP-2',
+    recording: { recordedAt: '2026-09-20T11:00:00Z', recordedRound: null, missionRevision: 2 },
+    repair: { ...target.repair!, incidentId: 'new', verified: true,
+      exactSuccessCoverage: { producer: 'harness-exact-check', missionId: missionId(slug), worktree: '/fixture', command: 'verify',
+        authorizedGates: [], authorizedCriteria: [], executionRevision: 'candidate', executionMissionRevision: 2,
+        checkpointEvidenceRevision: 2, verifiedMissionRevision: 3,
+        execution: { id: 'receipt', producer: 'rebound-exact-verifier', exitCode: 0,
+          startedAt: '2026-09-20T11:00:00Z', completedAt: '2026-09-20T11:01:00Z' },
+        verifiedOccurrence: { ...occurrence, checkpoint: 'CP-2', incidentId: 'new', attempt: 1 },
+        coveredOccurrences: [{ ...occurrence, checkpoint: 'CP-1', incidentId: 'old', attempt: 1 }] } } };
+  const mission = fixtureMission(slug, { status: 'integration', checkpoints: [target, source] });
+  assert.deepEqual(fixedVerificationNextAction({ mission }),
+    { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
+  const ports = stubIntegrateWorkflowPorts({ landing: { createAbort: () => new Error('integration aborted') } });
+  assert.doesNotThrow(() => assertRecoveredIntegrationHandoff(
+    { kind: 'found', mission, version: missionVersion(3) }, ports.landing, slug));
+
+  const historical: CheckpointData = { ...target, name: 'CP-legacy',
+    repair: { ...target.repair!, incidentId: 'legacy', command: 'review-preparation', occurrence: undefined } };
+  const legacyMission = fixtureMission('task-legacy-workflow-repair', { status: 'integration', checkpoints: [historical] });
+  assert.deepEqual(fixedVerificationNextAction({ mission: legacyMission }),
+    { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
+  const legacyCard = projectMissionCard(legacyMission, { latestGate: 'passed', reviewApproval: null,
+    currentWork: null, blockingReason: null, flags: [] });
+  assert.equal(legacyCard.verificationFacts.pendingRepair, false, 'board and workflow consume the same repair fact');
+  assert.equal(attentionAction(legacyCard, attentionReason(legacyCard))?.kind, 'integrate:merge');
+  assert.doesNotThrow(() => assertRecoveredIntegrationHandoff(
+    { kind: 'found', mission: legacyMission, version: missionVersion(1) }, ports.landing, 'task-legacy-workflow-repair'));
+
+  const reviewed = fixtureMission('task-reviewed-gate-repair', {
+    status: 'review', review: approvedReview('task-reviewed-gate-repair'),
+    checkpoints: [{ ...target, missionId: missionId('task-reviewed-gate-repair') }],
+  });
+  assert.deepEqual(fixedVerificationNextAction({ mission: reviewed }),
+    { kind: 'human-review', reason: 'agent-review-approved' }, 'historical gate debt cannot override approved review');
+  const integrating = fixtureMission('task-reviewed-gate-repair', {
+    status: 'integration', review: reviewed.review, checkpoints: reviewed.checkpoints,
+  });
+  assert.deepEqual(fixedVerificationNextAction({ mission: integrating }),
+    { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }, 'historical gate debt cannot override integration');
+  assert.doesNotThrow(() => assertRecoveredIntegrationHandoff(
+    { kind: 'found', mission: integrating, version: missionVersion(1) }, ports.landing, 'task-reviewed-gate-repair'));
+
+  const preparation = fixtureMission('task-preparation-gate-repair', { status: 'review', review: reviewFor('reviewing', false),
+    reviewPreparationPending: true, checkpoints: [{ ...target, missionId: missionId('task-preparation-gate-repair') }] });
+  assert.deepEqual(fixedVerificationNextAction({ mission: preparation }), { kind: 'repair', reason: 'repair-pending' });
+  const preparationCard = projectMissionCard(preparation, { latestGate: 'failed', reviewApproval: null,
+    currentWork: null, blockingReason: null, flags: [] });
+  assert.equal(attentionAction(preparationCard, attentionReason(preparationCard))?.kind, 'review:submit',
+    'review preparation owns retained gate recovery when active execution is ineligible');
+
+  const approved = reviewFor('approved', true);
+  const withdrawn = revokeApprovedDecision(approved, approved.rounds.at(-1)!.number, {
+    revokedAt: '2026-09-20T11:00:00Z', revokedBy: 'workflow', reason: 'gate repair changed the revision',
+    cause: { kind: 'integration-gate-failure', gate: 'unit' },
+  });
+  assert.deepEqual(fixedVerificationNextAction({ mission: fixtureMission('task-rereview-with-history', {
+    status: 'review', review: withdrawn, checkpoints: [historical],
+  }) }), { kind: 'agent-review', reason: 'review-unfinished' }, 'workflow repair history cannot skip required re-review');
+
+  const blocked = { ...historical, name: 'CP-blocked', repair: { ...historical.repair!, blocker: {
+    command: 'review-preparation', diagnostic: 'operator contract conflict', authorityReason: 'operator decision required',
+    proposedCorrection: 'choose the contract',
+  } } } satisfies CheckpointData;
+  assert.deepEqual(fixedVerificationNextAction({ mission: fixtureMission('task-blocked-repair', {
+    status: 'integration', checkpoints: [historical, blocked],
+  }) }), { kind: 'human-handoff', reason: 'recorded-blocker' }, 'any recorded blocker outranks repair history');
+});
 
 function decision(overrides: Partial<ReviewStartDecisionInput> = {}): ReviewStartDecisionInput {
   return {

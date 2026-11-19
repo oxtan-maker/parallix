@@ -2,7 +2,8 @@ import { completed, failure, type ApplicationOutcome } from './contracts.js';
 import type { MissionStore } from './domain-ports.js';
 import type { MissionLifecycleService } from './mission-lifecycle-service.js';
 import { missionId } from '../domain/mission.js';
-import { revokeApprovedDecision, reviewStatus, type Review } from '../domain/review.js';
+import { revokeApprovedDecision, reviewStatus, type Review, type ReviewFinding } from '../domain/review.js';
+import { applyOperatorCorrection } from '../domain/operator-review-correction.js';
 import { recordApprovalSuperseded } from '../domain/approval-coverage.js';
 import { missionApprovalCoverage, type ChangeIdentityPort } from './approval-coverage.js';
 
@@ -13,6 +14,8 @@ export interface RevokeReviewDecisionRequest {
   readonly operator: string;
   readonly occurredAt: string;
   readonly expectedVersion?: number;
+  /** The operator's own correction, recorded atomically with its approval stand-down. */
+  readonly correction?: { readonly findings: readonly ReviewFinding[]; readonly comment: string | null };
 }
 
 export interface ReviewProviderRevocationPort {
@@ -62,12 +65,9 @@ export class RevokeReviewDecisionUseCase {
 
     let review;
     try {
-      review = revokeApprovedDecision(this.withObservedSupersession(loaded.mission.review, request.occurredAt), request.round, {
-        revokedAt: request.occurredAt,
-        revokedBy: request.operator,
-        reason: request.reason,
-        cause: { kind: 'operator' },
-      });
+      review = revokeWithOperatorCorrection(
+        this.withObservedSupersession(loaded.mission.review, request.occurredAt), request,
+      );
     } catch (error) {
       return failure('validation', error instanceof Error ? error.message : 'Review decision cannot be revoked');
     }
@@ -102,6 +102,20 @@ export class RevokeReviewDecisionUseCase {
       return completed({ providerUpdated: false, providerDiagnostic: `provider was not updated: ${error instanceof Error ? error.message : 'unreachable'}` });
     }
   }
+}
+
+function revokeWithOperatorCorrection(review: Review, request: RevokeReviewDecisionRequest): Review {
+  const revoked = revokeApprovedDecision(review, request.round, {
+    revokedAt: request.occurredAt,
+    revokedBy: request.operator,
+    reason: request.reason,
+    cause: { kind: 'operator' },
+  });
+  return request.correction ? applyOperatorCorrection(revoked, {
+    ...request.correction,
+    source: { kind: 'operator', author: request.operator },
+    decidedAt: request.occurredAt,
+  }) : revoked;
 }
 
 function invalidRevocationRequest(request: RevokeReviewDecisionRequest): ApplicationOutcome<RevokeReviewDecisionResult> | null {

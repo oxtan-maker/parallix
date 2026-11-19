@@ -22,6 +22,7 @@ import type { PendingCommands } from './pending-command.js';
 const REASON_ACCENT: Readonly<Record<WebAttentionReasonKind, string>> = {
   'blocking': C.purple,
   'gate-failed': C.red,
+  'human-review': C.amber,
   'review-lane': C.purple,
   'integrate-lane': C.cyan,
   'stale-work': C.amber,

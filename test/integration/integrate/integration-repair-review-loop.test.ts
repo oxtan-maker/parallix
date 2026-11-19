@@ -53,6 +53,8 @@ import type { ReviewStartDecision } from '../../../src/application/ports/verific
 import { readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { policyArtifactFixture } from '../../unit/application/verification-policy/policy-artifact.fixture.js';
+import { captureRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
+import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 
 async function integrate(slug: string, worktree: string, args: string[] = []): Promise<number> {
   return await run(['integrate', slug, ...args], {
@@ -155,7 +157,7 @@ test('task-2620: a red integration gate repairs once, re-reviews, and stops in t
   void SqliteDatabaseAdapter;
 });
 
-test('persisted integration repair resumes through dry-run review and stops before gates or landing (TASK-2819, PX-0031)', async (t) => {
+test('persisted integration repair with retained gate debt resumes through review before landing (TASK-2859.12)', async (t) => {
   const fixture = await openRepairFixture({ slug: 'task-2819', gateCommand: 'touch gate-ran.txt' });
   t.after(() => fixture.close());
   t.after(() => { setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null); });
@@ -164,10 +166,18 @@ test('persisted integration repair resumes through dry-run review and stops befo
   fs.writeFileSync(path.join(fixture.worktree, 'repaired.txt'), 'restart repair\n');
   seedGit(fixture.worktree, [['add', 'repaired.txt'], ['commit', '-m', 'repair before restart']]);
   const repairedRevision = fixture.git(fixture.worktree, ['rev-parse', 'HEAD']);
+  const retainedFailure = captureRecoveryEvidence({ missionId: fixture.slug, command: ':', cwd: fixture.worktree,
+    capturedRevision: fixture.approvedRevision, exitCode: 1, signal: null, stdout: '', stderr: 'historical retained gate failure' });
+  assert.ok(retainedFailure.ok && retainedFailure.ref, `retained failure evidence: ${retainedFailure.error}`);
   // Persist the state an interrupted gate repair leaves. The public integrate
   // command must reload it and enter tryResumeIntegration, before gate setup.
   await new SqliteMissionStore(fixture.database).save({ ...original,
     status: 'active', rawStatus: 'active', closedAt: null,
+    checkpoints: [...original.checkpoints, { missionId: original.id, name: 'CP-2', nextActionText: 'repair then re-review',
+      goalCheck: [{ criterion: 'feature ships', evidence: 'historical evidence' }], repair: { incidentId: 'old-gate', command: ':',
+        authorizedGates: [':'], authorizedCriteria: ['feature ships'], attempt: 1, verified: false, evidenceRecorded: true,
+        occurrence: { openedMissionRevision: 1, worktree: fixture.worktree, failureRevision: fixture.approvedRevision,
+          failureEvidenceId: `${retainedFailure.ref.incidentId}:${retainedFailure.ref.attempt}` } } }],
     review: revokeApprovedDecision(original.review!, 1, {
       revokedAt: '2026-10-25T10:00:00Z', revokedBy: 'workflow', reason: 'Gate failed before interruption',
       cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'Restart regression' },
@@ -186,11 +196,25 @@ test('persisted integration repair resumes through dry-run review and stops befo
   setCommandPathProbe(() => '/fixture-agent');
   setLauncherHealthProbe(() => ({ ok: true as const }));
   let reviews = 0;
+  let repairs = 0;
   setWorkflowLaunchPort(({ prompt, worktree }) => ({
     invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
     resultPromise: (async () => {
+      if (!/^Mode: review\./m.test(prompt)) {
+        repairs++;
+        const checkpointName = integrationRepairCheckpoint(prompt);
+        assert.equal(checkpointName, 'CP-2', 'the retained repair names its durable checkpoint');
+        const current = await fixture.load();
+        const recorded = await new MissionCheckpointService(new SqliteMissionStore(fixture.database)).record({
+          operationId: 'retained-repair-proof', missionId: current.id, capabilities: new Set(['checkpoint:record']),
+          expectedVersion: missionVersion(await fixture.version()), checkpoint: { missionId: current.id,
+            name: checkpointName, goalCheck: [{ criterion: 'feature ships', evidence: 'repaired.txt: retained exact check rerun' }],
+            nextActionText: 'Resume independent review after retained repair' },
+        });
+        assert.equal(recorded.status, 'completed', JSON.stringify(recorded));
+        return { status: 0, stdout: '', stderr: '', telemetry: { provider: 'fixture', cost_usd: 0.02 } };
+      }
       reviews++;
-      assert.match(prompt, /^Mode: review\./m, 'restart never launches another repair');
       assert.match(prompt, /Restart regression/, 'the persisted gate evidence reaches the reviewer');
       assert.ok(prompt.includes(`${fixture.approvedRevision}..${repairedRevision}`));
       assert.match(output.join('\n'), /Sending task-2819 back through review/, 'progress appears before the nested review');
@@ -205,7 +229,9 @@ test('persisted integration repair resumes through dry-run review and stops befo
   const code = await integrate(fixture.slug, fixture.worktree, ['--dry-run']);
   assert.equal(code, 0, output.join('\n'));
   const restarted = await fixture.load();
+  assert.equal(repairs, 1, 'the review entry runs the actionable retained repair first');
   assert.equal(reviews, 1);
+  assert.equal(restarted.checkpoints.find(checkpoint => checkpoint.name === 'CP-2')?.repair?.verified, true);
   assert.equal(restarted.status, 'integration');
   assert.equal(reviewStatus(restarted.review!), 'approved');
   const decidedRevision = String(restarted.review!.rounds.at(-1)!.decision?.revision);

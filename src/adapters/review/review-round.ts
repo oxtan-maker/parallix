@@ -14,9 +14,8 @@
  * This module closes that half through the existing domain commands; it adds
  * no domain type and no second state machine.
  */
-import { applyOperatorCorrection } from '../../domain/operator-review-correction.js';
 import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
-import { settleRequestedChanges } from './review-request-changes-transition.js';
+import { recordOperatorRequestedChanges, settleRequestedChanges } from './review-request-changes-transition.js';
 import { verdictBlockForReview, type VerdictBlock } from '../../application/review-verdict-readiness.js';
 import { readReviewForDecision, type ReviewRoundObservation } from './review-round-read.js';
 import { isStaleWrite, type MissionStore, type MissionVersion } from '../../application/domain-ports.js';
@@ -63,7 +62,7 @@ export interface ReviewRoundPorts {
   lifecycleService?: Pick<MissionLifecycleService, 'transition'> | null;
 }
 
-type RequestedChangesInput = { findings: readonly ReviewFinding[]; source?: OperatorReviewSource; comment: string | null; revision?: string | null; decidedAt: string; disposition?: ReviewDisposition; expectedVersion?: number; observedRound?: ReviewRoundObservation; result?: ReviewerResultAttribution; publicationEvents?: readonly ReviewEventDraft[] };
+export type RequestedChangesInput = { findings: readonly ReviewFinding[]; source?: OperatorReviewSource; comment: string | null; revision?: string | null; decidedAt: string; disposition?: ReviewDisposition; expectedVersion?: number; observedRound?: ReviewRoundObservation; result?: ReviewerResultAttribution; publicationEvents?: readonly ReviewEventDraft[] };
 type ApprovalInput = { comment: string | null; revision?: string | null; decidedAt: string; source?: ReviewApprovalSource; expectedVersion?: number; observedRound?: ReviewRoundObservation; result?: ReviewerResultAttribution };
 
 type ChangesRequestedDisposition = Exclude<ReviewDisposition, 'APPROVED' | 'CHANGES_MADE'>;
@@ -105,13 +104,6 @@ export async function recordRequestedChanges(
   }
 }
 
-async function recordOperatorRequestedChanges(slug: string, input: RequestedChangesInput, source: OperatorReviewSource,
-  mission: Mission & { review: Review }, version: MissionVersion, store: MissionStore, ports: ReviewRoundPorts,
-): Promise<ReviewRoundResult> {
-  const review = appendReviewPublicationEvents(applyOperatorCorrection(mission.review, { ...input, source }), input.publicationEvents);
-  const savedVersion = review === mission.review ? version : await store.save({ ...mission, review }, version);
-  return await settleRequestedChanges(slug, { ...mission, review }, savedVersion, ports, source.author);
-}
 async function recordLateRequestedChanges(slug: string, input: RequestedChangesInput, mission: Mission & { review: Review },
   version: MissionVersion, store: MissionStore, ports: ReviewRoundPorts,
 ): Promise<ReviewRoundResult | null> {

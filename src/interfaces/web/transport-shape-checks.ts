@@ -188,7 +188,7 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'currentCheckpoint', 'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewWindowAllowance', 'repairBudget', 'reviewProgress', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
+      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewWindowAllowance', 'repairBudget', 'reviewProgress', 'humanReviewDue', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
       'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
@@ -214,6 +214,15 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkBoolean(object, 'reviewApproved', path, problems);
   checkNullableFiniteNumber(object, 'reviewRound', path, problems);
   checkNullableString(object, 'reviewPhase', path, problems);
+  if (!Object.prototype.hasOwnProperty.call(object, 'humanReviewDue') || object.humanReviewDue === null) {
+    // Omitted is a cached snapshot; null means no human turn.
+  } else if (isPlainObject(object.humanReviewDue)) {
+    checkKeys(object.humanReviewDue, ['reason', 'detail'], ['reason', 'detail'], `${path}.humanReviewDue`, problems);
+    checkString(object.humanReviewDue, 'reason', `${path}.humanReviewDue`, problems);
+    checkString(object.humanReviewDue, 'detail', `${path}.humanReviewDue`, problems);
+  } else {
+    problems.push(`${path}.humanReviewDue must be an object or null`);
+  }
   checkNullableString(object, 'reviewDisposition', path, problems);
   if (Object.prototype.hasOwnProperty.call(object, 'reviewRecovery')) {
     checkReviewRecovery(object.reviewRecovery, `${path}.reviewRecovery`, problems);
@@ -250,7 +259,6 @@ export function checkMissionCard(object: unknown, path: string, problems: string
     problems.push(`${path}.actions must be an array`);
   }
 }
-
 export function checkAttentionItem(object: unknown, path: string, problems: string[]): void {
   if (!isPlainObject(object)) { problems.push(`${path} must be an object`); return; }
   checkKeys(object, ['missionId', 'rank', 'reason', 'action', 'dependsOnSources'],

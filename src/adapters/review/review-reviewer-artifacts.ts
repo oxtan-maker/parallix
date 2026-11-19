@@ -55,7 +55,7 @@ type ReviewerArtifactOptions = {
    * values. Markdown is rendered here, at the export boundary, for the review
    * event and the provider comment only — it is never parsed back.
    */
-  output?: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string };
+  output?: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string; turn?: 'agent' | 'human'; authority?: 'reviewer' | 'operator' };
   /** Mission version the caller read; threaded to the recorders so a stale decision fails closed. */
   expectedVersion?: number;
   /** Present only for agent-produced artifacts; operator verdicts have no child process. */
@@ -81,7 +81,7 @@ export function resolveProviderEnabled(options: { providerEnabled?: boolean | nu
 }
 
 /** The same artifact set, supplied by `px verdict` in memory instead of read from files. */
-function typedReviewerArtifactSet(slug: string, tmpDir: string, output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string }): ResolvedArtifactSet {
+function typedReviewerArtifactSet(slug: string, tmpDir: string, output: { findings: readonly ReviewFinding[]; comment: string | null; verdict: string; turn?: 'agent' | 'human'; authority?: 'reviewer' | 'operator' }): ResolvedArtifactSet {
   return {
     findings: renderFindings(output.findings),
     outcomeMessage: output.comment ?? `Outcome: ${output.verdict}\nVerdict: ${output.verdict}`,
@@ -389,8 +389,9 @@ async function recordReviewerChangeRequest(slug: string, reviewer: string, findi
     comment: outcomeMessage,
     decidedAt: new Date().toISOString(),
     revision: options.revision,
+    ...(options.output?.authority === 'operator' ? { source: { kind: 'operator' as const, author: reviewer } } : {}),
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
-    result: reviewerResultAttribution(reviewer, options.processResult),
+    ...(options.output?.authority === 'operator' ? {} : { result: reviewerResultAttribution(reviewer, options.processResult) }),
     publicationEvents,
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   const decision = await recordConcurrentReviewerDecision(write, options.expectedVersion === undefined);
@@ -412,7 +413,7 @@ async function recordReviewerApproval(slug: string, reviewer: string, outcomeMes
     revision: options.revision,
     source: options.providerEnabled ? { kind: 'provider', provider: 'forgejo' } : { kind: 'local' },
     ...(options.expectedVersion === undefined ? {} : { expectedVersion: options.expectedVersion }),
-    result: reviewerResultAttribution(reviewer, options.processResult),
+    ...(options.output?.authority === 'operator' ? {} : { result: reviewerResultAttribution(reviewer, options.processResult) }),
   }, { missionStore: options.missionStore, lifecycleService: options.lifecycleService });
   const decision = await recordConcurrentReviewerDecision(write, options.expectedVersion === undefined);
   if (decision.outcome === 'failed') {

@@ -11,6 +11,8 @@ import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } fr
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
 import { missionId, isMissionSlugCandidate } from '../domain/mission.js';
+import { integrationRepairNeedsReview } from '../domain/integration-repair-policy.js';
+import { fixedVerificationNextAction } from './verification-policy/review-start-decision.js';
 import type {
   AgentLaunchOutcome,
   AgentLaunchPlan,
@@ -203,7 +205,20 @@ export class ExecuteMissionService {
     const evidence: DurableEvidence[] = [{ id: `${request.slug}:approval-retention`, source: 'mission-store',
       detail: 'Integration repair changed the approved patch; the original approval was withdrawn and no execute agent launched' }];
     if (request.cancellation?.requested) { return failure('cancelled', 'cancelled after integration repair assessment; re-query task state', evidence); }
-    if (!implementer) { throw new Error(`Integration repair changed the approved patch but no implementer is recorded; resume px review ${request.slug}.`); }
+    if (!implementer) {
+      return failure('validation', `Integration repair changed the approved patch but no implementer is recorded; resume px review ${request.slug}.`,
+        evidence, failureReason('state-machine', 'lifecycle', { operation: 'review-changed-integration-repair' }));
+    }
+    const loaded = await this._ports.missionTransitions.load(missionId(request.slug));
+    const next = loaded.kind === 'found' ? fixedVerificationNextAction({ mission: loaded.mission }) : null;
+    const reviewEntry = loaded.kind === 'found' && integrationRepairNeedsReview(loaded.mission)
+      && (next?.kind === 'agent-review' || next?.kind === 'repair');
+    if (!reviewEntry) {
+      return failure('validation', `Integration repair for ${request.slug} did not return to a fixed review-entry action.`,
+        evidence, failureReason('state-machine', 'lifecycle', {
+          operation: 'review-changed-integration-repair', nextAction: next?.kind ?? 'mission-unavailable',
+        }));
+    }
     const prepared = await this.resolveWorkspace(request.slug);
     if (typeof prepared === 'string') { throw new WorkspaceRefusal(prepared); }
     await this.review(request, prepared, implementer);

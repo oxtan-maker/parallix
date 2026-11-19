@@ -1,4 +1,23 @@
 import { freshGoalCheckRows, type CheckpointData } from './checkpoint.js';
+import type { Mission } from './mission.js';
+
+export const NON_GATE_REPAIR_COMMANDS = {
+  'rebase-conflict': 'rebase-conflict',
+  'review-preparation-verification': 'review-preparation',
+  'hook-failure': 'hook-failure',
+  'artifact-incomplete': 'artifact-incomplete',
+  'agent-timeout': 'agent-timeout',
+} as const;
+
+/** Workflow recovery labels are historical facts, not retained executable gates. */
+export function isRetainedGateRepair(command: string): boolean {
+  return !Object.values(NON_GATE_REPAIR_COMMANDS).includes(command as typeof NON_GATE_REPAIR_COMMANDS[keyof typeof NON_GATE_REPAIR_COMMANDS]);
+}
+
+/** A retained gate can resume only before review preparation has completed. */
+export function retainedGateRepairIsActionable(mission: Pick<Mission, 'status' | 'reviewPreparationPending'>): boolean {
+  return mission.status === 'active' || mission.status === 'review' && mission.reviewPreparationPending === true;
+}
 
 /** A failure occurrence, never reconstructed from checkpoint order or command equality. */
 export interface RepairOccurrence {

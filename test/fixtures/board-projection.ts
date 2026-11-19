@@ -55,7 +55,8 @@ export const ALL_LANES: readonly BoardLane[] = [
 
 /** A card with every optional projection fact absent. */
 export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
-  return {
+  const { verificationFacts, ...cardOverrides } = overrides;
+  const card: Omit<MissionCard, 'verificationFacts'> = {
     id: fixtureMissionId('task-9999'),
     repositoryId: fixtureRepositoryId('test-repo'),
     title: 'Test task-9999',
@@ -74,6 +75,7 @@ export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
     reviewApproved: false,
     reviewRound: null,
     reviewPhase: null,
+    humanReviewDue: null,
     reviewProgress: null,
     reviewDisposition: null,
     reviewHistory: [],
@@ -81,8 +83,11 @@ export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
     blockingReason: null,
     flags: [],
     commands: [],
-    ...overrides,
+    ...cardOverrides,
   };
+  return { ...card, verificationFacts: verificationFacts ?? { status: card.status,
+    reviewPhase: card.reviewPhase, pendingRepair: false, reviewRequired: false, humanIntervention: false,
+    ownedAction: false, humanOnlyReason: null } };
 }
 
 /** A card with every projection fact present. */

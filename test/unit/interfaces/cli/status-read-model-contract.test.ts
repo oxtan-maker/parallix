@@ -61,6 +61,18 @@ test('status and JSON expose the shared reviewer progress without a waiting-for-
   assert.doesNotMatch(rendered, /waiting for human/i);
   assert.deepEqual(JSON.parse(statusJson(result)).review.progress, reviewProgress);
 });
+
+test('status carries the board projection human-review reason unchanged (TASK-2859.15)', () => {
+  const humanReviewDue = { reason: 'agent-review-approved' as const,
+    detail: 'Human review is due because agent review approved the current change.' };
+  const result = statusResult({ slug: 'task-human-turn', missionData: {
+    backlogStatus: 'review', reviewHistory: [], humanReviewDue,
+  } as never });
+  const lines: string[] = [];
+  renderStatus(result, line => lines.push(line));
+  assert.match(lines.join('\n'), /Human review due: Human review is due because agent review approved the current change\. \(agent-review-approved\)/);
+  assert.deepEqual(JSON.parse(statusJson(result)).humanReviewDue, humanReviewDue);
+});
 test('settled MAX_ATTEMPTS review guides acknowledgment and never asks for another stop (TASK-2839)', async () => {
   // TASK-2830 shape: round 10 still reviewing, MAX_ATTEMPTS human stop, a browser stop already settled.
   const id = missionId('task-2830');

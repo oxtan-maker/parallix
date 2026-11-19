@@ -42,6 +42,13 @@ test('Board leaves absent checkpoint, PR and review facts unknown (TASK-2784)', 
   assert.doesNotMatch(html, /<a\b[^>]*>PR /);
 });
 
+test('Board card renders the projection-owned human review reason (TASK-2859.15)', () => {
+  const detail = 'Human review is due because agent review approved the current change.';
+  const html = renderedCard(makeFullCard({ humanReviewDue: { reason: 'agent-review-approved', detail } }));
+  assert.match(html, /data-human-review-due/);
+  assert.ok(html.includes(detail));
+});
+
 test('Board identifies a PR with null URL without inventing a PR anchor (TASK-2784)', () => {
   const card = makeFullCard();
   assert.ok(card.pullRequest);

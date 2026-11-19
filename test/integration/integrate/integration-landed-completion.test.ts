@@ -127,7 +127,9 @@ async function runIntegrate(scenario: Scenario) {
     mock.method(missionUtils, 'resolveWorktree', () => missionRoot);
   }
   fs.mkdirSync(path.join(baseRoot, 'backlog', 'tasks'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' } } }));
+  fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+    adapters: { review: { provider: 'forgejo' }, verification: { command: 'true' } },
+  }));
   const taskFile = path.join(baseRoot, 'backlog', 'tasks', 'task.md');
   fs.writeFileSync(taskFile, `status: ${scenario.taskStatus}\n`);
   const store = createFakeStore(scenario.missionStatus);
@@ -204,7 +206,8 @@ async function runIntegrate(scenario: Scenario) {
   mock.method(backlog, 'completeTask', () => true);
   mock.method(backlog, 'setTaskStatus', () => { order.push('promoted'); return true; });
   mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
-  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
+  mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED',
+    defaultUserApproved: true, defaultUserApprovedAt: '2026-08-04T22:00:00Z' }));
   mock.method(forgejo, 'listOpenPrsForSlug', () => []);
   mock.method(forgejo, 'readToken', () => 'token');
   mock.method(forgejo, 'resolveTokenFile', () => 'token-file');

@@ -342,8 +342,8 @@ test('attention-items: each item renders exact command string from attentionComm
   const { attentionCommand } = await import('../../../../src/interfaces/tui/shell.js');
   const { attentionAction } = await import('../../../../src/application/projections/board.js');
 
-  const integrateCard = makeCard({ id: fixtureMissionId('task-4001'), lane: 'integration', commands: [{ command: 'integrate', enabled: true, reason: null }] });
-  const reviewCard = makeCard({ id: fixtureMissionId('task-4002'), lane: 'review', commands: [{ command: 'review', enabled: true, reason: null }] });
+  const integrateCard = makeCard({ id: fixtureMissionId('task-4001'), lane: 'integration', status: 'integration', commands: [{ command: 'integrate', enabled: true, reason: null }] });
+  const reviewCard = makeCard({ id: fixtureMissionId('task-4002'), lane: 'review', status: 'review', commands: [{ command: 'review', enabled: true, reason: null }] });
   const blockingCard = makeCard({ id: fixtureMissionId('task-4003'), lane: 'active', blockingReason: 'upstream' });
   const gateFailedCard = makeCard({ id: fixtureMissionId('task-4004'), lane: 'active', gate: 'failed', commands: [{ command: 'active', enabled: true, reason: null }] });
 
@@ -356,7 +356,7 @@ test('attention-items: each item renders exact command string from attentionComm
     'px review task-4002',
   );
   assert.equal(
-    attentionCommand(attentionAction(blockingCard, { kind: 'blocking', detail: '' })),
+    attentionCommand(attentionAction(blockingCard, { kind: 'blocking', detail: 'upstream' })),
     'px lead task-4003 --once',
   );
   assert.equal(
@@ -369,6 +369,7 @@ test('attention-items: rendered output contains exact command text "$ px <cmd> <
   const integrateCard = makeCard({
     id: fixtureMissionId('task-5001'),
     lane: 'integration',
+    status: 'integration',
     commands: [{ command: 'integrate', enabled: true, reason: null }],
     title: 'Integrate mission',
   });
@@ -682,7 +683,7 @@ test('attention-items: exact next step uses mission context for review and disti
 
   for (const { id, lane, reasonKind, expected } of cases) {
     const command = lane === 'integration' ? 'integrate' : lane === 'review' ? 'review' : 'active';
-    const card = makeCard({ id: fixtureMissionId(id), lane, blockerRequiresOperator: reasonKind === 'blocking', commands: [{ command, enabled: true, reason: null }] });
+    const card = makeCard({ id: fixtureMissionId(id), lane, status: lane, blockerRequiresOperator: reasonKind === 'blocking', commands: [{ command, enabled: true, reason: null }] });
     const reason = { kind: reasonKind, detail: 'fixture diagnostic' };
     const actual = attentionCommand(attentionAction(card, reason));
     assert.equal(actual, expected, `command for ${reasonKind} must be "${expected}"`);

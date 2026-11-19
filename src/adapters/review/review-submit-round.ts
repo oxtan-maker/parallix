@@ -43,7 +43,10 @@ type SubmitReviewOptions = {
   resolveForgejoUserFn?: typeof resolveReviewUser;
   resolveTaskFileFn?: typeof resolveTaskFile;
   getTaskStatusFn?: typeof getTaskStatus;
+  /** Current tested head posted to a configured provider. */
   revision?: string;
+  /** Revision already judged by the persisted decision and replayed locally. */
+  reviewedRevision?: string;
   readTokenFn?: typeof readToken;
   postReviewFn?: typeof postReview;
   postCommentFn?: NonNullable<Parameters<typeof postWorkflowReview>[3]>['postCommentFn'];
@@ -114,7 +117,7 @@ async function recordApprovalDecision(slug: string, outcome: string, message: st
   const worktree = options.executionContext.missionWorktree;
   // The reviewer's own verdict counts toward the round's required approvals; it is attributed, never operator-directed.
   const { identityUser: identity, reviewState } = await resolveReviewIdentity(slug, worktree, { readReviewStateFn: options.readReviewStateFn });
-  const revision = options.revision ?? headRevision(worktree);
+  const revision = options.reviewedRevision ?? options.revision ?? headRevision(worktree);
   await refreshSubmittedReviewerAvailability(slug, worktree, revision, reviewState, options);
   const decision = await recordApprovalFn(slug, {
     comment: message || null,

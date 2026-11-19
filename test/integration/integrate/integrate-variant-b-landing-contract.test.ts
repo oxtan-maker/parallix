@@ -93,7 +93,8 @@ describe("Variant B landing", () => {
     }
   }
 
-  function setupMocks() {
+  function setupMocks(options: { missionStatus?: Mission['status']; providerDisabled?: boolean;
+    transitions?: string[] } = {}) {
     statsCalls = [];
     // TASK-2322.12: Allow --no-integration-gates in tests
     process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
@@ -130,7 +131,8 @@ describe("Variant B landing", () => {
     mock.method(backlog, 'completeTask', () => true);
     mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 41 }));
     mock.method(forgejo, 'listOpenPrsForSlug', () => []);
-    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
+    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED',
+      defaultUserApproved: true, defaultUserApprovedAt: '2026-05-15T11:00:00Z' }));
     mock.method(forgejo, 'readToken', () => 'token');
     mock.method(forgejo, 'resolveTokenFile', () => 'token-file');
     mock.method(forgejo, 'syncMerged', () => ({ ok: true as const }));
@@ -158,7 +160,7 @@ describe("Variant B landing", () => {
     // finishLanding.
     let storedMission: Mission = fixtureMission(TEST_SLUG, {
       labels: missionLabels(['ai_sdlc']),
-      status: 'review', closedAt: null, assignee: agentFamily('claude'), review: {
+      status: options.missionStatus ?? 'review', closedAt: null, assignee: agentFamily('claude'), review: {
         rounds: [{
           number: 1,
           subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: changeRevision('fixture') },
@@ -174,9 +176,11 @@ describe("Variant B landing", () => {
         load: async () => ({ kind: 'found' as const, mission: storedMission, version: 1 }),
       },
      lifecycle: {
-       transition: async () => {
-         storedMission = { ...storedMission, status: 'integration', closedAt: null };
-         return { durableEvidence: [],  status: 'completed' as const, value: { to: 'integration', version: 2 } };
+       transition: async (request: import('../../../src/application/mission-lifecycle-service.js').MissionTransitionRequest) => {
+         const status = request.command.type === 'submit-for-review' ? 'review' : 'integration';
+         options.transitions?.push(request.command.type);
+         storedMission = { ...storedMission, status, closedAt: null };
+         return { durableEvidence: [],  status: 'completed' as const, value: { to: status, version: 2 } };
        },
       },
       integration: {
@@ -196,7 +200,8 @@ describe("Variant B landing", () => {
 
     if (!fs.existsSync(FAKE_ROOT)) fs.mkdirSync(FAKE_ROOT, { recursive: true });
     fs.writeFileSync(path.join(FAKE_ROOT, 'workflow.config.json'), JSON.stringify({
-      adapters: { review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/visualboard' }, verification: { command: 'true' } },
+      adapters: { review: options.providerDisabled ? { provider: 'none' }
+        : { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/visualboard' }, verification: { command: 'true' } },
     }), 'utf8');
   }
 
@@ -231,6 +236,19 @@ describe("Variant B landing", () => {
     console.log = originalLog;
     if (previousDebug === undefined) delete process.env.DEBUG; else process.env.DEBUG = previousDebug;
     cleanup();
+  });
+
+  test('active provider-disabled approval stays on command recovery path (TASK-2859.16 review)', async () => {
+    const transitions: string[] = [];
+    setupMocks({ missionStatus: 'active', providerDisabled: true, transitions });
+    try {
+      try {
+        await loadIntegrate()([TEST_SLUG, '--no-integration-gates'], {
+          configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices,
+        });
+      } catch { /* downstream landing behavior is outside this recovery regression */ }
+      assert.deepEqual(transitions.slice(0, 2), ['submit-for-review', 'approve']);
+    } finally { cleanup(); }
   });
 
   test('integrate Variant B promotes and completes a review-approved task in the landed closeout', async () => {
@@ -339,7 +357,8 @@ describe("Variant B landing", () => {
       if (options.forgejoUser !== 'gemini') {
         return { ok: false as const, error: 'api-failed', reviewState: null };
       }
-      return { ok: true as const, reviewState: 'APPROVED' };
+      return { ok: true as const, reviewState: 'APPROVED',
+        defaultUserApproved: true, defaultUserApprovedAt: '2026-05-15T11:00:00Z' };
     });
 
     const integrate = loadIntegrate();
@@ -386,7 +405,8 @@ describe("Variant B landing", () => {
     });
     mock.method(forgejo, 'getLatestReviewDecision', (_branch: Parameters<(typeof forgejo)["getLatestReviewDecision"]>[0], options: Parameters<(typeof forgejo)["getLatestReviewDecision"]>[1] = {}) => {
       captured.approvalToken = options.token || null;
-      return { ok: true as const, reviewState: 'APPROVED' };
+      return { ok: true as const, reviewState: 'APPROVED',
+        defaultUserApproved: true, defaultUserApprovedAt: '2026-05-15T11:00:00Z' };
     });
 
     const integrate = loadIntegrate();
@@ -754,7 +774,8 @@ describe("integration completion order", () => {
     mock.method(backlog, 'getTaskAssignee', () => 'codex');
     mock.method(backlog, 'completeTask', () => true);
     mock.method(forgejo, 'getPrStatus', () => ({ exists: true as const, state: 'open', merged: false, number: 1 }));
-    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED' }));
+    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED',
+      defaultUserApproved: true, defaultUserApprovedAt: '2026-05-15T11:00:00Z' }));
     mock.method(forgejo, 'listOpenPrsForSlug', () => []);
     mock.method(forgejo, 'readToken', () => 'token');
     mock.method(forgejo, 'resolveTokenFile', () => 'token-file');

@@ -9,6 +9,8 @@ import { buildBoardProjection } from '../../../src/application/projections/board
 import { makeCard, emptyMetrics } from '../../fixtures/board-projection.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
+import { missionVersion } from '../../../src/application/domain-ports.js';
+import { approvedReview, fixtureMission } from '../../fixtures/mission-builders.js';
 
 const worktrees = mockModule<typeof import('../../../src/adapters/git/worktree.js')>(
   '../../../src/adapters/git/worktree.js', import.meta.url);
@@ -98,6 +100,53 @@ test('lead refuses liveness when the activity authority is unavailable (TASK-282
   } as Context);
   await assert.rejects(() => port.liveness('task-unreadable'), /operator database is unavailable/);
   assert.equal(cardReads, 0, 'missing authority cannot become a successful idle observation');
+});
+
+test('lead keeps approved active missions in agent review instead of finishing review approval (TASK-2859.12)', async t => {
+  t.after(() => mock.restoreAll());
+  mock.method(worktrees, 'resolveWorktree', () => '/target');
+  mock.method(fmt.log, 'info', () => {});
+  const mission = fixtureMission('task-active-approved', {
+    status: 'active', review: approvedReview('task-active-approved'),
+  });
+  const services = {
+    presentationCapabilities: { boardProjection: {} },
+    mission: {
+      store: {
+        load: async () => ({ kind: 'found' as const, mission, version: missionVersion(1) }),
+        save: async () => assert.fail('lead must not record approval for an active mission'),
+      },
+      lifecycle: {},
+    },
+  } as unknown as ProductionApplicationServices;
+  const invocations: string[][] = [];
+  const port = createLeadSupervisorPort(services, new Set(), {
+    rootDir: '/lead', configuration: resolveConfiguration({}), registry: { review: async () => {} },
+    runPublicCli: async args => { invocations.push([...(args ?? [])]); return 0; },
+    scope: {} as Context['scope'], launchRecovery: async () => '', active: async () => {},
+  });
+  await port.runAction('task-active-approved', { kind: 'review:submit', display: 'px review task-active-approved' });
+  assert.deepEqual(invocations, [['review', 'task-active-approved']],
+    'the public review owner handles the active mission without a lead-owned lifecycle transition');
+});
+
+test('lead carries the board human-review reason without running or inventing a verdict (TASK-2859.15)', async () => {
+  const detail = 'Human review is due because agent review approved the current change.';
+  const card = makeCard({ lane: 'review', status: 'review', rawStatus: 'review',
+    humanReviewDue: { reason: 'agent-review-approved', detail },
+  });
+  const projection = buildBoardProjection(card.repositoryId, [card], [], [], emptyMetrics, []);
+  const services = {
+    presentationCapabilities: { boardProjection: { build: async () => projection } },
+  } as unknown as ProductionApplicationServices;
+  const port = createLeadSupervisorPort(services, new Set(), {
+    rootDir: '/lead', configuration: resolveConfiguration({}), registry: {}, active: async () => {},
+    runPublicCli: async () => assert.fail('human review has no automated lead command'),
+    scope: {} as Context['scope'], launchRecovery: async () => assert.fail('human review is not a recovery launch'),
+  });
+  const observed = (await port.attention())[0]!;
+  assert.deepEqual(observed.reason, { kind: 'human-review', reason: 'agent-review-approved', detail });
+  assert.equal(observed.action, null);
 });
 
 test('lead observes current integration evidence and invokes only public integrate dry-run below threshold (PX-0031)', async t => {

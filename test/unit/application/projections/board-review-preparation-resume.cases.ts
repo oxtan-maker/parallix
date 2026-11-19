@@ -36,6 +36,8 @@ import {
   changeRevision,
   ConfiguredReviewerEligibility,
   currentReviewRound,
+  requestReviewIntervention,
+  resumeReview,
   reviewFindingId,
   reviewStatus,
   startReview,
@@ -147,7 +149,8 @@ function activeMissionUnderReview(): Mission {
 }
 
 /** Compose only what the handoff workflow needs; every other port stays unused. */
-function composeWithRecordedLoop(store: FakeMissionStore) {
+function composeWithRecordedLoop(store: FakeMissionStore,
+  reviewInterventionClearer?: NonNullable<Parameters<typeof composeProductionCapabilities>[8]>['reviewInterventionClearer']) {
   const launches: { slug: string; options: Record<string, unknown> }[] = [];
   const repos = emptyBoardRepositories();
   const capabilities = composeProductionCapabilities(
@@ -165,6 +168,7 @@ function composeWithRecordedLoop(store: FakeMissionStore) {
       reviewPreparationReviewLoop: (async (request, mechanisms) => {
         launches.push({ slug: request.slug, options: { ...request, worktree: mechanisms.worktree } as Record<string, unknown> });
       }),
+      reviewInterventionClearer,
     },
   );
   return { capabilities, launches };
@@ -213,6 +217,25 @@ test("board review preparation resume launches the loop again without inventing 
   assert.equal(store.events.length, 0, 'composition records no transition');
   assert.equal(store.mission!.review!.rounds.length, 1, 'a repeated resume does not open a round');
   assert.equal(launches.length, 2, 'each resume hands the loop the mission');
+});
+
+test('board review preparation clears a human-intervention stop before entering the loop (TASK-2859.12)', async () => {
+  const mission = activeMissionUnderReview();
+  const store = new FakeMissionStore({ ...mission, review: requestReviewIntervention(mission.review!, {
+    requestedAt: '2026-08-31T12:00:00.000Z', requestedBy: 'implementer', reason: 'operator decision required',
+  }) }, 3);
+  let clears = 0;
+  const { capabilities, launches } = composeWithRecordedLoop(store, async () => {
+    clears++;
+    await store.save({ ...store.mission!, review: resumeReview(store.mission!.review!) }, store.version);
+    return true;
+  });
+
+  const result = await resumeVia(capabilities, 'active');
+  assert.equal(result.status, 'completed');
+  assert.equal(clears, 1, 'the browser entry uses the shared intervention clearer once');
+  assert.notEqual(reviewStatus(store.mission!.review!), 'human-intervention');
+  assert.equal(launches.length, 1, 'the loop starts only after intervention clearance');
 });
 
 test("board review preparation resume hands an active mission with a round awaiting review to the review loop (TASK-2817)", async () => {

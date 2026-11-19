@@ -1,8 +1,11 @@
 import { integrationServices } from '../../../../helpers/stub-integration-services.js';
-import { fixtureMission } from '../../../../fixtures/mission-builders.js';
+import { approvedReview, fixtureMission, inMemoryTransitionStore } from '../../../../fixtures/mission-builders.js';
 import { integrationContext } from '../../../../fixtures/integration-context.js';
 import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 import { missionVersion as fixtureVersion } from '../../../../../src/application/domain-ports.js';
+import { MissionLifecycleService } from '../../../../../src/application/mission-lifecycle-service.js';
+import { agentFamily } from '../../../../../src/domain/agents.js';
+import { changeRevision, type Review } from '../../../../../src/domain/review.js';
 import { resolveConfiguration } from '../../../../../src/composition/config.js';
 const environment: NodeJS.ProcessEnv = { ...process.env };
 // Historical regression provenance: TASK-1039, TASK-1219, TASK-1431, TASK-2204.
@@ -18,17 +21,80 @@ import { createRequire } from 'node:module';
 import os from 'node:os';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
-import { printIntegrationPreflight, buildIntegrationContext } from '../../../../../src/adapters/cli/commands/integrate.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
-mockModule('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
+const integrateModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
+const productConfig = mockModule<typeof import('../../../../../src/adapters/config/product-config.js')>('../../../../../src/adapters/config/product-config.js', import.meta.url);
+const reviewCommands = mockModule<typeof import('../../../../../src/adapters/review/review-commands.js')>('../../../../../src/adapters/review/review-commands.js', import.meta.url);
+const reviewStateModule = mockModule<typeof import('../../../../../src/adapters/review/review-state.js')>('../../../../../src/adapters/review/review-state.js', import.meta.url);
 mockModule('../../../../../src/adapters/backlog/backlog.js', import.meta.url);
 mockModule('../../../../../src/composition/application-services.js', import.meta.url);
 mockModule('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
 await installModuleMocks();
 const { checkReviewProvider } = await import('../../../../../src/application/integrate/preflight-review.js');
+const { createIntegratePorts, printIntegrationPreflight, buildIntegrationContext } = integrateModule;
+
+test('configured provider approval posts the tested head and replays its covered decision revision (TASK-2859.16 review)', async t => {
+  const slug = 'task-2859-covered-provider';
+  const testedRevision = 'a'.repeat(40);
+  const reviewedRevision = 'b'.repeat(40);
+  const base = approvedReview(slug);
+  const round = base.rounds[0];
+  const review: Review = { ...base, rounds: [{
+    ...round,
+    subject: { ...round.subject, revision: changeRevision(reviewedRevision) },
+    decision: round.decision?.kind === 'approved'
+      ? { ...round.decision, revision: changeRevision(reviewedRevision) }
+      : round.decision,
+    reviewerResults: [{
+      publicationId: 'review-run', reviewerId: 'claude', agentFamily: agentFamily('claude'),
+      revision: changeRevision(reviewedRevision), decision: 'approved' as const, findings: [],
+      outcome: 'completed' as const, status: 0, publishedAt: '2026-11-19T10:30:00Z',
+    }],
+  }] };
+  const mission = fixtureMission(slug, { status: 'review', assignee: agentFamily('codex'), review });
+  const store = inMemoryTransitionStore(mission);
+  const lifecycle = new MissionLifecycleService(store);
+  const worktree = registeredMkdtemp('covered-provider-');
+  t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
+  let providerPosts = 0;
+  t.mock.method(productConfig, 'isForgejoReviewEnabled', () => true);
+  const submitReviewRound = reviewCommands.submitReviewRound;
+  const submitReviewRoundWithProvider: typeof submitReviewRound = (submittedSlug, outcome, message, options) =>
+    submitReviewRound(submittedSlug, outcome, message, {
+      ...options,
+      isReviewProviderEnabledFn: () => true,
+      readReviewStateFn: () => new reviewStateModule.ReviewState(slug, {
+        round: 1, reviewer: 'claude', implementer: 'codex', startedAt: '2026-11-19T10:00:00Z', phase: 'approved',
+      }),
+      readTokenFn: () => 'fixture-token',
+      resolveReviewUserFn: user => user,
+      getPrAuthorFn: () => 'someone-else',
+      postReviewFn: () => {
+        providerPosts++;
+        return { data: null, status: 200, statusCode: 200, stderr: null, error: null, ok: true as const };
+      },
+      log: () => {}, error: () => {},
+    });
+  t.mock.method(reviewCommands, 'submitReviewRound', submitReviewRoundWithProvider);
+
+  const result = await createIntegratePorts().review.submitApproval(slug, 'Approved through integrate', {
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: worktree }),
+    missionServices: { store, lifecycle }, revision: testedRevision, reviewedRevision,
+  });
+
+  assert.deepEqual(result, { ok: true });
+  assert.equal(providerPosts, 1, 'the configured provider receives one approval for the current PR head');
+  assert.equal(store.mission().status, 'integration', 'local authority replays the already-reviewed revision');
+  assert.deepEqual(
+    store.mission().review?.rounds[0]?.reviewerResults?.map(result => result.revision),
+    [changeRevision(reviewedRevision), changeRevision(reviewedRevision)],
+    'provider posting must not rewrite the revision attributed to the persisted decision',
+  );
+  assert.equal(store.events.length, 1, 'the approval and lifecycle transition retain one writer');
+});
 
 // ---- task-1039 preflight reporting (consolidated from test/task-1039-integrate-v3.test.ts, TASK-2622.09) ----
 describe("preflight reporting", () => {

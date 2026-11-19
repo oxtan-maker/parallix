@@ -437,9 +437,9 @@ reviewer's assignment. After a repair, successful preparation returns an undecid
 round to review and retains earlier findings and implementer responses. The
 recorded policy, with the reason for any fallback, appears in the review output. A
 classifier may return unresolved work to implementation, but
-its clear result cannot substitute for the required reviewer approvals. Human
-inspection in Forgejo or through `px integrate` stays optional and never becomes
-a required verdict.
+its clear result cannot substitute for the required reviewer approvals. When
+the verification next-action policy selects human review, that turn is explicit;
+otherwise human inspection in Forgejo or through `px integrate` stays optional.
 
 When provider mirroring is enabled, accepted findings, decisions and responses
 are recorded locally before their PR publication is attempted. A rejected or
@@ -461,8 +461,32 @@ requirement, and each stable reviewer/run label with its queued, running,
 waiting, completed or failed state. The TUI and web boards render the same
 application projection. A degraded one-reviewer or fresh same-agent policy names
 its reason; failed runs and blocking findings name the blocker and the next
-operator command. These states do not introduce a waiting-for-human lifecycle
-state.
+operator command. When human review is next, the card, lane, status output and
+attention queue show the same recorded reason. This projection does not
+introduce a waiting-for-human lifecycle state.
+
+Complete an explicit human turn with `px verdict`. The command records the
+decision through the existing review writer, reloads the authoritative next
+action, prints it, and resumes automatic review or repair only when that owner
+selects it. A request for changes after an approval first records the approval
+revocation and then the human-attributed findings; retries and restarts do not
+create another decision. Approval leaves integration as an explicit operator
+handoff.
+
+`px integrate <slug>` can complete that human turn when the current change
+already has both an agent approval and a complete passing integration-test
+action. The command records one human approval and moves the mission to
+integration before continuing the normal landing workflow. With Forgejo review
+enabled, Parallix first posts one approval for the exact tested revision through
+the existing review submission path; a missing pull request or token, a stale
+agent or test revision, or a failed provider write stops integration without
+creating local approval authority. With the review provider disabled, the same
+path records one local approval. The refusal names the missing or stale fact;
+use `px review <slug>` to refresh agent review or `px integrate <slug> --dry-run`
+to produce current integration-test evidence, then retry. The shortcut requires
+at least one configured `preIntegration` gate; when none is configured, the
+refusal names that configuration requirement instead of claiming a dry run can
+produce evidence.
 
 When a rebase pauses on shared conflicts, the implementer starts a fresh
 ephemeral session with the authoritative Mission goal, why, scope, out-of-scope

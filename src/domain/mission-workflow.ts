@@ -387,13 +387,23 @@ function revokeMissionApproval(mission: Mission, command: Extract<MissionCommand
     throw new MissionRuleViolation('Revocation requires a current effective approval');
   }
   requireRevocationSubject(mission.review, command.review);
-  if (reviewStatus(command.review) !== 'awaiting-review') {
-    throw new MissionRuleViolation('Revocation must open an awaiting-review round');
-  }
+  const nextStatus = reviewStatus(command.review);
   const withdrawn = command.review.rounds.at(-2)?.decision;
+  const operatorCorrection = isOperatorCorrectionRevocation(command.review, nextStatus);
+  if (nextStatus !== 'awaiting-review' && !operatorCorrection) {
+    throw new MissionRuleViolation('Revocation must open an awaiting-review round or atomically record its operator correction');
+  }
   const integrationRepair = mission.status === 'active' && withdrawn?.kind === 'approved'
     && withdrawn.revocation?.cause?.kind === 'integration-gate-failure';
-  return { ...mission, status: integrationRepair ? 'active' : 'review', review: command.review };
+  return { ...mission, status: integrationRepair || operatorCorrection ? 'active' : 'review', review: command.review };
+}
+
+function isOperatorCorrectionRevocation(review: Review, status: ReturnType<typeof reviewStatus>): boolean {
+  const withdrawn = review.rounds.at(-2)?.decision;
+  const correction = currentReviewRound(review).decision;
+  return status === 'awaiting-implementation'
+    && withdrawn?.kind === 'approved' && withdrawn.revocation?.cause?.kind === 'operator'
+    && correction?.kind === 'changes-requested' && correction.source?.kind === 'operator';
 }
 
 function recordImplementer(mission: Mission, command: Extract<MissionCommand, { type: 'record-implementer' }>): Mission {

@@ -73,7 +73,7 @@ async function runtimeOptions(rootDir: string, configuration: ParallixConfigurat
     loadAliasesFn: (options: { readonly rootDir?: string }) => deriveAliases(loadStateMap(options)),
     product: { name: packageJson.name, version: packageJson.version },
   };
-  if (command === 'verdict' || command === 'resolve') {
+  if (command === 'resolve') {
     const { createReviewVerbCommands } = await import('./cli-review-verbs.js');
     return { ...base, commandFns: createReviewVerbCommands(rootDir, configuration) };
   }

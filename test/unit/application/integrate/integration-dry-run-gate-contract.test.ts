@@ -2,9 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createIntegrationGateStep, type GateStepRequest } from '../../../../src/application/integrate/gates.js';
 import { setLogger } from '../../../../src/application/presentation/cli-format.js';
-import type { IntegrationGateFailureRequest, IntegrationGateRunResult } from '../../../../src/application/ports/integrate-workflow.js';
-import { missionId } from '../../../../src/domain/mission.js';
+import { createTestsActionExecutor } from '../../../../src/application/integrate/tests-action.js';
+import type { IntegrateWorkflowPorts, IntegrationGateFailureRequest, IntegrationGateRunResult } from '../../../../src/application/ports/integrate-workflow.js';
+import { missionVersion } from '../../../../src/application/domain-ports.js';
+import { missionId, type Mission } from '../../../../src/domain/mission.js';
+import { repositoryId } from '../../../../src/domain/repository.js';
 import { integrationContext } from '../../../fixtures/integration-context.js';
+import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+import { approvedReview, fixtureMission, pendingReview } from '../../../fixtures/mission-builders.js';
 import { integrationServices } from '../../../helpers/stub-integration-services.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
 
@@ -125,4 +130,231 @@ test('integration dry-run fails closed when mandatory preIntegration is missing 
   const { step, request, observations } = await fixture(receipt({ ok: true, executed: 0, skipped: true, outcomes: [] }), []);
   await assert.rejects(quiet(() => step.runRequiredLocalGates(request)), { name: 'IntegrationAbort' });
   assert.equal(observations().repairRoutes, 0);
+});
+
+// ── Tests action in the review step (TASK-2859.14) ─────────────────────────
+// The executor drives the real gate-step owner above; rebase, gate runner and
+// rebound kernel are the recorded boundaries each case asserts against.
+
+type GateRunRecord = NonNullable<ReturnType<NonNullable<IntegrateWorkflowPorts['gates']['readGateRun']>>>;
+const HEAD = 'c'.repeat(40);
+const plan = gates.map(({ key, command }) => ({ key, command }));
+const passedRun = (gateRunId: string | null, revision = HEAD, ran = plan): GateRunRecord => ({ gateRunId, revision, status: 'passed',
+  current: true, carried: null, gates: ran, outcomes: ran.map(gate => ({ ...gate, exitCode: 0, result: 'passed' as const })) });
+
+async function testsAction(options: { status?: Mission['status']; review?: Mission['review']; result?: IntegrationGateRunResult;
+  previous?: GateRunRecord | null; claim?: boolean; rebase?: () => void; selection?: 'tests' | null; refuseRepair?: string;
+  redUnreadable?: boolean; results?: IntegrationGateRunResult[]; validationWriteFails?: boolean } = {}) {
+  const slug = 'px-tests-action';
+  const calls: string[] = [];
+  let mission = fixtureMission(slug, { repositoryId: repositoryId('test-repo'), status: options.status ?? 'review',
+    review: options.review === undefined ? pendingReview(slug) : options.review, checkpoints: [] });
+  let record: GateRunRecord | null = options.previous ?? null;
+  const received: { runner?: Parameters<IntegrateWorkflowPorts['gates']['runPhaseGates']>[1]; rebase?: unknown; route?: IntegrationGateFailureRequest } = {};
+  const unsuccessful: unknown[] = [];
+  const services = integrationServices({
+    store: { load: async id => ({ kind: 'found', mission: { ...mission, id }, version: missionVersion(1) }) },
+    operationalHistory: { loadLatestByTypeForMission: async () => null,
+      recordIntegrationValidation: async input => {
+        if (options.validationWriteFails) { throw new Error('operator database unavailable'); }
+        unsuccessful.push(input);
+      } },
+  });
+  let runs = 1;
+  const ports = stubIntegrateWorkflowPorts({
+    process: { cwd: () => '/fixture/mission',
+      claimIntegration: async () => options.claim === false ? null : async () => { calls.push('release'); } },
+    git: { git: () => ({ status: 0, stdout: '', stderr: '' }), getCurrentBranch: () => `mission/${slug}` },
+    gates: {
+      readGateRun: () => record,
+      resolveIntegrationVerificationWorktree: () => '/fixture/mission',
+      captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture/mission', commit: HEAD, tree: 'd'.repeat(40) }),
+      loadPhaseGates: () => gates,
+      loadRequirePreIntegration: () => true,
+      runPhaseGates: async (_phase, runnerOptions) => {
+        calls.push('gates');
+        received.runner = runnerOptions;
+        const result = options.results?.shift() ?? options.result ?? receipt();
+        const status = result.cancelled ? 'cancelled' : result.ok ? 'passed' : 'failed';
+        // The single writer persists the outcomes the runner settled, with the run's input-identity currency.
+        record = options.redUnreadable && status === 'failed' ? null : { gateRunId: `run-${++runs}`, revision: HEAD, status,
+          current: true, carried: null, gates: plan,
+          outcomes: (result.outcomes ?? []).map(outcome => ({ key: outcome.key, command: outcome.command, exitCode: outcome.exitCode ?? null })) };
+        return result;
+      },
+    },
+    verification: { formatVerificationCommand: () => 'npm test' },
+    landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }),
+      isAbort: error => (error as Error)?.name === 'IntegrationAbort' },
+  });
+  const executor = createTestsActionExecutor(ports, {
+    buildIntegrationContext: async (contextSlug, contextOptions) => integrationContext({ slug: contextSlug,
+      executionContext: contextOptions.executionContext, reviewState: { implementer: 'codex' } }),
+    runIntegrationRebase: async (_slug, target) => { calls.push('rebase'); received.rebase = target; options.rebase?.(); },
+    runRequiredLocalGates: request => createIntegrationGateStep(ports).runRequiredLocalGates(request),
+  });
+  const executionContext = missionExecutionContext({ missionId: slug, missionWorktree: '/fixture/mission' });
+  const run = () => quiet(() => executor.runTestsAction({ slug, policySelection: options.selection === undefined ? 'tests' : options.selection,
+    executionContext, missionServicesFn: async () => services,
+    seams: {
+      // The rebound kernel boundary: it owns the transition to active and the repair rerun.
+      routeIntegrationGateFailureFn: async input => {
+        calls.push('rebound');
+        received.route = input;
+        if (options.refuseRepair) { throw new Error(options.refuseRepair); }
+        mission = { ...mission, status: 'active', closedAt: null } as Mission;
+        record = passedRun('run-3', 'e'.repeat(40));
+        return { route: 'blocked', rebounds: 1 };
+      },
+      startAgentFn: async () => { throw new Error('the rebound kernel owns launches'); },
+      transitionTaskFn: async () => { throw new Error('the rebound kernel owns lifecycle changes'); },
+      applyAgentFallbackFn: async () => { throw new Error('the rebound kernel owns fallback selection'); },
+    } }));
+  return { run, calls, received, unsuccessful, executionContext, mission: () => mission };
+}
+
+for (const [lane, review] of [['review', pendingReview('px-tests-action')], ['active', null]] as const) {
+  test(`a selected tests action in ${lane} rebases, then runs the full plan without landing eligibility or approval (TASK-2859.14)`, async () => {
+    const fixture = await testsAction({ status: lane, review });
+    const outcome = await fixture.run();
+    assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release'], 'rebase precedes every gate; no preflight, recovery or landing boundary ran');
+    assert.deepEqual(outcome, { kind: 'completed', verdict: 'passed', recorded: false, repairRoute: null,
+      evidence: { gateRunId: 'run-2', revision: HEAD, outcomes: plan.map(gate => ({ ...gate, exitCode: 0 })) },
+      next: { kind: 'agent-review', reason: 'review-unfinished' } });
+    assert.equal(fixture.mission().status, lane, 'no approval or lane change was fabricated');
+    assert.deepEqual(fixture.unsuccessful, [], 'a green first run writes no integration-validation marker for landing to reuse');
+    assert.deepEqual(fixture.received.runner?.gates, gates, 'the complete configured plan ran, not a validated subset');
+    assert.equal(fixture.received.runner?.slug, 'px-tests-action');
+    assert.equal(fixture.received.runner?.checkoutPath, '/fixture/mission');
+    assert.equal(fixture.received.runner?.targetBranch, 'main');
+    assert.deepEqual((fixture.received.rebase as { executionContext: unknown }).executionContext, fixture.executionContext);
+  });
+}
+
+test('a failed tests action routes repair through the rebound kernel and returns control unlanded (TASK-2859.14)', async () => {
+  const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+  const fixture = await testsAction({ result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }) });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'rebound', 'release']);
+  assert.deepEqual(outcome, { kind: 'completed', verdict: 'failed', recorded: false, repairRoute: { route: 'blocked', rebounds: 1 },
+    evidence: { gateRunId: 'run-2', revision: HEAD, outcomes: [{ ...plan[0], exitCode: 7 }] },
+    next: { kind: 'agent-review', reason: 'review-unfinished' } }, 'the red run is the verdict, not the repair rerun');
+  assert.equal(fixture.received.route?.implementer, 'codex');
+  assert.equal(fixture.received.route?.repositoryId, 'test-repo');
+  assert.equal(fixture.received.route?.testedRevision, HEAD);
+  assert.deepEqual(fixture.received.route?.executionContext, fixture.executionContext);
+  assert.equal(fixture.unsuccessful.length, 1, 'the failed run stays recorded once through the validation writer');
+});
+
+test('a cancelled tests action records its verdict and returns control without repair (TASK-2859.14)', async () => {
+  const fixture = await testsAction({ result: receipt({ ok: false, cancelled: true, executed: 1,
+    outcomes: [{ ...gates[0], exitCode: null, stdout: '', stderr: 'cancelled' }], error: 'cancelled' }) });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release']);
+  assert.equal(outcome.kind === 'completed' && outcome.verdict, 'cancelled');
+  assert.deepEqual(outcome.kind === 'completed' && outcome.next, { kind: 'agent-review', reason: 'review-unfinished' });
+});
+
+test('a restarted tests action reuses the settled exact-head run instead of writing it twice (TASK-2859.14)', async () => {
+  const fixture = await testsAction({ previous: passedRun('run-1') });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'release'], 'no second gate run or record');
+  assert.equal(outcome.kind === 'completed' && outcome.recorded, true);
+  assert.equal(outcome.kind === 'completed' && outcome.evidence?.gateRunId, 'run-1');
+});
+
+test('the fixed sequence and the landing lane never start the tests action (TASK-2859.14)', async () => {
+  for (const [name, options] of [['fixed-sequence', { selection: null }],
+    ['integration-lane', { status: 'integration' as const, review: approvedReview('px-tests-action') }]] as const) {
+    const fixture = await testsAction(options);
+    const outcome = await fixture.run();
+    assert.equal(outcome.kind, 'not-selected', name);
+    assert.deepEqual(fixture.calls, ['release'], `${name}: no rebase or gate ran`);
+  }
+});
+
+test('tests-action entries that cannot complete hand off with a typed reason (TASK-2859.14)', async () => {
+  const concurrent = await testsAction({ claim: false });
+  assert.deepEqual(await concurrent.run(), { kind: 'human-handoff', reason: 'concurrent-entry',
+    detail: 'Integration of px-tests-action is already running in another process.' });
+  assert.deepEqual(concurrent.calls, []);
+  const conflict = await testsAction({ rebase: () => { throw Object.assign(new Error('conflict'), { name: 'IntegrationAbort' }); } });
+  assert.equal((await conflict.run() as { reason?: string }).reason, 'rebase-dead-end');
+  assert.deepEqual(conflict.calls, ['rebase', 'release'], 'no gate runs after a rebase dead end');
+  const interrupted = await testsAction({ rebase: () => { throw new Error('SIGINT'); } });
+  assert.deepEqual(await interrupted.run(), { kind: 'human-handoff', reason: 'interrupted', detail: 'SIGINT' });
+  assert.deepEqual(interrupted.calls, ['rebase', 'release'], 'the claim is released on interruption');
+});
+
+test('a lifecycle refusal of the tests repair is a typed hand-off, never a completed repair (TASK-2859.14)', async () => {
+  const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+  const fixture = await testsAction({ review: approvedReview('px-tests-action'), refuseRepair: 'A review repair rebound requires an undecided review round',
+    result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }) });
+  assert.deepEqual(await fixture.run(), { kind: 'human-handoff', reason: 'repair-refused',
+    detail: 'A review repair rebound requires an undecided review round' });
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'rebound', 'release']);
+  assert.equal(fixture.mission().status, 'review', 'the refused repair leaves the mission unlanded where it was');
+});
+
+for (const [name, previous] of [
+  ['failed', { ...passedRun('run-1'), status: 'failed' as const, outcomes: [{ ...plan[0], exitCode: 7 }] }],
+  ['cancelled', { ...passedRun('run-1'), status: 'cancelled' as const, outcomes: [{ ...plan[0], exitCode: null }] }],
+  ['partial-plan', passedRun('run-1', HEAD, [plan[0]])],
+  ['other-plan', passedRun('run-1', HEAD, plan.map(gate => ({ ...gate, command: `${gate.command} --changed` })))],
+  ['unidentified', passedRun(null)],
+  ['non-current', { ...passedRun('run-1'), current: false }],
+  ['duplicated-outcome', { ...passedRun('run-1'), outcomes: [...passedRun('run-1').outcomes, passedRun('run-1').outcomes[0]!] }],
+] as const) {
+  test(`a ${name} exact-head record never stands in for the tests action; it reruns and routes red runs (TASK-2859.14)`, async () => {
+    const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+    const fixture = await testsAction({ previous, result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }) });
+    const outcome = await fixture.run();
+    assert.deepEqual(fixture.calls, ['rebase', 'gates', 'rebound', 'release'], 'the gates run again and the red run reaches repair');
+    assert.equal(outcome.kind === 'completed' && outcome.verdict, 'failed');
+    assert.equal(outcome.kind === 'completed' && outcome.recorded, false);
+  });
+}
+
+test('an unreadable red run stays a failed verdict with unknown evidence, never the repair rerun (TASK-2859.14)', async () => {
+  const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+  const fixture = await testsAction({ redUnreadable: true, result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }) });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'rebound', 'release']);
+  assert.equal(outcome.kind === 'completed' && outcome.verdict, 'failed', 'the gate step routed a red run');
+  assert.equal(outcome.kind === 'completed' && outcome.evidence, null, 'the green repair run run-3 is not the action evidence');
+});
+
+test('a gate-step refusal of an incomplete green receipt is a typed hand-off, never a passed verdict (TASK-2859.14)', async () => {
+  const fixture = await testsAction({ result: receipt({ executed: 1, outcomes: [{ ...gates[0], exitCode: 0, stdout: '', stderr: '' }] }) });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release']);
+  assert.equal(outcome.kind, 'human-handoff');
+  assert.equal((outcome as { reason?: string }).reason, 'gate-evidence-refused',
+    'the record says passed, but the gate step refused it fail-closed');
+});
+
+test('a run the gate step refused never becomes a passing restart, even when the refusal could not be recorded (TASK-2859.14)', async () => {
+  // The runner settled one of two gates while reporting ok; the writer stores status passed with that one outcome.
+  const partial = () => receipt({ executed: 1, outcomes: [{ ...gates[0], exitCode: 0, stdout: '', stderr: '' }] });
+  for (const validationWriteFails of [false, true]) {
+    const fixture = await testsAction({ results: [partial(), partial()], validationWriteFails });
+    const first = await fixture.run();
+    assert.equal((first as { reason?: string }).reason, validationWriteFails ? 'interrupted' : 'gate-evidence-refused');
+    const restart = await fixture.run();
+    assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release', 'rebase', 'gates', 'release'],
+      `failed-validation write ${validationWriteFails ? 'lost' : 'kept'}: the refused head is tested again, never reused`);
+    assert.notEqual(restart.kind === 'completed' && restart.verdict, 'passed');
+  }
+});
+
+test('a successful retry after a cancelled run is reused on the next restart (TASK-2859.14)', async () => {
+  const cancelled = receipt({ ok: false, cancelled: true, executed: 1, outcomes: [{ ...gates[0], exitCode: null, stdout: '', stderr: 'cancelled' }], error: 'cancelled' });
+  const fixture = await testsAction({ results: [cancelled, receipt()] });
+  assert.equal((await fixture.run() as { verdict?: string }).verdict, 'cancelled');
+  assert.equal((await fixture.run() as { verdict?: string }).verdict, 'passed');
+  const restart = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release', 'rebase', 'gates', 'release', 'rebase', 'release'],
+    'the stale cancellation does not force a third gate run');
+  assert.equal(restart.kind === 'completed' && restart.recorded, true);
+  assert.equal(restart.kind === 'completed' && restart.evidence?.gateRunId, 'run-3');
 });

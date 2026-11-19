@@ -1,8 +1,10 @@
 import { createIntegrationApprovalEvidence } from '../../review/integration-approval-evidence.js';
 import { SqliteIntegrationValidationReader } from '../../sqlite/integration-validation-reader.js';
 import { initOperatorState } from '../../sqlite/adapter-factory.js';
-import { createIntegrationVerificationEvidencePort } from '../../verification/integration-verification-proof.js';
+import { createIntegrationVerificationEvidencePort, readIntegrationGateRun } from '../../verification/integration-verification-proof.js';
 import { processIdentityForObservation } from '../../process/process-liveness.js';
+import { createGitChangeIdentity } from '../../git/change-identity.js';
+import { missionApprovalCoverage } from '../../../application/approval-coverage.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import type { VerificationActionPolicyFactory } from '../../../application/ports/verification-policy.js';
 import { testsActionObservationBinding } from '../../review/review-start-observation.js';
@@ -59,6 +61,19 @@ function createIntegrationGateRunner(configuration: ParallixConfiguration | unde
   };
 }
 
+function createSubmitApproval(configuration: ParallixConfiguration | undefined): IntegrateWorkflowPorts['review']['submitApproval'] {
+  return async (slug, message, options) => {
+    let exitCode: number | null = null;
+    await reviewCommands.submitReviewRound(slug, 'approve', message, {
+      executionContext: options.executionContext, configuration,
+      missionStore: options.missionServices.store, lifecycleService: options.missionServices.lifecycle,
+      revision: options.revision, reviewedRevision: options.reviewedRevision,
+      exit: code => { exitCode = code; },
+    });
+    return exitCode === null ? { ok: true } : { ok: false, diagnostic: `review submission exited ${exitCode}` };
+  };
+}
+
 /**
  * Bind the concrete mechanisms to the workflow ports. Every method reaches its
  * module through the imported namespace *at call time*, so a test that swaps a
@@ -70,10 +85,7 @@ export function createIntegratePorts(configuration?: ParallixConfiguration,
   const runIntegrationGates = createIntegrationGateRunner(configuration, policyFactory, operatorInvocation);
   return {
     process: composeIntegrationProcess(configuration),
-    fileSystem: {
-      existsSync: target => fs.existsSync(target),
-      isSymbolicLink: target => fs.lstatSync(target).isSymbolicLink(),
-    },
+    fileSystem: composeIntegrationFileSystem(),
     git: {
       git: args => git.git(args),
       getCurrentBranch: root => git.getCurrentBranch(root),
@@ -146,12 +158,15 @@ export function createIntegratePorts(configuration?: ParallixConfiguration,
     review: {
       readReviewState: (slug, rootDir, missionStore) => reviewState.readReviewState(slug, rootDir, missionStore),
       submitForReview: (slug, skipGate, options) => reviewCommands.submitForReview(slug, skipGate, options),
+      submitApproval: createSubmitApproval(configuration),
       resolveForgejoUser: reviewer => reviewAdapter.resolveForgejoUser(reviewer),
     },
     rebase: {
       createRebaseWorkflowPort: options => rebaseWorkflow.createRebaseWorkflowPort({ ...options, configuration }),
     },
     gates: {
+      readGateRun: checkout => readIntegrationGateRun(checkout, configuration),
+      approvalCoverage: (checkout, review) => missionApprovalCoverage(review, createGitChangeIdentity(checkout)),
       approvalEvidence: worktree => createIntegrationApprovalEvidence(worktree,
         async slug => new SqliteIntegrationValidationReader((await initOperatorState({ configuration })).db).read(slug), configuration),
       invalidateApproval: options => integrationGateRebound.invalidateApprovedPrReview(options),
@@ -166,6 +181,13 @@ export function createIntegratePorts(configuration?: ParallixConfiguration,
     },
     checkout: composeIntegrationCheckout(),
     landing: composeIntegrationLanding(configuration),
+  };
+}
+
+function composeIntegrationFileSystem(): IntegrateWorkflowPorts['fileSystem'] {
+  return {
+    existsSync: target => fs.existsSync(target),
+    isSymbolicLink: target => fs.lstatSync(target).isSymbolicLink(),
   };
 }
 

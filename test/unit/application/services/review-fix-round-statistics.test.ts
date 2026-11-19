@@ -65,6 +65,23 @@ test('fixed-sequence scenarios keep immutable golden statistics traces (TASK-285
   }
 });
 
+test('integrate-as-human-approval adds one human handoff without relabelling the agent verdict (TASK-2859.16)', () => {
+  const reviewed = round(1, { decision: { ...approval, revision: round(1).subject.revision } });
+  const result = reviewStatistics(review([reviewed]), { equivalentSubmissions: {}, reviewEpisodes: [{
+    identity: 'human-handoff:integrate-shortcut', actor: 'human', stage: 'human-review',
+    startedAt: '2026-11-19T10:00:00Z', endedAt: '2026-11-19T10:00:01Z',
+    revision: reviewed.subject.revision, sender: 'operator',
+  }] });
+  assert.deepEqual(result.episodes.map(episode => [episode.identity, episode.actor, episode.stage]), [
+    ['review:1', 'agent', 'agent-review'],
+    ['human-handoff:integrate-shortcut', 'human', 'human-review'],
+  ]);
+  assert.equal(result.episodes.filter(episode => episode.actor === 'human').length, 1,
+    'the shortcut is one human episode, not a human approval plus a handoff');
+  assert.deepEqual(result.sendBacks.human, { numerator: 0, eligibleEpisodes: 1, coverage: 1,
+    rate: { state: 'measured', value: 0 } });
+});
+
 test('counts human corrections without reviewer outcomes (TASK-2818)', () => {
   assert.equal(reviewStatistics(review([round(1, { decision: approval })], [
     event(1, { eventType: 'human_note', actor: 'operator' }),

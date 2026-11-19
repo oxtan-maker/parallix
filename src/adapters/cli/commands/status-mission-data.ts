@@ -147,6 +147,7 @@ function reviewFields({ recorded, card }: StatusSources) {
 
 function reviewCardFields(card: MissionCard | null) {
   return {
+    humanReviewDue: statusHumanReviewDue(card),
     reviewPhase: card?.reviewPhase,
     reviewRound: card?.reviewRound,
     reviewLiveness: card?.reviewLiveness,
@@ -163,6 +164,8 @@ function reviewCardFields(card: MissionCard | null) {
     reviewHistory: card?.reviewHistory ?? []
   };
 }
+
+function statusHumanReviewDue(card: MissionCard | null) { return card?.humanReviewDue ?? null; }
 
 function statusReviewPublicationGaps(recorded: RecordedMission) {
   return (recorded?.mission.review?.reviewEvents ?? []).flatMap(event => {

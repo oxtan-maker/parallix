@@ -36,6 +36,7 @@ export type WebWorkCertainty = 'live' | 'unknown' | 'stale';
 export type WebAttentionReasonKind =
   | 'blocking'
   | 'gate-failed'
+  | 'human-review'
   | 'review-lane'
   | 'integrate-lane'
   | 'stale-work'
@@ -180,6 +181,8 @@ export interface WebMissionCard {
   readonly reviewApproved: boolean;
   readonly reviewRound: number | null;
   readonly reviewPhase: string | null;
+  /** Added in transport v4; omitted cached snapshots mean the turn was not projected. */
+  readonly humanReviewDue?: import('../../application/verification-policy/review-start-decision.js').HumanReviewDue | null;
   /** The application-owned recovery decision; null when recovery is not applicable. */
   readonly reviewRecovery: import('../../application/review-recovery.js').ReviewRecovery | null;
   readonly reviewDisposition: string | null;

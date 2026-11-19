@@ -16,6 +16,7 @@ import { agentFamily } from '../../domain/agents.js';
 import { evaluateTaskStatusForIntegration, resolveAuthoritativeApprovalAt } from './approval.js';
 import { abortWith, resolveIntegrationTaskPath } from './support.js';
 import type { IntegrateReviewPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
 
 export type IntegrationRecoveryContext = Pick<IntegrationContext, 'slug' | 'approval' | 'missionStatus'>
   // Optional only because a closeout may recover a decided lane after its mission
@@ -26,6 +27,16 @@ export interface MissionRecoveryOptions {
   missionServices: IntegrationMissionServices;
   missionLoad?: MissionLoadResult;
   submitForReviewFn?: IntegrateReviewPort['submitForReview'];
+}
+
+export function assertRecoveredIntegrationHandoff(
+  recovered: MissionLoadResult,
+  landing: IntegrateWorkflowPorts['landing'],
+  slug: string,
+): void {
+  const action = recovered.kind === 'found' ? fixedVerificationNextAction({ mission: recovered.mission }) : null;
+  if (action?.kind === 'integration-handoff' || (action?.kind === 'wait' && action.reason === 'complete')) { return; }
+  throw abortWith(landing, `Mission ${slug} did not reach the fixed integration handoff after lifecycle recovery.`);
 }
 
 function composeMissionRecoveryDependencies(ports: IntegrateWorkflowPorts) {

@@ -1,6 +1,6 @@
 // review intervention resume.integration.
 // Related scenarios share imports; each contract keeps its own hooks and mutable fixtures.
-import { recordApproval } from '../../../src/adapters/review/review-round.js';
+import { recordApproval, recordRequestedChanges } from '../../../src/adapters/review/review-round.js';
 import { readReviewState } from '../../../src/adapters/review/review-state.js';
 import { currentReviewRound } from '../../../src/domain/review.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
@@ -41,6 +41,15 @@ import { unknownReviewFlags } from '../../../src/adapters/review/review-cli-flag
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../src/adapters/review/review-state-mapping.js';
 import { readAllEvents } from '../../../src/adapters/review/review-events.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
+import { fixedVerificationNextAction, REVIEW_START_DECISION_EVENT } from '../../../src/application/verification-policy/review-start-decision.js';
+import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
+import { createVerdictCommand } from '../../../src/interfaces/cli/review-verbs.js';
+import { reviewVerbPorts } from '../../../src/composition/cli-review-verbs.js';
+import { continueVerdictThroughActionOwner } from '../../../src/composition/cli-authoring-commands.js';
+import type { CliCommandContext } from '../../../src/composition/cli-service-scope.js';
+import type { Command } from '../../../src/interfaces/cli/runtime.js';
+import { resolveConfiguration } from '../../../src/composition/config.js';
+import { initCommittedRepository } from '../../fixtures/git-repository.js';
 
 // Regression provenance: TASK-2473, TASK-2810. Direct entry clears the
 // intervention without supplying a verdict; automatic entry retains it.
@@ -186,14 +195,14 @@ async function openMigrated(root: string): Promise<SqliteDatabaseAdapter> {
   return db;
 }
 
-interface Harness { root: string; store: SqliteMissionStore; }
+interface Harness { root: string; store: SqliteMissionStore; database: SqliteDatabaseAdapter; }
 
 async function seedRoot(review: Review): Promise<Harness> {
   const root = createTempRoot();
   const db = await openMigrated(root);
   const store = new SqliteMissionStore(db);
   await store.save(missionWith(review), null);
-  return { root, store };
+  return { root, store, database: db };
 }
 
 /** Invoke the inferred review entry with real SQLite and a held loop fence. */
@@ -419,6 +428,201 @@ describe("stopped review recovery through inferred px review", () => {
       assert.equal(outcome, 'human-intervention');
     });
   });
+});
+
+it('human-first request changes records once and returns to repair (TASK-2859.15)', async () => {
+  const review = startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('human-first-head') },
+    REVIEWER, IMPLEMENTER, '2026-11-19T08:00:00Z', reviewerEligibility,
+  );
+  const { store } = await seedRoot(review);
+  const lifecycle = new MissionLifecycleService(store);
+  const input = {
+    findings: [{ id: reviewFindingId('H1'), summary: 'Human-first correction', location: null }],
+    source: { kind: 'operator' as const, author: 'operator-alice' },
+    comment: 'Correct this before agent review', revision: 'human-first-head', decidedAt: '2026-11-19T08:01:00Z',
+  };
+
+  assert.equal((await recordRequestedChanges(SLUG, input, { missionStore: store, lifecycleService: lifecycle })).outcome, 'recorded');
+  const recorded = await store.load(missionId(SLUG));
+  assert.equal(recorded.kind, 'found');
+  if (recorded.kind !== 'found') { throw new Error('Missing human-first fixture'); }
+  assert.equal(recorded.mission.status, 'active');
+  assert.deepEqual(currentReviewRound(recorded.mission.review!).decision?.source,
+    { kind: 'operator', author: 'operator-alice' });
+  assert.deepEqual(fixedVerificationNextAction({ mission: recorded.mission }), { kind: 'repair', reason: 'findings-pending' });
+
+  const beforeReplay = reviewStatistics(recorded.mission.review!);
+  assert.equal((await recordRequestedChanges(SLUG, input, { missionStore: store, lifecycleService: lifecycle })).outcome, 'unchanged');
+  const replayed = await store.load(missionId(SLUG));
+  assert.equal(replayed.kind, 'found');
+  if (replayed.kind !== 'found') { throw new Error('Missing replayed human-first fixture'); }
+  assert.equal(replayed.mission.review!.rounds.length, 1);
+  assert.deepEqual(reviewStatistics(replayed.mission.review!), beforeReplay, 'replay cannot change existing statistics');
+});
+
+it('mid-sequence human request revokes approval, survives restart and remains idempotent (TASK-2859.15)', async () => {
+  const approved = applyReviewerCommand(startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('approved-head') },
+    REVIEWER, IMPLEMENTER, '2026-11-19T09:00:00Z', reviewerEligibility,
+  ), { type: 'approve', decidedAt: '2026-11-19T09:01:00Z', revision: changeRevision('approved-head'),
+    comment: 'Agent approved', source: { kind: 'local' } });
+  const { root, store, database } = await seedRoot(approved);
+  initCommittedRepository(root);
+  const seeded = await store.load(missionId(SLUG));
+  assert.equal(seeded.kind, 'found');
+  if (seeded.kind !== 'found') { throw new Error('Missing approved fixture'); }
+  await store.save({ ...seeded.mission, status: 'integration', closedAt: null }, seeded.version);
+  const input = {
+    findings: [{ id: reviewFindingId('H2'), summary: 'Human mid-sequence correction', location: null }],
+    source: { kind: 'operator' as const, author: 'operator-alice' },
+    comment: 'The human found a regression', revision: 'approved-head', decidedAt: '2026-11-19T09:02:00Z',
+  };
+  const beforeCorrection = await store.load(missionId(SLUG));
+  assert.equal(beforeCorrection.kind, 'found');
+  if (beforeCorrection.kind !== 'found') { throw new Error('Missing approved correction fixture'); }
+  const lifecycle = new MissionLifecycleService(store);
+  const dispatched: Array<{ command: 'active' | 'review'; args: string[] }> = [];
+  let approvedTaskMirror = false;
+  const registry: Record<string, Command> = {
+    active: async args => { dispatched.push({ command: 'active', args }); },
+    review: async args => {
+      dispatched.push({ command: 'review', args });
+      approvedTaskMirror = true;
+    },
+  };
+  const continuationContext = {
+    rootDir: root,
+    packageDir: root,
+    configuration: resolveConfiguration({ PARALLIX_HOME: path.join(root, 'parallix-home') }),
+    scope: {} as CliCommandContext['scope'],
+    active: registry.active!,
+    commands: () => registry,
+  } satisfies CliCommandContext;
+  const composed = reviewVerbPorts({
+    rootDir: root,
+    configuration: continuationContext.configuration,
+    mission: { store, lifecycle },
+    operatorInvocation: true,
+    continueVerificationAction: (slug, action) => continueVerdictThroughActionOwner(continuationContext, slug, action),
+  });
+  await createVerdictCommand({
+    ...composed,
+    resolveSlug: () => missionId(SLUG),
+    resolveExecutionContext: () => ({ ok: true, context: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }),
+  })([
+    'request-changes', '--actor', input.source.author, '--comment', input.comment,
+    '--finding', input.findings[0].id, '--summary', input.findings[0].summary,
+  ]);
+  assert.deepEqual(dispatched, [{ command: 'active', args: [SLUG] }]);
+  assert.equal(approvedTaskMirror, false, 'findings repair never enters the review owner that can mirror approved');
+  const reviewStarts = await database.query<{ event_data: string }>(
+    'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [REVIEW_START_DECISION_EVENT]);
+  assert.equal(reviewStarts.some(row => (JSON.parse(row.event_data) as { actualAction?: string }).actualAction === 'human'), false,
+    'findings repair does not write a stale human review-start observation');
+  assert.equal((await recordRequestedChanges(SLUG, input, { missionStore: store, lifecycleService: lifecycle })).outcome, 'unchanged');
+  const recorded = await store.load(missionId(SLUG));
+  assert.equal(recorded.kind, 'found');
+  if (recorded.kind !== 'found') { throw new Error('Missing corrected fixture'); }
+  assert.equal(recorded.mission.status, 'active');
+  assert.equal(recorded.mission.review!.rounds.length, 2);
+  assert.equal(recorded.mission.review!.rounds[0].decision?.kind === 'approved'
+    && recorded.mission.review!.rounds[0].decision.revocation?.revokedBy, 'operator-alice');
+  assert.deepEqual(currentReviewRound(recorded.mission.review!).decision?.source,
+    { kind: 'operator', author: 'operator-alice' });
+  assert.deepEqual(fixedVerificationNextAction({ mission: recorded.mission }), { kind: 'repair', reason: 'findings-pending' });
+  const beforeRestart = reviewStatistics(recorded.mission.review!);
+
+  for (const database of databases.splice(0)) { await database.close(); }
+  const restartedDb = new SqliteDatabaseAdapter();
+  databases.push(restartedDb);
+  await restartedDb.open({ path: databasePathOf(root) });
+  const restartedStore = new SqliteMissionStore(restartedDb);
+  const replay = await recordRequestedChanges(SLUG, input, {
+    missionStore: restartedStore, lifecycleService: new MissionLifecycleService(restartedStore),
+  });
+  assert.equal(replay.outcome, 'unchanged');
+  const reloaded = await restartedStore.load(missionId(SLUG));
+  assert.equal(reloaded.kind, 'found');
+  if (reloaded.kind !== 'found') { throw new Error('Missing restarted correction'); }
+  assert.equal(reloaded.mission.review!.rounds.length, 2);
+  assert.deepEqual(reviewStatistics(reloaded.mission.review!), beforeRestart, 'restart replay cannot change existing statistics');
+});
+
+it('reviewer verdict at a projected human turn retains evidence without withdrawing approval (TASK-2859.15)', async () => {
+  const approved = applyReviewerCommand(startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('approved-head') },
+    REVIEWER, IMPLEMENTER, '2026-11-19T09:10:00Z', reviewerEligibility,
+  ), { type: 'approve', decidedAt: '2026-11-19T09:11:00Z', revision: changeRevision('approved-head'),
+    comment: 'Agent approved', source: { kind: 'local' } });
+  const { root, store } = await seedRoot(approved);
+  initCommittedRepository(root);
+  const before = await store.load(missionId(SLUG));
+  assert.equal(before.kind, 'found');
+  if (before.kind !== 'found') { throw new Error('Missing approved reviewer fixture'); }
+  const beforeStatistics = reviewStatistics(before.mission.review!);
+  const continued: unknown[] = [];
+  const composed = reviewVerbPorts({
+    rootDir: root,
+    configuration: resolveConfiguration({
+      PARALLIX_HOME: path.join(root, 'parallix-home'),
+      PARALLIX_WORKFLOW_OPERATION: 'review-owner',
+      PARALLIX_WORKFLOW_GENERATION: '1',
+    }),
+    mission: { store, lifecycle: new MissionLifecycleService(store) },
+    operatorInvocation: true,
+    continueVerificationAction: async (_slug, action) => { continued.push(action); },
+  });
+  await assert.rejects(() => createVerdictCommand({
+    ...composed,
+    resolveSlug: () => missionId(SLUG),
+    resolveExecutionContext: () => ({ ok: true, context: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }),
+  })([
+    'request-changes', '--actor', 'codex', '--comment', 'Late agent objection',
+    '--finding', 'F-agent', '--summary', 'Agent cannot withdraw the approval',
+  ]), /standing approval remains authoritative.*late reviewer evidence was retained/);
+  assert.deepEqual(continued, []);
+
+  const after = await store.load(missionId(SLUG));
+  assert.equal(after.kind, 'found');
+  if (after.kind !== 'found') { throw new Error('Missing retained reviewer fixture'); }
+  assert.equal(after.mission.status, 'review');
+  assert.equal(reviewStatus(after.mission.review!), 'approved');
+  assert.equal(after.mission.review!.rounds.length, 1);
+  assert.equal(after.mission.review!.rounds[0].decision?.kind === 'approved'
+    && after.mission.review!.rounds[0].decision.revocation, undefined);
+  const afterStatistics = reviewStatistics(after.mission.review!);
+  assert.deepEqual(afterStatistics.returns.map(item => ({
+    actor: item.origin.actor, stage: item.origin.stage, sender: item.origin.sender,
+  })), [{ actor: 'agent', stage: 'agent-review', sender: 'codex' }]);
+  assert.deepEqual(afterStatistics.sendBacks.human, beforeStatistics.sendBacks.human,
+    'late reviewer evidence cannot become a human send-back statistic');
+});
+
+it('mid-sequence human approval replays the recorded approval into integration once (TASK-2859.15)', async () => {
+  const approved = applyReviewerCommand(startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('approval-head') },
+    REVIEWER, IMPLEMENTER, '2026-11-19T10:00:00Z', reviewerEligibility,
+  ), { type: 'approve', decidedAt: '2026-11-19T10:01:00Z', revision: changeRevision('approval-head'),
+    comment: 'Agent approved', source: { kind: 'local' } });
+  const { store } = await seedRoot(approved);
+  const lifecycle = new MissionLifecycleService(store);
+  const input = { comment: 'Human approved', revision: 'approval-head', decidedAt: '2026-11-19T10:02:00Z',
+    source: { kind: 'local' as const } };
+  assert.equal((await recordApproval(SLUG, input, { missionStore: store, lifecycleService: lifecycle })).outcome, 'recorded');
+  const recorded = await store.load(missionId(SLUG));
+  assert.equal(recorded.kind, 'found');
+  if (recorded.kind !== 'found') { throw new Error('Missing human approval fixture'); }
+  assert.equal(recorded.mission.status, 'integration');
+  assert.deepEqual(fixedVerificationNextAction({ mission: recorded.mission }),
+    { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
+  const beforeReplay = reviewStatistics(recorded.mission.review!);
+  assert.equal((await recordApproval(SLUG, input, { missionStore: store, lifecycleService: lifecycle })).outcome, 'unchanged');
+  const replayed = await store.load(missionId(SLUG));
+  assert.equal(replayed.kind, 'found');
+  if (replayed.kind !== 'found') { throw new Error('Missing replayed human approval fixture'); }
+  assert.equal(replayed.mission.review!.rounds.length, 1);
+  assert.deepEqual(reviewStatistics(replayed.mission.review!), beforeReplay, 'approval replay cannot change existing statistics');
 });
 
 import { copyRepairSchema } from '../../lib/integration-repair-fixture.js';

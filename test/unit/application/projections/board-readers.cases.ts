@@ -191,7 +191,7 @@ test('BoardProjectionBuilder projects the review loaded by its review adapter', 
   assert.equal(projection.attentionQueue[0].card.reviewRound, 2);
 });
 
-test('BoardProjectionBuilder preserves populated multi-round review cards from a batch projection', async () => {
+test('BoardProjectionBuilder preserves populated reviews and projects a human turn from one batch read (TASK-2859.15)', async () => {
   const ids = ['task-2401-none', 'task-2401-progress', 'task-2401-changes', 'task-2401-approved'].map(missionId);
   const subject = (id: typeof ids[number], revision: string, pullRequest = false) => ({
     change: pullRequest
@@ -274,6 +274,16 @@ test('BoardProjectionBuilder preserves populated multi-round review cards from a
   assert.match(cards.get(ids[2])?.reviewHistory[0].pushbacks[0] ?? '', /Tracked separately/);
   assert.equal(cards.get(ids[3])?.pullRequest?.id, '42');
   assert.equal(cards.get(ids[3])?.reviewApproved, true);
+  assert.deepEqual(cards.get(ids[3])?.humanReviewDue, {
+    reason: 'agent-review-approved',
+    detail: 'Human review is due because agent review approved the current change.',
+  });
+  const humanAttention = projection.attentionQueue.find(item => item.missionId === ids[3]);
+  assert.deepEqual(humanAttention?.reason, {
+    kind: 'human-review', reason: 'agent-review-approved',
+    detail: 'Human review is due because agent review approved the current change.',
+  });
+  assert.equal(humanAttention?.action, null, 'lead and board automation cannot manufacture the human verdict');
   assert.equal(cards.get(ids[3])?.commands.find(({ command }) => command === 'integrate')?.enabled, true);
 
   reviews.set(ids[3], { review: approvedReview, approval: { subject: subject(ids[3], 'different-revision', true), approvedAt: '2026-08-23T09:00:00.000Z' } });

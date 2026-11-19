@@ -1,4 +1,5 @@
 import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
+import { fixedVerificationFacts, fixedVerificationNextAction, humanReviewDue, type FixedVerificationNextActionFacts, type HumanReviewDue } from '../verification-policy/review-start-decision.js';
 import { invalidContractRecoveryCommands } from '../checkpoint-recovery-commands.js';
 import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';
@@ -29,10 +30,7 @@ import {
   type ReviewPhase,
 } from '../../domain/review.js';
 
-/**
- * A board lane is a mission status. The board shows the lifecycle the domain
- * records — it does not invent a vocabulary of its own.
- */
+/** A board lane is the recorded Mission lifecycle status. */
 export type BoardLane = MissionStatus;
 export type BoardCommand = 'active' | 'review' | 'integrate' | 'draft' | 'cancel';
 
@@ -97,6 +95,7 @@ export interface MissionOperationalFacts {
   readonly flags: readonly string[];
   /** Whether the effective approval still covers the branch (TASK-2555); absent when not observed. */
   readonly approvalCoverage?: ApprovalCoverage | null;
+  readonly ownedAction?: boolean;
 }
 
 export interface CommandAvailability {
@@ -178,6 +177,8 @@ export interface MissionCard {
   /** The one recovery decision for an orphaned or human-stopped Review; absent when not observed. */
   readonly reviewRecovery?: import('../review-recovery.js').ReviewRecovery | null;
   readonly pendingApprovalRetention?: boolean;
+  readonly verificationFacts: FixedVerificationNextActionFacts;
+  readonly humanReviewDue: HumanReviewDue | null;
   readonly reviewDisposition: ReviewDisposition | null;
   /** Advisory approval debt recorded by the provider workflow. */
   readonly approvalOwed?: boolean;
@@ -295,6 +296,7 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
     : null;
   const reviewedChange = reviewedSubject?.change ?? null;
   const currentRound = mission.review ? currentReviewRound(mission.review) : null;
+  const verificationFacts = fixedVerificationFacts({ mission, ownedAction: facts.ownedAction });
   return projectMissionClosure({
     id: mission.id,
     repositoryId: mission.repositoryId,
@@ -321,6 +323,8 @@ export function projectMissionCard(mission: Mission, facts: MissionOperationalFa
       ? [...facts.flags, `approval no longer covers the branch (round ${facts.approvalCoverage.round})`]
       : facts.flags,
     commands: availableBoardCommands(mission, facts),
+    verificationFacts,
+    humanReviewDue: humanReviewDue(fixedVerificationNextAction(verificationFacts)),
   });
 }
 

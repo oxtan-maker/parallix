@@ -9,6 +9,7 @@ import type {
   CommandAvailability,
   MissionCard,
 } from './mission-board.js';
+import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
 
 // ---------------------------------------------------------------------------
 // BoardProjection — versioned read model consumed by Ink and web clients
@@ -60,6 +61,7 @@ export interface AttentionAction {
 export type AttentionReason =
   | { readonly kind: 'blocking'; readonly detail: string }
   | { readonly kind: 'gate-failed'; readonly detail: string }
+  | { readonly kind: 'human-review'; readonly detail: string; readonly reason: NonNullable<MissionCard['humanReviewDue']>['reason'] }
   | { readonly kind: 'review-lane'; readonly detail: string }
   | { readonly kind: 'integrate-lane'; readonly detail: string }
   /** Work was published as running, then stopped being verifiable. */
@@ -284,63 +286,61 @@ export interface MetricsProvenance {
 export function attentionReason(card: MissionCard): AttentionReason {
   if (card.closed) { return { kind: 'none' }; }
   if (card.blockingReason) { return { kind: 'blocking', detail: card.blocker && card.nextActionText ? `${card.blockingReason}\n${card.nextActionText}` : card.blockingReason }; }
-  if (card.gate === 'failed') { return { kind: 'gate-failed', detail: `Gate ${card.gate}` }; }
-  // An agent is already taking this lane's turn — see `agentIsWorking`.
+  if (card.gate === 'failed' && (card.status === 'active' || card.status === 'review' || card.status === 'integration')) {
+    return { kind: 'gate-failed', detail: `Gate ${card.gate}` };
+  }
   if (agentIsWorking(card)) { return { kind: 'none' }; }
-  // Published work that stopped being verifiable is not silently forgotten:
-  // the operator is told the mission looked busy and no longer does.
+  // Published work that stopped being verifiable stays visible.
   if (card.currentWork?.freshness === 'stale') {
     return { kind: 'stale-work', detail: `${card.currentWork.phase} work is no longer verifiable` };
   }
+  return idleAttentionReason(card);
+}
+function idleAttentionReason(card: MissionCard): AttentionReason {
+  if (card.humanReviewDue) {
+    return { kind: 'human-review', detail: card.humanReviewDue.detail, reason: card.humanReviewDue.reason };
+  }
   if (card.lane === 'review') { return { kind: 'review-lane', detail: 'Awaiting review decision' }; }
   if (card.lane === 'integration') { return { kind: 'integrate-lane', detail: 'Awaiting integration' }; }
-  // Active lane with no live work and no failed gate: no agent holds the turn
-  // yet the aggregate never left `active`. Surface it so the operator can
-  // re-run `px active` rather than let the mission dwell in the queue forever.
   if (card.lane === 'active') { return { kind: 'orphaned-active', detail: 'Active mission has no live work' }; }
   return { kind: 'none' };
 }
-
 function hasHumanOnlyAttentionBlocker(card: MissionCard, reason: AttentionReason): boolean {
   return reason.kind === 'blocking' && Boolean(card.blockerRequiresOperator || card.blocker);
 }
-
-function attentionCommand(card: MissionCard): 'active' | 'integrate' | 'review' {
-  if (card.pendingApprovalRetention) { return 'active'; }
-  if (card.lane === 'integration') { return 'integrate'; }
-  if (card.lane === 'review' && card.reviewPhase !== 'fixing') { return 'review'; }
-  return 'active';
+function manualAttentionReason(card: MissionCard, reason: AttentionReason): string | null {
+  const humanOnlyBlocker = hasHumanOnlyAttentionBlocker(card, reason);
+  const reviewOwnsRecovery = card.lane === 'review' && card.reviewPhase !== 'fixing'
+    && !card.pendingApprovalRetention && !humanOnlyBlocker;
+  const manualBlocker = humanOnlyBlocker || (!reviewOwnsRecovery && reason.kind === 'blocking'
+    && !card.commands.some(action => action.command === 'active' && action.enabled));
+  return manualBlocker ? reason.kind === 'none' ? 'operator action required' : reason.detail
+    : card.verificationFacts.humanOnlyReason;
+}
+function commandForAttention(card: MissionCard, next: FixedVerificationNextAction): 'active' | 'integrate' | 'review' | null {
+  if (next.kind === 'integration-handoff') { return 'integrate'; }
+  if (next.kind === 'repair') { return card.commands.some(action => action.command === 'active' && action.enabled) ? 'active'
+    : card.commands.some(action => action.command === 'review' && action.enabled) ? 'review' : null; }
+  return card.lane === 'review' ? 'review' : 'active';
 }
 
-function reviewAttentionAction(card: MissionCard): AttentionAction | null {
-  if (card.reviewRecovery?.action === 'acknowledge-and-resume') {
-    return { kind: 'review:submit', display: `px review ${card.id}` };
-  }
-  return card.commands.some(action => action.command === 'review' && action.enabled)
-    ? { kind: 'review:submit', display: `px review ${card.id}` }
-    : null;
-}
-
-/**
- * The typed command an attention item resolves to.
- *
- * One function owns both halves of the pair the operator sees and presses, so
- * no surface can render `px review` beside a dispatch of `active:execute`.
- */
+/** Resolve one typed command so displayed `px review` cannot dispatch `active:execute`. */
 export function attentionAction(card: MissionCard, reason: AttentionReason): AttentionAction | null {
   if (card.closed) { return null; }
-  if (card.workflowOperation) { return null; }
-  const humanOnlyBlocker = hasHumanOnlyAttentionBlocker(card, reason);
-  // Diagnostics explain why attention is needed; the lane owns its recovery.
-  if (card.lane === 'review' && card.reviewPhase !== 'fixing'
-    && !card.pendingApprovalRetention && !humanOnlyBlocker) {
-    return reviewAttentionAction(card);
-  }
-  if (humanOnlyBlocker || (reason.kind === 'blocking'
-    && !card.commands.some(action => action.command === 'active' && action.enabled))) {
+  if (reason.kind === 'human-review') { return null; }
+  const next = fixedVerificationNextAction({
+    ...card.verificationFacts,
+    humanIntervention: card.verificationFacts.humanIntervention
+      && card.reviewRecovery?.action !== 'acknowledge-and-resume',
+    ownedAction: Boolean(card.workflowOperation) || agentIsWorking(card),
+    humanOnlyReason: manualAttentionReason(card, reason),
+  });
+  if (next.kind === 'wait') { return null; }
+  if (next.kind === 'human-handoff') {
     return { kind: 'manual', display: `px lead ${card.id} --once` };
   }
-  const command = attentionCommand(card);
+  const command = commandForAttention(card, next);
+  if (!command) { return { kind: 'manual', display: `px lead ${card.id} --once` }; }
   if (!card.commands.some(action => action.command === command && action.enabled)) { return null; }
   const kind = command === 'integrate' ? 'integrate:merge' : command === 'review' ? 'review:submit' : 'active:execute';
   return { kind, display: `px ${command} ${card.id}` };
@@ -361,6 +361,7 @@ export function attentionSources(reason: AttentionReason): readonly string[] {
       return ['current-work'];
     case 'gate-failed':
       return ['gate'];
+    case 'human-review': return ['mission-store'];
     case 'review-lane':
     case 'integrate-lane':
       return ['task-markdown'];
@@ -458,7 +459,7 @@ export function buildBoardProjection(
     const reason = attentionReason(card);
     if (reason.kind === 'none') { return []; }
     const action = attentionAction(card, reason);
-    if (action === null && !card.workflowOperation) { return []; }
+    if (action === null && !card.workflowOperation && reason.kind !== 'human-review') { return []; }
     return [{
       missionId: card.id,
       rank: attentionRank(card),

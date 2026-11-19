@@ -391,7 +391,7 @@ test('an item that appears mid-run is picked up on the next pass', async () => {
 
 function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
   const commands: CommandAvailability[] = [{ command: 'active', enabled: true, reason: null }];
-  return {
+  const card = {
     id: missionId('task-2489-card'), repositoryId: repositoryId('task-2489'), title: 'card',
     labels: missionLabels(['ai_sdlc']), lane: 'active' as BoardLane, status: 'active', rawStatus: 'active',
     closed: false, agent: agentFamily('claude'), checkpoint: 'CP-2.md', checkpointDescription: null,
@@ -399,7 +399,11 @@ function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
     reviewPhase: null, reviewDisposition: null, reviewHistory: [], currentWork: null,
     blockingReason: null, flags: [], commands,
     ...overrides,
-  } as MissionCard;
+  };
+  return { ...card, verificationFacts: overrides.verificationFacts ?? {
+    status: card.status, reviewPhase: card.reviewPhase, pendingRepair: false, reviewRequired: false,
+    humanIntervention: false, ownedAction: false, humanOnlyReason: null,
+  } } as MissionCard;
 }
 
 function makeItem(card: MissionCard): AttentionItem {

@@ -14,6 +14,8 @@ export function attentionWhy(reason: { kind: string; detail?: string }): string 
       return reason.detail || 'mission is blocked';
     case 'gate-failed':
       return reason.detail || 'verification gate failed';
+    case 'human-review':
+      return reason.detail || 'human review is due';
     case 'review-lane':
       return reason.detail || 'awaiting review decision';
     case 'integrate-lane':
@@ -117,6 +119,7 @@ function getReasonColor(kind: string): 'green' | 'yellow' | 'red' | 'blue' {
   switch (kind) {
     case 'blocking': return 'red';
     case 'gate-failed': return 'yellow';
+    case 'human-review': return 'yellow';
     case 'review-lane': return 'blue';
     case 'integrate-lane': return 'green';
     case 'orphaned-active': return 'yellow';

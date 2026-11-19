@@ -8,20 +8,12 @@ import { buildFreshDiagnosticRepairPrompt, promptSlotsFor, recoveryEvidenceRoute
 import { renderRepairPrompt } from './ports/repair-prompts.js';
 import type { FixLaunch } from './rebound-launch-result.js';
 import type { InvalidContractBlocker } from '../domain/rebound-policy.js';
+import { NON_GATE_REPAIR_COMMANDS } from '../domain/repair-coverage.js';
+export { isRetainedGateRepair } from '../domain/repair-coverage.js';
 
-// Non-gate checkpoints store workflow labels, not executable checks. Keep the
-// encoding shared with continuation so legacy interrupted repairs stay resumable.
-const NON_GATE_COMMANDS = {
-  'rebase-conflict': 'rebase-conflict',
-  'review-preparation-verification': 'review-preparation',
-  'hook-failure': 'hook-failure',
-  'artifact-incomplete': 'artifact-incomplete',
-  'agent-timeout': 'agent-timeout',
-} satisfies Record<Exclude<ReboundReason['kind'], 'gate-failure' | 'declared-gate-validation'>, string>;
-
-export function isRetainedGateRepair(command: string): boolean {
-  return !Object.values(NON_GATE_COMMANDS).includes(command);
-}
+const _NON_GATE_REPAIR_COMMANDS_COMPLETE: Record<Exclude<ReboundReason['kind'],
+  'gate-failure' | 'declared-gate-validation'>, string> = NON_GATE_REPAIR_COMMANDS;
+void _NON_GATE_REPAIR_COMMANDS_COMPLETE;
 
 type RepairPromptState = {
   occurrenceId: string;
@@ -126,7 +118,7 @@ async function prepareCheckpointRepairPrompt(state: RepairPromptState, context: 
 
 function repairCommand(reason: ReboundReason): string {
   return reason.kind === 'gate-failure' || reason.kind === 'declared-gate-validation'
-    ? reason.command : NON_GATE_COMMANDS[reason.kind];
+    ? reason.command : NON_GATE_REPAIR_COMMANDS[reason.kind];
 }
 
 async function captureAggregateEvidence(state: RepairPromptState, context: ReboundContext,

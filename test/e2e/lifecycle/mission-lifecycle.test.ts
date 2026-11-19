@@ -268,7 +268,10 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-    verification: { command: ':', defaultArea: 'all' },
+    verification: { command: ':', defaultArea: 'all', integrationCoverage: {
+      command: ':', checks: { lifecycle: ['lifecycle-gate'] },
+    } },
+    gates: { preIntegration: [{ key: 'lifecycle-gate', command: ':', order: 1 }] },
     review: { provider: 'none', tmpDir: reviewTmpDir },
     integrate
   };
@@ -622,7 +625,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
     }
 
     if (failIntegrationGate) {
-      // px integrate reads repository gates from the mission worktree, so adding
+      // px integrate --dry-run reads repository gates from the mission worktree, so adding
       // a failing gate only here — after handoff/review used the passing base
       // config — makes integrate abort before any success seam can invoke the
       // post-integrate hook.
@@ -641,7 +644,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
       runGit(worktree, ['add', '--', 'workflow.config.json']);
       runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);
 
-      const gateResult = await runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true });
+      const gateResult = await runWorkflow(worktree, env, ['integrate', slug, '--dry-run'], 60000, { allowFailure: true });
       summary.integrate = {
         gateOutput: `${gateResult.stdout}\n${gateResult.stderr}`,
         gateMarkers: fs.readdirSync(markers).sort(),
@@ -655,6 +658,7 @@ async function runScenario({ launchFromFeatureBranch = false, integrate = true, 
       return summary;
     }
 
+    await runWorkflow(worktree, env, ['integrate', slug, '--dry-run'], 60000, { invokeFromTarget: true });
     await runWorkflow(worktree, env, ['integrate', slug], 60000, { invokeFromTarget: true });
 
     const rootTask = taskFileIn(repo.repoRoot, slug);
@@ -769,7 +773,10 @@ function setupAdhocRepository({ title }: { title: string }) {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-    verification: { command: ':', defaultArea: 'all' },
+    verification: { command: ':', defaultArea: 'all', integrationCoverage: {
+      command: ':', checks: { lifecycle: ['lifecycle-gate'] },
+    } },
+    gates: { preIntegration: [{ key: 'lifecycle-gate', command: ':', order: 1 }] },
     review: { provider: 'none', tmpDir: reviewTmpDir },
     integrate,
   };
@@ -895,6 +902,7 @@ async function runAdhocScenario() {
       runGit(worktree, ['add', '-A']);
       runGit(worktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
     }
+    await runWorkflow(worktree, env, ['integrate', slug, '--dry-run']);
     await runWorkflow(worktree, env, ['integrate', slug]);
 
     return { slug, worktree, reviewPhase: state.phase };
@@ -941,6 +949,7 @@ async function runMixedScenario() {
       runGit(backlogWorktree, ['add', '-A']);
       runGit(backlogWorktree, ['commit', '-m', 'task-2002: capture execute artifacts']);
     }
+    await runWorkflow(backlogWorktree, env, ['integrate', 'task-2002', '--dry-run']);
     await runWorkflow(backlogWorktree, env, ['integrate', 'task-2002']);
     const rootTask = taskFileIn(repo.repoRoot, 'task-2002');
     assert.ok(rootTask, 'integrate should leave the Backlog task in the base repo');
@@ -973,6 +982,7 @@ async function runMixedScenario() {
       runGit(adhocWorktree, ['add', '-A']);
       runGit(adhocWorktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
     }
+    await runWorkflow(adhocWorktree, env, ['integrate', adhocSlug, '--dry-run']);
     await runWorkflow(adhocWorktree, env, ['integrate', adhocSlug]);
     assert.ok(!fs.existsSync(adhocWorktree), 'integrate should clean up the adhoc worktree');
 

@@ -122,6 +122,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     reviewApproved: card.reviewApproved,
     reviewRound: card.reviewRound,
     reviewPhase: card.reviewPhase,
+    humanReviewDue: card.humanReviewDue,
     reviewRecovery: card.reviewRecovery ?? null,
     reviewDisposition: card.reviewDisposition,
     reviewHistory: card.reviewHistory.map(({ number, disposition }) => ({ number, disposition })),

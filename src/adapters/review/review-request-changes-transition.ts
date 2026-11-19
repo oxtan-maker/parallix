@@ -1,7 +1,18 @@
 import type { MissionVersion } from '../../application/domain-ports.js';
 import { missionId, type Mission } from '../../domain/mission.js';
-import { currentReviewRound, reviewReturnStage, type Review } from '../../domain/review.js';
-import type { ReviewRoundPorts, ReviewRoundResult } from './review-round.js';
+import { currentReviewRound, reviewReturnStage, type OperatorReviewSource, type Review } from '../../domain/review.js';
+import { applyOperatorCorrection } from '../../domain/operator-review-correction.js';
+import { appendReviewPublicationEvents } from './review-publication.js';
+import type { RequestedChangesInput, ReviewRoundPorts, ReviewRoundResult } from './review-round.js';
+
+/** Record or replay a human correction after the operator-only owner admits it. */
+export async function recordOperatorRequestedChanges(slug: string, input: RequestedChangesInput, source: OperatorReviewSource,
+  mission: Mission & { review: Review }, version: MissionVersion, store: import('../../application/domain-ports.js').MissionStore,
+  ports: ReviewRoundPorts): Promise<ReviewRoundResult> {
+  const review = appendReviewPublicationEvents(applyOperatorCorrection(mission.review, { ...input, source }), input.publicationEvents);
+  const savedVersion = review === mission.review ? version : await store.save({ ...mission, review }, version);
+  return await settleRequestedChanges(slug, { ...mission, review }, savedVersion, ports, source.author);
+}
 
 /** Finish the lane boundary using the stored decision, including after an interrupted write. */
 export async function settleRequestedChanges(slug: string, mission: Mission & { review: Review }, version: MissionVersion,

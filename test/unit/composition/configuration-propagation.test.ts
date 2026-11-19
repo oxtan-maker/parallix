@@ -47,7 +47,7 @@ test('child verdict and resolution producers retain composed configuration (px-0
     },
   }));
   const ports = reviewVerbPorts({ rootDir: '/isolated/repo', configuration });
-  await ports.consumeReviewerOutput('task-fixture', 'codex', { findings: [], comment: null, verdict: 'comment' }, executionContext, 1);
+  await ports.consumeReviewerOutput('task-fixture', 'codex', { findings: [], comment: null, verdict: 'comment', turn: 'agent', authority: 'reviewer' }, executionContext, 1);
   await ports.consumeImplementerOutput('task-fixture', 'codex', { items: [], evidence: ['fixed'], blockedReason: null, disposition: 'CHANGES_MADE' }, executionContext, 1);
   assert.deepEqual(observed, ['verdict', 'resolve']);
 });

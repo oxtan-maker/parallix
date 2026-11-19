@@ -461,6 +461,19 @@ describe("Mission lifecycle and review invariants , ,", () => {
     assert.deepEqual(integrated.review?.rounds[0], active.review?.rounds[0]);
   });
 
+  test('a review-step tests failure rebounds only an undecided round and never approves (TASK-2859.14)', () => {
+    const cause = { kind: 'integration-gate-failure' as const, gate: 'unit' };
+    const undecided = initialReview();
+    const fromUndecided = decideMission({ ...mission('review'), review: undecided }, {
+      type: 'rebound-to-active', agent: implementer, cause, occurredAt: '2026-07-22T09:00:00Z' });
+    assert.equal(fromUndecided.status, 'active');
+    assert.deepEqual(fromUndecided.review, undecided, 'an undecided round gains no decision');
+    const agentApproved = { ...mission('review'), review: approve() };
+    assert.throws(() => decideMission(agentApproved, { type: 'rebound-to-active', agent: implementer, cause,
+      occurredAt: '2026-07-22T09:00:00Z' }), /requires an undecided review round/,
+    'an effective review-lane approval must be revoked before a tests repair; the refusal is never swallowed');
+  });
+
   test('active-lane recovery cannot skip submission after integration repair review requests changes (TASK-2819)', () => {
     const active = decideMission({ ...mission('integration'), review: approve() }, {
       type: 'rebound-to-active', agent: implementer, cause: { kind: 'integration-gate-failure', gate: 'unit' },

@@ -83,8 +83,11 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
     reviewHistory: [],
     currentWork: null,
     blockingReason: null,
+    humanReviewDue: null,
     flags: [],
     commands: [],
+    verificationFacts: { status: 'active', reviewPhase: null, pendingRepair: false, reviewRequired: false,
+      humanIntervention: false, ownedAction: false, humanOnlyReason: null },
   };
 
   /** Minimal AttentionItem for mocked projection. */

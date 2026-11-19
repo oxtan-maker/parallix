@@ -2,6 +2,7 @@ import type { RebaseMissionServices, RebaseWorkflowPort } from './ports/rebase-w
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
 import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import type { ConfiguredReviewerEligibility } from '../domain/review.js';
+import { fixedVerificationNextAction } from './verification-policy/review-start-decision.js';
 
 /** Effects used by application-owned rebase repair lifecycle decisions. */
 export interface RepairBindings {
@@ -42,7 +43,8 @@ export async function resumeRebaseReview(slug: string, root: string, implementer
   const services = await bindings.missionServices(root);
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error(`Mission ${slug} is unavailable after rebase repair`); }
-  if (loaded.mission.status === 'active' && loaded.mission.review && !loaded.mission.review.rounds.at(-1)?.decision) {
+  if (fixedVerificationNextAction({ mission: loaded.mission }).kind === 'agent-review'
+    && loaded.mission.status === 'active' && loaded.mission.review) {
     // AC12: reviewer eligibility always comes from the configured review step
     // of THIS mission's worktree, never from the prior round's reviewer.
     const reviewerEligibility = bindings.reviewerEligibility(root);

@@ -118,6 +118,7 @@ function statusCheckpointJson(result: StatusResult) {
 function statusReviewJson(result: StatusResult) {
   const md = result.missionData;
   return {
+    humanReviewDue: statusHumanReviewDue(md),
     review: md?.reviewPhase
       ? {
         round: md.reviewRound ?? 1,
@@ -137,6 +138,7 @@ function statusReviewJson(result: StatusResult) {
       : null
   };
 }
+function statusHumanReviewDue(data: StatusMissionData | null) { return data?.humanReviewDue ?? null; }
 
 /** Render the complete status output from a StatusResult. */
 /** `n unmerged file(s)` plus one line per file, under a caller-supplied heading. */
@@ -344,6 +346,7 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
     log(`Coordinator evidence: ${describeCoordinatorEvidence(missionData.activity.coordinator)}`);
   }
   logProviderObservation(missionData, log);
+  logHumanReviewDue(missionData, log);
   logBriefAndGates(missionData, log, slug);
   if (missionData.version !== null && missionData.version !== undefined) {
     log(`Version: ${missionData.version} (diagnostic only; writes resolve it automatically, or pass --expected-version to pin it)`);
@@ -359,7 +362,9 @@ function logMissionData(missionData: StatusMissionData | null, log: (_msg: strin
   logVerificationHistory(missionData.verificationHistory, log);
   logReviewLiveness(slug, missionData, log);
 }
-
+function logHumanReviewDue(missionData: StatusMissionData, log: (_msg: string) => void): void {
+  if (missionData.humanReviewDue) { log(`Human review due: ${missionData.humanReviewDue.detail} (${missionData.humanReviewDue.reason})`); }
+}
 function logVerificationHistory(history: StatusMissionData['verificationHistory'], log: (_msg: string) => void): void {
   if (!history) { return; }
   if ('fallback' in history) { log(`Verification policy history: fixed policy (${history.fallback})`); return; }

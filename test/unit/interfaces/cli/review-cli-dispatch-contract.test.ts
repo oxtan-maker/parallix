@@ -17,6 +17,7 @@ import { createRevokeReviewCommand } from '../../../../src/interfaces/cli/revoke
 import type { RevokeReviewDecisionRequest } from '../../../../src/application/revoke-review-decision-use-case.js';
 import { WorkflowOwnershipError } from '../../../../src/domain/workflow-operation.js';
 import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
+import * as fmt from '../../../../src/application/presentation/cli-format.js';
 
 const EXECUTION_CONTEXT = missionExecutionContext({ missionId: 'task-2521.03', missionWorktree: '/tmp/worktree' });
 
@@ -91,9 +92,13 @@ describe("review verbs", { concurrency: false }, () => {
     return {
       recorded,
       ports: {
+        verdictAuthority: 'reviewer',
         resolveSlug: (explicit) => explicit ?? 'task-2521.03',
         resolveExecutionContext: () => ({ ok: true, context: EXECUTION_CONTEXT }),
         readReviewState: async () => ({ round: 2, phase: 'reviewing' as const }),
+        nextVerificationAction: async (_slug, respectOwnedAction) => respectOwnedAction
+          ? { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }
+          : { kind: 'agent-review', reason: 'review-unfinished' },
         consumeReviewerOutput: async (slug, reviewer, output, _executionContext, expectedVersion) => {
           recorded.reviewerOutputs.push({ slug, reviewer, output, expectedVersion });
           return { consumed: true, ok: true as const };
@@ -119,7 +124,7 @@ describe("review verbs", { concurrency: false }, () => {
       await assert.rejects(() => createVerdictCommand(p)([action, '--actor', 'codex', '--comment', 'original comment', ...findings]), /rejected.*fenced.*retained.*\/retained\/verdict.json/i);
       assert.equal(retained.length, 1);
       assert.deepEqual(retained[0], { slug: 'task-2521.03', worktree: '/tmp/worktree', round: 1, reviewer: 'codex',
-        output: { verdict: action, comment: 'original comment', findings: action === 'approve' ? [] : [{ id: 'F1', summary: 'keep me', location: null }] },
+        output: { verdict: action, comment: 'original comment', findings: action === 'approve' ? [] : [{ id: 'F1', summary: 'keep me', location: null }], turn: 'agent', authority: 'reviewer' },
         reason: 'Workflow ownership was fenced or stopped' });
       assert.deepEqual(recorded.reviewerOutputs, []);
     }
@@ -145,10 +150,25 @@ describe("review verbs", { concurrency: false }, () => {
     await createVerdictCommand(p)(['approve', '--actor', 'codex', '--expected-version', '7', '--comment', 'looks good']);
     assert.deepEqual(recorded.reviewerOutputs, [{
       slug: 'task-2521.03', reviewer: 'codex',
-      output: { findings: [], comment: 'looks good', verdict: 'approve' },
+      output: { findings: [], comment: 'looks good', verdict: 'approve', turn: 'agent', authority: 'reviewer' },
       expectedVersion: 7,
     }]);
     assert.equal(recorded.implementerOutputs.length, 0);
+  });
+
+  test('px verdict surfaces a provider revocation diagnostic before reporting success (TASK-2859.15)', async t => {
+    const messages: string[] = [];
+    t.mock.method(fmt.log, 'plain', (message: string) => { messages.push(message); });
+    const { ports: p } = ports({
+      verdictAuthority: 'operator',
+      consumeReviewerOutput: async () => ({
+        consumed: true, ok: true, advisory: 'provider was not updated: offline',
+      }),
+    });
+    await createVerdictCommand(p)(['request-changes', '--actor', 'operator',
+      '--finding', 'F1', '--summary', 'repair this']);
+    assert.match(messages.join('\n'), /WARN.*provider was not updated: offline/);
+    assert.match(messages.join('\n'), /PASS.*Recorded request-changes/);
   });
 
   test('px verdict refuses to approve while naming findings', async () => {
@@ -158,6 +178,46 @@ describe("review verbs", { concurrency: false }, () => {
       /approve takes no --finding/,
     );
     assert.equal(recorded.reviewerOutputs.length, 0);
+  });
+
+  test('human verdict records before returning to the authoritative next action (TASK-2859.15)', async () => {
+    for (const action of ['approve', 'request-changes'] as const) {
+      const order: string[] = [];
+      const next = action === 'approve'
+        ? { kind: 'integration-handoff' as const, reason: 'fixed-sequence-complete' as const }
+        : { kind: 'repair' as const, reason: 'findings-pending' as const };
+      const { ports: p, recorded } = ports({
+        verdictAuthority: 'operator',
+        nextVerificationAction: async (_slug, respectOwnedAction) => {
+          order.push(`select:${respectOwnedAction ? 'after' : 'before'}`);
+          return respectOwnedAction ? next : { kind: 'human-review', reason: 'agent-review-approved' };
+        },
+        consumeReviewerOutput: async (slug, reviewer, output, _context, expectedVersion) => {
+          order.push('record');
+          recorded.reviewerOutputs.push({ slug, reviewer, output, expectedVersion });
+          return { consumed: true, ok: true };
+        },
+        continueVerificationAction: async (_slug, selected) => {
+          order.push(`continue:${selected.kind}`);
+        },
+      });
+      const findings = action === 'request-changes' ? ['--finding', 'F1', '--summary', 'repair this'] : [];
+      await createVerdictCommand(p)([action, '--actor', 'operator', ...findings]);
+      assert.equal(recorded.reviewerOutputs[0]?.output.turn, 'human');
+      assert.deepEqual(order, ['select:before', 'record', 'select:after', `continue:${next.kind}`]);
+    }
+  });
+
+  test('an already-owned post-verdict action is returned without a second decision (TASK-2859.15)', async () => {
+    const continued: unknown[] = [];
+    const { ports: p } = ports({
+      nextVerificationAction: async (_slug, respectOwnedAction) => respectOwnedAction
+        ? { kind: 'wait', reason: 'action-owned' }
+        : { kind: 'human-review', reason: 'agent-review-approved' },
+      continueVerificationAction: async (_slug, action) => { continued.push(action); },
+    });
+    await createVerdictCommand(p)(['approve', '--actor', 'operator']);
+    assert.deepEqual(continued, [{ kind: 'wait', reason: 'action-owned' }]);
   });
 
   test('px verdict refuses to fabricate a round when no review state exists', async () => {

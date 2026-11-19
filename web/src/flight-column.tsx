@@ -237,6 +237,11 @@ function FlightCard({ card, snapshotRevision, onAction, onSelect, onDragStart, s
         <FlightCardCheckpoint card={card} snapshotRevision={snapshotRevision} />
         <RepairBudgetFact card={card} />
         <ReviewProgress card={card} />
+        {card.humanReviewDue && (
+          <p data-human-review-due style={{ color: C.amber, fontSize: TYPE.meta, lineHeight: 1.4, margin: `${SPACE.sm}px 0 0` }}>
+            {card.humanReviewDue.detail}
+          </p>
+        )}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: SPACE.md, flexWrap: 'wrap' }}>
           <ActorLine card={card} />
           <details style={{ color: C.faint, fontSize: TYPE.micro }}>

@@ -49,6 +49,7 @@ import { conventionalWorktreePath, resolveWorktree } from '../adapters/git/workt
 import { performReviewPreparation } from "../adapters/cli/commands/review-preparation.js";
 import { runReviewLoop } from '../application/review-loop/review-loop.js';
 import { ReviewRoundUseCase } from '../application/review-round-use-case.js';
+import { continueReviewClearsIntervention } from '../adapters/review/review-commands.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { composeTuiCapabilities } from './board-projection.js';
 import { createPersistentReviewLoopPorts } from './review-persistence.js';
@@ -96,6 +97,7 @@ export interface ProductionCompositionOverrides {
    * resume branch can be driven without spawning agents.
    */
   readonly reviewPreparationReviewLoop?: typeof runReviewLoop;
+  readonly reviewInterventionClearer?: typeof continueReviewClearsIntervention;
 }
 
 /**
@@ -189,6 +191,7 @@ function createBoardReviewPreparationWorkflow(
   },
   reviewLoop: typeof runReviewLoop = runReviewLoop,
   resolveContext: typeof resolveMissionExecutionContext = resolveMissionExecutionContext,
+  clearIntervention: typeof continueReviewClearsIntervention = continueReviewClearsIntervention,
 ) {
   const { database, repositoryId } = persistence;
   const lifecycle = new MissionLifecycleService(store);
@@ -215,6 +218,13 @@ function createBoardReviewPreparationWorkflow(
       const worktree = live.context.missionWorktree;
       // The browser host must never be exited by the loop; a stop is a failed dispatch.
       const exit = (code: number): never => { throw new Error(`review workflow stopped (exit ${code})`); };
+      const clearHumanIntervention = async () => {
+        const loaded = await store.load(missionId(slug));
+        if (loaded.kind === 'found' && loaded.mission.review?.intervention) {
+          await clearIntervention(slug, [], { executionContext: live.context, missionStore: store, exit });
+        }
+      };
+      await clearHumanIntervention();
       await new ReviewRoundUseCase({
         loadRound: async () => {
           const existing = await store.load(missionId(slug));
@@ -225,7 +235,7 @@ function createBoardReviewPreparationWorkflow(
           const loaded = await store.load(missionId(slug));
           return loaded.kind === 'found' ? { kind: 'found' as const } : loaded;
         },
-        clearHumanIntervention: async () => undefined,
+        clearHumanIntervention,
         invalidateResolvedBlocker: async () => undefined,
         invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
@@ -277,7 +287,7 @@ export function composeProductionCapabilities(
       checkpoints: new MissionCheckpointService(missionStore, checkpointEvidenceReferences()),
       reviewPreparationWorkflow: createBoardReviewPreparationWorkflow(rootDir, missionStore, overrides.configuration, {
         repositoryId: owningRepositoryId, laneEvents: repositories.boardLaneEvents, database: database ?? null,
-      }, overrides.reviewPreparationReviewLoop, overrides.resolveMissionContext),
+      }, overrides.reviewPreparationReviewLoop, overrides.resolveMissionContext, overrides.reviewInterventionClearer),
       // Only with Mission authority: a null store means no draft service, so
       // draft:create reports a typed unavailable result and the read-only
       // graph opens no database or git handle.

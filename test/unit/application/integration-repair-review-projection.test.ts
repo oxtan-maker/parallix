@@ -744,7 +744,7 @@ test('post-execute continuation settles retained approval before begin-review-pr
 
 import type { IntegrationRepairContinuationPort } from '../../../src/application/ports/integration-records.js';
 
-async function pendingExecution(options: { samePatch?: boolean } = {}) {
+async function pendingExecution(options: { samePatch?: boolean; retainedGateDebt?: boolean } = {}) {
   const s = retentionScenario();
   const marker = (await s.evidence.validation('task-2620'))!;
   s.evidence.validation = async () => null;
@@ -762,7 +762,14 @@ async function pendingExecution(options: { samePatch?: boolean } = {}) {
   // Same outcome mapping as src/composition/integration-repair-continuation.ts.
   const resume = async (slug: string) => { const result = await certifyPendingIntegrationRepair(slug, services, integration,
     missionExecutionContext({ missionId: slug, missionWorktree: '/fixture', baseWorktree: '/fixture' }));
-    return !result || result.outcome === 'not-pending' ? 'none' as const : result.outcome; };
+    const outcome = !result || result.outcome === 'not-pending' ? 'none' as const : result.outcome;
+    if (options.retainedGateDebt && outcome === 'changed') {
+      const mission = s.store.mission();
+      await s.store.save({ ...mission, checkpoints: [...mission.checkpoints, { missionId: mission.id, name: 'CP-2', nextActionText: 'repair then re-review',
+        goalCheck: [{ criterion: 'old gate', evidence: 'old evidence' }], repair: { incidentId: 'old-gate', command: 'verify', authorizedGates: [], authorizedCriteria: [],
+          attempt: 1, verified: false, evidenceRecorded: true, occurrence: { openedMissionRevision: 1, worktree: '/fixture', failureRevision: 'old', failureEvidenceId: 'old:gate' } } }] });
+    }
+    return outcome; };
   return { s, effects, resume };
 }
 
@@ -778,8 +785,8 @@ function reviewOnlyPorts(resume: IntegrationRepairContinuationPort['resume'] | u
   }).ports;
 }
 
-test('execute sends a changed integration repair to fresh review without an execute agent (PX-0041.02)', async () => {
-  const { s, effects, resume } = await pendingExecution({ samePatch: false });
+test('execute sends changed repair with retained gate debt through repair-first fresh review (TASK-2859.12)', async () => {
+  const { s, effects, resume } = await pendingExecution({ samePatch: false, retainedGateDebt: true });
   const calls: string[] = [];
   const result = await new ExecuteMissionService({ ...reviewOnlyPorts(resume, calls), missionTransitions: s.store })
     .execute({ operationId: 'changed-repair', slug: 'task-2620', capabilities: new Set(['active:execute']) });
@@ -919,6 +926,24 @@ test('execute answers the fresh review a competing controller opened when this c
   assert.deepEqual(calls, ['checkpoints', `review-preparation:${IMPLEMENTER}`, `review:${IMPLEMENTER}`],
     'the opened round is answered by the recorded implementer, not reported as an unproven blocker');
   assert.equal(currentReviewRound(s.store.mission().review!).decision, null, 'the fresh review stays undecided for the reviewer');
+});
+
+test('changed repair returns a typed failure when recorded state no longer selects agent review (TASK-2859.12)', async () => {
+  const { s, resume } = await pendingExecution({ samePatch: false });
+  const calls: string[] = [];
+  const changedThenMoved = async (id: string) => {
+    const result = await resume(id);
+    const loaded = await s.store.load(missionId(id));
+    if (loaded.kind !== 'found') { assert.fail('changed repair mission must remain recorded'); }
+    await s.store.save({ ...loaded.mission, status: 'refined' } as Mission);
+    return result;
+  };
+  const result = await new ExecuteMissionService({ ...reviewOnlyPorts(changedThenMoved, calls), missionTransitions: s.store })
+    .execute({ operationId: 'changed-repair-moved', slug: 'task-2620', capabilities: new Set(['active:execute']) });
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error?.failureReason?.code, 'state-machine');
+  assert.equal(result.error?.failureReason?.context?.nextAction, 'wait');
+  assert.deepEqual(calls, [], 'typed owner refusal starts no review effects');
 });
 
 test('execute reports a repair a competing controller landed during a retained continuation (PX-0041.02)', async () => {

@@ -7,8 +7,7 @@ import * as fmt from '../application/presentation/cli-format.js';
 
 import { findTaskFile } from '../adapters/backlog/backlog.js';
 
-import { leadFinishesParkedApproval, leadInvocation } from '../interfaces/cli/lead.js';
-import { recordApproval } from '../adapters/review/review-round.js';
+import { leadInvocation } from '../interfaces/cli/lead.js';
 import type { AttentionAction } from '../application/projections/board.js';
 
 import { observationFromAttention } from '../application/recovery-supervisor.js';
@@ -79,18 +78,6 @@ export function createLeadSupervisorPort(
       if (observation) {
         const detail = observation.reason.kind === 'none' ? 'none' : observation.reason.detail;
         fmt.log.info(`[lead] Found stuck mission ${fmt.slug(mission)} in state ${observation.lane}; fixing by ${action.display} (${observation.reason.kind}: ${detail})`);
-      }
-      // An approved round still parked in review lost its review → integration
-      // transition. Finishing it moves the lane only; merging stays human.
-      // Lead never decides a review: an undecided round goes to
-      // `review`, whose configured reviewer decides (TASK-2620).
-      if (action.kind === 'review:submit' && services.mission
-        && leadFinishesParkedApproval(await services.mission.store.load(missionId(mission)))) {
-        const finished = await recordApproval(mission, { comment: null, decidedAt: new Date().toISOString() }, {
-          missionStore: services.mission.store,
-          lifecycleService: services.mission.lifecycle,
-        });
-        if (finished.outcome === 'recorded') { return; }
       }
       const invocation = leadInvocation(action.kind, mission);
       if (!invocation) { throw new Error(`px lead does not run ${action.kind}`); }

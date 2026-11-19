@@ -284,6 +284,18 @@ describe("stand down", { concurrency: false }, () => {
       assert.ok(!forbidden.test(text), `${file} must not stand an approval down`);
       if (file.startsWith('prompts')) { assert.ok(!/revoke-review/.test(text), `${file} must not offer the stand-down to an agent`); }
     }
+    const verdictComposition = fs.readFileSync(path.join(root, 'src/composition/cli-review-verbs.ts'), 'utf8');
+    assert.match(verdictComposition, /operatorInvocation === true/);
+    assert.match(verdictComposition, /!services\.configuration\.runtime\.workflowOperation/);
+    assert.match(verdictComposition, /!inheritedMissionWrite\(\)/);
+    assert.ok(!/output\.turn\s*===\s*['"]human['"]/.test(verdictComposition),
+      'the projected human turn must not grant approval stand-down authority');
+    assert.match(verdictComposition, /dismissProviderApproval/);
+    assert.match(verdictComposition, /createGitChangeIdentity/);
+    const authoringComposition = fs.readFileSync(path.join(root, 'src/composition/cli-authoring-commands.ts'), 'utf8');
+    assert.match(authoringComposition, /createReviewDecisionRevocationUseCase/);
+    assert.ok(!/new RevokeReviewDecisionUseCase/.test(authoringComposition),
+      'explicit revoke and verdict must share the same provider-aware composition owner');
   });
 
   test('a branch move that still carries the approved change leaves the approval untouched', async () => {
