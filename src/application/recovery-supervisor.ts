@@ -27,7 +27,7 @@ import type { OperatorJudgmentResult } from './operator-judgment.js';
  * Per attention item, per pass:
  *
  *  1. an item the human owns — anything that resolves to `px integrate` — is
- *     left for landing; idle capacity may run its non-landing dry-run first;
+ *     left for landing;
  *  2. the action the item advertises is run, once per distinct state;
  *  3. when that does not clear the item, a fresh recovery agent runs in the
  *     mission worktree, under a budget counted per failure;
@@ -41,7 +41,6 @@ import type { OperatorJudgmentResult } from './operator-judgment.js';
 
 export * from './recovery-contract.js';
 import { attentionDetail, failureFingerprint, recoveryInstruction, isLeadLane, HUMAN_ONLY_ACTIONS, ACTION_ATTEMPTS, RECOVERY_BUDGET, DEFAULT_POLL_MS, BOARD_READ_ATTEMPTS, type AttentionObservation, type SupervisorPort, type SupervisionOutcome, type MissionSupervision, type RecoveryRequest } from './recovery-contract.js';
-import { prevalidateIntegration } from './integration-prevalidation.js';
 import { assertSupervisionRunning, interruptiblePause, supervisionStopped } from './recovery-supervision-interruption.js';
 
 function errorText(error: unknown): string {
@@ -96,11 +95,7 @@ function report(run: MissionRun): MissionSupervision {
   };
 }
 
-async function settleHumanAction(port: SupervisorPort, run: MissionRun,
-  observed: AttentionObservation, action: NonNullable<AttentionObservation['action']>,
-  signal?: AbortSignal): Promise<PassResult> {
-  const step = await prevalidateIntegration(port, run.missionId, observed.lane, signal);
-  if (step) { run.steps.push(step); }
+function settleHumanAction(run: MissionRun, action: NonNullable<AttentionObservation['action']>): PassResult {
   return settle(
     run,
     'human',
@@ -129,10 +124,10 @@ async function superviseItem(
   if (!action) { return settle(run, 'human', `${run.missionId} requires operator attention: ${attentionDetail(observed.reason)}`); }
   run.steps.push(`${attentionDetail(observed.reason)} — board offers ${action.display}`);
 
-  // 1. The board is asking the human to land this. Lead may pre-validate the
-  // candidate, but it never dispatches the advertised landing action.
+  // 1. The board is asking the human to land this. Lead never dispatches the
+  // advertised landing action.
   if (HUMAN_ONLY_ACTIONS.has(action.kind)) {
-    return settleHumanAction(port, run, observed, action, signal);
+    return settleHumanAction(run, action);
   }
 
   // 2. Press what the board advertises — the same command the operator would,

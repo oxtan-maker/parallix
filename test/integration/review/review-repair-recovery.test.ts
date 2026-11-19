@@ -50,6 +50,9 @@ for (const expected of PARITY) {
       } else {
         assert.equal(reviewStatus(outcome.mission.review!), 'approved', 'approval came from the reviewer launch');
       }
+      // The fixed sequence owes its integration tests to the human turn, not to
+      // agent approval: neither review entry may run them (TASK-2859.17).
+      assert.equal(outcome.gateRunStatus, null, 'no review entry runs the integration tests before the human approves');
     });
   }
 }
@@ -64,6 +67,9 @@ for (const entry of ['cli', 'board'] as const) {
     assert.equal(outcome.mission.review!.rounds.length, 1);
     assert.deepEqual(outcome.launches, [], 'a terminal approval launches no agent');
     assert.deepEqual(outcome.laneEvents.map(event => `${event.from_status}>${event.to_status}`), ['review>integration']);
+    // Agent approval moved the candidate to the integration lane; only the
+    // human verdict may start its tests (TASK-2859.17).
+    assert.equal(outcome.gateRunStatus, null, 'an approved landing candidate gains no gate run from the review entry');
     assert.equal(reviewStatistics(outcome.mission.review!).total, 0,
       'retained approval adds no repair return to existing statistics (TASK-2859.11)');
     assert.equal(decisions.filter(kind => kind === 'approved').length, 1 + outcome.launches.filter(kind => kind === 'review').length, 'every approval beyond the seeded one has a reviewer launch');

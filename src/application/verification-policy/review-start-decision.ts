@@ -27,6 +27,8 @@ export interface FixedVerificationNextActionFacts {
   readonly agentReviewCurrent?: boolean | null;
   /** Exact-current complete integration-test evidence supplied by integrate. */
   readonly testsCurrent?: boolean | null;
+  /** Whether the repository configures integration tests; absent readers preserve unknown. */
+  readonly testsConfigured?: boolean | null;
   /**
    * A verification action a policy selected for this mission. The fixed
    * sequence never supplies one; only a policy-selected `tests` is honoured.
@@ -38,7 +40,7 @@ export type FixedVerificationNextAction =
   | { readonly kind: 'agent-review'; readonly reason: 'review-unfinished' }
   | { readonly kind: 'repair'; readonly reason: 'repair-pending' | 'findings-pending' }
   | { readonly kind: 'human-review'; readonly reason: 'agent-review-approved' | 'integrate-shortcut-eligible' }
-  | { readonly kind: 'tests'; readonly reason: 'policy-selected' }
+  | { readonly kind: 'tests'; readonly reason: 'policy-selected' | 'tests-not-current' }
   | { readonly kind: 'integration-handoff'; readonly reason: 'fixed-sequence-complete' }
   | { readonly kind: 'wait'; readonly reason: 'action-owned' | 'not-verifying' | 'complete' }
   | { readonly kind: 'human-handoff'; readonly reason: 'recorded-blocker' | 'human-intervention' };
@@ -57,6 +59,7 @@ export type FixedVerificationNextActionInput = FixedVerificationNextActionFacts 
   readonly humanOnlyReason?: string | null;
   readonly agentReviewCurrent?: boolean | null;
   readonly testsCurrent?: boolean | null;
+  readonly testsConfigured?: boolean | null;
   readonly policySelection?: 'tests' | null;
 };
 
@@ -91,6 +94,7 @@ export function fixedVerificationFacts(input: FixedVerificationNextActionInput):
     humanOnlyReason: input.humanOnlyReason ?? humanOnlyRepairReason(input.mission),
     agentReviewCurrent: input.agentReviewCurrent ?? null,
     testsCurrent: input.testsCurrent ?? null,
+    testsConfigured: input.testsConfigured ?? null,
     policySelection: input.policySelection ?? null,
   };
 }
@@ -113,15 +117,21 @@ function fixedVerificationPriorityAction(facts: FixedVerificationNextActionFacts
  * Entries provide recorded state and execute the returned mechanism. Lifecycle,
  * operation admission, rebase, gates, repair launch and event writers remain in
  * their established owners; this function only decides which one is next.
- * The fixed sequence never returns `tests`: integration tests run in the review
- * step only when a policy selection is presented for a review or active
- * mission whose round is not fixing (TASK-2859.14).
+ * The fixed sequence returns `tests` once agent review has approved and the
+ * integration lane holds the candidate, but only when the readers positively
+ * know tests are configured and not current; unknown evidence never schedules a
+ * run. A policy selection also reaches `tests` for a review or active mission
+ * whose round is not fixing (TASK-2859.14, TASK-2859.17).
  */
 export function fixedVerificationNextAction(input: FixedVerificationNextActionInput): FixedVerificationNextAction {
   const facts = fixedVerificationFacts(input);
   const priority = fixedVerificationPriorityAction(facts);
   if (priority) { return priority; }
-  if (facts.status === 'integration') { return { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }; }
+  if (facts.status === 'integration') {
+    return facts.testsConfigured === true && facts.testsCurrent === false
+      ? { kind: 'tests', reason: 'tests-not-current' }
+      : { kind: 'integration-handoff', reason: 'fixed-sequence-complete' };
+  }
   if (facts.reviewPhase === 'fixing') { return { kind: 'repair', reason: 'findings-pending' }; }
   if (facts.status === 'review' && facts.reviewPhase === 'approved') {
     return { kind: 'human-review', reason: facts.agentReviewCurrent === true && facts.testsCurrent === true

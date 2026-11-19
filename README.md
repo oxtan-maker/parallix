@@ -148,23 +148,15 @@ usage is recorded against the mission like any other launch. One mission's
 running agent never stops the rest of the queue from being worked.
 
 One exception, always: landing an item that asks for integration is left for
-you. When no current successful integration-gate run covers its candidate,
-`px lead` may use otherwise idle capacity to run the public
-`px integrate <slug> --dry-run` action, but only while measured machine CPU is
-strictly below 30%. That action executes the configured integration gates and
-records their complete execution receipt and, when integration coverage is
-configured, reusable exact-tree proof. A repairable failure enters the retained
-integration-repair workflow: the implementer receives the failed command and
-bounded output, the failed check and complete gate plan rerun, and a changed
-candidate receives fresh independent review before returning to integration.
-Human-only failures retain their evidence without launching an agent. Neither
-the dry-run nor repair rebases, merges, squashes, pushes, or lands the mission.
-At 30% or above, when CPU cannot be
-measured, or when current evidence already covers the candidate, lead leaves it
-alone. A mission claim and fresh liveness check prevent concurrent lead runs or
-newly started work from receiving the same dry-run. A recovery agent may not
-weaken a gate, manufacture a review, or absorb a defect that belongs to your
-primary branch either.
+you. `px lead` never runs integration gates on its own; the review step
+schedules the integration tests once you record your approval with
+`px verdict approve`, and a failed run
+enters the retained integration-repair workflow: the implementer receives the
+failed command and bounded output, the failed check and complete gate plan
+rerun, and a changed candidate receives fresh independent review before
+returning to integration. Human-only failures retain their evidence without
+launching an agent. A recovery agent may not weaken a gate, manufacture a
+review, or absorb a defect that belongs to your primary branch either.
 
 Without `--once` it keeps going until the queue drains, polling every `--poll`
 seconds (60 by default), so it holds the terminal the way a watch command does;

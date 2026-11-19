@@ -505,6 +505,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', m
       agents: { maxConcurrentCustom: workflowConfig?.adapters?.agents?.maxConcurrentCustom, models: model ? { [agent]: model } : {}, runners: agent === 'custom' ? { custom: runner } : {} },
       missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
       verification: { command: './scripts/verify-local.sh {{area}}', defaultArea: 'all' },
+      gates: { preIntegration: [{ key: 'smoke-verification', command: './scripts/verify-local.sh all', order: 1 }] },
       draft: { preDraftCommand: `touch ${PROVISIONED_MARKER}` },
       review: { provider: 'none', tmpDir: '.workflow/review-artifacts' }
     }
@@ -1086,9 +1087,22 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
       `[parallix-workflow-failure] recorded checkpoint Goal Check rows must cover every success criterion; uncovered: ${uncovered.join(', ')}`
     );
 
-    // Phase 3: Integrate through the real CLI rail. Agent work is complete at
-    // this point, so no further model session is needed; this proves the
-    // approved mission can land, close its task, and clean up its worktree.
+    // Phase 3: Record the human turn's integration-test action, then integrate
+    // through the real CLI rail. Agent work is complete at this point, so no
+    // further model session is needed. The final invocation still bypasses
+    // recursive gates, but the approval shortcut must first see a complete
+    // current pass from the fixture's fast pre-integration plan.
+    const dryRunResult = await runWorkflowAllowFail(
+      worktree,
+      env,
+      ['integrate', slug, '--dry-run'],
+      RUN_TIMEOUT_MS
+    );
+    assert.equal(
+      dryRunResult.status,
+      0,
+      `[parallix-workflow-failure] px integrate ${slug} --dry-run failed (status=${dryRunResult.status}):\nstdout:\n${dryRunResult.stdout}\nstderr:\n${dryRunResult.stderr}`
+    );
     const integrateResult = await runWorkflowAllowFail(
       worktree,
       // The smoke fixture must not recursively run the final integration

@@ -6,6 +6,7 @@ import type { IntegrateRunState } from './integrate/squash.js';
 import type { IntegrateSeams } from './integrate/gates.js';
 import { IntegrationStopsForHuman } from './integrate/review-before-integration.js';
 import { parseIntegrateArgs, type IntegrateRequest } from './integrate/support.js';
+import type { TestsActionOutcome, TestsActionRequest } from './integrate/tests-action.js';
 import { isNestedWorkPublisher, publishedAgentLaunch } from './recording/execution-activity-recorder.js';
 
 interface IntegrateEntrySteps {
@@ -13,7 +14,7 @@ interface IntegrateEntrySteps {
   restoreTemporaryStash(slug: string, stash: IntegrateRunState['temporaryStash']): 0 | 1;
 }
 
-function integrationSeams(options: IntegrateOptions, ports: IntegrateWorkflowPorts): IntegrateSeams {
+export function integrationSeams(options: IntegrateOptions, ports: IntegrateWorkflowPorts): IntegrateSeams {
   return {
     // SC2: kernel-context injection seams. Both bounces build their rebound
     // context from these so tests keep a mock launch/transition/fallback
@@ -122,3 +123,20 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
     exitFn(exitCode);
     return { exitCode };
   }
+
+/**
+ * Run the fixed sequence's tests action for one mission from the review step.
+ * Nothing here lands or approves: the executor owns the claim, the rebase, the
+ * gates and the repair route, and answers `not-selected` unless the next-action
+ * owner returns `tests`.
+ */
+export async function runReviewStepTestsEntry(slug: string, options: IntegrateOptions,
+  ports: IntegrateWorkflowPorts, executor: { runTestsAction(_request: TestsActionRequest): Promise<TestsActionOutcome> }): Promise<TestsActionOutcome> {
+  const execution = ports.missionContext.resolve(slug, options.executionRoot ?? ports.process.cwd());
+  if (!execution.ok) { return { kind: 'human-handoff', reason: 'mission-unavailable', detail: execution.reason }; }
+  if (!options.missionServicesFn) {
+    return { kind: 'human-handoff', reason: 'mission-unavailable', detail: `Mission services are unavailable for ${slug}.` };
+  }
+  return executor.runTestsAction({ slug, policySelection: null, executionContext: execution.context,
+    missionServicesFn: options.missionServicesFn, seams: integrationSeams(options, ports), configuration: options.configuration });
+}

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createIntegrationGateStep, type GateStepRequest } from '../../../../src/application/integrate/gates.js';
+import { runReviewStepTestsEntry } from '../../../../src/application/integrate-entry.js';
 import { setLogger } from '../../../../src/application/presentation/cli-format.js';
 import { createTestsActionExecutor } from '../../../../src/application/integrate/tests-action.js';
 import type { IntegrateWorkflowPorts, IntegrationGateFailureRequest, IntegrationGateRunResult } from '../../../../src/application/ports/integrate-workflow.js';
@@ -136,6 +137,62 @@ test('integration dry-run fails closed when mandatory preIntegration is missing 
 // The executor drives the real gate-step owner above; rebase, gate runner and
 // rebound kernel are the recorded boundaries each case asserts against.
 
+test('the review tests entry resolves the mission checkout and passes the composed repair launcher to the executor (TASK-2859.17)', async () => {
+  const slug = 'px-review-tests-entry';
+  const executionContext = missionExecutionContext({ missionId: slug, missionWorktree: '/fixture/mission' });
+  const missionServicesFn = async () => integrationServices();
+  const launches: Array<{ step: string; worktree?: string }> = [];
+  const ports = stubIntegrateWorkflowPorts({
+    missionContext: { resolve: (resolvedSlug, root) => {
+      assert.equal(resolvedSlug, slug);
+      assert.equal(root, '/fixture/operator-root', 'composition supplies the repository root, not process.cwd');
+      return { ok: true, context: executionContext };
+    } },
+    agents: { startAgent: async (step, options) => {
+      launches.push({ step, worktree: options.worktree });
+      return { agent: 'codex', result: { status: 0 } };
+    } },
+  });
+  const outcome = await runReviewStepTestsEntry(slug, { executionRoot: '/fixture/operator-root', missionServicesFn }, ports, {
+    runTestsAction: async request => {
+      assert.equal(request.slug, slug);
+      assert.equal(request.policySelection, null, 'the executor owns exact-current fixed-policy selection');
+      assert.equal(request.executionContext, executionContext);
+      assert.equal(request.missionServicesFn, missionServicesFn);
+      assert.deepEqual(await request.seams.startAgentFn('act-on-review', {
+        prompt: 'repair the failed integration gate', worktree: executionContext.missionWorktree,
+      }), { agent: 'codex', result: { status: 0 } });
+      return { kind: 'human-handoff', reason: 'repair-refused', detail: 'fixture stop after launch' };
+    },
+  });
+
+  assert.deepEqual(launches, [{ step: 'act-on-review', worktree: '/fixture/mission' }]);
+  assert.deepEqual(outcome, { kind: 'human-handoff', reason: 'repair-refused', detail: 'fixture stop after launch' });
+});
+
+test('the review tests entry fails closed when its mission context or services are unavailable (TASK-2859.17)', async () => {
+  const slug = 'px-review-tests-unavailable';
+  let executions = 0;
+  const executor = { runTestsAction: async () => {
+    executions++;
+    return { kind: 'not-selected' as const, next: null };
+  } };
+  const unresolved = stubIntegrateWorkflowPorts({
+    missionContext: { resolve: () => ({ ok: false, reason: 'mission checkout is unavailable' }) },
+  });
+  assert.deepEqual(await runReviewStepTestsEntry(slug, { executionRoot: '/fixture/operator' }, unresolved, executor), {
+    kind: 'human-handoff', reason: 'mission-unavailable', detail: 'mission checkout is unavailable',
+  });
+
+  const resolved = stubIntegrateWorkflowPorts({ missionContext: { resolve: () => ({
+    ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture/mission' }),
+  }) } });
+  assert.deepEqual(await runReviewStepTestsEntry(slug, { executionRoot: '/fixture/operator' }, resolved, executor), {
+    kind: 'human-handoff', reason: 'mission-unavailable', detail: `Mission services are unavailable for ${slug}.`,
+  });
+  assert.equal(executions, 0, 'an incomplete entry never reaches the tests-action owner');
+});
+
 type GateRunRecord = NonNullable<ReturnType<NonNullable<IntegrateWorkflowPorts['gates']['readGateRun']>>>;
 const HEAD = 'c'.repeat(40);
 const plan = gates.map(({ key, command }) => ({ key, command }));
@@ -144,7 +201,7 @@ const passedRun = (gateRunId: string | null, revision = HEAD, ran = plan): GateR
 
 async function testsAction(options: { status?: Mission['status']; review?: Mission['review']; result?: IntegrationGateRunResult;
   previous?: GateRunRecord | null; claim?: boolean; rebase?: () => void; selection?: 'tests' | null; refuseRepair?: string;
-  redUnreadable?: boolean; results?: IntegrationGateRunResult[]; validationWriteFails?: boolean } = {}) {
+  redUnreadable?: boolean; results?: IntegrationGateRunResult[]; validationWriteFails?: boolean; configured?: typeof gates } = {}) {
   const slug = 'px-tests-action';
   const calls: string[] = [];
   let mission = fixtureMission(slug, { repositoryId: repositoryId('test-repo'), status: options.status ?? 'review',
@@ -169,7 +226,7 @@ async function testsAction(options: { status?: Mission['status']; review?: Missi
       readGateRun: () => record,
       resolveIntegrationVerificationWorktree: () => '/fixture/mission',
       captureFinalIntegrationTree: () => ({ ok: true, rootDir: '/fixture/mission', commit: HEAD, tree: 'd'.repeat(40) }),
-      loadPhaseGates: () => gates,
+      loadPhaseGates: () => options.configured ?? gates,
       loadRequirePreIntegration: () => true,
       runPhaseGates: async (_phase, runnerOptions) => {
         calls.push('gates');
@@ -263,15 +320,50 @@ test('a restarted tests action reuses the settled exact-head run instead of writ
   assert.equal(outcome.kind === 'completed' && outcome.evidence?.gateRunId, 'run-1');
 });
 
-test('the fixed sequence and the landing lane never start the tests action (TASK-2859.14)', async () => {
-  for (const [name, options] of [['fixed-sequence', { selection: null }],
-    ['integration-lane', { status: 'integration' as const, review: approvedReview('px-tests-action') }]] as const) {
-    const fixture = await testsAction(options);
-    const outcome = await fixture.run();
-    assert.equal(outcome.kind, 'not-selected', name);
-    assert.deepEqual(fixture.calls, ['release'], `${name}: no rebase or gate ran`);
-  }
+test('a policy selection never starts the tests action in the landing lane or before a review lane exists (TASK-2859.14)', async () => {
+  const fixture = await testsAction({ status: 'integration', review: approvedReview('px-tests-action') });
+  assert.equal((await fixture.run()).kind, 'not-selected', 'integration-lane');
+  assert.deepEqual(fixture.calls, ['release'], 'no rebase or gate ran');
+  const reviewLane = await testsAction({ selection: null });
+  assert.equal((await reviewLane.run()).kind, 'not-selected', 'the fixed sequence reviews before it tests');
+  assert.deepEqual(reviewLane.calls, ['release']);
 });
+
+// The fixed sequence (decisions 5 and 7): an approved candidate in the landing lane owes the tests action
+// when configured tests have no exact-current passing run; nothing else schedules it (TASK-2859.17).
+test('the fixed sequence runs missing tests for an approved landing candidate: rebase first, full plan, no landing (TASK-2859.17)', async () => {
+  const fixture = await testsAction({ status: 'integration', review: approvedReview('px-tests-action'), selection: null });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release']);
+  assert.deepEqual(outcome, { kind: 'completed', verdict: 'passed', recorded: false, repairRoute: null,
+    evidence: { gateRunId: 'run-2', revision: HEAD, outcomes: plan.map(gate => ({ ...gate, exitCode: 0 })) },
+    next: { kind: 'integration-handoff', reason: 'fixed-sequence-complete' } });
+  assert.equal(fixture.mission().status, 'integration', 'no approval, lane change or landing was recorded');
+  assert.deepEqual(fixture.received.runner?.gates, gates, 'the complete configured plan ran');
+  assert.equal(fixture.received.runner?.slug, 'px-tests-action');
+});
+
+test('the fixed sequence routes a red landing-candidate run through the rebound kernel (TASK-2859.17)', async () => {
+  const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+  const fixture = await testsAction({ status: 'integration', review: approvedReview('px-tests-action'), selection: null,
+    result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }) });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'rebound', 'release']);
+  assert.equal(outcome.kind === 'completed' && outcome.verdict, 'failed');
+  assert.equal(fixture.received.route?.testedRevision, HEAD);
+  assert.equal(fixture.mission().status, 'active', 'the rebound kernel owns the repair transition');
+});
+
+for (const [name, options] of [
+  ['an exact-current passing run', { previous: passedRun('run-1') }],
+  ['no configured tests', { configured: [] as unknown as typeof gates }],
+] as const) {
+  test(`the fixed sequence leaves an approved landing candidate for the human with ${name} (TASK-2859.17)`, async () => {
+    const fixture = await testsAction({ status: 'integration', review: approvedReview('px-tests-action'), selection: null, ...options });
+    assert.deepEqual(await fixture.run(), { kind: 'not-selected', next: { kind: 'integration-handoff', reason: 'fixed-sequence-complete' } });
+    assert.deepEqual(fixture.calls, ['release'], 'no rebase or gate ran');
+  });
+}
 
 test('tests-action entries that cannot complete hand off with a typed reason (TASK-2859.14)', async () => {
   const concurrent = await testsAction({ claim: false });

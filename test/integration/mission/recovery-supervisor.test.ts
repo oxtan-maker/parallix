@@ -88,6 +88,8 @@ test('the supervisor never integrates: an integration item is left for the human
   assert.deepEqual(fleet.ran, [], 'no command is run for an item the human owns');
   assert.deepEqual(fleet.recoveries, [], 'and no agent is sent to do it instead');
   assert.match(resultFor(results).summary, /never integrates/);
+  assert.deepEqual(resultFor(results).steps.filter(step => /dry-run/.test(step)), [],
+    'the supervisor schedules no integration dry-run: the review step owns integration tests (TASK-2859.17)');
   assert.ok(HUMAN_ONLY_ACTIONS.has('integrate:merge'));
 });
 

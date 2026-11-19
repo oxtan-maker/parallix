@@ -132,18 +132,31 @@ test('fixed next-action owner resolves every reachable state to action, wait, or
   assert.equal(combinations, 710, 'the five-dimension reachable-state population stays explicit');
 });
 
-test('only a policy selection reaches the tests action; the fixed sequence never does (TASK-2859.14)', () => {
+test('a policy selection or known-missing tests in the landing lane reach the tests action; unknown evidence never does (TASK-2859.14, TASK-2859.17)', () => {
   const decide = (status: MissionStatus, reviewPhase: ReviewPhase | null, extra: Partial<Parameters<typeof fixedVerificationNextAction>[0]> = {}) =>
     fixedVerificationNextAction({ status, reviewPhase, pendingRepair: false, reviewRequired: false, ownedAction: false,
       humanOnlyReason: null, humanIntervention: false, ...extra } as Parameters<typeof fixedVerificationNextAction>[0]);
   for (const status of MISSION_STATUSES) for (const reviewPhase of [null, ...REVIEW_PHASES]) {
     for (const pendingRepair of [false, true]) for (const reviewRequired of [false, true]) {
-      for (const policySelection of [undefined, null] as const) {
-        assert.notEqual(decide(status, reviewPhase, { pendingRepair, reviewRequired, policySelection }).kind, 'tests',
-          `${status}/${reviewPhase ?? 'none'}/repair=${pendingRepair}/review=${reviewRequired}/selection=${policySelection}`);
+      for (const policySelection of [undefined, null] as const) for (const testsCurrent of [undefined, null, true] as const) {
+        assert.notEqual(decide(status, reviewPhase, { pendingRepair, reviewRequired, policySelection, testsConfigured: true, testsCurrent }).kind, 'tests',
+          `${status}/${reviewPhase ?? 'none'}/repair=${pendingRepair}/review=${reviewRequired}/selection=${policySelection}/current=${testsCurrent}`);
       }
     }
   }
+  // The fixed sequence (decisions 5 and 7): only an approved candidate in the landing lane, with tests positively
+  // known to be configured and not current, owes the tests action. Unknown, unconfigured and current stay a handoff.
+  const handoff = { kind: 'integration-handoff', reason: 'fixed-sequence-complete' };
+  for (const facts of [{}, { testsConfigured: null, testsCurrent: false }, { testsConfigured: false, testsCurrent: false },
+    { testsConfigured: true, testsCurrent: null }, { testsConfigured: true, testsCurrent: true }] as const) {
+    assert.deepEqual(decide('integration', 'approved', facts), handoff, JSON.stringify(facts));
+  }
+  assert.deepEqual(decide('integration', 'approved', { testsConfigured: true, testsCurrent: false }),
+    { kind: 'tests', reason: 'tests-not-current' });
+  assert.deepEqual(decide('integration', 'approved', { testsConfigured: true, testsCurrent: false, pendingRepair: true }),
+    { kind: 'repair', reason: 'repair-pending' }, 'a pending repair precedes the fixed tests action');
+  assert.deepEqual(decide('integration', 'approved', { testsConfigured: true, testsCurrent: false, ownedAction: true }),
+    { kind: 'wait', reason: 'action-owned' });
   const selected = { policySelection: 'tests' as const };
   const rows = [
     ['review-undecided', decide('review', 'reviewing', selected), { kind: 'tests', reason: 'policy-selected' }],

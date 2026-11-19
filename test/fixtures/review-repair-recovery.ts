@@ -138,6 +138,11 @@ export async function retainedRepairCase(phase: RetainedRepairPhase, inferred: b
   const previousLogger = setLogger({ log: text => { messages.push(String(text)); }, error: text => { messages.push(String(text)); } });
   t.after(() => { setLogger(previousLogger); });
   const invoke = (args: string[]) => runCli(inferred && args[0] === 'review' ? args.filter(arg => arg !== fixture.slug) : args, { baseCwd: fixture.worktree, log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; } });
+  // A launched agent is an automatic invocation and holds no operator authority,
+  // so its verdict is a reviewer decision, never the human turn that owes the
+  // fixed sequence's integration tests (TASK-2859.17).
+  const agentInvoke = (args: string[]) => runCli(args, { operatorInvocation: false, baseCwd: fixture.worktree,
+    log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; } });
   // The board dispatches the same review entry through production composition;
   // only the launcher and provider boundaries are doubled. A refusal or stop is
   // a failed dispatch, the board's analogue of the CLI's exit 1.
@@ -204,7 +209,8 @@ export async function retainedRepairCase(phase: RetainedRepairPhase, inferred: b
     command, capturedRevision: fixture.approvedRevision, signal: null, exitCode: 1, stdout: 'original interrupted check', stderr: 'original gate failure' });
   assert.equal(captured.ok, true);
   if (descendant) {
-    await settledDescendantContinuation({ fixture, opened, before, launches, invoke, descendants: descendant.descendants, messages, t });
+    await settledDescendantContinuation({ fixture, opened, before, launches, invoke, agentInvoke,
+      descendants: descendant.descendants, messages, t });
     return;
   }
   // A no-op agent cannot turn even a passing check into checkpoint proof.
@@ -240,14 +246,14 @@ export async function retainedRepairCase(phase: RetainedRepairPhase, inferred: b
     resultPromise: (async () => {
       if (prompt.includes('REPAIR AUTHORITY')) {
         launches.push('repair');
-        assert.equal(await invoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
+        assert.equal(await agentInvoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
           '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Independent review']), 0);
         return { status: 0, stdout: '', stderr: '' };
       }
       assert.match(prompt, /^Mode: review\./m, "only independent reviewer work is allowed after repaired review preparation");
       launches.push('review');
       const mission = await fixture.load();
-      assert.equal(await invoke(['verdict', 'approve', '--slug', fixture.slug,
+      assert.equal(await agentInvoke(['verdict', 'approve', '--slug', fixture.slug,
         '--actor', mission.review!.rounds.at(-1)!.reviewer, '--comment', 'Fixture repair reviewed']), 0);
       return { status: 0, stdout: '', stderr: '' };
     })(),
@@ -265,23 +271,24 @@ export async function retainedRepairCase(phase: RetainedRepairPhase, inferred: b
  * must still reach its next durable lifecycle action without px stop, and must
  * neither signal that process nor launch extra workers or synthesize approval.
  */
-async function settledDescendantContinuation({ fixture, opened, before, launches, invoke, descendants, messages, t }: {
+async function settledDescendantContinuation({ fixture, opened, before, launches, invoke, agentInvoke, descendants, messages, t }: {
   fixture: Awaited<ReturnType<typeof openRepairFixture>>; opened: { name: string }; before: Mission; launches: string[];
-  invoke: (_args: string[]) => Promise<number>; descendants: () => number[]; messages: string[]; t: TestContext;
+  invoke: (_args: string[]) => Promise<number>; agentInvoke: (_args: string[]) => Promise<number>;
+  descendants: () => number[]; messages: string[]; t: TestContext;
 }): Promise<void> {
   setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
     invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
     resultPromise: (async () => {
       if (prompt.includes('REPAIR AUTHORITY')) {
         launches.push('repair');
-        assert.equal(await invoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
+        assert.equal(await agentInvoke(['checkpoint', 'record', '--slug', fixture.slug, '--name', opened.name,
           '--criterion', 'feature ships', '--evidence', 'feature.txt', '--next', 'Independent review']), 0);
         return { status: 0, stdout: '', stderr: '' };
       }
       assert.match(prompt, /^Mode: review\./m, 'only independent reviewer work is allowed after repaired handoff');
       launches.push('review');
       const mission = await fixture.load();
-      assert.equal(await invoke(['verdict', 'approve', '--slug', fixture.slug,
+      assert.equal(await agentInvoke(['verdict', 'approve', '--slug', fixture.slug,
         '--actor', mission.review!.rounds.at(-1)!.reviewer, '--comment', 'Fixture repair reviewed']), 0);
       return { status: 0, stdout: '', stderr: '' };
     })(),

@@ -7,6 +7,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { missionVersion } from '../../src/application/domain-ports.js';
 import { SqliteMissionStore } from '../../src/adapters/sqlite/mission-store.js';
+import { readIntegrationGateRun } from '../../src/adapters/verification/integration-verification-proof.js';
+import { resolveConfiguration } from '../../src/composition/config.js';
 import type { Mission } from '../../src/domain/mission.js';
 import { requestReviewIntervention } from '../../src/domain/review.js';
 import { setLogger } from '../../src/application/presentation/cli-format.js';
@@ -23,6 +25,8 @@ export interface ParityOutcome {
   readonly launches: readonly string[];
   readonly laneEvents: ReadonlyArray<{ from_status: string | null; to_status: string; trigger: string }>;
   readonly messages: string;
+  /** Status of the integration gate-run evidence left in the checkout; null when none was written. */
+  readonly gateRunStatus: string | null;
 }
 
 /** The durable starting state of a scenario; every entry starts from the same bytes. */
@@ -85,7 +89,9 @@ export async function parityCase(scenario: ParityScenario, entry: 'cli' | 'board
   const approvalBefore = (await fixture.load()).review?.rounds[0].decision;
   const lanesBefore = (await fixture.laneEvents()).length;
   const code = await enterReviewVia(entry, fixture, store, messages, invoke);
-  const outcome = { code, mission: await fixture.load(), launches, laneEvents: (await fixture.laneEvents()).slice(lanesBefore), messages: messages.join('\n') };
+  const outcome = { code, mission: await fixture.load(), launches, laneEvents: (await fixture.laneEvents()).slice(lanesBefore),
+    messages: messages.join('\n'),
+    gateRunStatus: readIntegrationGateRun(fixture.worktree, resolveConfiguration(process.env))?.status ?? null };
   if (scenario === 'already-approved') {
     assert.deepEqual(outcome.mission.review!.rounds[0].decision, approvalBefore, 'restart preserves the original judgment and its provenance');
   }

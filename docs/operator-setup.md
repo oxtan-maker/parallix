@@ -470,8 +470,9 @@ decision through the existing review writer, reloads the authoritative next
 action, prints it, and resumes automatic review or repair only when that owner
 selects it. A request for changes after an approval first records the approval
 revocation and then the human-attributed findings; retries and restarts do not
-create another decision. Approval leaves integration as an explicit operator
-handoff.
+create another decision. After an approval the review step runs the integration
+tests when configured tests have no exact-current passing run; landing itself
+stays an explicit operator handoff.
 
 `px integrate <slug>` can complete that human turn when the current change
 already has both an agent approval and a complete passing integration-test
@@ -616,18 +617,17 @@ Other repair review routes retain their configured classification policy. All
 approvals still require the configured integration gates and provider protections. Retained and newly reviewed approvals stop in the integration lane;
 a human reads the PR and runs `px integrate <slug>` to land. Status shows the
 retention assessment and validation citation alongside the original judgment.
-While the mission waits there, `px lead` may pre-validate it by invoking only
-`px integrate <slug> --dry-run` when no current successful integration run
-covers the candidate and measured machine CPU is below 30%. The dry-run records
-the same gate execution receipt as a live integration gate pass and records
-reusable exact-tree verification evidence when integration coverage is configured,
-but performs no landing action. A repairable failure enters retained repair and,
-after green re-verification and any required fresh review, returns to the
-integration lane for the human decision. A mission claim and liveness recheck
-immediately before dispatch prevent overlapping supervisor work. Lead
-declines at exactly 30%, above it, when CPU is unavailable, or when current
-evidence already covers the candidate; the human integration decision remains
-pending in every case.
+When you record your approval with `px verdict approve` and the candidate sits in
+the integration lane without exact-current integration tests, the review step runs
+them automatically through the existing gate owner: it rebases first, runs the
+configured `preIntegration` gates and records the same gate execution receipt as a live
+integration gate pass, without landing or approving anything. `px lead` no longer
+runs integration gates on its own, and `px integrate <slug> --dry-run` stays a
+human command. A repairable failure enters retained repair and, after green
+re-verification and any required fresh review, returns to the integration lane
+for the human decision. Landing still runs the gates again unless existing gate
+evidence covers the final candidate; the version commit that follows the landing
+rebase normally prevents that reuse.
 If no original approval round is recorded, retention stays blocked; run
 `px review <slug>` to establish a fresh review before integration.
 Historical mechanical-restoration provenance remains readable independently of

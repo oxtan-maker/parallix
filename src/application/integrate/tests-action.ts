@@ -1,8 +1,9 @@
 /**
  * Integration tests as a review-step verification action (TASK-2859.14).
  *
- * The executor runs only when the next-action owner returns `tests`; the fixed
- * sequence never does. It needs no landing eligibility: it never runs the
+ * The executor runs only when the next-action owner returns `tests`: the fixed
+ * sequence returns it for an approved candidate whose exact-current tests are
+ * known to be missing (TASK-2859.17). It needs no landing eligibility: it never runs the
  * integration preflight, lifecycle recovery or landing, and never records an
  * approval. It rebases through the integration rebase owner, runs the
  * configured pre-integration gates through the gate-step owner (which writes the
@@ -21,7 +22,7 @@ import { IntegrationStopsForHuman } from './review-before-integration.js';
 
 export interface TestsActionRequest {
   readonly slug: string;
-  /** The verification action a policy selected; absent, the fixed sequence decides and never selects tests. */
+  /** The verification action a policy selected; null, the fixed sequence decides from exact-current evidence. */
   readonly policySelection: 'tests' | null;
   readonly executionContext: MissionExecutionContext;
   readonly missionServicesFn: IntegrationMissionServicesFactory;
@@ -55,6 +56,8 @@ type GateStepDecision =
   | { readonly kind: 'routed'; readonly route: IntegrationGateRoute; readonly redRun: IntegrationGateRunRecord | null }
   | { readonly kind: 'repair-refused'; readonly detail: string }
   | { readonly kind: 'stopped'; readonly detail: string };
+
+type TestsEvidenceFacts = { readonly testsConfigured?: boolean | null; readonly testsCurrent?: boolean | null };
 
 export interface TestsActionDependencies {
   buildIntegrationContext(_slug: string, _options: IntegrationContextOptions): Promise<IntegrationContext>;
@@ -100,6 +103,18 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function needsLandingEvidence(request: TestsActionRequest, missionStatus: string): boolean {
+  return request.policySelection === null && missionStatus === 'integration';
+}
+
+function needsResolvedContext(selected: FixedVerificationNextAction, needsEvidence: boolean): boolean {
+  return selected.kind === 'tests' || needsEvidence;
+}
+
+function stoppedByGateStep(ports: IntegrateWorkflowPorts, error: unknown): boolean {
+  return error instanceof IntegrationStopsForHuman || ports.landing.isAbort(error);
+}
+
 /** Map the gate step's own decision to a completion edge; the record never upgrades it. */
 async function settle(slug: string, decision: GateStepDecision, run: IntegrationGateRunRecord | null, tested: string | null,
   previous: IntegrationGateRunRecord | null, next: () => Promise<FixedVerificationNextAction | null>): Promise<TestsActionOutcome> {
@@ -123,12 +138,18 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
   const readRun = (checkout: string): IntegrationGateRunRecord | null => {
     try { return ports.gates.readGateRun?.(checkout) ?? null; } catch { return null; }
   };
-  const nextAction = async (services: IntegrationMissionServices, slug: string, policySelection: 'tests' | null = null) => {
+  const nextAction = async (services: IntegrationMissionServices, slug: string) => {
     const loaded = await services.store.load(missionId(slug));
-    return loaded.kind === 'found' ? fixedVerificationNextAction({ mission: loaded.mission, policySelection }) : null;
+    return loaded.kind === 'found' ? fixedVerificationNextAction({ mission: loaded.mission }) : null;
   };
-  const stoppedByGateStep = (error: unknown) => error instanceof IntegrationStopsForHuman || ports.landing.isAbort(error);
-
+  /** Exact-current evidence the fixed sequence needs in the landing lane; unreadable head stays unknown. */
+  const evidenceFacts = (slug: string, context: IntegrationContext): TestsEvidenceFacts => {
+    const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
+    const tree = ports.gates.captureFinalIntegrationTree(checkout);
+    const configured = ports.gates.loadPhaseGates(checkout, 'preIntegration');
+    return { testsConfigured: configured.length > 0,
+      testsCurrent: tree.ok && tree.commit ? completeCurrentTestsPass(readRun(checkout), tree.commit, configured) : null };
+  };
   async function rebase(slug: string, context: IntegrationContext, request: TestsActionRequest,
     executionContext: LiveMissionExecutionContext): Promise<TestsActionOutcome | null> {
     try {
@@ -138,7 +159,7 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
     } catch (error) {
       // Rebase conflicts and dead ends are outside the verification model: the
       // rebase workflow already printed its recovery path, and no gate runs.
-      if (stoppedByGateStep(error)) { return handoff('rebase-dead-end', messageOf(error)); }
+      if (stoppedByGateStep(ports, error)) { return handoff('rebase-dead-end', messageOf(error)); }
       throw error;
     }
   }
@@ -166,15 +187,15 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
       // (for example an effective approval that must first be revoked) is
       // reported, never treated as a completed repair.
       if (routed && !route) { return { kind: 'repair-refused', detail: messageOf(error) }; }
-      if (!stoppedByGateStep(error)) { throw error; }
+      if (!stoppedByGateStep(ports, error)) { throw error; }
       if (!route) { return { kind: 'stopped', detail: messageOf(error) }; }
     }
     return route ? { kind: 'routed', route, redRun } : { kind: 'passed' };
   }
 
-  /** Resolve the live checkout and integration facts, then rebase before any gate can run. */
-  async function prepare(request: TestsActionRequest, services: IntegrationMissionServices)
-    : Promise<{ context: IntegrationContext } | { handoff: TestsActionOutcome }> {
+  /** Resolve the live checkout and integration facts; nothing is rebased or run yet. */
+  async function resolveContext(request: TestsActionRequest, services: IntegrationMissionServices)
+    : Promise<{ context: IntegrationContext; executionContext: LiveMissionExecutionContext } | { handoff: TestsActionOutcome }> {
     const { slug } = request;
     if (request.executionContext.missionId !== slug) {
       return { handoff: handoff('mission-unavailable', `Execution context for ${request.executionContext.missionId} cannot run tests for ${slug}.`) };
@@ -184,18 +205,27 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
     const executionContext = { ...request.executionContext, missionWorktree };
     const context = await dependencies.buildIntegrationContext(slug, { missionStore: services.store, executionContext,
       getCurrentBranchFn: () => ports.git.getCurrentBranch(missionWorktree) });
-    const rebased = await rebase(slug, context, request, executionContext);
-    return rebased ? { handoff: rebased } : { context };
+    return { context, executionContext };
   }
 
   async function execute(request: TestsActionRequest): Promise<TestsActionOutcome> {
     const { slug } = request;
     const services = await request.missionServicesFn(ports.process.cwd());
-    const selected = await nextAction(services, slug, request.policySelection);
-    if (selected?.kind !== 'tests') { return { kind: 'not-selected', next: selected }; }
-    const prepared = await prepare(request, services);
-    if ('handoff' in prepared) { return prepared.handoff; }
-    const { context } = prepared;
+    const loaded = await services.store.load(missionId(slug));
+    if (loaded.kind !== 'found') { return { kind: 'not-selected', next: null }; }
+    const { policySelection } = request;
+    let selected = fixedVerificationNextAction({ mission: loaded.mission, policySelection });
+    // Only the landing lane needs positive evidence before the fixed sequence may schedule tests.
+    const needsEvidence = needsLandingEvidence(request, loaded.mission.status);
+    const resolved = needsResolvedContext(selected, needsEvidence) ? await resolveContext(request, services) : null;
+    if (resolved && 'handoff' in resolved) { return resolved.handoff; }
+    if (needsEvidence && resolved) {
+      selected = fixedVerificationNextAction({ mission: loaded.mission, ...evidenceFacts(slug, resolved.context) });
+    }
+    if (selected.kind !== 'tests' || !resolved) { return { kind: 'not-selected', next: selected }; }
+    const rebased = await rebase(slug, resolved.context, request, resolved.executionContext);
+    if (rebased) { return rebased; }
+    const { context } = resolved;
     const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
     const head = ports.gates.captureFinalIntegrationTree(checkout);
     context.missionHeadSha = head.ok ? head.commit ?? null : null;

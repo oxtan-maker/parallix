@@ -266,6 +266,12 @@ async function integrate(args: string[], options: import('../../../application/i
     options.verificationActionPolicy, options.operatorInvocation === true)).integrate(args, options);
 }
 
+/** The review step's tests action; the next-action owner decides whether anything runs. */
+async function runReviewStepTests(slug: string, options: import('../../../application/integrate-workflow.js').IntegrateOptions) {
+  return createIntegrateWorkflow(createIntegratePorts(options.configuration,
+    options.verificationActionPolicy, options.operatorInvocation === true)).runReviewStepTests(slug, options);
+}
+
 export {
   prepareNoisePatchForSquash,
   restoreNoisePatchAfterSquash,
@@ -392,6 +398,7 @@ const integrateWithHelpers = Object.assign(integrate, {
 export default integrateWithHelpers;
 export {
   integrate,
+  runReviewStepTests,
   parseIntegrateArgs,
   buildIntegrationContext,
   getPrimaryWorktree,

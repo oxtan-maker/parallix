@@ -1,4 +1,5 @@
 import { createReviewDecisionRevocationUseCase, createReviewVerbCommands } from './cli-review-verbs.js';
+import { runReviewStepTestsForSlug } from './review-step-tests.js';
 import { createBriefWriteCommands } from './cli-brief-writes.js';
 
 import { validateDeclaredGates } from "../adapters/cli/commands/review-preparation.js";
@@ -26,9 +27,22 @@ import type { FixedVerificationNextAction } from '../application/verification-po
 import { createDefectProvenanceCommand } from '../interfaces/cli/defect-provenance-write.js';
 import { readDefectProvenanceBackfillEntries } from '../adapters/cli/commands/defect-provenance-input.js';
 
-/** Return a recorded verdict through the owner selected for its exact next action. */
+/**
+ * Return a recorded verdict through the owner selected for its exact next action.
+ * Only a direct operator verdict reaches here, so this is the fixed sequence's
+ * human turn: an approval that leaves the mission at the integration handoff
+ * owes its tests, and the tests-action owner runs them only when configured
+ * tests have no exact-current passing run. An agent reviewer verdict never
+ * reaches this continuation, so agent approval alone schedules no tests
+ * (TASK-2859.17).
+ */
 export async function continueVerdictThroughActionOwner(context: CliCommandContext, slug: string,
   action: FixedVerificationNextAction): Promise<void> {
+  if (action.kind === 'integration-handoff') {
+    await context.scope.withMissionAndGraph((missionServicesFn, services) =>
+      runReviewStepTestsForSlug(slug, context.configuration, context.rootDir, missionServicesFn, services));
+    return;
+  }
   if (action.kind === 'repair' && action.reason === 'findings-pending') {
     await context.commands().active([slug], { operatorInvocation: false });
     return;

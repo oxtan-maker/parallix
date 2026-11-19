@@ -1,6 +1,6 @@
 import { retainedApprovalFeedbackAllowsLanding } from './integrate/approval-retention.js';
 import { resumePendingIntegrationRepair } from './integrate/repair-resumption.js';
-import { runIntegrateEntry } from './integrate-entry.js';
+import { runIntegrateEntry, runReviewStepTestsEntry } from './integrate-entry.js';
 import { reviewBeforeIntegration } from './integrate/review-before-integration.js';
 import type { MissionLoadResult } from './domain-ports.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from './ports/integration-records.js';
@@ -489,7 +489,7 @@ class IntegrateWorkflow {
     printIntegrationReadiness,
     runIntegrationRebase: this.dependencies.runIntegrationRebase,
     predictIntegrationRebase: this.dependencies.predictIntegrationRebase,
-    runTestsAction: createTestsActionExecutor(this.dependencies.ports, this.dependencies).runTestsAction,
+    runReviewStepTests: (slug: string, options: IntegrateOptions = {}) => runReviewStepTestsEntry(slug, options, this.dependencies.ports, createTestsActionExecutor(this.dependencies.ports, this.dependencies)),
     parseIntegrateArgs,
     resolveBounceImplementer,
     resolveIntegrationTaskPath,

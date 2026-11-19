@@ -109,7 +109,6 @@ async function runDryRun(
  * what was observed.
  *
  * An item that asks for integration is left on the board for human landing.
- * Lead may execute its public non-landing dry-run when idle capacity permits.
  *
  * Without `--once` the run keeps watching, polling every `--poll` seconds,
  * until the operator stops it; `--once` takes a single pass and exits.

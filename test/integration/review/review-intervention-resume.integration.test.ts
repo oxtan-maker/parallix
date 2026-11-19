@@ -827,3 +827,27 @@ it('retries a persisted operator correction after failed revocation and a databa
   assert.equal(completed.mission.review!.rounds.length, 3);
   assert.equal(completed.mission.review!.reviewEvents.filter(e => e.followUpReference?.startsWith('forgejo:')).length, 2);
 });
+
+it('a human approval that reaches the integration handoff starts the tests action once; agent and repair actions never do (TASK-2859.17)', async () => {
+  const dispatched: string[] = [];
+  const testsStarted: string[] = [];
+  const registry: Record<string, Command> = {
+    active: async args => { dispatched.push(`active:${args[0]}`); },
+    review: async args => { dispatched.push(`review:${args[0]}`); },
+  };
+  const context = {
+    rootDir: '/fixture', packageDir: '/fixture', configuration: resolveConfiguration({}),
+    // The tests action runs through the mission-and-graph scope, never a public command.
+    scope: { withMissionAndGraph: async () => { testsStarted.push(SLUG); } } as unknown as CliCommandContext['scope'],
+    active: registry.active!, commands: () => registry,
+  } satisfies CliCommandContext;
+  await continueVerdictThroughActionOwner(context, SLUG, { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
+  assert.deepEqual(testsStarted, [SLUG]);
+  assert.deepEqual(dispatched, [], 'the handoff dispatches no review or repair command');
+  for (const action of [{ kind: 'agent-review', reason: 'review-unfinished' }, { kind: 'repair', reason: 'findings-pending' },
+    { kind: 'human-review', reason: 'agent-review-approved' }] as const) {
+    await continueVerdictThroughActionOwner(context, SLUG, action);
+  }
+  assert.deepEqual(testsStarted, [SLUG], 'no other action starts the tests');
+  assert.deepEqual(dispatched, [`review:${SLUG}`, `active:${SLUG}`]);
+});

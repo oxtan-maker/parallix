@@ -211,7 +211,7 @@ The repository owner is responsible for complete, accurate coverage: gate names
 or arbitrary integration commands alone prove no relationship to `all`.
 Every configured integration gate must pass, with all named coverage gates
 present, against unchanged clean inputs. A successful complete
-`px integrate <slug> --dry-run` can establish reusable evidence when
+`px integrate <slug> --dry-run`, or the review step's automatic tests, can establish reusable evidence when
 `integrationCoverage` is configured. Without that optional mapping, the same
 complete green execution remains successful and visible as gate-run evidence,
 but cannot prove verification-command coverage or be reused by `px verify`.
@@ -229,7 +229,7 @@ or `backlog/completed/` bookkeeping paths.
 Local integration validation follows the same completed-rebase rule. Wherever
 Parallix reuses a successful local integration result on its validated revision,
 such as repaired-gate validation at landing or repair resumption,
-integration-backed verification, integration prevalidation and the board, it
+integration-backed verification and the board, it
 also reuses it after a completed rebase, whatever the rebase brought in:
 upstream source, tests, dependencies or configuration, conflicts resolved in
 Parallix or a terminal, and chains of rebases. Reuse reports the original
