@@ -152,8 +152,8 @@ test('preserves only coverage-backed approval after a completed landing repair (
     { approvalCoverage: new Map([[1, unverifiable]]) })), 'unavailable');
 });
 
-function rebase(outcome: RebaseMeasurement['outcome'], before: string | null, after: string | null): RebaseMeasurement {
-  return { id: 'rb', repositoryId: 'repo', missionId: 'task-x', operationId: 'op', generation: 1, sourceId: 'rb',
+function rebase(outcome: RebaseMeasurement['outcome'], before: string | null, after: string | null, id = 'rb'): RebaseMeasurement {
+  return { id, repositoryId: 'repo', missionId: 'task-x', operationId: 'op', generation: 1, sourceId: id,
     stage: 'direct-rebase', attempt: 1, outcome, baseBranch: 'main', revisionBefore: before, revisionAfter: after,
     conflicts: [], occurredAt: at(12) };
 }
@@ -164,10 +164,11 @@ test('uses stable change identity for rebases and marks re-scope or unmodelled r
   const identity = { branchHead: () => null, changeIdentity: (revision: string) => ids[revision] ?? null };
   assert.deepEqual(entries(mapped(null, null, [], [],
     { identity, rebases: [rebase('clean', 'before', 'clean')] })), []);
+  // Rebases are outside the model (PX-0074.01): even one that changed the patch leaves the judged state as it was.
   assert.deepEqual(entries(mapped(null, null, [], [],
-    { identity, rebases: [rebase('resolved', 'before', 'changed')] })), [{ kind: 'unmodelled-change' }]);
-  assert.equal(failure(mapped(null, null, [], [],
-    { identity, rebases: [rebase('clean', 'missing', 'clean')] })), 'unavailable');
+    { identity, rebases: [rebase('resolved', 'before', 'changed')] })), []);
+  assert.deepEqual(entries(mapped(null, null, [], [],
+    { identity, rebases: [rebase('clean', 'missing', 'clean')] })), []);
   const approved = decide(start(), 'approve');
   const currentGateHistory = entries(mapped(approved, gate('pass', rev('c'), rev('c')), [], [], { identity }));
   assert.deepEqual(currentGateHistory, [
@@ -199,6 +200,28 @@ test('uses stable change identity for rebases and marks re-scope or unmodelled r
     { kind: 'verdict', check: 'agent', passed: false }, { kind: 'repair', check: 'agent' },
     { kind: 'unmodelled-change' }, { kind: 'verdict', check: 'agent', passed: true },
   ]);
+});
+
+test('a rebase that changed the patch leaves approvals and gate results standing, and the agent that ran them is not an input (PX-0074.01)', () => {
+  const ids: Record<string, string> = { [rev('b')]: 'before-rebase', [rev('c')]: 'after-rebase' };
+  const identity = { branchHead: () => null, changeIdentity: (revision: string) => ids[revision] ?? null };
+  const approved = decide(start(), 'approve');
+  const standing = [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'tests', passed: true }];
+  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [],
+    { identity, rebases: [rebase('resolved', rev('b'), rev('c'))] })), standing, 'the rebase carried the judged revision');
+  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [], { identity })),
+    [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'unmodelled-change' }],
+    'without a rebase record the same movement is still an unmodelled change');
+  // An agent that left the rebase unfinished and completed it by hand: the next rebase observation starts from the head it left.
+  const unfinished = [{ ...rebase('failed', rev('b'), rev('b'), 'run-1'), occurredAt: at(11) },
+    { ...rebase('no-op', rev('c'), rev('c'), 'run-2'), occurredAt: at(12) }];
+  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [], { identity, rebases: unfinished })), standing,
+    'a failed rebase that was later completed restores the judged state');
+  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [], { identity, rebases: unfinished.slice(0, 1) })),
+    [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'unmodelled-change' }], 'an unfinished rebase explains no movement by itself');
+  const [round] = approved.rounds;
+  const switched: typeof approved = { ...approved, rounds: [{ ...round, implementer: agentFamily('codex'), reviewer: agentFamily('custom') }] };
+  assert.deepEqual(entries(mapped(switched, null, [], [], { identity })), entries(mapped(approved, null, [], [], { identity })));
 });
 
 test('declared-gates returns reset history and malformed facts fall back with typed reasons (TASK-2859.08)', () => {

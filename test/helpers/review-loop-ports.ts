@@ -54,6 +54,7 @@ export interface ReviewLoopFakeOverrides {
   readonly missionStore?: ReviewLoopPorts['missionStore'];
   readonly lifecycle?: ReviewLoopPorts['lifecycle'];
   readonly reviewStarts?: ReviewLoopPorts['reviewStarts'];
+  readonly policyActions?: ReviewLoopPorts['policyActions'];
 }
 
 export interface ReviewLoopFake {
@@ -165,6 +166,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       ...overrides.preReview,
     },
     ...(overrides.reviewStarts ? { reviewStarts: overrides.reviewStarts } : {}),
+    ...(overrides.policyActions ? { policyActions: overrides.policyActions } : {}),
     output: {
       emit: event => renderReviewLoopEvent(event, ports.output),
       log: message => { logs.push(message); },

@@ -209,22 +209,34 @@ function gateSlot(gates: IntegrationGateEvidence | null, testsAlreadyFailed: boo
   }
   return { observed: true };
 }
-function rebaseSlots(rebases: readonly RebaseMeasurement[], identity: ChangeIdentityPort | undefined): Slot[] {
-  return rebases.flatMap((rebase, index) => {
-    if (!isSuccessfulRebaseOutcome(rebase.outcome)) { return []; }
-    if (rebase.revisionBefore === rebase.revisionAfter) { return []; }
-    if (!identity || !rebase.baseBranch || !rebase.revisionBefore || !rebase.revisionAfter) {
-      reject('unmodelled-history', `rebase ${rebase.id} has no comparable change identity`);
+/**
+ * Rebases are outside the model: a change judged before a rebase keeps its judgement after it, even when conflict
+ * resolution changed the patch (origin CI owns that rare case). Every revision a completed rebase carried from
+ * `before` to `after` resolves to the identity of the first revision in its chain. A conflicted or failed run is
+ * usually an agent that left the rebase unfinished, so the next rebase observation, which starts from whatever head
+ * the agent finally left, continues the same chain.
+ */
+function rebaseTransparent(identity: ChangeIdentityPort | undefined, rebases: readonly RebaseMeasurement[]): ChangeIdentityPort | undefined {
+  if (!identity) { return identity; }
+  const root = new Map<string, string>();
+  const ordered = [...rebases].sort((left, right) => instant(left.occurredAt, 'rebase observation') - instant(right.occurredAt, 'rebase observation')
+    || left.attempt - right.attempt);
+  let unfinished: { readonly id: string; readonly root: string } | null = null;
+  for (const rebase of ordered) {
+    const before = rebase.revisionBefore;
+    if (!before) { continue; }
+    if (unfinished && rebase.id !== unfinished.id) { root.set(before, unfinished.root); }
+    const base = root.get(before) ?? before;
+    if (isSuccessfulRebaseOutcome(rebase.outcome)) {
+      if (rebase.revisionAfter) { root.set(rebase.revisionAfter, base); }
+      unfinished = null;
+    } else if (rebase.outcome === 'conflict' || rebase.outcome === 'failed') {
+      unfinished = { id: rebase.id, root: base };
     }
-    const comparableIdentity = identity as ChangeIdentityPort;
-    const baseBranch = rebase.baseBranch as string, beforeRevision = rebase.revisionBefore as string,
-      afterRevision = rebase.revisionAfter as string;
-    const before = comparableIdentity.changeIdentity(beforeRevision, baseBranch);
-    const after = comparableIdentity.changeIdentity(afterRevision, baseBranch);
-    if (before === null || after === null) { reject('unavailable', `rebase ${rebase.id} change identity is unavailable`); }
-    return before === after ? [] : [{ at: instant(rebase.occurredAt, 'rebase observation'), order: 2e6 + index,
-      entry: { kind: 'unmodelled-change' } as const }];
-  });
+  }
+  if (root.size === 0) { return identity; }
+  return Object.assign(Object.create(identity) as ChangeIdentityPort, {
+    changeIdentity: (revision: string, targetBranch: string) => identity.changeIdentity(root.get(revision) ?? revision, targetBranch) });
 }
 function lifecycleSlots(lifecycle: readonly LifecycleHistoryEntry[]): Slot[] {
   return lifecycle.flatMap((event, index) => {
@@ -253,7 +265,7 @@ function mappedHistorySlots(review: Review | null, repairRows: readonly Operatio
   repairCheckpoints: readonly CheckpointData[], facts: VerificationHistoryFacts): Slot[] {
   const repairs = repairsFrom(repairRows, repairCheckpoints);
   const slots = [...roundSlots(review?.rounds ?? [], repairs, facts.approvalCoverage ?? new Map(), facts.identity),
-    ...rebaseSlots(facts.rebases ?? [], facts.identity), ...lifecycleSlots(facts.lifecycle ?? []),
+    ...lifecycleSlots(facts.lifecycle ?? []),
     ...ambiguousRepairSlots(repairs)];
   slots.sort((left, right) => left.at - right.at || left.order - right.order);
   return truncateAtPendingRepair(slots);
@@ -275,8 +287,9 @@ export function adaptVerificationHistory(review: Review | null, gates: Integrati
   repairRows: readonly OperationalHistoryEntry[] = [], repairCheckpoints: readonly CheckpointData[] = [],
   facts: VerificationHistoryFacts = {}): PolicyHistory {
   try {
-    const { mapped, observed } = withGateSlot(mappedHistorySlots(review, repairRows, repairCheckpoints, facts),
-      gates, review, facts.identity);
+    const identity = rebaseTransparent(facts.identity, facts.rebases ?? []);
+    const { mapped, observed } = withGateSlot(mappedHistorySlots(review, repairRows, repairCheckpoints, { ...facts, identity }),
+      gates, review, identity);
     return { ok: true, entries: mapped.map(item => item.entry), tests: observed ? 'observed' : 'unobserved' };
   } catch (error) {
     const failure = error instanceof Unmapped ? { kind: error.kind, message: error.message }

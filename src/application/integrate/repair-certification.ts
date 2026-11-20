@@ -1,7 +1,7 @@
 import { StructuredFailure, failureReason, recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { VerifyResult } from '../rebound-kernel.js';
 import { missionId, type Mission } from '../../domain/mission.js';
-import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
+import { effectiveRepairObligations, isRetainedGateRepair } from '../../domain/repair-coverage.js';
 import { RepairCheckpointService, repairCheckpointFailure } from '../repair-checkpoint-service.js';
 import { runCheckpointVerification } from '../rebound-checkpoints.js';
 import type { IntegrationMissionServices, IntegrationGateDefinition } from '../ports/integration-records.js';
@@ -26,7 +26,7 @@ export async function verifyRestartedRepair(input: {
   const checkpoint = obligations.at(-1);
   const commands = [...new Set(obligations.map(cp => cp.repair!.command))];
   const legacySingle = isLegacyScalarRepair(obligations);
-  if (checkpoint && commands.some(command => !input.gates.some(gate => gate.command === command))) {
+  if (checkpoint && commands.some(command => isRetainedGateRepair(command) && !input.gates.some(gate => gate.command === command))) {
     throw new Error('Outstanding repair requires its original authorized verifier before integration');
   }
   const collectionBased = Boolean(checkpoint) && !legacySingle;

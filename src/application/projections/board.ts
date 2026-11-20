@@ -9,7 +9,7 @@ import type {
   CommandAvailability,
   MissionCard,
 } from './mission-board.js';
-import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 
 // ---------------------------------------------------------------------------
 // BoardProjection — versioned read model consumed by Ink and web clients

@@ -200,7 +200,7 @@ const passedRun = (gateRunId: string | null, revision = HEAD, ran = plan): GateR
   current: true, carried: null, gates: ran, outcomes: ran.map(gate => ({ ...gate, exitCode: 0, result: 'passed' as const })) });
 
 async function testsAction(options: { status?: Mission['status']; review?: Mission['review']; result?: IntegrationGateRunResult;
-  previous?: GateRunRecord | null; claim?: boolean; rebase?: () => void; selection?: 'tests' | null; refuseRepair?: string;
+  previous?: GateRunRecord | null; claim?: boolean; holder?: string; stillSelected?: (_revision: string) => Promise<boolean>; rebase?: () => void; selection?: 'tests' | null; refuseRepair?: string;
   redUnreadable?: boolean; results?: IntegrationGateRunResult[]; validationWriteFails?: boolean; configured?: typeof gates } = {}) {
   const slug = 'px-tests-action';
   const calls: string[] = [];
@@ -220,7 +220,8 @@ async function testsAction(options: { status?: Mission['status']; review?: Missi
   let runs = 1;
   const ports = stubIntegrateWorkflowPorts({
     process: { cwd: () => '/fixture/mission',
-      claimIntegration: async () => options.claim === false ? null : async () => { calls.push('release'); } },
+      claimIntegration: async () => options.claim === false ? null : async () => { calls.push('release'); },
+      integrationClaimHolder: () => options.holder ?? null },
     git: { git: () => ({ status: 0, stdout: '', stderr: '' }), getCurrentBranch: () => `mission/${slug}` },
     gates: {
       readGateRun: () => record,
@@ -252,7 +253,7 @@ async function testsAction(options: { status?: Mission['status']; review?: Missi
   });
   const executionContext = missionExecutionContext({ missionId: slug, missionWorktree: '/fixture/mission' });
   const run = () => quiet(() => executor.runTestsAction({ slug, policySelection: options.selection === undefined ? 'tests' : options.selection,
-    executionContext, missionServicesFn: async () => services,
+    executionContext, missionServicesFn: async () => services, stillSelected: options.stillSelected,
     seams: {
       // The rebound kernel boundary: it owns the transition to active and the repair rerun.
       routeIntegrationGateFailureFn: async input => {
@@ -320,10 +321,11 @@ test('a restarted tests action reuses the settled exact-head run instead of writ
   assert.equal(outcome.kind === 'completed' && outcome.evidence?.gateRunId, 'run-1');
 });
 
-test('a policy selection never starts the tests action in the landing lane or before a review lane exists (TASK-2859.14)', async () => {
+test('a policy selection runs the tests action after an agent approval moved the lane, never landing, and not before a review lane exists (TASK-2859.14, PX-0074.01)', async () => {
   const fixture = await testsAction({ status: 'integration', review: approvedReview('px-tests-action') });
-  assert.equal((await fixture.run()).kind, 'not-selected', 'integration-lane');
-  assert.deepEqual(fixture.calls, ['release'], 'no rebase or gate ran');
+  assert.equal((await fixture.run()).kind, 'completed', 'integration-lane');
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release'], 'tests ran without landing');
+  assert.equal(fixture.mission().status, 'integration', 'no approval, lane change or landing was recorded');
   const reviewLane = await testsAction({ selection: null });
   assert.equal((await reviewLane.run()).kind, 'not-selected', 'the fixed sequence reviews before it tests');
   assert.deepEqual(reviewLane.calls, ['release']);
@@ -365,11 +367,28 @@ for (const [name, options] of [
   });
 }
 
+test('a tests recommendation is asked again on the rebased head and a changed choice runs no gate (TASK-2859.19)', async () => {
+  const asked: string[] = [];
+  const declined = await testsAction({ stillSelected: async revision => { asked.push(revision); return false; } });
+  const outcome = await declined.run();
+  assert.equal(outcome.kind, 'not-selected');
+  assert.deepEqual(declined.calls, ['rebase', 'release'], 'the mandatory rebase ran, then no gate');
+  assert.equal(asked.length, 1);
+  assert.match(asked[0] ?? '', /^[0-9a-f]{40}$/, 'the policy is asked about the head that would be tested');
+  const kept = await testsAction({ stillSelected: async () => true });
+  assert.equal((await kept.run()).kind, 'completed');
+  assert.deepEqual(kept.calls, ['rebase', 'gates', 'release']);
+});
+
 test('tests-action entries that cannot complete hand off with a typed reason (TASK-2859.14)', async () => {
   const concurrent = await testsAction({ claim: false });
   assert.deepEqual(await concurrent.run(), { kind: 'human-handoff', reason: 'concurrent-entry',
     detail: 'Integration of px-tests-action is already running in another process.' });
   assert.deepEqual(concurrent.calls, []);
+  const named = await testsAction({ claim: false, holder: 'process 4242' });
+  assert.deepEqual(await named.run(), { kind: 'human-handoff', reason: 'concurrent-entry',
+    detail: 'Integration of px-tests-action is already running in process 4242.' }, 'the refused second actor is told who owns the claim (TASK-2859.19)');
+  assert.deepEqual(named.calls, [], 'the refused actor starts nothing');
   const conflict = await testsAction({ rebase: () => { throw Object.assign(new Error('conflict'), { name: 'IntegrationAbort' }); } });
   assert.equal((await conflict.run() as { reason?: string }).reason, 'rebase-dead-end');
   assert.deepEqual(conflict.calls, ['rebase', 'release'], 'no gate runs after a rebase dead end');

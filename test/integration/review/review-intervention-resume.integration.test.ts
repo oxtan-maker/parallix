@@ -41,7 +41,8 @@ import { unknownReviewFlags } from '../../../src/adapters/review/review-cli-flag
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../src/adapters/review/review-state-mapping.js';
 import { readAllEvents } from '../../../src/adapters/review/review-events.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
-import { fixedVerificationNextAction, REVIEW_START_DECISION_EVENT } from '../../../src/application/verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from '../../../src/application/verification-policy/fixed-next-action.js';
+import { REVIEW_START_DECISION_EVENT } from '../../../src/application/verification-policy/review-start-decision.js';
 import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
 import { createVerdictCommand } from '../../../src/interfaces/cli/review-verbs.js';
 import { reviewVerbPorts } from '../../../src/composition/cli-review-verbs.js';

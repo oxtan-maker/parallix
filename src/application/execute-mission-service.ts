@@ -12,7 +12,7 @@ import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
 import { missionId, isMissionSlugCandidate } from '../domain/mission.js';
 import { integrationRepairNeedsReview } from '../domain/integration-repair-policy.js';
-import { fixedVerificationNextAction } from './verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from './verification-policy/fixed-next-action.js';
 import type {
   AgentLaunchOutcome,
   AgentLaunchPlan,

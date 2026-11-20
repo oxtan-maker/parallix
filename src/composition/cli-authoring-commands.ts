@@ -23,7 +23,7 @@ import { type Command } from '../interfaces/cli/runtime.js';
 
 import { inferSlug } from '../adapters/filesystem/mission-paths.js';
 import type { CliCommandContext } from './cli-service-scope.js';
-import type { FixedVerificationNextAction } from '../application/verification-policy/review-start-decision.js';
+import type { FixedVerificationNextAction } from '../application/verification-policy/fixed-next-action.js';
 import { createDefectProvenanceCommand } from '../interfaces/cli/defect-provenance-write.js';
 import { readDefectProvenanceBackfillEntries } from '../adapters/cli/commands/defect-provenance-input.js';
 

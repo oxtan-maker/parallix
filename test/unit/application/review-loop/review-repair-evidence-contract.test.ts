@@ -44,7 +44,10 @@ function recoveryEvidenceRef(command: string, cwd: string, incidentId: string): 
   };
 }
 
-async function aggregateReviewScenario() {
+interface RepairShape { readonly command: string; readonly gateKey?: string }
+
+/** `shape` replaces the two gate-keyed repairs, e.g. with a workflow label (px-0074.02 shape). */
+async function aggregateReviewScenario(shape?: readonly RepairShape[]) {
   const approved = approvedReview(slug);
   const round = currentReviewRound(approved);
   const review = { ...approved, rounds: replaceCurrentRound(approved, { ...round,
@@ -62,13 +65,14 @@ async function aggregateReviewScenario() {
   const mission = fixtureMission(slug, {
     status: 'review', reviewPreparationPending: true, assignee: agentFamily('codex'), review,
     declaredGates: commands, successCriteria: criteria,
-    checkpoints: commands.map((command, index) => ({
+    checkpoints: (shape ?? commands.map((command, index) => ({ command,
+      gateKey: index === 0 ? 'static-analysis' : 'integration-ci' }))).map(({ command, gateKey }, index) => ({
       ...template,
       name: `CP-${index + 1}`,
       recording: { recordedAt: '2026-11-16T12:05:00Z', recordedRound: 1, missionRevision: index + 1 },
       goalCheck: [{ criterion: criteria[index], evidence: 'test/unit/application/review-loop/review-repair-evidence-contract.test.ts', recordedRound: 1 }],
       repair: {
-        incidentId: `repair-${index + 1}`, gateKey: index === 0 ? 'static-analysis' : 'integration-ci',
+        incidentId: `repair-${index + 1}`, ...(gateKey ? { gateKey } : {}),
         command, authorizedGates: commands, authorizedCriteria: criteria, attempt: 1,
         evidenceRecorded: true, verified: false,
         occurrence: {
@@ -171,3 +175,57 @@ for (const fault of ['missing', 'mismatched'] as const) {
     assert.deepEqual(scenario.store.mission(), before, 'failed evidence reads certify no checkpoint');
   });
 }
+
+test('direct Review never reads retained evidence for a non-gate review-preparation repair (TASK-2864)', async () => {
+  const scenario = await aggregateReviewScenario([{ command: 'review-preparation' }]);
+  // The retained adapter throws for any label it never captured.
+  scenario.fake.ports.retainedRepair!.read = async command => {
+    scenario.reads.push(command);
+    throw new Error(`Retained evidence unavailable for ${command}`);
+  };
+  await runReviewLoop({ slug, isContinue: true }, scenario.fake.ports);
+  assert.deepEqual(scenario.reads, [], 'workflow labels have no retained capture to read');
+  assert.equal(scenario.configuredReruns(), 1);
+  assert.deepEqual(scenario.store.mission().checkpoints.map(checkpoint => checkpoint.repair!.verified), [true],
+    'the configured rerun verifies the label repair through the existing certification owner');
+});
+
+for (const fault of ['exit-zero', 'capture-incomplete', 'wrong-cwd'] as const) {
+  test(`real gate repair still fails closed on ${fault} retained evidence (TASK-2864)`, async () => {
+    const scenario = await aggregateReviewScenario();
+    scenario.fake.ports.retainedRepair!.read = async command => {
+      scenario.reads.push(command);
+      const evidence = recoveryEvidenceRef(command, scenario.fake.ports.worktree, 'original');
+      return { stdout: '', stderr: '', evidence: fault === 'exit-zero' ? { ...evidence, exitCode: 0 }
+        : fault === 'capture-incomplete' ? { ...evidence, captureComplete: false } : { ...evidence, cwd: '/elsewhere' } };
+    };
+    await assert.rejects(runReviewLoop({ slug, isContinue: true }, scenario.fake.ports), error => {
+      assert.equal((error as { failureReason?: FailureReason }).failureReason?.code, 'incomplete-evidence');
+      assert.match(String(error), /evidence is incomplete or mismatched/);
+      return true;
+    });
+    assert.equal(scenario.configuredReruns(), 0);
+  });
+}
+
+test('lookup failure text names the underlying retained-evidence error for a real gate repair (TASK-2864)', async () => {
+  const scenario = await aggregateReviewScenario();
+  scenario.fake.ports.retainedRepair!.read = async () => { throw new Error('capture expired'); };
+  await assert.rejects(runReviewLoop({ slug, isContinue: true }, scenario.fake.ports), error => {
+    assert.equal((error as { failureReason?: FailureReason }).failureReason?.code, 'incomplete-evidence');
+    assert.match(String(error), /Original repair evidence is unavailable: capture expired/);
+    return true;
+  });
+});
+
+test('a gate repair without gateKey beside a workflow label certifies through one collection decision (TASK-2864)', async () => {
+  const scenario = await aggregateReviewScenario([{ command: commands[0] }, { command: 'review-preparation' }]);
+  scenario.fake.ports.retainedRepair!.read = async command => {
+    scenario.reads.push(command);
+    return { evidence: recoveryEvidenceRef(command, scenario.fake.ports.worktree, 'original'), stdout: 'failed', stderr: '' };
+  };
+  await runReviewLoop({ slug, isContinue: true }, scenario.fake.ports);
+  assert.deepEqual(scenario.reads, [commands[0]], 'only the real gate is read');
+  assert.equal(scenario.configuredReruns(), 1);
+  assert.deepEqual(scenario.store.mission().checkpoints.map(checkpoint => checkpoint.repair!.verified), [true, true]);
+});

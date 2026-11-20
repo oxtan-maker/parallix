@@ -192,7 +192,7 @@ test('board integration with a resolved context keeps every preflight safeguard 
   t.after(() => release());
   lines.length = 0;
   await assert.rejects(service.execute([slug, '--dry-run']), /exited with code 1/);
-  assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in another process`));
+  assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in process \\d+`));
 });
 
 test("base-started console execute, review preparation, review and retry resolve Mission context (TASK-2778)", async t => {
@@ -366,7 +366,7 @@ test('a terminal integrate run that loses the exclusive claim adds no base workt
   const result = await runIntegrateEntry([slug], { configuration: fixture.configuration, exitFn: () => {} }, ports, steps);
   assert.deepEqual(result, { exitCode: 1 });
   assert.equal(stepsRun, 0);
-  assert.match(lines.join('\n'), /already running in another process/);
+  assert.match(lines.join('\n'), /already running in process \d+/);
   assert.equal(worktrees(), before, 'the losing run must not add the recorded base checkout');
 });
 
@@ -409,6 +409,6 @@ test('board admission and its supervisor add no base worktree before the shared 
   const store = { load: async () => ({ kind: 'found', version: 1, mission: { id: slug, status: 'integration', labels: ['ai_sdlc'], brief: null, review: null, checkpoints: [] } }) };
   const service = createBoardIntegrateService({ store } as never, NO_EXECUTION_ACTIVITY, fixture.configuration, fixture.primary);
   await assert.rejects(service.execute([slug, '--dry-run']), /exited with code 1/);
-  assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in another process`));
+  assert.match(lines.join('\n'), new RegExp(`Integration of ${slug} is already running in process \\d+`));
   assert.equal(worktrees(), before, 'the losing board run must not add the recorded base checkout');
 });

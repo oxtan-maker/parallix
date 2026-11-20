@@ -2,17 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import { OperationalHistoryService } from '../../../../src/application/services/operational-history-service.js';
+import { fixedVerificationNextAction } from '../../../../src/application/verification-policy/fixed-next-action.js';
 import {
+  REVIEW_ENTRY_PIN_EVENT,
   REVIEW_START_DECISION_EVENT,
-  fixedVerificationNextAction,
   observePolicyReviewStart,
   observePolicyTestsStart,
   observeReviewStartDecision,
+  reviewEntryPin,
   reviewStartDecision,
   reviewStartDecisionKey,
+  selectPolicyAction,
 } from '../../../../src/application/verification-policy/review-start-decision.js';
 import type { ReviewStartDecision, ReviewStartDecisionInput, ReviewStartFailure,
-  ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
+  ReviewEntryPinInput, ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
 import { attentionAction, attentionReason } from '../../../../src/application/projections/board.js';
 import { projectMissionCard, type MissionCard, type MissionOperationalFacts } from '../../../../src/application/projections/mission-board.js';
 import type { GateState } from '../../../../src/application/projections/gate-observation.js';
@@ -165,7 +168,8 @@ test('a policy selection or known-missing tests in the landing lane reach the te
     ['fixing-repairs-first', decide('review', 'fixing', selected), { kind: 'repair', reason: 'findings-pending' }],
     ['pending-repair-first', decide('active', 'approved', { ...selected, pendingRepair: true }), { kind: 'repair', reason: 'repair-pending' }],
     ['withdrawn-approval-reviews-first', decide('review', 'reviewing', { ...selected, reviewRequired: true }), { kind: 'agent-review', reason: 'review-unfinished' }],
-    ['integration-lane-is-landing', decide('integration', 'approved', selected), { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }],
+    ['integration-lane-after-agent-approval-still-owes-selected-tests (PX-0074.01)', decide('integration', 'approved', selected), { kind: 'tests', reason: 'policy-selected' }],
+    ['integration-lane-never-tests-while-fixing', decide('integration', 'fixing', selected), { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }],
     ['owned-action-waits', decide('review', 'reviewing', { ...selected, ownedAction: true }), { kind: 'wait', reason: 'action-owned' }],
     ['blocker-hands-off', decide('review', 'reviewing', { ...selected, humanOnlyReason: 'operator' }), { kind: 'human-handoff', reason: 'recorded-blocker' }],
     ['escalation-hands-off', decide('active', null, { ...selected, humanIntervention: true }), { kind: 'human-handoff', reason: 'human-intervention' }],
@@ -306,6 +310,45 @@ function historyRepository() {
   return { entries, repository };
 }
 
+function assignment(mission: string, overrides: Partial<ReviewEntryPinInput> = {}): ReviewEntryPinInput {
+  return {
+    missionId: missionId(mission), repositoryId: repositoryId('repository-1'), changeIdentity: `patch-${mission}`,
+    configuredMode: 'pilot', artifactSha256: 'pinned-hash', failureReason: null,
+    ...overrides,
+  };
+}
+
+test('OperationalHistoryService pins each pilot mission once under concurrent entry, with no arms (TASK-2859.19)', async () => {
+  const { entries, repository } = historyRepository();
+  const services = Array.from({ length: 5 }, () => new OperationalHistoryService(repository));
+  const pinned = await Promise.all(services.map((service, index) =>
+    service.resolveReviewEntryPin(assignment(`task-entry-${index + 1}`))));
+  assert.deepEqual(pinned.map(row => row?.missionId), [1, 2, 3, 4, 5].map(index => `task-entry-${index}`));
+  for (const row of pinned) {
+    assert.equal(row?.artifactSha256, 'pinned-hash', 'every pilot mission records the pinned artifact hash');
+    assert.equal('arm' in (row ?? {}), false, 'no arm or sentinel assignment exists');
+  }
+  const racing = await Promise.all(services.map(service =>
+    service.resolveReviewEntryPin(assignment('task-racing', { changeIdentity: 'patch-racing' }))));
+  assert.equal(new Set(racing.map(row => row?.idempotencyKey)).size, 1, 'competing entries adopt one pin');
+  const replayed = await new OperationalHistoryService(repository)
+    .resolveReviewEntryPin(assignment('task-entry-1', { changeIdentity: 'replacement-patch' }));
+  assert.equal(replayed?.changeIdentity, 'patch-task-entry-1');
+  assert.equal(entries.filter(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT
+    && (JSON.parse(entry.eventData) as { missionId: string }).missionId === 'task-entry-1').length, 1);
+});
+
+test('pilot pin identity is repository-scoped (TASK-2859.19)', async () => {
+  const { entries, repository } = historyRepository();
+  const service = new OperationalHistoryService(repository);
+  const first = await service.resolveReviewEntryPin(assignment('task-shared'));
+  const second = await service.resolveReviewEntryPin(assignment('task-shared', {
+    repositoryId: repositoryId('repository-2'),
+  }));
+  assert.equal(entries.filter(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT).length, 2);
+  assert.notEqual(first?.idempotencyKey, second?.idempotencyKey);
+});
+
 test('review-start decision keeps every identity and unknown explicit (TASK-2859.09)', () => {
   const record = reviewStartDecision(decision({
     artifactSha256: null,
@@ -422,7 +465,12 @@ function policyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
     loadPolicy: () => ({ mode: 'shadow', hash: 'pinned-hash', artifact: parsedArtifact }),
     readHistory: async () => ({ ok: true, entries: [], tests: 'unobserved' }),
     identity: { branchHead: () => 'abc1234', changeIdentity: () => 'patch-123', onlyBookkeepingSince: () => false },
-    writer: { recordReviewStartDecision: async input => { records.push(input); return true; } },
+    writer: {
+      recordReviewStartDecision: async input => { records.push(input); return true; },
+      resolveReviewEntryPin: async input => input.configuredMode === 'pilot'
+        ? reviewEntryPin(input)
+        : null,
+    },
     diagnostic: failure => { failures.push(failure); },
     ...overrides,
   };
@@ -450,8 +498,16 @@ test('shadow and pilot evaluate recommendations, probabilities, overrides and sw
   const pilot = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' } });
   assert.equal(await observePolicyReviewStart(startFacts({ actualAction: 'human', agentRunId: null }), pilot.ports), 'recorded');
   assert.equal(pilot.records[0]?.configuredMode, 'pilot');
-  assert.equal(pilot.records[0]?.effectiveMode, 'shadow');
-  assert.equal(pilot.records[0]?.operatorOverride, false);
+  assert.equal(pilot.records[0]?.effectiveMode, 'fixed', 'a human turn before agent approval falls back to the fixed policy');
+  assert.equal(pilot.records[0]?.failureReason?.kind, 'human-turn-unavailable');
+  assert.equal(pilot.records[0]?.recommendedAction, null);
+
+  const approved = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' },
+    readHistory: async () => ({ ok: true, entries: [{ kind: 'verdict', check: 'agent', passed: true }], tests: 'unobserved' }) });
+  assert.equal(await observePolicyReviewStart(startFacts({ actualAction: 'human', agentRunId: null }), approved.ports), 'recorded');
+  assert.equal(approved.records[0]?.effectiveMode, 'pilot');
+  assert.equal(approved.records[0]?.operatorOverride, false);
+  assert.notEqual(approved.records[0]?.recommendedAction, 'agent', 'a passed check is never recommended on the same change');
 
   const automated = policyPorts();
   assert.equal(await observePolicyReviewStart(startFacts({ operatorInvocation: false }), automated.ports), 'recorded');
@@ -499,6 +555,15 @@ test('artifact and history failures record typed fixed-policy decisions (TASK-28
   }
 });
 
+test('a timed-out evaluation still lands a typed observation-timeout row with unknowns left unknown (TASK-2859.19)', async () => {
+  const slow = policyPorts({ readHistory: () => new Promise<never>(() => {}) });
+  assert.equal(await observePolicyReviewStart(startFacts(), slow.ports), 'recorded');
+  assert.equal(slow.records[0]?.failureReason?.kind, 'observation-timeout');
+  assert.equal(slow.records[0]?.changeIdentity, null);
+  assert.equal(slow.records[0]?.effectiveMode, 'fixed');
+  assert.deepEqual(slow.records[0]?.predictedPassProbability, { agent: null, human: null, tests: null });
+});
+
 test('unmodelled belief and absent recommendation remain typed observations (TASK-2859.09)', async () => {
   const pending = policyPorts({ readHistory: async () => ({ ok: true,
     entries: [{ kind: 'verdict', check: 'tests', passed: false }], tests: 'observed' }) });
@@ -514,4 +579,226 @@ test('unmodelled belief and absent recommendation remain typed observations (TAS
   assert.equal(await observePolicyReviewStart(startFacts(), complete.ports), 'recorded');
   assert.equal(complete.records[0]?.failureReason?.kind, 'no-recommendation');
   assert.equal(complete.records[0]?.effectiveMode, 'shadow');
+});
+
+const SELECTION_FACTS = { missionId: missionId('task-select'), revision: 'abc1234' };
+const pilotConfiguration = { mode: 'pilot', artifact: 'policy.json' } as const;
+
+test('only pilot selects, and shadow or off do no policy work (TASK-2859.19)', async () => {
+  let work = 0;
+  const counting = { readHistory: async () => { work++; return { ok: true as const, entries: [], tests: 'unobserved' as const }; },
+    loadPolicy: () => { work++; return { mode: 'shadow' as const, hash: 'pinned-hash', artifact: parsedArtifact }; } };
+  const shadow = policyPorts({ ...counting });
+  assert.equal((await selectPolicyAction(SELECTION_FACTS, shadow.ports)).action, null);
+  assert.equal(work, 0, 'shadow never evaluates a selection');
+  assert.deepEqual(shadow.records, []);
+});
+
+test('the pilot recommends only an unfinished check, never one that passed on the same change (TASK-2859.19)', async () => {
+  const checks = ['agent', 'human', 'tests'] as const;
+  const selections: string[] = [];
+  for (let mask = 0; mask < 8; mask++) {
+    const passed = checks.filter((_check, index) => mask & (1 << index));
+    const fixture = policyPorts({ configuration: pilotConfiguration, readHistory: async () => ({ ok: true,
+      entries: passed.map(check => ({ kind: 'verdict' as const, check, passed: true })), tests: 'observed' }) });
+    const selected = (await selectPolicyAction(SELECTION_FACTS, { ...fixture.ports, writer: { ...fixture.ports.writer,
+      resolveReviewEntryPin: async input => reviewEntryPin({ ...input, artifactSha256: 'pinned-hash' }) } })).action;
+    if (passed.length === checks.length) {
+      assert.equal(selected, null, 'nothing is left to recommend once all three passed');
+      assert.equal(fixture.failures[0]?.kind, 'no-recommendation');
+    } else if (selected !== null) {
+      assert.equal(passed.includes(selected), false, `${selected} already passed`);
+      selections.push(selected);
+    }
+  }
+  assert.ok(selections.length > 0, 'the fixture policy selected at least one check');
+});
+
+test('every unusable policy conclusion leaves the fixed policy in charge with a typed reason (TASK-2859.19)', async () => {
+  const cases: Array<[string, Partial<ReviewStartPolicyPorts>]> = [
+    ['artifact-missing', { loadPolicy: () => ({ mode: 'fixed', reason: 'missing' }) }],
+    ['artifact-invalid', { loadPolicy: () => ({ mode: 'fixed', reason: 'invalid' }) }],
+    ['artifact-hash-mismatch', { loadPolicy: () => ({ mode: 'fixed', reason: 'hash-mismatch' }) }],
+    ['history-unavailable', { readHistory: async () => ({ ok: false, failure: { kind: 'unavailable', message: 'gone' } }) }],
+    ['history-contradiction', { readHistory: async () => ({ ok: false, failure: { kind: 'contradiction', message: 'x' } }) }],
+    ['history-unmodelled-history', { readHistory: async () => ({ ok: false, failure: { kind: 'unmodelled-history', message: 'x' } }) }],
+    ['belief-unmodelled-history', { readHistory: async () => ({ ok: true, entries: [{ kind: 'verdict', check: 'tests', passed: false }], tests: 'observed' }) }],
+    ['policy-exception', { readHistory: async () => { throw new Error('boom'); } }],
+    ['human-turn-unavailable', {}],
+  ];
+  for (const [kind, overrides] of cases) {
+    const fixture = policyPorts({ configuration: pilotConfiguration, ...overrides });
+    assert.equal((await selectPolicyAction(SELECTION_FACTS, fixture.ports)).action, null, kind);
+    assert.equal(fixture.failures[0]?.kind, kind, kind);
+  }
+  const contradiction = policyPorts({ configuration: pilotConfiguration, readHistory: async () => ({ ok: true, entries: [
+    { kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'agent', passed: false }], tests: 'observed' }) });
+  assert.equal((await selectPolicyAction(SELECTION_FACTS, contradiction.ports)).action, null, 'a contradictory verdict is a bug detector, not a recommendation');
+  assert.ok(contradiction.failures.length > 0);
+  const slow = policyPorts({ configuration: pilotConfiguration, readHistory: () => new Promise<never>(() => {}) });
+  assert.equal((await selectPolicyAction(SELECTION_FACTS, slow.ports)).action, null);
+  assert.equal(slow.failures.at(-1)?.kind, 'observation-timeout');
+});
+
+test('a transient selection failure is carried to the action-start record instead of a re-derived reason (TASK-2859.19)', async () => {
+  const slow = policyPorts({ configuration: pilotConfiguration, readHistory: () => new Promise<never>(() => {}) });
+  const selection = await selectPolicyAction(SELECTION_FACTS, slow.ports);
+  assert.equal(selection.failure?.kind, 'observation-timeout');
+  const healthy = policyPorts({ configuration: pilotConfiguration });
+  assert.equal(await observePolicyReviewStart(startFacts({ selectionFailure: selection.failure }), healthy.ports), 'recorded');
+  assert.equal(healthy.records[0]?.failureReason?.kind, 'observation-timeout', 'the record names the failure the selection met');
+  assert.equal(healthy.records[0]?.artifactSha256, 'pinned-hash', 'the pinned artifact hash is kept on a carried fallback');
+  assert.equal(healthy.records[0]?.changeIdentity, 'patch-123', 'the change identity is kept too');
+  assert.equal(healthy.records[0]?.effectiveMode, 'fixed');
+  assert.equal(healthy.records[0]?.recommendedAction, null);
+
+  const brokenPin = policyPorts({ configuration: pilotConfiguration, writer: {
+    recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => { throw new Error('pin writer down'); } } });
+  const pinSelection = await selectPolicyAction({ ...SELECTION_FACTS }, brokenPin.ports);
+  assert.equal(pinSelection.failure?.kind, 'writer-failure');
+  const deterministic = await selectPolicyAction(SELECTION_FACTS, policyPorts({ configuration: pilotConfiguration }).ports);
+  assert.equal(deterministic.failure, null, 'a failure the start record re-derives identically is not carried');
+});
+
+test('pilot pin survives restart, artifact replacement and switch changes (TASK-2859.19)', async () => {
+  const { entries, repository } = historyRepository();
+  const first = policyPorts({
+    configuration: { mode: 'pilot', artifact: 'policy.json' },
+    writer: new OperationalHistoryService(repository),
+  });
+  assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-pinned') }), first.ports), 'recorded');
+  const assignmentRow = entries.find(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT);
+  assert.ok(assignmentRow);
+  assert.deepEqual(JSON.parse(assignmentRow.eventData), {
+    schemaVersion: 1, idempotencyKey: 'review-entry:repository-1:task-pinned:patch-123:1',
+    missionId: 'task-pinned', repositoryId: 'repository-1',
+    changeIdentity: 'patch-123', configuredMode: 'pilot', actionSequence: 1,
+    artifactSha256: 'pinned-hash', failureReason: null,
+    recordedAt: JSON.parse(assignmentRow.eventData).recordedAt,
+  });
+
+  const expectedHashes: Array<string | undefined> = [];
+  const restarted = policyPorts({
+    configuration: { mode: 'pilot', artifact: 'replacement.json' },
+    writer: new OperationalHistoryService(repository),
+    loadPolicy: expected => {
+      expectedHashes.push(expected);
+      return expected === 'pinned-hash'
+        ? { mode: 'fixed', reason: 'hash-mismatch' }
+        : { mode: 'shadow', hash: 'replacement-hash', artifact: parsedArtifact };
+    },
+  });
+  assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-pinned'),
+    actualAction: 'human', agentRunId: null, verdictCorrelation: 'review:1:human' }), restarted.ports), 'recorded');
+  assert.deepEqual(expectedHashes, [undefined, 'pinned-hash'], 'the pin is resolved first, then the pinned hash is loaded');
+  const decisions = entries.filter(entry => entry.eventType === REVIEW_START_DECISION_EVENT)
+    .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision);
+  assert.equal(decisions.at(-1)?.effectiveMode, 'fixed');
+  assert.equal(decisions.at(-1)?.artifactSha256, 'pinned-hash');
+  assert.equal(decisions.at(-1)?.failureReason?.kind, 'artifact-hash-mismatch');
+  assert.equal(entries.filter(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT).length, 1);
+});
+
+test('a pilot-pinned mission finishes fixed with a recorded reason when the mode changes (TASK-2859.19)', async () => {
+  const { entries, repository } = historyRepository();
+  const service = new OperationalHistoryService(repository);
+  await service.resolveReviewEntryPin(assignment('task-pinned-pilot'));
+  let historyReads = 0;
+  const switchedToShadow = policyPorts({
+    configuration: { mode: 'shadow', artifact: 'policy.json' }, writer: new OperationalHistoryService(repository),
+    readHistory: async () => { historyReads++; return { ok: true, entries: [], tests: 'unobserved' }; },
+  });
+  assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-pinned-pilot') }), switchedToShadow.ports), 'recorded');
+  assert.equal(historyReads, 0, 'a mission pinned under pilot does not evaluate policy history after the mode changed');
+  const decisions = () => entries.filter(entry => entry.eventType === REVIEW_START_DECISION_EVENT)
+    .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision);
+  assert.equal(decisions().at(-1)?.effectiveMode, 'fixed');
+  assert.equal(decisions().at(-1)?.artifactSha256, 'pinned-hash');
+  assert.equal(decisions().at(-1)?.failureReason?.kind, 'mode-changed-in-flight');
+
+  await service.recordReviewStartDecision(decision({ missionId: missionId('task-before-pilot') }));
+  const switchedOn = policyPorts({
+    configuration: { mode: 'pilot', artifact: 'policy.json' }, writer: new OperationalHistoryService(repository),
+  });
+  assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-before-pilot'),
+    actualAction: 'human', agentRunId: null, verdictCorrelation: 'review:1:human' }), switchedOn.ports), 'recorded');
+  assert.equal(decisions().at(-1)?.effectiveMode, 'fixed');
+  assert.equal(decisions().at(-1)?.failureReason?.kind, 'mode-changed-in-flight');
+  assert.equal(entries.filter(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT
+    && (JSON.parse(entry.eventData) as { missionId: string }).missionId === 'task-before-pilot').length, 0);
+});
+
+test('a pilot mission whose first pin write failed is pinned at the next evaluation, not demoted (TASK-2859.19 F13)', async () => {
+  const { entries, repository } = historyRepository();
+  const real = new OperationalHistoryService(repository);
+  let failures = 1;
+  const flaky = { recordReviewStartDecision: (input: ReviewStartDecisionInput) => real.recordReviewStartDecision(input),
+    resolveReviewEntryPin: async (input: ReviewEntryPinInput) => {
+      if (failures-- > 0) { throw new Error('pin writer down'); }
+      return await real.resolveReviewEntryPin(input);
+    } };
+  const fixture = policyPorts({ configuration: pilotConfiguration, writer: flaky });
+  const facts = { missionId: missionId('task-flaky-pin'), revision: 'abc1234' };
+  const first = await selectPolicyAction(facts, fixture.ports);
+  assert.equal(first.failure?.kind, 'writer-failure');
+  const second = await selectPolicyAction(facts, fixture.ports);
+  assert.equal(second.failure, null, 'the retry pinned the mission and the policy evaluated normally');
+  assert.equal(entries.filter(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT).length, 1);
+});
+
+test('pilot pin writer failure records a fixed fallback instead of stalling (TASK-2859.19)', async () => {
+  const records: ReviewStartDecisionInput[] = [];
+  const fixture = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' }, writer: {
+    resolveReviewEntryPin: async () => { throw new Error('pin writer unavailable'); },
+    recordReviewStartDecision: async input => { records.push(input); return true; },
+  } });
+  assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-contended') }), fixture.ports),
+    'recorded');
+  assert.equal(records[0]?.effectiveMode, 'fixed');
+  assert.equal(records[0]?.failureReason?.kind, 'writer-failure');
+  assert.equal(records[0]?.failureReason?.message, 'pin writer unavailable');
+});
+
+test('pilot entry and evaluation failures persist fixed reasons without unknown coercion (TASK-2859.18)', async () => {
+  for (const reason of ['missing', 'invalid'] as const) {
+    const { entries, repository } = historyRepository();
+    const fixture = policyPorts({
+      configuration: { mode: 'pilot', artifact: 'policy.json' }, writer: new OperationalHistoryService(repository),
+      loadPolicy: () => ({ mode: 'fixed', reason }),
+    });
+    assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId(`task-${reason}`) }), fixture.ports), 'recorded');
+    const assignmentRecord = entries.find(entry => entry.eventType === REVIEW_ENTRY_PIN_EVENT);
+    assert.ok(assignmentRecord);
+    assert.equal((JSON.parse(assignmentRecord.eventData) as { failureReason: ReviewStartFailure }).failureReason.kind,
+      `artifact-${reason}`);
+    const recorded = entries.find(entry => entry.eventType === REVIEW_START_DECISION_EVENT);
+    assert.ok(recorded);
+    const row = JSON.parse(recorded.eventData) as ReviewStartDecision;
+    assert.equal(row.effectiveMode, 'fixed');
+    assert.equal(row.failureReason?.kind, `artifact-${reason}`);
+    assert.deepEqual(row.predictedPassProbability, { agent: null, human: null, tests: null });
+  }
+
+  const { entries, repository } = historyRepository();
+  const failed = policyPorts({
+    configuration: { mode: 'pilot', artifact: 'policy.json' }, writer: new OperationalHistoryService(repository),
+    readHistory: async () => { throw new Error('evaluation failed'); },
+  });
+  assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-evaluation-failed') }), failed.ports), 'recorded');
+  const failedDecision = entries.filter(entry => entry.eventType === REVIEW_START_DECISION_EVENT)
+    .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision).at(-1);
+  assert.equal(failedDecision?.effectiveMode, 'fixed');
+  assert.equal(failedDecision?.failureReason?.kind, 'policy-exception');
+  assert.equal(failedDecision?.artifactSha256, 'pinned-hash');
+});
+
+test('a writer that outlives the deadline gets no second, contradictory decision row (TASK-2859.19 F14)', async () => {
+  assert.equal(await observeReviewStartDecision(async () => decision(), { recordReviewStartDecision: () => new Promise<boolean>(() => {}) },
+    () => {}, { deadlineMs: 5 }), 'write-timed-out');
+  const writes: ReviewStartDecisionInput[] = [];
+  const slow = policyPorts({ writer: { resolveReviewEntryPin: async () => null,
+    recordReviewStartDecision: async input => { writes.push(input); await new Promise(resolve => setTimeout(resolve, 280)); return true; } } });
+  assert.equal(await observePolicyReviewStart(startFacts(), slow.ports), 'write-timed-out');
+  assert.equal(writes.length, 1, 'the original write is the only one; it keeps its known change identity');
+  assert.equal(writes[0]?.changeIdentity, 'patch-123');
 });

@@ -219,3 +219,9 @@ export function claimRecoveryLock(mission: string, hooks: RecoveryClaimTestHooks
     releaseTakeover();
   }
 }
+
+/** The live process holding a mission's claim, so a refused second actor can name it; null when free or unreadable. */
+export function claimHolderPid(mission: string): number | null {
+  const holder = occupant(claimDir(mission));
+  return holder === null || holder === 'unreadable' ? null : holder.pid;
+}

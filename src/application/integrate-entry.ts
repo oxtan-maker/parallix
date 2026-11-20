@@ -34,6 +34,11 @@ export function integrationSeams(options: IntegrateOptions, ports: IntegrateWork
   };
 }
 
+/** The live owner of the integration claim, named in the refusal a second actor receives. */
+function claimHolder(ports: IntegrateWorkflowPorts, slug: string): string {
+  return ports.process.integrationClaimHolder?.(slug) ?? 'another process';
+}
+
 function integrationFailure(error: unknown, ports: IntegrateWorkflowPorts, state: IntegrateRunState): 0 | 1 {
   let exitCode: 0 | 1;
   // TASK-2620: a repaired-and-re-approved revision stops cleanly in the
@@ -88,7 +93,7 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
     // mutation. An unresolved context releases the claim and stops the run.
     const releaseIntegration = await ports.process.claimIntegration(slug);
     if (!releaseIntegration) {
-      fmt.log.fail(`Integration of ${slug} is already running in another process. Wait for it to finish before retrying.`);
+      fmt.log.fail(`Integration of ${slug} is already running in ${claimHolder(ports, slug)}. Wait for it to finish before retrying.`);
       exitFn(1);
       return { exitCode: 1 };
     }

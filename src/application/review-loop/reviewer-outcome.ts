@@ -1,7 +1,8 @@
 import type { LoopContext, ReviewRound, RoundStep } from './round.js';
 import { observeHumanReviewStart } from './review-start-observation.js';
 
-export type ReviewerOutcomeStep = RoundStep | 'ignored';
+/** `approved` means the approval is durable and the next-action decision owner decides what follows it. */
+export type ReviewerOutcomeStep = RoundStep | 'ignored' | 'approved';
 
 /** Read only a decision for the exact loop round represented by `state`. */
 export function persistedReviewerOutcome(
@@ -30,11 +31,8 @@ export async function applyReviewerOutcome(context: LoopContext, round: ReviewRo
       state.reviewer = authoritative.reviewer;
       context.identities.reviewer = authoritative.reviewer;
     }
-    await observeHumanReviewStart(context);
-    context.emit({ kind: 'review-verdict', disposition: state.disposition, findings: [], verbose: context.verbose, round: state.round });
-    context.emit({ kind: 'reviewer-approved' });
-    await ports.task.mirrorApproved();
-    return 'stop';
+    announceApproval(context);
+    return 'approved';
   }
   const previousPhase = state.phase;
   const previousDisposition = state.disposition;
@@ -54,9 +52,21 @@ export async function applyReviewerOutcome(context: LoopContext, round: ReviewRo
     context.exit(1);
     return 'stop';
   }
-  await observeHumanReviewStart(context);
-  context.emit({ kind: 'review-verdict', disposition: state.disposition, findings: [], verbose: context.verbose, round: state.round });
+  announceApproval(context);
+  return 'approved';
+}
+
+function announceApproval(context: LoopContext): void {
+  context.emit({ kind: 'review-verdict', disposition: context.state.disposition, findings: [], verbose: context.verbose, round: context.state.round });
   context.emit({ kind: 'reviewer-approved' });
-  await ports.task.mirrorApproved();
-  return 'stop';
+}
+
+/**
+ * Begin the human turn once the next-action decision owner has nothing
+ * automatic left to dispatch: record the human start and mirror the approved
+ * lane. An approval alone never moves the lane.
+ */
+export async function beginHumanTurn(context: LoopContext): Promise<void> {
+  await observeHumanReviewStart(context);
+  if (!context.dryRun) { await context.ports.task.mirrorApproved(); }
 }

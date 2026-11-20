@@ -247,7 +247,7 @@ function createBoardReviewPreparationWorkflow(
           preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit,
           classification: createReviewClassification(slug, worktree, configuration.decision, configuration),
         }, {
-          mission: { store, lifecycle, operationalHistory: missionServices.operationalHistory, repositoryId },
+          mission: { store, lifecycle, operationalHistory: missionServices.operationalHistory, repositoryId, integration: missionServices.integration },
           operatorState: { db: database, repositories: { boardLaneEvents: persistence.laneEvents } },
         }),
       }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null, executionContext: live.context, operatorInvocation: false });

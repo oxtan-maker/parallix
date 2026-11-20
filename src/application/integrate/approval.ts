@@ -11,7 +11,7 @@ import type { IntegrationContext } from './context.js';
  */
 import { reviewStatus } from '../../domain/review.js';
 import type { IntegrateStateMapPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
-import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import { completeCurrentTestsPass } from './tests-action.js';
 import { abortWith } from './support.js';
 

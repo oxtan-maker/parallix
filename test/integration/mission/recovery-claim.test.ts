@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { claimRecoveryLock } from '../../../src/adapters/filesystem/recovery-claim.js';
+import { claimHolderPid, claimRecoveryLock } from '../../../src/adapters/filesystem/recovery-claim.js';
 
 test('only one supervisor run holds a mission claim, and a released claim is available again', async () => {
   const mission = `task-2489-claim-${process.pid}`;
@@ -17,7 +17,9 @@ test('only one supervisor run holds a mission claim, and a released claim is ava
   const held = claimRecoveryLock(mission);
   assert.ok(held, 'the first run takes the claim');
   assert.equal(claimRecoveryLock(mission), null, 'a second run is refused while the first holds it');
+  assert.equal(claimHolderPid(mission), process.pid, 'the refusal can name the live owner (TASK-2859.19)');
   await held();
+  assert.equal(claimHolderPid(mission), null, 'a released claim has no holder');
 
   const again = claimRecoveryLock(mission);
   assert.ok(again, 'a released claim is available');

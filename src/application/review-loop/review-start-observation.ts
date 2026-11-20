@@ -1,6 +1,12 @@
 import type { LoopContext, ReviewRound } from './round.js';
 import { missionId } from '../../domain/mission.js';
 
+function takeSelectionFailure(context: LoopContext) {
+  const failure = context.selectionFailure ?? null;
+  context.selectionFailure = null;
+  return failure;
+}
+
 /** Observe an actual agent launch after the round-open boundary committed. */
 export async function observeAgentReviewStart(context: LoopContext, round: ReviewRound,
   reviewer: string, runId: string | null): Promise<void> {
@@ -9,7 +15,8 @@ export async function observeAgentReviewStart(context: LoopContext, round: Revie
   if (!revision) { return; }
   await context.ports.reviewStarts.observe({ missionId: missionId(context.slug), actualAction: 'agent', revision,
     verdictCorrelation: `review:${round.attempt}:agent:${reviewer}-verdict`, agentRunId: runId,
-    operatorInvocation: context.operatorInvocation });
+    operatorInvocation: context.operatorInvocation,
+    selectionFailure: takeSelectionFailure(context) });
 }
 
 /** Observe the already-committed integration handoff; restart replays the same key. */
@@ -19,5 +26,6 @@ export async function observeHumanReviewStart(context: LoopContext): Promise<voi
   if (!revision) { return; }
   await context.ports.reviewStarts.observe({ missionId: missionId(context.slug), actualAction: 'human', revision,
     verdictCorrelation: `review:${context.state.round}:human-verdict`, agentRunId: null,
-    operatorInvocation: context.operatorInvocation });
+    operatorInvocation: context.operatorInvocation,
+    selectionFailure: takeSelectionFailure(context) });
 }

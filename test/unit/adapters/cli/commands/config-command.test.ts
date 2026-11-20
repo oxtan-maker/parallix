@@ -8,6 +8,7 @@ import os from 'os';
 import path from 'path';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
+import { policyArtifactFixture } from '../../../application/verification-policy/policy-artifact.fixture.js';
 const config = mockModule<typeof import('../../../../../src/adapters/cli/commands/config.js')>('../../../../../src/adapters/cli/commands/config.js', import.meta.url);
 await installModuleMocks();
 test.afterEach(() => mock.restoreAll());
@@ -52,6 +53,18 @@ test('config keeps policy failures non-blocking and reports the fallback (TASK-2
     assert.deepEqual(result.errors, []);
     assert.match(result.logs.join('\n'), /Verification policy: fixed \(missing\)/);
     assert.match(result.logs.join('\n'), /Preserved/);
+  });
+});
+
+test('config reports the configured pilot mode with the pinned artifact hash (TASK-2859.24)', async () => {
+  await withTempDir(async root => {
+    const artifact = policyArtifactFixture();
+    fs.writeFileSync(path.join(root, 'policy.json'), JSON.stringify(artifact));
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
+      product: { name: 'Preserved' }, verificationPolicy: { mode: 'pilot', artifact: 'policy.json' },
+    }));
+    const result = await runConfig(root);
+    assert.match(result.logs.join('\n'), /Verification policy: pilot \([0-9a-f]{64}\)/);
   });
 });
 

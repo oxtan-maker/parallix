@@ -2,7 +2,7 @@ import type { RebaseMissionServices, RebaseWorkflowPort } from './ports/rebase-w
 import { transitionReviewRepair } from './review-repair-lifecycle.js';
 import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import type { ConfiguredReviewerEligibility } from '../domain/review.js';
-import { fixedVerificationNextAction } from './verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from './verification-policy/fixed-next-action.js';
 
 /** Effects used by application-owned rebase repair lifecycle decisions. */
 export interface RepairBindings {

@@ -2,154 +2,14 @@ import type { PerAction, PolicyAction } from './policy-artifact.js';
 import { POLICY_ACTIONS } from './policy-artifact.js';
 import { deriveBelief } from './belief.js';
 import { recommend } from './recommend.js';
-import { currentIntegrationRepair } from '../../domain/integration-repair-policy.js';
-import type { Mission, MissionStatus } from '../../domain/mission.js';
-import { effectiveRepairObligations, isRetainedGateRepair, retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
-import { currentReviewRound, reviewStatus } from '../../domain/review.js';
-import type { ReviewPhase } from '../../domain/review-phase-policy.js';
-import type { PolicyLoadResult, ReviewStartDecision, ReviewStartDecisionInput, ReviewStartFacts, ReviewStartFailure,
+import type { PolicyLoadResult, PolicySelection, ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
+  ReviewStartDecisionInput, ReviewStartFacts, ReviewStartFailure,
   ReviewStartFailureKind, ReviewStartPolicyPorts, TestsActionStartFacts,
   VerificationActionStartFacts } from '../ports/verification-policy.js';
 
 export const REVIEW_START_DECISION_EVENT = 'verification.review-start-decision';
+export const REVIEW_ENTRY_PIN_EVENT = 'verification.review-entry-assignment';
 export const REVIEW_START_OBSERVATION_DEADLINE_MS = 250;
-
-/** Facts every production entry presents to the fixed-sequence owner. */
-export interface FixedVerificationNextActionFacts {
-  readonly status: MissionStatus;
-  readonly reviewPhase: ReviewPhase | null;
-  readonly pendingRepair: boolean;
-  readonly reviewRequired: boolean;
-  readonly humanIntervention: boolean;
-  readonly ownedAction: boolean;
-  readonly humanOnlyReason: string | null;
-  /** Exact-current evidence supplied by integrate; absent readers preserve unknown. */
-  readonly agentReviewCurrent?: boolean | null;
-  /** Exact-current complete integration-test evidence supplied by integrate. */
-  readonly testsCurrent?: boolean | null;
-  /** Whether the repository configures integration tests; absent readers preserve unknown. */
-  readonly testsConfigured?: boolean | null;
-  /**
-   * A verification action a policy selected for this mission. The fixed
-   * sequence never supplies one; only a policy-selected `tests` is honoured.
-   */
-  readonly policySelection?: 'tests' | null;
-}
-
-export type FixedVerificationNextAction =
-  | { readonly kind: 'agent-review'; readonly reason: 'review-unfinished' }
-  | { readonly kind: 'repair'; readonly reason: 'repair-pending' | 'findings-pending' }
-  | { readonly kind: 'human-review'; readonly reason: 'agent-review-approved' | 'integrate-shortcut-eligible' }
-  | { readonly kind: 'tests'; readonly reason: 'policy-selected' | 'tests-not-current' }
-  | { readonly kind: 'integration-handoff'; readonly reason: 'fixed-sequence-complete' }
-  | { readonly kind: 'wait'; readonly reason: 'action-owned' | 'not-verifying' | 'complete' }
-  | { readonly kind: 'human-handoff'; readonly reason: 'recorded-blocker' | 'human-intervention' };
-
-export type HumanReviewDueReason = Extract<FixedVerificationNextAction, { readonly kind: 'human-review' }>['reason'];
-
-/** The one projection fact every human-facing surface carries unchanged. */
-export interface HumanReviewDue {
-  readonly reason: HumanReviewDueReason;
-  readonly detail: string;
-}
-
-export type FixedVerificationNextActionInput = FixedVerificationNextActionFacts | {
-  readonly mission: Mission;
-  readonly ownedAction?: boolean;
-  readonly humanOnlyReason?: string | null;
-  readonly agentReviewCurrent?: boolean | null;
-  readonly testsCurrent?: boolean | null;
-  readonly testsConfigured?: boolean | null;
-  readonly policySelection?: 'tests' | null;
-};
-
-function retainedGateRepairPending(mission: Mission): boolean {
-  if (!retainedGateRepairIsActionable(mission)) { return false; }
-  const obligations = effectiveRepairObligations(mission.checkpoints ?? [], mission.declaredGates, mission.successCriteria);
-  return obligations.some(checkpoint => isRetainedGateRepair(checkpoint.repair!.command));
-}
-
-function humanOnlyRepairReason(mission: Mission): string | null {
-  const blocker = mission.checkpoints?.find(checkpoint => checkpoint.repair?.blocker)?.repair?.blocker;
-  return blocker?.authorityReason ?? null;
-}
-
-/** Tests run in the review step, before landing; never while findings are being fixed. */
-function policySelectedTests(facts: FixedVerificationNextActionFacts): boolean {
-  return facts.policySelection === 'tests' && (facts.status === 'review' || facts.status === 'active')
-    && facts.reviewPhase !== 'fixing';
-}
-
-export function fixedVerificationFacts(input: FixedVerificationNextActionInput): FixedVerificationNextActionFacts {
-  if (!('mission' in input)) { return input; }
-  const review = input.mission.review;
-  const integrationRepair = currentIntegrationRepair(input.mission);
-  return {
-    status: input.mission.status,
-    reviewPhase: review ? currentReviewRound(review).phase : null,
-    pendingRepair: integrationRepair?.kind === 'approval-retention' || retainedGateRepairPending(input.mission),
-    reviewRequired: integrationRepair?.kind === 'review-required',
-    humanIntervention: review ? reviewStatus(review) === 'human-intervention' : false,
-    ownedAction: input.ownedAction ?? false,
-    humanOnlyReason: input.humanOnlyReason ?? humanOnlyRepairReason(input.mission),
-    agentReviewCurrent: input.agentReviewCurrent ?? null,
-    testsCurrent: input.testsCurrent ?? null,
-    testsConfigured: input.testsConfigured ?? null,
-    policySelection: input.policySelection ?? null,
-  };
-}
-
-function fixedVerificationPriorityAction(facts: FixedVerificationNextActionFacts): FixedVerificationNextAction | null {
-  if (facts.ownedAction) { return { kind: 'wait', reason: 'action-owned' }; }
-  if (facts.humanOnlyReason) { return { kind: 'human-handoff', reason: 'recorded-blocker' }; }
-  if (facts.humanIntervention) { return { kind: 'human-handoff', reason: 'human-intervention' }; }
-  if (facts.status === 'done') { return { kind: 'wait', reason: 'complete' }; }
-  if (facts.status === 'backlog' || facts.status === 'refined') { return { kind: 'wait', reason: 'not-verifying' }; }
-  if (facts.pendingRepair) { return { kind: 'repair', reason: 'repair-pending' }; }
-  if (facts.reviewRequired) { return { kind: 'agent-review', reason: 'review-unfinished' }; }
-  if (policySelectedTests(facts)) { return { kind: 'tests', reason: 'policy-selected' }; }
-  return null;
-}
-
-/**
- * The sole application-layer fixed-sequence decision.
- *
- * Entries provide recorded state and execute the returned mechanism. Lifecycle,
- * operation admission, rebase, gates, repair launch and event writers remain in
- * their established owners; this function only decides which one is next.
- * The fixed sequence returns `tests` once agent review has approved and the
- * integration lane holds the candidate, but only when the readers positively
- * know tests are configured and not current; unknown evidence never schedules a
- * run. A policy selection also reaches `tests` for a review or active mission
- * whose round is not fixing (TASK-2859.14, TASK-2859.17).
- */
-export function fixedVerificationNextAction(input: FixedVerificationNextActionInput): FixedVerificationNextAction {
-  const facts = fixedVerificationFacts(input);
-  const priority = fixedVerificationPriorityAction(facts);
-  if (priority) { return priority; }
-  if (facts.status === 'integration') {
-    return facts.testsConfigured === true && facts.testsCurrent === false
-      ? { kind: 'tests', reason: 'tests-not-current' }
-      : { kind: 'integration-handoff', reason: 'fixed-sequence-complete' };
-  }
-  if (facts.reviewPhase === 'fixing') { return { kind: 'repair', reason: 'findings-pending' }; }
-  if (facts.status === 'review' && facts.reviewPhase === 'approved') {
-    return { kind: 'human-review', reason: facts.agentReviewCurrent === true && facts.testsCurrent === true
-      ? 'integrate-shortcut-eligible' : 'agent-review-approved' };
-  }
-  return { kind: 'agent-review', reason: 'review-unfinished' };
-}
-
-/** Project a human turn only from the next-action owner's typed result. */
-export function humanReviewDue(action: FixedVerificationNextAction): HumanReviewDue | null {
-  if (action.kind !== 'human-review') { return null; }
-  switch (action.reason) {
-    case 'agent-review-approved':
-      return { reason: action.reason, detail: 'Human review is due because agent review approved the current change.' };
-    case 'integrate-shortcut-eligible':
-      return { reason: action.reason, detail: 'Human review is due; px integrate may record it because agent review and tests passed on the current change.' };
-  }
-}
 
 function required(value: string, field: string): string {
   if (!value.trim()) { throw new Error(`${field} is required`); }
@@ -177,6 +37,25 @@ export function reviewStartDecision(input: ReviewStartDecisionInput, actionSeque
   };
 }
 
+export function reviewEntryPinKey(input: Pick<ReviewEntryPin,
+  'missionId' | 'repositoryId' | 'changeIdentity' | 'actionSequence'>): string {
+  return ['review-entry', required(input.repositoryId, 'repositoryId'), required(input.missionId, 'missionId'),
+    input.changeIdentity === null ? 'unknown' : required(input.changeIdentity, 'changeIdentity'), String(input.actionSequence)]
+    .map(encodeURIComponent).join(':');
+}
+
+export function reviewEntryPin(input: ReviewEntryPinInput): ReviewEntryPin {
+  const actionSequence = 1 as const;
+  return {
+    ...input,
+    configuredMode: 'pilot',
+    schemaVersion: 1,
+    idempotencyKey: reviewEntryPinKey({ ...input, actionSequence }),
+    actionSequence,
+    recordedAt: new Date().toISOString(),
+  };
+}
+
 function unknownProbabilities(): PerAction<null> { return { agent: null, human: null, tests: null }; }
 
 function artifactFailure(reason: Extract<PolicyLoadResult, { mode: 'fixed' }>['reason']): ReviewStartFailure {
@@ -188,65 +67,236 @@ function observationFailure(scope: 'history' | 'belief',
   return { kind: `${scope}-${failure.kind}` as ReviewStartFailureKind, message: failure.message };
 }
 
-function fallback(input: VerificationActionStartFacts, ports: ReviewStartPolicyPorts, changeIdentity: string | null,
-  failure: ReviewStartFailure, effectiveMode: ReviewStartDecision['effectiveMode'] = 'fixed', artifactSha256: string | null = null,
-  probabilities: PerAction<number | null> = unknownProbabilities()): ReviewStartDecisionInput {
-  ports.diagnostic(failure);
-  return decisionInput(input, ports, changeIdentity, effectiveMode, artifactSha256, null, probabilities, failure);
+/** The facts the policy needs to evaluate one mission; every action start supplies them. */
+export type PolicyEvaluationFacts = Pick<VerificationActionStartFacts, 'missionId' | 'revision'>;
+
+/** What the policy concluded for one mission at one moment, before an action's own facts are attached. */
+interface PolicyEvaluation {
+  readonly changeIdentity: string | null;
+  readonly effectiveMode: ReviewStartDecision['effectiveMode'];
+  readonly artifactSha256: string | null;
+  readonly recommendedAction: PolicyAction | null;
+  readonly probabilities: PerAction<number | null>;
+  readonly failureReason: ReviewStartFailure | null;
 }
 
-function decisionInput(input: VerificationActionStartFacts, ports: ReviewStartPolicyPorts, changeIdentity: string | null,
-  effectiveMode: ReviewStartDecision['effectiveMode'], artifactSha256: string | null, recommendedAction: PolicyAction | null,
-  probabilities: PerAction<number | null>, failureReason: ReviewStartFailure | null): ReviewStartDecisionInput {
+type LoadedPolicy = Exclude<PolicyLoadResult, { mode: 'off' }>;
+type ActivePolicy = Extract<LoadedPolicy, { mode: 'shadow' }>;
+type PolicyLoadOutcome = { readonly loaded: LoadedPolicy } | { readonly failure: ReviewStartFailure };
+type PolicyHistory = Awaited<ReturnType<ReviewStartPolicyPorts['readHistory']>>;
+
+interface EvaluationContext {
+  readonly facts: PolicyEvaluationFacts;
+  readonly ports: ReviewStartPolicyPorts;
+  readonly changeIdentity: string | null;
+}
+
+/** A pilot mission acts on the policy; shadow only observes it. */
+function activeMode(ports: ReviewStartPolicyPorts): 'shadow' | 'pilot' {
+  return ports.configuration.mode === 'pilot' ? 'pilot' : 'shadow';
+}
+
+function fallback(context: EvaluationContext, failure: ReviewStartFailure,
+  effectiveMode: PolicyEvaluation['effectiveMode'] = 'fixed', artifactSha256: string | null = null,
+  probabilities: PerAction<number | null> = unknownProbabilities()): PolicyEvaluation {
+  context.ports.diagnostic(failure);
+  return evaluation(context, effectiveMode, artifactSha256, null, probabilities, failure);
+}
+
+function evaluation(context: EvaluationContext, effectiveMode: PolicyEvaluation['effectiveMode'],
+  artifactSha256: string | null, recommendedAction: PolicyAction | null,
+  probabilities: PerAction<number | null>, failureReason: ReviewStartFailure | null): PolicyEvaluation {
+  return { changeIdentity: context.changeIdentity, effectiveMode, artifactSha256, recommendedAction, probabilities, failureReason };
+}
+
+/** Attach the started action's own facts; an operator-invoked action that differs from the recommendation is an override. */
+function decisionInput(input: VerificationActionStartFacts, ports: ReviewStartPolicyPorts,
+  concluded: PolicyEvaluation): ReviewStartDecisionInput {
   return {
-    missionId: input.missionId, repositoryId: ports.repositoryId, changeIdentity,
-    configuredMode: ports.configuration.mode, effectiveMode,
-    artifactSha256,
-    recommendedAction, predictedPassProbability: probabilities, actualAction: input.actualAction,
-    operatorOverride: input.operatorInvocation && recommendedAction !== null && recommendedAction !== input.actualAction,
+    missionId: input.missionId, repositoryId: ports.repositoryId, changeIdentity: concluded.changeIdentity,
+    configuredMode: ports.configuration.mode, effectiveMode: concluded.effectiveMode,
+    artifactSha256: concluded.artifactSha256,
+    recommendedAction: concluded.recommendedAction, predictedPassProbability: concluded.probabilities,
+    actualAction: input.actualAction,
+    operatorOverride: input.operatorInvocation && concluded.recommendedAction !== null
+      && concluded.recommendedAction !== input.actualAction,
     verdictCorrelation: input.verdictCorrelation, agentRunId: input.agentRunId,
     gateRunId: input.actualAction === 'tests' ? input.gateRunId : null,
-    operationId: ports.operationId, failureReason,
+    operationId: ports.operationId, failureReason: concluded.failureReason,
   };
+}
+
+function loadPolicy(ports: ReviewStartPolicyPorts, expectedHash?: string): PolicyLoadOutcome {
+  try { return { loaded: ports.loadPolicy(expectedHash) }; }
+  catch (error) {
+    return { failure: { kind: 'policy-exception',
+      message: error instanceof Error ? error.message : String(error) } };
+  }
+}
+
+async function resolvePin(facts: PolicyEvaluationFacts, ports: ReviewStartPolicyPorts,
+  changeIdentity: string | null): Promise<{ readonly pin: ReviewEntryPin | null;
+    readonly initialLoad?: PolicyLoadOutcome; readonly failure?: ReviewStartFailure }> {
+  let initialLoad: PolicyLoadOutcome | undefined;
+  let artifactSha256: string | null = null;
+  let failureReason: ReviewStartFailure | null = null;
+  if (ports.configuration.mode === 'pilot') {
+    initialLoad = loadPolicy(ports);
+    if ('failure' in initialLoad) { failureReason = initialLoad.failure; }
+    else if (initialLoad.loaded.mode === 'fixed') { failureReason = artifactFailure(initialLoad.loaded.reason); }
+    else { artifactSha256 = initialLoad.loaded.hash; }
+  }
+  const candidate: ReviewEntryPinInput = {
+    missionId: facts.missionId, repositoryId: ports.repositoryId, changeIdentity,
+    configuredMode: ports.configuration.mode, artifactSha256, failureReason,
+  };
+  try {
+    return { pin: await ports.writer.resolveReviewEntryPin(candidate), ...(initialLoad ? { initialLoad } : {}) };
+  } catch (error) {
+    return { pin: null, ...(initialLoad ? { initialLoad } : {}), failure: {
+      kind: 'writer-failure', message: error instanceof Error ? error.message : String(error),
+    } };
+  }
+}
+
+/** The pin fixes the mode and artifact a mission entered review under; a mode change finishes it on the fixed policy. */
+function pinEvaluation(context: EvaluationContext,
+  resolved: Awaited<ReturnType<typeof resolvePin>>): PolicyEvaluation | undefined {
+  const { ports } = context;
+  if (resolved.failure) { return fallback(context, resolved.failure); }
+  const pin = resolved.pin;
+  if (pin?.failureReason) { return fallback(context, pin.failureReason, 'fixed', pin.artifactSha256); }
+  if ((ports.configuration.mode === 'pilot') !== (pin !== null)) {
+    return fallback(context, { kind: 'mode-changed-in-flight',
+      message: 'the verification policy mode changed after this mission entered review' }, 'fixed', pin?.artifactSha256 ?? null);
+  }
+  return undefined;
+}
+
+function policyException(error: unknown): ReviewStartFailure {
+  return { kind: 'policy-exception', message: error instanceof Error ? error.message : String(error) };
+}
+
+function evaluateHistory(context: EvaluationContext, loaded: ActivePolicy,
+  history: Extract<PolicyHistory, { ok: true }>): PolicyEvaluation {
+  let belief: ReturnType<typeof deriveBelief>;
+  try { belief = deriveBelief(loaded.artifact, history.entries); }
+  catch (error) { return fallback(context, policyException(error), 'fixed', loaded.hash); }
+  if (!belief.ok) { return fallback(context, observationFailure('belief', belief.failure), 'fixed', loaded.hash); }
+  if (belief.record.kind === 'pending-repair') {
+    return fallback(context, { kind: 'belief-unmodelled-history', message: `${belief.record.check} repair is pending` },
+      'fixed', loaded.hash);
+  }
+  const passed = new Set(belief.record.passed);
+  let recommendation: ReturnType<typeof recommend>;
+  try {
+    recommendation = recommend(loaded.artifact, belief.belief,
+      new Set(POLICY_ACTIONS.filter(action => !passed.has(action))));
+  } catch (error) { return fallback(context, policyException(error), 'fixed', loaded.hash); }
+  if (recommendation.kind === 'invalid-belief') {
+    return fallback(context, { kind: 'belief-invalid', message: `policy belief is ${recommendation.reason}` }, 'fixed', loaded.hash);
+  }
+  const mode = activeMode(context.ports);
+  if (recommendation.kind === 'no-recommendation') {
+    return fallback(context, { kind: 'no-recommendation', message: 'policy has no permitted recommendation' },
+      mode, loaded.hash, recommendation.passProbabilities);
+  }
+  // A human verdict is recorded against the round only after agent review approved it;
+  // recommending it earlier cannot be attributed to the human check, so the fixed policy runs.
+  if (mode === 'pilot' && recommendation.action === 'human' && !passed.has('agent')) {
+    return fallback(context, { kind: 'human-turn-unavailable', message: 'human review cannot be recorded before agent review approved the change' },
+      'fixed', loaded.hash, recommendation.passProbabilities);
+  }
+  return evaluation(context, mode, loaded.hash, recommendation.action, recommendation.passProbabilities, null);
+}
+
+async function evaluateWithPolicy(context: EvaluationContext, resolved: Awaited<ReturnType<typeof resolvePin>>,
+  signal: AbortSignal): Promise<PolicyEvaluation | null> {
+  const { ports } = context;
+  const pinned = resolved.pin?.artifactSha256 ?? null;
+  const outcome = resolved.pin
+    ? loadPolicy(ports, pinned ?? undefined)
+    : resolved.initialLoad ?? loadPolicy(ports);
+  if ('failure' in outcome) { return fallback(context, outcome.failure, 'fixed', pinned); }
+  const loaded = outcome.loaded;
+  if (loaded.mode === 'fixed') { return fallback(context, artifactFailure(loaded.reason), 'fixed', pinned); }
+  let history: PolicyHistory;
+  try { history = await ports.readHistory(signal); }
+  catch (error) { return fallback(context, policyException(error), 'fixed', loaded.hash); }
+  if (signal.aborted) { return null; }
+  if (!history.ok) { return fallback(context, observationFailure('history', history.failure), 'fixed', loaded.hash); }
+  return evaluateHistory(context, loaded, history);
+}
+
+/** The one policy evaluator: shadow records and pilot selections both read its conclusion. */
+async function evaluatePolicy(facts: PolicyEvaluationFacts, ports: ReviewStartPolicyPorts,
+  signal: AbortSignal): Promise<PolicyEvaluation | null> {
+  if (signal.aborted) { return null; }
+  const changeIdentity = ports.identity.changeIdentity(facts.revision, ports.targetBranch);
+  const context = { facts, ports, changeIdentity };
+  const resolved = await resolvePin(facts, ports, changeIdentity);
+  if (signal.aborted) { return null; }
+  return pinEvaluation(context, resolved) ?? await evaluateWithPolicy(context, resolved, signal);
+}
+
+/** A lost or already-failed evaluation keeps its typed reason with every unknown left unknown. */
+function unknownEvaluation(failure: ReviewStartFailure): PolicyEvaluation {
+  return { changeIdentity: null, effectiveMode: 'fixed', artifactSha256: null, recommendedAction: null,
+    probabilities: unknownProbabilities(), failureReason: failure };
 }
 
 async function buildDecision(input: VerificationActionStartFacts, ports: ReviewStartPolicyPorts,
   signal: AbortSignal): Promise<ReviewStartDecisionInput | null> {
-  if (signal.aborted) { return null; }
-  const changeIdentity = ports.identity.changeIdentity(input.revision, ports.targetBranch);
-  const loaded = ports.loadPolicy();
-  if (loaded.mode === 'fixed') { return fallback(input, ports, changeIdentity, artifactFailure(loaded.reason)); }
-  const history = await ports.readHistory(signal);
-  if (signal.aborted) { return null; }
-  if (!history.ok) { return fallback(input, ports, changeIdentity, observationFailure('history', history.failure)); }
-  const belief = deriveBelief(loaded.artifact, history.entries);
-  if (!belief.ok) {
-    return fallback(input, ports, changeIdentity, observationFailure('belief', belief.failure));
-  }
-  if (belief.record.kind === 'pending-repair') {
-    return fallback(input, ports, changeIdentity,
-      { kind: 'belief-unmodelled-history', message: `${belief.record.check} repair is pending` });
-  }
-  const passed = new Set(belief.record.passed);
-  const recommendation = recommend(loaded.artifact, belief.belief,
-    new Set(POLICY_ACTIONS.filter(action => !passed.has(action))));
-  if (recommendation.kind === 'invalid-belief') {
-    return fallback(input, ports, changeIdentity,
-      { kind: 'belief-invalid', message: `policy belief is ${recommendation.reason}` });
-  }
-  if (recommendation.kind === 'no-recommendation') {
-    const failure = { kind: 'no-recommendation' as const, message: 'policy has no permitted recommendation' };
-    return fallback(input, ports, changeIdentity, failure, 'shadow', loaded.hash, recommendation.passProbabilities);
-  }
-  return decisionInput(input, ports, changeIdentity, 'shadow', loaded.hash, recommendation.action,
-    recommendation.passProbabilities, null);
+  const concluded = await evaluatePolicy(input, ports, signal);
+  if (!concluded) { return null; }
+  const decision = decisionInput(input, ports, concluded);
+  // A selection that already fell back keeps its own reason; the pin and change identity stay as resolved.
+  return input.selectionFailure ? { ...decision, effectiveMode: 'fixed', recommendedAction: null,
+    predictedPassProbability: unknownProbabilities(), failureReason: input.selectionFailure } : decision;
+}
+
+/** Failures a later evaluation of the same facts need not reproduce, so the selection hands them to the start record. */
+const TRANSIENT_FAILURES: ReadonlySet<ReviewStartFailureKind> = new Set(['observation-timeout', 'policy-exception', 'writer-failure']);
+
+function unusable(ports: ReviewStartPolicyPorts, failure: ReviewStartFailure): PolicySelection {
+  try { ports.diagnostic(failure); } catch { /* Diagnostics cannot steer the mission. */ }
+  return { action: null, failure };
+}
+
+/**
+ * The pilot's choice of the next unfinished check for the current change. A null
+ * action leaves the fixed policy in charge; a transient fallback also returns its
+ * typed reason so the next recorded decision carries it, not a re-derived one.
+ */
+export async function selectPolicyAction(facts: PolicyEvaluationFacts,
+  ports: ReviewStartPolicyPorts): Promise<PolicySelection> {
+  if (ports.configuration.mode !== 'pilot') { return { action: null, failure: null }; }
+  const controller = new AbortController();
+  const lost = { kind: 'observation-timeout' as const, message: `policy selection exceeded ${REVIEW_START_OBSERVATION_DEADLINE_MS} ms` };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<PolicySelection>(resolve => {
+    timer = setTimeout(() => { controller.abort(); resolve(unusable(ports, lost)); }, REVIEW_START_OBSERVATION_DEADLINE_MS);
+    timer.unref?.();
+  });
+  try {
+    const concluded = await Promise.race([evaluatePolicy(facts, ports, controller.signal), timeout]);
+    if (concluded === null) { return unusable(ports, lost); }
+    if ('action' in concluded) { return concluded; }
+    const reason = concluded.failureReason;
+    return { action: concluded.effectiveMode === 'pilot' ? concluded.recommendedAction : null,
+      failure: reason && TRANSIENT_FAILURES.has(reason.kind) ? reason : null };
+  } catch (error) { return unusable(ports, policyException(error)); }
+  finally { if (timer !== undefined) { clearTimeout(timer); } }
 }
 
 /** The sole policy evaluator used by every durable verification-action start boundary. */
 async function observePolicyVerificationActionStart(input: VerificationActionStartFacts,
   ports: ReviewStartPolicyPorts): Promise<ReviewStartObservationOutcome> {
-  return await observeReviewStartDecision(signal => buildDecision(input, ports, signal),
+  const outcome = await observeReviewStartDecision(signal => buildDecision(input, ports, signal),
     ports.writer, ports.diagnostic);
+  if (outcome !== 'timed-out') { return outcome; }
+  const lost = unknownEvaluation({ kind: 'observation-timeout', message: `policy evaluation exceeded ${REVIEW_START_OBSERVATION_DEADLINE_MS} ms` });
+  return await observeReviewStartDecision(async () => decisionInput(input, ports, lost), ports.writer, ports.diagnostic);
 }
 
 /** Review-loop binding retained at its existing two durable review-start boundaries. */
@@ -261,18 +311,15 @@ export async function observePolicyTestsStart(input: TestsActionStartFacts,
   return await observePolicyVerificationActionStart(input, ports);
 }
 
-type ReviewStartObservationOutcome = 'recorded' | 'duplicate' | 'skipped' | 'failed' | 'timed-out';
-
-interface ObservationOptions {
-  readonly deadlineMs?: number;
-}
+/** `write-timed-out`: the deadline passed while the writer was running, so that write may still land and no second one is made. */
+type ReviewStartObservationOutcome = 'recorded' | 'duplicate' | 'skipped' | 'failed' | 'timed-out' | 'write-timed-out';
 
 /** Failure-isolated deadline around metadata/evaluation and the durable writer. */
 export async function observeReviewStartDecision(
   build: (_signal: AbortSignal) => Promise<ReviewStartDecisionInput | null>,
-  writer: ReviewStartPolicyPorts['writer'],
+  writer: Pick<ReviewStartPolicyPorts['writer'], 'recordReviewStartDecision'>,
   diagnostic: (_failure: ReviewStartFailure) => void,
-  options: ObservationOptions = {},
+  options: { readonly deadlineMs?: number } = {},
 ): Promise<ReviewStartObservationOutcome> {
   const controller = new AbortController();
   const deadlineMs = options.deadlineMs ?? REVIEW_START_OBSERVATION_DEADLINE_MS;
@@ -280,16 +327,17 @@ export async function observeReviewStartDecision(
     try { diagnostic(failure); } catch { /* Diagnostics cannot alter review control flow. */ }
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<'timed-out'>(resolve => {
+  let writing = false;
+  const timeout = new Promise<'timed-out' | 'write-timed-out'>(resolve => {
     const scheduled = setTimeout(() => {
       controller.abort();
       report({ kind: 'observation-timeout', message: `review-start observation exceeded ${deadlineMs} ms` });
-      resolve('timed-out');
+      resolve(writing ? 'write-timed-out' : 'timed-out');
     }, deadlineMs);
     timer = scheduled;
     scheduled.unref?.();
   });
-  const work = (async (): Promise<Exclude<ReviewStartObservationOutcome, 'timed-out'>> => {
+  const work = (async (): Promise<Exclude<ReviewStartObservationOutcome, 'timed-out' | 'write-timed-out'>> => {
     let input: ReviewStartDecisionInput | null;
     try { input = await build(controller.signal); }
     catch (error) {
@@ -297,7 +345,7 @@ export async function observeReviewStartDecision(
       return 'failed';
     }
     if (input === null || controller.signal.aborted) { return 'skipped'; }
-    try { return await writer.recordReviewStartDecision(input) ? 'recorded' : 'duplicate'; }
+    try { writing = true; return await writer.recordReviewStartDecision(input) ? 'recorded' : 'duplicate'; }
     catch (error) {
       report({ kind: 'writer-failure', message: error instanceof Error ? error.message : String(error) });
       return 'failed';

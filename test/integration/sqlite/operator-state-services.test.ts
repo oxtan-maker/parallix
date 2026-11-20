@@ -344,6 +344,27 @@ describe('OperationalHistoryService: ordered events and failure handling', () =>
       ['review-start:task-2859.09:patch-123:2', 'qwen-run-1'],
     ]);
   });
+
+  it('persists one pilot pin per mission across concurrent SQLite entries (TASK-2859.19)', async () => {
+    const restarted = new OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
+    const input = (slug: string) => ({
+      missionId: missionId(slug), repositoryId: repositoryId('repository-1'), changeIdentity: `patch-${slug}`,
+      configuredMode: 'pilot' as const, artifactSha256: 'pinned-hash', failureReason: null,
+    });
+    const [left, right, racing, racer] = await Promise.all([
+      service.resolveReviewEntryPin(input('task-concurrent-left')),
+      restarted.resolveReviewEntryPin(input('task-concurrent-right')),
+      service.resolveReviewEntryPin(input('task-concurrent-same')),
+      restarted.resolveReviewEntryPin(input('task-concurrent-same')),
+    ]);
+    assert.equal(left?.artifactSha256, 'pinned-hash');
+    assert.equal(right?.artifactSha256, 'pinned-hash');
+    assert.equal(racing?.idempotencyKey, racer?.idempotencyKey, 'two entries for one mission adopt one pin');
+    assert.equal((await new OperationalHistoryService(new SqliteOperationalHistoryRepository(db))
+      .resolveReviewEntryPin(input('task-concurrent-left')))?.idempotencyKey, left?.idempotencyKey);
+    const rows = await restarted.loadByType('verification.review-entry-assignment');
+    assert.equal(rows.length, 3, 'one row per mission, whichever entry won');
+  });
 });
 
 describe('AgentBlockService: blocked agent projection', () => {

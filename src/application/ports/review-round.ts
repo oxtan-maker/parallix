@@ -21,7 +21,7 @@ import type { SessionLaunchPolicy } from '../../domain/session.js';
 import type { AgentLaunchResult } from './agent-launch-result.js';
 import type { ReviewOperatorResumeAssessment } from '../review-recovery.js';
 import type { LiveMissionExecutionContext } from './mission-execution-context.js';
-import type { ReviewStartFacts } from './verification-policy.js';
+import type { PolicyActionPort, ReviewStartFacts } from './verification-policy.js';
 export type { ReviewStartFacts } from './verification-policy.js';
 
 /* ------------------------------------------------------------------ *
@@ -445,6 +445,8 @@ export interface ReviewLoopPorts {
   readonly preReview: PreReviewPort;
   /** Absent when verificationPolicy is off, preserving zero policy work. */
   readonly reviewStarts?: ReviewStartObservationPort;
+  /** Absent unless verificationPolicy.mode is pilot; shadow and off run the fixed policy. */
+  readonly policyActions?: PolicyActionPort;
   readonly output: ReviewLoopOutput;
   readonly lock: ReviewControllerLock;
   readonly classification?: import('./review-classification.js').ReviewClassificationPorts;
@@ -463,6 +465,8 @@ export interface ReviewLoopRequest {
   readonly dryRun?: boolean;
   readonly reset?: boolean;
   readonly isContinue?: boolean;
+  /** Policy-selected tests actions spent by earlier entries of this run; a floor under the durable count. */
+  readonly policyActionsUsed?: number;
   /** The caller already ran the review preparation transition (e.g. `px active` repair). */
   readonly skipReviewPreparation?: boolean;
   readonly verbose?: boolean;

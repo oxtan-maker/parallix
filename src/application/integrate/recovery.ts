@@ -16,7 +16,7 @@ import { agentFamily } from '../../domain/agents.js';
 import { evaluateTaskStatusForIntegration, resolveAuthoritativeApprovalAt } from './approval.js';
 import { abortWith, resolveIntegrationTaskPath } from './support.js';
 import type { IntegrateReviewPort, IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
-import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 
 export type IntegrationRecoveryContext = Pick<IntegrationContext, 'slug' | 'approval' | 'missionStatus'>
   // Optional only because a closeout may recover a decided lane after its mission

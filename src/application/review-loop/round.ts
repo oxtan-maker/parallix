@@ -13,7 +13,8 @@ import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { AgentLaunchResult } from '../ports/agent-launch-result.js';
 import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent } from '../rebound-kernel.js';
-import type { ProviderApproval, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
+import type { ReviewStartFailure } from '../ports/verification-policy.js';
+import type { HumanReviewFeedback, ProviderApproval, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
 
 /** Default per-round relaunch cap. */
 export const DEFAULT_REBOUNDS_PER_ROUND = 6;
@@ -35,6 +36,14 @@ export interface LoopContext {
   readonly operatorInvocation: boolean;
   readonly verbose: boolean;
   readonly initialRound: number;
+  /** Feedback the policy step already reconciled; the next round consumes it instead of reading it again. */
+  reconciledFeedback?: HumanReviewFeedback | null;
+  /** Set when the durable allowance cannot be read: the fixed policy runs this loop. */
+  policyDisabled?: boolean;
+  /** What the policy chose before this round's setup; a declined tests choice is not re-asked after the rebase. */
+  selectedAction?: import('../verification-policy/policy-artifact.js').PolicyAction | null;
+  /** A transient policy-selection fallback the next observed action start records. */
+  selectionFailure?: ReviewStartFailure | null;
   /** This private context owns one selected slot in a parallel reviewer batch. */
   readonly parallelReviewer?: boolean;
   readonly state: ReviewLoopState;

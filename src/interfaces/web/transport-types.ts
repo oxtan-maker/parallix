@@ -182,7 +182,7 @@ export interface WebMissionCard {
   readonly reviewRound: number | null;
   readonly reviewPhase: string | null;
   /** Added in transport v4; omitted cached snapshots mean the turn was not projected. */
-  readonly humanReviewDue?: import('../../application/verification-policy/review-start-decision.js').HumanReviewDue | null;
+  readonly humanReviewDue?: import('../../application/verification-policy/fixed-next-action.js').HumanReviewDue | null;
   /** The application-owned recovery decision; null when recovery is not applicable. */
   readonly reviewRecovery: import('../../application/review-recovery.js').ReviewRecovery | null;
   readonly reviewDisposition: string | null;

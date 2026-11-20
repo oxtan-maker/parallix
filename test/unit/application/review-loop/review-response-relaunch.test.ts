@@ -86,7 +86,7 @@ for (const recovery of ['artifact', 'timeout'] as const) {
 
       const outcome = await runReviewerPhase(context, new ReviewRound(1, context));
 
-      assert.deepEqual(outcome, verdict === 'APPROVED' ? { outcome: 'stop' } : { reviewState: verdict });
+      assert.deepEqual(outcome, verdict === 'APPROVED' ? { outcome: 'approved' } : { reviewState: verdict });
       assert.equal(state.phase, accepted.phase);
       assert.deepEqual(fake.exits, []);
       assert.deepEqual(fake.stops, []);
@@ -122,7 +122,7 @@ test('timeout recovery consumes artifacts against the retry launch status (PX-00
 
   const outcome = await runReviewerPhase(context, new ReviewRound(1, context));
 
-  assert.deepEqual(outcome, { outcome: 'stop' });
+  assert.deepEqual(outcome, { outcome: 'approved' });
   assert.deepEqual(consumedStatuses, [null, 0], 'recovered artifacts must be checked against the retry process result');
   assert.equal(launches, 2);
   assert.deepEqual(fake.stops, []);

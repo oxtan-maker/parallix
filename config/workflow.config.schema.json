@@ -8,7 +8,7 @@
   "properties": {
     "verificationPolicy": {
       "type": "object",
-      "description": "Invalid policy configuration disables only this block. Pilot currently behaves as shadow.",
+      "description": "Invalid policy configuration disables only this block. Shadow only observes; pilot lets the policy choose integration tests in the review step.",
       "properties": {
         "mode": { "enum": ["off", "shadow", "pilot"], "default": "off" },
         "artifact": { "type": "string", "pattern": "\\S" }

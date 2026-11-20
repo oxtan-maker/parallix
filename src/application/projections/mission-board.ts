@@ -1,5 +1,5 @@
 import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
-import { fixedVerificationFacts, fixedVerificationNextAction, humanReviewDue, type FixedVerificationNextActionFacts, type HumanReviewDue } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationFacts, fixedVerificationNextAction, humanReviewDue, type FixedVerificationNextActionFacts, type HumanReviewDue } from '../verification-policy/fixed-next-action.js';
 import { invalidContractRecoveryCommands } from '../checkpoint-recovery-commands.js';
 import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';

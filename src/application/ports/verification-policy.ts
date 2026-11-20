@@ -28,6 +28,8 @@ export type ReviewStartFailureKind =
   | `history-${HistoryFailure}`
   | `belief-${BeliefFailureKind}`
   | 'no-recommendation'
+  | 'human-turn-unavailable'
+  | 'mode-changed-in-flight'
   | 'policy-exception'
   | 'writer-failure'
   | 'observation-timeout';
@@ -42,6 +44,25 @@ export interface ReviewStartFailure {
   readonly message: string;
 }
 
+/** One append-only pilot pin, fixed for the lifetime of a Mission: the mode and artifact it entered review under. */
+export interface ReviewEntryPin {
+  readonly schemaVersion: 1;
+  readonly idempotencyKey: string;
+  readonly missionId: MissionId;
+  readonly repositoryId: RepositoryId;
+  readonly changeIdentity: string | null;
+  readonly configuredMode: 'pilot';
+  readonly actionSequence: 1;
+  readonly artifactSha256: string | null;
+  readonly failureReason: ReviewStartFailure | null;
+  readonly recordedAt: string;
+}
+
+export type ReviewEntryPinInput = Pick<ReviewEntryPin,
+  'missionId' | 'repositoryId' | 'changeIdentity' | 'artifactSha256' | 'failureReason'> & {
+  readonly configuredMode: ActiveVerificationPolicyConfiguration['mode'];
+};
+
 /** Complete append-only review-start observation. Unknown values are explicit nulls. */
 export interface ReviewStartDecision {
   readonly schemaVersion: 1;
@@ -50,7 +71,7 @@ export interface ReviewStartDecision {
   readonly repositoryId: RepositoryId;
   readonly changeIdentity: string | null;
   readonly configuredMode: Exclude<VerificationPolicyConfiguration['mode'], 'off'>;
-  readonly effectiveMode: Exclude<PolicyLoadResult['mode'], 'off'>;
+  readonly effectiveMode: Exclude<PolicyLoadResult['mode'], 'off'> | 'pilot';
   readonly artifactSha256: string | null;
   readonly recommendedAction: PolicyAction | null;
   readonly predictedPassProbability: PerAction<number | null>;
@@ -73,6 +94,8 @@ export interface VerificationActionStartFactsBase<Action extends PolicyAction> {
   readonly verdictCorrelation: string;
   readonly agentRunId: string | null;
   readonly operatorInvocation: boolean;
+  /** The reason the pilot's own selection fell back; the start record carries it instead of re-deriving a different one. */
+  readonly selectionFailure?: ReviewStartFailure | null;
 }
 
 /** Durable review-action facts presented to optional observers. */
@@ -100,7 +123,10 @@ export interface ReviewStartPolicyPorts {
   readonly loadPolicy: (_expectedHash?: string) => Exclude<PolicyLoadResult, { mode: 'off' }>;
   readonly readHistory: (_signal: AbortSignal) => Promise<PolicyHistory>;
   readonly identity: ChangeIdentityPort;
-  readonly writer: { recordReviewStartDecision(_input: ReviewStartDecisionInput): Promise<boolean> };
+  readonly writer: {
+    recordReviewStartDecision(_input: ReviewStartDecisionInput): Promise<boolean>;
+    resolveReviewEntryPin(_input: ReviewEntryPinInput): Promise<ReviewEntryPin | null>;
+  };
   readonly diagnostic: (_failure: ReviewStartFailure) => void;
 }
 
@@ -110,3 +136,28 @@ export type VerificationActionPolicyFactory = (_input: {
   readonly targetBranch: string;
   readonly slug: string;
 }) => Omit<ReviewStartPolicyPorts, 'diagnostic'> | undefined;
+
+/** How a policy-selected integration-test action ended; the executor's own typed outcome. */
+export type PolicyTestsOutcome =
+  | { readonly kind: 'not-selected' }
+  | { readonly kind: 'completed'; readonly verdict: 'passed' | 'failed' | 'cancelled' }
+  | { readonly kind: 'human-handoff'; readonly reason: string; readonly detail: string };
+
+/** The pilot's choice: an action to run, or null with the typed reason the fixed policy stays in charge (absent when none applies). */
+export interface PolicySelection {
+  readonly action: PolicyAction | null;
+  readonly failure: ReviewStartFailure | null;
+}
+
+/** Pilot-mode choices the loop acts on between rounds; composed only while verificationPolicy.mode is pilot. */
+export interface PolicyActionPort {
+  /** The policy's next unfinished check for the current change; null leaves the fixed policy in charge. */
+  select(_facts: { readonly missionId: MissionId; readonly revision: string;
+  }): Promise<PolicySelection>;
+  /** Run the integration tests through the integrate workflow's own claim, rebase and gate owners. */
+  runTests(_stillSelected: (_revision: string) => Promise<boolean>): Promise<PolicyTestsOutcome>;
+  /** Tests actions already started for this Mission, from durable records; a restart resumes the count. */
+  testsActionsSpent(): Promise<number>;
+  /** A rebase stopped on conflicts is outside the model: no decision while it is open. */
+  rebaseInProgress(): boolean;
+}

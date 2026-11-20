@@ -21,9 +21,11 @@ import { pendingRetainedRepair, resumeRetainedRepair } from './retained-repair.j
 import { selectReviewer } from './reviewer-selection.js';
 import { runReviewerPhase } from './reviewer-phase.js';
 import { runImplementerPhase } from './implementer-phase.js';
+import { reconciledHumanFeedback, runPolicyTestsAction, testsActionsSpent } from './policy-action.js';
+import { beginHumanTurn } from './reviewer-outcome.js';
 import { DEFAULT_REBOUNDS_PER_ROUND, ReviewRound, stopIfControllerSuperseded, type LoopContext } from './round.js';
 import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
-import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import { retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
 export const DEFAULT_MAX_ATTEMPTS = AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS;
 
@@ -210,12 +212,12 @@ async function handleApprovedRoundCorrection(context: LoopContext, feedback: Hum
 }
 
 /** One round: the reviewing half, then the implementer's answer to it. */
-async function runRound(context: LoopContext, attempt: number): Promise<'stop' | 'next-round' | 'revoked'> {
+async function runRound(context: LoopContext, attempt: number): Promise<'stop' | 'next-round' | 'revoked' | 'replan' | 'approved'> {
   if (await stopIfControllerSuperseded(context, `round ${attempt}`)) { return 'stop'; }
   context.emit({ kind: 'round-started', attempt: attempt, maxAttempts: context.maxAttempts });
   if (attempt > context.state.round) { context.state.advanceRound(); }
   const round = new ReviewRound(attempt, context);
-  const humanFeedback = await context.ports.humanFeedback.reconcile(context.state);
+  const humanFeedback = await reconciledHumanFeedback(context);
   if (humanFeedback?.disposition === 'REQUEST_CHANGES' && humanFeedback.state === 'current') {
     // An explicit human correction is newer authority than a stored provider
     // approval.  Enter the existing fixing path directly, rather than launch a
@@ -316,10 +318,34 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
 }
 
 async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest, restarted: boolean): Promise<void> {
-  const { ports, state, maxAttempts } = context;
-  for (let attempt = context.initialRound; attempt <= maxAttempts; attempt++) {
+  const { ports, maxAttempts } = context;
+  // Every policy-selected tests action spends one attempt of the same allowance, so
+  // checks that fail forever still end in MAX_ATTEMPTS. The spent count is read from
+  // durable decision rows, so a restart cannot restore the budget.
+  let used = request.policyActionsUsed ?? 0;
+  const durable = await testsActionsSpent(context);
+  // An unreadable history leaves the fixed policy in charge for this run.
+  context.policyDisabled = durable === null;
+  const spentAttempts = async () => Math.max(used, await testsActionsSpent(context) ?? used);
+  let allowance = maxAttempts - Math.max(used, durable ?? 0);
+  for (let attempt = context.initialRound; attempt <= allowance;) {
+    const tests = await runPolicyTestsAction(context);
+    if (tests === 'stop') { return; }
+    if (tests === 'repaired') {
+      await runOwnedReviewLoop({ ...request, policyActionsUsed: used + 1, isContinue: true, reset: false }, ports, restarted);
+      return;
+    }
+    if (tests === 'ran') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
     const outcome = await runRound(context, attempt);
+    // The pre-review rebase changed what the policy recommends: it chooses again, and the re-plan spends an attempt.
+    if (outcome === 'replan') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
+    attempt += 1;
     if (outcome === 'stop') { return; }
+    // An approval is durable but is not the end of the decision: the policy chooses again on the approved state.
+    if (outcome === 'approved') {
+      await settleApproval(context, request, used, restarted, spentAttempts);
+      return;
+    }
     // A revoked approval reopened the Review: start again as a continuation
     // so the review preparation opens the next round.  One restart per run bounds it.
     if (outcome === 'revoked') {
@@ -327,10 +353,41 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
         await context.escalateToHumanReview('APPROVED_ROUND_HUMAN_CORRECTION');
         return;
       }
-      await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, ports, true);
+      await runOwnedReviewLoop({ ...request, policyActionsUsed: used, isContinue: true, reset: false }, ports, true);
       return;
     }
   }
+  await exhaustAttempts(context);
+}
+
+/**
+ * Return control to the next-action decision after an approved agent round. A
+ * policy-selected tests action is dispatched at most once, within the attempt
+ * allowance; whatever it ends in, the approval is handed to the human turn,
+ * except a failed check, which re-enters review. A spent allowance dispatches
+ * nothing and ends in MAX_ATTEMPTS after the hand-off.
+ */
+async function settleApproval(context: LoopContext, request: ReviewLoopRequest, used: number, restarted: boolean,
+  spentAttempts: () => Promise<number>): Promise<void> {
+  const spent = Math.max(used, await spentAttempts());
+  if (spent >= context.maxAttempts) {
+    await beginHumanTurn(context);
+    await exhaustAttempts(context);
+    return;
+  }
+  const tests = await runPolicyTestsAction(context);
+  if (tests === 'repaired') {
+    await runOwnedReviewLoop({ ...request, policyActionsUsed: spent + 1, isContinue: true, reset: false }, context.ports, restarted);
+    return;
+  }
+  // 'stop' already escalated its typed handoff; the approval itself is still durable and owes its human turn.
+  await beginHumanTurn(context);
+  // A dispatched action that consumed the final attempt ends the loop like any other spent allowance.
+  if (tests === 'ran' && Math.max(spent + 1, await spentAttempts()) >= context.maxAttempts) { await exhaustAttempts(context); }
+}
+
+async function exhaustAttempts(context: LoopContext): Promise<void> {
+  const { state, ports, maxAttempts } = context;
   state.disposition = 'MAX_ATTEMPTS';
   state.metadata = { ...state.metadata, humanEscalationReason: 'MAX_ATTEMPTS', humanEscalatedAt: new Date().toISOString() };
   await ports.state.persist(state);

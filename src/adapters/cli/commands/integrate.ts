@@ -29,7 +29,7 @@ import * as forgejo from '../../forgejo/forgejo.js';
 import * as github from '../../github/github-pr.js';
 import * as missionUtils from '../../filesystem/mission-utils.js';
 import { getPrimaryWorktree } from '../../filesystem/mission-utils.js';
-import { claimRecoveryLock } from '../../filesystem/recovery-claim.js';
+import { claimHolderPid, claimRecoveryLock } from '../../filesystem/recovery-claim.js';
 import * as verification from '../../verification/verification.js';
 import * as agents from '../../agents/agents.js';
 import * as runtimeMatrix from '../../agents/runtime-matrix.js';
@@ -191,6 +191,11 @@ function composeIntegrationFileSystem(): IntegrateWorkflowPorts['fileSystem'] {
   };
 }
 
+function integrationClaimKey(configuration: ParallixConfiguration | undefined, slug: string): string {
+  const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree(configuration)).digest('hex').slice(0, 16);
+  return `integrate-${rootKey}-${slug}`;
+}
+
 function composeIntegrationProcess(configuration: ParallixConfiguration | undefined): IntegrateWorkflowPorts['process'] {
   return {
     terminate: code => process.exit(code),
@@ -200,9 +205,10 @@ function composeIntegrationProcess(configuration: ParallixConfiguration | undefi
       const key = crypto.createHash('sha256').update(`${base}\0${branch}`).digest('hex');
       return claimRecoveryLock(`integration-base-${key}`);
     },
-    claimIntegration: async slug => {
-      const rootKey = crypto.createHash('sha256').update(getPrimaryWorktree(configuration)).digest('hex').slice(0, 16);
-      return claimRecoveryLock(`integrate-${rootKey}-${slug}`);
+    claimIntegration: async slug => claimRecoveryLock(integrationClaimKey(configuration, slug)),
+    integrationClaimHolder: slug => {
+      const pid = claimHolderPid(integrationClaimKey(configuration, slug));
+      return pid === null ? null : `process ${pid}`;
     },
   };
 }
@@ -270,6 +276,12 @@ async function integrate(args: string[], options: import('../../../application/i
 async function runReviewStepTests(slug: string, options: import('../../../application/integrate-workflow.js').IntegrateOptions) {
   return createIntegrateWorkflow(createIntegratePorts(options.configuration,
     options.verificationActionPolicy, options.operatorInvocation === true)).runReviewStepTests(slug, options);
+}
+
+/** The review loop's policy-selected integration tests, bound with the same ports and claim as px integrate. */
+async function runPolicyTestsAction(slug: string, options: Parameters<typeof workflow.runPolicyTestsAction>[1]) {
+  return await createIntegrateWorkflow(createIntegratePorts(options.configuration,
+    options.verificationActionPolicy, options.operatorInvocation === true)).runPolicyTestsAction(slug, options);
 }
 
 export {
@@ -399,6 +411,7 @@ export default integrateWithHelpers;
 export {
   integrate,
   runReviewStepTests,
+  runPolicyTestsAction,
   parseIntegrateArgs,
   buildIntegrationContext,
   getPrimaryWorktree,

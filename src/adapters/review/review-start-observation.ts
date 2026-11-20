@@ -1,5 +1,6 @@
 import * as fmt from '../../application/presentation/cli-format.js';
 import type { ReviewLoopPorts } from '../../application/ports/review-round.js';
+import type { PolicyActionPort } from '../../application/ports/verification-policy.js';
 import type { ReviewStartFailure, ReviewStartFailureKind,
   ReviewStartPolicyPorts } from '../../application/ports/verification-policy.js';
 import { observePolicyReviewStart, observePolicyTestsStart } from '../../application/verification-policy/review-start-decision.js';
@@ -8,6 +9,8 @@ import type { IntegrationTestsActionObservationPort } from '../../application/po
 /** Review-loop bindings derived from the two existing application ports. */
 export type ReviewStartObservationBindings = {
   readonly reviewStartPolicy?: Omit<ReviewStartPolicyPorts, 'diagnostic'>;
+  /** Composed only in pilot mode; the loop acts on its choices. */
+  readonly policyActions?: PolicyActionPort;
 };
 
 /** Count each typed failure separately while retaining the existing warning channel. */
@@ -23,12 +26,12 @@ export function createReviewStartFailureDiagnostics(log: (_message: string) => v
 
 /** Bind the policy evaluator to the review loop's existing warning channel. */
 export function reviewStartObservationBinding(bindings: ReviewStartObservationBindings,
-  log: (_message: string) => void): Pick<ReviewLoopPorts, 'reviewStarts'> | Record<string, never> {
+  log: (_message: string) => void): Pick<ReviewLoopPorts, 'reviewStarts' | 'policyActions'> | Record<string, never> {
   if (!bindings.reviewStartPolicy) { return {}; }
   const diagnostic = createReviewStartFailureDiagnostics(log);
   return { reviewStarts: { observe: async facts => {
     await observePolicyReviewStart(facts, { ...bindings.reviewStartPolicy!, diagnostic });
-  } } };
+  } }, ...(bindings.policyActions ? { policyActions: bindings.policyActions } : {}) };
 }
 
 /** Bind the same evaluator and bounded diagnostics to the integration evidence boundary. */

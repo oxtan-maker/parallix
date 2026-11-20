@@ -27,15 +27,32 @@ effect.
 `verificationPolicy.mode` accepts `off` (default), `shadow` or `pilot`.
 Off or an absent block performs no policy artifact or history reads, writes or
 queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
-path, relative to the checkout or absolute. Pilot currently behaves as shadow;
-verification sequencing and merge requirements remain unchanged.
+path, relative to the checkout or absolute. Shadow only observes: review and
+integration run the fixed sequence. In pilot mode every mission is pinned at
+review entry to the mode and artifact hash it entered under, and the policy
+chooses integration tests as the next action whenever it recommends them as an
+unfinished check; agent review and the human turn stay with the fixed review
+step, and a check that already passed on the current change is never
+recommended again. Operator commands still override and are recorded as
+overrides. Escalation, recovery, repair and a rebase stopped on conflicts make
+no policy decision. Any missing, invalid or mismatched artifact, contradictory
+or unmodelled history, policy error or recommendation that cannot be acted on
+(for example a human turn before agent approval) runs the fixed policy and
+records the typed reason. Every policy-selected action counts against the review
+allowance, so a check that fails forever still ends in a human handoff. Change
+the mode only between missions: a mission in flight when the mode changes
+finishes on the fixed policy with a recorded reason; a mission that already has
+recorded policy decisions when pilot begins is never pinned late.
 When enabled, `px status <mission>` reports the ordered policy history or its typed fixed-policy fallback reason.
 Agent-review, human-review and non-empty integration-test starts append
 observational policy decisions. Observation failures never change review or
 integration-gate outcomes.
 History preserves only observations whose recorded identity and authority are
-unambiguous. Stable-identity rebases add nothing; changed or otherwise
-unmodelled work resets the history as `unmodelled-change`. Approval passes are
+unambiguous. Rebases, including conflict-resolved and failed-then-completed
+ones, add nothing and never reset the history, and the agent that ran a check is
+not an input; a patch changed by a rebase is left to origin CI. Other
+unmodelled work, such as a revision identity mismatch, approval revocation or
+an ambiguous repair, resets the history as `unmodelled-change`. Approval passes are
 retained only when the recorded approval coverage still covers the change, and
 landing-gate failures appear as a failed tests verdict followed by a completed
 repair when that repair addresses exactly the failed check.

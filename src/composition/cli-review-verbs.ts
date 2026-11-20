@@ -12,7 +12,7 @@ import { authorizeMissionWrite, authorizedOperationId, inheritedMissionWrite } f
 import { promptArtifacts } from '../adapters/agents/prompt-artifacts.js';
 import { liveMissionExecutionContext } from '../application/ports/mission-execution-context.js';
 import { missionId } from '../domain/mission.js';
-import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../application/verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../application/verification-policy/fixed-next-action.js';
 import { currentReviewRound, reviewStatus, type Review } from '../domain/review.js';
 import { RevokeReviewDecisionUseCase } from '../application/revoke-review-decision-use-case.js';
 import { createGitChangeIdentity } from '../adapters/git/change-identity.js';

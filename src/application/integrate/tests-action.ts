@@ -15,15 +15,19 @@ import type { ParallixConfiguration } from '../ports/configuration.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts, IntegrationGateRoute, IntegrationGateRunRecord } from '../ports/integrate-workflow.js';
 import type { LiveMissionExecutionContext, MissionExecutionContext } from '../ports/mission-execution-context.js';
-import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import type { IntegrationContext, IntegrationContextOptions } from './context.js';
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { IntegrationStopsForHuman } from './review-before-integration.js';
+import { integrationSeams } from '../integrate-entry.js';
+import type { IntegrateOptions } from '../integrate-workflow.js';
 
 export interface TestsActionRequest {
   readonly slug: string;
   /** The verification action a policy selected; null, the fixed sequence decides from exact-current evidence. */
   readonly policySelection: 'tests' | null;
+  /** Asked after the mandatory rebase with the head to be tested; false when the policy no longer recommends tests there. */
+  readonly stillSelected?: (_revision: string) => Promise<boolean>;
   readonly executionContext: MissionExecutionContext;
   readonly missionServicesFn: IntegrationMissionServicesFactory;
   readonly seams: IntegrateSeams;
@@ -134,6 +138,16 @@ async function settle(slug: string, decision: GateStepDecision, run: Integration
     next: await next() };
 }
 
+/** A rebase that changed the change identity resets what the policy knows, so its choice is asked again on the head that would be tested. */
+async function choiceChanged(request: TestsActionRequest, tested: string | null): Promise<boolean> {
+  return tested !== null && request.stillSelected !== undefined && !await request.stillSelected(tested);
+}
+
+/** The refused second actor is told which process owns the integration claim. */
+function claimRefused(ports: IntegrateWorkflowPorts, slug: string): TestsActionOutcome {
+  return handoff('concurrent-entry', `Integration of ${slug} is already running in ${ports.process.integrationClaimHolder?.(slug) ?? 'another process'}.`);
+}
+
 export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies) {
   const readRun = (checkout: string): IntegrationGateRunRecord | null => {
     try { return ports.gates.readGateRun?.(checkout) ?? null; } catch { return null; }
@@ -213,8 +227,7 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
     const services = await request.missionServicesFn(ports.process.cwd());
     const loaded = await services.store.load(missionId(slug));
     if (loaded.kind !== 'found') { return { kind: 'not-selected', next: null }; }
-    const { policySelection } = request;
-    let selected = fixedVerificationNextAction({ mission: loaded.mission, policySelection });
+    let selected = fixedVerificationNextAction({ mission: loaded.mission, policySelection: request.policySelection });
     // Only the landing lane needs positive evidence before the fixed sequence may schedule tests.
     const needsEvidence = needsLandingEvidence(request, loaded.mission.status);
     const resolved = needsResolvedContext(selected, needsEvidence) ? await resolveContext(request, services) : null;
@@ -228,8 +241,9 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
     const { context } = resolved;
     const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
     const head = ports.gates.captureFinalIntegrationTree(checkout);
-    context.missionHeadSha = head.ok ? head.commit ?? null : null;
     const tested = head.ok ? head.commit ?? null : null;
+    context.missionHeadSha = tested;
+    if (await choiceChanged(request, tested)) { return { kind: 'not-selected', next: selected }; }
     const previous = readRun(checkout);
     if (completeCurrentTestsPass(previous, tested, ports.gates.loadPhaseGates(checkout, 'preIntegration'))) {
       return { kind: 'completed', verdict: 'passed', evidence: evidenceOf(previous), recorded: true, repairRoute: null,
@@ -242,11 +256,25 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
   /** Run one policy-selected tests action under the mission's exclusive integration claim. */
   async function runTestsAction(request: TestsActionRequest): Promise<TestsActionOutcome> {
     const release = await ports.process.claimIntegration(request.slug);
-    if (!release) { return handoff('concurrent-entry', `Integration of ${request.slug} is already running in another process.`); }
+    if (!release) { return claimRefused(ports, request.slug); }
     try { return await execute(request); }
     catch (error) { return handoff('interrupted', messageOf(error)); }
     finally { await release(); }
   }
 
   return { runTestsAction };
+}
+
+export type PolicyTestsActionOptions = IntegrateOptions & {
+  readonly stillSelected?: TestsActionRequest['stillSelected'];
+  readonly executionContext: MissionExecutionContext;
+  readonly missionServicesFn: IntegrationMissionServicesFactory;
+};
+
+/** The review loop's policy-selected tests action: the integrate claim, rebase and gate owners, never landing. */
+export async function runPolicyTestsAction(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
+  slug: string, options: PolicyTestsActionOptions): Promise<TestsActionOutcome> {
+  return await createTestsActionExecutor(ports, dependencies).runTestsAction({ slug, policySelection: 'tests',
+    executionContext: options.executionContext, missionServicesFn: options.missionServicesFn,
+    seams: integrationSeams(options, ports), configuration: options.configuration, stillSelected: options.stillSelected });
 }

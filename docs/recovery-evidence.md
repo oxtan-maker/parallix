@@ -65,8 +65,9 @@ repair; a dry-run review only reports that it is pending.
 When several configured checks remain outstanding, restart reruns their
 authoritative configured phase once and requires a complete receipt for every
 failed command. Before that rerun, retained original failure evidence must still
-be available and complete for every outstanding command; an expired or
-mismatched capture stops certification. Restart certifies all covered
+be available and complete for every outstanding gate command (workflow
+labels such as `review-preparation` have no capture and are not read); an
+expired or mismatched capture stops certification. Restart certifies all covered
 checkpoints together only while the committed tree and Mission authority are
 unchanged. A failed public workflow keeps the actionable retained blocker as
 its latest reason; the child process's generic nonzero-exit summary does not

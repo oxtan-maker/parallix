@@ -6,6 +6,8 @@ import { createReviewStartPolicyPorts, createTestsActionPolicyFactory } from '..
 import { DEFAULT_CONFIGURATION } from '../../../src/application/ports/configuration.js';
 import type { ReviewStartObservationServices } from '../../../src/composition/review-start-observation.js';
 import { mkdtemp } from '../../helpers/temp-dir.js';
+import { createPolicyActionPort } from '../../../src/composition/review-policy-actions.js';
+import { missionId } from '../../../src/domain/mission.js';
 
 test('off or absent verification policy composes no review-start query boundary (TASK-2859.09)', () => {
   for (const configured of [false, true]) {
@@ -51,4 +53,25 @@ test('review-start change identity uses the execution context base branch (TASK-
   const ports = createReviewStartPolicyPorts({ missionWorktree: worktree, baseBranch: 'release/next' },
     'task-2859.09', DEFAULT_CONFIGURATION, services);
   assert.equal(ports?.targetBranch, 'release/next');
+});
+
+test('only pilot composes policy actions, bound to the loop and the rebase state of its checkout (TASK-2859.19)', async () => {
+  const worktree = mkdtemp('policy-actions-');
+  const policy = (mode: 'shadow' | 'pilot') => ({
+    configuration: { mode, artifact: 'policy.json' }, repositoryId: 'repository-1' as never, targetBranch: 'main', operationId: null,
+    loadPolicy: () => ({ mode: 'fixed' as const, reason: 'missing' as const }),
+    readHistory: async () => ({ ok: true as const, entries: [], tests: 'unobserved' as const }),
+    identity: { branchHead: () => null, changeIdentity: () => 'patch-1', onlyBookkeepingSince: () => false },
+    writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null },
+  });
+  const input = (mode: 'shadow' | 'pilot') => ({ slug: 'task-2859.19', executionContext: { missionWorktree: worktree } as never,
+    configuration: DEFAULT_CONFIGURATION, policy: policy(mode), policyFactory: (() => undefined) as never, missionServices: {} as never,
+    history: { countTestsActions: async () => 2 } });
+  assert.equal(createPolicyActionPort(input('shadow')), undefined, 'shadow runs the fixed policy with no policy action port');
+  const port = createPolicyActionPort(input('pilot'));
+  assert.ok(port);
+  assert.equal(port.rebaseInProgress(), false);
+  assert.equal(await port.testsActionsSpent(), 2, 'the spent count comes from the durable history');
+  assert.equal((await port.select({ missionId: missionId('task-2859.19'), revision: 'abc' })).action, null,
+    'an unusable policy leaves the fixed policy in charge');
 });

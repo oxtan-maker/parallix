@@ -47,8 +47,8 @@ import {
   type IntegrateRequest,
 } from './integrate/support.js';
 import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
-import { fixedVerificationNextAction } from './verification-policy/review-start-decision.js';
-import { createTestsActionExecutor } from './integrate/tests-action.js';
+import { fixedVerificationNextAction } from './verification-policy/fixed-next-action.js';
+import { createTestsActionExecutor, runPolicyTestsAction, type PolicyTestsActionOptions } from './integrate/tests-action.js';
 
 /** The injection seams `px integrate` callers and the characterization suites bind. */
 export interface IntegrateOptions extends Partial<IntegrateSeams> {
@@ -85,7 +85,6 @@ function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
   const { printIntegrationPreflight } = createIntegrationPreflight(ports);
 
   const { runRequiredLocalGates } = createIntegrationGateStep(ports);
-
   const { landThroughGithubPr } = createGithubPrLanding(ports);
 
   const { publishMission } = createMissionLanding(ports, { promoteTaskForIntegrationIfNeeded });
@@ -490,6 +489,7 @@ class IntegrateWorkflow {
     runIntegrationRebase: this.dependencies.runIntegrationRebase,
     predictIntegrationRebase: this.dependencies.predictIntegrationRebase,
     runReviewStepTests: (slug: string, options: IntegrateOptions = {}) => runReviewStepTestsEntry(slug, options, this.dependencies.ports, createTestsActionExecutor(this.dependencies.ports, this.dependencies)),
+    runPolicyTestsAction: (slug: string, options: PolicyTestsActionOptions) => runPolicyTestsAction(this.dependencies.ports, this.dependencies, slug, options),
     parseIntegrateArgs,
     resolveBounceImplementer,
     resolveIntegrationTaskPath,

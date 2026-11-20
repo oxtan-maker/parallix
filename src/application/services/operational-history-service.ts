@@ -1,7 +1,10 @@
 import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../ports/operation-history.js';
-import type { ReviewStartDecision, ReviewStartDecisionInput } from '../ports/verification-policy.js';
+import type { ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
+  ReviewStartDecisionInput } from '../ports/verification-policy.js';
 import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_TYPE } from '../integrate/validation-marker.js';
-import { REVIEW_START_DECISION_EVENT, reviewStartDecision } from '../verification-policy/review-start-decision.js';
+import { REVIEW_ENTRY_PIN_EVENT, REVIEW_START_DECISION_EVENT, reviewEntryPin,
+  reviewStartDecision } from '../verification-policy/review-start-decision.js';
+
 
 /**
  * Application boundary for operational history recording and querying.
@@ -123,6 +126,33 @@ export class OperationalHistoryService {
     if (right.actualAction === 'agent' && right.agentRunId !== null) { return left.agentRunId === right.agentRunId; }
     if (right.actualAction === 'human') { return left.verdictCorrelation === right.verdictCorrelation; }
     return left.verdictCorrelation === right.verdictCorrelation && left.operationId === right.operationId;
+  }
+
+  private async missionPin(input: Pick<ReviewEntryPinInput, 'missionId' | 'repositoryId'>): Promise<ReviewEntryPin | null> {
+    const rows = await this.loadAllByTypeForMission(REVIEW_ENTRY_PIN_EVENT, input.missionId);
+    return rows.map(entry => JSON.parse(entry.eventData) as ReviewEntryPin)
+      .find(entry => entry.repositoryId === input.repositoryId) ?? null;
+  }
+
+  /** Resolve the one pilot pin; shadow reads an existing pin but never creates one. */
+  async resolveReviewEntryPin(input: ReviewEntryPinInput): Promise<ReviewEntryPin | null> {
+    const existing = await this.missionPin(input);
+    if (existing) { return existing; }
+    if (input.configuredMode !== 'pilot') { return null; }
+    if ((await this.reviewStartDecisions(input.missionId)).length > 0) { return null; }
+    const pin = reviewEntryPin(input);
+    // The idempotent append elects one writer; a loser re-reads and adopts the winner's pin.
+    if (await this.repository.appendIdempotent({
+      eventType: REVIEW_ENTRY_PIN_EVENT,
+      eventData: JSON.stringify(pin),
+      createdAt: pin.recordedAt,
+    }, pin.idempotencyKey)) { return pin; }
+    return await this.missionPin(input);
+  }
+
+  /** Integration-test actions already started for this Mission, from the durable decision rows. */
+  async countTestsActions(missionId: string): Promise<number> {
+    return (await this.reviewStartDecisions(missionId)).filter(decision => decision.actualAction === 'tests').length;
   }
 
   /**

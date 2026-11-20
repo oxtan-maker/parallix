@@ -13,14 +13,15 @@ import { isArtifactInfraFailure, isPollTimeout, POLL_TIMEOUT, type ReviewerArtif
 import { pinReviewBaseline } from './pin-baseline.js';
 import { emitReviewerProgress, establishReviewerPolicy, launchFailureAllowsReplacement, nextOutstandingReviewer, reconcileReroutedReviewer, recordedApprovalReady, recordedPendingApproval, recordObservedApproval, replaceFailedReviewer } from './reviewer-policy.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
+import { testsPreferredAfterSetup } from './policy-action.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
 import { selectReviewer } from './reviewer-selection.js';
 import { runParallelReviewerBatch } from './parallel-reviewers.js';
 import { applyReviewerArtifacts, incompleteReviewerDiagnostic, missingReviewerArtifacts, reviewerArtifactDiagnostic } from './reviewer-artifacts.js';
-import { applyReviewerOutcome, persistedReviewerOutcome } from './reviewer-outcome.js';
-import { observeAgentReviewStart, observeHumanReviewStart } from './review-start-observation.js';
+import { applyReviewerOutcome, beginHumanTurn, persistedReviewerOutcome } from './reviewer-outcome.js';
+import { observeAgentReviewStart } from './review-start-observation.js';
 
-type ReviewOutcome = { outcome: 'stop' } | { reviewState: unknown };
+type ReviewOutcome = { outcome: 'stop' | 'replan' | 'approved' } | { reviewState: unknown };
 
 /** Re-evaluate separation only at a judgment boundary, using the actual roles. */
 function routeCollidingReviewer(context: LoopContext): boolean {
@@ -343,8 +344,7 @@ export async function runReviewerPhase(context: LoopContext, round: ReviewRound,
   const { state } = context;
   round.integrationRepair = await integrationRepairBrief(context);
   if (state.phase === 'approved') {
-    await observeHumanReviewStart(context);
-    if (!context.dryRun) { await context.ports.task.mirrorApproved(); }
+    await beginHumanTurn(context);
     return { outcome: 'stop' };
   }
   if (state.phase !== 'reviewing') { return { reviewState: await resumeFixingPhaseReview(context, round) }; }
@@ -379,7 +379,7 @@ type FreshReviewerResult = { action: 'return'; value: ReviewOutcome } | { action
 
 async function finishReviewerOutcome(context: LoopContext, round: ReviewRound, reviewState: unknown): Promise<ReviewOutcome> {
   const applied = await applyReviewerOutcome(context, round, reviewState);
-  if (applied !== 'ignored') { return applied ? { outcome: 'stop' } : { reviewState }; }
+  if (applied !== 'ignored') { return applied ? { outcome: applied } : { reviewState }; }
   const recovered = await recoverReviewerTimeout(context, round, POLL_TIMEOUT);
   if (recovered.step) { return { outcome: 'stop' }; }
   const retried = await applyReviewerOutcome(context, round, recovered.reviewState);
@@ -387,7 +387,7 @@ async function finishReviewerOutcome(context: LoopContext, round: ReviewRound, r
     await context.escalateToHumanReview('REVIEWER_NON_APPROVAL');
     return { outcome: 'stop' };
   }
-  return retried ? { outcome: 'stop' } : { reviewState: recovered.reviewState };
+  return retried ? { outcome: retried } : { reviewState: recovered.reviewState };
 }
 
 async function continueResumedApproval(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
@@ -402,6 +402,7 @@ async function continueResumedApproval(context: LoopContext, round: ReviewRound)
 
 async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
   if (await freshReviewSetup(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }
+  if (await testsPreferredAfterSetup(context, round)) { return { action: 'return', value: { outcome: 'replan' } }; }
   // Record the round's reviewer requirement before anything can decide it, so a
   // classifier verdict is measured against the same authority the reviewers answer (PX-0046.03).
   await establishReviewerPolicy(context, round);
@@ -410,7 +411,8 @@ async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promi
   const classified = await tryClassifyReview(context, round, cycleStarted);
   if (classified === 'stop') { return { action: 'return', value: { outcome: 'stop' } }; }
   if (classified) {
-    if (await applyReviewerOutcome(context, round, classified)) { return { action: 'return', value: { outcome: 'stop' } }; }
+    const applied = await applyReviewerOutcome(context, round, classified);
+    if (applied) { return { action: 'return', value: { outcome: applied === 'ignored' ? 'stop' : applied } }; }
     return { action: 'return', value: { reviewState: classified } };
   }
   return await runSelectedReviewers(context, round);

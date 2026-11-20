@@ -22,7 +22,7 @@ import * as fmt from '../../application/presentation/cli-format.js';
 import type { ReviewFinding, ReviewItemDisposition } from '../../domain/review.js';
 import { WorkflowOwnershipError } from '../../domain/workflow-operation.js';
 import type { LiveMissionExecutionContext, LiveMissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
-import type { FixedVerificationNextAction } from '../../application/verification-policy/review-start-decision.js';
+import type { FixedVerificationNextAction } from '../../application/verification-policy/fixed-next-action.js';
 
 export interface ReviewerVerdictOutput {
   readonly findings: readonly ReviewFinding[];

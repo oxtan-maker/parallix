@@ -1,5 +1,5 @@
 import { StructuredFailure, failureReason } from '../../domain/failure-reason.js';
-import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
+import { effectiveRepairObligations, isRetainedGateRepair } from '../../domain/repair-coverage.js';
 import type { RetainedRepairPort } from '../ports/review-round.js';
 import { createIntegrationRebase } from './rebase.js';
 import { integrationRepairCertified, isLegacyScalarRepair, verifyRestartedRepair } from './repair-certification.js';
@@ -21,7 +21,7 @@ import { carriedRetentionValidation, retainIntegrationApproval, type RetentionOu
 import { IntegrationStopsForHuman, reviewBeforeIntegration } from './review-before-integration.js';
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { abortWith, projectBacklogTransition } from './support.js';
-import { fixedVerificationNextAction } from '../verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 
 /** What review and execute must do next about a pending retained approval. */
 export type PendingRepairContinuation =
@@ -173,20 +173,23 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
 async function verifyExactRepairEvidence(exact: RetainedRepairPort, mission: Mission,
   execution: RepairExecution): Promise<void> {
   const { slug, services, worktree } = execution;
-  const obligations = effectiveRepairObligations(mission.checkpoints, mission.declaredGates, mission.successCriteria, worktree);
-  const commands = [...new Set(obligations.map(checkpoint => checkpoint.repair!.command))];
+  const outstanding = effectiveRepairObligations(mission.checkpoints, mission.declaredGates, mission.successCriteria, worktree);
+  // Workflow labels have no retained capture and are no command to run; only real gates are read.
+  const commands = [...new Set(outstanding.map(checkpoint => checkpoint.repair!.command).filter(isRetainedGateRepair))];
   // Read immutable original diagnostics for every distinct failed command
   // before consuming either the exact verifier or the configured phase rerun.
   for (const command of commands) {
     const retained = await exact.read(command).catch(cause => {
-      throw new StructuredFailure('Original repair evidence is unavailable', failureReason('incomplete-evidence', 'verification'), cause);
+      const detail = cause instanceof Error ? `: ${cause.message}` : '';
+      throw new StructuredFailure(`Original repair evidence is unavailable${detail}`, failureReason('incomplete-evidence', 'verification'), cause);
     });
     if (retained.evidence.command !== command || retained.evidence.cwd !== worktree
       || retained.evidence.exitCode === 0 || !retained.evidence.captureComplete) {
       throw new StructuredFailure('Original repair evidence is incomplete or mismatched', failureReason('incomplete-evidence', 'verification'));
     }
   }
-  const command = isLegacyScalarRepair(obligations) ? commands[0] : undefined;
+  // Same unfiltered set as verifyRestartedRepair, so both owners agree on scalar versus collection.
+  const command = isLegacyScalarRepair(outstanding) ? commands[0] : undefined;
   if (!command) { return; }
   await verifyRestartedRepair({ slug, services, worktree, revision: execution.revision,
     gates: [{ key: 'repair', command, order: 1 }], head: () => committedRepairHead(execution),
