@@ -13,7 +13,7 @@ dependencies: []
 references:
   - TASK-2866
   - TASK-2859
-  - ../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.pdf
+  - ../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.tex
   - ../parallix-research/research/verification-pomdp/README.md
 priority: high
 ---
@@ -21,7 +21,7 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Make the policy runtime serve any artifact of model v0.13 (`../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.pdf`), whatever parameters the re-estimation of TASK-2866 later produces. It runs in parallel with TASK-2866 stages 1 and 2. Only the last slice, selecting the pinned artifact, waits for the recalculation (task-2866.03). This parent is a planning container and is Large by construction: refine it into a wave with `px split`. TASK-2859 is not edited; this wave changes code that 2859 delivered through its own children and may depend on 2859 missions by reference.
+Make the policy runtime serve any artifact of model v0.13 (`../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.tex`), whatever parameters the re-estimation of TASK-2866 later produces. It runs in parallel with TASK-2866 stages 1 and 2. Only the last slice, selecting the pinned artifact, waits for the recalculation (task-2866.03). This parent is a planning container and is Large by construction: refine it into a wave with `px split`. TASK-2859 is not edited; this wave changes code that 2859 delivered through its own children and may depend on 2859 missions by reference.
 
 Why parallel: the runtime must not be fitted to the numbers of one solve. Its contract is the model, not a parameter set. Tests use small synthetic artifacts, labelled synthetic, never estimates (2859 hard rule: the runtime contains no parameter values, `src/` and `web/` read one artifact from `verificationPolicy.artifact` and nothing under `research/`).
 

@@ -14,7 +14,7 @@ references:
   - TASK-2859
   - px-0060
   - ../parallix-research/research/verification-pomdp/README.md
-  - /home/magnus/Downloads/parallix_stochastic_model_v13 (2).pdf
+  - ../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.tex
 priority: high
 ---
 
@@ -27,7 +27,7 @@ State at start (main, 2026-11-20): `verificationPolicy.mode` is `pilot` with `co
 
 ## References
 
-- **Model v0.13:** `../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.pdf` (PDF only; no LaTeX or LyX source exists). Section numbers below are v0.13 sections. The v0.11 `.tex` stays until the solver form and artifact contract v1 that read its Table 3 are replaced.
+- **Model v0.13:** `../parallix-research/research/verification-pomdp/parallix_stochastic_model_v13.tex` (LaTeX source). Section numbers below are v0.13 sections. The v0.11 source is removed; the solver and contract v1 keep its 27-state numbering until replaced.
 - **px-0060** and its frozen source cut and data under `../parallix-research/px-0060`: reuse its extraction owners and cut; do not re-extract what is frozen unless a new estimand needs it.
 - `../parallix-research/research/verification-pomdp/` (solver, parameters, provenance, artifact emission, cross-checks); wave 2859 (artifact contract v1, `src/application/verification-policy/`, guardrails W1–W20, corner cases); `AGENTS.md`, `docs/doc-standards.md`, ADR 0047, ADR 0057.
 
@@ -60,7 +60,7 @@ State at start (main, 2026-11-20): `verificationPolicy.mode` is `pilot` with `co
 
 ## Stages (the drafter splits and sizes each Small or Medium, ADR 0047)
 
-**0. Source and decisions (done manually, no child mission).** The v0.13 PDF is committed next to the v0.11 `.tex` (kept, because contract v1 and its test read v0.11 Table 3 until stage 3 replaces them), and the research README records the v0.13-versus-solver differences. Pilot mode during the wave is unchanged (pilot on the v0.11 artifact) unless the operator returns it to `shadow`.
+**0. Source and decisions (done manually, no child mission).** The v0.13 LaTeX source replaced the v0.11 source in `../parallix-research/research/verification-pomdp/`, and the research README records the v0.13-versus-solver differences. Pilot mode during the wave is unchanged (pilot on the v0.11-form artifact) unless the operator returns it to `shadow`.
 
 **1. Estimation (research only, like px-0060).** Produce the parameter file for what is new or changed, reusing px-0060's cut and re-deriving E1–E4 as attempt counts with round/findings splits (a joint agent-and-human attempt counts in both E3 and E4 and is flagged; no joint-effect modelling): `beta_1` and agent agreement (note where replay was needed and in what environment); rebuttal share and approval-after-rebuttal; per-run duration records with `W`/`R` split and presence signal; E6 per attempt; E7 restart points and surviving approvals; E8 with action counts and mean step duration for `rho`; count tables by verdict source with empty cells (including cells the fixed order never visits, which go to sensitivity, never imputed). Unknown stays unknown; assumptions are labelled. The operator-owned parameter file is the only input later stages read.
 
