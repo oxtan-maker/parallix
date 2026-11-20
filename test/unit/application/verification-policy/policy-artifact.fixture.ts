@@ -1,6 +1,6 @@
 export type Json = Record<string, any>;
 const STATUS = { W: 'would-fail', P: 'would-pass', D: 'passed' } as const;
-/** v0.11 Table 3, written out state by state (tests, agent, human); index k holds state k + 1. */
+/** The 27-state numbering, written out state by state (tests, agent, human); index k holds state k + 1. */
 const TABLE_3 = 'WWW WWP WWD WPW WPP WPD WDW WDP WDD PWW PWP PWD PPW PPP PPD PDW PDP PDD DWW DWP DWD DPW DPP DPD DDW DDP DDD'.split(' ');
 export const oneHot = (at: number) => Array.from({ length: 27 }, (_u, k) => Number(k === at));
 export const half = (at: number) => Array.from({ length: 27 }, (_u, k) => (k === at || k === 26 ? 0.5 : 0));
