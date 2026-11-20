@@ -7,6 +7,8 @@ import { projectAgentAvailability } from '../../../../src/application/projection
 import { cumulativeFlow, medianCycleTimeSeries } from '../../../../src/application/projections/analytics.js';
 import { availableBoardCommands, attentionQueue, boardLane, projectMissionCard, wipCounts } from '../../../../src/application/projections/mission-board.js';
 import { projectRepairBudget } from '../../../../src/application/projections/repair-budget.js';
+import { coveredRepairCheckpoints } from '../../../fixtures/covered-repair-checkpoints.js';
+import { effectiveRepairObligations } from '../../../../src/domain/repair-coverage.js';
 import {
   isPlannedCheckpoint,
   latestEvidencedCheckpoint,
@@ -607,6 +609,45 @@ test('board repair progress leaves ordinary, legacy and evidence-domain contract
   assert.equal(isPlannedCheckpoint(repair), false);
   assert.equal(latestEvidencedCheckpoint([ordinary, repair]), repair);
   assert.deepEqual(missingCheckpointEvidence([ordinary, legacy, repair]), [legacy, repair]);
+});
+
+const coverageFacts = { latestGate: 'failed' as const, reviewApproval: null, currentWork: null, blockingReason: null, flags: [] };
+
+test('board settles an older repair explicitly covered by a later harness exact-success receipt (TASK-2858 provenance, px-0072)', () => {
+  const checkpoints = coveredRepairCheckpoints(id);
+  assert.deepEqual(effectiveRepairObligations(checkpoints), []);
+  assert.equal(projectRepairBudget(checkpoints), null);
+  for (const status of ['active', 'refined', 'review', 'integration'] as const) {
+    const card = projectMissionCard(fixtureMission('task-covered-repair', { status, checkpoints }), coverageFacts);
+    assert.deepEqual(card.checkpointEvidence.map(cp => cp.state), ['completed', 'completed', 'completed'], status);
+    assert.equal(card.currentCheckpoint, null, status);
+  }
+});
+
+test('board keeps repairs outstanding without valid explicit coverage (px-0072)', () => {
+  const faults: Record<string, (checkpoints: CheckpointData[]) => CheckpointData[]> = {
+    blocker: cps => cps.map(cp => cp.name === 'CP-2' ? { ...cp, repair: { ...cp.repair!, blocker: { command: 'npm test',
+      diagnostic: 'stop', authorityReason: 'contract', proposedCorrection: 'clarify' } } } : cp),
+    malformed: cps => cps.map(cp => cp.repair?.exactSuccessCoverage ? { ...cp, repair: { ...cp.repair,
+      exactSuccessCoverage: { ...cp.repair.exactSuccessCoverage, execution: { ...cp.repair.exactSuccessCoverage.execution, exitCode: 1 as unknown as 0 } } } } : cp),
+    incompatible: cps => cps.map(cp => cp.name === 'CP-2' ? { ...cp, repair: { ...cp.repair!, command: 'npm run lint' } } : cp),
+    'cross-worktree': cps => cps.map(cp => cp.name === 'CP-2' ? { ...cp, repair: { ...cp.repair!,
+      occurrence: { ...cp.repair!.occurrence!, worktree: '/other' } } } : cp),
+    incomplete: cps => cps.map(cp => cp.repair?.exactSuccessCoverage ? { ...cp, repair: { ...cp.repair,
+      exactSuccessCoverage: { ...cp.repair.exactSuccessCoverage, coveredOccurrences: [] } } } : cp),
+  };
+  for (const [fault, apply] of Object.entries(faults)) {
+    const checkpoints = apply(coveredRepairCheckpoints(id));
+    const active = projectMissionCard(fixtureMission('task-uncovered-repair', { status: 'active', checkpoints }), coverageFacts);
+    assert.deepEqual(active.checkpointEvidence.map(cp => cp.state), ['completed', 'current', 'completed'], fault);
+    assert.equal(active.currentCheckpoint, 'CP-2', fault);
+    const review = projectMissionCard(fixtureMission('task-uncovered-repair', { status: 'review', checkpoints }), coverageFacts);
+    assert.deepEqual(review.checkpointEvidence.map(cp => cp.state), ['completed', 'future', 'completed'], fault);
+  }
+  const later = coveredRepairCheckpoints(id), open = (name: string): CheckpointData => ({ ...later[1]!, name,
+    repair: { ...later[1]!.repair!, incidentId: name, occurrence: { ...later[1]!.repair!.occurrence!, failureEvidenceId: name } } });
+  const two = projectMissionCard(fixtureMission('task-open-repairs', { status: 'active', checkpoints: [later[0]!, open('CP-2'), open('CP-3')] }), coverageFacts);
+  assert.deepEqual(two.checkpointEvidence.map(cp => cp.state), ['completed', 'current', 'future']);
 });
 
 function repairRow(attemptsUsed: number, maxAttempts?: number, verified = false): NonNullable<CheckpointData['repair']> {

@@ -6,6 +6,7 @@ import { HTMLButtonElement as DomButton, HTMLElement as DomHtmlElement } from 'h
 import { act } from 'react';
 import { renderBoard } from './web-board-harness.fixture.js';
 import { makeCard, makeProjection } from '../../../fixtures/board-projection.js';
+import { coveredRepairCheckpoints } from '../../../fixtures/covered-repair-checkpoints.js';
 import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 
@@ -68,6 +69,34 @@ test('execution advances to the next checkpoint after recorded completion (TASK-
     const percentage = Number.parseFloat(page.mount.querySelector<DomHtmlElement>('[data-checkpoint-fill]')!.style.width);
     assert.ok(Math.abs(percentage - 100 / 3) < 1e-9, 'one of three supplied checkpoints is completed');
   } finally { await page.close(); }
+});
+
+test('canonically settled repair renders full progress and a completed historical row (px-0072)', async () => {
+  const { projectMissionCard } = await import('../../../../src/application/projections/mission-board.js');
+  const base = makeCard();
+  const project = (checkpoints: ReturnType<typeof coveredRepairCheckpoints>) => projectMissionCard({ ...base, assignee: null,
+    closedAt: null, review: null, netEngineeringLines: null, checkpoints }, { latestGate: 'failed', reviewApproval: null,
+    flags: [], blockingReason: null, currentWork: null });
+  const settled = project(coveredRepairCheckpoints(base.id));
+  const page = await renderBoard({ board: snapshot([settled]) });
+  try {
+    const plan = page.mount.querySelector('[aria-label="Checkpoint plan"]')!;
+    assert.match(plan.getAttribute('aria-description')!, /^3\/3 completed/);
+    assert.doesNotMatch(plan.getAttribute('aria-description')!, /Current:/);
+    assert.equal(page.mount.querySelector<DomHtmlElement>('[data-checkpoint-fill]')!.style.width, '100%');
+    assert.ok(page.mount.querySelector('[data-checkpoint-complete]'), 'all-complete mark shown');
+    await act(async () => { page.mount.querySelector<DomButton>('button[aria-label^="View checkpoint evidence for"]')!.click(); });
+    const dialog = page.window.document.querySelector('[role="dialog"]')!;
+    const repairRow = [...dialog.querySelectorAll<DomButton>('nav button')].find(button => button.textContent.includes('CP-2'))!;
+    assert.match(repairRow.textContent, /CP-2 · completed/);
+    assert.doesNotMatch(dialog.textContent, /CP-2 · future/);
+  } finally { await page.close(); }
+  const open = project(coveredRepairCheckpoints(base.id, { coveredOccurrences: [] }));
+  const reopened = await renderBoard({ board: snapshot([open]) });
+  try {
+    assert.match(reopened.mount.querySelector('[aria-label="Checkpoint plan"]')!.getAttribute('aria-description')!, /^2\/3 completed · Current: CP-2/);
+    assert.equal(reopened.mount.querySelector('[data-checkpoint-complete]'), null);
+  } finally { await reopened.close(); }
 });
 
 for (const lane of ['refined', 'active', 'review', 'integration', 'done'] as const) {

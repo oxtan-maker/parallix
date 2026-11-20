@@ -158,12 +158,15 @@ legacy plans with omitted states show completion unknown as a disclosure without
 an empty progress track, even when evidence is present. Checkpoint tracks
 never blink.
 
-A repair checkpoint counts as completed only after its own repair verification.
-Carried Goal Check rows keep earlier accepted evidence visible but do not fill the
-progress track. While a mission is active, its first unverified repair is current
-and later unverified repairs are future; outside the active lane they remain
-future. Full progress and the completion check return only after every repair in
-the supplied plan is verified.
+A repair checkpoint counts as completed after its own repair verification, or
+when a later verified same-command repair carries a valid harness exact-success
+receipt that explicitly covers it; blockers and malformed, incompatible,
+cross-worktree or incomplete receipts never settle a repair. Carried Goal Check
+rows keep earlier accepted evidence visible but do not fill the progress track.
+While a mission is active, its first outstanding repair is current and later
+outstanding repairs are future; outside the active lane they remain future. A
+covered repair stays in the checkpoint dialog as completed. Full progress and the
+completion check return only after no repair in the supplied plan is outstanding.
 
 Click the checkpoint track, or focus it and press Enter or Space, to open the
 checkpoint dialog, including in intake cards and the expanded done rail. A

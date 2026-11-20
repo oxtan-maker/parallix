@@ -6,6 +6,7 @@ import { pointerBoard } from './web-pointer-board.js';
 import { makeCard, makeProjection } from './board-projection.js';
 import { missionId } from '../../src/domain/mission.js';
 import { fixtureMission } from './mission-builders.js';
+import { coveredRepairCheckpoints } from './covered-repair-checkpoints.js';
 import { projectMissionCard } from '../../src/application/projections/mission-board.js';
 
 type Checkpoint = NonNullable<ReturnType<typeof makeCard>['checkpointEvidence']>[number];
@@ -171,6 +172,22 @@ try {
   assert.match(await projectedRepair.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /2\/2 completed/);
   assert.doesNotMatch(await projectedRepair.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /Current:/);
   assert.equal(await projectedRepair.locator('[data-checkpoint-complete]').count(), 1);
+  const coveredId = missionId('task-covered-repair-progress');
+  const uncovered = projectMissionCard(fixtureMission(coveredId, { status: 'active',
+    checkpoints: coveredRepairCheckpoints(coveredId, { coveredOccurrences: [] }) }), repairFacts);
+  await fixture.render(webProjection.snapshot(makeProjection({ active: [uncovered] })));
+  const covered = fixture.page.locator('[data-board-card="task-covered-repair-progress"]');
+  const coveredPlan = covered.getByRole('group', { name: 'Checkpoint plan' });
+  assert.match(await coveredPlan.getAttribute('aria-description') ?? '', /2\/3 completed · Current: CP-2/);
+  assert.equal(await covered.locator('[data-checkpoint-complete]').count(), 0);
+  const settled = projectMissionCard(fixtureMission(coveredId, { status: 'active', checkpoints: coveredRepairCheckpoints(coveredId) }), repairFacts);
+  await fixture.render(webProjection.snapshot(makeProjection({ active: [settled] })));
+  assert.match(await coveredPlan.getAttribute('aria-description') ?? '', /3\/3 completed/);
+  assert.doesNotMatch(await coveredPlan.getAttribute('aria-description') ?? '', /Current:/);
+  assert.equal(await covered.locator('[data-checkpoint-complete]').count(), 1);
+  await covered.getByRole('button', { name: /View checkpoint evidence/ }).click();
+  assert.match(await fixture.page.getByRole('dialog', { name: /Checkpoint evidence/ }).textContent() ?? '', /✓ CP-1 · completed.*✓ CP-2 · completed.*✓ CP-3 · completed/s);
+  await fixture.page.keyboard.press('Escape');
   assert.equal(fixture.requests.length, 0);
-  console.log('PASS: checkpoint UI stays compact and observes unverified repair 1/2 current → verified repair 2/2 complete with zero command writes');
+  console.log('PASS: checkpoint UI stays compact and observes unverified repair 1/2 current → verified repair 2/2 complete, and open repair 2/3 current → canonically covered repair 3/3 complete with zero command writes');
 } finally { await fixture.close(); }

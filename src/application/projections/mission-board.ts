@@ -5,14 +5,14 @@ import { workflowEligible } from '../../domain/workflow-command-policy.js';
 import type { GateState } from './gate-observation.js';
 import type { ProviderExecutionFacts } from './provider-execution.js';
 import { projectReviewHistory, type ReviewRoundSummary } from './review-history.js';
+import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
 import { projectRepairBudget, type RepairBudgetFacts } from './repair-budget.js';
 import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
 export { projectReviewHistory } from './review-history.js';
 export type { ReviewRoundSummary } from './review-history.js';
 import type { AgentFamily } from '../../domain/agents.js';
-import { isPlannedCheckpoint, latestEvidencedCheckpoint, type GoalCheckRow } from '../../domain/checkpoint.js';
+import { isPlannedCheckpoint, latestEvidencedCheckpoint, type CheckpointData, type GoalCheckRow } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
-import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { RepositoryId } from '../../domain/repository.js';
 import type { RunningAgentSession } from './agent-status.js';
 import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
@@ -242,12 +242,11 @@ export interface CheckpointEvidence {
  * not just the latest evidenced one, so a client can walk the mission's checkpoint
  * history and its evidence in one snapshot. Planned checkpoints carry their
  * description with an empty Goal Check list; recorded checkpoints carry their rows.
- * A repair remains unfinished until its repair verification succeeds.
+ * A repair remains unfinished until it is verified or validly covered by a later exact-success receipt.
  */
 function checkpointEvidence(checkpoints: readonly CheckpointData[], status: MissionStatus): CheckpointEvidence[] {
-  const completed = (checkpoint: CheckpointData) => checkpoint.repair
-    ? checkpoint.repair.verified
-    : !isPlannedCheckpoint(checkpoint);
+  const open = new Set(effectiveRepairObligations(checkpoints));
+  const completed = (checkpoint: CheckpointData) => checkpoint.repair ? !open.has(checkpoint) : !isPlannedCheckpoint(checkpoint);
   const current = status === 'active' ? checkpoints.find(checkpoint => !completed(checkpoint)) : undefined;
   return checkpoints.map((checkpoint) => ({
     name: checkpoint.name,
