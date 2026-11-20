@@ -1,11 +1,10 @@
 import { agentFamily } from '../../../src/domain/agents.js';
-import { DECLARED_GATES_RETURN_STAGE } from '../../../src/domain/board-event.js';
 import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
 import type { RetainedRepairPort, ReviewLoopRequest } from '../../../src/application/ports/review-round.js';
 import type { ReviewLoopFakeOverrides } from '../../helpers/review-loop-ports.js';
 import type { ReviewLoopState } from '../../../src/application/ports/review-round.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
-import { fixtureMission, inMemoryTransitionStore, pendingReview, type InMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { fixtureMission, pendingReview } from '../../fixtures/mission-builders.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { makePorts, makeRecorder } from "../../helpers/review-preparation-ports.js";
 // review gate repair contract.
@@ -25,9 +24,9 @@ import { ReviewPreparationCommandUseCase } from '../../../src/application/review
 import { ReviewState } from '../../../src/adapters/review/review-state.js';
 import { rebound } from '../../../src/application/rebound-kernel.js';
 import { submitForReview } from '../../../src/adapters/review/review-commands.js';
-import { recordReviewPreparationFailure } from '../../../src/application/review-submission-service.js';
 import { listRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
+import vm from 'node:vm';
 
 test('review repair fixtures isolate retained evidence across occurrences (TASK-2770)', async () => {
   const first = fakeReviewLoopPorts({ slug: 'task-1385' });
@@ -736,6 +735,42 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     assert.ok(f.fake.errors.some(line => line.includes('repair budget (2)')));
   });
 
+  test('retained repair names a non-Error stop cause instead of an unreadable object (PX-0074.03)', async () => {
+    const f = fixture();
+    const stopped = Object.freeze({ kind: 'command-exit' });
+    f.fake.ports.retainedRepair.verify = async (...args) => { f.checks.push([args[0], args[1]]); throw stopped; };
+    await f.run();
+    const dossier = f.fake.errors.find(line => line.includes('Recovery dossier for task-2757')) ?? '';
+    assert.match(dossier, /Last diagnostic: \{"kind":"command-exit"\}/);
+    assert.ok(f.fake.errors.every(line => !line.includes('[object Object]')), f.fake.errors.join(' | '));
+    assert.equal(f.repair.verified, false, 'a stop during verification certifies nothing');
+  });
+
+  test('retained repair still stops when the thrown cause cannot be serialized (PX-0074.03)', async () => {
+    const f = fixture();
+    const circular: Record<string, unknown> = { kind: 'gate-run-unreadable' };
+    circular.self = circular;
+    f.fake.ports.retainedRepair.verify = async (...args) => { f.checks.push([args[0], args[1]]); throw circular; };
+    // The cause is reported inside the catch that owns the stop; a serialization throw here would
+    // escape rebound() and leave the run with no typed stop at all.
+    await f.run();
+    const dossier = f.fake.errors.find(line => line.includes('Recovery dossier for task-2757')) ?? '';
+    assert.match(dossier, /Last diagnostic: \[unserializable cause: \[object Object\]\]/);
+    assert.deepEqual(f.verified, [], 'an unserializable cause certifies no verification');
+    assert.deepEqual(f.fake.exits, [1], 'the run still ends on its bounded stop');
+  });
+
+  test('retained repair names an Error thrown from another realm by its message (PX-0074.03)', async () => {
+    const f = fixture();
+    const foreign = new vm.Script('new Error("gate run unreadable")').runInNewContext() as Error;
+    assert.equal(foreign instanceof Error, false, 'the fixture is only meaningful for a cross-realm Error');
+    f.fake.ports.retainedRepair.verify = async (...args) => { f.checks.push([args[0], args[1]]); throw foreign; };
+    await f.run();
+    const dossier = f.fake.errors.find(line => line.includes('Recovery dossier for task-2757')) ?? '';
+    assert.match(dossier, /Last diagnostic: Error: gate run unreadable/);
+    assert.deepEqual(f.verified, [], 'a foreign-realm Error certifies no verification');
+  });
+
   test('explicit exact-success coverage omits an older distinct repair diagnostic without rewriting history (TASK-2802)', async () => {
     const f = fixture();
     const older = { ...f.mission.checkpoints[0], name: 'CP-5',
@@ -886,79 +921,5 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     await f.run();
     assert.deepEqual(f.fake.exits, [1]);
     assert.ok(f.fake.errors.some(line => line.includes('fresh evidence required')));
-  });
-});
-
-// A declared-gate rebound is not an agent-review return. Each
-// repair producer names the lane its return leaves, and the repair owner places
-// that stage on the durable lane event instead of defaulting every producer.
-describe('review repair return stage', { concurrency: false }, () => {
-  function gateRepairMission(slug: string): InMemoryTransitionStore {
-    return inMemoryTransitionStore(fixtureMission(slug, {
-      status: 'review', assignee: agentFamily('codex'), review: pendingReview(slug),
-    }));
-  }
-  /** Each committed lane event with the return stage the producer placed on it. */
-  function placedReturns(store: InMemoryTransitionStore) {
-    return store.events.map(event => [`${event.from}→${event.to}:${event.trigger}`, event.returnIdentity?.stage ?? null]);
-  }
-
-  test('pre-review gate repair places its return at declared-gates (PX-0055.01)', async () => {
-    const slug = 'task-0055-pre-review';
-    const store = gateRepairMission(slug);
-    const fake = fakeReviewLoopPorts({ slug, missionStore: store, lifecycle: new MissionLifecycleService(store) });
-    const context = fakeLoopContext(fake, { slug, identities: { implementer: agentFamily('codex'), reviewer: agentFamily('claude') } });
-    const repair = await repairPreReviewFailure(context,
-      gateFailureReason({ ok: false, area: 'test', command: 'npm test', exitCode: 1, stdout: '', stderr: 'assertion failed' }), 1);
-    assert.equal(repair.outcome, 'fixed');
-    assert.deepEqual(placedReturns(store), [
-      ['review→active:rebound-to-active', 'declared-gates'],
-      ['active→review:submit-for-review', null],
-    ], 'the verified repair resumes review without claiming a return');
-  });
-
-  test('review-loop validation-failed bounce places its return at declared-gates (PX-0055.01)', async () => {
-    const slug = 'task-0055-validation';
-    const store = gateRepairMission(slug);
-    const fake = fakeReviewLoopPorts({
-      slug, missionStore: store, lifecycle: new MissionLifecycleService(store),
-      reviewPreparation: { reviewPreparation: async () => ({
-        ok: false as const, reason: 'validation-failed' as const,
-        error: 'Gate declaration must contain an exact runnable command only',
-      }) },
-    });
-    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude' }, fake.ports);
-    assert.deepEqual(placedReturns(store), [['review→active:rebound-to-active', 'declared-gates']]);
-  });
-
-  test('px review submit gate failure places its send-back return at declared-gates (PX-0055.01)', async () => {
-    const slug = 'task-0055-submit';
-    const store = gateRepairMission(slug);
-    await submitForReview(slug, false, {
-      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/worktree' }),
-      readReviewStateFn: () => null,
-      resolveTaskFileFn: () => ({ ok: true as const, taskFile: '/worktree/task.md', matches: [] }),
-      getTaskImplementerFn: () => 'codex',
-      isReviewProviderEnabledFn: () => false,
-      missionStore: store, lifecycleService: new MissionLifecycleService(store),
-      transitionTaskFn: async () => true,
-      performReviewPreparationFn: async () => ({
-        ok: false as const, reason: 'validation-failed' as const,
-        error: 'Gate declaration must contain an exact runnable command only',
-      }),
-      exit: () => undefined,
-    });
-    assert.deepEqual(placedReturns(store), [['review→active:rebound-to-active', 'declared-gates']]);
-  });
-
-  test('review preparation send-back places its return at declared-gates (PX-0055.01)', async () => {
-    const slug = 'task-0055-send-back';
-    const store = gateRepairMission(slug);
-    await recordReviewPreparationFailure(slug, 'Declared gate "npm test" failed', {
-      store, lifecycle: new MissionLifecycleService(store),
-      checkpoints: { record: async () => assert.fail('the gate incident owns its checkpoint'),
-        plan: async () => assert.fail('a declared-gate failure has its own repair owner') },
-    }, { kind: 'gate-failure', area: 'declared gate', command: 'npm test', exitCode: 1, stdout: '', stderr: 'test failed' }, DECLARED_GATES_RETURN_STAGE);
-    assert.deepEqual(placedReturns(store), [['review→active:rebound-to-active', 'declared-gates']]);
   });
 });

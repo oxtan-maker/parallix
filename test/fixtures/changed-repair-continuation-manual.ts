@@ -11,7 +11,7 @@ import { applyReviewerCommand, changeRevision, ConfiguredReviewerEligibility, cu
 import { decideMission } from '../../src/domain/mission-workflow.js';
 import { recordImplementerLaunch } from '../../src/application/rebase-identity.js';
 import { createMissionApplicationServices } from '../../src/composition/application-services.js';
-import { clearOperatorStateCache } from '../../src/adapters/sqlite/adapter-factory.js';
+import { clearOperatorStateCache, initOperatorState } from '../../src/adapters/sqlite/adapter-factory.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
 import { configureMissionWriteAuthorization } from '../../src/application/ports/mission-write-authorization.js';
 import type { ReviewStartDecision } from '../../src/application/ports/verification-policy.js';
@@ -19,6 +19,8 @@ import { REVIEW_START_DECISION_EVENT } from '../../src/application/verification-
 import { run } from '../../src/composition/create-cli.js';
 import { recordApproval } from '../../src/adapters/review/review-round.js';
 import { reviewerResultAttribution } from '../../src/adapters/review/reviewer-result-attribution.js';
+import { readIntegrationGateRun } from '../../src/adapters/verification/integration-verification-proof.js';
+import { policyArtifactFixture } from '../unit/application/verification-policy/policy-artifact.fixture.js';
 
 const equivalent = process.argv.includes('--equivalent');
 const failingCheck = process.argv.includes('--failing-check');
@@ -26,9 +28,21 @@ const aggregateMode = process.argv.includes('--aggregate-review') || process.arg
 const aggregateExecute = process.argv.includes('--aggregate-execute');
 const reviewStartPolicy = process.argv.includes('--review-start-policy');
 const parallelReviewers = process.argv.includes('--parallel-reviewers');
+const policyTestsRepair = process.argv.includes('--policy-tests-repair');
+const policyTestsBlocked = policyTestsRepair && process.argv.includes('--policy-tests-blocked');
 const reviewFamilies = parallelReviewers ? ['custom', 'claude'] : ['custom'];
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-changed-repair-manual-'));
 const exactCommand = `test -f ${temporary}/allow-check`;
+// The pilot rehearsal's integration gate stays red until the launched repair actor writes this marker.
+const gateCommand = `test -f ${temporary}/gate-green`;
+const gateKey = 'integration-ci';
+/** A valid artifact whose value vectors make `tests` the best permitted action on the prior state. */
+const testsFirstArtifact = () => {
+  const artifact = policyArtifactFixture();
+  const unit = (value: number) => Array.from({ length: 27 }, (_unused, state) => (state === 26 ? 0 : value));
+  artifact.vectors = [{ action: 'tests', values: unit(15) }, { action: 'agent', values: unit(14) }, { action: 'human', values: unit(13) }];
+  return artifact;
+};
 const aggregateCommands = [`test -f ${temporary}/allow-static`, `test -f ${temporary}/allow-integration`];
 const repo = path.join(temporary, 'repo');
 const worktree = path.join(temporary, 'repo-task-manual-repair');
@@ -45,14 +59,16 @@ try {
   fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'manual-repair', targetUser: 'probe' },
-    ...(reviewStartPolicy ? { verificationPolicy: { mode: 'shadow', artifact: 'missing-policy.json' } } : {}), adapters: {
+    ...(policyTestsRepair ? { verificationPolicy: { mode: 'pilot', artifact: 'policy.json' } }
+      : reviewStartPolicy ? { verificationPolicy: { mode: 'shadow', artifact: 'missing-policy.json' } } : {}), adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom', claude: 'stub/claude' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
     verification: { command: ':', defaultArea: 'all' },
     gates: { preIntegration: aggregateMode
       ? aggregateCommands.map((command, index) => ({ key: index ? 'integration-ci' : 'static-analysis', command, order: index + 1 }))
-      : [{ key: 'unit', command: equivalent ? exactCommand : ':', order: 1 }] }, review: { provider: 'none', tmpDir: path.join(temporary, 'review') },
+      : policyTestsRepair ? [{ key: gateKey, command: gateCommand, order: 1 }]
+        : [{ key: 'unit', command: equivalent ? exactCommand : ':', order: 1 }] }, review: { provider: 'none', tmpDir: path.join(temporary, 'review') },
   } }));
   fs.writeFileSync(path.join(repo, 'config', 'agents.json'), JSON.stringify({ steps: {
     draft: { eligible: ['custom'], selection: 'random' }, active: { eligible: ['codex', 'custom'], selection: 'random' },
@@ -60,6 +76,7 @@ try {
   } }));
   fs.writeFileSync(path.join(repo, 'config', 'state-map.json'), JSON.stringify({ ready: 'refined', approved: 'ready-for-integration' }));
   fs.writeFileSync(path.join(repo, 'README.md'), '# Disposable repair exercise\n');
+  if (policyTestsRepair) { fs.writeFileSync(path.join(repo, 'policy.json'), `${JSON.stringify(testsFirstArtifact(), null, 2)}\n`); }
   fs.writeFileSync(path.join(repo, 'backlog', 'tasks', `${slug} - Manual repair.md`), `---\nid: ${slug}\ntitle: Manual repair\nstatus: review\nassignee: [codex]\nlabels: [ai_sdlc]\n---\n\nRead the recorded Mission.\n`);
   git(repo, 'init', '-b', 'main');
   git(repo, 'config', 'user.email', 'probe@example.invalid');
@@ -81,26 +98,42 @@ try {
   process.chdir(worktree);
   await clearOperatorStateCache();
   const services = await createMissionApplicationServices(worktree);
-  configureMissionWriteAuthorization({ operationId: 'disposable-manual-review', async assert(id) { assert.equal(id, slug); } });
+  configureMissionWriteAuthorization({ operationId: 'disposable-manual-review', ...(policyTestsRepair ? { generation: 1 } : {}),
+    async assert(id) { assert.equal(id, slug); } });
   const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: reviewFamilies.map(agentFamily), strategy: 'random' });
-  const review = applyReviewerCommand(startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
-    revision: changeRevision(approvedRevision), baseline: changeRevision(baseline) }, agentFamily('custom'), agentFamily('codex'), '2026-10-01T08:00:00Z', eligibility), {
+  // The pilot rehearsal opens an undecided review turn on the current revision, so the policy owns the next action.
+  const startedReview = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
+    revision: changeRevision(policyTestsRepair ? repairedRevision : approvedRevision), baseline: changeRevision(baseline) }, agentFamily('custom'), agentFamily('codex'), '2026-10-01T08:00:00Z', eligibility);
+  const review = policyTestsRepair ? startedReview : applyReviewerCommand(startedReview, {
     type: 'approve', revision: changeRevision(approvedRevision), decidedAt: '2026-10-01T09:00:00Z', comment: 'historical approval', source: { kind: 'local' },
   });
   const approved = fixtureMission(slug, { repositoryId: services.repositoryId, status: 'integration', assignee: agentFamily('codex'), review,
     labels: missionLabels(['ai_sdlc']),
     brief: { goal: 'Review repaired behavior', why: 'Avoid historical approval replay', scope: 'deliverable.txt', outOfScope: ['Landing'] },
-    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands : [':'],
+    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands : policyTestsRepair ? [gateCommand] : [':'],
     checkpoints: [{ missionId: missionId(slug), name: 'CP-1', goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt:1', recordedRound: 1 }], nextActionText: 'Independent review',
       recording: { recordedAt: '2026-10-02T09:00:00Z', recordedRound: 1, missionRevision: 2 },
-      repair: { incidentId: 'manual-successful-repair', command: ':', attempt: 1, authorizedGates: [':'],
-        authorizedCriteria: ['The deliverable is repaired'], evidenceRecorded: true, verified: true } }],
+      ...(policyTestsRepair ? {} : {
+        repair: { incidentId: 'manual-successful-repair', command: ':', attempt: 1, authorizedGates: [':'],
+          authorizedCriteria: ['The deliverable is repaired'], evidenceRecorded: true, verified: true } }) }],
   });
   const active = decideMission(approved, { type: 'rebound-to-active', agent: agentFamily('codex'),
-    cause: { kind: 'integration-gate-failure', gate: aggregateMode ? 'static-analysis' : 'unit',
-      command: aggregateMode ? aggregateCommands[0] : ':' }, occurredAt: '2026-10-01T10:00:00Z' });
-  await services.store.save({ ...active, status: equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
+    cause: { kind: 'integration-gate-failure', gate: aggregateMode ? 'static-analysis' : policyTestsRepair ? gateKey : 'unit',
+      command: aggregateMode ? aggregateCommands[0] : policyTestsRepair ? gateCommand : ':' }, occurredAt: '2026-10-01T10:00:00Z' });
+  // The pilot rehearsal starts from an unblocked review turn: no pending repair may shadow the policy decision.
+  const seededMission = policyTestsRepair ? approved : active;
+  await services.store.save({ ...seededMission, status: policyTestsRepair ? 'review' : equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
     ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
+  if (policyTestsRepair) {
+    // The pilot joins every retained rebase observation to its admitted workflow operation; without one the
+    // history reader reports unmodelled history and the decision falls back to the fixed sequence.
+    const { SqliteWorkflowOperationStore } = await import('../../src/adapters/sqlite/workflow-operation-store.js');
+    const { db } = await initOperatorState({ homeDir: process.env.PARALLIX_HOME });
+    await new SqliteWorkflowOperationStore(db, services.repositoryId).insert({ id: 'disposable-manual-review', repositoryId: services.repositoryId,
+      missionId: missionId(slug), requestKey: 'disposable-pilot-rehearsal', command: 'review:submit', generation: 1, phase: 'completed',
+      providerStarted: false, agent: null, reviewer: 'custom', originalStatus: 'review', previousAssignee: null, owner: null,
+      createdAt: '2026-10-01T08:00:00Z', updatedAt: '2026-10-01T08:00:00Z', reason: null });
+  }
   if (aggregateMode) {
     const { captureRecoveryEvidence } = await import('../../src/application/recovery-evidence.js');
     const references = aggregateCommands.map((command, index) => {
@@ -204,6 +237,91 @@ try {
     console.log(JSON.stringify({ observation: 'approved direct-review continuation', control: failingCheck, code,
       lane: after.mission.status, verified: after.mission.checkpoints.at(-1)?.repair?.verified, launches,
       originalDecisionPreserved: true, originalFailurePreserved: true, exactCommand }));
+  } else if (policyTestsRepair) {
+    // CP-2 rehearsal: a pilot policy selects the tests action, its configured gate is red,
+    // the repair owner takes the failure, and the loop stops at one typed boundary.
+    const launches: Array<{ role: string | null; worktree: string; promptHead: string }> = [];
+    setCommandPathProbe(() => '/disposable-review-or-repair-actor');
+    setLauncherHealthProbe(() => ({ ok: true }));
+    setWorkflowLaunchPort(input => ({
+      invocation: { command: 'disposable-review-or-repair-actor', args: [], options: { cwd: input.worktree } },
+      resultPromise: (async () => {
+        launches.push({ role: input.role ?? null, worktree: input.worktree, promptHead: input.prompt.slice(0, 60).replace(/\s+/g, ' ') });
+        if (/Mode: review\./.test(input.prompt)) {
+          assert.equal(await run(['verdict', 'approve', '--actor', 'custom'], { baseCwd: input.worktree }), 0);
+          return { status: 0, stdout: '', stderr: '' };
+        }
+        if (policyTestsBlocked) { return { status: 0, stdout: '', stderr: '' }; }
+        fs.writeFileSync(path.join(temporary, 'gate-green'), 'green\n');
+        fs.writeFileSync(path.join(input.worktree, 'deliverable.txt'), 'repaired behavior\n');
+        git(input.worktree, 'add', '.'); git(input.worktree, 'commit', '--allow-empty', '-qm', 'disposable repair candidate');
+        // A repair only counts when the actor records fresh authorized evidence on the open repair checkpoint.
+        const open = await services.store.load(missionId(slug));
+        if (open.kind !== 'found') { throw new Error('missing disposable mission during repair'); }
+        const pending = open.mission.checkpoints.find(checkpoint => checkpoint.repair && !checkpoint.repair.verified);
+        assert.ok(pending, 'the failed check must leave an open repair checkpoint');
+        assert.equal(await run(['checkpoint', 'record', '--name', pending!.name, '--criterion', 'The deliverable is repaired',
+          '--evidence', 'deliverable.txt', '--next', 'Rerun the failed integration gate'], { baseCwd: input.worktree }), 0);
+        return { status: 0, stdout: '', stderr: '' };
+      })(),
+    }));
+    console.log(`COMMAND: px review ${slug} --reviewer custom`);
+    // A direct operator command overrides the policy, so the rehearsal runs the workflow invocation the pilot governs.
+    const code = await run(['review', slug, '--reviewer', 'custom'], { baseCwd: worktree, operatorInvocation: false });
+    const result = await services.store.load(missionId(slug));
+    assert.equal(result.kind, 'found');
+    if (result.kind !== 'found') { throw new Error('missing disposable mission'); }
+    const gateRun = readIntegrationGateRun(worktree);
+    const repairs = result.mission.checkpoints.flatMap(checkpoint => checkpoint.repair ? [checkpoint.repair] : [])
+      .filter(repair => repair.gateKey === gateKey);
+    const decisions = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
+      .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision).sort((left, right) => left.actionSequence - right.actionSequence);
+    const actions = decisions.map(decision => decision.actualAction);
+    const repair = repairs[0];
+    // Dispatch: the pilot's own recommendation is what ran, and each run is joined to a durable gate run.
+    assert.deepEqual(decisions.filter(decision => decision.actualAction === 'tests')
+      .every(decision => decision.recommendedAction === 'tests' && decision.effectiveMode === 'pilot' && decision.gateRunId !== null), true);
+    assert.equal(actions[0], 'tests', 'the policy-selected tests action is the first action the loop takes');
+    assert.ok(gateRun?.outcomes.some(outcome => outcome.key === gateKey), 'the tests action leaves a durable gate outcome');
+    // Repair ownership: the failed check opens one repair checkpoint and the implementer, not the reviewer, is launched for it.
+    assert.equal(repairs.length, 1, 'the failed integration gate opens exactly one repair checkpoint');
+    assert.ok(repair.occurrence?.failureEvidenceId, 'the failed check keeps its recovery evidence reference');
+    assert.equal(launches[0]?.role, 'execute', 'the repair owner launches the implementer for the failed check');
+    assert.equal(launches[0]?.promptHead, 'PRE-REVIEW GATE FAILURE — FRESH-CONTEXT DIAGNOSTIC REPAIR RE');
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), baseline, 'human landing never ran');
+    if (policyTestsBlocked) {
+      // A repair actor that records no fresh evidence cannot verify: the loop stops inside its attempt budget.
+      assert.equal(code, 1);
+      assert.equal(repair.verified, false, 'an unevidenced repair stays unverified');
+      assert.ok(repair.maxAttempts !== undefined && (repair.attemptsUsed ?? 0) <= repair.maxAttempts, 'the repair stops within its attempt budget');
+      assert.equal(result.mission.status, 'active', 'the blocked check returns the Mission to the implementer lane');
+      assert.equal(currentReviewRound(result.mission.review!).decision, null, 'a blocked check records no verdict');
+      assert.deepEqual(actions, ['tests'], 'the typed stop runs no further action');
+    } else {
+      // The evidenced repair re-runs the same check green, the loop re-enters, and review finishes at its typed handoff.
+      assert.equal(code, 0);
+      assert.equal(repair.verified, true, 'fresh evidence plus a green rerun verifies the repair');
+      assert.equal(repair.attemptsUsed, 1);
+      assert.ok(repair.maxAttempts !== undefined && (repair.attemptsUsed ?? 0) <= repair.maxAttempts);
+      assert.equal(result.mission.status, 'integration', 'the approved review hands off to integration without landing');
+      assert.equal(currentReviewRound(result.mission.review!).decision?.kind, 'approved');
+      assert.deepEqual(actions.slice(-2), ['agent', 'human'], 'the loop still runs the reviewer round and the human turn');
+      assert.ok(decisions.filter(decision => decision.actualAction === 'tests').length >= 2,
+        'the repaired check is re-selected after the repair, not trusted from the previous run');
+    }
+    console.log(JSON.stringify({ observation: policyTestsBlocked ? 'pilot tests action blocked repair' : 'pilot tests action failure and repair',
+      code, launches, lane: result.mission.status, round: currentReviewRound(result.mission.review!).number,
+      decision: currentReviewRound(result.mission.review!).decision?.kind ?? null,
+      gateRun: gateRun && { status: gateRun.status, revision: gateRun.revision, gateRunId: gateRun.gateRunId,
+        outcomes: gateRun.outcomes.map(outcome => ({ key: outcome.key, exitCode: outcome.exitCode })) },
+      repair: { gateKey: repair.gateKey, command: repair.command, attempt: repair.attempt, attemptsUsed: repair.attemptsUsed,
+        maxAttempts: repair.maxAttempts, evidenceRecorded: repair.evidenceRecorded, verified: repair.verified,
+        failureRevision: repair.occurrence?.failureRevision ?? null, failureEvidenceId: repair.occurrence?.failureEvidenceId ?? null },
+      decisions: decisions.map(decision => ({ actual: decision.actualAction, recommended: decision.recommendedAction,
+        mode: decision.effectiveMode, gateRunId: decision.gateRunId, failure: decision.failureReason?.kind ?? null,
+        sequence: decision.actionSequence, verdictCorrelation: decision.verdictCorrelation })),
+      head: git(worktree, 'rev-parse', 'HEAD'), baseHead: git(repo, 'rev-parse', 'HEAD'), baseline,
+      boundaries: 'disposable Git worktree + PARALLIX_HOME; real gate process; stubbed agent launches; no landing' }, null, 1));
   } else {
   console.log(JSON.stringify({ observation: 'seeded repaired Mission', lane, approvedRevision, repairedRevision }));
   const seeded = await services.store.load(missionId(slug));
@@ -266,12 +384,20 @@ try {
   const decisions = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
     .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision).sort((left, right) => left.actionSequence - right.actionSequence);
   if (reviewStartPolicy) {
-    assert.deepEqual(decisions.map(decision => decision.actualAction), parallelReviewers ? ['agent', 'agent', 'human'] : ['agent', 'human']);
+    assert.deepEqual(decisions.map(decision => decision.actualAction),
+      parallelReviewers ? ['tests', 'agent', 'agent', 'human'] : ['tests', 'agent', 'human'],
+      'the fixed sequence runs its integration check before the reviewer round');
     assert.deepEqual(decisions.map(decision => decision.failureReason?.kind), decisions.map(() => 'artifact-missing'));
-    assert.deepEqual(decisions.map(decision => decision.verdictCorrelation), parallelReviewers
+    const testsRows = decisions.filter(decision => decision.actualAction === 'tests');
+    assert.equal(testsRows.length, 1, 'the fixed-sequence check runs once per review entry');
+    assert.ok(testsRows.every(tests => tests.gateRunId !== null && tests.recommendedAction === null),
+      'a shadow-mode check row keeps its durable gate run and gets no recommendation');
+    assert.deepEqual(testsRows.map(tests => tests.verdictCorrelation), testsRows.map(tests => tests.gateRunId),
+      'a check row is joined to its gate run, never to a verdict');
+    assert.deepEqual(decisions.filter(decision => decision.actualAction !== 'tests').map(decision => decision.verdictCorrelation), parallelReviewers
       ? ['review:2:agent:custom-verdict', 'review:2:agent:claude-verdict', 'review:2:human-verdict']
       : ['review:2:agent:custom-verdict', 'review:2:human-verdict']);
-    assert.deepEqual(decisions.map(decision => decision.actionSequence), parallelReviewers ? [1, 2, 3] : [1, 2]);
+    assert.deepEqual(decisions.map(decision => decision.actionSequence), parallelReviewers ? [1, 2, 3, 4] : [1, 2, 3]);
     assert.ok(decisions.filter(decision => decision.actualAction === 'agent').every(decision => decision.agentRunId),
       'each agent review row retains its available run link');
     assert.equal(decisions.at(-1)?.agentRunId, null);

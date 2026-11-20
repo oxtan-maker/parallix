@@ -163,6 +163,22 @@ export function repairCheckpointCases(): void {
     assert.match(result.dossier ?? '', /operator selects owner/);
   });
 
+  test('a repair blocker read that throws a structured stop names its cause and stops (PX-0074.03)', async () => {
+    // A checkpoint store can reject with a stop sentinel rather than an Error; the
+    // kernel must still report a readable cause and never certify an unreadable blocker.
+    let launched = 0;
+    const stopped = Object.freeze({ kind: 'checkpoint-store-unavailable' });
+    const result = await rebound(reason, context({
+      repairCheckpoints: port({ readBlocker: async () => { throw stopped; } }),
+      startAgent: async () => { launched++; return { result: { status: 0 } }; },
+      verify: () => { return assert.fail('an unreadable blocker must not be certified'); },
+    }));
+    assert.equal(result.outcome, 'human-only');
+    assert.equal(launched, 1, 'the stop follows the consumed launch and precedes any rerun');
+    assert.match(result.diagnostic, /Cannot read repair blocker: \{"kind":"checkpoint-store-unavailable"\}/);
+    assert.ok(!(result.diagnostic ?? '').includes('[object Object]'), 'the structured stop cause stays readable');
+  });
+
   test('agent structured launch blocker stops even on nonzero exit (TASK-2695)', async () => {
     let launched = 0;
     const result = await rebound(reason, context({

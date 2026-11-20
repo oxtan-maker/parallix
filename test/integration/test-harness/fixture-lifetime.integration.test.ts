@@ -291,7 +291,7 @@ test('TASK-2853: a SIGKILLed disposable stand-in cache is reclaimed after its co
   assert.equal(fs.existsSync(unrelated), true, 'unrelated temporary data survives');
 });
 
-test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and disposable cache', async () => {
+test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and disposable cache', async (t) => {
   // A stand-in checkout whose fast unit entry point reports the scratch root
   // the runner handed it, then hangs until the runner's signal forwarding
   // terminates the suite process group.
@@ -313,8 +313,12 @@ test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and di
   const testNode = path.join(checkout.root, 'node');
   fs.writeFileSync(testNode, `#!/bin/sh\nif [ "$1" = --version ]; then echo v26.7.0; else exec ${JSON.stringify(process.execPath)} "$@"; fi\n`);
   fs.chmodSync(testNode, 0o755);
+  // The runner owns a private process group: a signal aimed at the enclosing
+  // suite tree cannot terminate it mid-case, and the case can settle the whole
+  // tree it created on every outcome.
   const runner = spawn(process.execPath, ['--import', 'tsx', path.join(testRoot, 'run-default-tests.ts')], {
     cwd: path.dirname(testRoot),
+    detached: process.platform !== 'win32',
     stdio: ['ignore', 'ignore', 'pipe'],
     env: {
       ...process.env,
@@ -330,8 +334,23 @@ test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and di
   let stderr = '';
   runner.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
   let running = true;
-  const exited = new Promise<number | null>((resolve) => {
-    runner.on('exit', (code) => { running = false; resolve(code); });
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    runner.on('exit', (code, signal) => { running = false; resolve({ code, signal }); });
+  });
+  // Teardown on assertion failure, timeout or abort: forward a signal so the
+  // runner retires its own scratch and cache, and escalate to the group only if
+  // it does not settle.
+  t.after(async () => {
+    if (!running) { return; }
+    runner.kill('SIGTERM');
+    const settled = await Promise.race([
+      exited.then(() => true),
+      new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2_000)),
+    ]);
+    if (!settled) {
+      try { process.kill(process.platform === 'win32' ? runner.pid! : -runner.pid!, 'SIGKILL'); } catch { /* Already settled. */ }
+      await exited;
+    }
   });
   while (running && !(fs.existsSync(report) && fs.statSync(report).size > 0)) {
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -342,7 +361,12 @@ test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and di
   assert.equal(fs.existsSync(scratch), true);
   assert.equal(fs.existsSync(cache), true);
   runner.kill('SIGTERM');
-  assert.equal(await exited, 143);
+  // A non-null signal means an outside process terminated the runner, which is
+  // distinguishable from the runner mishandling the forwarded signal. The
+  // runner's own stderr is the only witness of an abnormal exit it survived
+  // (heap limit, spawn failure), so the failure message carries its tail.
+  assert.deepEqual(await exited, { code: 143, signal: null },
+    `the runner must translate the forwarded SIGTERM into exit 143 (runner stderr: ${stderr.slice(-600) || '<none>'})`);
   assert.equal(fs.existsSync(scratch), false, 'the terminated runner must remove its fast-unit scratch root');
   assert.equal(fs.existsSync(cache), false, 'the terminated runner must retire its disposable checkout cache');
 });

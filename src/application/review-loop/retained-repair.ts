@@ -1,6 +1,6 @@
 import { missionId, type Mission } from '../../domain/mission.js';
 import type { ReviewLoopPorts, ReviewLoopRequest } from '../ports/review-round.js';
-import { rebound, DEFAULT_REBOUND_ATTEMPTS } from '../rebound-kernel.js';
+import { rebound, causeText, DEFAULT_REBOUND_ATTEMPTS } from '../rebound-kernel.js';
 import { repairContractFailure } from '../repair-checkpoint-service.js';
 import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
 import { transitionReviewRepair } from '../review-repair-lifecycle.js';
@@ -56,7 +56,7 @@ export async function resumeRetainedRepair(request: ReviewLoopRequest, mission: 
     if (result.outcome !== 'fixed') { ports.output.exit(1); return false; }
     return true;
   } catch (cause) {
-    ports.output.error(`Retained verification repair failed: ${String(cause)}`);
+    ports.output.error(`Retained verification repair failed: ${causeText(cause)}`);
     ports.output.exit(1);
     return false;
   }

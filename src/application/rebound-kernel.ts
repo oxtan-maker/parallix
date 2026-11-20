@@ -52,6 +52,22 @@ export { DEFAULT_REBOUND_ATTEMPTS } from '../domain/rebound-policy.js';
 
 // ── Reason: structured failure values, never a regex match on combined text ──
 
+/**
+ * A thrown cause may be a structured stop sentinel; its shape is the only reportable diagnostic.
+ * Reporting must never throw: this runs inside a catch on the repair-stop path, so a serialization
+ * failure (circular structure, BigInt, a throwing toJSON) would escape the owner that was trying to
+ * stop. An Error from another realm is not `instanceof` this realm's Error, so the Error branch tests
+ * the tag too; String() still names it.
+ */
+export function causeText(cause: unknown): string {
+  if (cause instanceof Error) { return String(cause); }
+  if (typeof cause !== 'object' || cause === null) { return String(cause); }
+  const tag = Object.prototype.toString.call(cause);
+  if (tag === '[object Error]') { return String(cause); }
+  try { return JSON.stringify(cause) ?? `[unserializable cause: ${tag}]`; }
+  catch { return `[unserializable cause: ${tag}]`; }
+}
+
 function recordRepairTelemetry(context: ReboundContext, event: { strategy: RepairStrategy; outcome: 'pass' | 'advance' | 'rescue' | 'escalate' }) {
   // Logs are the recovery event sink shared by every rebound consumer. Keep the
   // identifiers structured and stable so operators can aggregate outcomes
@@ -271,7 +287,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     const strategy: RepairStrategy = repairStrategy(attempt);
     let prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>;
     try { prepared = await prepareRepairPrompt(state, context, attempt, maxAttempts); }
-    catch (cause) { return stopRepair(state, context, `Repair checkpoint persistence failed before launch: ${String(cause)}`); }
+    catch (cause) { return stopRepair(state, context, `Repair checkpoint persistence failed before launch: ${causeText(cause)}`); }
     const { fixPrompt, repairCheckpoint } = prepared;
     await transitionRepairToImplementer(context, slug);
     log(fmt.status('INFO', `Bouncing to ${context.role ?? 'implementer'} (${state.implementer}) with ${strategy} ${state.classification.failureClass} repair. Attempt ${attempt}/${maxAttempts}.`));
@@ -305,7 +321,7 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
         return humanOnlyOutcome(state, context, error);
       }
       await verification.certify();
-    } catch (cause) { return stopRepair(state, context, String(cause)); }
+    } catch (cause) { return stopRepair(state, context, causeText(cause)); }
     const outcome = await finishVerifiedRepair(state, options, attempt, { strategy, headBefore, fingerprintBefore, startedAt, launch }, verified);
     if (outcome === 'stop') { break; }
     if (outcome) { return outcome; }
@@ -381,7 +397,7 @@ async function repairCheckpointOutcome(state: ReboundState, context: ReboundCont
   try {
     blocker ??= await readRepairCheckpointBlocker(slug, prepared);
   }
-  catch (cause) { return stopRepair(state, context, `Cannot read repair blocker: ${String(cause)}`); }
+  catch (cause) { return stopRepair(state, context, `Cannot read repair blocker: ${causeText(cause)}`); }
   if (blocker) {
     if (launch.repairAttempted) { state.attempts++; }
     return stopRepair(state, context, JSON.stringify(blocker));
