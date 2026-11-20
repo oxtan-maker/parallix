@@ -66,13 +66,7 @@ State at start (main, 2026-11-20): `verificationPolicy.mode` is `pilot` with `co
 
 **2. Recalculation (research only, after 1).** Build the v0.13 model in the research solver: 8 states, 7 actions, `beta_1`, `M`, `rho` from E8, SARSOP with the rule check and record-in-state fallback; the exact order-per-round method with all 64 policies and bounds as independent cross-check; current-policy value computed both ways and compared with observed totals (E8). Report T and C, savings with and without discounting, sensitivity to empty cells, bootstrap or split, and what depends on extreme values. Compare with the v0.11 result and say what moved and why. Operator gate: choose the artifact(s) to deploy and which v0.13 capabilities are worth implementing.
 
-**3. Implementation wave (after the stage 2 gate; scoped from its result; wave 2859 guardrails W1–W20 apply).** Candidate children, kept only if stage 2 needs them:
-- Artifact contract v2 for the v0.13 model, replacing v1 in place (8-state/record form or order lookup table, decided from stage 2 evidence); the 27-state parser and tests removed once the replacement is wired to every production caller (AGENTS.md "Implementation").
-- Belief/record derivation for `beta_1 > 0` (a test failure is inconclusive, the history carries the record); history adapter covers rebuttals (repair without a new commit, renewed review of the same revision), retained approvals and joint repairs (one attempt addressing several failed checks, one belief transition; supersedes the corner-case-21 behavior the code has from wave 2859; TASK-2859 itself is not edited).
-- A "re-run tests after failure without repair" action, only if the stage 2 policy uses it, via existing gate and rebound owners (W7, W12, W17).
-- Recording what the next estimation round needs: per-run durations, human wait versus review, same-revision re-runs, rebuttal outcome, findings per attempt, verdict source, through existing owners, unknown left unknown (W13, W16).
-- Statistics and docs updated to the new model; existing metrics unchanged.
-- Re-selection of the pinned artifact and a disposable-environment check before ordinary missions are evaluated; PX-0073 states which artifact and model version it ran under.
+**3. Implementation: separate parallel wave TASK-2867.** The runtime must serve any artifact of the v0.13 model, not only what stage 2 produces, so it does not wait for stages 1 and 2. Only the final pinned-artifact selection depends on stage 2 (2867 depends on task-2866.03 for that slice).
 
 ## Out of scope
 
@@ -84,7 +78,7 @@ Separate agent/human repair actions, deferred repairs and runtime concurrency (u
 - [ ] #1 Stage 0 done: the v0.13 document is in ../parallix-research/research/verification-pomdp and the README lists its differences from the solver.
 - [ ] #2 Stage 1 delivered the v0.13 estimand set (beta_1, rebuttal share, per-run durations with W/R split, E7 restart points, E8 with step duration for rho, count tables by verdict source with empty cells), unknown values unknown, assumptions labelled.
 - [ ] #3 Stage 2 produced SARSOP and exact order-per-round values that agree within the stated bounds, the current policy's value agrees with observed totals or the gap is reported, and the saving is reported with sensitivity to empty cells.
-- [ ] #4 Stage 3 changes only what the stage 2 operator gate asked for, leaves missions unchanged with the switch off (W1), and removes superseded contract-v1 code and tests after the replacement is wired to every production caller.
+- [ ] #4 The implementation is delivered by TASK-2867 and this wave only supplies the artifact it pins.
 - [ ] #5 Before ordinary missions are evaluated, the pilot runs on an artifact consistent with v0.13, or the evaluation states which artifact and model version it ran under.
 <!-- AC:END -->
 
