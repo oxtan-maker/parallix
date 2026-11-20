@@ -5,8 +5,20 @@ import { runReviewLoop } from '../../../../src/application/review-loop/review-lo
 import type { PolicyActionPort, PolicyTestsOutcome } from '../../../../src/application/ports/verification-policy.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
+import { changeRevision, ConfiguredReviewerEligibility, currentReviewRound, startReview } from '../../../../src/domain/review.js';
 import type { Mission } from '../../../../src/domain/mission.js';
-import { fixtureMission } from '../../../fixtures/mission-builders.js';
+import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
+import { createReviewObservationRecorder } from '../../../../src/adapters/review/review-observation-recording.js';
+import { assertReviewStatePersisted, readReviewState, writeReviewState } from '../../../../src/adapters/review/review-state.js';
+import { openReviewRound } from '../../../../src/adapters/review/review-round-open.js';
+import { recordApproval } from '../../../../src/adapters/review/review-round.js';
+import { configureMissionWriteAuthorization } from '../../../../src/application/ports/mission-write-authorization.js';
+import { fixedVerificationNextAction } from '../../../../src/application/verification-policy/fixed-next-action.js';
+import { continueVerdictThroughActionOwner } from '../../../../src/composition/cli-authoring-commands.js';
+import { resolveConfiguration } from '../../../../src/composition/config.js';
+import type { CliCommandContext } from '../../../../src/composition/cli-service-scope.js';
+import type { Command } from '../../../../src/interfaces/cli/runtime.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
@@ -334,4 +346,173 @@ test('a post-approval tests action that consumes the final attempt ends in MAX_A
   assert.equal(base.calls.tests, 1, 'the last allowed attempt still ran');
   assert.equal(fake.current()?.disposition, 'MAX_ATTEMPTS');
   assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), ['approved'], 'the approval still reaches its human turn');
+});
+
+// Six passing orders of agent review, human review and integration tests (PX-0074.02).
+//
+// Each row drives one order over a real Mission store through the owners production uses, and
+// asserts the current change advances exactly once.
+//   starting lane  `review`, one unfinished round whose subject revision is `head-1`, opened by
+//                  the domain `startReview` owner; the loop ports report the same head, so the
+//                  recorded decision carries the change identity.
+//   agent check    `runReviewLoop` over the production state, observation-recording and
+//                  round-open adapters, which records the reviewer approval through the approve
+//                  owner and moves the lane.
+//   human check    the approve owner `recordApproval`, the owner `px verdict approve` reaches;
+//                  its CLI wiring is proven at the integration boundary.
+//   tests check    the composition dispatch owner `continueVerdictThroughActionOwner` with the
+//                  action read back from the persisted mission, or the loop's policy-selected
+//                  tests action when the order places tests before the approval.
+//   expected lane  `integration`, reached by exactly one `review -> integration` lane event and
+//                  exactly one tests action, with one human turn and no repair or re-review.
+// Contract-bound collapses, argued rather than tested: once the approval stands, a later agent
+// verdict launches no reviewer and a later human approve is refused (`mission is already in
+// integration`); the loop never selects a tests action after the decision closed
+// (`decisionIsOpen`), so a post-approval tests action only comes from the decision owner; and a
+// verdict recorded inside an owned workflow operation defers its continuation
+// (`wait: action-owned`), which is what lets a later check land before the dispatched tests.
+type Check = 'agent' | 'human' | 'tests';
+interface PassingOrder {
+  readonly order: readonly Check[];
+  /** Selections the loop's policy port is offered, in order. */
+  readonly selections: Check[];
+  /** Which owner delivers the tests check for this order. */
+  readonly testsBy: 'loop' | 'owner' | 'verdict';
+  /** The verdict lands inside an owned workflow operation, so its continuation defers. */
+  readonly verdictOwned: boolean;
+  /** The human verdict lands while the reviewer is running, so the agent verdict is late. */
+  readonly verdictDuringRound: boolean;
+  readonly launches: number;
+  readonly inLoopTests: number;
+  readonly handoffs: number;
+  readonly verdict: 'recorded' | 'unchanged';
+  /** Next action read from the persisted mission after each check, in order. */
+  readonly offered: readonly string[];
+}
+
+const DONE = 'integration/integration-handoff:fixed-sequence-complete';
+const OWED = 'review/agent-review:review-unfinished';
+
+const PASSING_ORDERS: ReadonlyArray<PassingOrder> = [
+  { order: ['agent', 'human', 'tests'], selections: ['agent', 'human'], testsBy: 'verdict', verdictOwned: false, verdictDuringRound: false, launches: 1, inLoopTests: 0, handoffs: 1, verdict: 'unchanged', offered: [DONE, DONE, DONE] },
+  { order: ['agent', 'tests', 'human'], selections: ['agent', 'human'], testsBy: 'owner', verdictOwned: true, verdictDuringRound: false, launches: 1, inLoopTests: 0, handoffs: 1, verdict: 'unchanged', offered: [DONE, DONE, DONE] },
+  { order: ['tests', 'agent', 'human'], selections: ['tests', 'agent'], testsBy: 'loop', verdictOwned: true, verdictDuringRound: false, launches: 1, inLoopTests: 1, handoffs: 0, verdict: 'unchanged', offered: [OWED, DONE, DONE] },
+  { order: ['human', 'agent', 'tests'], selections: ['agent'], testsBy: 'owner', verdictOwned: true, verdictDuringRound: false, launches: 0, inLoopTests: 0, handoffs: 1, verdict: 'recorded', offered: [DONE, DONE, DONE] },
+  { order: ['human', 'tests', 'agent'], selections: ['agent'], testsBy: 'verdict', verdictOwned: false, verdictDuringRound: false, launches: 0, inLoopTests: 0, handoffs: 1, verdict: 'recorded', offered: [DONE, DONE, DONE] },
+  { order: ['tests', 'human', 'agent'], selections: ['tests', 'agent', 'human'], testsBy: 'loop', verdictOwned: true, verdictDuringRound: true, launches: 1, inLoopTests: 1, handoffs: 0, verdict: 'recorded', offered: [OWED, OWED, DONE] },
+];
+
+const ORDER_HEAD = 'head-1';
+const ORDER_REVIEWER = agentFamily('claude');
+const ORDER_IMPLEMENTER = agentFamily('codex');
+
+function orderStore() {
+  const review = startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision(ORDER_HEAD) },
+    ORDER_REVIEWER, ORDER_IMPLEMENTER, '2026-12-01T10:00:00Z',
+    ConfiguredReviewerEligibility.fromReviewStep({ eligible: [ORDER_REVIEWER], strategy: 'random' }));
+  const store = inMemoryTransitionStore(fixtureMission(SLUG, { status: 'review', assignee: ORDER_IMPLEMENTER, review }));
+  return { store, lifecycle: new MissionLifecycleService(store) };
+}
+
+interface OrderEffects {
+  launches: number; mirrors: string[]; inLoopTests: number; handoffs: number; commands: string[]; verdicts: string[]; offered: string[];
+}
+
+function orderDispatch(effects: OrderEffects) {
+  const registry: Record<string, Command> = {
+    active: async () => { effects.commands.push('active'); },
+    review: async () => { effects.commands.push('review'); },
+  };
+  return {
+    rootDir: '/fixture', packageDir: '/fixture', configuration: resolveConfiguration({}),
+    scope: { withMissionAndGraph: async () => { effects.handoffs += 1; } } as unknown as CliCommandContext['scope'],
+    active: registry.active!, commands: () => registry,
+  } satisfies CliCommandContext;
+}
+
+async function runPassingOrder(row: PassingOrder) {
+  const { store, lifecycle } = orderStore();
+  const effects: OrderEffects = { launches: 0, mirrors: [], inLoopTests: 0, handoffs: 0, commands: [], verdicts: [], offered: [] };
+  const offered = () => {
+    const mission = store.mission();
+    const action = fixedVerificationNextAction({ mission });
+    return `${mission.status}/${action.kind}${'reason' in action ? `:${action.reason}` : ''}`;
+  };
+  const base = scripted(row.selections, () => passed);
+  const policy: PolicyActionPort = {
+    ...base.actions,
+    runTests: async reselect => { effects.inLoopTests += 1; return await base.actions.runTests(reselect); },
+  };
+  const verdict = async () => {
+    const result = await recordApproval(SLUG, { comment: 'Human approved', decidedAt: '2026-12-01T11:00:00Z', revision: ORDER_HEAD,
+      source: { kind: 'local' } }, { missionStore: store, lifecycleService: lifecycle });
+    effects.verdicts.push(result.outcome);
+    const action = fixedVerificationNextAction({ mission: store.mission(), ownedAction: row.verdictOwned });
+    await continueVerdictThroughActionOwner(orderDispatch(effects), SLUG, action);
+  };
+  const loop = async (isContinue: boolean, duringRound?: () => Promise<void>) => {
+    const fake = fakeReviewLoopPorts({
+      slug: SLUG, missionStore: store, lifecycle, policyActions: policy,
+      stateport: {
+        read: () => readReviewState(SLUG, undefined, store),
+        persist: async state => {
+          assertReviewStatePersisted(await writeReviewState(SLUG, state, fake.ports.worktree, { missionStore: store }), { slug: SLUG, round: state.round });
+        },
+        ...createReviewObservationRecorder(SLUG, () => ORDER_HEAD, false, { missionStore: store, lifecycleService: lifecycle }),
+        openRound: async state => (await openReviewRound(SLUG, state, {
+          worktree: fake.ports.worktree, log: () => {}, error: message => { throw new Error(message); }, missionStore: store, lifecycleService: lifecycle,
+        })).ok,
+      },
+      agents: { launch: async launch => {
+        effects.launches += 1;
+        if (launch.role === 'reviewer' && duringRound) { await duringRound(); }
+        return { agent: launch.agent, result: { status: 0 } };
+      } },
+      artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
+      task: { mirrorApproved: async () => { effects.mirrors.push('approved'); } },
+    });
+    await runReviewLoop({ slug: SLUG, implementer: ORDER_IMPLEMENTER, reviewer: ORDER_REVIEWER, maxAttempts: 4, skipReviewPreparation: true, isContinue }, fake.ports);
+    assert.deepEqual(fake.errors, [], row.order.join('>'));
+    return fake;
+  };
+  const dispatch = async () => {
+    await continueVerdictThroughActionOwner(orderDispatch(effects), SLUG, fixedVerificationNextAction({ mission: store.mission() }));
+  };
+
+  // The order is driven literally: each check runs at its turn, and the persisted next action is
+  // read back after it. A tests check that the loop's policy port or the verdict continuation
+  // delivers needs no separate step; only an owned-operation dispatch does.
+  const humanFirst = row.order[0] === 'human';
+  for (const check of row.order) {
+    if (check === 'agent') { await loop(humanFirst, row.verdictDuringRound ? verdict : undefined); }
+    else if (check === 'human') { if (!row.verdictDuringRound) { await verdict(); } }
+    else if (row.testsBy === 'owner') { await dispatch(); }
+    effects.offered.push(offered());
+  }
+  return { store, effects };
+}
+
+test('each passing order of agent review, human review and integration tests advances the persisted change once (PX-0074.02)', async t => {
+  configureMissionWriteAuthorization({ operationId: 'px-0074.02-matrix', generation: 1, assert: async () => {} });
+  t.after(() => configureMissionWriteAuthorization(null));
+  for (const row of PASSING_ORDERS) {
+    const label = row.order.join('>');
+    const { store, effects } = await runPassingOrder(row);
+    const mission = store.mission();
+    const round = currentReviewRound(mission.review!);
+    assert.deepEqual(store.events.map(event => [event.from, event.to]), [['review', 'integration']],
+      `${label}: the current change advances exactly once`);
+    assert.equal(mission.status, 'integration', `${label}: the lane after the order`);
+    assert.equal(mission.review!.rounds.length, 1, `${label}: no second round is opened`);
+    assert.equal(round.decision?.kind, 'approved', `${label}: one approved decision`);
+    assert.equal(round.decision?.revision, ORDER_HEAD, `${label}: the decision names the judged change revision`);
+    assert.equal(effects.launches, row.launches, `${label}: the reviewer is owed only while the round is undecided`);
+    assert.deepEqual([effects.inLoopTests, effects.handoffs], [row.inLoopTests, row.handoffs], `${label}: the tests check arrives once, from ${row.testsBy}`);
+    assert.deepEqual(effects.verdicts, [row.verdict], `${label}: the human verdict advances the change only while the round still awaits it`);
+    assert.deepEqual(effects.mirrors, ['approved'], `${label}: the approval reaches one human turn`);
+    assert.deepEqual(effects.commands, [], `${label}: no repair or re-review is dispatched`);
+    assert.deepEqual(effects.offered, [...row.offered],
+      `${label}: each check leaves the persisted mission offering one next action, and once the approval stands it is the same automatic work, never a second agent review or a human-review wait`);
+  }
 });

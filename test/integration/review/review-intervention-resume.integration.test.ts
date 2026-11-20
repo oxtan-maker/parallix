@@ -41,7 +41,7 @@ import { unknownReviewFlags } from '../../../src/adapters/review/review-cli-flag
 import { applyReviewStateToReview, reviewStateDataFrom } from '../../../src/adapters/review/review-state-mapping.js';
 import { readAllEvents } from '../../../src/adapters/review/review-events.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
-import { fixedVerificationNextAction } from '../../../src/application/verification-policy/fixed-next-action.js';
+import { fixedVerificationNextAction, humanReviewDue } from '../../../src/application/verification-policy/fixed-next-action.js';
 import { REVIEW_START_DECISION_EVENT } from '../../../src/application/verification-policy/review-start-decision.js';
 import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
 import { createVerdictCommand } from '../../../src/interfaces/cli/review-verbs.js';
@@ -624,6 +624,53 @@ it('mid-sequence human approval replays the recorded approval into integration o
   if (replayed.kind !== 'found') { throw new Error('Missing replayed human approval fixture'); }
   assert.equal(replayed.mission.review!.rounds.length, 1);
   assert.deepEqual(reviewStatistics(replayed.mission.review!), beforeReplay, 'approval replay cannot change existing statistics');
+});
+
+it('a human wait dispatches nothing, and the operator verdict command resumes the owed tests once (PX-0074.02)', async () => {
+  const approved = applyReviewerCommand(startReview(
+    { change: { kind: 'local-branch', sourceBranch: `mission/${SLUG}`, targetBranch: 'main' }, revision: changeRevision('wait-head') },
+    REVIEWER, IMPLEMENTER, '2026-11-19T11:00:00Z', reviewerEligibility,
+  ), { type: 'approve', decidedAt: '2026-11-19T11:01:00Z', revision: changeRevision('wait-head'),
+    comment: 'Agent approved', source: { kind: 'local' } });
+  const { root, store } = await seedRoot(approved);
+  initCommittedRepository(root);   // the verdict command records the branch tip it hands back
+  const dispatched: string[] = [];
+  const testsStarted: string[] = [];
+  const registry: Record<string, Command> = {
+    active: async args => { dispatched.push(`active:${args[0]}`); },
+    review: async args => { dispatched.push(`review:${args[0]}`); },
+  };
+  const context = {
+    rootDir: root, packageDir: root, configuration: resolveConfiguration({ PARALLIX_HOME: path.join(root, 'parallix-home') }),
+    scope: { withMissionAndGraph: async () => { testsStarted.push(SLUG); } } as unknown as CliCommandContext['scope'],
+    active: registry.active!, commands: () => registry,
+  } satisfies CliCommandContext;
+  const waiting = await store.load(missionId(SLUG));
+  if (waiting.kind !== 'found') { throw new Error('Missing waiting mission'); }
+  const wait = fixedVerificationNextAction({ mission: waiting.mission });
+  assert.deepEqual(humanReviewDue(wait), { reason: 'agent-review-approved', detail: 'Human review is due because agent review approved the current change.' });
+  await continueVerdictThroughActionOwner(context, SLUG, wait);
+  assert.deepEqual([dispatched, testsStarted], [[], []], 'the wait for the human dispatches no automatic work');
+
+  // The supported human-verdict path is the operator verdict command: it records the verdict and
+  // continues the eligible work itself. A verdict that stops continuing eligible work fails here.
+  const lifecycle = new MissionLifecycleService(store);
+  const composed = reviewVerbPorts({
+    rootDir: root, configuration: context.configuration, mission: { store, lifecycle }, operatorInvocation: true,
+    continueVerificationAction: (slug, action) => continueVerdictThroughActionOwner(context, slug, action),
+  });
+  await createVerdictCommand({
+    ...composed,
+    resolveSlug: () => missionId(SLUG),
+    resolveExecutionContext: () => ({ ok: true, context: missionExecutionContext({ missionId: SLUG, missionWorktree: root }) }),
+  })(['approve', '--actor', 'operator-alice', '--comment', 'Human approved']);
+
+  const recorded = await store.load(missionId(SLUG));
+  if (recorded.kind !== 'found') { throw new Error('Missing approved mission'); }
+  assert.equal(recorded.mission.status, 'integration', 'the recorded verdict advances the change out of review');
+  assert.equal(currentReviewRound(recorded.mission.review!).decision?.kind, 'approved');
+  assert.deepEqual(fixedVerificationNextAction({ mission: recorded.mission }), { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
+  assert.deepEqual([dispatched, testsStarted], [[], [SLUG]], 'the verdict command alone starts the owed tests, once, with no operator command');
 });
 
 import { copyRepairSchema } from '../../lib/integration-repair-fixture.js';

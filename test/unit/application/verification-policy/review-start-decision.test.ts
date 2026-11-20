@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import { OperationalHistoryService } from '../../../../src/application/services/operational-history-service.js';
-import { fixedVerificationNextAction } from '../../../../src/application/verification-policy/fixed-next-action.js';
+import { fixedVerificationNextAction, humanReviewDue } from '../../../../src/application/verification-policy/fixed-next-action.js';
 import {
   REVIEW_ENTRY_PIN_EVENT,
   REVIEW_START_DECISION_EVENT,
@@ -801,4 +801,48 @@ test('a writer that outlives the deadline gets no second, contradictory decision
   assert.equal(await observePolicyReviewStart(startFacts(), slow.ports), 'write-timed-out');
   assert.equal(writes.length, 1, 'the original write is the only one; it keeps its known change identity');
   assert.equal(writes[0]?.changeIdentity, 'patch-123');
+});
+
+// The next-action owner's answer for each lane a passing order passes through (PX-0074.02). The six orders
+// themselves are driven through persisted transitions in the review-loop contract suite; this suite owns only the
+// pure decision: given a recorded lane, round phase and the exact-current facts, which single action follows, and
+// which of them projects a human-review wait.
+test('each lane a passing order passes through yields one next action, and only a human turn is an explicit wait (PX-0074.02)', () => {
+  const slug = 'task-passing-orders';
+  type Step = readonly [lane: string, mission: Mission, facts: Partial<Parameters<typeof fixedVerificationNextAction>[0]>, expected: string];
+  const reviewing = fixtureMission(slug, { status: 'review', review: reviewFor('reviewing', false) });
+  const agentApproved = fixtureMission(slug, { status: 'review', review: approvedReview(slug) });
+  const landing = { ...agentApproved, status: 'integration' as const, closedAt: null };
+  const selected = { policySelection: 'tests' as const };
+  const testsOwed = { testsConfigured: true, testsCurrent: false };
+  const lanes: readonly Step[] = [
+    ['review/reviewing', reviewing, {}, 'agent-review'],
+    ['review/reviewing tests selected', reviewing, selected, 'tests:policy-selected'],
+    ['review/approved', agentApproved, {}, 'human-review:agent-review-approved'],
+    ['review/approved tests selected', agentApproved, selected, 'tests:policy-selected'],
+    ['review/approved tests passed', agentApproved, { agentReviewCurrent: true, testsCurrent: true }, 'human-review:integrate-shortcut-eligible'],
+    ['integration/approved', landing, {}, 'integration-handoff'],
+    ['integration/approved tests owed', landing, testsOwed, 'tests:tests-not-current'],
+    ['integration/approved tests passed', landing, { testsConfigured: true, testsCurrent: true }, 'integration-handoff'],
+  ];
+  const label = (action: ReturnType<typeof fixedVerificationNextAction>) => `${action.kind}${action.kind === 'agent-review' ? '' : `:${action.reason}`}`.replace(/^(agent-review|integration-handoff):.*/, '$1');
+  for (const [lane, mission, facts, expected] of lanes) {
+    const action = fixedVerificationNextAction({ mission, ...facts });
+    assert.equal(label(action), expected, `${lane}`);
+    // Only the human turn projects a due review; every other next action is automatic work or a plain wait.
+    assert.equal(humanReviewDue(action) !== null, action.kind === 'human-review', `${lane}: human-review-due projection`);
+  }
+  // After the human verdict the round decision stands: no agent review is owed again on the same change, whatever the evidence says.
+  for (const testsConfigured of [undefined, null, true, false] as const) for (const testsCurrent of [undefined, null, true, false] as const) {
+    for (const agentReviewCurrent of [undefined, null, true, false] as const) {
+      assert.notEqual(fixedVerificationNextAction({ mission: landing, testsConfigured, testsCurrent, agentReviewCurrent }).kind, 'agent-review',
+        `integration/approved ${testsConfigured}/${testsCurrent}/${agentReviewCurrent}`);
+    }
+  }
+  // The wait is explicit and idle: a human turn names its reason and an owned or escalated state dispatches nothing automatic.
+  assert.deepEqual(humanReviewDue(fixedVerificationNextAction({ mission: agentApproved })),
+    { reason: 'agent-review-approved', detail: 'Human review is due because agent review approved the current change.' });
+  const escalated = fixtureMission(slug, { status: 'review', review: { ...repeatReview(), intervention: { requestedAt: '2026-11-19T10:00:00Z', requestedBy: 'reviewer', reason: 'needs a human' } } });
+  assert.deepEqual(fixedVerificationNextAction({ mission: escalated }), { kind: 'human-handoff', reason: 'human-intervention' });
+  assert.equal(humanReviewDue(fixedVerificationNextAction({ mission: escalated })), null, 'an escalation is a handoff, not a human-review-due turn');
 });
