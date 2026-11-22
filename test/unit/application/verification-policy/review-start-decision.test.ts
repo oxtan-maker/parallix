@@ -32,7 +32,8 @@ import { parsePolicyArtifact } from '../../../../src/application/verification-po
 import { approvedReview, fixtureMission } from '../../../fixtures/mission-builders.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
-import { policyArtifactFixture } from './policy-artifact.fixture.js';
+import { policyArtifactFixture, syntheticPolicyArtifactV2 } from './policy-artifact.fixture.js';
+import { createPolicyArtifactLoader } from '../../../../src/adapters/config/verification-policy.js';
 
 function reviewFor(phase: ReviewPhase, pending: boolean): NonNullable<Mission['review']> {
   const fixture = repeatReview(), current = fixture.rounds.at(-1)!;
@@ -553,6 +554,40 @@ test('artifact and history failures record typed fixed-policy decisions (TASK-28
     assert.equal(fixture.records[0]?.failureReason?.kind,
       `history-${kind}`);
   }
+});
+
+test('a synthetic v2 artifact is observed in shadow and each invalid one falls back without throwing (TASK-2867.01)', async () => {
+  const loaded = (artifact: unknown, mode: 'shadow' | 'pilot' = 'shadow') => policyPorts({ configuration: { mode, artifact: 'policy.json' },
+    loadPolicy: createPolicyArtifactLoader('/repo', { mode, artifact: 'policy.json' }, () => JSON.stringify(artifact)) });
+  const valid = loaded(syntheticPolicyArtifactV2());
+  assert.equal(await observePolicyReviewStart(startFacts(), valid.ports), 'recorded');
+  assert.equal(valid.records[0]?.effectiveMode, 'shadow');
+  assert.equal(valid.records[0]?.recommendedAction, 'tests');
+  assert.equal(valid.records[0]?.failureReason, null);
+  assert.match(valid.records[0]?.artifactSha256 ?? '', /^[0-9a-f]{64}$/);
+  const pilot = loaded(syntheticPolicyArtifactV2(), 'pilot');
+  assert.equal((await selectPolicyAction(SELECTION_FACTS, pilot.ports)).action, 'tests');
+
+  const invalid = {
+    'dimension mismatch': (a: Record<string, any>) => { a.transition.tests.pop(); },
+    'bad action names': (a: Record<string, any>) => { a.actions[6] = 'deploy'; },
+    'bad hash': (a: Record<string, any>) => { a.parameterHash = 'not-a-digest'; },
+    'bad rule check': (a: Record<string, any>) => { a.ruleCheck.violatingMissions = 4; },
+  };
+  const rejections = new Set<string>();
+  for (const [name, change] of Object.entries(invalid)) {
+    const artifact = syntheticPolicyArtifactV2(); change(artifact);
+    const fixture = loaded(artifact);
+    const result = fixture.ports.loadPolicy();
+    assert.ok(result.mode === 'fixed' && result.reason === 'invalid' && result.rejection, name);
+    rejections.add(result.rejection.code);
+    assert.equal(await observePolicyReviewStart(startFacts(), fixture.ports), 'recorded', name);
+    assert.deepEqual([fixture.records[0]?.effectiveMode, fixture.records[0]?.failureReason?.kind, fixture.records[0]?.recommendedAction,
+      fixture.records[0]?.artifactSha256], ['fixed', 'artifact-invalid', null, null], name);
+    const selection = await selectPolicyAction(SELECTION_FACTS, loaded(artifact, 'pilot').ports);
+    assert.equal(selection.action, null, name);
+  }
+  assert.equal(rejections.size, Object.keys(invalid).length, 'each invalid class carries its own typed rejection');
 });
 
 test('a timed-out evaluation still lands a typed observation-timeout row with unknowns left unknown (TASK-2859.19)', async () => {

@@ -44,7 +44,11 @@ export function createPolicyArtifactLoader(rootDir: string, config: Verification
       catch (error) { return { mode: 'fixed', reason: (error as NodeJS.ErrnoException)?.code === 'ENOENT' ? 'missing' : 'unreadable' }; }
       const parsed = parsePolicyArtifact(input);
       if (!parsed.ok) { return { mode: 'fixed', reason: 'invalid', rejection: parsed.rejection }; }
-      const hash = createHash('sha256').update(canonical(parsed.artifact)).digest('hex');
+      let hash: string;
+      try { hash = createHash('sha256').update(canonical(JSON.parse(input))).digest('hex'); }
+      catch { // the identity covers the whole document, so an unbounded ignored field must degrade to a typed result, not a crash
+        return { mode: 'fixed', reason: 'invalid', rejection: { code: 'unreadable', path: 'artifact', message: 'artifact identity could not be computed' } };
+      }
       if (expectedHash !== undefined && hash !== expectedHash) { return { mode: 'fixed', reason: 'hash-mismatch' }; }
       pinned = { mode: 'shadow', hash, artifact: parsed.artifact };
     }

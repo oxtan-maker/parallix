@@ -164,9 +164,14 @@ function cleanInterruptedReviewFixtureSource(parentPid: number, root: string): s
 }
 
 function watchInterruptedReviewFixture(root: string) {
+  // The watcher outlives the test process and exits after the enclosing run may
+  // already be reading raw V8 coverage; an inherited coverage directory leaves a
+  // half-written file that fails the whole run ("coverage file is empty").
+  const watcherEnv = { ...process.env };
+  delete watcherEnv.NODE_V8_COVERAGE;
   const watcher = childProcess.spawn(process.execPath, [
     '-e', cleanInterruptedReviewFixtureSource(process.pid, root)
-  ], { detached: true, stdio: 'ignore' });
+  ], { detached: true, stdio: 'ignore', env: watcherEnv });
   watcher.unref();
 }
 

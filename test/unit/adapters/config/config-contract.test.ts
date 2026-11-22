@@ -1,3 +1,4 @@
+import { parsePolicyArtifact } from '../../../../src/application/verification-policy/policy-artifact.js';
 import { createPolicyArtifactLoader } from '../../../../src/adapters/config/verification-policy.js';
 import { policyArtifactFixture as fixture } from '../../application/verification-policy/policy-artifact.fixture.js';
 // In-process config cases share this owner and worker; real Git cases remain integration.
@@ -86,6 +87,16 @@ test('policy loader off does no I/O and failures return typed fixed-policy reaso
   }
   const invalid = createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => '{}')();
   assert.ok(invalid.mode === 'fixed' && invalid.reason === 'invalid' && invalid.rejection?.code === 'missing-field');
+});
+
+test('policy loader returns a typed fixed result when an ignored field is too deeply nested to hash (TASK-2867.01)', () => {
+  const body = JSON.stringify(fixture());
+  const input = `${body.slice(0, -1)},"extra":${'['.repeat(20_000)}${']'.repeat(20_000)}}`;
+  assert.ok(parsePolicyArtifact(input).ok, 'the parser ignores unknown fields');
+  for (const mode of ['shadow', 'pilot'] as const) {
+    const result = createPolicyArtifactLoader('/repo', { mode, artifact: 'policy.json' }, () => input)();
+    assert.ok(result.mode === 'fixed' && result.reason === 'invalid' && result.rejection?.code === 'unreadable', mode);
+  }
 });
 
 test('verificationPolicy invalid block disables only itself and reports once (TASK-2859.06)', () => {

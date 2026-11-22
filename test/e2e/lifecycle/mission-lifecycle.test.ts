@@ -451,9 +451,14 @@ function cleanInterruptedFixtureSource(parentPid: number, root: string, repoRoot
 
 function watchInterruptedFixture(root: string, repoRoot: string, worktree: string) {
   const cleanupMarker = process.env.PARALLIX_E2E_CLEANUP_MARKER || '';
+  // The watcher outlives the test process and exits after the enclosing run may
+  // already be reading raw V8 coverage; an inherited coverage directory leaves a
+  // half-written file that fails the whole run ("coverage file is empty").
+  const watcherEnv = { ...process.env };
+  delete watcherEnv.NODE_V8_COVERAGE;
   const watcher = childProcess.spawn(process.execPath, [
     '-e', cleanInterruptedFixtureSource(process.pid, root, repoRoot, worktree, cleanupMarker)
-  ], { detached: true, stdio: 'ignore' });
+  ], { detached: true, stdio: 'ignore', env: watcherEnv });
   watcher.unref();
 }
 

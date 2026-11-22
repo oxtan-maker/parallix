@@ -1,11 +1,10 @@
 import {
   POLICY_ACTIONS,
   POLICY_ROW_TOLERANCE,
-  POLICY_STATE_COUNT,
   type PolicyAction,
   type PolicyArtifact,
   type PolicyObservation,
-  type PolicyStatus,
+  type PolicyState,
 } from './policy-artifact.js';
 
 export type VerificationHistoryEntry =
@@ -28,10 +27,9 @@ export type BeliefDerivation =
 const failed = (kind: BeliefFailureKind, message: string, historyIndex: number | null = null): BeliefDerivation =>
   ({ ok: false, failure: { kind, historyIndex, message } });
 const isCheck = (value: unknown): value is PolicyAction => POLICY_ACTIONS.includes(value as PolicyAction);
-const statusCode: Record<PolicyStatus, number> = { 'would-fail': 0, 'would-pass': 1, passed: 2 };
 
 function validatedPrior(artifact: PolicyArtifact): readonly number[] | null {
-  if (!Array.isArray(artifact.prior) || artifact.prior.length !== POLICY_STATE_COUNT) { return null; }
+  if (!Array.isArray(artifact.prior) || artifact.prior.length !== artifact.states.length) { return null; }
   let sum = 0;
   const copy: number[] = [];
   for (const value of artifact.prior as readonly unknown[]) {
@@ -52,42 +50,70 @@ function normalized(values: number[], message: string, historyIndex: number): Be
   return values.map(value => value / mass);
 }
 
+const actionIndexError = (action: string) => failed('invalid', `artifact defines no ${action} action`);
+
+/** Belief after one action's transition and, when observed, the observation's likelihood; a missing observation leaves the prediction. */
 function filter(
   artifact: PolicyArtifact,
   belief: readonly number[],
-  check: PolicyAction,
-  observation: PolicyObservation,
+  action: string,
+  observation: PolicyObservation | null,
   historyIndex: number,
 ): BeliefDerivation | readonly number[] {
-  const values = Array<number>(POLICY_STATE_COUNT).fill(0);
+  const transition = artifact.transition[action];
+  const likelihoods = artifact.observation[action];
+  if (!transition || !likelihoods) { return actionIndexError(action); }
+  const count = artifact.states.length;
+  const values = Array<number>(count).fill(0);
   const observationIndex = observation === 'passed' ? 1 : 0;
-  for (let next = 0; next < POLICY_STATE_COUNT; next += 1) {
+  for (let next = 0; next < count; next += 1) {
     let predicted = 0;
-    for (let current = 0; current < POLICY_STATE_COUNT; current += 1) {
-      const probability = artifact.transition[check][current][next];
+    for (let current = 0; current < count; current += 1) {
+      const probability = transition[current][next];
       if (!Number.isFinite(probability) || probability < 0) { return failed('invalid', 'artifact transition is invalid', historyIndex); }
       predicted += belief[current] * probability;
     }
-    const likelihood = artifact.observation[check][next][observationIndex];
+    const likelihood = observation === null ? 1 : likelihoods[next][observationIndex];
     if (!Number.isFinite(likelihood) || likelihood < 0) { return failed('invalid', 'artifact observation is invalid', historyIndex); }
     values[next] = likelihood * predicted;
   }
-  return normalized(values, `${check} ${observation} has zero predicted probability`, historyIndex);
+  return normalized(values, `${action} ${observation ?? 'transition'} has zero predicted probability`, historyIndex);
 }
 
+/**
+ * A failed verdict then its repair. A v1 artifact's read action holds both; a v2 artifact splits them, so one that
+ * defines no repair-<check> action cannot say what the repair did and the belief fails typed instead of guessing.
+ */
+function repaired(
+  artifact: PolicyArtifact,
+  belief: readonly number[],
+  check: PolicyAction,
+  historyIndex: number,
+): BeliefDerivation | readonly number[] {
+  const failedRead = filter(artifact, belief, check, 'not-passed', historyIndex);
+  if ('ok' in failedRead || artifact.schemaVersion === 1) { return failedRead; }
+  const repair = `repair-${check}` as const;
+  return artifact.actions.includes(repair) ? filter(artifact, failedRead, repair, null, historyIndex)
+    : failed('unmodelled-history', `artifact defines no ${repair} action`, historyIndex);
+}
+
+const stateKey = (acceptable: PolicyState['acceptable'], verdicts: PolicyState['verdicts']) => JSON.stringify([acceptable, verdicts]);
+
+/** The state a retained pass of `check` moves each state to: same code state, that check's verdict passed. */
 function retainedPass(
   artifact: PolicyArtifact,
   belief: readonly number[],
   check: PolicyAction,
   historyIndex: number,
 ): BeliefDerivation | readonly number[] {
-  const values = Array<number>(POLICY_STATE_COUNT).fill(0);
-  for (let current = 0; current < POLICY_STATE_COUNT; current += 1) {
-    const state = artifact.states[current];
-    if (!state || !isCheck(check) || state[check] === 'would-fail') { continue; }
-    const codes = POLICY_ACTIONS.map(action => action === check ? 2 : statusCode[state[action]]);
-    if (codes.some(code => code === undefined)) { return failed('invalid', 'artifact state is invalid', historyIndex); }
-    values[9 * codes[0] + 3 * codes[1] + codes[2]] += belief[current];
+  const values = Array<number>(artifact.states.length).fill(0);
+  const index = new Map(artifact.states.map((state, at) => [stateKey(state.acceptable, state.verdicts), at]));
+  const carriesRecord = artifact.states.some(state => POLICY_ACTIONS.some(action => state.verdicts[action] !== 'unread'));
+  for (const [current, state] of artifact.states.entries()) {
+    if (!state || !isCheck(check) || !state.acceptable[check]) { continue; }
+    const target = carriesRecord ? index.get(stateKey(state.acceptable, { ...state.verdicts, [check]: 'passed' })) : current;
+    if (target === undefined) { return failed('invalid', 'artifact state is invalid', historyIndex); }
+    values[target] += belief[current];
   }
   return normalized(values, `${check} retained pass has zero belief mass`, historyIndex);
 }
@@ -133,7 +159,7 @@ function replay(artifact: PolicyArtifact, history: readonly VerificationHistoryE
       if (repair.kind !== 'repair' || repair.check !== entry.check) {
         return failed('unmodelled-history', `failed ${entry.check} verdict must be followed by its repair`, index + 1);
       }
-      const next = filter(artifact, belief, entry.check, 'not-passed', index);
+      const next = repaired(artifact, belief, entry.check, index);
       if ('ok' in next) { return next; }
       belief = next; passed.clear(); index += 1; continue;
     }

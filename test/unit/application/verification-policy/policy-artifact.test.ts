@@ -4,7 +4,7 @@ import { deriveBelief, verificationCheckStates, verificationIntegrationEligible,
   type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyAction, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
 import { recommend } from '../../../../src/application/verification-policy/recommend.js';
-import { policyArtifactFixture as fixture, oneHot, half, type Json } from './policy-artifact.fixture.js';
+import { policyArtifactFixture as fixture, syntheticPolicyArtifactV2 as syntheticV2, v2State, oneHot, half, type Json } from './policy-artifact.fixture.js';
 
 type AlphaVector = { action: PolicyAction; values: number[] };
 type FilterModel = { transition: number[][][]; observation: number[][][]; prior: number[] };
@@ -32,14 +32,22 @@ test('parses an exact contract-v1 fixture as value and as text, preserving every
   for (const input of [fixture(), JSON.stringify(fixture())]) {
     const result = parsePolicyArtifact(input);
     assert.ok(result.ok);
-    assert.deepEqual(result.ok && result.artifact, fixture());
+    assert.ok(result.ok);
+    const { states, schemaVersion, ruleCheck, ...rest } = result.artifact;
+    const { states: sourceStates, schemaVersion: sourceVersion, ...sourceRest } = fixture();
+    assert.deepEqual(rest, sourceRest);
+    // the thin v1-to-v2 mapping: a status says acceptable and, once passed, the carried verdict
+    assert.deepEqual([schemaVersion, sourceVersion, ruleCheck, states.length, sourceStates.length], [1, 1, null, 27, 27]);
+    assert.deepEqual(states[0], { acceptable: { tests: false, agent: false, human: false }, verdicts: { tests: 'unread', agent: 'unread', human: 'unread' } });
+    assert.deepEqual(states[13], { acceptable: { tests: true, agent: true, human: true }, verdicts: { tests: 'unread', agent: 'unread', human: 'unread' } });
+    assert.deepEqual(states[26], { acceptable: { tests: true, agent: true, human: true }, verdicts: { tests: 'passed', agent: 'passed', human: 'passed' } });
   }
 });
 
 test('parsed artifacts do not share mutable state objects across parses (TASK-2859.03)', () => {
   const first = parsePolicyArtifact(fixture());
   assert.ok(first.ok);
-  if (first.ok) { (first.artifact.states[0] as { tests: string }).tests = 'passed'; }
+  if (first.ok) { (first.artifact.states[0].acceptable as { tests: boolean }).tests = true; }
   assert.equal(code(fixture()), 'accepted');
 });
 
@@ -47,7 +55,7 @@ test('rejects each malformed class with a typed rejection and never throws (TASK
   const cases: Array<[string, unknown, PolicyRejectionCode]> = [
     ['not json', '{nope', 'invalid-json'], ['null', null, 'not-an-object'], ['hostile getter', { get schemaVersion(): never { throw new Error('x'); } }, 'unreadable'],
     ['throwing proxy', { get schemaVersion(): never { throw new Proxy({}, { getPrototypeOf() { throw new Error('trap'); } }); } }, 'unreadable'],
-    ['schema version', mutated(a => { a.schemaVersion = 2; }), 'schema-version'],
+    ['schema version', mutated(a => { a.schemaVersion = 3; }), 'schema-version'],
     ['missing field', mutated(a => { delete a.parameterHash; }), 'missing-field'],
     ['missing action matrix', mutated(a => { delete a.transition.human; }), 'missing-field'],
     ['unknown objective', mutated(a => { a.objective = 'speed'; }), 'out-of-range'],
@@ -226,27 +234,30 @@ test('matches the reference best vector on 1000 beliefs reached from a synthetic
   const fresh = [0.03, 0.07, 0.11, 0.13, 0.17, 0.19, 0.14, 0.16];
   const freshStates = [0, 1, 3, 4, 9, 10, 12, 13];
   const code = { 'would-fail': 0, 'would-pass': 1, passed: 2 } as const;
+  const status = (state: (typeof states)[number], check: PolicyAction) =>
+    state.verdicts[check] === 'passed' ? 'passed' : state.acceptable[check] ? 'would-pass' : 'would-fail';
   const transition = POLICY_ACTIONS.map((action, slot) => states.map((state, index) => {
     const row = Array<number>(27).fill(0);
-    if (index === 26 || state[action] === 'passed') { row[index] = 1; }
-    else if (state[action] === 'would-pass') {
-      const statuses = POLICY_ACTIONS.map(check => code[state[check]]);
+    if (index === 26 || status(state, action) === 'passed') { row[index] = 1; }
+    else if (status(state, action) === 'would-pass') {
+      const statuses = POLICY_ACTIONS.map(check => code[status(state, check)]);
       statuses[slot] = 2;
       row[9 * statuses[0] + 3 * statuses[1] + statuses[2]] = 1;
     } else { freshStates.forEach((next, position) => { row[next] = fresh[position]; }); }
     return row;
   }));
-  const observation = POLICY_ACTIONS.map(action => states.map(state => state[action] === 'passed' ? [0, 1] : [1, 0]));
+  const observation = POLICY_ACTIONS.map(action => states.map(state => status(state, action) === 'passed' ? [0, 1] : [1, 0]));
   const prior = Array<number>(27).fill(0); freshStates.forEach((state, index) => { prior[state] = fresh[index]; });
   const cost = POLICY_ACTIONS.map((_action, slot) => states.map((_state, index) => index === 26 ? 0 : slot + 1));
   const model: FilterModel = { transition, observation, prior };
   const vectors: AlphaVector[] = POLICY_ACTIONS.flatMap((action, slot) => [
-    { action, values: states.map((state, index) => 7 * code[state[action]] - (index * (slot + 2) % 11)) },
-    { action, values: states.map((state, index) => 4 * code[state[action]] + (index * (slot + 3) % 13) - 8) },
+    { action, values: states.map((state, index) => 7 * code[status(state, action)] - (index * (slot + 2) % 11)) },
+    { action, values: states.map((state, index) => 4 * code[status(state, action)] + (index * (slot + 3) % 13) - 8) },
   ]);
   const byAction = <T>(values: T[]) => Object.fromEntries(POLICY_ACTIONS.map((name, slot) => [name, values[slot]]));
   const emitted = { schemaVersion: 1, objective: 'time', parameterHash: '0'.repeat(64), solverVersion: 'synthetic-unit', discount: 0.99,
-    states, actions: [...POLICY_ACTIONS], observations: ['not-passed', 'passed'], transition: byAction(transition), observation: byAction(observation),
+    states: states.map(state => Object.fromEntries(POLICY_ACTIONS.map(check => [check, status(state, check)]))),
+    actions: [...POLICY_ACTIONS], observations: ['not-passed', 'passed'], transition: byAction(transition), observation: byAction(observation),
     cost: byAction(cost), prior, vectors, bounds: { lower: -20, upper: 20 }, predicted: { policyValue: 0, currentSequenceValue: 0 } };
   const parsed = parsePolicyArtifact(JSON.stringify(emitted)); assert.ok(parsed.ok);
   const a = parsed.artifact;
@@ -269,4 +280,94 @@ test('matches the reference best vector on 1000 beliefs reached from a synthetic
     if (hidden === 26) { hidden = sample(model.prior); belief = [...model.prior]; }
   }
   assert.ok(selected.size > 1, 'the reachable-belief comparison must exercise more than one selected action');
+});
+
+// Contract v2 (TASK-2867.01): every dimension comes from the artifact. All fixtures are SYNTHETIC.
+const parsedV2 = (input: Json): PolicyArtifact => { const result = parsePolicyArtifact(input); if (!result.ok) { throw new Error(result.rejection.message); } return result.artifact; };
+const mutatedV2 = (change: (a: Json) => void, base: Json = syntheticV2()): Json => { change(base); return base; };
+const recommended = (a: PolicyArtifact, history: VerificationHistoryEntry[], permitted: readonly PolicyAction[] = POLICY_ACTIONS) => {
+  const belief = deriveBelief(a, history); assert.ok(belief.ok);
+  return { belief: belief.belief, result: recommend(a, belief.belief, new Set(permitted)) };
+};
+
+test('parses a synthetic 8-state 7-action v2 artifact and drives recommend from its own dimensions (TASK-2867.01)', () => {
+  const a = parsedV2(syntheticV2());
+  assert.deepEqual([a.schemaVersion, a.states.length, a.actions.length, a.vectors[0].values.length, a.prior.length], [2, 8, 7, 8, 8]);
+  const fresh = recommended(a, []);
+  assert.deepEqual(fresh.belief, a.prior);
+  assert.ok(fresh.result.kind === 'recommendation' && fresh.result.action === 'tests');
+  assert.ok(Math.abs(fresh.result.passProbabilities.tests - 26 / 36) < 1e-12 && Math.abs(fresh.result.passProbabilities.human - 20 / 36) < 1e-12);
+  const afterTests = recommended(a, [{ kind: 'verdict', check: 'tests', passed: true }], ['agent', 'human']);
+  assert.ok(Math.abs(afterTests.belief[7] - 8 / 26) < 1e-12 && afterTests.belief[3] === 0);
+  assert.ok(afterTests.result.kind === 'recommendation' && afterTests.result.action === 'agent');
+  // a failed verdict then its repair conditions on the failure, then redraws through the repair action
+  const repaired = recommended(a, [{ kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' }]);
+  assert.ok(repaired.belief.every((mass, index) => Math.abs(mass - a.prior[index]) < 1e-12));
+});
+
+test('a second synthetic v2 artifact of other dimensions parses and recommends with no code change (TASK-2867.01)', () => {
+  const small = syntheticV2([1, 3, 5, 7].map(mask => v2State(mask)), ['tests', 'agent', 'human', 'merge']);
+  const a = parsedV2(small);
+  assert.deepEqual([a.states.length, a.actions, a.vectors[0].values.length], [4, ['tests', 'agent', 'human', 'merge'], 4]);
+  const first = recommended(a, []);
+  assert.ok(first.result.kind === 'recommendation' && first.result.action === 'human');
+  assert.ok(Math.abs(first.result.passProbabilities.tests - 0.7) < 1e-12 && Math.abs(first.result.passProbabilities.agent - 0.6) < 1e-12);
+  const second = recommended(a, [{ kind: 'verdict', check: 'tests', passed: true }], ['agent', 'human']);
+  assert.deepEqual(second.belief.map(mass => Math.round(mass * 7 * 1e6) / 1e6), [0, 0, 3, 4]);
+  assert.ok(second.result.kind === 'recommendation' && second.result.action === 'human');
+  // no repair action is declared, so a v2 failed verdict has no modelled repair: a typed failure, never a stale belief
+  assert.equal(failure(deriveBelief(a, [{ kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' }])), 'unmodelled-history');
+  assert.equal(failure(deriveBelief(a, [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'tests', passed: true }])), 'ok');
+  assert.equal(failure(deriveBelief(a, [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'agent', passed: false }, { kind: 'repair', check: 'agent' }])), 'contradiction');
+});
+
+test('a v2 state with a verdict record moves a retained pass to its passed-record state (TASK-2867.01)', () => {
+  const passedTests = { tests: 'passed', agent: 'unread', human: 'unread' };
+  const a = parsedV2(syntheticV2([v2State(7), v2State(7, passedTests), v2State(3)], ['tests', 'agent', 'human', 'merge']));
+  assert.deepEqual(a.states[1].verdicts, passedTests);
+  assert.deepEqual(a.states[0].verdicts, { tests: 'unread', agent: 'unread', human: 'unread' });
+  assert.deepEqual(recommended(a, [{ kind: 'retained-pass', check: 'tests' }]).belief, [0, 1, 0]);
+  const missingTarget = parsedV2(syntheticV2([v2State(7), v2State(7, passedTests), v2State(7, { tests: 'unread', agent: 'failed', human: 'unread' })],
+    ['tests', 'agent', 'human', 'merge']));
+  assert.equal(failure(deriveBelief(missingTarget, [{ kind: 'retained-pass', check: 'agent' }])), 'invalid');
+});
+
+test('the parsed v2 value carries action names, parameter hash, solver version and rule-check outcome (TASK-2867.01)', () => {
+  const source = syntheticV2();
+  for (const input of [source, JSON.stringify(source)]) {
+    const a = parsedV2(input as Json);
+    assert.deepEqual([a.actions, a.parameterHash, a.solverVersion, a.ruleCheck], [source.actions, 'a'.repeat(64), 'synthetic-v2-1', { outcome: 'passed', violatingMissions: 0 }]);
+  }
+  assert.deepEqual(parsedV2(mutatedV2(a => { a.ruleCheck = { outcome: 'violated', violatingMissions: 3 }; })).ruleCheck, { outcome: 'violated', violatingMissions: 3 });
+});
+
+test('rejects each invalid v2 class with its own typed reason (TASK-2867.01)', () => {
+  const cases: Array<[string, Json, PolicyRejectionCode]> = [
+    ['transition rows differ from the state count', mutatedV2(a => { a.transition.tests.pop(); }), 'dimensions'],
+    ['transition columns differ from the state count', mutatedV2(a => { a.transition.merge[0] = [1]; }), 'dimensions'],
+    ['vector length differs from the state count', mutatedV2(a => { a.vectors[0].values.pop(); }), 'dimensions'],
+    ['prior length differs from the state count', mutatedV2(a => { a.prior.pop(); }), 'dimensions'],
+    ['unknown action name', mutatedV2(a => { a.actions[6] = 'deploy'; }), 'action-names'],
+    ['repair declared for only some checks', mutatedV2(a => { a.actions = a.actions.filter((name: string) => name !== 'repair-human'); }), 'action-names'],
+    ['repeated action name', mutatedV2(a => { a.actions[6] = 'tests'; }), 'action-names'],
+    ['a check is not readable', mutatedV2(a => { a.actions = a.actions.filter((name: string) => name !== 'human'); }), 'action-names'],
+    ['an action has no matrix', mutatedV2(a => { delete a.transition['repair-agent']; }), 'missing-field'],
+    ['vector names an undeclared action', mutatedV2(a => { a.vectors[0].action = 'deploy'; }), 'numbering'],
+    ['hash is not a sha-256 digest', mutatedV2(a => { a.parameterHash = 'hand-written-hash'; }), 'parameter-hash'],
+    ['hash is upper case', mutatedV2(a => { a.parameterHash = 'A'.repeat(64); }), 'parameter-hash'],
+    ['solver version is empty', mutatedV2(a => { a.solverVersion = ''; }), 'missing-field'],
+    ['rule check is absent', mutatedV2(a => { delete a.ruleCheck; }), 'missing-field'],
+    ['rule check outcome is unknown', mutatedV2(a => { a.ruleCheck.outcome = 'maybe'; }), 'rule-check'],
+    ['rule check passed with violations', mutatedV2(a => { a.ruleCheck.violatingMissions = 2; }), 'rule-check'],
+    ['rule check count is fractional', mutatedV2(a => { a.ruleCheck = { outcome: 'violated', violatingMissions: 1.5 }; }), 'rule-check'],
+    ['state omits acceptability', mutatedV2(a => { delete a.states[2].acceptable; }), 'missing-field'],
+    ['state record verdict is unknown', mutatedV2(a => { a.states[2].record = { tests: 'lost', agent: 'unread', human: 'unread' }; }), 'out-of-range'],
+    ['two states repeat', mutatedV2(a => { a.states[1] = a.states[0]; }), 'numbering'],
+    ['no states', mutatedV2(a => { a.states = []; }), 'dimensions'],
+    ['row does not sum to 1', mutatedV2(a => { a.transition.agent[0][0] = 0.5; }), 'row-sum'],
+    ['schema version 3', mutatedV2(a => { a.schemaVersion = 3; }), 'schema-version'],
+  ];
+  for (const [name, input, expected] of cases) { assert.equal(code(input), expected, name); }
+  const codes = new Set(cases.map(([, , expected]) => expected));
+  for (const required of ['dimensions', 'action-names', 'parameter-hash', 'rule-check']) { assert.ok(codes.has(required as PolicyRejectionCode), required); }
 });
