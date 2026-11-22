@@ -107,8 +107,9 @@ test('integration start and authoritative settlement share one gate run correlat
   try {
     const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(checkout, '.git', 'home') });
     const starts: TestsActionStartFacts[] = [];
+    const settlements: { gateRunId: string; passed: boolean }[] = [];
     const evidence = createIntegrationVerificationEvidencePort(configuration, null,
-      { observe: async facts => { starts.push(facts); } });
+      { observe: async facts => { starts.push(facts); }, settle: async facts => { settlements.push(facts); } });
     const result = await runPhaseGates('integration', { slug: 'task-2859.10', checkoutPath: checkout,
       gates: [{ key: 'unit', command: 'true', order: 1 }], commandRunner: () => ({ status: 0, stdout: '', stderr: '' }),
       operatorInvocation: true, verificationEvidence: evidence, log: () => {}, error: () => {} });
@@ -121,6 +122,9 @@ test('integration start and authoritative settlement share one gate run correlat
     assert.equal(settled?.gateRunId, starts[0]!.gateRunId);
     assert.equal(settled?.status, 'passed');
     assert.deepEqual(settled?.outcomes.map(outcome => outcome.result), ['passed']);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(settlements.map(item => [item.gateRunId, item.passed]), [[starts[0]!.gateRunId, true]],
+      'the gate run verdict settles the tests start it began, by the same gate run id (TASK-2867.07)');
   } finally { fs.rmSync(checkout, { recursive: true, force: true }); }
 });
 

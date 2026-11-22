@@ -298,10 +298,18 @@ export interface IntegrateWorkflowPort {
 /** Adapter operations required by the stats reporting workflow. The application
  * owns the sequence; CLI and infrastructure provide these operations. */
 export interface StatsWorkflowPort<Row = unknown> {
-  loadVerificationStatistics?(_missions?: ReadonlySet<string>): Promise<import('../projections/verification-statistics.js').VerificationStatistics | null>;
+  /**
+   * A mission report names its `missions`. A weekly or range report names the Missions its `windows` completed and
+   * those windows, so every measurement covers the report's own timespan and nothing older.
+   */
+  loadVerificationStatistics?(_scope: {
+    readonly missions: ReadonlySet<string>;
+    readonly windows?: readonly import('../../domain/decision-window.js').ReportingWindow[];
+  }): Promise<import('../projections/verification-statistics.js').VerificationStatistics | null>;
   loadClassifierStatistics?(): Promise<import('../review-classification/statistics.js').ClassifierStatisticsInput | null>;
   loadMeasurements(): Promise<readonly Row[]>;
-  loadMissionFlow(): Promise<readonly StatsMissionFlow[] | null>;
+  /** `windows` names the report's windows so a reader can share its verification read with `loadVerificationStatistics`. */
+  loadMissionFlow(_windows?: readonly import('../../domain/decision-window.js').ReportingWindow[]): Promise<readonly StatsMissionFlow[] | null>;
 }
 
 /** Lifecycle data consumed by statistics presentation without exposing a store. */

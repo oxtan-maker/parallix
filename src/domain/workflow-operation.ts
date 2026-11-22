@@ -39,6 +39,13 @@ export function requireWorkflowOwner(operation: WorkflowOperation, generation: n
 }
 
 /**
+ * Generation 0 is the admission generation: the accepted operation publishes its
+ * first activity before any owner claims it, and that observation stays joinable
+ * for the operation's whole lifetime.
+ */
+const ADMISSION_GENERATION = 0;
+
+/**
  * The exact generation that produced retained observations. This is a read of
  * lifecycle history, not current write authority: `requireWorkflowOwner`
  * admits writes only while executing, whereas settled observations remain
@@ -64,9 +71,12 @@ export interface WorkflowObservationReference {
 
 export type WorkflowObservationAuthorization = 'authorized' | 'incomplete' | 'unavailable' | 'rejected';
 
-/** One owner for every current or historical observation-to-operation authorization. */
+/**
+ * One owner for every current or historical observation-to-operation authorization. Only an `activity` observation may
+ * carry the admission generation; gate and rebase measurements run after a claim and need the exact claimed generation.
+ */
 export function workflowObservationAuthorization(operation: WorkflowOperation | null | undefined,
-  identity: WorkflowObservationReference): WorkflowObservationAuthorization {
+  identity: WorkflowObservationReference, kind: 'activity' | 'measurement' = 'measurement'): WorkflowObservationAuthorization {
   if (!identity.repositoryId || !identity.missionId || !identity.operationId
     || identity.generation === null || identity.generation === undefined) {
     return 'incomplete';
@@ -75,7 +85,7 @@ export function workflowObservationAuthorization(operation: WorkflowOperation | 
   return operation.id === identity.operationId
     && operation.repositoryId === identity.repositoryId
     && operation.missionId === identity.missionId
-    && historicalObservationGeneration(operation) === identity.generation
+    && (kind === 'activity' && identity.generation === ADMISSION_GENERATION || historicalObservationGeneration(operation) === identity.generation)
     ? 'authorized' : 'rejected';
 }
 

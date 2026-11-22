@@ -129,12 +129,15 @@ of code or proof of causation.
 
 ## Verification measurements
 
-FLOW and `px stats` share a repository-scoped verification breakdown labelled
-**retained history**. It includes open work and historical attempts independently
-of the weekly delivery cohort. Agent-run observations cover every run retained in
-this repository's run store; a run defect with no mission row in the selected
-window is named in the breakdown rather than dropped. A mission stats report limits it to that
-mission. Measurement begins with the installed support; older work has unknown
+FLOW and `px stats` share a verification breakdown labelled **retained
+history**. FLOW shows this repository's, including open work and historical
+attempts independently of the weekly delivery cohort. A weekly or range
+`px stats` report covers only the missions its windows completed, and a mission
+stats report only that mission, so the command reads and prints the timespan it
+reports. The default report keeps the measurements and only counts its debugging detail
+(FLOW diagnostics, rebase stage facts, gate batches, revision comparisons,
+controlled profiling comparisons and profiling references); `px stats --verbose` prints that detail and the unknown observations. Durations and CPU
+time print as their two largest units, from milliseconds up to years. Measurement begins with the installed support; older work has unknown
 attempt and CPU coverage. These observations do not authorize proof reuse.
 
 Each gate execution has a distinct attempt identity and start/terminal
@@ -172,6 +175,36 @@ discovered workloads or host load. Ranked observed costs identify investigation
 candidates; missing coverage prevents a trustworthy optimization-benefit or
 contention estimate. See [opt-in profiling](verification-profiling.md) for sample
 semantics and retained experiments.
+
+## Verification policy model
+
+`px stats` reports, after the verification measurements, how well the
+verification policy's predictions held and what the model says the policy saves.
+Neither is a FLOW measurement and neither changes an existing metric. They
+cover this repository's decisions recorded inside the weekly or range report's
+windows (the current and previous window of a weekly report), or the one Mission
+a mission report names. Decisions recorded for other repositories sharing the operator
+database are never included.
+
+Calibration is reported separately for the tests, agent and human checks. For
+each start of that check it compares the recorded predicted pass probability
+with the outcome that start produced, and shows the starts, the matched pairs
+(and how many passed), the mean prediction, the observed pass rate and the mean
+absolute gap between them in percentage points, with predictions grouped in five
+bins. A prediction with no recorded probability, a start with no observed
+outcome yet, or a record that cannot be read is excluded and counted as
+unknown; it is never counted as a fail or a zero probability. An agent outcome
+is its review verdict, a tests outcome is the verdict of the integration gate
+run the start began (a cancelled run reaches none), and a human outcome is
+observed only when the operator rejects the handoff, so a handoff that ends by
+merge stays unknown. Starts whose recorded outcome lacks a pass result stay unknown.
+Calibration pools every recorded prediction, whichever policy artifact made it.
+
+The saving is `J_mu(pi_0) - V(pi_0)`, read from the configured policy artifact,
+and its percentage divides by `J_mu(pi_0)`. With no configured or readable
+artifact, or a zero `J_mu(pi_0)`, the affected figure is unknown rather than
+zero. The saving is the model's prediction under the currently configured
+artifact's parameters, not an observed saving.
 
 Any legacy CSV analysis remains a separate read-only boundary. Stats recovery
 does not read it or join it to a repository-scoped production projection.

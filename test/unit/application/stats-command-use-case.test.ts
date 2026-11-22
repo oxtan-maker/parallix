@@ -57,11 +57,28 @@ test('StatsCommandUseCase empty store returns an empty report result', async () 
 test('mission stats delegates verification scope and shared calculation to its read port (px-0025)', async () => {
   const verification = verificationStatistics({ repositoryId: 'repo', history: [], operations: [], lifecycle: [] });
   const result = await new StatsCommandUseCase(port([], {
-    loadVerificationStatistics: async missions => { assert.deepEqual([...missions!], ['px-1']); return verification; },
+    loadVerificationStatistics: async scope => { assert.deepEqual([...scope.missions!], ['px-1']); return verification; },
   })).execute({ mode: 'mission', mission: 'px-1' });
   assert.equal(result.verification, verification);
 });
 
+test('weekly and range stats name their windows up front and ask for one verification read of the Missions they completed (TASK-2867.07)', async () => {
+  const seen = { flowWindows: [] as string[], scope: null as null | { missions: string[]; days: string[] } };
+  const days = (windows: readonly { readonly start: Date; readonly end: Date }[]) => windows.flatMap(window => [window.start, window.end]).map(day => day.toISOString().slice(0, 10));
+  const workflow = () => port([], {
+    loadMissionFlow: async windows => {
+      seen.flowWindows = days(windows!);
+      return [{ repo: 'r', mission: 'inside', closedAt: '2026-06-20T12:00:00Z', labels: [] }, { repo: 'r', mission: 'outside', closedAt: '2026-01-20T12:00:00Z', labels: [] }];
+    },
+    loadVerificationStatistics: async scope => { seen.scope = { missions: [...scope.missions].sort(), days: days(scope.windows ?? []) }; return null; },
+  });
+  await new StatsCommandUseCase(workflow()).execute({ mode: 'range', from: '2026-06-01', to: '2026-06-30' });
+  assert.deepEqual(seen.flowWindows, ['2026-06-01', '2026-06-30'], 'the flow reader is told the range before it reads');
+  assert.deepEqual(seen.scope, { missions: ['inside'], days: ['2026-06-01', '2026-06-30'] },
+    'the verification read covers only the Missions the range completed, and the model statistics follow the range');
+  await new StatsCommandUseCase(workflow()).execute({ mode: 'weekly', today: '2026-06-23' });
+  assert.equal(seen.scope!.days.length, 4, 'a weekly report covers its current and previous windows, not the retained history');
+});
 
 // TASK-2637.04: recording is a separate application contract because stage
 // consumers must remain synchronous while Mission/Review reads are async.

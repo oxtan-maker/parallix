@@ -1,6 +1,7 @@
 import type { StatsMissionFlow, StatsWorkflowPort } from './ports/cli-workflows.js';
 import { statisticsMissionKey, type StatisticsRow } from './services/statistics-service.js';
-import { selectStatsReport, type StatsReportSelection } from './services/statistics-report-selection.js';
+import { reportingWindowContains } from '../domain/decision-window.js';
+import { requestedStatsWindows, selectStatsReport, type StatsReportSelection } from './services/statistics-report-selection.js';
 
 export interface StatsCommandRequest {
   readonly mode: 'weekly' | 'range' | 'mission';
@@ -26,9 +27,8 @@ export class StatsCommandUseCase<Row extends StatisticsRow = StatisticsRow> {
 
   async execute(request: StatsCommandRequest): Promise<StatsCommandResult<Row>> {
     const rows = await this._workflow.loadMeasurements();
-    const verification = await this._workflow.loadVerificationStatistics?.(request.mode === 'mission'
-      ? new Set([request.mission ?? '']) : undefined) ?? null;
     if (request.mode === 'mission') {
+      const verification = await this._workflow.loadVerificationStatistics?.({ missions: new Set([request.mission ?? '']) }) ?? null;
       const mission = request.mission || '';
       return {
         mode: 'mission',
@@ -37,8 +37,14 @@ export class StatsCommandUseCase<Row extends StatisticsRow = StatisticsRow> {
         missionKey: statisticsMissionKey({ repo: '', mission }),
       };
     }
-    const missionFlow = await this._workflow.loadMissionFlow();
+    // Every verification measurement covers the report's windows only; naming them up front lets one read serve both
+    // the per-Mission FLOW observation and the verification section.
+    const requested = requestedStatsWindows({ ...request, mode: request.mode });
+    const windows = [requested.current, ...(requested.previous ? [requested.previous] : [])];
+    const missionFlow = await this._workflow.loadMissionFlow(windows);
     const classifierStatistics = await this._workflow.loadClassifierStatistics?.() ?? null;
+    const missions = new Set((missionFlow ?? []).filter(outcome => windows.some(window => reportingWindowContains(window, outcome.closedAt))).map(outcome => outcome.mission));
+    const verification = await this._workflow.loadVerificationStatistics?.({ missions, windows }) ?? null;
     return { mode: request.mode, rows, missionFlow, classifierStatistics, verification, selection: selectStatsReport(rows, missionFlow, { ...request, mode: request.mode }) };
   }
 }

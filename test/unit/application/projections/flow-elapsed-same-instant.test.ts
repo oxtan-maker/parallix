@@ -466,3 +466,13 @@ test('a partial same-millisecond block cannot establish an operation over an adm
     'the activity owner rejects a foreign blocked publication after running, or supersedes it when running follows');
   assert.deepEqual(results[1], results[0]);
 });
+
+test('open integrate activity at delivery is expected, not an unknown observation (TASK-2867.07)', () => {
+  const unknownsFor = (phase: string, state: string, actor: string, revision: string | null) => verificationStatistics({ repositoryId: 'repo',
+    operations: [completedOperation('op')], lifecycle: lifecycle([['backlog', 'refined', 0, 'refined', 1], ['integration', 'done', 10, 'done', 2]]),
+    history: [history(1, 1, 'mission.current-work', { operationId: 'op', operationGeneration: 1, sourceId: 'op', dependencies: [],
+      revision, phase, state, actor, model: null, timeState: state === 'blocked' ? 'waiting' : 'working' })] }).unknowns;
+  const mentions = (unknowns: readonly string[], text: string) => unknowns.some(value => value.includes(text));
+  assert.equal(mentions(unknownsFor('integrate', 'running', 'parallix', 'rev'), 'Open activity bounded'), false, 'delivery happens inside integrate');
+  assert.equal(mentions(unknownsFor('execute', 'running', 'codex', 'rev'), 'Open activity bounded'), true, 'other open phases stay diagnosed');
+});

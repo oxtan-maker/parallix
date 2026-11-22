@@ -35,13 +35,16 @@ function verificationReport(attempts: readonly VerificationMeasurement[], lifecy
 test('verification action decisions leave existing statistics and projections unchanged (TASK-2859.09, TASK-2859.10)', () => {
   const decision = (actualAction: 'agent' | 'tests'): OperationalHistoryEntry => ({
     id: 1, eventType: REVIEW_START_DECISION_EVENT, createdAt: '2026-11-18T10:00:00.000Z',
-    eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'task-2859.10', actualAction,
+    eventData: JSON.stringify({ idempotencyKey: `start-${actualAction}`, repositoryId: 'repo', missionId: 'task-2859.10', actualAction,
       actionSequence: 1, predictedPassProbability: { agent: 0.8, human: 0.7, tests: 0.9 } }),
   });
   const statistics = (history: readonly OperationalHistoryEntry[]) => verificationStatistics({
     repositoryId: 'repo', history, operations: [], lifecycle: [],
   });
-  assert.deepEqual(statistics([decision('agent'), decision('tests')]), statistics([]));
+  const { model, ...measured } = statistics([decision('agent'), decision('tests')]);
+  const { model: _empty, ...baseline } = statistics([]);
+  assert.deepEqual(measured, baseline, 'decisions change no existing measurement; only the model statistics see them (TASK-2867.07)');
+  assert.deepEqual(model.calibration.map(entry => [entry.check, entry.starts, entry.matched]), [['tests', 1, 0], ['agent', 1, 0], ['human', 0, 0]]);
   const recovery = (operationalHistory: readonly OperationalHistoryEntry[]) => collectLocalStatsRecovery({
     missions: [], laneMoves: [], operationalHistory,
   }, 'repo');
@@ -108,4 +111,34 @@ test('repository diagnostics remain visible without becoming mission defects (PX
     repositoryDiagnostics: [diagnostic] });
   assert.ok(report.unknowns.includes(diagnostic));
   assert.deepEqual(report.flowMissions.flatMap(mission => mission.diagnostics), []);
+});
+
+test('a running event for a lower activity frame ends the frames above it, so they are not reported as still running (TASK-2867.07)', () => {
+  const event = (sourceId: string, state: string, at: number, phase = 'draft') => ({ eventType: 'mission.current-work', createdAt: instant(at),
+    eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', operationGeneration: 1, sourceId, revision: 'rev',
+      dependencies: [], phase, state, actor: 'parallix', model: null, timeState: 'working' }) });
+  const stopped = verificationStatistics({ repositoryId: 'repo', operations: [operation()], lifecycle: [], history: [
+    event('op', 'running', 1, 'waiting'), event('draft:px-1:a', 'running', 2), event('op', 'running', 3, 'waiting'), event('op', 'cancelled', 4, 'waiting'),
+  ] });
+  assert.equal(stopped.unknowns.some(value => value.includes('Open activity intervals excluded')), false, 'nothing is left open');
+  const lingering = verificationStatistics({ repositoryId: 'repo', operations: [operation()], lifecycle: [], history: [
+    event('op', 'running', 1, 'waiting'), event('draft:px-1:a', 'running', 2), event('op', 'cancelled', 4, 'waiting'),
+  ] });
+  assert.equal(lingering.unknowns.some(value => value.includes('Open activity intervals excluded')), true, 'a frame above a closed frame stays open until something lower runs');
+});
+
+test('only an activity may carry the admission generation; a gate attempt needs the claimed generation (TASK-2867.07 F11)', () => {
+  const measurement = (extra: Partial<VerificationMeasurement>) => ({ eventType: VERIFICATION_MEASUREMENT_EVENT, createdAt: instant(2),
+    eventData: JSON.stringify(attempt('unit', extra)) });
+  const gate = (generation: number) => verificationStatistics({ repositoryId: 'repo', operations: [operation()], lifecycle: [],
+    history: [measurement({ operationGeneration: generation })] });
+  assert.equal(gate(1).attemptCount, 1, 'the claimed generation is measured');
+  assert.equal(gate(0).attemptCount, 0, 'generation 0 is not a gate generation');
+  assert.ok(gate(0).unknowns.some(value => value.includes('Gate')), 'the rejected attempt is reported, not dropped');
+  const activity = (generation: number) => verificationStatistics({ repositoryId: 'repo', operations: [operation()], lifecycle: [], history: [
+    { eventType: 'mission.current-work', createdAt: instant(1), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1',
+      operationId: 'op', operationGeneration: generation, sourceId: 'op', revision: 'rev', dependencies: [], phase: 'waiting', state: 'running',
+      actor: 'parallix', model: null, timeState: 'waiting' }) }] });
+  assert.equal(activity(0).unknowns.some(value => value.includes('Activity workflow identity rejected')), false, 'the admission activity joins its operation');
+  assert.equal(activity(5).unknowns.some(value => value.includes('Activity workflow identity rejected')), true, 'other generations still need the exact one');
 });

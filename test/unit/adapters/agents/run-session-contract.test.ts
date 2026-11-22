@@ -424,6 +424,25 @@ test('verdict-first Pi shutdown retains the observed model, session and telemetr
     'the client leaves no signal listener behind');
 });
 
+test('a Pi worker run reports the CPU of the process tree it waited for (TASK-2867.07)', async t => {
+  const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
+  const worker = piWorkerDouble(t, false);
+  const spawned: { command: string; args: string[] }[] = [];
+  const reported: unknown[] = [];
+  const resultPromise = startPiWorker({ prompt: 'review the branch', worktree: 'fixture',
+    teeOptions: { resourceBoundary: { boundary: 'review-custom-a1-x', parent: null }, onProcessTreeCpu: observation => reported.push(observation) } },
+    { command: 'px-pi-worker-double', args: [], options: { env: {} } }, async () => {}, { command: 'px', args: [] },
+    { spawn: (command, args) => { spawned.push({ command, args }); return worker.child; } });
+  // The wrapper's second argument names the file its `time` report is read from.
+  assert.equal(spawned[0]!.command, 'bash');
+  fs.writeFileSync(spawned[0]!.args[3]!, '0,25 0,50\n');
+  worker.publish({ kind: 'result', result: { status: 0, signal: null, stdout: '', stderr: '', error: null, sessionId: null, provider: null, model: null,
+    telemetry: null, transientRetries: 0, startedAt: new Date().toISOString(), endedAt: new Date().toISOString() } });
+  worker.settle(0, null);
+  await resultPromise;
+  assert.deepEqual(reported, [{ userUs: 250_000, systemUs: 500_000, provenance: 'bash-time-waited-tree', boundary: 'review-custom-a1-x', parent: null }]);
+});
+
 test('a sparse final Pi result enriches rather than erases observed facts (px-0036.01)', async t => {
   const { startPiWorker } = await import('../../../../src/adapters/agents/pi-worker-client.js');
   const worker = piWorkerDouble(t, false);

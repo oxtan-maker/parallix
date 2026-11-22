@@ -29,6 +29,7 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   draft?: ConstructorParameters<typeof WorkflowOperationService>[7];
   eligible?: (_agent: string) => Promise<boolean>;
   reviewExecution?: ConstructorParameters<typeof WorkflowOperationService>[12];
+  revision?: () => string | null;
 } = {}) {
   const rows = new Map<string, WorkflowOperation>();
   let tail: Promise<unknown> = Promise.resolve();
@@ -76,7 +77,7 @@ function fixture(draftInput = false, wait?: { now(): number; timeoutMs: number }
   const publish = activity.publish;
   activity.publish = async (event, source) => { publications.push(event.summary); await publish(event, source); };
   const service = new WorkflowOperationService(operations, store, { canExecute: () => true, async dispatch<T>() { return completed({} as T); } }, processes,
-    repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true), undefined,
+    repositoryId('parallix'), preparation.select ?? (async () => 'codex'), async () => {}, preparation.draft ?? (draftInput ? async () => ({ title: 'Backlog source', labels: [], status: 'backlog' }) : undefined), undefined, wait, preparation.eligible ?? (async () => true), preparation.revision,
     preparation.reviewExecution ?? (async () => ({ workflow: null, liveness: { workflow: false, coordinator: false, execution: false, reviewer: false } })));
   return { service, store, operations, activity, missions, events, laneEvents, launches, publications, processes, isWriting: () => writing, setLaunchFailure: (value: boolean) => { failLaunch = value; }, setEffectsSettled: (value: boolean) => { effectsSettled = value; }, setLive: (value: boolean | null) => { live = value; }, setStopped: (value: boolean) => { stopped = value; } };
 }
@@ -954,4 +955,40 @@ test('pending integration repair admission preserves approval and skips agent se
   assert.equal(result.operation.agent, null);
   assert.deepEqual(f.events, []);
   assert.deepEqual(f.missions.get('task-one'), pending);
+});
+
+function recordPublications(f: ReturnType<typeof fixture>) {
+  const events: Array<{ summary: string; revision?: string | null; operationGeneration?: number | null }> = [];
+  const publish = f.activity.publish;
+  f.activity.publish = async (event, source) => { events.push(event); await publish(event, source); };
+  return events;
+}
+
+test('every retained workflow activity joins its operation, including admission, stop and a completion after the checkout is gone (TASK-2867.07)', async () => {
+  const { workflowObservationAuthorization } = await import('../../../src/domain/workflow-operation.js');
+  let checkout: string | null = 'abc123';
+  const f = fixture(false, undefined, { revision: () => checkout });
+  const published = recordPublications(f);
+  await f.service.admit(request());
+  await f.service.run('request-one', async () => { checkout = null; return completed({}); });
+  const finished = await f.service.operation('request-one');
+  const join = (event: { operationGeneration?: number | null }) => workflowObservationAuthorization(finished, {
+    repositoryId: finished!.repositoryId, missionId: finished!.missionId, operationId: finished!.id, generation: event.operationGeneration }, 'activity');
+  const completion = published.at(-1)!;
+  assert.equal(completion.summary, 'workflow completed');
+  assert.equal(completion.revision, 'abc123', 'a completion published after the checkout is gone keeps the last revision the workflow observed');
+  assert.equal(join(completion), 'authorized');
+  assert.equal(join({ operationGeneration: 0 }), 'authorized', 'the admission activity precedes the claim and stays joinable');
+
+  const g = fixture(); const stopped = recordPublications(g); await g.service.admit(request());
+  const release = Promise.withResolvers<void>();
+  const run = g.service.run('request-one', async () => { await release.promise; return completed({}); });
+  await g.operations.transaction(async () => {});
+  assert.equal((await g.service.stop('task-one')).status, 'completed');
+  const stoppedOperation = await g.service.operation('request-one');
+  const stop = stopped.at(-1)!;
+  assert.equal(stop.summary, 'workflow stopped; mission retained');
+  assert.equal(workflowObservationAuthorization(stoppedOperation, { repositoryId: stoppedOperation!.repositoryId, missionId: stoppedOperation!.missionId,
+    operationId: stoppedOperation!.id, generation: stop.operationGeneration }), 'authorized', 'the stop is stamped with the generation it fenced');
+  release.resolve(); await run;
 });

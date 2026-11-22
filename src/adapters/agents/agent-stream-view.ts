@@ -7,6 +7,7 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 // written exclusively to a TTY sink.
 
 import { styleText } from 'node:util';
+import { formatDuration } from '../../application/presentation/duration.js';
 import { SPINNER_FRAMES } from '../../application/presentation/progress-frames.js';
 import type { NormalizedEvent } from './agent-stream-events.js';
 
@@ -43,14 +44,6 @@ export function colorEnabled(sink: RenderSink, configuration: ParallixConfigurat
   if (configuration.runtime.forceColor !== undefined && configuration.runtime.forceColor !== '') { return true; }
   if (configuration.runtime.term === 'dumb') { return false; }
   return sink.isTTY === true;
-}
-
-function formatDuration(ms: number): string {
-  if (ms < 1000) { return `${ms}ms`; }
-  const seconds = ms / 1000;
-  if (seconds < 60) { return `${seconds.toFixed(1)}s`; }
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m${String(Math.round(seconds - minutes * 60)).padStart(2, '0')}s`;
 }
 
 /** Renders normalized events to a terminal sink. */

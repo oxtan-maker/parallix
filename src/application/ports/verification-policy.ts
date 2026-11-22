@@ -115,7 +115,7 @@ export interface ReviewStartOutcome {
   readonly startKey: string;
   readonly missionId: MissionId;
   readonly changeIdentity: string | null;
-  readonly actualAction: Exclude<PolicyAction, 'tests'>;
+  readonly actualAction: PolicyAction;
   /** Wall time of the agent run from its run record; null when the run record or its end is missing. */
   readonly runDurationMs: number | null;
   /** Agent review time: round start to this reviewer's own publication (or the round decision when the round has none); null with neither. */
@@ -125,6 +125,12 @@ export interface ReviewStartOutcome {
   /** Findings of the decision this action produced; null when no decision was recorded. */
   readonly findingCount: number | null;
   readonly verdictSource: ReviewVerdictSource | null;
+  /**
+   * Whether the check this start ran passed, matched to the start's predicted pass probability: an agent approval is a
+   * pass, a changes-requested verdict or an operator rejection after a human handoff is not. Null when unobserved
+   * (a human handoff ended by merge leaves no decision); absent on rows recorded before it was kept.
+   */
+  readonly passed?: boolean | null;
   readonly rebuttal: ReviewRebuttalOutcome | null;
   readonly recordedAt: string;
 }

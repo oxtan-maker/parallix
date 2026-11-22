@@ -89,15 +89,24 @@ export function flowElapsedOwnership(input: {
   const rows: FlowOwnershipRow[] = [];
   const exclusive: FlowOwnershipSegment[] = [];
   let explained = 0;
+  // One grouping per read: scanning every Mission's segments for each window is quadratic in the segment population.
+  const segmentsByMission = new Map<string, Segment[]>();
+  for (const segment of segments) {
+    const scoped = segmentsByMission.get(segment.missionId) ?? [];
+    scoped.push(segment); segmentsByMission.set(segment.missionId, scoped);
+  }
   for (const window of windows) {
-    const scoped = segments.filter(segment => segment.missionId === window.missionId);
+    const scoped = segmentsByMission.get(window.missionId) ?? [];
+    // One ordering per Mission: a slice's winner is the first covering segment in the same total order the per-slice
+    // sort produced, so ordering once keeps every winner identical and drops a sort and an array copy per boundary.
+    const ordered = [...scoped].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
     const boundaries = [...new Set([window.start, window.end, ...scoped.flatMap(segment => [segment.start, segment.end])])]
       .filter(value => value >= window.start && value <= window.end).sort((a, b) => a - b);
     for (let index = 1; index < boundaries.length; index++) {
       const start = boundaries[index - 1]!, end = boundaries[index]!;
       if (end <= start) { continue; }
-      const winner = exclusiveWinner(scoped.filter(segment => segment.start <= start && segment.end >= end));
-      if (!winner) { continue; }
+      const winner = ordered.find(segment => segment.start <= start && segment.end >= end);
+      if (!winner || winner.unobserved) { continue; }
       explained += end - start;
       appendRow(rows, winner, end - start);
       appendSegment(exclusive, winner, start, end);
@@ -165,7 +174,7 @@ function workflowCompletionAuthorized(repositoryId: string, operations: Readonly
   const operation = operations.get(event.operationId);
   return publication.sourceId === event.operationId && operation?.phase === 'completed'
     && workflowObservationAuthorization(operation, { repositoryId, missionId: event.missionId,
-      operationId: event.operationId, generation: event.operationGeneration }) === 'authorized';
+      operationId: event.operationId, generation: event.operationGeneration }, 'activity') === 'authorized';
 }
 
 function activitySegments(window: MissionWindow, defects: Set<string>, intervals: readonly HistoricalActivityInterval[]): Segment[] {
@@ -182,7 +191,8 @@ function activitySegments(window: MissionWindow, defects: Set<string>, intervals
       return [{ id: `unobserved:${sourceId}`, missionId: window.missionId, start, end, priority: 20,
         unobserved: true, ...row('unobserved', 'unattributed', null, 'waiting') }];
     }
-    if (end === window.end && event.state === 'running') {
+    // Delivery happens inside the integrate workflow, so its activity is always still open at first delivery.
+    if (end === window.end && event.state === 'running' && event.phase !== 'integrate') {
       defects.add(`Open activity bounded at first delivery for ${window.missionId} operation ${event.operationId} source ${sourceId}`);
     }
     return [{ id: `activity:${sourceId}`, missionId: window.missionId, start, end, priority: 20,
@@ -195,11 +205,6 @@ function completeActivityOwnership(value: Activity): value is Activity & { opera
   return Boolean(value.operationId) && (value.actor === 'lead'
     || value.operationGeneration !== null && value.operationGeneration !== undefined)
     && Boolean(value.revision) && Boolean(value.actor) && value.actor !== 'unattributed' && Boolean(value.timeState);
-}
-
-function exclusiveWinner(covering: readonly Segment[]): Segment | undefined {
-  const top = [...covering].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id))[0];
-  return top?.unobserved ? undefined : top;
 }
 
 function gateSegments(repositoryId: string, history: HistoryIndex, window: MissionWindow): Segment[] {
@@ -341,8 +346,8 @@ function operationFinalizationSegments(window: MissionWindow, currentWork: reado
 
 function addMeasured(target: Segment[], window: MissionWindow, id: string, from: string | null, to: string | null,
   priority: number, ownership: FlowOwnershipRow): void {
-  const start = from === null ? NaN : Math.max(window.start, Date.parse(from));
-  const end = to === null ? NaN : Math.min(window.end, Date.parse(to));
+  const start = from === null ? Number.NaN : Math.max(window.start, Date.parse(from));
+  const end = to === null ? Number.NaN : Math.min(window.end, Date.parse(to));
   if (Number.isFinite(start) && Number.isFinite(end) && end >= start) {
     target.push({ id, missionId: window.missionId, start, end, priority, ...ownership });
   }

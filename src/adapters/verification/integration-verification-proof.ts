@@ -359,6 +359,14 @@ export function createIntegrationVerificationEvidencePort(configuration?: Parall
         verdictCorrelation: pending.run.gateRunId, agentRunId: null, gateRunId: pending.run.gateRunId,
         operatorInvocation: context.operatorInvocation }).catch(() => undefined);
     }
-    return pending ? { complete: (outcomes, disposition) => finishIntegrationRun(pending, outcomes, disposition, configuration) } : null;
+    if (!pending) { return null; }
+    return { complete: (outcomes, disposition) => {
+      const reusable = finishIntegrationRun(pending, outcomes, disposition, configuration);
+      // Best effort and unawaited: the gate executor settles synchronously and a lost write is an unknown outcome, never a wrong one.
+      if (testsAction && disposition !== 'cancelled') {
+        void testsAction.settle({ missionId: context.missionId, gateRunId: pending.run.gateRunId, passed: disposition === 'passed' }).catch(() => undefined);
+      }
+      return reusable;
+    } };
   } };
 }

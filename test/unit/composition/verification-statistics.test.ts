@@ -10,6 +10,9 @@ import { createVerificationStatisticsReader, verificationStatisticsReader } from
 import { resolveCanonicalRepositoryId } from '../../../src/adapters/git/repository-identity.js';
 import { initOperatorState } from '../../../src/adapters/sqlite/adapter-factory.js';
 import { SqliteBoardLaneEventRepository } from '../../../src/adapters/sqlite/board-lane-event-repository.js';
+import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
+import { REVIEW_START_DECISION_EVENT } from '../../../src/application/verification-policy/review-start-decision.js';
+import { REVIEW_START_OUTCOME_EVENT } from '../../../src/application/verification-policy/review-start-outcome.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { RUN_RECORD_FILE } from '../../../src/application/run-history-types.js';
 import { mkdtemp as registeredMkdtemp } from '../../helpers/temp-dir.js';
@@ -79,6 +82,46 @@ test('repository verification still observes agent runs outside the delivery coh
       'the per-Mission FLOW projection stays scoped to the delivery population');
     assert.deepEqual(statistics.agentResources.runs.map(run => run.missionId).sort(), ['delivered-mission', 'open-mission'],
       'the verification breakdown owns the repository-wide agent-run population, so an open mission cannot be dropped silently');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('the repository verification payload read stays scoped to the families the projection observes (TASK-2867.07)', async () => {
+  const root = registeredMkdtemp('px-2867.07-payload-scope-');
+  try {
+    const checkout = path.join(root, 'repository');
+    const configuration = resolveConfiguration({ PARALLIX_HOME: path.join(root, 'operator') });
+    const repositoryId = resolveCanonicalRepositoryId(checkout);
+    const { db } = await initOperatorState({ configuration });
+    const history = new SqliteOperationalHistoryRepository(db);
+    const lifecycle = new SqliteBoardLaneEventRepository(db);
+    const at = '2026-11-02T00:00:00.000Z';
+    await lifecycle.append({ repositoryId, missionId: 'task-scoped', fromStatus: 'review', toStatus: 'done',
+      trigger: 'integration', agent: 'codex', occurredAt: at, idempotencyKey: 'done-task-scoped' });
+    // One row of each family the repository-wide report reports, plus a retained repair transcript whose audit
+    // text is megabytes per row and reaches the projection through its own compact read, never this one.
+    await history.append({ eventType: 'flow.rebase', createdAt: at, eventData: JSON.stringify({
+      id: 'rebase-1', repositoryId, missionId: 'task-scoped', operationId: 'op-1', generation: 1, sourceId: 'src-1',
+      stage: 'direct-rebase', attempt: 1, outcome: 'running', revisionBefore: 'before', revisionAfter: null,
+      conflicts: [], occurredAt: at }) });
+    await history.append({ eventType: REVIEW_START_DECISION_EVENT, createdAt: at, eventData: JSON.stringify({
+      idempotencyKey: 'start-1', repositoryId, missionId: 'task-scoped', actualAction: 'agent',
+      predictedPassProbability: { tests: null, agent: 0.9, human: null } }) });
+    await history.append({ eventType: REVIEW_START_OUTCOME_EVENT, createdAt: at,
+      eventData: JSON.stringify({ startKey: 'start-1', passed: true }) });
+    await history.append({ eventType: 'rebound.repair', createdAt: at, eventData: JSON.stringify({
+      missionId: 'task-scoped', repositoryId, occurrenceId: 'occ-1', occurredAt: at, durationMs: 1000,
+      returnIdentity: { stage: 'review', identity: 'r-1' }, transcript: 'x'.repeat(200_000) }) });
+
+    const statistics = await createVerificationStatisticsReader(checkout, configuration).readRepository!(new Set(['task-scoped']));
+
+    assert.ok(statistics.flowMissions[0]?.rebaseStages.some(stage => stage.stage === 'direct-rebase'),
+      'the scoped payload read still carries the flow.rebase family');
+    const agent = statistics.model.calibration.find(entry => entry.check === 'agent');
+    assert.deepEqual([agent?.starts, agent?.matched, agent?.matchedPassed], [1, 1, 1],
+      'the scoped payload read still carries the review-start decision and outcome families');
+    assert.equal(statistics.model.unreadableRows, 0, 'no observed family is dropped into an unreadable row');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

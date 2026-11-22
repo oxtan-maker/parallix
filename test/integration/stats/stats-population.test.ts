@@ -1,4 +1,5 @@
 import type { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
+import type { BoardLaneEventRepository, OperationalHistoryRepository } from '../../../src/application/ports/operation-history.js';
 // Historical regression provenance: TASK-2357.
 /**
  * Completed-mission population for the metrics slice (TASK-2622.13
@@ -17,6 +18,7 @@ import assert from 'node:assert/strict';
 import { createStatisticsCommand, type StatsCompositionOptions } from '../../../src/composition/stats.js';
 import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { SqliteMeasurementStore } from '../../../src/adapters/sqlite/measurement-store.js';
+import { verificationStatistics as verificationStatisticsProjection } from '../../../src/application/projections/verification-statistics.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
 import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
 import { missionId } from '../../../src/domain/mission.js';
@@ -143,4 +145,68 @@ describe("defect D: lifecycle `done` is the only completion definition", () => {
       assert.doesNotMatch(report, /^\s*# missions\s{2,}# user value/m, report);
     });
   });
+
+  it('reads the verification once per weekly report, limited to the windows and shared by the FLOW observation and the report (TASK-2867.07)', async () => {
+    await withStatisticsDatabase(async ({ dir, db, databasePath, laneEventRepo, usageRepo }) => {
+      await seed(laneEventRepo, db);
+      const verificationReads: { missions: string[]; windows: number }[] = [];
+      const verificationStatistics = {
+        read: async (missions?: ReadonlySet<string>, windows?: readonly unknown[]) => {
+          verificationReads.push({ missions: [...missions ?? []].sort(), windows: windows?.length ?? 0 });
+          return verificationStatisticsProjection({ repositoryId: 'fixture-repo', history: [], operations: [], lifecycle: [] });
+        },
+        readRepository: async () => { throw new Error('a weekly report reads no repository-wide verification'); },
+      };
+      const store = new SqliteMeasurementStore(databasePath);
+      try {
+        await stats(['--today', '2026-06-05'], { rootDir: dir, store, missionStore: new SqliteMissionStore(db), laneEventRepo, usageRepo,
+          repositoryId: REPO, verificationStatistics, log: () => undefined, error: () => undefined, exit: () => undefined });
+      } finally { store.close(); }
+      assert.deepEqual(verificationReads, [{ missions: [...EXPECTED_COMPLETED].sort(), windows: 2 }],
+        'one read serves the FLOW observation and the verification section, with the two weekly windows');
+    });
+  });
+
+  it('lists the lane history once and reads rebound repairs once per weekly report (TASK-2867.07)', async () => {
+    await withStatisticsDatabase(async ({ dir, db, databasePath, laneEventRepo, usageRepo, historyRepo }) => {
+      await seed(laneEventRepo, db);
+      const { fixtureMission } = await import('../../fixtures/mission-builders.js');
+      const missionStore = new SqliteMissionStore(db);
+      for (const mission of EXPECTED_COMPLETED) {
+        await missionStore.save(fixtureMission(String(mission), { repositoryId: REPO, status: 'done', closedAt: CLOSED }), null);
+      }
+      const counts = { laneListings: 0, perMissionLaneReads: 0, repairReads: 0 };
+      const countedLane: BoardLaneEventRepository = new Proxy(laneEventRepo, {
+        get: (target, property) => {
+          if (property === 'findAll') return () => { counts.laneListings += 1; return target.findAll(); };
+          if (property === 'findByMissionId') return (missionId: string) => {
+            counts.perMissionLaneReads += 1;
+            return target.findByMissionId(missionId);
+          };
+          const value = Reflect.get(target, property) as unknown;
+          return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const countedHistory: OperationalHistoryRepository = new Proxy(historyRepo, {
+        get: (target, property) => {
+          if (property === 'findReboundRepairs') return () => { counts.repairReads += 1; return target.findReboundRepairs(); };
+          const value = Reflect.get(target, property) as unknown;
+          return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const verificationStatistics = {
+        read: async () => verificationStatisticsProjection({ repositoryId: 'fixture-repo', history: [], operations: [], lifecycle: [] }),
+        readRepository: async () => { throw new Error('a weekly report reads no repository-wide verification'); },
+      };
+      const store = new SqliteMeasurementStore(databasePath);
+      try {
+        await stats(['--today', '2026-06-05'], { rootDir: dir, store, missionStore,
+          laneEventRepo: countedLane, usageRepo, historyRepo: countedHistory, repositoryId: REPO, verificationStatistics,
+          log: () => undefined, error: () => undefined, exit: () => undefined });
+      } finally { store.close(); }
+      assert.deepEqual(counts, { laneListings: 1, perMissionLaneReads: 0, repairReads: 1 },
+        'one collapsed lane listing and one compact rebound-repair read serve every Mission of the run');
+    });
+  });
 });
+

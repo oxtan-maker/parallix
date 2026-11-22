@@ -8,7 +8,8 @@ import { isOpenWorkflow, type WorkflowOperation } from '../../domain/workflow-op
 import { compareCodeUnits } from '../../domain/comparators.js';
 import { isRetainedRebaseOutcome, isTerminalRebaseOutcome, REBASE_OBSERVATION_STAGES,
   type RebaseObservationStage, type RetainedRebaseOutcome } from '../ports/rebase-workflow.js';
-import type { FlowElapsedOwnership, FlowOwnershipRow } from './flow-elapsed-ownership.js';
+import type { FlowElapsedOwnership, FlowOwnershipRow, FlowOwnershipSegment } from './flow-elapsed-ownership.js';
+import { firstByKey, groupByKey } from './population-index.js';
 import type { RebaseMeasurement, RebaseObservationCutovers } from './verification-observation-reader.js';
 import type { ObservationDiagnostic } from './verification-diagnostic.js';
 
@@ -140,9 +141,31 @@ diagnostics: readonly ObservationDiagnostic[] = [], missions?: ReadonlySet<strin
     ?? firstReturnProvenanceObservation(input.lifecycle, input.repositoryId, input.reboundRepairs);
   const completed = input.lifecycle.filter(event => event.repositoryId === input.repositoryId && event.toStatus === 'done'
     && (!missions || missions.has(event.missionId)));
+  const scope = flowMissionScope(input, ownership, attempts, rebases, diagnostics);
   return [...new Set(completed.map(event => event.missionId))]
-    .map(missionId => observedFlowMission({ ...input, returnProvenanceCutover }, ownership, attempts, rebases, firstRebaseObservedAt,
-      diagnostics, missionId));
+    .map(missionId => observedFlowMission({ ...input, returnProvenanceCutover }, scope, firstRebaseObservedAt, missionId));
+}
+
+/**
+ * One grouping per read for every population the per-Mission observation slices. Each Mission-scoped lookup returns
+ * the same rows in the same order as the population-wide filter it replaces, and turns a report that rescanned every
+ * retained run, attempt, rebase, diagnostic, lane transition and ownership segment per Mission into one pass.
+ */
+function flowMissionScope(input: { readonly lifecycle: readonly LifecycleHistoryEntry[];
+  readonly operations: readonly WorkflowOperation[]; readonly runs?: readonly RunRecord[]; readonly flowRuns?: readonly RunRecord[] },
+ownership: FlowElapsedOwnership | null, attempts: readonly VerificationMeasurement[], rebases: readonly RebaseMeasurement[],
+diagnostics: readonly ObservationDiagnostic[]) {
+  const runs = input.flowRuns ?? input.runs;
+  return {
+    runs: runs === undefined ? null : groupByKey(runs, run => run.missionId),
+    attempts: groupByKey(attempts, attempt => attempt.missionId),
+    rebases: groupByKey(rebases, rebase => rebase.missionId),
+    diagnostics: groupByKey(diagnostics, diagnostic => diagnostic.missionId),
+    lifecycle: groupByKey(input.lifecycle, event => event.missionId),
+    operations: groupByKey(input.operations, operation => operation.missionId),
+    segments: groupByKey(ownership?.segments ?? [], segment => segment.missionId),
+    windows: firstByKey(ownership?.windows ?? [], window => window.missionId),
+  };
 }
 
 /**
@@ -163,25 +186,26 @@ export function firstReturnProvenanceObservation(lifecycle: readonly LifecycleHi
 function observedFlowMission(input: { readonly repositoryId: string;
   readonly lifecycle: readonly LifecycleHistoryEntry[]; readonly operations: readonly WorkflowOperation[];
   readonly runs?: readonly RunRecord[]; readonly flowRuns?: readonly RunRecord[]; readonly returnProvenanceCutover?: string },
-ownership: FlowElapsedOwnership | null, attempts: readonly VerificationMeasurement[], rebases: readonly RebaseMeasurement[],
-firstRebaseObservedAt: RebaseObservationCutovers, diagnostics: readonly ObservationDiagnostic[],
-missionId: string): ObservedFlowMission {
-  const missionOwnership = ownershipFacts(ownership, missionId);
-  const retainedRuns = (input.flowRuns ?? input.runs)?.filter(run => run.repositoryId === input.repositoryId && run.missionId === missionId);
+scope: ReturnType<typeof flowMissionScope>,
+firstRebaseObservedAt: RebaseObservationCutovers, missionId: string): ObservedFlowMission {
+  const missionOwnership = ownershipFacts(scope.segments.get(missionId) ?? [], scope.windows.get(missionId) ?? null);
+  // A read that supplied no run population keeps declaring it unobserved; a read that supplied one but no row for
+  // this Mission still measured zero launches.
+  const retainedRuns = scope.runs === null ? undefined
+    : (scope.runs.get(missionId) ?? []).filter(run => run.repositoryId === input.repositoryId);
   const agentRuns = retainedRuns?.filter(run => runCaptureKind(run) === 'agent');
-  const scopedAttempts = attempts.filter(attempt => attempt.missionId === missionId);
-  const scopedRebases = rebases.filter(rebase => rebase.missionId === missionId);
+  const scopedAttempts = scope.attempts.get(missionId) ?? [];
+  const scopedRebases = scope.rebases.get(missionId) ?? [];
   const retainedRebaseRuns = rebaseRuns(scopedRebases);
   const launches = launchFacts(agentRuns, retainedRuns);
   const scopedDiagnostics = [
-    ...diagnostics.filter(diagnostic => diagnostic.repositoryId === input.repositoryId
-      && diagnostic.missionId === missionId),
-    ...laneReturnDiagnostics(input.repositoryId, input.lifecycle, missionId),
+    ...(scope.diagnostics.get(missionId) ?? []).filter(diagnostic => diagnostic.repositoryId === input.repositoryId),
+    ...laneReturnDiagnostics(input.repositoryId, scope.lifecycle.get(missionId) ?? [], missionId),
   ];
   return { missionId, diagramNodeIds: missionOwnership.nodeIds, diagramEdgeIds: missionOwnership.edgeIds,
     ownership: missionOwnership.rows, diagnostics: scopedDiagnostics,
     window: missionOwnership.window, gateRuns: gateRuns(scopedAttempts), rebaseRuns: retainedRebaseRuns,
-    rebaseStages: rebaseStageFacts(input.operations, missionId, scopedRebases,
+    rebaseStages: rebaseStageFacts(scope.operations.get(missionId) ?? [], missionId, scopedRebases,
       retainedRebaseRuns, firstRebaseObservedAt, scopedDiagnostics),
     lead: leadEpisodes(missionOwnership.segments), actualAgentLaunches: launches.count,
     agentLaunchesLowerBound: launches.lowerBound,
@@ -196,15 +220,14 @@ missionId: string): ObservedFlowMission {
 
 function laneReturnDiagnostics(repositoryId: string, lifecycle: readonly LifecycleHistoryEntry[],
   missionId: string): ObservationDiagnostic[] {
-  return lifecycle.filter(event => event.repositoryId === repositoryId && event.missionId === missionId
-    && event.returnIdentityDefect).map(event => ({ kind: 'provenance', state: 'absent', repositoryId, missionId,
+  return lifecycle.filter(event => event.repositoryId === repositoryId && event.returnIdentityDefect)
+    .map(event => ({ kind: 'provenance', state: 'absent', repositoryId, missionId,
     operationId: null, sourceId: event.idempotencyKey, stage: 'return', message: event.returnIdentityDefect!,
     recovery: 'inspect the retained lane return identity' }));
 }
 
-function ownershipFacts(ownership: FlowElapsedOwnership | null, missionId: string) {
-  const segments = ownership?.segments.filter(segment => segment.missionId === missionId) ?? [];
-  const window = ownership?.windows.find(value => value.missionId === missionId) ?? null;
+function ownershipFacts(segments: readonly FlowOwnershipSegment[],
+  window: FlowElapsedOwnership['windows'][number] | null) {
   const grouped = new Map<string, FlowOwnershipRow>();
   for (const segment of segments) {
     const key = `${segment.step}\0${segment.actor}\0${segment.model ?? ''}\0${segment.state}`;

@@ -185,7 +185,7 @@ function loadMeasurementRows(options: StatsOptions = {}) {
 }
 
 export interface StatsReadBinding extends StatsOptions {
-  readonly readMissionFlow: () => Promise<readonly StatsMissionFlow[] | null>;
+  readonly readMissionFlow: (_windows?: readonly import('../../../domain/decision-window.js').ReportingWindow[]) => Promise<readonly StatsMissionFlow[] | null>;
 }
 
 export function createStatsWorkflowAdapter(binding: StatsReadBinding): StatsWorkflowPort<StatsRow> {

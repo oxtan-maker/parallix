@@ -30,7 +30,7 @@ function renderRangeStatsReport(rows: readonly TestRow[], options = {}) {
 
 test('px stats formats the shared typed FLOW projection without recalculating metrics (TASK-2835)', () => {
   const reviewStatistics = reviewStatisticsObservation('codex', 0);
-  const report = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', missionFlow: [{
+  const report = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', verbose: true, missionFlow: [{
     repo: 'repo', mission: 'task-flow', closedAt: '2026-11-03T12:00:00Z', labels: ['ai_sdlc'],
     implementer: 'codex', reviewStatistics, flowObservation: {
       diagramNodeIds: ['implement', 'review'], diagramEdgeIds: ['implement->review'],
@@ -52,7 +52,24 @@ test('px stats formats the shared typed FLOW projection without recalculating me
   assert.match(report, /direct-rebase measured; operation=rebase-op; source=rebase-source; outcomes=no-op/);
   assert.match(report, /pre-review-rebase inapplicable; operation=review-op; source=review-source; outcomes=none; review-provider-disabled/);
   assert.match(report, /2\/1\s+100\.0% \(1\/1, coverage 100%\)\s+0 \(mean 0\.0, n=1\)/);
-  assert.match(report, /implement\/codex\/gpt-6\.1-sol\/working: total 25ms, mean 25\.0ms, p90 25ms, n=1/);
+  assert.match(report, /implement\/codex\/gpt-6\.1-sol\/working: total 25ms, mean 25ms, p90 25ms, n=1/);
+});
+
+test('px stats counts FLOW debugging detail by default and prints it with --verbose (TASK-2867.07)', () => {
+  const flow = [{ repo: 'repo', mission: 'task-flow', closedAt: '2026-11-03T12:00:00Z', labels: ['ai_sdlc'], implementer: 'codex',
+    reviewStatistics: reviewStatisticsObservation('codex', 0), flowObservation: {
+      diagramNodeIds: [], diagramEdgeIds: [], window: null, gateRuns: [], rebaseRuns: [], rebaseStages: [
+        { stage: 'direct-rebase' as const, state: 'inapplicable' as const, operationId: null, sourceId: null, reason: 'not requested', outcomes: [] },
+      ], diagnostics: [{ kind: 'coverage' as const, state: 'absent' as const, repositoryId: 'repo', missionId: 'task-flow', operationId: null, sourceId: 'run-1',
+        stage: 'agent-run', message: 'Agent waited-tree CPU missing for task-flow run run-1', recovery: 'inspect the retained run history' }],
+      lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], ownership: [] } }];
+  const summary = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', missionFlow: flow });
+  assert.doesNotMatch(summary, /FLOW diagnostic:|Rebase stage:/);
+  assert.match(summary, /Debugging detail not shown: \d+ FLOW diagnostics, \d+ rebase stage facts; run px stats --verbose\./);
+  const verbose = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', missionFlow: flow, verbose: true });
+  assert.match(verbose, /FLOW diagnostic: Agent waited-tree CPU missing for task-flow run run-1/);
+  assert.match(verbose, /Rebase stage: repo\/task-flow direct-rebase inapplicable/);
+  assert.doesNotMatch(verbose, /Debugging detail not shown/);
 });
 
 test('px stats bounds rebase stage detail with incomplete states first (PX-0055.03)', () => {
@@ -74,7 +91,7 @@ test('px stats bounds rebase stage detail with incomplete states first (PX-0055.
       ],
     },
   }));
-  const report = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', missionFlow });
+  const report = statsReport.renderWeeklyStatsReport([], { today: '2026-11-03', verbose: true, missionFlow });
   assert.equal(report.match(/^Rebase stage:/gm)?.length, 12);
   assert.match(report, /Rebase stage: repo\/task-0 pre-review-rebase running/);
   assert.match(report, /Rebase stages: 3 additional stage facts not shown; incomplete states are listed first\./);

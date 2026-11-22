@@ -1,5 +1,5 @@
 import { renderClassifierStatistics } from '../../application/presentation/classifier-statistics.js';
-import { renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
+import { renderVerificationModelStatistics, renderVerificationStatistics } from '../../application/presentation/verification-statistics.js';
 import * as fmt from '../../application/presentation/cli-format.js';
 import { createRangeWindow } from '../../application/services/statistics-row.js';
 import type { StatsRow } from '../../application/services/statistics-row.js';
@@ -14,15 +14,15 @@ export interface StatsCommandOptions {
 }
 
 export interface StatsPresentation {
-  renderWeekly(_rows: readonly StatsRow[], _options: { rootDir: string; selection: StatsReportSelection<StatsRow> }): string;
-  renderRange(_rows: readonly StatsRow[], _options: { rootDir: string; selection: StatsReportSelection<StatsRow> }): string;
+  renderWeekly(_rows: readonly StatsRow[], _options: { rootDir: string; selection: StatsReportSelection<StatsRow>; verbose: boolean }): string;
+  renderRange(_rows: readonly StatsRow[], _options: { rootDir: string; selection: StatsReportSelection<StatsRow>; verbose: boolean }): string;
   renderMission(_rows: readonly StatsRow[], _mission: string, _options: { rootDir: string }): string;
   writeReport(_file: string, _report: string): void;
   cohorts(_args: string[], _options: StatsCommandOptions): Promise<void>;
 }
 
 export function printStatsUsage(log: (_message: string) => unknown = fmt.log.plain): void {
-  log(`Usage: px stats [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>]
+  log(`Usage: px stats [--today YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--output <file>] [--verbose]
        px stats cohorts [--by label|implementer|model|provider] [--min-sample <n>]
        px stats backfill [--recovery-inventory <json-file>] [--apply --isolated-copy <db-copy>] [--json]
 
@@ -54,6 +54,9 @@ Notes:
     and update with new deliveries; dates advance at local midnight. The previous
     7 days are the comparison. Explicit ranges include both local calendar dates.
     Bug counts and shares use these same periods and Mission labels.
+  - --verbose prints the debugging detail the default report only counts (FLOW diagnostics, rebase stage
+    facts, gate batches, revision comparisons, controlled profiling comparisons and profiling references)
+    and the unknown observations the default report leaves out.
   - Use --from and --to together to print one inclusive arbitrary-range report.`);
 }
 
@@ -65,13 +68,13 @@ export function createStatsCommand(useCase: Pick<StatsCommandUseCase<StatsRow>, 
     const rootDir = options.rootDir ?? process.cwd();
     if (args[0] === 'cohorts') { await presentation.cohorts(args.slice(1), options); return; }
     if (args.includes('--help') || args.includes('-h')) { printStatsUsage(log); return; }
-    const { outputFile, today, from, to, mission } = parseStatsArgs(args);
+    const { outputFile, today, from, to, mission, verbose } = parseStatsArgs(args);
     const range = from !== null || to !== null;
     let report: string;
     try {
       assertStatsRange(mission, range, from, to);
       const result = await useCase.execute(statsReadRequest(mission, range, today, from, to));
-      report = renderStatsResult(result, mission, range, rootDir, log, presentation);
+      report = renderStatsResult(result, { mission, range, rootDir, verbose }, log, presentation);
     } catch (failure) {
       error(fmt.status('FAIL', failure instanceof Error ? failure.message : String(failure)));
       exit(1);
@@ -96,7 +99,8 @@ function statsReadRequest(mission: string | null, range: boolean, today: string 
 }
 
 type StatsCommandResult = Awaited<ReturnType<StatsCommandUseCase<StatsRow>['execute']>>;
-function renderStatsResult(result: StatsCommandResult, mission: string | null, range: boolean, rootDir: string, log: (_message: string) => unknown, presentation: StatsPresentation): string {
+function renderStatsResult(result: StatsCommandResult, { mission, range, rootDir, verbose }: { mission: string | null; range: boolean; rootDir: string; verbose: boolean },
+  log: (_message: string) => unknown, presentation: StatsPresentation): string {
   let report: string;
   if (mission) {
     report = presentation.renderMission(result.rows, mission, { rootDir });
@@ -104,15 +108,15 @@ function renderStatsResult(result: StatsCommandResult, mission: string | null, r
     log(fmt.status('INFO', `Loaded ${result.rows.length} measurements from the statistics database`));
     if (!result.selection) { throw new Error('Statistics report selection is missing.'); }
     report = range
-      ? presentation.renderRange(result.rows, { rootDir, selection: result.selection })
-      : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection });
+      ? presentation.renderRange(result.rows, { rootDir, selection: result.selection, verbose })
+      : presentation.renderWeekly(result.rows, { rootDir, selection: result.selection, verbose });
     if (result.selection.previous) {
       const windows = [result.selection.current.window, result.selection.previous.window] as const;
       report += `\n\n${renderClassifierStatistics(result.classifierStatistics ?? null, windows)}`;
     }
 
   }
-  return `${report}\n\n${renderVerificationStatistics(result.verification).join('\n')}`;
+  return `${report}\n\n${renderVerificationStatistics(result.verification, verbose ? 'full' : 'summary').join('\n')}\n\n${renderVerificationModelStatistics(result.verification).join('\n')}`;
 }
 
 const STATS_VALUE_FLAGS: Readonly<Record<string, 'mission' | 'outputFile' | 'today' | 'from' | 'to'>> = {
@@ -121,8 +125,8 @@ const STATS_VALUE_FLAGS: Readonly<Record<string, 'mission' | 'outputFile' | 'tod
 const MISSION_SLUG_RE = /^[a-z][a-z0-9]*-\d+$/i;
 
 export function parseStatsArgs(args: string[]) {
-  const parsed: { outputFile: string | null; today: string | Date; from: string | null; to: string | null; mission: string | null } = {
-    outputFile: null, today: new Date(), from: null, to: null, mission: null,
+  const parsed: { outputFile: string | null; today: string | Date; from: string | null; to: string | null; mission: string | null; verbose: boolean } = {
+    outputFile: null, today: new Date(), from: null, to: null, mission: null, verbose: false,
   };
   const positional: string[] = [];
   for (let i = 0;i < args.length;i += 1) {
@@ -133,6 +137,7 @@ export function parseStatsArgs(args: string[]) {
       else if (field === 'from' || field === 'to') { parsed[field] = ''; i += 1; }
       continue;
     }
+    if (arg === '--verbose') { parsed.verbose = true; continue; }
     if (!arg.startsWith('--')) { positional.push(arg); }
   }
   if (!parsed.mission && positional.length && MISSION_SLUG_RE.test(positional[0])) { parsed.mission = positional[0]; }

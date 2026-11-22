@@ -3,7 +3,8 @@ import type { ReviewLoopPorts } from '../../application/ports/review-round.js';
 import type { PolicyActionPort } from '../../application/ports/verification-policy.js';
 import type { ReviewStartFailure, ReviewStartFailureKind,
   ReviewStartPolicyPorts } from '../../application/ports/verification-policy.js';
-import { observePolicyReviewStart, observePolicyTestsStart } from '../../application/verification-policy/review-start-decision.js';
+import { REVIEW_START_OBSERVATION_DEADLINE_MS, observePolicyReviewStart, observePolicyTestsStart } from '../../application/verification-policy/review-start-decision.js';
+import { settleTestsStartOutcome } from '../../application/verification-policy/review-start-outcome.js';
 import type { IntegrationTestsActionObservationPort } from '../../application/ports/integration-verification-evidence.js';
 
 /** Review-loop bindings derived from the two existing application ports. */
@@ -39,5 +40,10 @@ export function testsActionObservationBinding(policy: Omit<ReviewStartPolicyPort
   log: (_message: string) => void): IntegrationTestsActionObservationPort | undefined {
   if (!policy) { return undefined; }
   const diagnostic = createReviewStartFailureDiagnostics(log);
-  return { observe: async facts => { await observePolicyTestsStart(facts, { ...policy, diagnostic }); } };
+  return {
+    observe: async facts => { await observePolicyTestsStart(facts, { ...policy, diagnostic }); },
+    settle: async facts => {
+      await settleTestsStartOutcome(facts.missionId, facts.gateRunId, facts.passed, { ...policy, diagnostic }, REVIEW_START_OBSERVATION_DEADLINE_MS);
+    },
+  };
 }

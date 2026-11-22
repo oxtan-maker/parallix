@@ -86,7 +86,8 @@ export interface SpawnTeeOptions {
   [key: string]: unknown;
 }
 
-function processTreeMeasurement(launch: { command: string; args: string[] }, boundary: SpawnTeeOptions['resourceBoundary']) {
+/** Wrap a launch so the CPU of the whole tree it waits for is reported through `finish`. */
+export function processTreeMeasurement(launch: { command: string; args: string[] }, boundary: SpawnTeeOptions['resourceBoundary']) {
   if (!boundary || process.platform === 'win32') { return null; }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'px-run-cpu-'));
   const report = path.join(dir, 'usage');

@@ -20,13 +20,22 @@ export interface HistoricalActivityReplay {
   /** Current-operation terminal candidates; the workflow lifecycle owner must still authorize them. */
   readonly currentTerminals: ReadonlySet<ExecutionActivity>;
 }
-type ReplayState = { readonly snapshot: ExecutionActivitySnapshot | null; readonly accepted: ReadonlySet<ExecutionActivity>;
-  readonly currentTerminals: ReadonlySet<ExecutionActivity> };
+type ReplayState = { readonly snapshot: ExecutionActivitySnapshot | null; readonly accepted: EventChain | null;
+  readonly currentTerminals: EventChain | null };
+/**
+ * Append-only view of the events one replay path accepted. Copying the accumulated set for every publication is
+ * quadratic in a Mission's retained publications, while a cons cell makes each advance O(1); the sets the consumers
+ * ask for are materialised once, when the replay ends.
+ */
+type EventChain = { readonly event: ExecutionActivity; readonly prev: EventChain | null; readonly size: number };
+const chainSize = (chain: EventChain | null): number => chain?.size ?? 0;
+const chainAdd = (chain: EventChain | null, event: ExecutionActivity): EventChain =>
+  ({ event, prev: chain, size: chainSize(chain) + 1 });
 
 /** Replay through the existing transition owner; audit publication alone grants no activity authority. */
 export function historicalActivityReplay(publications: readonly HistoricalActivityPublication[], end: number,
   defects: Set<string>): HistoricalActivityReplay {
-  let states: readonly ReplayState[] = [{ snapshot: null, accepted: new Set(), currentTerminals: new Set() }];
+  let states: readonly ReplayState[] = [{ snapshot: null, accepted: null, currentTerminals: null }];
   const intervals: HistoricalActivityInterval[] = [];
   const tokens = new Map(publications.map((publication, index) => [publication.event, index]));
   const ended = new Set<ExecutionActivity>();
@@ -92,8 +101,10 @@ function advance(state: ReplayState, publication: HistoricalActivityPublication,
   const isCurrentTerminal = ['ended', 'interrupted', 'cancelled'].includes(event.state)
     && state.snapshot?.operationId === event.operationId && !state.snapshot.supersededOperations.includes(event.operationId);
   return { snapshot: result.snapshot,
-    accepted: result.accepted ? new Set([...state.accepted, event]) : state.accepted,
-    currentTerminals: isCurrentTerminal ? new Set([...state.currentTerminals, event]) : state.currentTerminals };
+    // Grow the accumulated sets in place after copying; spreading them into an array first makes each
+    // publication of a Mission's replay copy the whole accepted history again.
+    accepted: result.accepted ? chainAdd(state.accepted, event) : state.accepted,
+    currentTerminals: isCurrentTerminal ? chainAdd(state.currentTerminals, event) : state.currentTerminals };
 }
 
 function distinct(states: readonly ReplayState[], tokens: ReadonlyMap<ExecutionActivity, number>): ReplayState[] {
@@ -108,16 +119,32 @@ function distinct(states: readonly ReplayState[], tokens: ReadonlyMap<ExecutionA
     });
     const prior = unique.get(key);
     unique.set(key, prior ? { snapshot: prior.snapshot,
-      accepted: intersection(prior.accepted, state.accepted),
-      currentTerminals: intersection(prior.currentTerminals, state.currentTerminals) } : state);
+      accepted: chainIntersect(prior.accepted, state.accepted),
+      currentTerminals: chainIntersect(prior.currentTerminals, state.currentTerminals) } : state);
   }
   return [...unique.values()];
 }
 
-function commonEvents(states: readonly ReplayState[], select: (state: ReplayState) => ReadonlySet<ExecutionActivity>): ReadonlySet<ExecutionActivity> {
-  return states.length ? states.slice(1).reduce((events, state) => intersection(events, select(state)), select(states[0]!)) : new Set();
+function commonEvents(states: readonly ReplayState[], select: (state: ReplayState) => EventChain | null): ReadonlySet<ExecutionActivity> {
+  const chains = states.map(select);
+  if (!chains.length) { return new Set(); }
+  let common: EventChain | null = chains[0]!;
+  for (const chain of chains.slice(1)) { common = chainIntersect(common, chain); }
+  const events = new Set<ExecutionActivity>();
+  for (let node: EventChain | null = common; node; node = node.prev) { events.add(node.event); }
+  return events;
 }
 
-function intersection(left: ReadonlySet<ExecutionActivity>, right: ReadonlySet<ExecutionActivity>): ReadonlySet<ExecutionActivity> {
-  return new Set([...left].filter(event => right.has(event)));
+/** Events the two replay paths accepted in common, as a chain rooted at the larger path's order. */
+function chainIntersect(left: EventChain | null, right: EventChain | null): EventChain | null {
+  if (left === right) { return left; }
+  const smaller = chainSize(left) <= chainSize(right) ? left : right;
+  const larger = smaller === left ? right : left;
+  const candidates = new Set<ExecutionActivity>();
+  for (let node = smaller; node; node = node.prev) { candidates.add(node.event); }
+  let common: EventChain | null = null;
+  for (let node = larger; node; node = node.prev) {
+    if (candidates.has(node.event)) { common = chainAdd(common, node.event); }
+  }
+  return common;
 }

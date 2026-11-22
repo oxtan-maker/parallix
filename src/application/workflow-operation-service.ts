@@ -52,6 +52,15 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     private readonly _reviewExecution?: ReviewLivenessReader,
   ) {}
 
+  /** The last revision a running workflow observed; a landed Mission's checkout may be gone when its completion publishes. */
+  private readonly _lastRevision = new Map<string, string>();
+
+  private revisionFor(operationId: string): string | null {
+    const current = this._revision();
+    if (current) { this._lastRevision.set(operationId, current); }
+    return current ?? this._lastRevision.get(operationId) ?? null;
+  }
+
   canExecute(kind: BoardCommandRequest['kind']): boolean {
     if (kind === 'workflow:stop') { return true; }
     return this._dispatcher.canExecute(kind);
@@ -286,7 +295,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (!pending || pending.phase !== 'accepted' || pending.owner) { return null; }
       const claimed = { ...pending, ...claimWorkflow(pending, owner, new Date().toISOString()) };
       await this._operations.replace(claimed, pending.generation);
-      await this._operations.activity.publish(executionActivity(claimed, 'running', 'preparing workflow', owner, this._revision()), claimed.id);
+      await this._operations.activity.publish(executionActivity(claimed, 'running', 'preparing workflow', owner, this.revisionFor(claimed.id)), claimed.id);
       return claimed;
     });
     if (!operation) { return; }
@@ -414,7 +423,8 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
       if (!current || current.generation !== stopping.generation || current.phase !== 'stopping') { throw new Error('Stop ownership changed'); }
       const stopped = { ...current, ...settleWorkflowStop(current, new Date().toISOString()) };
       await this._operations.replace(stopped, current.generation);
-      await this.publish(stopped, 'cancelled', 'workflow stopped; mission retained');
+      // The stop is produced by the generation it fenced, not by the advanced fence it leaves behind.
+      await this.publish({ ...stopped, generation: current.generation }, 'cancelled', 'workflow stopped; mission retained');
     });
     return completed({ stopped: true, operationId: stopping.id });
   }
@@ -429,7 +439,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
   }
 
   private async publish(operation: WorkflowOperation, state: ExecutionActivity['state'], summary: string): Promise<void> {
-    await this._operations.activity.publish(executionActivity(operation, state, summary, operation.owner, this._revision()), operation.id);
+    await this._operations.activity.publish(executionActivity(operation, state, summary, operation.owner, this.revisionFor(operation.id)), operation.id);
   }
 
 }

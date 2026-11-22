@@ -1,5 +1,6 @@
 import type { OperationalHistoryEntry, BoardLaneEventEntry, ReboundRepairHistoryEntry } from '../ports/operation-history.js';
-import type { VerificationMeasurement } from '../ports/verification-observation.js';
+import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../ports/verification-observation.js';
+import type { ReportingWindow } from '../../domain/decision-window.js';
 import { workflowObservationAuthorization, type WorkflowOperation } from '../../domain/workflow-operation.js';
 import { flowElapsedOwnership, type FlowElapsedOwnership } from './flow-elapsed-ownership.js';
 import { observedFlowMissions, type ObservedFlowMission } from './flow-mission-facts.js';
@@ -10,8 +11,23 @@ import { agentRunModel, type ProcessTreeCpuObservation, type ProviderResourceObs
 import { observedAttempts, observedRebaseCutovers, observedRebases,
   type RebaseMeasurement } from './verification-observation-reader.js';
 import { diagnoseAgentRuns } from './verification-agent-diagnostics.js';
+import { completeDependencyNodes, longestDependencyPath, type DependencyNode } from './verification-dependency-path.js';
+import { verificationModelStatistics, type PolicyModelValues, type VerificationModelStatistics } from './verification-model-statistics.js';
+import { firstByKey, groupByKey } from './population-index.js';
+import { ActivityCosts, interval, type ActivityEvent, type Interval } from './verification-activity-costs.js';
+import { REVIEW_START_DECISION_EVENT } from '../verification-policy/review-start-decision.js';
+import { REVIEW_START_OUTCOME_EVENT } from '../verification-policy/review-start-outcome.js';
 export type { RebaseMeasurement } from './verification-observation-reader.js';
-type Interval = readonly [number, number];
+
+/**
+ * The event families this projection reads from `input.history`; every consumer filters by type before it parses,
+ * so a composition read scoped to these families observes the same population. A retained repair transcript is
+ * megabytes of audit text and reaches the projection through `reboundRepairs`, never through this payload read.
+ */
+export const VERIFICATION_HISTORY_EVENT_TYPES: readonly string[] = [
+  'mission.current-work', 'flow.activity', VERIFICATION_MEASUREMENT_EVENT, 'flow.rebase', 'lead.operator-judgment',
+  REVIEW_START_DECISION_EVENT, REVIEW_START_OUTCOME_EVENT,
+];
 export interface VerificationStatisticsInput {
   readonly repositoryId: string;
   readonly history: readonly OperationalHistoryEntry[];
@@ -24,6 +40,10 @@ export interface VerificationStatisticsInput {
   readonly reboundRepairs?: readonly ReboundRepairHistoryEntry[]; // staged rows are return-stage producers
   /** Storage rows excluded from the readable measured subset, already named by the owning adapter. */
   readonly repositoryDiagnostics?: readonly string[];
+  /** Values of the configured policy artifact; absent when none is configured or readable. */
+  readonly policyValues?: PolicyModelValues | null;
+  /** Reporting windows the model statistics are limited to; absent means every recorded decision. */
+  readonly modelWindows?: readonly ReportingWindow[];
 }
 export interface VerificationCost {
   readonly wallMs: number | null;
@@ -70,9 +90,8 @@ export interface VerificationStatistics {
   readonly comparisons: readonly { gate: string; before: string; after: string; beforeN: number; afterN: number;
     configurationEquivalent: boolean | null; workloadEquivalent: 'unobserved'; beforeWallMs: number | null; afterWallMs: number | null }[];
   readonly controlledComparisons: readonly ControlledVerificationComparison[];
+  readonly model: VerificationModelStatistics;
 }
-
-type DependencyNode = { readonly id: string; readonly dependencies: readonly string[] | null; readonly durationMs: number };
 
 function observedDagDependencyPath(input: VerificationStatisticsInput,
   attempts: readonly VerificationMeasurement[]): VerificationStatistics['dependencyPath'] {
@@ -101,38 +120,8 @@ function observedActivityNodes(input: VerificationStatisticsInput): DependencyNo
   }
   return [...activities].map(([id, value]) => {
     const measured = interval(value.startedAt, value.finishedAt);
-    return { id, dependencies: value.dependencies, durationMs: measured.length ? measured[0][1] - measured[0][0] : NaN };
+    return { id, dependencies: value.dependencies, durationMs: measured.length ? measured[0][1] - measured[0][0] : Number.NaN };
   });
-}
-
-function completeDependencyNodes(nodes: readonly DependencyNode[]): boolean {
-  if (!nodes.length || nodes.some(node => node.dependencies === null || !Number.isFinite(node.durationMs))) { return false; }
-  const byId = new Map(nodes.map(node => [node.id, node]));
-  return byId.size === nodes.length && !nodes.some(node => node.dependencies!.some(id => !byId.has(id)));
-}
-
-function longestDependencyPath(nodes: readonly DependencyNode[]): VerificationStatistics['dependencyPath'] {
-  const byId = new Map(nodes.map(node => [node.id, node]));
-  const memo = new Map<string, { durationMs: number; nodeIds: readonly string[] }>();
-  const visiting = new Set<string>();
-  const visit = (id: string): { durationMs: number; nodeIds: readonly string[] } | null => {
-    const cached = memo.get(id); if (cached) { return cached; }
-    if (visiting.has(id)) { return null; }
-    const node = byId.get(id); if (!node) { return null; }
-    visiting.add(id);
-    const predecessors = node.dependencies!.map(visit);
-    visiting.delete(id);
-    if (predecessors.some(value => value === null)) { return null; }
-    const prior = (predecessors as { durationMs: number; nodeIds: readonly string[] }[])
-      .sort((a, b) => b.durationMs - a.durationMs || a.nodeIds.join('\0').localeCompare(b.nodeIds.join('\0')))[0];
-    const result = { durationMs: (prior?.durationMs ?? 0) + node.durationMs,
-      nodeIds: [...(prior?.nodeIds ?? []), id] };
-    memo.set(id, result); return result;
-  };
-  const paths = nodes.map(node => visit(node.id));
-  if (paths.some(value => value === null)) { return null; }
-  return (paths as NonNullable<VerificationStatistics['dependencyPath']>[])
-    .sort((a, b) => b.durationMs - a.durationMs || a.nodeIds.join('\0').localeCompare(b.nodeIds.join('\0')))[0] ?? null;
 }
 
 function ownershipDependencyPath(ownership: FlowElapsedOwnership | null, runs: readonly RunRecord[]): VerificationStatistics['dependencyPath'] {
@@ -141,13 +130,14 @@ function ownershipDependencyPath(ownership: FlowElapsedOwnership | null, runs: r
   for (const segment of ownership.segments) {
     byMission.set(segment.missionId, [...(byMission.get(segment.missionId) ?? []), segment]);
   }
+  const runsByMission = groupByKey(runs, run => run.missionId);
   const paths = [...byMission.entries()].map(([missionId, segments]) => {
     const inserted = new Set<string>();
     const nodeIds: string[] = [];
     for (const segment of segments) {
       nodeIds.push(segment.id);
       const start = Date.parse(segment.startedAt), end = Date.parse(segment.finishedAt);
-      for (const run of runs.filter(value => value.missionId === missionId && value.endedAt
+      for (const run of (runsByMission.get(missionId) ?? []).filter(value => value.endedAt
         && Date.parse(value.startedAt) < end && Date.parse(value.endedAt!) > start
         && (segment.actor === value.family || ['implement', 'agent-review', 'repair', 'recovery'].includes(segment.step)))) {
         if (!inserted.has(run.runId)) { nodeIds.push(`run:${run.runId}`); inserted.add(run.runId); }
@@ -157,11 +147,6 @@ function ownershipDependencyPath(ownership: FlowElapsedOwnership | null, runs: r
   });
   return paths.sort((left, right) => right.durationMs - left.durationMs
     || left.nodeIds.join('\0').localeCompare(right.nodeIds.join('\0')))[0] ?? null;
-}
-
-function interval(start: string | null, end: string | null): Interval[] {
-  const a = start === null ? NaN : Date.parse(start), b = end === null ? NaN : Date.parse(end);
-  return Number.isFinite(a) && Number.isFinite(b) && b >= a ? [[a, b]] : [];
 }
 
 /** Union measure, including measured zero; null belongs to the caller's coverage. */
@@ -261,39 +246,6 @@ function criticalPath(attempts: readonly VerificationMeasurement[]): number | nu
   return paths.length && paths.every(value => value !== null) ? Math.max(...paths as number[]) : null;
 }
 
-type ActivityEvent = { repositoryId?: string; missionId: string; operationId: string;
-  operationGeneration?: number | null; sourceId?: string; revision?: string | null; attempt?: number | null;
-  phase: string; state: string; purpose?: 'repair' };
-
-class ActivityCosts {
-  readonly sources = new Map<string, { phase: string; start: string; event: ActivityEvent }>();
-  readonly repair: Interval[] = [];
-  readonly review: Interval[] = [];
-  readonly waiting: Interval[] = [];
-  private readonly seenReview = new Set<string>();
-  accept(event: ActivityEvent, at: string): void {
-    const key = JSON.stringify([event.operationId, event.sourceId]);
-    const prior = this.sources.get(key);
-    if (prior) { this.close(prior, at); }
-    if (event.state !== 'running') { this.sources.delete(key); return; }
-    const phase = this.reviewPhase(event, prior?.phase);
-    this.sources.set(key, { phase, start: at, event });
-  }
-  private close(prior: { phase: string; start: string }, at: string): void {
-    const times = interval(prior.start, at);
-    if (['repair', 'review-response', 'recovery'].includes(prior.phase)) { this.repair.push(...times); }
-    if (prior.phase === 're-review') { this.review.push(...times); }
-    if (prior.phase === 'waiting') { this.waiting.push(...times); }
-  }
-  private reviewPhase(event: ActivityEvent, prior?: string): string {
-    if (event.purpose === 'repair') { return 'repair'; }
-    if (event.phase !== 'review') { return event.phase; }
-    const repeated = this.seenReview.has(event.missionId) && !['review', 're-review'].includes(prior ?? '');
-    this.seenReview.add(event.missionId);
-    return repeated || prior === 're-review' ? 're-review' : 'review';
-  }
-}
-
 function activityCosts(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined,
   attempts: readonly VerificationMeasurement[],
   unknowns: Set<string>, diagnostics: ObservationDiagnostic[]): { repairMs: number | null; reReviewMs: number | null; waiting: Interval[] } {
@@ -342,7 +294,7 @@ function readActivityEvent(eventData: string, repositoryId: string, missions: Re
 function authorizedActivityEvent(event: ActivityEvent, repositoryId: string, operation: WorkflowOperation | undefined,
   unknowns: Set<string>): boolean {
   const authorization = workflowObservationAuthorization(operation, { repositoryId,
-    missionId: event.missionId, operationId: event.operationId, generation: event.operationGeneration });
+    missionId: event.missionId, operationId: event.operationId, generation: event.operationGeneration }, 'activity');
   if (operation && authorization !== 'authorized') {
     unknowns.add(`Activity workflow identity rejected for ${event.missionId || 'unknown mission'} operation ${event.operationId || 'unknown'} source ${event.sourceId ?? 'unknown'}`);
     return false;
@@ -387,11 +339,12 @@ function attemptRecovery(executed: readonly VerificationMeasurement[], unknowns:
 function lifetimeCosts(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined, unknowns: Set<string>) {
   const scoped = input.lifecycle.filter(e => !missions || missions.has(e.missionId));
   const missionIds = new Set(scoped.filter(e => e.repositoryId === input.repositoryId).map(e => e.missionId));
+  const byMission = groupByKey(scoped, e => e.missionId);
   let endToEndMs = 0;
   let measuredMissions = 0;
   let completedMissions = 0;
   for (const mission of missionIds) {
-    const events = scoped.filter(e => e.repositoryId === input.repositoryId && e.missionId === mission)
+    const events = (byMission.get(mission) ?? []).filter(e => e.repositoryId === input.repositoryId)
       .sort((a, b) => Date.parse(a.occurredAt) - Date.parse(b.occurredAt));
     const refined = events.find(e => e.toStatus === 'refined');
     const completed = events.find(e => e.toStatus === 'done'
@@ -423,8 +376,8 @@ function measurementUnknowns(attempts: readonly VerificationMeasurement[], unkno
 
 function revisionComparisons(executed: readonly VerificationMeasurement[]): VerificationStatistics['comparisons'] {
   const comparisons: VerificationStatistics['comparisons'][number][] = [];
-  for (const gate of new Set(executed.map(a => a.gate))) {
-    const rows = executed.filter(a => a.gate === gate && a.revision);
+  for (const [gate, gateRows] of groupByKey(executed, a => a.gate)) {
+    const rows = gateRows.filter(a => a.revision);
     const revisions = [...new Set(rows.map(a => a.revision!))];
     if (revisions.length < 2) { continue; }
     const before = revisions.at(-2)!, after = revisions.at(-1)!;
@@ -449,6 +402,16 @@ function controlledComparisons(attempts: readonly VerificationMeasurement[], unk
   return [...controlled.values()];
 }
 
+/** The retained run population carries duplicate copies of one run id; the first copy is the one the linear find returned. */
+function scopedRunRecords(input: VerificationStatisticsInput, rows: readonly { runId: string }[]): RunRecord[] {
+  const runsById = firstByKey(input.runs ?? [], run => run.runId);
+  return rows.map(row => runsById.get(row.runId)!).filter(Boolean);
+}
+
+function modelStatistics(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined): VerificationModelStatistics {
+  return verificationModelStatistics(input.history, input.repositoryId, input.policyValues, input.modelWindows ? undefined : missions, input.modelWindows);
+}
+
 export function verificationStatistics(input: VerificationStatisticsInput, missions?: ReadonlySet<string>, flowMissions = missions): VerificationStatistics {
   const unknowns = new Set<string>(input.repositoryDiagnostics ?? []);
   const diagnostics: ObservationDiagnostic[] = [];
@@ -463,12 +426,13 @@ export function verificationStatistics(input: VerificationStatisticsInput, missi
   // Waiting can overlap a nested command. Count only the portion outside execution.
   const executionMs = intervals.length ? intervalUnionMs(intervals) : null;
   const waitingMs = waiting.length ? intervalUnionMs([...waiting, ...intervals]) - intervalUnionMs(intervals) : null;
+  const batchesByBatch = groupByKey(attempts, a => a.batchId);
   const batches = [...new Set(attempts.map(a => a.batchId))].map(batchId => ({ batchId,
-    criticalPathMs: criticalPath(attempts.filter(a => a.batchId === batchId)) }));
+    criticalPathMs: criticalPath(batchesByBatch.get(batchId) ?? []) }));
   const lifecycle = lifetimeCosts(input, missions, unknowns);
   const ownership = flowElapsedOwnership(input, unknowns, missions);
   const resources = agentResources(input, missions, unknowns, diagnostics);
-  const scopedRuns = resources.runs.map(row => (input.runs ?? []).find(run => run.runId === row.runId)!).filter(Boolean);
+  const scopedRuns = scopedRunRecords(input, resources.runs);
   const dependencyPath = ownershipDependencyPath(ownership, scopedRuns) ?? observedDagDependencyPath(input, attempts);
   const cpu = cpuCost(executed, unknowns);
   measurementUnknowns(attempts, unknowns, diagnostics, input.repositoryId);
@@ -477,6 +441,7 @@ export function verificationStatistics(input: VerificationStatisticsInput, missi
   }
   const recoveryAttempts = executed.filter(a => execution(a).some(([start, end]) => recoveries.some(([a, b]) => start >= a && end <= b)));
   const comparisons = revisionComparisons(executed), controlled = controlledComparisons(attempts, unknowns);
+  const gatesByGate = groupByKey(executed, a => a.gate);
   const observedFlow = observedFlowMissions(input, ownership, attempts, rebases, observedRebaseCutovers(input), diagnostics, flowMissions);
   const visibleMissionIds = new Set(observedFlow.map(mission => mission.missionId));
   for (const diagnostic of diagnostics.filter(value => !visibleMissionIds.has(value.missionId))) {
@@ -492,9 +457,11 @@ export function verificationStatistics(input: VerificationStatisticsInput, missi
     repairMs: activity.repairMs, reReviewMs: activity.reReviewMs,
     criticalPathMs: dependencyPath?.durationMs ?? (batches.length === 1 ? batches[0].criticalPathMs : null),
     dependencyPath, elapsedOwnership: ownership, agentResources: resources, flowMissions: observedFlow, rebases, batches,
-    ranked: [...new Set(executed.map(a => a.gate))].map(gate => { const rows = executed.filter(a => a.gate === gate);
+    ranked: [...new Set(executed.map(a => a.gate))].map(gate => { const rows = gatesByGate.get(gate) ?? [];
       const c = cost(rows); return { gate, attempts: rows.length, wallMs: c.wallMs, cpuUs: c.cpuUs };
     }).sort((a, b) => (b.wallMs ?? -1) - (a.wallMs ?? -1)),
     unknowns: [...unknowns], comparisons, controlledComparisons: controlled,
+    // A windowed report counts every decision its windows recorded, including those of Missions not completed in them.
+    model: modelStatistics(input, missions),
     profileReferences: [...new Set(attempts.flatMap(a => a.profile ? [a.profile.reference] : []))] };
 }

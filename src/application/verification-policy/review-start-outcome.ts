@@ -148,6 +148,7 @@ function agentOutcome(start: ReviewStartDecision, review: Review | null, facts: 
     humanWaitMs: null,
     findingCount: verdict?.findings ?? null,
     verdictSource: verdict?.source ?? null,
+    passed: verdict ? verdict.kind === 'approved' : null,
     rebuttal: rebuttalAnswered(review, round),
   };
 }
@@ -160,6 +161,7 @@ function humanOutcome(start: ReviewStartDecision, review: Review | null, later: 
     humanWaitMs: elapsedMs(start.recordedAt, decided?.decidedAt),
     findingCount: decision?.kind === 'changes-requested' ? decision.findings.length : null,
     verdictSource: decided ? 'operator' as const : null,
+    passed: decided ? false : null, // only operator rejections are decisions; approval by merge stays unobserved
     rebuttal: null,
   };
 }
@@ -204,13 +206,7 @@ function startEnded(start: ReviewStartDecision, facts: ReviewOutcomeFacts, later
  */
 export async function settleReviewStartOutcomes(missionId: MissionId, ports: ReviewStartPolicyPorts,
   deadlineMs: number): Promise<void> {
-  const report = (failure: ReviewStartFailure) => { try { ports.diagnostic(failure); } catch { /* Diagnostics cannot steer the mission. */ } };
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<'timed-out'>(resolve => {
-    timer = setTimeout(() => resolve('timed-out'), deadlineMs);
-    timer.unref?.();
-  });
-  const settle = async (): Promise<'settled'> => {
+  await settleWithin(ports, deadlineMs, 'review-start outcome settlement', async () => {
     const facts = await ports.readOutcomeFacts(missionId);
     await ports.writer.settleReviewStartOutcomes(missionId, (start, later, all) => {
       const outcome = settledReviewStartOutcome(start, facts, later, all);
@@ -220,11 +216,38 @@ export async function settleReviewStartOutcomes(missionId: MissionId, ports: Rev
       if (outcome.rebuttal !== null && awaitsDecision(start, facts)) { return null; }
       return outcome;
     });
-    return 'settled';
-  };
+  });
+}
+
+/** An integration tests action has no review round: its outcome is the verdict of the gate run it started, matched by gate run id. */
+function testsOutcome(start: ReviewStartDecision, passed: boolean): ReviewStartOutcomeInput {
+  return { startKey: start.idempotencyKey, missionId: start.missionId, changeIdentity: start.changeIdentity, actualAction: 'tests',
+    runDurationMs: null, reviewMs: null, humanWaitMs: null, findingCount: null, verdictSource: null, passed, rebuttal: null };
+}
+
+/**
+ * Record how the integration gate run of a tests start ended. A cancelled run reached no verdict and records nothing, so
+ * its start stays an unknown outcome. Failure-isolated and bounded like every other settlement.
+ */
+export async function settleTestsStartOutcome(missionId: MissionId, gateRunId: string, passed: boolean,
+  ports: ReviewStartPolicyPorts, deadlineMs: number): Promise<void> {
+  await settleWithin(ports, deadlineMs, 'tests outcome settlement', async () => {
+    await ports.writer.settleReviewStartOutcomes(missionId, start =>
+      start.actualAction === 'tests' && start.gateRunId === gateRunId ? testsOutcome(start, passed) : null);
+  });
+}
+
+async function settleWithin(ports: Pick<ReviewStartPolicyPorts, 'diagnostic'>, deadlineMs: number, label: string,
+  settle: () => Promise<void>): Promise<void> {
+  const report = (failure: ReviewStartFailure) => { try { ports.diagnostic(failure); } catch { /* Diagnostics cannot steer the mission. */ } };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<'timed-out'>(resolve => {
+    timer = setTimeout(() => resolve('timed-out'), deadlineMs);
+    timer.unref?.();
+  });
   try {
-    if (await Promise.race([settle(), timeout]) === 'timed-out') {
-      report({ kind: 'observation-timeout', message: `review-start outcome settlement exceeded ${deadlineMs} ms` });
+    if (await Promise.race([settle().then(() => 'settled' as const), timeout]) === 'timed-out') {
+      report({ kind: 'observation-timeout', message: `${label} exceeded ${deadlineMs} ms` });
     }
   } catch (error) {
     report({ kind: 'writer-failure', message: error instanceof Error ? error.message : String(error) });

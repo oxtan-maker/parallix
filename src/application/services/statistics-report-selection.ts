@@ -24,14 +24,22 @@ export interface StatsReportSelection<Row extends StatisticsRow = StatisticsRow>
   readonly flowStatistics?: FlowStatistics;
 }
 
+type StatsWindowRequest = { readonly mode: 'weekly' | 'range'; readonly today?: string | Date; readonly from?: string; readonly to?: string; readonly timeZone?: string };
+
+/** The reporting windows a weekly or range request covers, known before any measurement is read. */
+export function requestedStatsWindows(request: StatsWindowRequest): { readonly current: StatsReportWindow['window']; readonly previous?: StatsReportWindow['window'] } {
+  return request.mode === 'weekly' ? weeklyDecisionWindows(request.today ?? new Date(), request.timeZone)
+    : { current: createRangeWindow({ from: request.from, to: request.to, timeZone: request.timeZone }) };
+}
+
 /** Select lifecycle completions by canonical delivery day, telemetry spend by measurement day. */
 export function selectStatsReport<Row extends StatisticsRow>(
   rows: readonly Row[],
   missionFlow: readonly StatsMissionFlow[] | null,
-  request: { readonly mode: 'weekly' | 'range'; readonly today?: string | Date; readonly from?: string; readonly to?: string; readonly timeZone?: string },
+  request: StatsWindowRequest,
 ): StatsReportSelection<Row> {
   const decisionWindows = request.mode === 'weekly' ? weeklyDecisionWindows(request.today ?? new Date(), request.timeZone) : null;
-  const windows = decisionWindows ?? { current: createRangeWindow({ from: request.from, to: request.to, timeZone: request.timeZone }), previous: undefined };
+  const windows = decisionWindows ?? requestedStatsWindows(request);
   const select = (window: StatsReportWindow<Row>['window']): StatsReportWindow<Row> => {
     const outcomes = (missionFlow ?? []).filter(outcome => reportingWindowContains(window, outcome.closedAt));
     const completedMissionKeys = new Set(outcomes.map(statisticsMissionKey));

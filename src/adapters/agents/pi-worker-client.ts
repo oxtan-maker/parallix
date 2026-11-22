@@ -6,7 +6,7 @@ import { spawn, type SpawnOptions } from 'node:child_process';
 import { setImmediate } from 'node:timers';
 import { cliInvocation, type CliInvocation } from '../process/cli-invocation.js';
 import { createOutputWatchdog, type NoOutputWatchdog } from '../process/output-watchdog.js';
-import type { SupervisedChild } from '../process/spawn-tee.js';
+import { processTreeMeasurement, type SpawnTeeOptions, type SupervisedChild } from '../process/spawn-tee.js';
 import type { RenderSink } from './agent-stream-view.js';
 import type { PiWorkerMessage, PiWorkerObservation, PiWorkerResult as Result } from './pi-worker-protocol.js';
 import { DECISION_CREDENTIAL_ENV } from '../../domain/decision-credentials.js';
@@ -49,6 +49,9 @@ export interface PiWorkerRequest {
     stderrSink?: RenderSink;
     noOutputWatchdog?: NoOutputWatchdog | null;
     onSpawn?: (_child: SupervisedChild) => void;
+    /** The worker tree's CPU is measured and reported when the run names its resource boundary. */
+    resourceBoundary?: SpawnTeeOptions['resourceBoundary'];
+    onProcessTreeCpu?: SpawnTeeOptions['onProcessTreeCpu'];
   };
 }
 
@@ -96,6 +99,16 @@ function mergeResultObservation(result: Result, observed: PiWorkerObservation | 
   };
 }
 
+function measureWorkerTree(confined: { command: string; args: string[] }, request: PiWorkerRequest): ReturnType<typeof processTreeMeasurement> {
+  try { return processTreeMeasurement(confined, request.teeOptions?.resourceBoundary); } catch { return null; }
+}
+
+function reportWorkerTreeCpu(measured: ReturnType<typeof processTreeMeasurement>, request: PiWorkerRequest): void {
+  const processTreeCpu = measured?.finish() ?? null;
+  if (!processTreeCpu) { return; }
+  try { request.teeOptions?.onProcessTreeCpu?.(processTreeCpu); } catch { /* A resource report cannot change the run outcome. */ }
+}
+
 /** The worker inherits the launch environment without changing the parent's. */
 export function startPiWorker(request: PiWorkerRequest, invocation: { command: string; args: string[]; options: { env: NodeJS.ProcessEnv } }, clearStaleMarker: () => Promise<void>, worker: CliInvocation = cliInvocation(process.argv[1]), deps: PiWorkerClientDeps = {}): Promise<Result> {
   const startedAt = new Date().toISOString();
@@ -111,7 +124,9 @@ export function startPiWorker(request: PiWorkerRequest, invocation: { command: s
     let escalation: ReturnType<typeof setTimeout> | undefined;
     const confined = wrapWithBubblewrap(cli.command, [...cli.args, '--pi-session-worker'], request.worktree, request.configuration ?? DEFAULT_CONFIGURATION);
     const spawnChild: PiWorkerSpawn = deps.spawn ?? ((command, args, options) => spawn(command, args, options));
-    const child = spawnChild(confined.command, confined.args, {
+    const measured = measureWorkerTree(confined, request);
+    const launch = measured?.launch ?? confined;
+    const child = spawnChild(launch.command, launch.args, {
       cwd: request.worktree, env: environment, detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'], serialization: 'advanced',
     });
@@ -145,6 +160,7 @@ export function startPiWorker(request: PiWorkerRequest, invocation: { command: s
       settled = true;
       watchdog.clear();
       clearTimeout(deadline); clearTimeout(escalation);
+      reportWorkerTreeCpu(measured, request);
       process.removeListener('exit', parentExit);
       process.removeListener('SIGTERM', parentSignal); process.removeListener('SIGINT', parentSignal);
       const failure = timedOut ? Object.assign(new Error('No output before configured liveness deadline'), { code: 'NO_OUTPUT_TIMEOUT' }) : error;

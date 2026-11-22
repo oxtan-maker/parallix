@@ -9,7 +9,7 @@ import type { SessionMarkerPort } from '../../application/domain-ports.js';
 import { buildSubagentLimitPrefix } from './subagent-limit.js';
 import { type RenderSink } from './agent-stream-view.js';
 import { type NoOutputWatchdog } from '../process/output-watchdog.js';
-import type { SupervisedChild } from '../process/spawn-tee.js';
+import type { SpawnTeeOptions, SupervisedChild } from '../process/spawn-tee.js';
 
 interface BuildPiInvocationOptions {
   configuration?: ParallixConfiguration;
@@ -26,6 +26,8 @@ interface PiTeeOptions {
   stdoutSink?: RenderSink;
   noOutputWatchdog?: NoOutputWatchdog | null;
   onSpawn?: (_child: SupervisedChild) => void;
+  resourceBoundary?: SpawnTeeOptions['resourceBoundary'];
+  onProcessTreeCpu?: SpawnTeeOptions['onProcessTreeCpu'];
 }
 
 interface StartPiAgentOptions {

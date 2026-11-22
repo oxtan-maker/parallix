@@ -661,7 +661,7 @@ test('verification reporting retains controlled workloads, samples and explicit 
   assert.equal(report.controlledComparisons[0].optimizationBenefitBound?.maximumSpeedupRatio, 1.25);
   const rendered = renderVerificationStatistics(report).join('\n');
   assert.match(rendered, /retained history/);
-  assert.match(rendered, /OS waited-tree CPU 2000 us/);
+  assert.match(rendered, /OS waited-tree CPU 2ms/);
   assert.match(rendered, /retained\/report.json/);
   assert.match(rendered, /workload equivalence unobserved \(not a controlled comparison\)/);
   assert.match(rendered, /workload\/configuration\/runtime equivalent true/);

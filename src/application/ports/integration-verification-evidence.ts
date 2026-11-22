@@ -22,6 +22,8 @@ export interface IntegrationVerificationEvidencePort {
 /** Optional shadow observer, composed only while verification policy is active. */
 export interface IntegrationTestsActionObservationPort {
   observe(_facts: TestsActionStartFacts): Promise<void>;
+  /** The verdict of the gate run an observed tests start began; a cancelled run reaches none and is never settled. */
+  settle(_facts: { readonly missionId: MissionId; readonly gateRunId: string; readonly passed: boolean }): Promise<void>;
 }
 
 /** One configured gate's settled part of an integration run. Blocked and cancelled

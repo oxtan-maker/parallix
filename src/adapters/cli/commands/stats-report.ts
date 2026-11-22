@@ -6,6 +6,7 @@
 
 import { localReportingTimeZone } from '../../../domain/decision-window.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
+import { formatDuration } from '../../../application/presentation/duration.js';
 
 import {
   summarizeAgentWindow,
@@ -31,6 +32,8 @@ interface StatsReportOptions {
   today?: string;
   from?: string;
   to?: string;
+  /** Print the debugging lines (FLOW diagnostics, rebase stage facts) too. */
+  verbose?: boolean;
 }
 
 type StatsField = keyof StatsRow;
@@ -57,7 +60,7 @@ function missionFlowSection(heading: string, selected: ReturnType<typeof selectS
   return lines;
 }
 
-function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>): string[] {
+function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>, verbose: boolean): string[] {
   if (!selection.flowStatistics) { return []; }
   const renderRate = (metric: import('../../../application/projections/flow-statistics.js').FlowRate) => metric.state === 'measured'
     ? `${((metric.value ?? 0) * 100).toFixed(1)}% (${metric.numerator}/${metric.denominator}, coverage ${(metric.coverage * 100).toFixed(0)}%)`
@@ -71,14 +74,19 @@ function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>): str
           : flow.completedMissions === 0 ? 'n/a (no completed missions)'
             : `${flow.extraAgentLaunches.lowerBound ? 'at least ' : ''}${flow.extraAgentLaunches.total} (mean ${flow.extraAgentLaunches.meanPerMission!.toFixed(1)}, n=${flow.extraAgentLaunches.n})`,
         renderRate(flow.sendBacks.agent), renderRate(flow.sendBacks.human), largest
-          ? `${largest.step}/${largest.actor}${largest.model ? `/${largest.model}` : ''}/${largest.state} ${largest.totalMs}ms (${(largest.share * 100).toFixed(1)}%)`
+          ? `${largest.step}/${largest.actor}${largest.model ? `/${largest.model}` : ''}/${largest.state} ${formatDuration(largest.totalMs)} (${(largest.share * 100).toFixed(1)}%)`
           : 'n/a (no elapsed observations)']]),
-      ...flow.time.rows.map(row => `${row.step}/${row.actor}${row.model ? `/${row.model}` : ''}/${row.state}: total ${row.totalMs}ms, mean ${row.meanMs.toFixed(1)}ms, p90 ${row.p90Ms}ms, n=${row.n}`),
-      ...flow.defects.map(diagnostic => `FLOW diagnostic: ${diagnostic}`),
-      ...rebaseStageLines(flow.rebaseStages)];
+      ...flow.time.rows.map(row => `${row.step}/${row.actor}${row.model ? `/${row.model}` : ''}/${row.state}: total ${formatDuration(row.totalMs)}, mean ${formatDuration(row.meanMs)}, p90 ${formatDuration(row.p90Ms)}, n=${row.n}`),
+      ...(verbose ? [...flow.defects.map(diagnostic => `FLOW diagnostic: ${diagnostic}`), ...rebaseStageLines(flow.rebaseStages)]
+        : hiddenDebuggingLine(flow.defects.length, flow.rebaseStages.visible.length + flow.rebaseStages.omitted))];
   };
   return [...period('Current week', selection.flowStatistics.current),
     ...period('Previous week', selection.flowStatistics.previous)];
+}
+
+function hiddenDebuggingLine(diagnostics: number, rebaseStages: number): string[] {
+  return diagnostics + rebaseStages === 0 ? []
+    : [`Debugging detail not shown: ${diagnostics} FLOW diagnostics, ${rebaseStages} rebase stage facts; run px stats --verbose.`];
 }
 
 function rebaseStageLines({ visible, omitted }: import('../../../application/projections/flow-statistics.js').FlowWindowStatistics['rebaseStages']): string[] {
@@ -174,7 +182,7 @@ function renderWeeklyStatsReport(rows: readonly StatsRow[], options: StatsReport
 
   const lines = [`Reporting timezone: ${selection.current.window.timeZone ?? localReportingTimeZone()}; current period updates with new completions.`];
   lines.push(...missionFlowSection('Mission flow — current week', selection.current));
-  lines.push(...sharedFlowSection(selection));
+  lines.push(...sharedFlowSection(selection, options.verbose === true));
   lines.push('');
   lines.push(...missionFlowSection('Mission flow — previous week', selection.previous));
   lines.push('');

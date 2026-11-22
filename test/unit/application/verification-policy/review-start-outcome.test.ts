@@ -5,7 +5,7 @@ import type { ReviewOutcomeFacts, ReviewStartDecision, ReviewStartDecisionInput,
   ReviewStartOutcome, ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
 import { OperationalHistoryService } from '../../../../src/application/services/operational-history-service.js';
 import { reviewStartDecision } from '../../../../src/application/verification-policy/review-start-decision.js';
-import { REVIEW_START_OUTCOME_EVENT, settleReviewStartOutcomes,
+import { REVIEW_START_OUTCOME_EVENT, settleReviewStartOutcomes, settleTestsStartOutcome,
   settledReviewStartOutcome } from '../../../../src/application/verification-policy/review-start-outcome.js';
 import { changeRevision, reviewFindingId, type Review, type ReviewRound, type ReviewerDecision } from '../../../../src/domain/review.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
@@ -80,6 +80,15 @@ test('human wait is measured from the handoff to the operator decision and revie
   const settled = settledReviewStartOutcome(human, facts({ review: operator }));
   assert.equal(settled?.humanWaitMs, 3_600_000, 'handoff recorded 00:00:30, operator decided 01:00:30');
   assert.equal(settled?.reviewMs, null, 'a human start has no agent review time');
+  assert.equal(settled?.passed, false, 'an operator rejection after the handoff is an observed not-passed (TASK-2867.07)');
+});
+
+test('the matched pass outcome is observed for agent verdicts and unknown when unobservable (TASK-2867.07)', () => {
+  const human = start({ actualAction: 'human', agentRunId: null, verdictCorrelation: 'review:1:human-verdict' });
+  assert.equal(settledReviewStartOutcome(start(), facts())?.passed, false, 'a changes-requested verdict is not a pass');
+  assert.equal(settledReviewStartOutcome(start(), facts({ review: withDecision(review(), 1, approval()) }))?.passed, true);
+  assert.equal(settledReviewStartOutcome(start(), facts({ review: withDecision(review(), 1, null) }))?.passed, null, 'no verdict is unknown');
+  assert.equal(settledReviewStartOutcome(human, facts())?.passed, null, 'approval by merge leaves no decision, never an inferred pass');
 });
 
 test('an unobservable human wait is null, never zero or an estimate (TASK-2867.06)', () => {
@@ -407,4 +416,22 @@ test('a failing outcome read or write is reported through the diagnostic channel
 test('tests actions settle no review outcome (TASK-2867.06)', () => {
   const tests = start({ actualAction: 'tests', agentRunId: null, gateRunId: 'gate-1', verdictCorrelation: 'gate-1' });
   assert.equal(settledReviewStartOutcome(tests, facts()), null, 'their duration stays in the verification.attempt measurements');
+});
+
+test('a tests start settles the verdict of its own gate run, once, and never another start (TASK-2867.07)', async () => {
+  const { entries, repository } = historyRepository();
+  const service = new OperationalHistoryService(repository);
+  const failures: ReviewStartFailure[] = [];
+  const ports = { writer: service, readOutcomeFacts: async () => facts(), diagnostic: (failure: ReviewStartFailure) => { failures.push(failure); } } as unknown as ReviewStartPolicyPorts;
+  const tests = (gateRunId: string, changeIdentity: string) => input({ actualAction: 'tests', agentRunId: null, gateRunId, verdictCorrelation: gateRunId, changeIdentity });
+  await service.recordReviewStartDecision(tests('gate-1', 'patch-1'));
+  await service.recordReviewStartDecision(tests('gate-2', 'patch-2'));
+  await settleTestsStartOutcome(MISSION, 'gate-1', false, ports, 250);
+  await settleTestsStartOutcome(MISSION, 'gate-1', true, ports, 250);
+  await settleTestsStartOutcome(MISSION, 'gate-unknown', true, ports, 250);
+  const rows = outcomes(entries);
+  assert.deepEqual(rows.map(row => [row.actualAction, row.passed]), [['tests', false]], 'one row for the matched start; a replay or an unknown run adds none');
+  await settleReviewStartOutcomes(MISSION, ports, 250);
+  assert.equal(outcomes(entries).length, 1, 'the review settlement leaves tests starts alone');
+  assert.deepEqual(failures, []);
 });
