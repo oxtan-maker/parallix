@@ -29,6 +29,11 @@ export interface MissionRecoveryOptions {
   submitForReviewFn?: IntegrateReviewPort['submitForReview'];
 }
 
+/** Whether a run still owes the delayed Backlog promotion at closeout: the lane was `review`, or an admission already retained the promotion it deferred. */
+export function retainsCloseoutBacklogPromotion(context: Pick<IntegrationContext, 'missionStatus' | 'promoteBacklogOnCloseout'>): boolean {
+  return context.promoteBacklogOnCloseout === true || context.missionStatus === 'review';
+}
+
 export function assertRecoveredIntegrationHandoff(
   recovered: MissionLoadResult,
   landing: IntegrateWorkflowPorts['landing'],

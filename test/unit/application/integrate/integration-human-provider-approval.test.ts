@@ -9,10 +9,10 @@ import { forgejoApiFixture } from '../../../fixtures/forgejo-api.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getLatestReviewDecision } from '../../../../src/adapters/forgejo/forgejo.js';
-import { approveEligibleIntegrationShortcut, evaluateTaskStatusForIntegration, recoveryEstablishesApproval } from '../../../../src/application/integrate/approval.js';
+import { admitIntegrationApproval, approveEligibleIntegrationShortcut, evaluateTaskStatusForIntegration, recoveryEstablishesApproval, requireCurrentAgentReviewForHumanApproval } from '../../../../src/application/integrate/approval.js';
 import { recoverMissionForIntegration } from '../../../../src/adapters/cli/commands/integrate.js';
 import { changeRevision, reviewApprovalOwed } from '../../../../src/domain/review.js';
-import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
+import { stubIntegrateWorkflowPorts, type IntegrateWorkflowPortOverrides } from '../../../helpers/stub-integrate-workflow-ports.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { recordApproval } from '../../../../src/adapters/review/review-round.js';
 import { reviewStatistics } from '../../../../src/application/services/review-statistics.js';
@@ -142,7 +142,7 @@ function shortcutMissionAtDecision(slug: string, revision: string) {
   }] } } as typeof initial;
 }
 
-function shortcutPorts(overrides: Parameters<typeof stubIntegrateWorkflowPorts>[0] = {}) {
+function shortcutPorts(overrides: IntegrateWorkflowPortOverrides = {}) {
   return stubIntegrateWorkflowPorts({
     gates: {
       resolveIntegrationVerificationWorktree: () => '/fixture/mission',
@@ -356,4 +356,86 @@ test('the existing integration claim serializes concurrent shortcut approval wri
   assert.equal(await first, 'completed');
   assert.equal(submissions, 1);
   assert.equal(store.events.length, 1);
+});
+
+const humanApproved = { ok: true as const, operatorApproved: true, operatorApprovedAt: approvedAt, reviewState: 'APPROVED' };
+const staleRun = { gateRunId: 'old', revision: shortcutHead, status: 'passed' as const, current: false, carried: null,
+  gates: [shortcutGate], outcomes: [{ ...shortcutGate, exitCode: 0 }] };
+
+/** Run one admission entry, or the integrate admission in dry-run or real mode, for one pass combination; report the refusal text, submissions and lane writes. */
+async function admission(entry: 'ordinary' | 'shortcut' | 'dry-run' | 'real', initial: ReturnType<typeof shortcutMission>,
+  options: { approval?: typeof humanApproved; gates?: IntegrateWorkflowPortOverrides['gates'] } = {}) {
+  const store = inMemoryTransitionStore(initial);
+  let submissions = 0;
+  const errors: string[] = [], original = console.error;
+  console.error = (...values: unknown[]) => { errors.push(values.join(' ')); };
+  let refused = false;
+  try {
+    const context = integrationContext({ slug: String(initial.id), missionStatus: initial.status, missionReview: initial.review,
+      approval: options.approval ?? { ok: false, error: 'forgejo-off' } });
+    const ports = shortcutPorts({ gates: options.gates, review: { submitApproval: async (slug, _message, submit) => {
+      submissions++;
+      const result = await recordApproval(slug, { comment: 'Integrated by human', revision: submit.revision,
+        decidedAt: '2026-11-19T11:00:00Z', source: { kind: 'local' } },
+      { missionStore: submit.missionServices.store, lifecycleService: submit.missionServices.lifecycle });
+      return result.outcome === 'failed' ? { ok: false, diagnostic: result.diagnostic } : { ok: true };
+    } } });
+    const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store) });
+    const loaded = await store.load(initial.id);
+    try {
+      if (entry === 'ordinary') { await requireCurrentAgentReviewForHumanApproval(context, loaded, services, ports); }
+      else if (entry === 'shortcut') { await approveEligibleIntegrationShortcut(context, loaded, services, ports); }
+      else { await admitIntegrationApproval(context, loaded, services, ports, { dryRun: entry === 'dry-run' }); }
+    } catch { refused = true; }
+  } finally { console.error = original; }
+  return { refused, reason: errors.join('\n'), submissions, events: store.events.length, status: (await store.load(initial.id)).mission.status };
+}
+
+test('ordinary admission with a human approval needs the current agent review; the shortcut needs agent review and tests (px-0074.04)', async () => {
+  const current = shortcutMission('px-0074-04-current');
+  const stale = shortcutMissionAtDecision('px-0074-04-stale', 'b'.repeat(40));
+  const undecided = fixtureMission('px-0074-04-undecided', { status: 'review', assignee: agentFamily('codex'), review: null });
+  const noReview = fixtureMission('px-0074-04-active', { status: 'active', assignee: agentFamily('codex'), review: null });
+  const accepted = { refused: false, reason: '', submissions: 0, events: 0, status: 'review' };
+  assert.deepEqual(await admission('ordinary', current, { approval: humanApproved }), accepted, 'all three current: nothing to refuse, nothing written');
+  for (const [name, mission, expected] of [['agent review missing', undecided, /needs the agent review to approve the current revision/],
+    ['agent review missing on an active lane', noReview, /needs the agent review to approve the current revision/],
+    ['agent review stale', stale, /needs the agent review to approve the current revision/]] as const) {
+    const result = await admission('ordinary', mission, { approval: humanApproved });
+    assert.equal(result.refused, true, name);
+    assert.match(result.reason, expected, name);
+    assert.deepEqual([result.submissions, result.events, result.status], [0, 0, mission.status], `${name}: no approval, no lane change`);
+  }
+  for (const [name, mission, gates, expected] of [
+    ['tests missing', current, { readGateRun: () => null }, /no complete current passing integration-test action/],
+    ['tests stale', current, { readGateRun: () => staleRun }, /no complete current passing integration-test action/],
+    ['agent review missing', undecided, {}, /agent review does not approve the current revision/],
+    ['agent review stale', stale, {}, /agent review does not approve the current revision/]] as const) {
+    const result = await admission('shortcut', mission, { gates });
+    assert.equal(result.refused, true, name);
+    assert.match(result.reason, expected, name);
+    assert.deepEqual([result.submissions, result.events, result.status], [0, 0, 'review'], `${name}: no approval, no lane change`);
+  }
+  const shortcut = await admission('shortcut', current);
+  assert.deepEqual([shortcut.refused, shortcut.submissions, shortcut.events, shortcut.status], [false, 1, 1, 'integration']);
+});
+
+// Review round 1 (F1): `px integrate --dry-run` used to report "recovery would move the Mission to integration" for a combination the real run
+// refuses. Both modes now run the same admission at the same point, so the human-facing prediction cannot claim a fact the run contradicts.
+test('the integrate dry-run predicts the same human-approval refusal and records no approval (px-0074.04 review F1)', async () => {
+  const stale = shortcutMissionAtDecision('px-0074-04-prediction-stale', 'b'.repeat(40));
+  const current = shortcutMission('px-0074-04-prediction-current');
+  const dryRun = await admission('dry-run', stale, { approval: humanApproved });
+  const realRun = await admission('real', stale, { approval: humanApproved });
+  for (const [mode, result] of [['dry-run', dryRun], ['real', realRun]] as const) {
+    assert.equal(result.refused, true, `${mode} integrate refuses a standing human approval with a stale agent pass`);
+    assert.match(result.reason, /needs the agent review to approve the current revision/, mode);
+    assert.deepEqual([result.submissions, result.events, result.status], [0, 0, 'review'], `${mode}: no approval, no lane change`);
+  }
+  assert.equal(dryRun.reason, realRun.reason, 'the dry run names the same refusal the real run gives');
+  const acceptedDryRun = await admission('dry-run', current);
+  assert.deepEqual([acceptedDryRun.refused, acceptedDryRun.submissions, acceptedDryRun.events, acceptedDryRun.status], [false, 0, 0, 'review'],
+    'a dry run cannot record the human approval the shortcut entry owns');
+  const acceptedRealRun = await admission('real', current);
+  assert.deepEqual([acceptedRealRun.refused, acceptedRealRun.submissions, acceptedRealRun.events, acceptedRealRun.status], [false, 1, 1, 'integration']);
 });

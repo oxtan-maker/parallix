@@ -1,6 +1,6 @@
 import { agentFamily } from '../../../src/domain/agents.js';
 import { changeRevision } from '../../../src/domain/review.js';
-import { missionLabels, type Mission } from '../../../src/domain/mission.js';
+import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
@@ -30,6 +30,8 @@ mockModule('../../../src/adapters/agents/runtime-matrix.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/stats.js', import.meta.url);
 mockModule('../../../src/composition/application-services.js', import.meta.url);
 mockModule('../../../src/adapters/verification/verification.js', import.meta.url);
+mockModule('../../../src/adapters/verification/integration-verification-proof.js', import.meta.url);
+mockModule('../../../src/adapters/review/review-commands.js', import.meta.url);
 mockModule('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
 mockModule('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 await installModuleMocks();
@@ -56,6 +58,8 @@ describe("Variant B landing", () => {
   const statsModule = mockModule<typeof import('../../../src/adapters/cli/commands/stats.js')>('../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const __mm1 = mockModule<typeof import('../../../src/composition/application-services.js')>('../../../src/composition/application-services.js', import.meta.url);
   const executionContext = mockModule<typeof import('../../../src/adapters/git/mission-execution-context.js')>('../../../src/adapters/git/mission-execution-context.js', import.meta.url);
+  const gateProof = mockModule<typeof import('../../../src/adapters/verification/integration-verification-proof.js')>('../../../src/adapters/verification/integration-verification-proof.js', import.meta.url);
+  const reviewCommands = mockModule<typeof import('../../../src/adapters/review/review-commands.js')>('../../../src/adapters/review/review-commands.js', import.meta.url);
   const __mm2 = mockModule<typeof import('../../../src/adapters/cli/commands/integrate.js')>('../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 
   const { mock } = test;
@@ -165,7 +169,11 @@ describe("Variant B landing", () => {
           number: 1,
           subject: { change: { kind: 'local-branch', sourceBranch: `mission/${TEST_SLUG}`, targetBranch: 'main' }, revision: changeRevision('fixture') },
           reviewer: agentFamily('codex'), implementer: agentFamily('claude'), startedAt: '2026-05-15T10:00:00Z',
-          decision: { kind: 'approved', decidedAt: '2026-05-15T10:30:00Z', comment: null, source: { kind: 'local' } },
+          // px-0074.04: `px integrate` admits a standing human provider approval only when the
+          // agent decision names the revision the integration checkout reports. Every git double
+          // in this suite answers rev-parse with `deadbeef`, so the approved decision carries it;
+          // an unrecorded revision is an unverifiable agent pass and is refused.
+          decision: { kind: 'approved', revision: changeRevision('deadbeef'), decidedAt: '2026-05-15T10:30:00Z', comment: null, source: { kind: 'local' } },
           response: null, phase: 'approved', disposition: 'APPROVED', reviewerRetryCount: 0, implementerRetryCount: 0,
         }], intervention: null, stageLaunches: [], reviewEvents: [],
       },
@@ -294,6 +302,88 @@ describe("Variant B landing", () => {
     } catch { /* expected */ }
 
     assert.deepEqual(events, ['abort', 'squash', 'promote', 'complete', 'commit']);
+    cleanup();
+  });
+
+  // px-0074.04 review F2: the operator shortcut is the only admission route in this case, and it
+  // moves the lane out of `review` itself. The closeout must still promote the Backlog mirror that
+  // the dry run predicted, so the call site keeps the retained promotion instead of re-deriving it
+  // from the lane it just moved.
+  test('integrate lands an operator-shortcut Mission and still promotes its Backlog mirror at closeout (px-0074.04 review F2)', async () => {
+    setupMocks();
+    const taskFile = path.join(FAKE_ROOT, 'backlog/tasks/task.md');
+    fs.mkdirSync(path.dirname(taskFile), { recursive: true });
+    fs.writeFileSync(taskFile, '---\nstatus: review\n---\n', 'utf8');
+    const events: string[] = [];
+    mock.method(backlog, 'getTaskStatus', () => 'review');
+    mock.method(backlog, 'setTaskStatus', () => {
+      events.push('promote');
+      return true;
+    });
+    mock.method(backlog, 'completeTask', () => {
+      events.push('complete');
+      return true;
+    });
+    // The gate checkout resolves from Mission identity; keep it on the fake root so the declared
+    // preIntegration gate list below is the list the shortcut reads.
+    mock.method(missionUtils, 'resolveWorktree', () => FAKE_ROOT);
+    // No standing human provider approval: only the operator shortcut can admit this run.
+    mock.method(forgejo, 'getLatestReviewDecision', () => ({ ok: true as const, reviewState: 'APPROVED',
+      defaultUserApproved: false }));
+    fs.writeFileSync(path.join(FAKE_ROOT, 'workflow.config.json'), JSON.stringify({
+      adapters: {
+        review: { provider: 'forgejo', baseUrl: 'http://localhost:3300', remote: 'review', repo: 'magnus/parallix' },
+        verification: { command: 'true' },
+        gates: { preIntegration: [{ key: 'unit', command: 'npm test -- --unit' }] },
+      },
+    }), 'utf8');
+    // The gate owner's complete current passing run for the head commit the agent approved.
+    mock.method(gateProof, 'readIntegrationGateRun', () => ({
+      gateRunId: 'gate-run-1', revision: 'deadbeef', status: 'passed' as const, current: true, carried: null,
+      gates: [{ key: 'unit', command: 'npm test -- --unit' }],
+      outcomes: [{ key: 'unit', command: 'npm test -- --unit', exitCode: 0 }],
+    }));
+    // The shortcut records the human approval through the existing review-submission owner; the
+    // provider round itself is outside this landing regression.
+    mock.method(reviewCommands, 'submitReviewRound', async (_slug: string, _outcome: string, _message: string,
+      options: { missionStore: NonNullable<Parameters<typeof reviewCommands.submitReviewRound>[3]['missionStore']>, lifecycleService: NonNullable<Parameters<typeof reviewCommands.submitReviewRound>[3]['lifecycleService']> }) => {
+      events.push('approve');
+      const loaded = await options.missionStore.load(missionId(TEST_SLUG));
+      await options.lifecycleService.transition({
+        operationId: 'shortcut-approval', missionId: missionId(TEST_SLUG), expectedVersion: missionVersion(1),
+        capabilities: new Set(['mission:transition']), actor: 'custom', occurredAt: '2026-05-15T11:30:00Z',
+        idempotencyKey: 'approve:shortcut',
+        command: { type: 'approve', review: loaded.kind === 'found' ? loaded.mission.review! : null! },
+      });
+    });
+    mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+      if (args.includes('branch') && args.includes('--list')) return { signal: null,  status: 0, stdout: 'main\n', stderr: '' };
+      if (args.includes('branch') && args.includes('--show-current')) return { signal: null,  status: 0, stdout: 'main', stderr: '' };
+      if (args.includes('status')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('merge') && args.includes('--abort')) {
+        events.push('abort');
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
+      }
+      if (args.includes('merge') && args.includes('--squash')) {
+        events.push('squash');
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
+      }
+      if (args.includes('commit')) {
+        events.push('commit');
+        return { signal: null,  status: 0, stdout: '', stderr: '' };
+      }
+      if (args.includes('merge')) return { signal: null,  status: 0, stdout: '', stderr: '' };
+      if (args.includes('rev-parse') || args.includes('merge-base')) return { signal: null,  status: 0, stdout: 'deadbeef', stderr: '' };
+      if (args.includes('show')) return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+02:00\n', stderr: '' };
+      return { signal: null,  status: 0, stdout: '', stderr: '' };
+    });
+
+    try {
+      await loadIntegrate()([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
+    } catch { /* expected */ }
+
+    assert.deepEqual(events, ['approve', 'abort', 'squash', 'promote', 'complete', 'commit'],
+      'the shortcut approves once and the landed closeout still promotes the Backlog mirror');
     cleanup();
   });
 

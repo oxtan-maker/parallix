@@ -44,7 +44,8 @@ import { MissionLifecycleService } from '../../../src/application/mission-lifecy
 import type { MissionStatus } from '../../../src/domain/mission.js';
 import { missionId } from '../../../src/domain/mission.js';
 import { repositoryId } from '../../../src/domain/repository.js';
-import { approvedReview, inMemoryTransitionStore, integrateCommandMission, type InMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { inMemoryTransitionStore, integrateCommandMission, pendingReview, type InMemoryTransitionStore } from '../../fixtures/mission-builders.js';
+import { applyReviewerCommand, changeRevision, type Review } from '../../../src/domain/review.js';
 import { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/database-adapter.js';
 import { SqliteMigrationRunner, loadDefaultMigrations } from '../../../src/adapters/sqlite/migration-runner.js';
 import { SqliteUsageRepository } from '../../../src/adapters/sqlite/usage-repository.js';
@@ -66,12 +67,24 @@ const RETRY_AT = '2026-08-06T10:00:00+02:00';
 type FakeStore = InMemoryTransitionStore;
 
 /**
+ * The agent pass for these landing scenarios. px-0074.04: `px integrate` admits a standing
+ * human provider approval only when the agent decision names the revision the integration
+ * checkout reports, and the git double below answers rev-parse with LANDED_SHA. An approval
+ * with no recorded revision is an unverifiable agent pass, so it is refused before recovery.
+ */
+function approvedReviewForLandedChange(): Review {
+  return applyReviewerCommand(pendingReview(SLUG), {
+    type: 'approve', decidedAt: '2026-08-04T10:30:00Z', comment: null, source: { kind: 'local' }, revision: changeRevision(LANDED_SHA),
+  });
+}
+
+/**
  * A MissionTransitionStore that records lane events, so completions are countable.
  * An approved last round is what the CLI reads as its approval source when
  * no review provider is reachable (integrate.ts, "mission-store" approval).
  */
 function createFakeStore(status: MissionStatus): FakeStore {
-  return inMemoryTransitionStore(integrateCommandMission(SLUG, status, approvedReview(SLUG)));
+  return inMemoryTransitionStore(integrateCommandMission(SLUG, status, approvedReviewForLandedChange()));
 }
 
 function servicesFor(store: FakeStore) {

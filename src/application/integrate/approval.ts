@@ -228,17 +228,28 @@ function agentApprovalCoversHead(mission: Extract<MissionLoadResult, { kind: 'fo
   return ports.gates.approvalCoverage?.(checkout, mission.review)?.kind === 'covers';
 }
 
-function integrationShortcutEvidence(context: IntegrationContext,
-  mission: Extract<MissionLoadResult, { kind: 'found' }>['mission'], ports: IntegrateWorkflowPorts): IntegrationShortcutEvidence {
+type AgentReviewCurrency = { readonly ok: true; readonly checkout: string; readonly head: string | null; readonly agentReviewCurrent: boolean }
+  | FailedIntegrationShortcutEvidence;
+
+/** Whether the agent approval covers the finalized integration tree; one reader for both admission entries. */
+function agentReviewCurrency(context: IntegrationContext,
+  mission: Extract<MissionLoadResult, { kind: 'found' }>['mission'], ports: IntegrateWorkflowPorts): AgentReviewCurrency {
   const checkout = ports.gates.resolveIntegrationVerificationWorktree(context.slug, { baseWorktree: context.baseWorktree });
   const tree = ports.gates.captureFinalIntegrationTree(checkout);
   if (!tree.ok) {
     return { ok: false, error: tree.error ?? `Unable to capture the finalized integration tree at ${checkout}` };
   }
   const head = tree.commit ?? null;
+  return { ok: true, checkout, head, agentReviewCurrent: agentApprovalCoversHead(mission, checkout, head, ports) };
+}
+
+function integrationShortcutEvidence(context: IntegrationContext,
+  mission: Extract<MissionLoadResult, { kind: 'found' }>['mission'], ports: IntegrateWorkflowPorts): IntegrationShortcutEvidence {
+  const currency = agentReviewCurrency(context, mission, ports);
+  if (!currency.ok) { return currency; }
+  const { checkout, head, agentReviewCurrent } = currency;
   const round = mission.review?.rounds.length ? currentReviewRound(mission.review) : null;
   const reviewedRevision = round?.decision?.kind === 'approved' ? round.decision.revision ?? null : null;
-  const agentReviewCurrent = agentApprovalCoversHead(mission, checkout, head, ports);
   const configuredTests = ports.gates.loadPhaseGates(checkout, 'preIntegration');
   const testsCurrent = completeCurrentTestsPass(ports.gates.readGateRun?.(checkout) ?? null, head,
     configuredTests);
@@ -313,4 +324,37 @@ export async function approveEligibleIntegrationShortcut(context: IntegrationCon
   context.missionStatus = 'integration';
   context.missionReview = reloaded.mission.review;
   context.missionVersion = reloaded.version;
+}
+
+/**
+ * A standing human provider approval moves a review or active Mission to the
+ * integration lane through lifecycle recovery, but it is only one of the three
+ * passes. The agent review must still approve the current change, so a missing
+ * or stale agent pass is refused before recovery writes any lane change. The
+ * integration tests are not read here: the required gates run before landing.
+ */
+export async function requireCurrentAgentReviewForHumanApproval(context: IntegrationContext,
+  missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, _missionServices: IntegrationMissionServices,
+  ports: IntegrateWorkflowPorts): Promise<void> {
+  const mission = missionLoad.mission;
+  if ((mission.status !== 'review' && mission.status !== 'active') || !recordedHumanProviderApproval(context.approval)) { return; }
+  const currency = agentReviewCurrency(context, mission, ports);
+  if (!currency.ok) { throw abortWith(ports.landing, currency.error); }
+  if (!currency.agentReviewCurrent) {
+    throw abortWith(ports.landing, `Integration of ${context.slug} needs the agent review to approve the current revision ${currency.head ?? 'unknown'}; the human approval alone does not admit it. Run px review ${context.slug} for the current change, then retry.`);
+  }
+}
+
+/**
+ * Both admission entries in order: a standing human approval needs the current agent review, otherwise the operator shortcut may record one.
+ * The integrate dry run keeps its prediction honest by running the read-only human-approval leg: it writes nothing, so the dry run calls the same
+ * admission at the same point and refuses with the same reason the real run gives. The shortcut entry records the human approval, so a dry run
+ * stops before it; that combination stays predicted by the status check's warn row.
+ */
+export async function admitIntegrationApproval(context: IntegrationContext,
+  missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, missionServices: IntegrationMissionServices,
+  ports: IntegrateWorkflowPorts, { dryRun = false }: { dryRun?: boolean } = {}): Promise<void> {
+  await requireCurrentAgentReviewForHumanApproval(context, missionLoad, missionServices, ports);
+  if (dryRun) { return; }
+  await approveEligibleIntegrationShortcut(context, missionLoad, missionServices, ports);
 }

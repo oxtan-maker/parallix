@@ -1,9 +1,9 @@
 import type { IntegrateWorkflowPorts } from '../../src/application/ports/integrate-workflow.js';
 
-type Overrides = { [K in keyof IntegrateWorkflowPorts]?: Partial<IntegrateWorkflowPorts[K]> };
+export type IntegrateWorkflowPortOverrides = { [K in keyof IntegrateWorkflowPorts]?: Partial<IntegrateWorkflowPorts[K]> };
 
 /** Unused collaborators fail immediately; each case supplies its exercised boundaries. */
-export function stubIntegrateWorkflowPorts(overrides: Overrides = {}): IntegrateWorkflowPorts {
+export function stubIntegrateWorkflowPorts(overrides: IntegrateWorkflowPortOverrides = {}): IntegrateWorkflowPorts {
   return {
     missionContext: {
       resolve: () => { throw new Error('Unexpected integrate boundary: missionContext.resolve'); },

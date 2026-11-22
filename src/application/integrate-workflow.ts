@@ -27,7 +27,7 @@ import * as fmt from './presentation/cli-format.js';
 import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import { integrationRepairNeedsReview } from './integration-repair-review.js';
-import { approveEligibleIntegrationShortcut, evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
+import { admitIntegrationApproval, evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
 import { createIntegrationGateStep, type IntegrateSeams } from './integrate/gates.js';
 import { createGithubPrLanding } from './integrate/github-pr.js';
@@ -35,7 +35,7 @@ import { createMissionLanding } from './integrate/landing.js';
 import { createIntegrationPreflight } from './integrate/preflight.js';
 import { buildIntegrationReadiness, printIntegrationReadiness } from './integrate/readiness.js';
 import { createIntegrationRebase } from './integrate/rebase.js';
-import { assertRecoveredIntegrationHandoff, createMissionRecovery } from './integrate/recovery.js';
+import { assertRecoveredIntegrationHandoff, createMissionRecovery, retainsCloseoutBacklogPromotion } from './integrate/recovery.js';
 import { recoverLandedIntegration } from './integrate/landed-recovery.js';
 import type { IntegrateRunState } from './integrate/squash.js';
 import {
@@ -374,12 +374,12 @@ class IntegrateWorkflow {
     const missionLoad = await this.loadMissionAuthority(slug, context, missionServices);
     this.requireReadableApprovedRevision(context, missionLoad);
 
-    // Reconcile the authoritative Mission before preflight or merge work.
-    // Backlog promotion remains delayed until closeout, because it can be
-    // part of the candidate branch, but it is never lifecycle authority.
+    // Admission runs in both modes: a dry run predicts the same refusal at the same point; only the real run may record the human approval.
+    if (missionLoad.kind === 'found') { await admitIntegrationApproval(context, missionLoad, missionServices, this.dependencies.ports, { dryRun }); }
+    // Recovery owns the lane; Backlog promotion stays delayed until closeout because it can be part of the candidate branch, never lifecycle authority.
+    // The retention keeps a promotion the shortcut already deferred: that admission moved the lane out of `review` itself.
     if (!dryRun) {
-      context.promoteBacklogOnCloseout = context.missionStatus === 'review';
-      if (missionLoad.kind === 'found') { await approveEligibleIntegrationShortcut(context, missionLoad, missionServices, this.dependencies.ports); }
+      context.promoteBacklogOnCloseout = retainsCloseoutBacklogPromotion(context);
       await this.dependencies.recoverMissionForIntegration(context, { missionServices });
       const recovered = await missionServices.store.load(missionId(slug));
       assertRecoveredIntegrationHandoff(recovered, this.dependencies.landing, slug);
