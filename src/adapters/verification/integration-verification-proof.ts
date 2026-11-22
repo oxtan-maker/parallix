@@ -9,7 +9,8 @@ import type { IntegrationRunOwner } from '../../application/ports/integration-ve
 import { loadAdapterConfig } from '../config/product-config.js';
 import { git } from '../git/git.js';
 import { completedRebaseLineage, completedRebaseLineageForCheckout, ensureRebaseCompletionRecorder } from '../git/rebase-completion-recorder.js';
-import { isVerificationBookkeeping, type CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
+import type { CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
+import { verificationEquivalentRevision } from '../git/revision-equivalence.js';
 import { readJson, writeJson } from '../storage/storage.js';
 import { createActiveVerificationIdentity } from './active-verification-identity.js';
 import { verificationDigest } from './verification-proof-inputs.js';
@@ -242,14 +243,26 @@ function storedGateRunId(data: StoredRun): string | null {
   const gateRunId = data.run?.gateRunId;
   return typeof gateRunId === 'string' && gateRunId ? gateRunId : null;
 }
+
+function movableRunTarget(data: StoredRun, inputs: ReturnType<typeof runIdentity>, exact: boolean,
+  revision: string, head: string | null): string | null {
+  return !exact && typeof data.run?.inputIdentity === 'string' && inputs !== null
+    && data.run.toolchain === inputs.toolchain && head !== null && head !== revision ? head : null;
+}
+
 /** Whether the run covers the current inputs, or completed rebases carried it there on the same toolchain. */
 function runCurrency(root: string, data: StoredRun, revision: string, gates: readonly Gate[],
   configuration?: ParallixConfiguration, snapshot?: VerificationReadSnapshot) {
   const inputs = runIdentity(root, gates, configuration, snapshot);
-  const current = typeof data.run?.inputIdentity === 'string' && data.run.inputIdentity === inputs?.identity;
-  const head = headRevision(root, snapshot);
-  const carriable = !current && inputs !== null && data.run?.toolchain === inputs.toolchain && head !== null && head !== revision;
-  return { current, carried: carriable ? completedRebaseLineageForCheckout(root, revision, head, snapshot?.git) : null };
+  const storedIdentity = data.run?.inputIdentity;
+  const exact = typeof storedIdentity === 'string' && storedIdentity === inputs?.identity;
+  const target = movableRunTarget(data, inputs, exact, revision, headRevision(root, snapshot));
+  if (!target) { return { current: exact, carried: null }; }
+  if (verificationEquivalentRevision(root, revision, target, snapshot?.git ?? git)) {
+    return { current: true, carried: null };
+  }
+  return { current: false,
+    carried: completedRebaseLineageForCheckout(root, revision, target, snapshot?.git) };
 }
 
 /** Read the run record without reuse identity: an observation, not authority. */
@@ -298,12 +311,6 @@ function matchesCoverage(proof: Evidence, gates: readonly Gate[], coverage: Cove
       && outcome.command === gate.command && outcome.exitCode === 0));
 }
 
-function coversRevision(root: string, from: string, to: string, snapshot?: VerificationReadSnapshot): boolean {
-  if (from === to) { return true; }
-  const diff = (snapshot?.git ?? git)(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
-  return diff.status === 0 && diff.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
-}
-
 /** After completed rebases, each configured gate is carried by its own successful outcome. */
 function carriedCoverage(proof: Evidence, gates: readonly Gate[]): boolean {
   return Array.isArray(proof.outcomes) && gates.every(gate => proof.outcomes.some(outcome => outcome && outcome.key === gate.key && outcome.exitCode === 0));
@@ -332,7 +339,7 @@ export function readIntegrationVerificationProof(command: string, root: string, 
     const { coverage, gates, file, proof } = stored;
     const diagnostic = (suffix: string) => `Repository verification passed by reuse of integration evidence ${file}; validated ${proof.verifiedCommit}, covered ${current.commit}${suffix}.`;
     if (proof.inputFingerprint === current.inputFingerprint && matchesCoverage(proof, gates, coverage)
-      && coversRevision(root, proof.verifiedCommit, current.commit, snapshot)) {
+      && verificationEquivalentRevision(root, proof.verifiedCommit, current.commit, snapshot?.git ?? git)) {
       return { ok: true as const, proof, diagnostic: diagnostic('') };
     }
     const lineage = completedRebaseLineage(root, current.branch, proof.verifiedCommit, current.commit, snapshot?.git);

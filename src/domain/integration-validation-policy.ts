@@ -74,6 +74,39 @@ export interface CompletedRebaseStep {
  */
 export type CompletedRebaseLineage = readonly CompletedRebaseStep[];
 
+export interface PassingIntegrationGateReceipt {
+  readonly gateRunId: string | null;
+  readonly revision: string;
+  readonly status: 'running' | 'passed' | 'failed' | 'cancelled';
+  readonly current: boolean;
+  readonly carried: CompletedRebaseLineage | null;
+  readonly gates: readonly { readonly key: string; readonly command: string }[];
+  readonly outcomes: readonly { readonly key: string; readonly command: string; readonly exitCode: number | null }[];
+}
+
+/**
+ * Whether one executor-owned receipt proves the complete configured plan for
+ * the candidate. Exact policy-action restart reuse requires the recorded SHA;
+ * landing also accepts adapter-proven equivalent inputs or completed-rebase
+ * lineage. Missing identity, incomplete plans and every non-passing verdict
+ * fail closed to execution.
+ */
+export function passingIntegrationReceiptApplies(
+  receipt: PassingIntegrationGateReceipt | null | undefined,
+  finalizedCommit: string | null | undefined,
+  configured: readonly { readonly key: string; readonly command: string }[],
+  mode: 'exact' | 'equivalent',
+): receipt is PassingIntegrationGateReceipt {
+  if (!receipt || receipt.status !== 'passed' || !receipt.gateRunId || !finalizedCommit || configured.length === 0) { return false; }
+  const revisionCovered = mode === 'exact'
+    ? receipt.current && receipt.revision === finalizedCommit
+    : receipt.current || Boolean(receipt.carried?.length);
+  if (!revisionCovered || receipt.gates.length !== configured.length || receipt.outcomes.length !== configured.length) { return false; }
+  return configured.every(gate =>
+    receipt.gates.filter(ran => ran.key === gate.key && ran.command === gate.command).length === 1
+    && receipt.outcomes.filter(outcome => outcome.key === gate.key && outcome.command === gate.command && outcome.exitCode === 0).length === 1);
+}
+
 /**
  * True when the marker authorizes a skip: it exists, its whitelist is
  * non-empty, and the validated commit still covers the finalized commit — it

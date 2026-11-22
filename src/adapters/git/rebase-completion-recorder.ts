@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { git, type GitReader } from './git.js';
 import type { RepositoryMetadataWriter } from '../../application/ports/repository-metadata.js';
-import { isVerificationBookkeeping, type CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
+import type { CompletedRebaseLineage } from '../../domain/integration-validation-policy.js';
+import { verificationEquivalentRevision } from './revision-equivalence.js';
 
 export interface RebaseCompletion {
   from: string;
@@ -35,12 +36,6 @@ export function readRebaseCompletions(root: string, gitRunner: GitReader = git):
 
 const revision = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{40,64}$/.test(value);
 
-function onlyBookkeeping(root: string, from: string, to: string, gitRunner: GitReader = git): boolean {
-  if (from === to) { return true; }
-  const result = gitRunner(['-C', root, 'diff', '--name-only', '-z', from, to, '--']);
-  return result.status === 0 && result.stdout.split('\0').filter(Boolean).every(isVerificationBookkeeping);
-}
-
 /**
  * The completed rebases of `branch` that carry `from` to `to`, or null. Each
  * step must start where the previous coverage ended, up to bookkeeping, so an
@@ -52,12 +47,12 @@ export function completedRebaseLineage(root: string, branch: string, from: strin
   const steps: { from: string; to: string }[] = [];
   for (const record of readRebaseCompletions(root, gitRunner)) {
     if (!record || !revision(record.from) || !revision(record.to) || record.branch !== branch || !Array.isArray(record.mappings)
-      || !onlyBookkeeping(root, covered, record.from, gitRunner)) { continue; }
+      || !verificationEquivalentRevision(root, covered, record.from, gitRunner)) { continue; }
     // Git invokes post-rewrite only after completion. It may drop already
     // upstream commits, so the covered HEAD need not occur in its mapping list.
     covered = record.to;
     steps.push({ from: record.from, to: record.to });
-    if (onlyBookkeeping(root, covered, to, gitRunner)) { return steps; }
+    if (verificationEquivalentRevision(root, covered, to, gitRunner)) { return steps; }
   }
   return null;
 }

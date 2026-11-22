@@ -30,6 +30,7 @@ import type { MissionStore } from '../domain-ports.js';
 import type { OperationalHistoryService } from '../services/operational-history-service.js';
 import { completeIntegrationGateRunReceipt } from './integration-gate-receipt.js';
 import { recordImplementerLaunch } from '../rebase-identity.js';
+import { passingIntegrationReceiptApplies } from '../../domain/integration-validation-policy.js';
 
 /**
  * Minimal shape of a configured gate the skip resolver needs. Kept local to
@@ -38,7 +39,10 @@ import { recordImplementerLaunch } from '../rebase-identity.js';
  */
 interface SkippableGate {
   readonly key: string;
+  readonly command?: string;
 }
+
+type MarkerHistoryEntry = { eventType?: string; eventData?: string } | null;
 
 export interface IntegrateSeams extends BounceSeams {
   routeIntegrationGateFailureFn: IntegrateGatesPort['routeIntegrationGateFailure'];
@@ -124,6 +128,25 @@ class IntegrationGateStep {
   private readonly dependencies: ReturnType<typeof composeIntegrationGateStepDependencies>;
   constructor(ports: IntegrateWorkflowPorts) { this.dependencies = composeIntegrationGateStepDependencies(ports); }
 
+  private passingReceiptSkip<T extends SkippableGate>(configured: T[], slug: string, checkout: string,
+    finalizedCommit: string, log: (_message: string) => void): { gates: T[]; skippedAll: boolean } | null {
+    const receipt = this.passingReceipt(checkout);
+    const receiptPlan = configured.every((gate): gate is T & { command: string } => typeof gate.command === 'string') ? configured : [];
+    if (!passingIntegrationReceiptApplies(receipt, finalizedCommit, receiptPlan, 'equivalent')) { return null; }
+    log(`Integration gates for ${slug}: complete passing run ${receipt.gateRunId} at ${receipt.revision.slice(0, 12)} covers finalized ${finalizedCommit.slice(0, 12)}; skipping ${configured.map(gate => gate.key).join(', ')}.`);
+    return { gates: [], skippedAll: true };
+  }
+
+  private async markerEntry(operationalHistory: Pick<OperationalHistoryService, 'loadLatestByTypeForMission'>,
+    slug: string): Promise<MarkerHistoryEntry> {
+    try {
+      return await operationalHistory.loadLatestByTypeForMission(INTEGRATION_VALIDATION_EVENT_TYPE, missionId(slug));
+    } catch {
+      // An unreadable history must never authorize a skip.
+      return null;
+    }
+  }
+
   /**
    * Decide which of the configured preIntegration gates to run, applying the
    * TASK-2625 skip: when a durable, sha-keyed marker records that this mission
@@ -156,15 +179,11 @@ class IntegrationGateStep {
     log: (_message: string) => void;
   }): Promise<{ gates: T[]; skippedAll: boolean }> {
     const full = { gates: configured, skippedAll: false };
-    if (!finalizedCommit || !operationalHistory) { return full; }
-    let markerEntry: { eventType?: string; eventData?: string } | null = null;
-    try {
-      markerEntry = await operationalHistory.loadLatestByTypeForMission(INTEGRATION_VALIDATION_EVENT_TYPE, missionId(slug));
-    } catch {
-      // An unreadable history must never authorize a skip: fall back to the full
-      // suite rather than silently running nothing.
-      return full;
-    }
+    if (!finalizedCommit) { return full; }
+    const receiptSkip = this.passingReceiptSkip(configured, slug, checkout, finalizedCommit, log);
+    if (receiptSkip) { return receiptSkip; }
+    if (!operationalHistory) { return full; }
+    const markerEntry = await this.markerEntry(operationalHistory, slug);
     // A later failed/cancelled validation supersedes the old green whitelist.
     const evidence = this.dependencies.gates.approvalEvidence?.(checkout);
     if (evidence) {
@@ -183,6 +202,11 @@ class IntegrationGateStep {
     log(`Integration gates for ${slug}: ${skip.length} hook(s) already validated at ${marker.sha.slice(0, 12)}${coverage}; skipping ${skip.join(', ')}.`);
     const toRun = run.map(key => configured.find(gate => gate.key === key) as T);
     return { gates: toRun, skippedAll: toRun.length === 0 };
+  }
+
+  /** Executor evidence is an optimization only; absent or unreadable records run normally. */
+  passingReceipt(checkout: string) {
+    try { return this.dependencies.gates.readGateRun?.(checkout) ?? null; } catch { return null; }
   }
 
   /** Completed-rebase lineage from the validated commit; unavailable lineage reads as none (fail open). */

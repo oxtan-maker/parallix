@@ -14,6 +14,58 @@ import runWorkflow, {
 } from '../../../src/adapters/verification/verification.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
 import { initCommittedRepository } from '../../fixtures/git-repository.js';
+import { bookkeepingCommitMessage } from '../../../src/domain/approval-coverage.js';
+
+test('real gate receipt currency accepts direct equivalence and a recorded rebase plus version hook only (TASK-2867.09)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'integration-receipt-equivalence-'));
+  try {
+    const manifests = (version: string, dependency = false) => ({
+      'package.json': `${JSON.stringify({ version, ...(dependency ? { dependencies: { x: '2' } } : {}) }, null, 2)}\n`,
+      'package-lock.json': `${JSON.stringify({ version, packages: { '': { version } } }, null, 2)}\n`,
+    });
+    const repo = initCommittedRepository(root, { ...manifests('1.0.0'), 'src/input.ts': 'export const value = 1;\n' });
+    repo.git('checkout', '-b', 'mission');
+    const gates = [{ key: 'unit', order: 1, command: 'true' }];
+    assert.equal((await runPhaseGates('integration', { slug: 'task-2867.09', checkoutPath: root, gates,
+      verificationEvidence: createIntegrationVerificationEvidencePort(),
+      commandRunner: () => ({ status: 0, stdout: '', stderr: '' }), log: () => {}, error: () => {} })).ok, true);
+    const original = readIntegrationGateRun(root);
+    assert.equal(original?.current, true);
+    assert.ok(original?.gateRunId);
+
+    fs.mkdirSync(path.join(root, 'backlog/tasks'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'backlog/tasks/task.md'), 'status: review\n');
+    repo.git('add', '.');
+    repo.git('commit', '-m', 'record task');
+    assert.equal(readIntegrationGateRun(root)?.current, true, 'Backlog-only movement is directly equivalent');
+
+    for (const [file, text] of Object.entries(manifests('1.0.1'))) { fs.writeFileSync(path.join(root, file), text); }
+    repo.git('add', '.');
+    repo.git('commit', '-m', bookkeepingCommitMessage('release hook', 'pre-commit-hook'));
+    assert.equal(readIntegrationGateRun(root)?.current, true, 'the genuine tagged version hook is directly equivalent');
+
+    repo.git('checkout', 'main');
+    fs.writeFileSync(path.join(root, 'src/upstream.ts'), 'export const upstream = true;\n');
+    repo.git('add', '.');
+    repo.git('commit', '-m', 'upstream source');
+    repo.git('checkout', 'mission');
+    repo.git('rebase', 'main');
+    for (const [file, text] of Object.entries(manifests('1.0.2'))) { fs.writeFileSync(path.join(root, file), text); }
+    repo.git('add', '.');
+    repo.git('commit', '-m', bookkeepingCommitMessage('release hook after rebase', 'pre-commit-hook'));
+    const carried = readIntegrationGateRun(root);
+    assert.equal(carried?.current, false, 'substantive rebased inputs use recorded lineage, not direct equivalence');
+    assert.equal(carried?.carried?.length, 1, 'the hook after the completed rebase keeps the lineage connected');
+    assert.equal(carried?.gateRunId, original.gateRunId, 'the original run identity survives every equivalent move');
+
+    for (const [file, text] of Object.entries(manifests('1.0.3', true))) { fs.writeFileSync(path.join(root, file), text); }
+    repo.git('add', '.');
+    repo.git('commit', '-m', bookkeepingCommitMessage('substantive manifest edit', 'pre-commit-hook'));
+    const substantive = readIntegrationGateRun(root);
+    assert.equal(substantive?.current, false);
+    assert.equal(substantive?.carried, null, 'dependency movement after the carried candidate requires fresh gates');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
 
 // Real Git and phase execution boundary: existing integration-ci owner, ADR 0057.
 for (const scenario of ['green', 'partial', 'failed', 'uncovered']) {

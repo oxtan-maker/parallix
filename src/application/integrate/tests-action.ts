@@ -21,6 +21,7 @@ import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { IntegrationStopsForHuman } from './review-before-integration.js';
 import { integrationSeams } from '../integrate-entry.js';
 import type { IntegrateOptions } from '../integrate-workflow.js';
+import { passingIntegrationReceiptApplies } from '../../domain/integration-validation-policy.js';
 
 export interface TestsActionRequest {
   readonly slug: string;
@@ -100,11 +101,7 @@ function freshRun(run: IntegrationGateRunRecord | null, head: string | null, pre
  */
 export function completeCurrentTestsPass(run: IntegrationGateRunRecord | null, head: string | null,
   configured: readonly { key: string; command: string }[]): run is IntegrationGateRunRecord {
-  return run !== null && run.status === 'passed' && run.current && run.gateRunId !== null && head !== null
-    && run.revision === head && configured.length > 0
-    && run.gates.length === configured.length && run.outcomes.length === configured.length
-    && configured.every(gate => run.gates.some(ran => ran.key === gate.key && ran.command === gate.command)
-      && run.outcomes.filter(outcome => outcome.key === gate.key && outcome.command === gate.command && outcome.exitCode === 0).length === 1);
+  return passingIntegrationReceiptApplies(run, head, configured, 'exact');
 }
 
 function messageOf(error: unknown): string {

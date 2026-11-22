@@ -250,7 +250,7 @@ export interface IntegrationGateRunRecord {
   readonly gateRunId: string | null;
   readonly revision: string;
   readonly status: 'running' | 'passed' | 'failed' | 'cancelled';
-  /** The run's recorded input identity matches the checkout now (toolchain, coverage, worktree). */
+  /** The run covers the checkout now by exact input identity or adapter-proven revision equivalence. */
   readonly current: boolean;
   /** Completed rebases that carried the run to the checked-out HEAD; null when none. */
   readonly carried: import('../../domain/integration-validation-policy.js').CompletedRebaseLineage | null;

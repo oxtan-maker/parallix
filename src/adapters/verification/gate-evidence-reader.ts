@@ -58,8 +58,7 @@ function readCheckout(worktree: string, gitRunner: GitReader = git): Extract<Gat
 function coversCheckout(run: IntegrationGateRun, gate: { key: string; command: string }, checkout: Extract<GateCheckout, { kind: 'present' }>): boolean {
   if (!checkout.clean) { return false; }
   if (run.carried) { return run.gates.some(candidate => candidate.key === gate.key); }
-  return run.current && run.revision === checkout.revision
-    && run.gates.find(candidate => candidate.key === gate.key)?.command === gate.command;
+  return run.current && run.gates.find(candidate => candidate.key === gate.key)?.command === gate.command;
 }
 
 function newerResult<T extends GateResultEvidence>(prior: T | null, candidate: T): T {

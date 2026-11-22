@@ -5,6 +5,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { MissionRevision } from '../../application/ports/review-evidence.js';
 import { isBookkeepingPath } from '../../domain/integration-validation-policy.js';
+import { releaseVersionOnly } from '../git/revision-equivalence.js';
+
+export { releaseVersionOnly } from '../git/revision-equivalence.js';
 
 interface JsonManifest { version: unknown; packages?: Record<string, { version: unknown }>; [key: string]: unknown }
 const manifest = (raw: string): JsonManifest => JSON.parse(raw) as JsonManifest;
@@ -131,24 +134,6 @@ export class GitMissionPatchComparison {
       return [...headers, ...normalized.split('\n').filter(l => !/^(diff --git |index |--- |\+\+\+ )/.test(l))].join('\n');
     } finally { await rm(scratch, { recursive: true, force: true }); }
   }
-}
-
-/** Exactly the hook's root version fields; formatting, dependencies and every other byte stay substantive. */
-export function releaseVersionOnly(before: string, after: string, path: string): boolean {
-  try {
-    const old = manifest(before), next = manifest(after);
-    const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(old.version));
-    if (!match || next.version !== `${match[1]}.${match[2]}.${Number(match[3]) + 1}`) { return false; }
-    const version = next.version;
-    next.version = old.version;
-    if (path === 'package-lock.json' && next.packages?.['']) {
-      if (next.packages[''].version !== version || old.packages?.['']?.version !== old.version) { return false; }
-      next.packages[''].version = old.version;
-    }
-    return JSON.stringify(next) === JSON.stringify(old)
-      && after === `${JSON.stringify(manifest(after), null, 2)}\n`
-      && before === `${JSON.stringify(old, null, 2)}\n`;
-  } catch { return false; }
 }
 
 function canNormalizeRelease(path: string, diff: string): boolean {

@@ -133,6 +133,8 @@ test('patch comparison fails closed on Git errors and only accepts release-versi
   assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4' }), 'package.json'), true);
   assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.3.0' }), 'package.json'), false);
   assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4', dependencies: { x: '2' } }), 'package.json'), false);
+  assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4', scripts: { test: 'false' } }), 'package.json'), false);
+  assert.equal(releaseVersionOnly(json(pkg), json({ ...pkg, version: '1.2.4', config: { mode: 'changed' } }), 'package.json'), false);
   assert.equal(releaseVersionOnly(json(pkg), JSON.stringify({ ...pkg, version: '1.2.4' }), 'package.json'), false);
 });
 

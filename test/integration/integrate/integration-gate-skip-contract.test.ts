@@ -1,7 +1,7 @@
 import type { OperationalHistoryEntry } from '../../../src/application/ports/operation-history.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
-import type { IntegrateWorkflowPorts } from '../../../src/application/ports/integrate-workflow.js';
-import { fixtureMission } from '../../fixtures/mission-builders.js';
+import type { IntegrateWorkflowPorts, IntegrationGateRunRecord } from '../../../src/application/ports/integrate-workflow.js';
+import { approvedReview, fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { classifyReboundReason } from '../../../src/domain/rebound-policy.js';
 import { phaseGateResult } from '../../helpers/phase-gate-result.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
@@ -35,6 +35,7 @@ import {
   partitionGatesForSkip,
   parseIntegrationValidationMarker,
   isBookkeepingPath,
+  passingIntegrationReceiptApplies,
   validationSkipApplies,
 } from '../../../src/application/integrate/validation-marker.js';
 import { captureFinalIntegrationTree, listChangedPathsBetween } from '../../../src/adapters/cli/commands/integrate-gates.js';
@@ -47,6 +48,15 @@ import { openRepairFixture } from '../../lib/integration-repair-fixture.js';
 import { SqliteOperationalHistoryRepository } from '../../../src/adapters/sqlite/operational-history-repository.js';
 import { completedRebaseLineageForCheckout, ensureRebaseCompletionRecorder } from '../../../src/adapters/git/rebase-completion-recorder.js';
 import { writeJson } from '../../../src/adapters/storage/storage.js';
+import { bookkeepingCommitMessage } from '../../../src/domain/approval-coverage.js';
+import { verificationEquivalentRevision } from '../../../src/adapters/git/revision-equivalence.js';
+import { approveEligibleIntegrationShortcut } from '../../../src/application/integrate/approval.js';
+import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
+import { recordApproval } from '../../../src/adapters/review/review-round.js';
+import { agentFamily } from '../../../src/domain/agents.js';
+import { changeRevision, type Review } from '../../../src/domain/review.js';
+import { createIntegrationVerificationEvidencePort, readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { missionId } from '../../../src/domain/mission.js';
 
 const EVENT = INTEGRATION_VALIDATION_EVENT_TYPE;
 const SLUG = 'task-2625';
@@ -102,7 +112,54 @@ test('partitionGatesForSkip splits whitelisted (skip) from unvalidated (run) hoo
   assert.deepEqual(run, ['integration-ci', 'quality-gate']);
 });
 
+test('passing receipt policy preserves exact and equivalent coverage but rejects incomplete, stale, failed, cancelled, superseded, and other-plan evidence (TASK-2867.09)', () => {
+  const configured = [{ key: 'unit', command: 'u' }, { key: 'integration-ci', command: 'i' }];
+  const receipt = { gateRunId: 'original-run', revision: 'tested', status: 'passed' as const, current: true, carried: null,
+    gates: configured, outcomes: configured.map(gate => ({ ...gate, exitCode: 0 })) };
+  assert.equal(passingIntegrationReceiptApplies(receipt, 'tested', configured, 'exact'), true, 'exact-head policy restart');
+  assert.equal(passingIntegrationReceiptApplies({ ...receipt, revision: 'before-backlog' }, 'after-backlog', configured, 'equivalent'), true,
+    'adapter-proven equivalent inputs retain the receipt');
+  assert.equal(passingIntegrationReceiptApplies({ ...receipt, current: false, carried: [{ from: 'before', to: 'after' }] },
+    'after', configured, 'equivalent'), true, 'completed rebase retains the receipt');
+  const rejected = [
+    null,
+    { ...receipt, gateRunId: null },
+    { ...receipt, gates: configured.slice(0, 1), outcomes: receipt.outcomes.slice(0, 1) },
+    { ...receipt, current: false },
+    { ...receipt, status: 'failed' as const },
+    { ...receipt, status: 'cancelled' as const },
+    { ...receipt, status: 'running' as const },
+    { ...receipt, outcomes: [{ ...configured[0], exitCode: 1 }, receipt.outcomes[1]] },
+  ];
+  for (const candidate of rejected) {
+    assert.equal(passingIntegrationReceiptApplies(candidate, 'tested', configured, 'equivalent'), false);
+  }
+  assert.equal(passingIntegrationReceiptApplies(receipt, 'tested', [{ key: 'unit', command: 'changed' }], 'equivalent'), false,
+    'gate-plan mismatch reruns');
+});
+
 // ── resolveSkippableGates (the wired skip decision) ───────────────────────────
+
+test('revision equivalence avoids Git reads for the identical revision and stops after one diff for obvious changes (TASK-2867.09)', () => {
+  const original = '1'.repeat(40), candidate = '2'.repeat(40);
+  const calls: string[][] = [];
+  const backlogOnly = (args: string[]) => {
+    calls.push(args);
+    return { status: 0, stdout: 'backlog/tasks/task-1.md\0', stderr: '' };
+  };
+  assert.equal(verificationEquivalentRevision('/repo', original, original, backlogOnly), true);
+  assert.equal(calls.length, 0, 'same revision requires no Git read');
+  assert.equal(verificationEquivalentRevision('/repo', original, candidate, backlogOnly), true);
+  assert.equal(calls.length, 1, 'Backlog-only movement requires one diff');
+
+  calls.length = 0;
+  const substantive = (args: string[]) => {
+    calls.push(args);
+    return { status: 0, stdout: 'src/change.ts\0', stderr: '' };
+  };
+  assert.equal(verificationEquivalentRevision('/repo', original, candidate, substantive), false);
+  assert.equal(calls.length, 1, 'an obviously substantive path stops after one diff');
+});
 
 function markerEntry(sha: string, hooks: string[]) {
   return { createdAt: '2026-10-01T00:00:00Z', eventType: EVENT, eventData: JSON.stringify({ missionId: SLUG, sha, hooks }) };
@@ -113,6 +170,7 @@ type ChangedPathsResult = { ok: true; paths: string[] } | { ok: false; error: st
 function makeStep(overrides: {
   loadLatest?: () => Promise<OperationalHistoryEntry | null> | OperationalHistoryEntry | null;
   runPhaseGates?: IntegrateWorkflowPorts['gates']['runPhaseGates'];
+  readGateRun?: IntegrateWorkflowPorts['gates']['readGateRun'];
   changedPaths?: (_from: string, _to: string) => ChangedPathsResult;
   lineageRoot?: string;
 } = {}) {
@@ -128,6 +186,7 @@ function makeStep(overrides: {
       captureFinalIntegrationTree: () => ({ ok: true as const, rootDir: '/fw', commit: 'final', tree: 't' }),
       loadPhaseGates: () => [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }],
       loadRequirePreIntegration: () => false,
+      ...(overrides.readGateRun ? { readGateRun: overrides.readGateRun } : {}),
       runPhaseGates: overrides.runPhaseGates
         ? overrides.runPhaseGates
         : async () => phaseGateResult({ skipped: false, gates: [{ key: 'unit', command: 'u', order: 1 }, { key: 'integration-ci', command: 'i', order: 2 }], executed: 2 }),
@@ -387,7 +446,8 @@ function openGitRepo() {
     git('commit', '-q', '--no-verify', '-m', message);
   };
   git('init', '-q', '-b', 'main');
-  commit({ 'src/a.ts': 'export const a = 1;\n', [TASK_FILE]: 'status: active\n' }, 'base');
+  commit({ 'src/a.ts': 'export const a = 1;\n', [TASK_FILE]: 'status: active\n',
+    'package.json': '{\n  "version": "1.0.0"\n}\n' }, 'base');
   return { root, git, head, commit, close: () => fs.rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -422,6 +482,8 @@ test('listChangedPathsBetween reports moved task records and fails open for unre
     const diff = listChangedPathsBetween(repo.root, validated, moved);
     assert.equal(diff.ok, true);
     assert.deepEqual(diff.ok && [...diff.paths].sort(), ['backlog/completed/task-9001 - Example-task.md', TASK_FILE]);
+    assert.equal(verificationEquivalentRevision(repo.root, validated, moved), true,
+      'both sides of a Backlog lane transition remain verification bookkeeping');
     assert.equal(listChangedPathsBetween(repo.root, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', moved).ok, false, 'unreachable marker sha');
     assert.equal(listChangedPathsBetween(repo.root, '--output=/tmp/x', moved).ok, false, 'malformed id never reaches git');
   } finally { repo.close(); }
@@ -474,84 +536,169 @@ test('a recorded completed rebase carries validated hooks across upstream source
   } finally { repo.close(); }
 });
 
-// ── TASK-2859.14 (W17): review-step tests evidence at the landing candidate ────
-// One real git rebound flow: the review-step tests action rebases and runs red,
-// the rebound kernel's verify seam re-runs green on the fix commit, then a
-// bookkeeping commit and the final landing rebase move the candidate. Landing
-// coverage is read only through the existing marker and completed-rebase owners.
-
-test('a review-step tests rebound marks only the fix commit; landing reuses it across bookkeeping and reruns after a version commit (TASK-2859.14)', async () => {
+test('a tagged manifest commit with dependency, script, or configuration changes is substantive (TASK-2867.09)', async () => {
   const repo = openGitRepo();
-  const markers: Array<{ missionId: string; sha: string; hooks: readonly string[]; failed?: boolean }> = [];
-  const previous = setLogger({ log: () => {}, error: () => {} });
   try {
     repo.git('checkout', '-q', '-b', 'mission');
-    repo.commit({ 'src/a.ts': 'export const a = 2;\n' }, 'feature');
-    let run: { gateRunId: string; revision: string; status: 'failed'; current: boolean; carried: null; gates: { key: string; command: string }[];
-      outcomes: { key: string; command: string; exitCode: number }[] } | null = null;
-    const gitRunner = (args: string[]) => { try { return { status: 0, stdout: execFileSync('git', args, { encoding: 'utf8' }), stderr: '' }; }
-      catch (error) { return { status: 1, stdout: '', stderr: String(error) }; } };
+    const validated = repo.head();
+    repo.commit({ 'package.json': '{\n  "version": "1.0.1",\n  "dependencies": {\n    "x": "2"\n  },\n  "scripts": {\n    "test": "false"\n  },\n  "config": {\n    "mode": "changed"\n  }\n}\n' },
+      bookkeepingCommitMessage('chore(task-2867.09): integrate pre-commit hook', 'pre-commit-hook'));
+    assert.equal(verificationEquivalentRevision(repo.root, validated, repo.head()), false,
+      'a trailer cannot authorize dependency, script, or configuration changes');
+    const receipt = { gateRunId: 'original-run', revision: validated, status: 'passed' as const, current: false, carried: null,
+      gates: REBOUND_GATES, outcomes: REBOUND_GATES.map(gate => ({ ...gate, exitCode: 0 })) };
+    const { step, operationalHistory } = makeStep({ loadLatest: () => null, readGateRun: () => receipt });
+    const result = await step.resolveSkippableGates({ configured: REBOUND_GATES, slug: SLUG, checkout: repo.root,
+      finalizedCommit: repo.head(), operationalHistory, log: () => {} });
+    assert.deepEqual(result.gates, REBOUND_GATES, 'substantive manifest movement takes the existing gate path');
+  } finally { repo.close(); }
+});
+
+test('moving a source file into Backlog is substantive and runs the full landing gate plan (TASK-2867.09)', async () => {
+  const repo = openGitRepo();
+  try {
+    repo.git('checkout', '-q', '-b', 'mission');
+    const evidence = createIntegrationVerificationEvidencePort();
+    const run = await evidence.start(repo.root, REBOUND_GATES, { missionId: missionId(SLUG), operatorInvocation: false });
+    assert.ok(run, 'the original source tree has a complete passing receipt');
+    run.complete(REBOUND_GATES.map(({ key, command }) => ({ key, command, exitCode: 0 })), 'passed');
+
+    fs.mkdirSync(path.join(repo.root, 'backlog/tasks'), { recursive: true });
+    repo.git('mv', 'src/a.ts', 'backlog/tasks/a.md');
+    repo.commit({}, 'move source into backlog');
+
+    const receipt = readIntegrationGateRun(repo.root);
+    assert.equal(receipt?.current, false, 'the deleted source path makes the landing tree substantive');
+    assert.equal(receipt?.carried, null);
+    const { step, operationalHistory } = makeStep({ loadLatest: () => null, readGateRun: () => receipt });
+    const landing = await step.resolveSkippableGates({ configured: REBOUND_GATES, slug: SLUG,
+      checkout: repo.root, finalizedCommit: repo.head(), operationalHistory, log: () => {} });
+    assert.deepEqual(landing.gates, REBOUND_GATES, 'landing runs the complete configured gate plan');
+  } finally { repo.close(); }
+});
+
+// ── TASK-2867.09: review-step tests evidence at the landing candidate ────
+// One real Git approval-to-landing flow: the policy-selected tests action writes
+// a green receipt, agent and human approval preserve it, then the tagged version
+// hook moves the candidate. Landing reads currency through the production adapter.
+
+test('a complete green policy tests receipt survives agent and human approval and the verified version hook (TASK-2867.09)', async () => {
+  const repo = openGitRepo();
+  const diagnostics: string[] = [];
+  const previous = setLogger({ log: message => diagnostics.push(String(message)), error: message => diagnostics.push(String(message)) });
+  try {
+    repo.git('checkout', '-q', '-b', 'mission');
+    let launches = 0;
+    const evidence = createIntegrationVerificationEvidencePort();
+    const runState: { receipt: IntegrationGateRunRecord | null } = { receipt: null };
+    const readRun = () => runState.receipt;
     const ports = stubIntegrateWorkflowPorts({
       process: { cwd: () => repo.root, claimIntegration: async () => async () => {} },
-      git: { git: gitRunner, getCurrentBranch: () => 'mission' },
+      git: { getCurrentBranch: () => 'mission' },
       gates: {
         resolveIntegrationVerificationWorktree: () => repo.root,
         captureFinalIntegrationTree: root => captureFinalIntegrationTree(root),
         loadPhaseGates: () => REBOUND_GATES, loadRequirePreIntegration: () => true,
-        // The gate-run writer's red record for the tested head; its writer has its own suite.
         runPhaseGates: async () => {
-          run = { gateRunId: 'tests-run', revision: repo.head(), status: 'failed', current: true, carried: null,
-            gates: REBOUND_GATES.map(({ key, command }) => ({ key, command })), outcomes: [{ key: 'unit', command: 'u', exitCode: 1 }] };
-          return phaseGateResult({ ok: false, gates: REBOUND_GATES, executed: 1, failedGate: { key: 'unit', command: 'u' }, error: 'red' });
+          launches++;
+          const outcomes = REBOUND_GATES.map(({ key, command }) => ({ key, command, exitCode: 0 }));
+          const run = await evidence.start(repo.root, REBOUND_GATES, { missionId: missionId(SLUG), operatorInvocation: false });
+          assert.ok(run, 'the real receipt adapter starts the policy gate run');
+          run.complete(outcomes, 'passed');
+          // Cache the writer's persisted fields for the tests action; landing below deliberately rereads currency.
+          const stored = JSON.parse(fs.readFileSync(path.join(repo.root, '.git', 'integration-verification-proof.json'), 'utf8')) as {
+            run: { gateRunId: string }; revision: string; status: 'passed';
+            gates: { key: string; command: string }[]; outcomes: { key: string; command: string; exitCode: number }[];
+          };
+          runState.receipt = { gateRunId: stored.run.gateRunId, revision: stored.revision, status: stored.status,
+            current: true, carried: null, gates: stored.gates, outcomes: stored.outcomes };
+          return phaseGateResult({ gates: REBOUND_GATES, executed: REBOUND_GATES.length,
+            outcomes: outcomes.map(outcome => ({ ...outcome, stdout: '', stderr: '' })), proofReusable: true });
         },
-        readGateRun: () => run,
+        readGateRun: readRun,
       },
       verification: { formatVerificationCommand: () => 'verify' },
       landing: { createAbort: () => Object.assign(new Error('aborted'), { name: 'IntegrationAbort' }),
         isAbort: error => (error as Error)?.name === 'IntegrationAbort' },
     });
-    const services = integrationServices({ operationalHistory: {
-      loadLatestByTypeForMission: async () => null,
-      recordIntegrationValidation: async marker => { markers.push(marker); },
-    } });
+    const services = integrationServices({ operationalHistory: { loadLatestByTypeForMission: async () => null,
+      recordIntegrationValidation: async () => {} } });
     const outcome = await createTestsActionExecutor(ports, {
       buildIntegrationContext: async (slug, options) => integrationContext({ slug, executionContext: options.executionContext,
         baseWorktree: repo.root, missionWorktree: repo.root, reviewState: { implementer: 'custom' } }),
-      runIntegrationRebase: async () => { repo.git('rebase', '-q', 'main', 'mission'); },
+      runIntegrationRebase: async () => {},
       runRequiredLocalGates: request => createIntegrationGateStep(ports).runRequiredLocalGates(request),
     }).runTestsAction({ slug: SLUG, policySelection: 'tests', missionServicesFn: async () => services,
       executionContext: { missionId: SLUG, missionWorktree: repo.root, missionBranch: 'mission', baseWorktree: repo.root, baseBranch: 'main' },
       seams: {
-        routeIntegrationGateFailureFn: input => routeIntegrationGateFailure({ ...input,
-          runPhaseGatesFn: async () => completeGreenReboundResult(),
-          invalidateApprovalFn: async () => ({ ok: true, dismissed: [], errors: [] }),
-          // The implementer's repair commit, then the kernel's own verify seam.
-          reboundFn: async (reason, ctx) => {
-            repo.commit({ 'src/a.ts': 'export const a = 3;\n' }, 'repair');
-            await ctx.verify(1);
-            return { attempts: 1, outcome: 'fixed', diagnostic: '', implementer: ctx.implementer, classification: classifyReboundReason(reason) };
-          } }),
-        startAgentFn: async () => { throw new Error('the fixture rebound owns the repair'); },
+        routeIntegrationGateFailureFn: async () => { throw new Error('green tests must not enter repair'); },
+        startAgentFn: async () => { throw new Error('green tests must not launch a repair agent'); },
         transitionTaskFn: async () => true,
         applyAgentFallbackFn: async () => 'custom',
       } });
-    assert.equal(outcome.kind === 'completed' && outcome.verdict, 'failed', JSON.stringify(outcome));
+    if (outcome.kind !== 'completed' || outcome.verdict !== 'passed') { assert.fail(JSON.stringify(outcome)); }
+    const originalRunId = runState.receipt?.gateRunId;
+    assert.ok(originalRunId);
+    assert.equal(outcome.evidence.gateRunId, originalRunId);
     const validated = repo.head();
-    assert.deepEqual(markers.filter(marker => !marker.failed).map(marker => marker.sha), [validated],
-      'only the rebound green rerun records a reusable marker, keyed on the fix commit');
+    assert.equal(launches, 1, 'the policy tests action launches one complete local gate batch');
 
-    repo.commit({ [TASK_FILE]: 'status: review\n' }, 'backlog bookkeeping');
-    repo.git('checkout', '-q', 'main');
-    repo.commit({ 'backlog/tasks/task-9002 - Other.md': 'status: review\n' }, 'upstream bookkeeping before landing');
-    repo.git('checkout', '-q', 'mission');
-    const logs: string[] = [];
-    const landing = await resolveAfterRebase(repo, validated, logs);
-    assert.notEqual(landing.finalized, validated, 'the landing rebase moved the candidate');
-    assert.deepEqual(landing.keys, [], 'mission and upstream bookkeeping alone reuse every validated hook');
-    assert.match(logs.join('\n'), /differs only in backlog bookkeeping/);
-    repo.commit({ 'package.json': '{"version":"1.0.1"}\n' }, 'landing version bump');
-    assert.deepEqual((await resolveAtHead(repo, validated)).keys, ['unit', 'integration-ci'],
-      'a landing-time version commit (preCommitCommand) after the rebase reruns the full configured set');
+    // The existing agent-review aggregate and human shortcut owner consume the
+    // original receipt without replacing it.
+    const review = approvedReview(SLUG);
+    const round = review.rounds[0];
+    const approved: Review = { ...review, rounds: [{ ...round,
+      subject: { ...round.subject, revision: changeRevision(validated) },
+      decision: round.decision?.kind === 'approved'
+        ? { ...round.decision, revision: changeRevision(validated) }
+        : round.decision,
+    }] };
+    const approvalMission = fixtureMission(SLUG, {
+      status: 'review', assignee: agentFamily('codex'), review: approved,
+    });
+    const approvalStore = inMemoryTransitionStore(approvalMission);
+    const approvalServices = integrationServices({
+      store: approvalStore,
+      lifecycle: new MissionLifecycleService(approvalStore),
+    });
+    const approvalContext = integrationContext({ slug: SLUG, missionStatus: 'review', missionReview: approved,
+      baseWorktree: repo.root, missionWorktree: repo.root });
+    const approvalPorts = stubIntegrateWorkflowPorts({
+      gates: {
+        resolveIntegrationVerificationWorktree: () => repo.root,
+        captureFinalIntegrationTree: root => captureFinalIntegrationTree(root),
+        loadPhaseGates: () => REBOUND_GATES,
+        readGateRun: readRun,
+      },
+      landing: { createAbort: () => Object.assign(new Error(diagnostics.join('\n')), { name: 'IntegrationAbort' }) },
+      review: { submitApproval: async (slug, _message, options) => {
+        const result = await recordApproval(slug, { comment: 'Integrated by human', revision: options.reviewedRevision,
+          decidedAt: '2026-11-22T10:00:00Z', source: { kind: 'local' } },
+        { missionStore: options.missionServices.store, lifecycleService: options.missionServices.lifecycle });
+        return result.outcome === 'failed' ? { ok: false, diagnostic: result.diagnostic } : { ok: true };
+      } },
+    });
+    await approveEligibleIntegrationShortcut(approvalContext, await approvalStore.load(approvalMission.id),
+      approvalServices, approvalPorts);
+    assert.equal((await approvalStore.load(approvalMission.id)).mission.status, 'integration');
+    assert.equal(runState.receipt?.gateRunId, originalRunId, 'approval preserves the original gate receipt');
+
+    repo.commit({ 'package.json': '{\n  "version": "1.0.1"\n}\n' },
+      bookkeepingCommitMessage('chore(task-2867.09): integrate pre-commit hook', 'pre-commit-hook'));
+
+    const finalized = repo.head();
+    assert.notEqual(finalized, validated, 'the verified hook moved the candidate');
+    const landingState: { receipt: ReturnType<typeof readIntegrationGateRun> } = { receipt: null };
+    const gateStep = makeStep({ loadLatest: () => null, readGateRun: checkout => {
+      landingState.receipt = readIntegrationGateRun(checkout);
+      return landingState.receipt;
+    } });
+    const landing = await gateStep.step.resolveSkippableGates({ configured: REBOUND_GATES, slug: SLUG,
+      checkout: repo.root, finalizedCommit: finalized, operationalHistory: gateStep.operationalHistory, log: () => {} });
+    assert.deepEqual(landing.gates, [], 'landing reuses the complete original receipt');
+    assert.equal(launches, 1, 'landing launches no second local gate batch');
+    assert.equal(landingState.receipt?.current, true, 'the production reader proves the hook-only revision equivalent');
+    assert.equal(landingState.receipt?.gateRunId, originalRunId, 'the original run identity and verdict provenance survive');
   } finally { setLogger(previous); repo.close(); }
 });
 

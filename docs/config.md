@@ -249,7 +249,11 @@ and runtime/npm toolchain. Configuration and tracked substantive inputs must
 also match, unless completed rebases, recorded the same way as for
 active/review verification, carried the evidence to the current SHA. Otherwise
 a different SHA requires a successful Git diff containing only `backlog/tasks/`
-or `backlog/completed/` bookkeeping paths.
+or `backlog/completed/` bookkeeping paths. A genuine release hook commit is
+also verification-neutral when its bookkeeping trailer is present and its only
+manifest change is the expected patch-version increment; dependency, script,
+configuration or formatting changes remain substantive and require fresh
+verification.
 
 Local integration validation follows the same completed-rebase rule. Wherever
 Parallix reuses a successful local integration result on its validated revision,
@@ -266,7 +270,13 @@ the actual rebased candidate independently, so rebase-introduced problems are
 caught there. Missing, malformed, failed or incomplete evidence, dirty inputs
 or Git lookup failures cause normal verification. Starting another integration
 run clears earlier integration-backed evidence, so failed or partial retries
-cannot reuse it.
+cannot reuse it. When the policy tests action has already completed the entire
+configured gate plan successfully, landing consumes that original run receipt
+under these same equivalence rules instead of starting the plan again. The
+receipt keeps its original run and verdict identity. Missing, partial, stale,
+failed, cancelled or superseded receipts run the configured gates normally.
+Downstream origin CI still validates the exact landed candidate and is the
+residual safeguard for changes introduced by an accepted completed rebase.
 Review approval, required integration gates and exact publication proof checks
 retain their own authorization requirements.
 

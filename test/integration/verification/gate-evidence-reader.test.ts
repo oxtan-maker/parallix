@@ -9,8 +9,9 @@ import { recoveryEvidenceFileSystem } from '../../../src/adapters/filesystem/rec
 import { writeActiveVerificationProof, inspectActiveVerificationProof } from '../../../src/adapters/verification/active-verification-proof.js';
 import { VerificationReadSnapshot } from '../../../src/adapters/verification/verification-read-snapshot.js';
 import { git, type GitReader } from '../../../src/adapters/git/git.js';
+import { completedRebaseLineageForCheckout } from '../../../src/adapters/git/rebase-completion-recorder.js';
 import { VerificationGateEvidenceReader } from '../../../src/adapters/verification/gate-evidence-reader.js';
-import { createIntegrationVerificationEvidencePort } from '../../../src/adapters/verification/integration-verification-proof.js';
+import { createIntegrationVerificationEvidencePort, readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
 import { VerificationGateObserver } from '../../../src/application/projections/gate-observation.js';
 import { captureRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
@@ -262,6 +263,44 @@ test('gate evidence reader keeps marker and run results current across completed
     fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 3;\n'); repo.git('commit', '-am', 'new implementation');
     assert.deepEqual((await reader.readIntegrationGates(scope, null)).gates.map(gate => gate.proof.state), ['stale', 'stale'],
       'an implementation edit outside a completed rebase makes both results stale');
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
+test('gate evidence reports a directly equivalent rebased receipt as current (TASK-2867.09)', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-equivalent-rebase-evidence-'));
+  try {
+    const gates = [{ key: 'unit', command: 'true', order: 0 }];
+    const repo = initCommittedRepository(root, { 'src/input.ts': 'export const value = 1;\n',
+      'workflow.config.json': JSON.stringify({ adapters: { gates: { preIntegration: gates } } }) });
+    const configuration = resolveConfiguration({ ...process.env, PARALLIX_HOME: path.join(root, '.git', 'home') });
+    const scope = { repositoryId: repositoryId('task-2867-repository'), missionId: missionId('task-2867.09') };
+    repo.git('checkout', '-b', 'mission/task-2867.09');
+    fs.writeFileSync(path.join(root, 'src/input.ts'), 'export const value = 2;\n');
+    repo.git('commit', '-am', 'mission implementation');
+    const validated = repo.git('rev-parse', 'HEAD').trim();
+    const run = await createIntegrationVerificationEvidencePort(configuration).start(root, gates,
+      { missionId: scope.missionId, operatorInvocation: false });
+    assert.ok(run);
+    run.complete([{ key: 'unit', command: 'true', exitCode: 0 }], 'passed');
+
+    repo.git('checkout', 'main');
+    fs.mkdirSync(path.join(root, 'backlog/tasks'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'backlog/tasks/task.md'), 'status: review\n');
+    repo.git('add', '.');
+    repo.git('commit', '-m', 'record task');
+    repo.git('checkout', 'mission/task-2867.09');
+    repo.git('rebase', 'main');
+
+    assert.equal(completedRebaseLineageForCheckout(root, validated, repo.git('rev-parse', 'HEAD').trim())?.length, 1,
+      'the installed recorder also captured the completed rebase');
+    const receipt = readIntegrationGateRun(root, configuration);
+    assert.equal(receipt?.current, true, 'Backlog-only movement is direct revision equivalence');
+    assert.equal(receipt?.carried, null, 'direct equivalence remains the cheap currency path');
+    const observed = await new VerificationGateEvidenceReader({ configuration, resolveWorktree: () => root,
+      integrationValidation: async () => null }).readIntegrationGates(scope, null);
+    assert.deepEqual(observed.gates[0].proof,
+      { state: 'current', revision: validated, observedAt: receipt?.finishedAt },
+      'board evidence trusts adapter-proven current coverage across the equivalent revision');
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
