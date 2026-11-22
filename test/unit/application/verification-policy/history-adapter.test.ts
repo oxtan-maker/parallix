@@ -99,7 +99,7 @@ test('maps authoritative verdicts and exact repairs while wrong-revision checks 
   ]);
 });
 
-test('maps landing failure and its verdict record, while exact repair clears that record (TASK-2859.08, TASK-2867.02)', () => {
+test('maps landing failure and its verdict record, while exact and multi-gate repairs clear that record (TASK-2859.08, TASK-2867.02, TASK-2867.04)', () => {
   assert.deepEqual(entries(mapped(null, gate('pass'))), [{ kind: 'verdict', check: 'tests', passed: true }]);
   assert.deepEqual(mapped(null, gate('stale')), { ok: true, entries: [], record: { passed: [], failed: [] }, tests: 'observed' });
   assert.deepEqual(entries(mapped(null, gate('pass', 'other'))), [{ kind: 'unmodelled-change' }]);
@@ -122,7 +122,7 @@ test('maps landing failure and its verdict record, while exact repair clears tha
   assert.deepEqual(entries(mapped(failed, null, [row('wide', 'pass')], multi)), [
     { kind: 'verdict', check: 'agent', passed: true },
     { kind: 'verdict', check: 'tests', passed: false },
-    { kind: 'unmodelled-change' },
+    { kind: 'repair', check: 'tests' },
   ]);
   assert.deepEqual(entries(mapped(failed, gate('pass', 'other'), [], [],
     { identity: { branchHead: () => null, changeIdentity: revision => revision } })), [
@@ -130,6 +130,42 @@ test('maps landing failure and its verdict record, while exact repair clears tha
     { kind: 'verdict', check: 'tests', passed: false },
     { kind: 'unmodelled-change' },
   ]);
+});
+
+test('a joint agent and human repair records both repaired checks but applies the last verdict transition once (TASK-2867.04)', async () => {
+  const agentFailed = recordReviewerResult(start(), { publicationId: 'agent-failure', reviewerId: 'claude',
+    agentFamily: agentFamily('claude'), revision: rev('a'), decision: 'changes-requested',
+    findings: [{ id: reviewFindingId('agent-finding'), summary: 'agent finding', location: null }],
+    outcome: 'completed', status: 0, publishedAt: at(9) });
+  const jointlyFailed = decide(agentFailed, 'request-changes', { kind: 'operator', author: 'magnus' });
+  const jointlyRepaired = repair(jointlyFailed);
+  const mission = fixtureMission('task-x', { review: jointlyRepaired });
+  const history = await readVerificationHistory({
+    store: { load: async () => ({ kind: 'found' as const, mission, version: 1 as never }) },
+    gates: { readIntegrationGates: async () => gate('stale') },
+    history: { loadAllByTypeForMission: async () => [] }, lifecycle: { findByMissionId: async () => [] },
+    operations: { all: async () => [] },
+    identity: { branchHead: () => null, changeIdentity: (revision: string) => revision },
+  }, { repositoryId: repositoryId('repo'), missionId: missionId('task-x') });
+  assert.deepEqual(entries(history), [
+    { kind: 'verdict', check: 'agent', passed: false },
+    { kind: 'verdict', check: 'human', passed: false },
+    { kind: 'repair', check: 'agent' },
+    { kind: 'repair', check: 'human' },
+  ]);
+  assert.deepEqual(history.ok && history.record, { passed: [], failed: [] });
+
+  const parsed = parsePolicyArtifact(syntheticPolicyArtifactV2());
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok) { return; }
+  const repairTransitions: string[] = [];
+  const transition = new Proxy(parsed.artifact.transition, { get(target, key: string) {
+    if (key.startsWith('repair-')) { repairTransitions.push(key); }
+    return target[key];
+  } });
+  const belief = deriveBelief({ ...parsed.artifact, transition }, history.ok ? history.entries : []);
+  assert.equal(belief.ok, true, JSON.stringify(belief));
+  assert.deepEqual(repairTransitions, ['repair-human']);
 });
 
 test('preserves only coverage-backed approval after a completed landing repair (TASK-2859.08)', () => {
@@ -209,22 +245,25 @@ test('uses stable change identity for rebases and marks re-scope or unmodelled r
   ]);
 });
 
-test('a rebase that changed the patch leaves approvals and gate results standing, and the agent that ran them is not an input (PX-0074.01)', () => {
-  const ids: Record<string, string> = { [rev('b')]: 'before-rebase', [rev('c')]: 'after-rebase' };
+test('retained approval survives a clean rebase and drops on an identity-changing rebase (TASK-2867.04)', () => {
+  const ids: Record<string, string> = { [rev('b')]: 'same-change', [rev('c')]: 'same-change', [rev('d')]: 'changed' };
   const identity = { branchHead: () => null, changeIdentity: (revision: string) => ids[revision] ?? null };
   const approved = decide(start(), 'approve');
   const standing = [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'tests', passed: true }];
   assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [],
-    { identity, rebases: [rebase('resolved', rev('b'), rev('c'))] })), standing, 'the rebase carried the judged revision');
-  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [], { identity })),
+    { identity, rebases: [rebase('clean', rev('b'), rev('c'))] })), standing, 'the clean rebase carried the judged revision');
+  const changed = mapped(approved, gate('pass', rev('b'), rev('d')), [], [],
+    { identity, rebases: [rebase('resolved', rev('b'), rev('d'))] });
+  assert.deepEqual(entries(changed),
     [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'unmodelled-change' }],
-    'without a rebase record the same movement is still an unmodelled change');
+    'an identity-changing rebase invalidates the approval and gate result');
+  assert.deepEqual(changed.ok && changed.record, { passed: [], failed: [] });
   // An agent that left the rebase unfinished and completed it by hand: the next rebase observation starts from the head it left.
   const unfinished = [{ ...rebase('failed', rev('b'), rev('b'), 'run-1'), occurredAt: at(11) },
     { ...rebase('no-op', rev('c'), rev('c'), 'run-2'), occurredAt: at(12) }];
   assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [], { identity, rebases: unfinished })), standing,
     'a failed rebase that was later completed restores the judged state');
-  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('c')), [], [], { identity, rebases: unfinished.slice(0, 1) })),
+  assert.deepEqual(entries(mapped(approved, gate('pass', rev('b'), rev('d')), [], [], { identity, rebases: unfinished.slice(0, 1) })),
     [{ kind: 'verdict', check: 'agent', passed: true }, { kind: 'unmodelled-change' }], 'an unfinished rebase explains no movement by itself');
   const [round] = approved.rounds;
   const switched: typeof approved = { ...approved, rounds: [{ ...round, implementer: agentFamily('codex'), reviewer: agentFamily('custom') }] };

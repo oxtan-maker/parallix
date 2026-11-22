@@ -1,5 +1,6 @@
 import type { Review, ReviewRound } from '../../domain/review.js'; import type { CheckpointData } from '../../domain/checkpoint.js';
 import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
+import { isEffectiveReviewerResult } from '../../domain/reviewer-result.js';
 import type { MissionStore } from '../domain-ports.js';
 import type { GateEvidenceReader, GateEvidenceScope, IntegrationGateEvidence } from '../ports/gate-evidence.js';
 import type { LifecycleHistoryEntry, OperationalHistoryEntry } from '../ports/operation-history.js';
@@ -57,7 +58,23 @@ function repairsFrom(rows: readonly OperationalHistoryEntry[], checkpoints: read
 }
 function changeSlots(round: ReviewRound, decided: number, label: string): Slot[] {
   const check = round.decision?.kind === 'changes-requested' && round.decision.source?.kind === 'operator' ? 'human' : 'agent';
-  const slots: Slot[] = [{ at: decided, order: round.number * 10, entry: { kind: 'verdict', check, passed: false } }];
+  const effective = new Map<string, NonNullable<ReviewRound['reviewerResults']>[number]>();
+  if (check === 'human') {
+    for (const result of round.reviewerResults ?? []) {
+      if (result.revision === round.subject.revision && isEffectiveReviewerResult(result)
+        && !effective.has(result.agentFamily)) { effective.set(result.agentFamily, result); }
+    }
+  }
+  const agentResults = [...effective.values()];
+  const agentResult = agentResults.length === 0 ? null : {
+    passed: agentResults.every(result => result.decision === 'approved'),
+    at: Math.max(...agentResults.map(result => instant(result.publishedAt, `${label} agent verdict`))),
+  };
+  const slots: Slot[] = [
+    ...(agentResult ? [{ at: agentResult.at, order: round.number * 10 - 1,
+      entry: { kind: 'verdict' as const, check: 'agent' as const, passed: agentResult.passed } }] : []),
+    { at: decided, order: round.number * 10, entry: { kind: 'verdict', check, passed: false } },
+  ];
   if (!round.response) { return slots; }
   const responded = instant(round.response.respondedAt, `${label} repair`);
   if (responded < decided) { reject('contradiction', `${label} repair predates its verdict`); }
@@ -95,7 +112,7 @@ function integrationIncidentSlots(round: ReviewRound, next: ReviewRound | undefi
   }
   const repaired = incidentRepair(gate, failed, next, repairs);
   const slots: Slot[] = [{ at: failed, order: round.number * 10 + 2, entry: { kind: 'verdict', check: 'tests', passed: false } }];
-  return repaired?.gates.size === 1
+  return repaired
     ? [...slots, { at: repaired.at, order: round.number * 10 + 3, entry: { kind: 'repair', check: 'tests' } }]
     : slots;
 }
@@ -218,11 +235,10 @@ function gateSlot(gates: IntegrationGateEvidence | null, testsAlreadyFailed: boo
   return { observed: true };
 }
 /**
- * Rebases are outside the model: a change judged before a rebase keeps its judgement after it, even when conflict
- * resolution changed the patch (origin CI owns that rare case). Every revision a completed rebase carried from
- * `before` to `after` resolves to the identity of the first revision in its chain. A conflicted or failed run is
- * usually an agent that left the rebase unfinished, so the next rebase observation, which starts from whatever head
- * the agent finally left, continues the same chain.
+ * Rebases are outside the model. A completed rebase carries a judgement only when the existing identity owner says
+ * the before and after revisions are the same change. A conflicted or failed run may be completed outside the
+ * recorded operation; its next observation continues the chain only when that intervening revision has the same
+ * identity too. Identity-changing conflict resolution therefore remains an unmodelled change.
  */
 function rebaseTransparent(identity: ChangeIdentityPort | undefined, rebases: readonly RebaseMeasurement[]): ChangeIdentityPort | undefined {
   if (!identity) { return identity; }
@@ -233,10 +249,18 @@ function rebaseTransparent(identity: ChangeIdentityPort | undefined, rebases: re
   for (const rebase of ordered) {
     const before = rebase.revisionBefore;
     if (!before) { continue; }
-    if (unfinished && rebase.id !== unfinished.id) { root.set(before, unfinished.root); }
+    const sameIdentity = (left: string, right: string) => {
+      if (!rebase.baseBranch) { return false; }
+      const leftIdentity = identity.changeIdentity(left, rebase.baseBranch);
+      const rightIdentity = identity.changeIdentity(right, rebase.baseBranch);
+      return leftIdentity !== null && rightIdentity !== null && leftIdentity === rightIdentity;
+    };
+    if (unfinished && rebase.id !== unfinished.id && sameIdentity(unfinished.root, before)) {
+      root.set(before, unfinished.root);
+    }
     const base = root.get(before) ?? before;
     if (isSuccessfulRebaseOutcome(rebase.outcome)) {
-      if (rebase.revisionAfter) { root.set(rebase.revisionAfter, base); }
+      if (rebase.revisionAfter && sameIdentity(base, rebase.revisionAfter)) { root.set(rebase.revisionAfter, base); }
       unfinished = null;
     } else if (rebase.outcome === 'conflict' || rebase.outcome === 'failed') {
       unfinished = { id: rebase.id, root: base };
@@ -254,18 +278,33 @@ function lifecycleSlots(lifecycle: readonly LifecycleHistoryEntry[]): Slot[] {
         entry: { kind: 'unmodelled-change' } as const }] : [];
   });
 }
-function ambiguousRepairSlots(repairs: readonly Repair[]): Slot[] {
-  return repairs.flatMap((repair, index) => repair.complete && repair.gates.size > 1
-    ? [{ at: repair.at, order: 4e6 + index, entry: { kind: 'unmodelled-change' } as const }] : []);
-}
-function truncateAtPendingRepair(slots: Slot[]): Slot[] {
-  let pending = false;
+function normalizeRepairAttempts(slots: Slot[]): Slot[] {
+  const pending: Extract<VerificationHistoryEntry, { readonly kind: 'verdict' }>['check'][] = [];
   const retained: Slot[] = [];
   for (const slot of slots) {
-    if (pending && slot.entry.kind !== 'repair' && slot.entry.kind !== 'unmodelled-change') { break; }
+    const entry = slot.entry;
+    if (entry.kind === 'verdict') {
+      const previous = pending.indexOf(entry.check);
+      if (entry.passed) {
+        if (previous >= 0) { pending.splice(previous, 1); }
+        else if (pending.length > 0) { break; }
+      } else {
+        if (previous >= 0) { pending.splice(previous, 1); }
+        pending.push(entry.check);
+      }
+      retained.push(slot);
+      continue;
+    }
+    if (entry.kind === 'repair') {
+      if (pending.length === 0 || !pending.includes(entry.check)) { retained.push(slot); continue; }
+      retained.push(...pending.map((check, index) => ({ ...slot, order: slot.order + index / 10,
+        entry: { kind: 'repair' as const, check } })));
+      pending.splice(0);
+      continue;
+    }
+    if (entry.kind === 'unmodelled-change') { pending.splice(0); retained.push(slot); continue; }
+    if (pending.length > 0) { break; }
     retained.push(slot);
-    if (slot.entry.kind === 'verdict' && !slot.entry.passed) { pending = true; }
-    else if (slot.entry.kind === 'repair' || slot.entry.kind === 'unmodelled-change') { pending = false; }
   }
   return retained;
 }
@@ -273,10 +312,9 @@ function mappedHistorySlots(review: Review | null, repairRows: readonly Operatio
   repairCheckpoints: readonly CheckpointData[], facts: VerificationHistoryFacts): Slot[] {
   const repairs = repairsFrom(repairRows, repairCheckpoints);
   const slots = [...roundSlots(review?.rounds ?? [], repairs, facts.approvalCoverage ?? new Map(), facts.identity),
-    ...lifecycleSlots(facts.lifecycle ?? []),
-    ...ambiguousRepairSlots(repairs)];
+    ...lifecycleSlots(facts.lifecycle ?? [])];
   slots.sort((left, right) => left.at - right.at || left.order - right.order);
-  return truncateAtPendingRepair(slots);
+  return normalizeRepairAttempts(slots);
 }
 function withGateSlot(mapped: Slot[], gates: IntegrationGateEvidence | null, review: Review | null,
   identity: ChangeIdentityPort | undefined) {

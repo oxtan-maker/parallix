@@ -136,30 +136,6 @@ function checkedEntry(value: unknown, index: number): VerificationHistoryEntry |
   return { kind: entry.kind, check: entry.check };
 }
 
-type ReplayStep = { readonly belief: readonly number[]; readonly consumesRepair: boolean };
-
-function replayFailedVerdict(
-  artifact: PolicyArtifact,
-  belief: readonly number[],
-  history: readonly VerificationHistoryEntry[],
-  entry: Extract<VerificationHistoryEntry, { readonly kind: 'verdict' }>,
-  index: number,
-): ReplayStep | BeliefDerivation {
-  const failedRead = filter(artifact, belief, entry.check, 'not-passed', index);
-  if ('ok' in failedRead) { return failedRead; }
-  if (index + 1 === history.length) { return { belief: failedRead, consumesRepair: false }; }
-  const repair = checkedEntry(history[index + 1], index + 1);
-  if ('ok' in repair) { return repair; }
-  if (repair.kind === 'verdict' && repair.check === entry.check) {
-    return { belief: failedRead, consumesRepair: false };
-  }
-  if (repair.kind !== 'repair' || repair.check !== entry.check) {
-    return failed('unmodelled-history', `failed ${entry.check} verdict must be followed by its repair`, index + 1);
-  }
-  const repairedBelief = repaired(artifact, failedRead, entry.check, index);
-  return 'ok' in repairedBelief ? repairedBelief : { belief: repairedBelief, consumesRepair: true };
-}
-
 /** Project the explicit verdict record carried by an ordered, already validated history. */
 export function verificationHistoryRecord(history: readonly VerificationHistoryEntry[]): BeliefRecord {
   const passed = new Set<PolicyAction>();
@@ -179,30 +155,92 @@ export function verificationHistoryRecord(history: readonly VerificationHistoryE
   };
 }
 
+type ReplayAdvance = { readonly belief: readonly number[]; readonly nextIndex: number };
+type RepairGroup = { readonly checks: readonly PolicyAction[]; readonly nextIndex: number };
+
+function readRepairGroup(history: readonly VerificationHistoryEntry[], index: number): RepairGroup | BeliefDerivation {
+  const checks: PolicyAction[] = [];
+  let nextIndex = index;
+  for (; nextIndex < history.length; nextIndex += 1) {
+    const entry = checkedEntry(history[nextIndex], nextIndex);
+    if ('ok' in entry) { return entry; }
+    if (entry.kind !== 'repair') { break; }
+    if (checks.includes(entry.check)) {
+      return failed('unmodelled-history', `repair attempt repeats ${entry.check}`, nextIndex);
+    }
+    checks.push(entry.check);
+  }
+  return { checks, nextIndex };
+}
+
+function replayRepairAttempt(
+  artifact: PolicyArtifact,
+  belief: readonly number[],
+  pending: PolicyAction[],
+  history: readonly VerificationHistoryEntry[],
+  index: number,
+): ReplayAdvance | BeliefDerivation {
+  const group = readRepairGroup(history, index);
+  if ('ok' in group) { return group; }
+  if (pending.length === 0) { return failed('unmodelled-history', 'repair has no preceding failed verdict', index); }
+  const omitted = pending.find(check => !group.checks.includes(check));
+  if (omitted) { return failed('unmodelled-history', `repair attempt does not address failed ${omitted}`, index); }
+  const unrelated = group.checks.find(check => !pending.includes(check));
+  if (unrelated) { return failed('unmodelled-history', `repair attempt addresses non-failed ${unrelated}`, index); }
+  const transitionCheck = pending[pending.length - 1]!;
+  const next = repaired(artifact, belief, transitionCheck, index);
+  if ('ok' in next) { return next; }
+  pending.splice(0);
+  return { belief: next, nextIndex: group.nextIndex };
+}
+
+function replayRetainedPass(
+  artifact: PolicyArtifact,
+  belief: readonly number[],
+  pending: readonly PolicyAction[],
+  entry: Extract<VerificationHistoryEntry, { readonly kind: 'retained-pass' }>,
+  index: number,
+): ReplayAdvance | BeliefDerivation {
+  if (pending.length > 0) {
+    return failed('unmodelled-history', `failed ${pending[pending.length - 1]} verdict must be repaired before a retained pass`, index);
+  }
+  const next = retainedPass(artifact, belief, entry.check, index);
+  return 'ok' in next ? next : { belief: next, nextIndex: index + 1 };
+}
+
+function replayVerdict(
+  artifact: PolicyArtifact,
+  belief: readonly number[],
+  pending: PolicyAction[],
+  entry: Extract<VerificationHistoryEntry, { readonly kind: 'verdict' }>,
+  index: number,
+): ReplayAdvance | BeliefDerivation {
+  if (entry.passed && pending.length > 0 && !pending.includes(entry.check)) {
+    return failed('unmodelled-history', `failed ${pending[pending.length - 1]} verdict must be repaired before passing ${entry.check}`, index);
+  }
+  const next = filter(artifact, belief, entry.check, entry.passed ? 'passed' : 'not-passed', index);
+  if ('ok' in next) { return next; }
+  const previous = pending.indexOf(entry.check);
+  if (previous >= 0) { pending.splice(previous, 1); }
+  if (!entry.passed) { pending.push(entry.check); }
+  return { belief: next, nextIndex: index + 1 };
+}
+
 function replay(artifact: PolicyArtifact, history: readonly VerificationHistoryEntry[]): BeliefDerivation {
   const prior = validatedPrior(artifact);
   if (!prior) { return failed('invalid', 'artifact prior is invalid'); }
   let belief = prior;
+  const pending: PolicyAction[] = [];
   for (let index = 0; index < history.length; index += 1) {
     const entry = checkedEntry(history[index], index);
     if ('ok' in entry) { return entry; }
-    if (entry.kind === 'unmodelled-change') { belief = [...prior]; continue; }
-    if (entry.kind === 'repair') { return failed('unmodelled-history', 'repair has no preceding failed verdict', index); }
-    if (entry.kind === 'retained-pass') {
-      const next = retainedPass(artifact, belief, entry.check, index);
-      if ('ok' in next) { return next; }
-      belief = next; continue;
-    }
-    if (!entry.passed) {
-      const step = replayFailedVerdict(artifact, belief, history, entry, index);
-      if ('ok' in step) { return step; }
-      belief = step.belief;
-      if (step.consumesRepair) { index += 1; }
-      continue;
-    }
-    const next = filter(artifact, belief, entry.check, 'passed', index);
+    if (entry.kind === 'unmodelled-change') { belief = [...prior]; pending.splice(0); continue; }
+    const next = entry.kind === 'repair' ? replayRepairAttempt(artifact, belief, pending, history, index)
+      : entry.kind === 'retained-pass' ? replayRetainedPass(artifact, belief, pending, entry, index)
+        : replayVerdict(artifact, belief, pending, entry, index);
     if ('ok' in next) { return next; }
-    belief = next;
+    belief = next.belief;
+    index = next.nextIndex - 1;
   }
   return { ok: true, belief };
 }
