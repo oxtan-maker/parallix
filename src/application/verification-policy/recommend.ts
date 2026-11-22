@@ -4,6 +4,7 @@ import {
   type PolicyAction,
   type PolicyArtifact,
 } from './policy-artifact.js';
+import type { BeliefRecord } from './belief.js';
 
 export type InvalidBeliefReason = 'dimensions' | 'non-finite' | 'negative' | 'not-normalized';
 export type PolicyRecommendation =
@@ -27,15 +28,24 @@ function passProbabilities(artifact: PolicyArtifact, belief: readonly number[]):
     probability + (artifact.states[state].acceptable[check] ? mass : 0), 0)])) as PerAction<number>;
 }
 
-/** Select the first maximizing artifact vector whose named action the caller permits. */
+/** The runtime's address-immediately rule: a failed test may be re-run; every other failure is repaired first. */
+function permittedChecks(record: BeliefRecord): ReadonlySet<PolicyAction> {
+  if (record.failed.length > 0) {
+    return new Set(record.failed.includes('tests') ? ['tests'] : []);
+  }
+  return new Set(POLICY_ACTIONS.filter(check => !record.passed.includes(check)));
+}
+
+/** Select the first maximizing artifact vector permitted by the verdict record. */
 export function recommend(
   artifact: PolicyArtifact,
   belief: readonly number[],
-  permitted: ReadonlySet<PolicyAction>,
+  record: BeliefRecord,
 ): PolicyRecommendation {
   const invalid = invalidBelief(belief, artifact.states.length);
   if (invalid) { return { kind: 'invalid-belief', reason: invalid }; }
   const probabilities = passProbabilities(artifact, belief);
+  const permitted = permittedChecks(record);
   let best: { readonly action: PolicyAction; readonly value: number } | undefined;
   for (const vector of artifact.vectors) {
     const action = POLICY_ACTIONS.find(check => check === vector.action); // a repair or merge vector is never a check to start

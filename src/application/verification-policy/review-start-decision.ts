@@ -1,5 +1,4 @@
 import type { PerAction, PolicyAction } from './policy-artifact.js';
-import { POLICY_ACTIONS } from './policy-artifact.js';
 import { deriveBelief } from './belief.js';
 import { recommend } from './recommend.js';
 import { settleReviewStartOutcomes } from './review-start-outcome.js';
@@ -186,18 +185,22 @@ function evaluateHistory(context: EvaluationContext, loaded: ActivePolicy,
   try { belief = deriveBelief(loaded.artifact, history.entries); }
   catch (error) { return fallback(context, policyException(error), 'fixed', loaded.hash); }
   if (!belief.ok) { return fallback(context, observationFailure('belief', belief.failure), 'fixed', loaded.hash); }
-  if (belief.record.kind === 'pending-repair') {
-    return fallback(context, { kind: 'belief-unmodelled-history', message: `${belief.record.check} repair is pending` },
+  const failed = new Set(history.record.failed);
+  if ([...failed].some(check => check !== 'tests')) {
+    return fallback(context, { kind: 'belief-unmodelled-history', message: `${[...failed][0]} repair is pending` },
       'fixed', loaded.hash);
   }
-  const passed = new Set(belief.record.passed);
+  const passed = new Set(history.record.passed);
   let recommendation: ReturnType<typeof recommend>;
   try {
-    recommendation = recommend(loaded.artifact, belief.belief,
-      new Set(POLICY_ACTIONS.filter(action => !passed.has(action))));
+    recommendation = recommend(loaded.artifact, belief.belief, history.record);
   } catch (error) { return fallback(context, policyException(error), 'fixed', loaded.hash); }
   if (recommendation.kind === 'invalid-belief') {
     return fallback(context, { kind: 'belief-invalid', message: `policy belief is ${recommendation.reason}` }, 'fixed', loaded.hash);
+  }
+  if (failed.has('tests') && recommendation.passProbabilities.tests === 0) {
+    return fallback(context, { kind: 'belief-unmodelled-history', message: 'tests repair is pending' },
+      'fixed', loaded.hash, recommendation.passProbabilities);
   }
   const mode = activeMode(context.ports);
   if (recommendation.kind === 'no-recommendation') {

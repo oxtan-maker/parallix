@@ -9,8 +9,10 @@ import type { OperationalHistoryService } from '../services/operational-history-
 import { assessApprovalCoverage } from '../../domain/approval-coverage.js';
 import { observeLandedChange, type ChangeIdentityPort } from '../approval-coverage.js';
 import { observedRebases, type RebaseMeasurement } from '../projections/verification-observation-reader.js';
-import type { VerificationHistoryEntry } from './belief.js';
-export type PolicyHistory = { readonly ok: true; readonly entries: readonly VerificationHistoryEntry[]; readonly tests: 'observed' | 'unobserved' } | { readonly ok: false; readonly failure: { readonly kind: 'unavailable' | 'invalid' | 'contradiction' | 'unmodelled-history'; readonly message: string } };
+import { verificationHistoryRecord, type BeliefRecord, type VerificationHistoryEntry } from './belief.js';
+export type PolicyHistory = { readonly ok: true; readonly entries: readonly VerificationHistoryEntry[];
+  readonly record: BeliefRecord; readonly tests: 'observed' | 'unobserved' }
+  | { readonly ok: false; readonly failure: { readonly kind: 'unavailable' | 'invalid' | 'contradiction' | 'unmodelled-history'; readonly message: string } };
 type FailureKind = Extract<PolicyHistory, { ok: false }>['failure']['kind'];
 type Slot = { readonly at: number; readonly order: number; readonly entry: VerificationHistoryEntry }; type Repair = { readonly occurrence: string; readonly gates: ReadonlySet<string>; readonly at: number; readonly complete: boolean };
 type ApprovedDecision = Extract<NonNullable<ReviewRound['decision']>, { readonly kind: 'approved' }>;
@@ -290,7 +292,8 @@ export function adaptVerificationHistory(review: Review | null, gates: Integrati
     const identity = rebaseTransparent(facts.identity, facts.rebases ?? []);
     const { mapped, observed } = withGateSlot(mappedHistorySlots(review, repairRows, repairCheckpoints, { ...facts, identity }),
       gates, review, identity);
-    return { ok: true, entries: mapped.map(item => item.entry), tests: observed ? 'observed' : 'unobserved' };
+    const entries = mapped.map(item => item.entry);
+    return { ok: true, entries, record: verificationHistoryRecord(entries), tests: observed ? 'observed' : 'unobserved' };
   } catch (error) {
     const failure = error instanceof Unmapped ? { kind: error.kind, message: error.message }
       : { kind: 'invalid' as const, message: 'recorded facts could not be read' };

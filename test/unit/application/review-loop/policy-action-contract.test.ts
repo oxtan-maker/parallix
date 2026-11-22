@@ -734,7 +734,7 @@ function realPolicyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
   const ports: ReviewStartPolicyPorts = {
     configuration: { mode: 'pilot', artifact: 'policy.json' }, repositoryId: repositoryId('repository-1'), targetBranch: 'main',
     operationId: 'operation-1', loadPolicy: () => ({ mode: 'shadow', hash: 'pinned-hash', artifact: parsedPolicyArtifact }),
-    readHistory: async () => ({ ok: true, entries: [], tests: 'unobserved' }),
+    readHistory: async () => ({ ok: true, entries: [], record: { passed: [], failed: [] }, tests: 'unobserved' }),
     identity: { branchHead: () => 'head-1', changeIdentity: () => 'patch-1', onlyBookkeepingSince: () => false },
     writer: { recordReviewStartDecision: async input => { records.push(input); return true; },
       resolveReviewEntryPin: async input => input.configuredMode === 'pilot' ? reviewEntryPin(input) : null,

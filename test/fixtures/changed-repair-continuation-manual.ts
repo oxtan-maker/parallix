@@ -20,7 +20,7 @@ import { run } from '../../src/composition/create-cli.js';
 import { recordApproval } from '../../src/adapters/review/review-round.js';
 import { reviewerResultAttribution } from '../../src/adapters/review/reviewer-result-attribution.js';
 import { readIntegrationGateRun } from '../../src/adapters/verification/integration-verification-proof.js';
-import { policyArtifactFixture } from '../unit/application/verification-policy/policy-artifact.fixture.js';
+import { ALL_ACTIONS, syntheticPolicyArtifactV2, v2State } from '../unit/application/verification-policy/policy-artifact.fixture.js';
 
 const equivalent = process.argv.includes('--equivalent');
 const failingCheck = process.argv.includes('--failing-check');
@@ -36,13 +36,9 @@ const exactCommand = `test -f ${temporary}/allow-check`;
 // The pilot rehearsal's integration gate stays red until the launched repair actor writes this marker.
 const gateCommand = `test -f ${temporary}/gate-green`;
 const gateKey = 'integration-ci';
-/** A valid artifact whose value vectors make `tests` the best permitted action on the prior state. */
-const testsFirstArtifact = () => {
-  const artifact = policyArtifactFixture();
-  const unit = (value: number) => Array.from({ length: 27 }, (_unused, state) => (state === 26 ? 0 : value));
-  artifact.vectors = [{ action: 'tests', values: unit(15) }, { action: 'agent', values: unit(14) }, { action: 'human', values: unit(13) }];
-  return artifact;
-};
+/** A SYNTHETIC beta_1 > 0 artifact whose value vectors make `tests` the best permitted action on the prior state. */
+const testsFirstArtifact = () => syntheticPolicyArtifactV2(
+  Array.from({ length: 8 }, (_unused, mask) => v2State(mask)), [...ALL_ACTIONS], 0.25);
 const aggregateCommands = [`test -f ${temporary}/allow-static`, `test -f ${temporary}/allow-integration`];
 const repo = path.join(temporary, 'repo');
 const worktree = path.join(temporary, 'repo-task-manual-repair');
@@ -320,6 +316,7 @@ try {
       decisions: decisions.map(decision => ({ actual: decision.actualAction, recommended: decision.recommendedAction,
         mode: decision.effectiveMode, gateRunId: decision.gateRunId, failure: decision.failureReason?.kind ?? null,
         sequence: decision.actionSequence, verdictCorrelation: decision.verdictCorrelation })),
+      syntheticBeta1: 0.25,
       head: git(worktree, 'rev-parse', 'HEAD'), baseHead: git(repo, 'rev-parse', 'HEAD'), baseline,
       boundaries: 'disposable Git worktree + PARALLIX_HOME; real gate process; stubbed agent launches; no landing' }, null, 1));
   } else {

@@ -60,7 +60,7 @@ test('only pilot composes policy actions, bound to the loop and the rebase state
   const policy = (mode: 'shadow' | 'pilot') => ({
     configuration: { mode, artifact: 'policy.json' }, repositoryId: 'repository-1' as never, targetBranch: 'main', operationId: null,
     loadPolicy: () => ({ mode: 'fixed' as const, reason: 'missing' as const }),
-    readHistory: async () => ({ ok: true as const, entries: [], tests: 'unobserved' as const }),
+    readHistory: async () => ({ ok: true as const, entries: [], record: { passed: [], failed: [] }, tests: 'unobserved' as const }),
     identity: { branchHead: () => null, changeIdentity: () => 'patch-1', onlyBookkeepingSince: () => false },
     writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null, settleReviewStartOutcomes: async () => 0 },
     readOutcomeFacts: async () => ({ review: null, runs: [] }),

@@ -13,15 +13,17 @@ export type VerificationHistoryEntry =
   | { readonly kind: 'retained-pass'; readonly check: PolicyAction }
   | { readonly kind: 'unmodelled-change' };
 
-export type BeliefRecord =
-  | { readonly kind: 'complete'; readonly passed: readonly PolicyAction[] }
-  | { readonly kind: 'pending-repair'; readonly check: PolicyAction; readonly passed: readonly PolicyAction[] };
+/** Latest verdicts on the current revision since handoff or the last repair. */
+export interface BeliefRecord {
+  readonly passed: readonly PolicyAction[];
+  readonly failed: readonly PolicyAction[];
+}
 
-export type VerificationCheckState = 'unknown' | 'passed';
+export type VerificationCheckState = 'unknown' | 'failed' | 'passed';
 
 export type BeliefFailureKind = 'contradiction' | 'unmodelled-history' | 'invalid';
 export type BeliefDerivation =
-  | { readonly ok: true; readonly belief: readonly number[]; readonly record: BeliefRecord }
+  | { readonly ok: true; readonly belief: readonly number[] }
   | { readonly ok: false; readonly failure: { readonly kind: BeliefFailureKind; readonly historyIndex: number | null; readonly message: string } };
 
 const failed = (kind: BeliefFailureKind, message: string, historyIndex: number | null = null): BeliefDerivation =>
@@ -86,14 +88,13 @@ function filter(
  */
 function repaired(
   artifact: PolicyArtifact,
-  belief: readonly number[],
+  failedBelief: readonly number[],
   check: PolicyAction,
   historyIndex: number,
 ): BeliefDerivation | readonly number[] {
-  const failedRead = filter(artifact, belief, check, 'not-passed', historyIndex);
-  if ('ok' in failedRead || artifact.schemaVersion === 1) { return failedRead; }
+  if (artifact.schemaVersion === 1) { return failedBelief; }
   const repair = `repair-${check}` as const;
-  return artifact.actions.includes(repair) ? filter(artifact, failedRead, repair, null, historyIndex)
+  return artifact.actions.includes(repair) ? filter(artifact, failedBelief, repair, null, historyIndex)
     : failed('unmodelled-history', `artifact defines no ${repair} action`, historyIndex);
 }
 
@@ -135,39 +136,75 @@ function checkedEntry(value: unknown, index: number): VerificationHistoryEntry |
   return { kind: entry.kind, check: entry.check };
 }
 
+type ReplayStep = { readonly belief: readonly number[]; readonly consumesRepair: boolean };
+
+function replayFailedVerdict(
+  artifact: PolicyArtifact,
+  belief: readonly number[],
+  history: readonly VerificationHistoryEntry[],
+  entry: Extract<VerificationHistoryEntry, { readonly kind: 'verdict' }>,
+  index: number,
+): ReplayStep | BeliefDerivation {
+  const failedRead = filter(artifact, belief, entry.check, 'not-passed', index);
+  if ('ok' in failedRead) { return failedRead; }
+  if (index + 1 === history.length) { return { belief: failedRead, consumesRepair: false }; }
+  const repair = checkedEntry(history[index + 1], index + 1);
+  if ('ok' in repair) { return repair; }
+  if (repair.kind === 'verdict' && repair.check === entry.check) {
+    return { belief: failedRead, consumesRepair: false };
+  }
+  if (repair.kind !== 'repair' || repair.check !== entry.check) {
+    return failed('unmodelled-history', `failed ${entry.check} verdict must be followed by its repair`, index + 1);
+  }
+  const repairedBelief = repaired(artifact, failedRead, entry.check, index);
+  return 'ok' in repairedBelief ? repairedBelief : { belief: repairedBelief, consumesRepair: true };
+}
+
+/** Project the explicit verdict record carried by an ordered, already validated history. */
+export function verificationHistoryRecord(history: readonly VerificationHistoryEntry[]): BeliefRecord {
+  const passed = new Set<PolicyAction>();
+  const failedChecks = new Set<PolicyAction>();
+  for (const entry of history) {
+    if (entry.kind === 'unmodelled-change' || entry.kind === 'repair') {
+      passed.clear(); failedChecks.clear(); continue;
+    }
+    if (entry.kind === 'retained-pass' || entry.passed) {
+      passed.add(entry.check); failedChecks.delete(entry.check); continue;
+    }
+    failedChecks.add(entry.check); passed.delete(entry.check);
+  }
+  return {
+    passed: POLICY_ACTIONS.filter(check => passed.has(check)),
+    failed: POLICY_ACTIONS.filter(check => failedChecks.has(check)),
+  };
+}
+
 function replay(artifact: PolicyArtifact, history: readonly VerificationHistoryEntry[]): BeliefDerivation {
   const prior = validatedPrior(artifact);
   if (!prior) { return failed('invalid', 'artifact prior is invalid'); }
   let belief = prior;
-  const passed = new Set<PolicyAction>();
   for (let index = 0; index < history.length; index += 1) {
     const entry = checkedEntry(history[index], index);
     if ('ok' in entry) { return entry; }
-    if (entry.kind === 'unmodelled-change') { belief = [...prior]; passed.clear(); continue; }
+    if (entry.kind === 'unmodelled-change') { belief = [...prior]; continue; }
     if (entry.kind === 'repair') { return failed('unmodelled-history', 'repair has no preceding failed verdict', index); }
     if (entry.kind === 'retained-pass') {
       const next = retainedPass(artifact, belief, entry.check, index);
       if ('ok' in next) { return next; }
-      belief = next; passed.add(entry.check); continue;
+      belief = next; continue;
     }
     if (!entry.passed) {
-      if (index + 1 === history.length) {
-        return { ok: true, belief, record: { kind: 'pending-repair', check: entry.check, passed: POLICY_ACTIONS.filter(check => passed.has(check)) } };
-      }
-      const repair = checkedEntry(history[index + 1], index + 1);
-      if ('ok' in repair) { return repair; }
-      if (repair.kind !== 'repair' || repair.check !== entry.check) {
-        return failed('unmodelled-history', `failed ${entry.check} verdict must be followed by its repair`, index + 1);
-      }
-      const next = repaired(artifact, belief, entry.check, index);
-      if ('ok' in next) { return next; }
-      belief = next; passed.clear(); index += 1; continue;
+      const step = replayFailedVerdict(artifact, belief, history, entry, index);
+      if ('ok' in step) { return step; }
+      belief = step.belief;
+      if (step.consumesRepair) { index += 1; }
+      continue;
     }
     const next = filter(artifact, belief, entry.check, 'passed', index);
     if ('ok' in next) { return next; }
-    belief = next; passed.add(entry.check);
+    belief = next;
   }
-  return { ok: true, belief, record: { kind: 'complete', passed: POLICY_ACTIONS.filter(check => passed.has(check)) } };
+  return { ok: true, belief };
 }
 
 /** Replay contract-v1 verification history. Pure and total: invalid inputs become typed failures. */
@@ -183,11 +220,13 @@ export function deriveBelief(artifact: PolicyArtifact, history: readonly Verific
 /** Exhaustive check-state projection; a missing pass remains explicitly unknown. */
 export function verificationCheckStates(record: BeliefRecord): Readonly<Record<PolicyAction, VerificationCheckState>> {
   const passed = new Set(record.passed);
-  return Object.fromEntries(POLICY_ACTIONS.map(check => [check, passed.has(check) ? 'passed' : 'unknown'])) as
+  const failedChecks = new Set(record.failed);
+  return Object.fromEntries(POLICY_ACTIONS.map(check =>
+    [check, passed.has(check) ? 'passed' : failedChecks.has(check) ? 'failed' : 'unknown'])) as
     Record<PolicyAction, VerificationCheckState>;
 }
 
 /** Only a completed history with all three current-change passes may land. */
 export function verificationIntegrationEligible(record: BeliefRecord): boolean {
-  return record.kind === 'complete' && POLICY_ACTIONS.every(check => record.passed.includes(check));
+  return record.failed.length === 0 && POLICY_ACTIONS.every(check => record.passed.includes(check));
 }

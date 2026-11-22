@@ -29,13 +29,17 @@ export const ALL_ACTIONS = ['tests', 'agent', 'human', 'repair-tests', 'repair-a
  * Reads and merge keep the state; a repair redraws it from the prior; a read observes whether the state is acceptable.
  */
 export function syntheticPolicyArtifactV2(states: Json[] = Array.from({ length: 8 }, (_u, mask) => v2State(mask)),
-  actions: string[] = ALL_ACTIONS): Json {
+  actions: string[] = ALL_ACTIONS, testFlakeRate = 0): Json {
   const count = states.length;
   const prior = Array.from({ length: count }, (_u, k) => (k + 1) / (count * (count + 1) / 2));
   const identity = () => Array.from({ length: count }, (_u, k) => oneHot(k, count));
   const redraw = () => Array.from({ length: count }, () => [...prior]);
   const reads = (action: string) => CHECKS.indexOf(action as 'tests');
-  const observe = (action: string) => states.map(state => (reads(action) < 0 || state.acceptable[action] ? [0, 1] : [1, 0]));
+  const observe = (action: string) => states.map(state => {
+    if (reads(action) < 0) { return [0, 1]; }
+    if (!state.acceptable[action]) { return [1, 0]; }
+    return action === 'tests' ? [testFlakeRate, 1 - testFlakeRate] : [0, 1];
+  });
   const cost = (action: string) => states.map(() => [1.1, 1, 3][reads(action)] ?? (action === 'merge' ? 0.5 : 6));
   const byAction = (build: (action: string) => unknown) => Object.fromEntries(actions.map(action => [action, build(action)]));
   return {

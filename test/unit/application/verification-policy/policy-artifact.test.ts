@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveBelief, verificationCheckStates, verificationIntegrationEligible,
+import { deriveBelief, verificationCheckStates, verificationHistoryRecord, verificationIntegrationEligible,
   type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyAction, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
 import { recommend } from '../../../../src/application/verification-policy/recommend.js';
-import { policyArtifactFixture as fixture, syntheticPolicyArtifactV2 as syntheticV2, v2State, oneHot, half, type Json } from './policy-artifact.fixture.js';
+import { ALL_ACTIONS, policyArtifactFixture as fixture, syntheticPolicyArtifactV2 as syntheticV2,
+  v2State, oneHot, half, type Json } from './policy-artifact.fixture.js';
 
 type AlphaVector = { action: PolicyAction; values: number[] };
 type FilterModel = { transition: number[][][]; observation: number[][][]; prior: number[] };
@@ -96,7 +97,7 @@ test('rejects each malformed class with a typed rejection and never throws (TASK
   for (const input of [undefined, 7, Symbol('x'), () => 1]) { assert.doesNotThrow(() => parsePolicyArtifact(input)); }
 });
 
-test('replays hand-computed verdict, repair, reset, retained-pass and pending-repair history (TASK-2859.04)', () => {
+test('replays hand-computed verdict, repair, reset, retained-pass and failed-verdict history (TASK-2859.04)', () => {
   const a = artifact();
   const agentPass = { kind: 'verdict', check: 'agent', passed: true } as const;
   const passed = deriveBelief(a, [agentPass]);
@@ -105,11 +106,13 @@ test('replays hand-computed verdict, repair, reset, retained-pass and pending-re
   const repaired = deriveBelief(a, [agentPass, { kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' }]);
   assert.ok(repaired.ok); assert.deepEqual(repaired.belief, oneHot(13));
   const reset = deriveBelief(a, [agentPass, { kind: 'unmodelled-change' }]);
-  assert.ok(reset.ok); assert.deepEqual(reset, { ok: true, belief: a.prior, record: { kind: 'complete', passed: [] } });
+  assert.ok(reset.ok); assert.deepEqual(reset, { ok: true, belief: a.prior });
   const retained = deriveBelief(a, [{ kind: 'retained-pass', check: 'tests' }]);
-  assert.ok(retained.ok); assert.deepEqual(retained, { ok: true, belief: oneHot(22), record: { kind: 'complete', passed: ['tests'] } });
+  assert.ok(retained.ok); assert.deepEqual(retained, { ok: true, belief: oneHot(22) });
   const pending = deriveBelief(a, [{ kind: 'verdict', check: 'human', passed: false }]);
-  assert.ok(pending.ok); assert.deepEqual(pending, { ok: true, belief: a.prior, record: { kind: 'pending-repair', check: 'human', passed: [] } });
+  assert.ok(pending.ok);
+  assert.deepEqual(verificationHistoryRecord([{ kind: 'verdict', check: 'human', passed: false }]),
+    { passed: [], failed: ['human'] });
   assert.equal('recommendation' in pending, false);
 });
 
@@ -143,9 +146,10 @@ test('all check orders preserve passes and explicit unknowns until all three are
       const result = deriveBelief(artifact(), history);
       assert.ok(result.ok, 'passing history must derive a belief');
       const observed = new Set(history.map(entry => 'check' in entry ? entry.check : null));
-      assert.deepEqual(verificationCheckStates(result.record), Object.fromEntries(POLICY_ACTIONS.map(candidate =>
+      const record = verificationHistoryRecord(history);
+      assert.deepEqual(verificationCheckStates(record), Object.fromEntries(POLICY_ACTIONS.map(candidate =>
         [candidate, observed.has(candidate) ? 'passed' : 'unknown'])));
-      assert.equal(verificationIntegrationEligible(result.record), history.length === POLICY_ACTIONS.length);
+      assert.equal(verificationIntegrationEligible(record), history.length === POLICY_ACTIONS.length);
     }
   }
   const retained = deriveBelief(artifact(), [
@@ -153,21 +157,29 @@ test('all check orders preserve passes and explicit unknowns until all three are
     { kind: 'verdict', check: 'human', passed: true },
     { kind: 'verdict', check: 'tests', passed: true },
   ]);
-  assert.equal(retained.ok && verificationIntegrationEligible(retained.record), true);
+  assert.equal(retained.ok && verificationIntegrationEligible(verificationHistoryRecord([
+    { kind: 'retained-pass', check: 'agent' },
+    { kind: 'verdict', check: 'human', passed: true },
+    { kind: 'verdict', check: 'tests', passed: true },
+  ])), true);
 });
 
 test('request-changes enters pending repair without losing earlier passes or hiding failures (TASK-2859.13)', () => {
-  const humanFirst = deriveBelief(artifact(), [
+  const humanFirstHistory = [
     { kind: 'verdict', check: 'human', passed: true },
     { kind: 'verdict', check: 'agent', passed: false },
-  ]);
-  assert.deepEqual(humanFirst.ok && humanFirst.record,
-    { kind: 'pending-repair', check: 'agent', passed: ['human'] });
-  assert.equal(humanFirst.ok && verificationIntegrationEligible(humanFirst.record), false);
+  ] as const;
+  const humanFirst = deriveBelief(artifact(), humanFirstHistory);
+  const humanFirstRecord = verificationHistoryRecord(humanFirstHistory);
+  assert.deepEqual(humanFirst.ok && humanFirstRecord, { passed: ['human'], failed: ['agent'] });
+  assert.equal(humanFirst.ok && verificationIntegrationEligible(humanFirstRecord), false);
 
   for (const check of ['agent', 'human'] as const) {
-    const pending = deriveBelief(artifact(), [{ kind: 'verdict', check, passed: false }]);
-    assert.deepEqual(pending.ok && pending.record, { kind: 'pending-repair', check, passed: [] });
+    const pendingHistory = [{ kind: 'verdict', check, passed: false }] as const;
+    const pending = deriveBelief(artifact(), pendingHistory);
+    const pendingRecord = verificationHistoryRecord(pendingHistory);
+    assert.deepEqual(pending.ok && pendingRecord, { passed: [], failed: [check] });
+    assert.equal(pending.ok && verificationCheckStates(pendingRecord)[check], 'failed');
     const skipped = deriveBelief(artifact(), [
       { kind: 'verdict', check, passed: false },
       { kind: 'verdict', check: 'tests', passed: true },
@@ -203,19 +215,19 @@ test('selects only permitted vectors and reports each predicted pass probability
   const a = artifact();
   const belief = Array<number>(27).fill(0);
   Object.assign(belief, { 0: 0.1, 9: 0.2, 4: 0.3, 26: 0.4 });
-  const unrestricted = recommend(a, belief, new Set(POLICY_ACTIONS));
+  const unrestricted = recommend(a, belief, { passed: [], failed: [] });
   assert.ok(unrestricted.kind === 'recommendation');
   assert.equal(unrestricted.action, 'human');
   assert.ok(Math.abs(unrestricted.passProbabilities.tests - 0.6) < 1e-12);
   assert.ok(Math.abs(unrestricted.passProbabilities.agent - 0.7) < 1e-12);
   assert.ok(Math.abs(unrestricted.passProbabilities.human - 0.7) < 1e-12);
-  const restricted = recommend(a, belief, new Set<PolicyAction>(['tests', 'agent']));
+  const restricted = recommend(a, belief, { passed: ['human'], failed: [] });
   assert.ok(restricted.kind === 'recommendation'); assert.equal(restricted.action, 'tests');
-  assert.equal(recommend(a, belief, new Set()).kind, 'no-recommendation');
+  assert.equal(recommend(a, belief, { passed: [...POLICY_ACTIONS], failed: [] }).kind, 'no-recommendation');
 });
 
 test('rejects malformed beliefs before selection or probability calculation (TASK-2859.05 F1)', () => {
-  const a = artifact(); const permitted = new Set(POLICY_ACTIONS);
+  const a = artifact(); const record = { passed: [], failed: [] };
   const negative = oneHot(0); negative[0] = 1.1; negative[1] = -0.1;
   const unnormalized = oneHot(0); unnormalized[0] = 0.5;
   const cases: Array<[unknown, string]> = [
@@ -223,7 +235,7 @@ test('rejects malformed beliefs before selection or probability calculation (TAS
     [Array(27).fill(NaN), 'non-finite'], [negative, 'negative'], [unnormalized, 'not-normalized'],
   ];
   for (const [belief, reason] of cases) {
-    const result = recommend(a, belief as readonly number[], permitted);
+    const result = recommend(a, belief as readonly number[], record);
     assert.deepEqual(result, { kind: 'invalid-belief', reason });
     assert.equal('action' in result, false); assert.equal('passProbabilities' in result, false);
   }
@@ -261,7 +273,7 @@ test('matches the reference best vector on 1000 beliefs reached from a synthetic
     cost: byAction(cost), prior, vectors, bounds: { lower: -20, upper: 20 }, predicted: { policyValue: 0, currentSequenceValue: 0 } };
   const parsed = parsePolicyArtifact(JSON.stringify(emitted)); assert.ok(parsed.ok);
   const a = parsed.artifact;
-  const permitted = new Set(POLICY_ACTIONS);
+  const record = { passed: [] as PolicyAction[], failed: [] as PolicyAction[] };
   let seed = 2_859_005; const random = () => ((seed = seed * 48_271 % 2_147_483_647) - 1) / 2_147_483_646;
   const sample = (distribution: readonly number[]) => {
     const target = random(); let cumulative = 0;
@@ -271,7 +283,7 @@ test('matches the reference best vector on 1000 beliefs reached from a synthetic
   let belief = [...model.prior]; let hidden = sample(model.prior); const selected = new Set<PolicyAction>();
   for (let compared = 0; compared < 1000; compared += 1) {
     const expected = referenceSelect(vectors, belief);
-    const actual = recommend(a, belief, permitted);
+    const actual = recommend(a, belief, record);
     assert.ok(actual.kind === 'recommendation'); assert.equal(actual.action, expected.action); selected.add(actual.action);
     const action = Math.floor(random() * POLICY_ACTIONS.length) as 0 | 1 | 2;
     hidden = sample(model.transition[action][hidden]);
@@ -285,9 +297,10 @@ test('matches the reference best vector on 1000 beliefs reached from a synthetic
 // Contract v2 (TASK-2867.01): every dimension comes from the artifact. All fixtures are SYNTHETIC.
 const parsedV2 = (input: Json): PolicyArtifact => { const result = parsePolicyArtifact(input); if (!result.ok) { throw new Error(result.rejection.message); } return result.artifact; };
 const mutatedV2 = (change: (a: Json) => void, base: Json = syntheticV2()): Json => { change(base); return base; };
-const recommended = (a: PolicyArtifact, history: VerificationHistoryEntry[], permitted: readonly PolicyAction[] = POLICY_ACTIONS) => {
+const recommended = (a: PolicyArtifact, history: VerificationHistoryEntry[]) => {
   const belief = deriveBelief(a, history); assert.ok(belief.ok);
-  return { belief: belief.belief, result: recommend(a, belief.belief, new Set(permitted)) };
+  const record = verificationHistoryRecord(history);
+  return { belief: belief.belief, record, result: recommend(a, belief.belief, record) };
 };
 
 test('parses a synthetic 8-state 7-action v2 artifact and drives recommend from its own dimensions (TASK-2867.01)', () => {
@@ -297,11 +310,47 @@ test('parses a synthetic 8-state 7-action v2 artifact and drives recommend from 
   assert.deepEqual(fresh.belief, a.prior);
   assert.ok(fresh.result.kind === 'recommendation' && fresh.result.action === 'tests');
   assert.ok(Math.abs(fresh.result.passProbabilities.tests - 26 / 36) < 1e-12 && Math.abs(fresh.result.passProbabilities.human - 20 / 36) < 1e-12);
-  const afterTests = recommended(a, [{ kind: 'verdict', check: 'tests', passed: true }], ['agent', 'human']);
+  const afterTests = recommended(a, [{ kind: 'verdict', check: 'tests', passed: true }]);
   assert.ok(Math.abs(afterTests.belief[7] - 8 / 26) < 1e-12 && afterTests.belief[3] === 0);
   assert.ok(afterTests.result.kind === 'recommendation' && afterTests.result.action === 'agent');
   // a failed verdict then its repair conditions on the failure, then redraws through the repair action
   const repaired = recommended(a, [{ kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' }]);
+  assert.ok(repaired.belief.every((mass, index) => Math.abs(mass - a.prior[index]) < 1e-12));
+});
+
+test('a synthetic flaky-test failure stays inconclusive while its record permits only a test re-run (TASK-2867.02)', () => {
+  const states = Array.from({ length: 8 }, (_u, mask) => v2State(mask));
+  const a = parsedV2(syntheticV2(states, [...ALL_ACTIONS], 0.25));
+  const afterFailure = recommended(a, [{ kind: 'verdict', check: 'tests', passed: false }]);
+  const acceptableMass = afterFailure.belief.reduce((sum, mass, index) =>
+    sum + (a.states[index].acceptable.tests ? mass : 0), 0);
+  assert.ok(acceptableMass > 0 && acceptableMass < 1, 'a flaky failure leaves both acceptable and unacceptable states possible');
+  assert.deepEqual(afterFailure.record, { passed: [], failed: ['tests'] });
+  assert.ok(afterFailure.result.kind === 'recommendation' && afterFailure.result.action === 'tests');
+
+  const afterRerun = recommended(a, [
+    { kind: 'verdict', check: 'tests', passed: false },
+    { kind: 'verdict', check: 'tests', passed: true },
+  ]);
+  assert.deepEqual(afterRerun.record, { passed: ['tests'], failed: [] });
+  assert.ok(afterRerun.result.kind === 'recommendation' && afterRerun.result.action !== 'tests',
+    'the passed re-run clears the failed test and leaves another check permitted');
+});
+
+test('the same record path serves zero flake and an artifact without record-bearing states (TASK-2867.02)', () => {
+  const source = syntheticV2();
+  assert.ok(source.states.every((state: Json) => !Object.hasOwn(state, 'record')), 'the SYNTHETIC artifact omits state records');
+  const a = parsedV2(source);
+  assert.ok(a.states.every(state => POLICY_ACTIONS.every(check => state.verdicts[check] === 'unread')));
+  const failed = recommended(a, [{ kind: 'verdict', check: 'tests', passed: false }]);
+  assert.equal(failed.belief.reduce((sum, mass, index) =>
+    sum + (a.states[index].acceptable.tests ? mass : 0), 0), 0, 'beta_1 = 0 makes the failure conclusive');
+  assert.deepEqual(failed.record, { passed: [], failed: ['tests'] });
+  assert.ok(failed.result.kind === 'recommendation' && failed.result.action === 'tests');
+  const repaired = recommended(a, [
+    { kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' },
+  ]);
+  assert.deepEqual(repaired.record, { passed: [], failed: [] });
   assert.ok(repaired.belief.every((mass, index) => Math.abs(mass - a.prior[index]) < 1e-12));
 });
 
@@ -312,7 +361,7 @@ test('a second synthetic v2 artifact of other dimensions parses and recommends w
   const first = recommended(a, []);
   assert.ok(first.result.kind === 'recommendation' && first.result.action === 'human');
   assert.ok(Math.abs(first.result.passProbabilities.tests - 0.7) < 1e-12 && Math.abs(first.result.passProbabilities.agent - 0.6) < 1e-12);
-  const second = recommended(a, [{ kind: 'verdict', check: 'tests', passed: true }], ['agent', 'human']);
+  const second = recommended(a, [{ kind: 'verdict', check: 'tests', passed: true }]);
   assert.deepEqual(second.belief.map(mass => Math.round(mass * 7 * 1e6) / 1e6), [0, 0, 3, 4]);
   assert.ok(second.result.kind === 'recommendation' && second.result.action === 'human');
   // no repair action is declared, so a v2 failed verdict has no modelled repair: a typed failure, never a stale belief

@@ -96,10 +96,13 @@ test('maps authoritative verdicts and exact repairs while wrong-revision checks 
   ]);
 });
 
-test('maps landing failure and exact repair, but multi-check repair becomes one unmodelled change (TASK-2859.08)', () => {
+test('maps landing failure and its verdict record, while exact repair clears that record (TASK-2859.08, TASK-2867.02)', () => {
   assert.deepEqual(entries(mapped(null, gate('pass'))), [{ kind: 'verdict', check: 'tests', passed: true }]);
-  assert.deepEqual(mapped(null, gate('stale')), { ok: true, entries: [], tests: 'observed' });
+  assert.deepEqual(mapped(null, gate('stale')), { ok: true, entries: [], record: { passed: [], failed: [] }, tests: 'observed' });
   assert.deepEqual(entries(mapped(null, gate('pass', 'other'))), [{ kind: 'unmodelled-change' }]);
+
+  const pending = mapped(null, gate('fail'));
+  assert.deepEqual(pending.ok && pending.record, { passed: [], failed: ['tests'] });
 
   const failed = failedReview();
   const exact = mapped(failed, null, [row('same', 'advance'), row('same', 'pass', 13)], [cp('same', 'e2e')]);
@@ -108,6 +111,7 @@ test('maps landing failure and exact repair, but multi-check repair becomes one 
     { kind: 'verdict', check: 'tests', passed: false },
     { kind: 'repair', check: 'tests' },
   ]);
+  assert.deepEqual(exact.ok && exact.record, { passed: [], failed: [] });
   assert.equal(JSON.stringify(exact), JSON.stringify(mapped(JSON.parse(JSON.stringify(failed)), null,
     [row('same', 'advance'), row('same', 'pass', 13)], [cp('same', 'e2e')])));
 
