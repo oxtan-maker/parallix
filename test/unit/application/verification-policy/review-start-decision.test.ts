@@ -358,7 +358,7 @@ test('review-start decision keeps every identity and unknown explicit (TASK-2859
     agentRunId: null,
     operationId: null,
     failureReason: { kind: 'artifact-missing', message: 'configured artifact is absent' },
-  }), 3);
+  }), 3, true);
   assert.deepEqual(record, {
     schemaVersion: 1,
     idempotencyKey: 'review-start:task-2859.09:patch-123:3',
@@ -366,7 +366,7 @@ test('review-start decision keeps every identity and unknown explicit (TASK-2859
     configuredMode: 'shadow', effectiveMode: 'shadow', artifactSha256: null,
     recommendedAction: null, predictedPassProbability: { agent: null, human: null, tests: null },
     actualAction: 'agent', operatorOverride: true, verdictCorrelation: 'review:round-2',
-    agentRunId: null, gateRunId: null, operationId: null, actionSequence: 3,
+    agentRunId: null, gateRunId: null, operationId: null, actionSequence: 3, sameRevisionRerun: true,
     failureReason: { kind: 'artifact-missing', message: 'configured artifact is absent' },
     recordedAt: record.recordedAt,
   });
@@ -391,7 +391,7 @@ test('OperationalHistoryService appends one review-start row across restart repl
   assert.equal(entries.length, 1);
   assert.equal(entries[0]?.eventType, REVIEW_START_DECISION_EVENT);
   const stored = JSON.parse(entries[0]!.eventData) as ReviewStartDecision;
-  const expected = reviewStartDecision(input, 1);
+  const expected = reviewStartDecision(input, 1, false);
   assert.deepEqual({ ...stored, recordedAt: undefined }, { ...expected, recordedAt: undefined });
   assert.equal(Number.isNaN(Date.parse(stored.recordedAt)), false);
 });
@@ -471,7 +471,9 @@ function policyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
       resolveReviewEntryPin: async input => input.configuredMode === 'pilot'
         ? reviewEntryPin(input)
         : null,
+      settleReviewStartOutcomes: async () => 0,
     },
+    readOutcomeFacts: async () => ({ review: null, runs: [] }),
     diagnostic: failure => { failures.push(failure); },
     ...overrides,
   };
@@ -688,7 +690,8 @@ test('a transient selection failure is carried to the action-start record instea
   assert.equal(healthy.records[0]?.recommendedAction, null);
 
   const brokenPin = policyPorts({ configuration: pilotConfiguration, writer: {
-    recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => { throw new Error('pin writer down'); } } });
+    recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => { throw new Error('pin writer down'); },
+    settleReviewStartOutcomes: async () => 0 } });
   const pinSelection = await selectPolicyAction({ ...SELECTION_FACTS }, brokenPin.ports);
   assert.equal(pinSelection.failure?.kind, 'writer-failure');
   const deterministic = await selectPolicyAction(SELECTION_FACTS, policyPorts({ configuration: pilotConfiguration }).ports);
@@ -771,7 +774,8 @@ test('a pilot mission whose first pin write failed is pinned at the next evaluat
     resolveReviewEntryPin: async (input: ReviewEntryPinInput) => {
       if (failures-- > 0) { throw new Error('pin writer down'); }
       return await real.resolveReviewEntryPin(input);
-    } };
+    },
+    settleReviewStartOutcomes: async () => 0 };
   const fixture = policyPorts({ configuration: pilotConfiguration, writer: flaky });
   const facts = { missionId: missionId('task-flaky-pin'), revision: 'abc1234' };
   const first = await selectPolicyAction(facts, fixture.ports);
@@ -786,6 +790,7 @@ test('pilot pin writer failure records a fixed fallback instead of stalling (TAS
   const fixture = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' }, writer: {
     resolveReviewEntryPin: async () => { throw new Error('pin writer unavailable'); },
     recordReviewStartDecision: async input => { records.push(input); return true; },
+    settleReviewStartOutcomes: async () => 0,
   } });
   assert.equal(await observePolicyReviewStart(startFacts({ missionId: missionId('task-contended') }), fixture.ports),
     'recorded');
@@ -831,7 +836,7 @@ test('a writer that outlives the deadline gets no second, contradictory decision
   assert.equal(await observeReviewStartDecision(async () => decision(), { recordReviewStartDecision: () => new Promise<boolean>(() => {}) },
     () => {}, { deadlineMs: 5 }), 'write-timed-out');
   const writes: ReviewStartDecisionInput[] = [];
-  const slow = policyPorts({ writer: { resolveReviewEntryPin: async () => null,
+  const slow = policyPorts({ writer: { resolveReviewEntryPin: async () => null, settleReviewStartOutcomes: async () => 0,
     recordReviewStartDecision: async input => { writes.push(input); await new Promise(resolve => setTimeout(resolve, 280)); return true; } } });
   assert.equal(await observePolicyReviewStart(startFacts(), slow.ports), 'write-timed-out');
   assert.equal(writes.length, 1, 'the original write is the only one; it keeps its known change identity');

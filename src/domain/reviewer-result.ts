@@ -82,10 +82,15 @@ export function currentRevisionReviewerResults(review: Review, revision: ChangeR
   return effectiveResults((review.rounds.at(-1)?.reviewerResults ?? []).filter(result => result.revision === revision));
 }
 
+/** A publication counts as a judgment only when its run completed cleanly, it is not revoked and it names a decision. */
+export function isEffectiveReviewerResult(result: ReviewerResult): boolean {
+  return result.outcome === 'completed' && result.status === 0 && !result.revokedAt && result.decision !== 'unknown';
+}
+
 function effectiveResults(results: readonly ReviewerResult[]): readonly ReviewerResult[] {
   const effective = new Map<AgentFamily, ReviewerResult>();
   for (const result of results) {
-    if (result.outcome !== 'completed' || result.status !== 0 || result.revokedAt || result.decision === 'unknown') { continue; }
+    if (!isEffectiveReviewerResult(result)) { continue; }
     if (!effective.has(result.agentFamily)) { effective.set(result.agentFamily, result); }
   }
   return [...effective.values()];

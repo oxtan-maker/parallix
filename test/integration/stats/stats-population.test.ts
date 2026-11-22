@@ -15,7 +15,7 @@ import type { SqliteDatabaseAdapter } from '../../../src/adapters/sqlite/databas
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStatisticsCommand, type StatsCompositionOptions } from '../../../src/composition/stats.js';
-import type { MissionStore } from '../../../src/application/domain-ports.js';
+import { SqliteMissionStore } from '../../../src/adapters/sqlite/mission-store.js';
 import { SqliteMeasurementStore } from '../../../src/adapters/sqlite/measurement-store.js';
 import { ConcreteMetricsReadAdapter } from '../../../src/application/projections/metrics-read-adapter.js';
 import type { MissionId, MissionStatus } from '../../../src/domain/mission.js';
@@ -96,7 +96,7 @@ describe("defect D: lifecycle `done` is the only completion definition", () => {
   });
 
   it('gives the shared CLI mission-flow report the same population as the board', async () => {
-    await withStatisticsDatabase(async ({ db, databasePath, laneEventRepo, usageRepo }) => {
+    await withStatisticsDatabase(async ({ dir, db, databasePath, laneEventRepo, usageRepo }) => {
       await seed(laneEventRepo, db);
 
       const metrics = await new ConcreteMetricsReadAdapter({
@@ -116,8 +116,9 @@ describe("defect D: lifecycle `done` is the only completion definition", () => {
       process.env.DEBUG = '1';
       try {
         await stats(['--today', '2026-06-05'], {
-          rootDir: process.cwd(),
+          rootDir: dir,
           store,
+          missionStore: new SqliteMissionStore(db),
           laneEventRepo,
           usageRepo,
           repositoryId: REPO,

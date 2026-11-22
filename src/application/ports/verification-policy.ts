@@ -82,8 +82,60 @@ export interface ReviewStartDecision {
   readonly gateRunId: string | null;
   readonly operationId: string | null;
   readonly actionSequence: number;
+  /**
+   * Whether this action had already started once for the same change identity.
+   * Null when the change identity is unknown; absent on rows recorded before it was kept.
+   */
+  readonly sameRevisionRerun?: boolean | null;
   readonly failureReason: ReviewStartFailure | null;
   readonly recordedAt: string;
+}
+
+/** Who stood behind a recorded verdict. `reviewer` is the agent reviewer: a changes-requested decision with no operator source. */
+export type ReviewVerdictSource = 'reviewer' | 'classifier' | 'operator' | 'provider' | 'local' | 'mechanical-restoration';
+
+/** What one implementer response that disputed findings led to; null when the review answered none. */
+export interface ReviewRebuttalOutcome {
+  readonly disputedFindings: number;
+  /** Findings the same response fixed; 0 marks a pure rebuttal. */
+  readonly fixedFindings: number;
+  /** The settled round decision of the review that judged the revision the response produced; null while none exists, and for an approval that was later withdrawn. */
+  readonly renewedVerdict: 'approved' | 'changes-requested' | null;
+}
+
+/**
+ * Append-only observation of how one review start ended, settled from the review
+ * round and run records already stored. Every unobserved value is an explicit null,
+ * never zero, an empty list or an estimate.
+ */
+export interface ReviewStartOutcome {
+  readonly schemaVersion: 1;
+  readonly idempotencyKey: string;
+  /** Idempotency key of the review-start decision this settles. */
+  readonly startKey: string;
+  readonly missionId: MissionId;
+  readonly changeIdentity: string | null;
+  readonly actualAction: Exclude<PolicyAction, 'tests'>;
+  /** Wall time of the agent run from its run record; null when the run record or its end is missing. */
+  readonly runDurationMs: number | null;
+  /** Agent review time: round start to this reviewer's own publication (or the round decision when the round has none); null with neither. */
+  readonly reviewMs: number | null;
+  /** Human wait: handoff start to the human decision; null with no decision or no start time. */
+  readonly humanWaitMs: number | null;
+  /** Findings of the decision this action produced; null when no decision was recorded. */
+  readonly findingCount: number | null;
+  readonly verdictSource: ReviewVerdictSource | null;
+  readonly rebuttal: ReviewRebuttalOutcome | null;
+  readonly recordedAt: string;
+}
+
+export type ReviewStartOutcomeInput = Omit<ReviewStartOutcome, 'schemaVersion' | 'idempotencyKey' | 'recordedAt'>;
+
+/** The stored facts an outcome is settled from. */
+export interface ReviewOutcomeFacts {
+  readonly review: import('../../domain/review.js').Review | null;
+  /** Agent run windows by run id; endedAt null is a run with no recorded end. */
+  readonly runs: readonly { readonly runId: string; readonly startedAt: string | null; readonly endedAt: string | null }[];
 }
 
 /** Shared facts presented after any verification-action start commits. */
@@ -112,7 +164,7 @@ export type VerificationActionStartFacts = ReviewStartFacts | TestsActionStartFa
 
 /** Facts known at the start boundary; the one writer assigns the durable sequence. */
 export type ReviewStartDecisionInput = Omit<ReviewStartDecision,
-  'schemaVersion' | 'idempotencyKey' | 'recordedAt' | 'actionSequence'>;
+  'schemaVersion' | 'idempotencyKey' | 'recordedAt' | 'actionSequence' | 'sameRevisionRerun'>;
 
 /** Policy mechanisms composed only when verificationPolicy is active. */
 export interface ReviewStartPolicyPorts {
@@ -126,7 +178,12 @@ export interface ReviewStartPolicyPorts {
   readonly writer: {
     recordReviewStartDecision(_input: ReviewStartDecisionInput): Promise<boolean>;
     resolveReviewEntryPin(_input: ReviewEntryPinInput): Promise<ReviewEntryPin | null>;
+    /** Append the outcome of every settled start of the Mission not yet recorded; returns how many rows were new. */
+    settleReviewStartOutcomes(_missionId: MissionId,
+      _build: (_start: ReviewStartDecision, _later: readonly ReviewStartDecision[], _all: readonly ReviewStartDecision[]) => ReviewStartOutcomeInput | null): Promise<number>;
   };
+  /** The stored review rounds and run records an outcome is settled from; unreadable is a throw, never empty. */
+  readonly readOutcomeFacts: (_missionId: MissionId) => Promise<ReviewOutcomeFacts>;
   readonly diagnostic: (_failure: ReviewStartFailure) => void;
 }
 

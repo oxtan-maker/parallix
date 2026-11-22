@@ -737,7 +737,9 @@ function realPolicyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
     readHistory: async () => ({ ok: true, entries: [], tests: 'unobserved' }),
     identity: { branchHead: () => 'head-1', changeIdentity: () => 'patch-1', onlyBookkeepingSince: () => false },
     writer: { recordReviewStartDecision: async input => { records.push(input); return true; },
-      resolveReviewEntryPin: async input => input.configuredMode === 'pilot' ? reviewEntryPin(input) : null },
+      resolveReviewEntryPin: async input => input.configuredMode === 'pilot' ? reviewEntryPin(input) : null,
+      settleReviewStartOutcomes: async () => 0 },
+    readOutcomeFacts: async () => ({ review: null, runs: [] }),
     diagnostic: () => {}, ...overrides,
   };
   return { ports, records };
@@ -758,7 +760,7 @@ async function runWithRealPolicy(policy: ReturnType<typeof realPolicyPorts>, ope
 
 test('policy fallbacks are recorded with their typed reason and the fixed sequence still completes (PX-0074.03)', async () => {
   const cases: Array<[string, Partial<ReviewStartPolicyPorts>]> = [
-    ['mode-changed-in-flight', { writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null } }],
+    ['mode-changed-in-flight', { writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null, settleReviewStartOutcomes: async () => 0 } }],
     ['artifact-missing', { loadPolicy: () => ({ mode: 'fixed', reason: 'missing' }) }],
     ['history-unavailable', { readHistory: async () => ({ ok: false, failure: { kind: 'unavailable', message: 'gone' } }) }],
   ];

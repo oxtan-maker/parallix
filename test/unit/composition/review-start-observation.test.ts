@@ -62,7 +62,8 @@ test('only pilot composes policy actions, bound to the loop and the rebase state
     loadPolicy: () => ({ mode: 'fixed' as const, reason: 'missing' as const }),
     readHistory: async () => ({ ok: true as const, entries: [], tests: 'unobserved' as const }),
     identity: { branchHead: () => null, changeIdentity: () => 'patch-1', onlyBookkeepingSince: () => false },
-    writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null },
+    writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null, settleReviewStartOutcomes: async () => 0 },
+    readOutcomeFacts: async () => ({ review: null, runs: [] }),
   });
   const input = (mode: 'shadow' | 'pilot') => ({ slug: 'task-2859.19', executionContext: { missionWorktree: worktree } as never,
     configuration: DEFAULT_CONFIGURATION, policy: policy(mode), policyFactory: (() => undefined) as never, missionServices: {} as never,
@@ -74,4 +75,19 @@ test('only pilot composes policy actions, bound to the loop and the rebase state
   assert.equal(await port.testsActionsSpent(), 2, 'the spent count comes from the durable history');
   assert.equal((await port.select({ missionId: missionId('task-2859.19'), revision: 'abc' })).action, null,
     'an unusable policy leaves the fixed policy in charge');
+});
+
+test('outcome facts read the stored review and fail loudly when either source is unreadable (TASK-2867.06)', async () => {
+  const worktree = mkdtemp('review-outcome-facts-');
+  fs.writeFileSync(path.join(worktree, 'workflow.config.json'), JSON.stringify({
+    verificationPolicy: { mode: 'shadow', artifact: 'missing-policy.json' },
+  }));
+  const review = { rounds: [], intervention: null, stageLaunches: [], reviewEvents: [] };
+  const portsFor = (loaded: unknown) => createReviewStartPolicyPorts({ missionWorktree: worktree, baseBranch: 'main' },
+    'task-2867.06', DEFAULT_CONFIGURATION, { db: {}, store: { load: async () => loaded }, history: {}, lifecycle: {},
+      repositoryId: 'repository-1' } as unknown as ReviewStartObservationServices)!;
+  const facts = await portsFor({ kind: 'found', mission: { review } }).readOutcomeFacts(missionId('task-2867.06'));
+  assert.equal(facts.review, review);
+  assert.deepEqual(facts.runs, [], 'a mission with no retained run has an empty run list, read from the run history');
+  await assert.rejects(portsFor({ kind: 'missing' }).readOutcomeFacts(missionId('task-2867.06')), /review rounds are unavailable/);
 });

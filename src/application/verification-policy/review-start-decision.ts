@@ -2,6 +2,7 @@ import type { PerAction, PolicyAction } from './policy-artifact.js';
 import { POLICY_ACTIONS } from './policy-artifact.js';
 import { deriveBelief } from './belief.js';
 import { recommend } from './recommend.js';
+import { settleReviewStartOutcomes } from './review-start-outcome.js';
 import type { PolicyLoadResult, PolicySelection, ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
   ReviewStartDecisionInput, ReviewStartFacts, ReviewStartFailure,
   ReviewStartFailureKind, ReviewStartPolicyPorts, TestsActionStartFacts,
@@ -27,11 +28,13 @@ export function reviewStartDecisionKey(input: Pick<ReviewStartDecision,
     .map(encodeURIComponent).join(':');
 }
 
-export function reviewStartDecision(input: ReviewStartDecisionInput, actionSequence: number): ReviewStartDecision {
+export function reviewStartDecision(input: ReviewStartDecisionInput, actionSequence: number,
+  sameRevisionRerun: boolean | null): ReviewStartDecision {
   return {
     ...input,
     schemaVersion: 1,
     actionSequence,
+    sameRevisionRerun,
     idempotencyKey: reviewStartDecisionKey({ ...input, actionSequence }),
     recordedAt: new Date().toISOString(),
   };
@@ -291,6 +294,14 @@ export async function selectPolicyAction(facts: PolicyEvaluationFacts,
 
 /** The sole policy evaluator used by every durable verification-action start boundary. */
 async function observePolicyVerificationActionStart(input: VerificationActionStartFacts,
+  ports: ReviewStartPolicyPorts): Promise<ReviewStartObservationOutcome> {
+  const outcome = await recordStartDecision(input, ports);
+  // Earlier starts of the Mission have ended or been superseded; their outcomes are stored now.
+  await settleReviewStartOutcomes(input.missionId, ports, REVIEW_START_OBSERVATION_DEADLINE_MS);
+  return outcome;
+}
+
+async function recordStartDecision(input: VerificationActionStartFacts,
   ports: ReviewStartPolicyPorts): Promise<ReviewStartObservationOutcome> {
   const outcome = await observeReviewStartDecision(signal => buildDecision(input, ports, signal),
     ports.writer, ports.diagnostic);

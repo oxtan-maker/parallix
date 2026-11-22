@@ -1,9 +1,11 @@
 import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../ports/operation-history.js';
+import type { MissionId } from '../../domain/mission.js';
 import type { ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
-  ReviewStartDecisionInput } from '../ports/verification-policy.js';
+  ReviewStartDecisionInput, ReviewStartOutcome, ReviewStartOutcomeInput } from '../ports/verification-policy.js';
 import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_TYPE } from '../integrate/validation-marker.js';
 import { REVIEW_ENTRY_PIN_EVENT, REVIEW_START_DECISION_EVENT, reviewEntryPin,
   reviewStartDecision } from '../verification-policy/review-start-decision.js';
+import { REVIEW_START_OUTCOME_EVENT, reviewStartOutcome, reviewStartOutcomeKey, reviewerOfStart } from '../verification-policy/review-start-outcome.js';
 
 
 /**
@@ -167,12 +169,37 @@ export class OperationalHistoryService {
       const actionSequence = records
         .filter(record => record.changeIdentity === input.changeIdentity)
         .reduce((highest, record) => Math.max(highest, record.actionSequence), 0) + 1;
-      const decision = reviewStartDecision(input, actionSequence);
+      // Change identity is the revision notion the policy history uses; an unknown identity cannot say.
+      // A re-run is the same reviewer starting the same action again; an independent co-reviewer is not one.
+      const sameRevisionRerun = input.changeIdentity === null ? null
+        : records.some(record => record.changeIdentity === input.changeIdentity && record.actualAction === input.actualAction
+          && reviewerOfStart(record.verdictCorrelation) === reviewerOfStart(input.verdictCorrelation));
+      const decision = reviewStartDecision(input, actionSequence, sameRevisionRerun);
       if (await this.repository.appendIdempotent({
         eventType: REVIEW_START_DECISION_EVENT,
         eventData: JSON.stringify(decision),
         createdAt: decision.recordedAt,
       }, decision.idempotencyKey)) { return true; }
     }
+  }
+
+  /**
+   * Append the outcome of every start the builder settles and that has none yet.
+   * The idempotent append makes a replay, or a competing writer, add nothing.
+   */
+  async settleReviewStartOutcomes(missionId: MissionId,
+    build: (_start: ReviewStartDecision, _later: readonly ReviewStartDecision[], _all: readonly ReviewStartDecision[]) => ReviewStartOutcomeInput | null): Promise<number> {
+    const starts = await this.reviewStartDecisions(missionId);
+    let appended = 0;
+    for (const [index, start] of starts.entries()) {
+      const input = build(start, starts.slice(index + 1), starts);
+      if (input === null) { continue; }
+      const outcome: ReviewStartOutcome = reviewStartOutcome(input);
+      if (await this.repository.appendIdempotent({ eventType: REVIEW_START_OUTCOME_EVENT,
+        eventData: JSON.stringify(outcome), createdAt: outcome.recordedAt }, reviewStartOutcomeKey(start.idempotencyKey))) {
+        appended += 1;
+      }
+    }
+    return appended;
   }
 }
