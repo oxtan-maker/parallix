@@ -9,7 +9,7 @@ import type { LoopContext, ReviewRound } from './round.js';
  * policy chooses again, `repaired` means a failed check was repaired and the
  * review step must be re-entered, `stop` means the action went to a human.
  */
-export type PolicyTestsStep = 'none' | 'ran' | 'repaired' | 'stop';
+export type PolicyTestsStep = 'none' | 'ran' | 'retry' | 'repaired' | 'stop';
 
 /** Named escalation prefix for a tests action that needs a human; the suffix is its typed handoff reason. */
 export const TESTS_ACTION_HANDOFF = 'TESTS_ACTION';
@@ -90,7 +90,7 @@ async function settleTestsAction(context: LoopContext, outcome: PolicyTestsOutco
     case 'completed':
       ports.output.log(`Policy-selected integration tests ${outcome.verdict} for ${slug}.`);
       if (outcome.verdict === 'passed') { return 'ran'; }
-      if (outcome.verdict === 'failed') { return 'repaired'; }
+      if (outcome.verdict === 'failed') { return outcome.retryWithoutRepair ? 'retry' : 'repaired'; }
       await context.escalateToHumanReview(`${TESTS_ACTION_HANDOFF}_CANCELLED`);
       return 'stop';
     case 'human-handoff':

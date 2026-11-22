@@ -5,6 +5,10 @@ import { runReviewStepTestsEntry } from '../../../../src/application/integrate-e
 import { setLogger } from '../../../../src/application/presentation/cli-format.js';
 import { createTestsActionExecutor } from '../../../../src/application/integrate/tests-action.js';
 import type { IntegrateWorkflowPorts, IntegrationGateFailureRequest, IntegrationGateRunResult } from '../../../../src/application/ports/integrate-workflow.js';
+import type { ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
+import { reviewEntryPin, selectPolicyAction } from '../../../../src/application/verification-policy/review-start-decision.js';
+import { parsePolicyArtifact } from '../../../../src/application/verification-policy/policy-artifact.js';
+import { verificationHistoryRecord, type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { missionId, type Mission } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
@@ -13,6 +17,7 @@ import { missionExecutionContext } from '../../../fixtures/mission-execution-con
 import { approvedReview, fixtureMission, pendingReview } from '../../../fixtures/mission-builders.js';
 import { integrationServices } from '../../../helpers/stub-integration-services.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
+import { syntheticPolicyArtifactV2 } from '../verification-policy/policy-artifact.fixture.js';
 
 const gates = [
   { key: 'unit', command: 'npm test -- --unit', order: 0 },
@@ -291,7 +296,11 @@ for (const [lane, review] of [['review', pendingReview('px-tests-action')], ['ac
 
 test('a failed tests action routes repair through the rebound kernel and returns control unlanded (TASK-2859.14)', async () => {
   const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
-  const fixture = await testsAction({ result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }) });
+  let selections = 0;
+  const fixture = await testsAction({
+    result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }),
+    stillSelected: async () => selections++ === 0,
+  });
   const outcome = await fixture.run();
   assert.deepEqual(fixture.calls, ['rebase', 'gates', 'rebound', 'release']);
   assert.deepEqual(outcome, { kind: 'completed', verdict: 'failed', recorded: false, repairRoute: { route: 'blocked', rebounds: 1 },
@@ -302,6 +311,46 @@ test('a failed tests action routes repair through the rebound kernel and returns
   assert.equal(fixture.received.route?.testedRevision, HEAD);
   assert.deepEqual(fixture.received.route?.executionContext, fixture.executionContext);
   assert.equal(fixture.unsuccessful.length, 1, 'the failed run stays recorded once through the validation writer');
+  assert.equal(selections, 2, 'a policy decline after the red verdict retains the rebound path');
+});
+
+test('a synthetic policy re-selection re-runs failed tests through the gate owner without repair (TASK-2867.05)', async () => {
+  const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'synthetic flake' };
+  const parsed = parsePolicyArtifact(syntheticPolicyArtifactV2(undefined, undefined, 0.25));
+  assert.ok(parsed.ok);
+  let evaluations = 0;
+  const selectionPorts: ReviewStartPolicyPorts = {
+    configuration: { mode: 'pilot', artifact: 'synthetic.json' }, repositoryId: repositoryId('test-repo'),
+    targetBranch: 'main', operationId: null,
+    loadPolicy: () => ({ mode: 'shadow', hash: 'synthetic-hash', artifact: parsed.artifact }),
+    readHistory: async () => {
+      const entries: VerificationHistoryEntry[] = evaluations++ === 0 ? []
+        : [{ kind: 'verdict', check: 'tests', passed: false }];
+      return { ok: true, entries, record: verificationHistoryRecord(entries), tests: 'observed' };
+    },
+    identity: { branchHead: () => HEAD, changeIdentity: () => HEAD, onlyBookkeepingSince: () => false },
+    writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async input => reviewEntryPin(input),
+      settleReviewStartOutcomes: async () => 0 },
+    readOutcomeFacts: async () => ({ review: null, runs: [] }),
+    diagnostic: failure => { throw new Error(failure.message); },
+  };
+  const fixture = await testsAction({
+    results: [receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }), receipt()],
+    stillSelected: async revision => (await selectPolicyAction({ missionId: missionId('px-tests-action'), revision }, selectionPorts)).action === 'tests',
+  });
+  const failed = await fixture.run();
+  assert.deepEqual(failed, { kind: 'completed', verdict: 'failed', recorded: false, repairRoute: null,
+    retryWithoutRepair: true,
+    evidence: { gateRunId: 'run-2', revision: HEAD, outcomes: [{ ...plan[0], exitCode: 7 }] },
+    next: { kind: 'tests', reason: 'policy-selected' } });
+  assert.equal(fixture.calls.includes('rebound'), false, 'the renewed tests selection bypassed only the repair launch');
+
+  const passed = await fixture.run();
+  assert.equal(passed.kind === 'completed' && passed.verdict, 'passed');
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release', 'rebase', 'gates', 'release'],
+    'the same gate owner executed the unchanged-revision re-run; no parallel runner or rebound was created');
+  assert.equal(evaluations, 3, 'the artifact selected tests before the first run, after its failed verdict, and before the re-run');
+  assert.equal(fixture.unsuccessful.length, 1, 'only the red verdict wrote the unsuccessful validation fact');
 });
 
 test('a cancelled tests action records its verdict and returns control without repair (TASK-2859.14)', async () => {

@@ -318,7 +318,7 @@ test('parses a synthetic 8-state 7-action v2 artifact and drives recommend from 
   assert.ok(repaired.belief.every((mass, index) => Math.abs(mass - a.prior[index]) < 1e-12));
 });
 
-test('a synthetic flaky-test failure stays inconclusive while its record permits only a test re-run (TASK-2867.02)', () => {
+test('a synthetic artifact test vector makes the failed check re-runnable, and its absence does not (TASK-2867.05)', () => {
   const states = Array.from({ length: 8 }, (_u, mask) => v2State(mask));
   const a = parsedV2(syntheticV2(states, [...ALL_ACTIONS], 0.25));
   const afterFailure = recommended(a, [{ kind: 'verdict', check: 'tests', passed: false }]);
@@ -327,6 +327,11 @@ test('a synthetic flaky-test failure stays inconclusive while its record permits
   assert.ok(acceptableMass > 0 && acceptableMass < 1, 'a flaky failure leaves both acceptable and unacceptable states possible');
   assert.deepEqual(afterFailure.record, { passed: [], failed: ['tests'] });
   assert.ok(afterFailure.result.kind === 'recommendation' && afterFailure.result.action === 'tests');
+
+  const withoutRerun = syntheticV2(states, [...ALL_ACTIONS], 0.25);
+  withoutRerun.vectors = withoutRerun.vectors.filter((vector: Json) => vector.action !== 'tests');
+  assert.equal(recommended(parsedV2(withoutRerun), [{ kind: 'verdict', check: 'tests', passed: false }]).result.kind,
+    'no-recommendation', 'the artifact, not a runtime parameter, decides whether the re-run action exists');
 
   const afterRerun = recommended(a, [
     { kind: 'verdict', check: 'tests', passed: false },
@@ -337,7 +342,7 @@ test('a synthetic flaky-test failure stays inconclusive while its record permits
     'the passed re-run clears the failed test and leaves another check permitted');
 });
 
-test('the same record path serves zero flake and an artifact without record-bearing states (TASK-2867.02)', () => {
+test('the same record path serves zero flake and an artifact without record-bearing states (TASK-2867.02, TASK-2867.05)', () => {
   const source = syntheticV2();
   assert.ok(source.states.every((state: Json) => !Object.hasOwn(state, 'record')), 'the SYNTHETIC artifact omits state records');
   const a = parsedV2(source);
@@ -346,7 +351,8 @@ test('the same record path serves zero flake and an artifact without record-bear
   assert.equal(failed.belief.reduce((sum, mass, index) =>
     sum + (a.states[index].acceptable.tests ? mass : 0), 0), 0, 'beta_1 = 0 makes the failure conclusive');
   assert.deepEqual(failed.record, { passed: [], failed: ['tests'] });
-  assert.ok(failed.result.kind === 'recommendation' && failed.result.action === 'tests');
+  assert.ok(failed.result.kind === 'recommendation' && failed.result.action === 'tests',
+    'a zero pass probability does not override an action present in the artifact');
   const repaired = recommended(a, [
     { kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' },
   ]);

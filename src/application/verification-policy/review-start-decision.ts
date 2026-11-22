@@ -198,10 +198,6 @@ function evaluateHistory(context: EvaluationContext, loaded: ActivePolicy,
   if (recommendation.kind === 'invalid-belief') {
     return fallback(context, { kind: 'belief-invalid', message: `policy belief is ${recommendation.reason}` }, 'fixed', loaded.hash);
   }
-  if (failed.has('tests') && recommendation.passProbabilities.tests === 0) {
-    return fallback(context, { kind: 'belief-unmodelled-history', message: 'tests repair is pending' },
-      'fixed', loaded.hash, recommendation.passProbabilities);
-  }
   const mode = activeMode(context.ports);
   if (recommendation.kind === 'no-recommendation') {
     return fallback(context, { kind: 'no-recommendation', message: 'policy has no permitted recommendation' },

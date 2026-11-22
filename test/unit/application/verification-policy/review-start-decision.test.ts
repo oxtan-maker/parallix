@@ -605,7 +605,7 @@ test('a timed-out evaluation still lands a typed observation-timeout row with un
   assert.deepEqual(slow.records[0]?.predictedPassProbability, { agent: null, human: null, tests: null });
 });
 
-test('a flaky test failure permits its re-run while zero flake preserves the fixed-policy result (TASK-2859.09, TASK-2867.02)', async () => {
+test('artifact action presence permits a failed test re-run independently of the flake parameter (TASK-2867.05)', async () => {
   const flakyLoader = createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' },
     () => JSON.stringify(syntheticPolicyArtifactV2(undefined, undefined, 0.25)));
   const pending = policyPorts({ loadPolicy: flakyLoader, readHistory: async () =>
@@ -626,10 +626,19 @@ test('a flaky test failure permits its re-run while zero flake preserves the fix
     { mode: 'shadow', artifact: 'policy.json' }, () => JSON.stringify(syntheticPolicyArtifactV2())),
   readHistory: async () => policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'observed') });
   assert.equal(await observePolicyReviewStart(startFacts(), zeroFlake.ports), 'recorded');
-  assert.equal(zeroFlake.records[0]?.failureReason?.kind, 'belief-unmodelled-history');
-  assert.equal(zeroFlake.records[0]?.effectiveMode, 'fixed');
-  assert.equal(zeroFlake.records[0]?.recommendedAction, null);
+  assert.equal(zeroFlake.records[0]?.failureReason, null);
+  assert.equal(zeroFlake.records[0]?.effectiveMode, 'shadow');
+  assert.equal(zeroFlake.records[0]?.recommendedAction, 'tests');
   assert.equal(zeroFlake.records[0]?.predictedPassProbability.tests, 0);
+
+  const missingAction = syntheticPolicyArtifactV2(undefined, undefined, 0.25);
+  missingAction.vectors = missingAction.vectors.filter((vector: Record<string, unknown>) => vector.action !== 'tests');
+  const absent = policyPorts({ loadPolicy: createPolicyArtifactLoader('/repo',
+    { mode: 'shadow', artifact: 'policy.json' }, () => JSON.stringify(missingAction)),
+  readHistory: async () => policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'observed') });
+  assert.equal(await observePolicyReviewStart(startFacts(), absent.ports), 'recorded');
+  assert.equal(absent.records[0]?.failureReason?.kind, 'no-recommendation');
+  assert.equal(absent.records[0]?.recommendedAction, null, 'an artifact without the re-run vector keeps repair in charge');
 
   const complete = policyPorts({ readHistory: async () => policyHistory([
     { kind: 'verdict', check: 'tests', passed: true },

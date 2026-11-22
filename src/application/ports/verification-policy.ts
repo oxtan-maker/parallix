@@ -197,7 +197,9 @@ export type VerificationActionPolicyFactory = (_input: {
 /** How a policy-selected integration-test action ended; the executor's own typed outcome. */
 export type PolicyTestsOutcome =
   | { readonly kind: 'not-selected' }
-  | { readonly kind: 'completed'; readonly verdict: 'passed' | 'failed' | 'cancelled' }
+  | { readonly kind: 'completed'; readonly verdict: 'passed' | 'failed' | 'cancelled';
+    /** True only when the post-failure policy selection chose tests again before rebound began. */
+    readonly retryWithoutRepair?: boolean }
   | { readonly kind: 'human-handoff'; readonly reason: string; readonly detail: string };
 
 /** The pilot's choice: an action to run, or null with the typed reason the fixed policy stays in charge (absent when none applies). */

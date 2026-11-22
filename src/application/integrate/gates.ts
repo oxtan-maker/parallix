@@ -107,6 +107,8 @@ export interface GateStepRequest {
   realAgent: string | null;
   realAgentModel: string | null;
   seams: IntegrateSeams;
+  /** A policy-selected tests action may reselect the same check after its failed verdict is recorded. */
+  retryFailedTestsWithoutRepair?: (_revision: string) => Promise<boolean>;
 }
 
 function composeIntegrationGateStepDependencies({ gates, landing, verification, git: gitPort, review }: IntegrateWorkflowPorts) {
@@ -258,7 +260,8 @@ class IntegrationGateStep {
     return { checkout, configured, gatesToRun, requirePreIntegration, result, finalTree };
   }
 
-  async runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }: GateStepRequest): Promise<string> {
+  async runRequiredLocalGates({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent,
+    realAgentModel, seams, configuration, retryFailedTestsWithoutRepair }: GateStepRequest): Promise<string> {
     if (noIntegrationGates) {
       fmt.log.info('Integration gates skipped via --no-integration-gates flag');
       return 'skipped via --no-integration-gates';
@@ -303,8 +306,24 @@ class IntegrationGateStep {
     if (disposition === 'cancelled') {
       throw abortWith(this.dependencies.landing, `Integration gates cancelled for ${slug}. Aborting before merge.`);
     }
+    // Only the tests-action entry supplies this boundary. The failed run is
+    // durable before the policy sees it; every absent, refused or failed
+    // selection continues into the existing rebound owner below.
+    if (await this.selectedTestsRetryWithoutRepair(execution.finalTree.commit, retryFailedTestsWithoutRepair)) {
+      return 'integration gates failed; policy selected tests again without repair';
+    }
 
     return this.repairGateFailure({ slug, context, missionLoad, missionServices, dryRun, noIntegrationGates, realAgent, realAgentModel, seams, configuration }, execution);
+  }
+
+  private async selectedTestsRetryWithoutRepair(commit: string | null | undefined,
+    retryFailedTestsWithoutRepair: GateStepRequest['retryFailedTestsWithoutRepair']): Promise<boolean> {
+    if (!commit || !retryFailedTestsWithoutRepair) { return false; }
+    try { return await retryFailedTestsWithoutRepair(commit); }
+    catch {
+      // Policy failure preserves the existing repair route.
+      return false;
+    }
   }
 
   private async recordUnsuccessfulGateRun(slug: string, missionServices: IntegrationMissionServices,

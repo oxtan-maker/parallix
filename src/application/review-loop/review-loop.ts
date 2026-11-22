@@ -340,7 +340,7 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
       await runOwnedReviewLoop({ ...windowRequest, policyActionsUsed: used + 1, isContinue: true, reset: false }, ports, restarted);
       return;
     }
-    if (tests === 'ran') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
+    if (tests === 'ran' || tests === 'retry') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
     const outcome = await runRound(context, attempt);
     // The pre-review rebase changed what the policy recommends: it chooses again, and the re-plan spends an attempt.
     if (outcome === 'replan') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
@@ -367,28 +367,32 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
 
 /**
  * Return control to the next-action decision after an approved agent round. A
- * policy-selected tests action is dispatched at most once, within the attempt
- * allowance; whatever it ends in, the approval is handed to the human turn,
- * except a failed check, which re-enters review. A spent allowance dispatches
- * nothing and ends in MAX_ATTEMPTS after the hand-off.
+ * policy-selected tests action stays within the attempt allowance. A selected
+ * same-revision retry returns to the policy; any repaired failure re-enters
+ * review. Every other outcome hands the durable approval to the human turn. A
+ * spent allowance dispatches nothing and ends in MAX_ATTEMPTS after hand-off.
  */
 async function settleApproval(context: LoopContext, request: ReviewLoopRequest, used: number, restarted: boolean,
   spentAttempts: () => Promise<number>): Promise<void> {
-  const spent = Math.max(used, await spentAttempts());
-  if (spent >= context.maxAttempts) {
+  let spent = Math.max(used, await spentAttempts());
+  while (spent < context.maxAttempts) {
+    const tests = await runPolicyTestsAction(context);
+    if (tests === 'repaired') {
+      await runOwnedReviewLoop({ ...request, policyActionsUsed: spent + 1, isContinue: true, reset: false }, context.ports, restarted);
+      return;
+    }
+    if (tests === 'retry') {
+      spent = Math.max(spent + 1, await spentAttempts());
+      continue;
+    }
+    // 'stop' already escalated its typed handoff; the approval itself is still durable and owes its human turn.
     await beginHumanTurn(context);
-    await exhaustAttempts(context);
+    // A dispatched passing action that consumed the final attempt ends like any other spent allowance.
+    if (tests === 'ran' && Math.max(spent + 1, await spentAttempts()) >= context.maxAttempts) { await exhaustAttempts(context); }
     return;
   }
-  const tests = await runPolicyTestsAction(context);
-  if (tests === 'repaired') {
-    await runOwnedReviewLoop({ ...request, policyActionsUsed: spent + 1, isContinue: true, reset: false }, context.ports, restarted);
-    return;
-  }
-  // 'stop' already escalated its typed handoff; the approval itself is still durable and owes its human turn.
   await beginHumanTurn(context);
-  // A dispatched action that consumed the final attempt ends the loop like any other spent allowance.
-  if (tests === 'ran' && Math.max(spent + 1, await spentAttempts()) >= context.maxAttempts) { await exhaustAttempts(context); }
+  await exhaustAttempts(context);
 }
 
 async function exhaustAttempts(context: LoopContext): Promise<void> {

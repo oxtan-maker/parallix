@@ -55,7 +55,14 @@ unmodelled work, such as a revision identity mismatch, approval revocation or
 an ambiguous repair, resets the history as `unmodelled-change`. Approval passes are
 retained only when the recorded approval coverage still covers the change, and
 landing-gate failures appear as a failed tests verdict followed by a completed
-repair when that repair addresses exactly the failed check.
+repair when that repair addresses exactly the failed check. In pilot mode, the
+pinned artifact can instead make a same-revision test re-run available by
+carrying a tests action vector and selecting tests again after the failed
+verdict. That re-run uses the same gate owner and spends the same bounded review
+allowance; there is no configuration parameter or flake-rate threshold that
+enables it. If the artifact lacks that action, chooses another action, or the
+policy falls back, the existing rebound repair and typed human handoff behavior
+is unchanged.
 
 `px config` validates the configured artifact and displays its canonical SHA-256
 identity or a fixed-policy fallback reason. Missing, unreadable, invalid or
