@@ -4,10 +4,24 @@ import { deriveBelief, verificationCheckStates, verificationIntegrationEligible,
   type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyAction, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
 import { recommend } from '../../../../src/application/verification-policy/recommend.js';
-import { selectAlpha, type AlphaVector } from '../../../../research/verification-pomdp/alpha-policy.js';
-import { buildPolicyArtifact } from '../../../../research/verification-pomdp/artifact.js';
-import { updateBelief, type SolverModel } from '../../../../research/verification-pomdp/solver-model.js';
 import { policyArtifactFixture as fixture, oneHot, half, type Json } from './policy-artifact.fixture.js';
+
+type AlphaVector = { action: PolicyAction; values: number[] };
+type FilterModel = { transition: number[][][]; observation: number[][][]; prior: number[] };
+
+/** Independent reference of the belief filter: B_y P' pi, normalized. Contract v1 is outside the research solver, which now solves the current model. */
+function referenceUpdate(model: FilterModel, belief: number[], action: number, observation: 0 | 1) {
+  const next = belief.map((_p, column) => model.observation[action][column][observation]
+    * belief.reduce((sum, p, row) => sum + p * model.transition[action][row][column], 0));
+  const probability = next.reduce((sum, value) => sum + value, 0);
+  return { probability, belief: next.map(value => value / probability) };
+}
+
+/** Independent reference of the maximizing alpha vector. */
+function referenceSelect(vectors: AlphaVector[], belief: number[]) {
+  const value = (vector: AlphaVector) => vector.values.reduce((sum, entry, state) => sum + entry * belief[state], 0);
+  return vectors.reduce((best, vector) => value(vector) > value(best) ? vector : best, vectors[0]);
+}
 
 const mutated = (change: (a: Json) => void): Json => { const a = fixture(); change(a); return a; };
 const code = (input: unknown): PolicyRejectionCode | 'accepted' => { const r = parsePolicyArtifact(input); return r.ok ? 'accepted' : r.rejection.code; };
@@ -158,7 +172,7 @@ test('request-changes enters pending repair without losing earlier passes or hid
 
 test('matches the research filter deterministically and stays normalized over 200 fixed-seed steps (TASK-2859.04)', () => {
   const a = artifact();
-  const model: SolverModel = { objective: 'T', discount: a.discount, prior: [...a.prior], cost: [[], [], []],
+  const model: FilterModel = { prior: [...a.prior],
     transition: POLICY_ACTIONS.map(action => a.transition[action].map(row => [...row])),
     observation: POLICY_ACTIONS.map(action => a.observation[action].map(row => [...row])) };
   const history: VerificationHistoryEntry[] = [];
@@ -168,7 +182,7 @@ test('matches the research filter deterministically and stays normalized over 20
     const action = seed % 3 as 0 | 1 | 2; const passed = seed % 5 !== 0;
     history.push({ kind: 'verdict', check: POLICY_ACTIONS[action], passed });
     if (!passed) { history.push({ kind: 'repair', check: POLICY_ACTIONS[action] }); }
-    expected = updateBelief(model, expected, action, passed ? 1 : 0).belief;
+    expected = referenceUpdate(model, expected, action, passed ? 1 : 0).belief;
   }
   const actual = deriveBelief(a, history); assert.ok(actual.ok);
   assert.ok(actual.belief.every(Number.isFinite));
@@ -207,7 +221,7 @@ test('rejects malformed beliefs before selection or probability calculation (TAS
   }
 });
 
-test('matches the solver best vector on 1000 beliefs reached from a synthetic emitted artifact (TASK-2859.05)', () => {
+test('matches the reference best vector on 1000 beliefs reached from a synthetic contract-v1 artifact (TASK-2859.05)', () => {
   const states = artifact().states;
   const fresh = [0.03, 0.07, 0.11, 0.13, 0.17, 0.19, 0.14, 0.16];
   const freshStates = [0, 1, 3, 4, 9, 10, 12, 13];
@@ -224,15 +238,17 @@ test('matches the solver best vector on 1000 beliefs reached from a synthetic em
   }));
   const observation = POLICY_ACTIONS.map(action => states.map(state => state[action] === 'passed' ? [0, 1] : [1, 0]));
   const prior = Array<number>(27).fill(0); freshStates.forEach((state, index) => { prior[state] = fresh[index]; });
-  const model: SolverModel = { objective: 'T', discount: 0.99, transition, observation,
-    cost: POLICY_ACTIONS.map((_action, slot) => states.map((_state, index) => index === 26 ? 0 : slot + 1)), prior };
+  const cost = POLICY_ACTIONS.map((_action, slot) => states.map((_state, index) => index === 26 ? 0 : slot + 1));
+  const model: FilterModel = { transition, observation, prior };
   const vectors: AlphaVector[] = POLICY_ACTIONS.flatMap((action, slot) => [
     { action, values: states.map((state, index) => 7 * code[state[action]] - (index * (slot + 2) % 11)) },
     { action, values: states.map((state, index) => 4 * code[state[action]] + (index * (slot + 3) % 13) - 8) },
   ]);
-  const emitted = buildPolicyArtifact({ model, objective: 'T', solverVersion: 'synthetic-unit',
-    parameterFileSha256: '0'.repeat(64), vectors, bounds: { lower: -20, upper: 20 }, policyValue: 0, currentSequenceValue: 0 });
-  const parsed = parsePolicyArtifact(emitted.canonical); assert.ok(parsed.ok);
+  const byAction = <T>(values: T[]) => Object.fromEntries(POLICY_ACTIONS.map((name, slot) => [name, values[slot]]));
+  const emitted = { schemaVersion: 1, objective: 'time', parameterHash: '0'.repeat(64), solverVersion: 'synthetic-unit', discount: 0.99,
+    states, actions: [...POLICY_ACTIONS], observations: ['not-passed', 'passed'], transition: byAction(transition), observation: byAction(observation),
+    cost: byAction(cost), prior, vectors, bounds: { lower: -20, upper: 20 }, predicted: { policyValue: 0, currentSequenceValue: 0 } };
+  const parsed = parsePolicyArtifact(JSON.stringify(emitted)); assert.ok(parsed.ok);
   const a = parsed.artifact;
   const permitted = new Set(POLICY_ACTIONS);
   let seed = 2_859_005; const random = () => ((seed = seed * 48_271 % 2_147_483_647) - 1) / 2_147_483_646;
@@ -243,13 +259,13 @@ test('matches the solver best vector on 1000 beliefs reached from a synthetic em
   };
   let belief = [...model.prior]; let hidden = sample(model.prior); const selected = new Set<PolicyAction>();
   for (let compared = 0; compared < 1000; compared += 1) {
-    const expected = selectAlpha(vectors, belief);
+    const expected = referenceSelect(vectors, belief);
     const actual = recommend(a, belief, permitted);
     assert.ok(actual.kind === 'recommendation'); assert.equal(actual.action, expected.action); selected.add(actual.action);
     const action = Math.floor(random() * POLICY_ACTIONS.length) as 0 | 1 | 2;
     hidden = sample(model.transition[action][hidden]);
     const observed = sample(model.observation[action][hidden]) as 0 | 1;
-    belief = updateBelief(model, belief, action, observed).belief;
+    belief = referenceUpdate(model, belief, action, observed).belief;
     if (hidden === 26) { hidden = sample(model.prior); belief = [...model.prior]; }
   }
   assert.ok(selected.size > 1, 'the reachable-belief comparison must exercise more than one selected action');

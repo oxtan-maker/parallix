@@ -467,6 +467,8 @@ export interface ReviewLoopRequest {
   readonly isContinue?: boolean;
   /** Policy-selected tests actions spent by earlier entries of this run; a floor under the durable count. */
   readonly policyActionsUsed?: number;
+  /** Durable tests actions already spent when this attempt window opened; they do not consume it. */
+  readonly policyActionsBaseline?: number;
   /** The caller already ran the review preparation transition (e.g. `px active` repair). */
   readonly skipReviewPreparation?: boolean;
   readonly verbose?: boolean;

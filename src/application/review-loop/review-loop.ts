@@ -326,13 +326,18 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
   const durable = await testsActionsSpent(context);
   // An unreadable history leaves the fixed policy in charge for this run.
   context.policyDisabled = durable === null;
-  const spentAttempts = async () => Math.max(used, await testsActionsSpent(context) ?? used);
-  let allowance = maxAttempts - Math.max(used, durable ?? 0);
+  // Every continuation entry, whatever its persisted round, opens a fresh attempt window, so tests
+  // actions spent before the window do not consume it. In-run restarts carry the baseline instead of re-deriving it.
+  const baseline = request.policyActionsBaseline ?? (request.isContinue ? durable ?? 0 : 0);
+  const windowRequest = { ...request, policyActionsBaseline: baseline };
+  const spentIn = (count: number | null) => Math.max(used, count === null ? 0 : count - baseline);
+  const spentAttempts = async () => spentIn(await testsActionsSpent(context));
+  let allowance = maxAttempts - spentIn(durable);
   for (let attempt = context.initialRound; attempt <= allowance;) {
     const tests = await runPolicyTestsAction(context);
     if (tests === 'stop') { return; }
     if (tests === 'repaired') {
-      await runOwnedReviewLoop({ ...request, policyActionsUsed: used + 1, isContinue: true, reset: false }, ports, restarted);
+      await runOwnedReviewLoop({ ...windowRequest, policyActionsUsed: used + 1, isContinue: true, reset: false }, ports, restarted);
       return;
     }
     if (tests === 'ran') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
@@ -343,7 +348,7 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
     if (outcome === 'stop') { return; }
     // An approval is durable but is not the end of the decision: the policy chooses again on the approved state.
     if (outcome === 'approved') {
-      await settleApproval(context, request, used, restarted, spentAttempts);
+      await settleApproval(context, windowRequest, used, restarted, spentAttempts);
       return;
     }
     // A revoked approval reopened the Review: start again as a continuation
@@ -353,7 +358,7 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
         await context.escalateToHumanReview('APPROVED_ROUND_HUMAN_CORRECTION');
         return;
       }
-      await runOwnedReviewLoop({ ...request, policyActionsUsed: used, isContinue: true, reset: false }, ports, true);
+      await runOwnedReviewLoop({ ...windowRequest, policyActionsUsed: used, isContinue: true, reset: false }, ports, true);
       return;
     }
   }

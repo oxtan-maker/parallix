@@ -164,6 +164,36 @@ test('the allowance a restart sees is the durable count of tests actions, so it 
   assert.equal(exhausted.calls.tests, 0, 'a fully spent allowance runs no further tests action after a restart');
 });
 
+test('tests actions spent before a continuation window do not consume the window the operator opened (px-0074)', async () => {
+  const spent = scripted(['agent'], () => passed, () => false, () => 5);
+  const fake = fakeReviewLoopPorts({
+    slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex', round: 6, phase: 'reviewing' }),
+    policyActions: spent.actions,
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
+  });
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 10, isContinue: true, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
+  assert.notEqual(fake.current()?.disposition, 'MAX_ATTEMPTS', 'five earlier tests actions leave the round 6..10 window intact');
+  assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer']);
+});
+
+test('a continuation resumed at round 1 after the window was spent by tests actions opens a fresh window (px-0074)', async () => {
+  const spent = scripted(['agent'], () => passed, () => false, () => 5);
+  const fake = fakeReviewLoopPorts({
+    slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
+    policyActions: spent.actions,
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
+  });
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 5, isContinue: true, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
+  assert.notEqual(fake.current()?.disposition, 'MAX_ATTEMPTS', 'five tests actions spent at round 1 do not consume the resumed window');
+  assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer']);
+  // The same durable count on a first entry, which is not a continuation, stays spent.
+  const first = scripted(['agent'], () => passed, () => false, () => 5);
+  const none = loop(first.actions, reviewing(), 5);
+  await none.run();
+  assert.equal(none.fake.current()?.disposition, 'MAX_ATTEMPTS');
+  assert.equal(none.fake.launches.length, 0);
+});
+
 test('a pending human change request is routed before any policy action and is not consumed by it (TASK-2859.19)', async () => {
   const feedback = { source: 'review-1', author: 'operator', state: 'current' as const, disposition: 'REQUEST_CHANGES' as const,
     approval: false, reason: 'fix it', reviewId: '1', findings: [] };
