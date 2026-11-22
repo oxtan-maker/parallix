@@ -299,6 +299,20 @@ test('consumeImplementerArtifacts rejects unchanged fixes before publishing a su
   assert.deepEqual(effects, [], 'a refused resolution cannot publish success events');
 });
 
+test('consumeImplementerArtifacts forwards a prose-only PUSHBACK_ALL as the global disposition (TASK-2867.03)', async () => {
+  const seen: Array<{ disposition?: string; itemDispositions: readonly unknown[] }> = [];
+  const result = await consumeImplementerArtifacts('test-slug', 'codex', {
+    executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }),
+    output: { items: [], evidence: ['the code is correct'], disposition: 'PUSHBACK_ALL', resultingRevision: 'revision' },
+    readReviewStateFn: () => ({ round: 1, phase: 'fixing' }),
+    recordImplementerResolutionFn: async (_slug, input) => { seen.push(input); return { outcome: 'recorded' as const }; },
+    createEventFn: () => ({ ok: true, path: null }),
+    providerEnabled: false, log: () => {}, error: () => {},
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(seen.map(input => [input.disposition, input.itemDispositions.length]), [['PUSHBACK_ALL', 0]]);
+});
+
 test('consumeImplementerArtifacts returns diagnostic when persist fails', async () => {
   const tmpDir = registeredMkdtemp('test-dispatcher-');
 

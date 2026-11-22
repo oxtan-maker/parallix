@@ -406,18 +406,20 @@ async function replayApprovalTransition(
  * `pushed_back` and `parked` are the implementer disputing the finding, which
  * is what `disputed` means in the domain; anything the implementer's artifact
  * did not classify is recorded as fixed against the round summary, because the
- * implementer handed the round back rather than escalating.
+ * implementer handed the round back rather than escalating. A global `PUSHBACK_ALL`
+ * disposition disputes every finding, including prose-only answers with no per-finding list.
  */
 function resolutionsFor(
   findings: readonly ReviewFinding[],
   itemDispositions: readonly ReviewItemDisposition[],
   evidence: string,
+  pushbackAll = false,
 ): FindingResolution[] {
   const classified = new Map(itemDispositions.map((item) => [String(item.findingId).toUpperCase(), item.kind]));
   return findings.map((finding) => {
     const kind = classified.get(String(finding.id).toUpperCase());
-    if (kind === 'pushed_back' || kind === 'parked') {
-      return { findingId: finding.id, kind: 'disputed' as const, rationale: `${kind}: ${evidence}` };
+    if (kind === 'pushed_back' || kind === 'parked' || (pushbackAll && !kind)) {
+      return { findingId: finding.id, kind: 'disputed' as const, rationale: `${kind ?? 'pushed_back'}: ${evidence}` };
     }
     return { findingId: finding.id, kind: 'fixed' as const, evidence };
   });
@@ -433,6 +435,8 @@ export async function recordImplementerResolution(
   slug: string,
   input: {
     itemDispositions: readonly ReviewItemDisposition[];
+    /** The implementer's global answer; `PUSHBACK_ALL` disputes every finding without a per-finding list. */
+    disposition?: string;
     evidence: string;
     resultingRevision: string;
     respondedAt: string;
@@ -457,19 +461,19 @@ export async function recordImplementerResolution(
     const currentRound = currentReviewRound(mission.review);
     const decision = currentRound.decision;
     const findings = decision?.kind === 'changes-requested' ? decision.findings : [];
-    // TASK-2478/criterion 8: an implementer resolution whose resulting revision
-    // equals the round's subject revision means the finding was NOT addressed.
-    // Reject it here, before recording, so the round never becomes
-    // ready-for-next-round on the unchanged tree (a later resume could otherwise
-    // open round 2 on the original revision and approve the finding).
-    if (input.resultingRevision && input.resultingRevision === currentRound.subject.revision) {
+    const evidence = input.evidence.trim() || `Round resolution for ${slug}`;
+    const resolutions = resolutionsFor(findings, input.itemDispositions, evidence, input.disposition === 'PUSHBACK_ALL');
+    // TASK-2478/criterion 8: a claimed fix on an unchanged revision was NOT addressed; recording it would let a
+    // later resume open round 2 on the original revision and approve the finding. A rebuttal (every finding
+    // disputed) claims no fix: the renewed review of the same revision is the reviewer's answer.
+    const rebuttal = resolutions.length > 0 && resolutions.every(item => item.kind === 'disputed');
+    if (input.resultingRevision && input.resultingRevision === currentRound.subject.revision && !rebuttal) {
       return { outcome: 'unchanged', reason: 'resulting revision did not change from the round subject revision', noRevisionChange: true };
     }
-    const evidence = input.evidence.trim() || `Round resolution for ${slug}`;
     let review = applyImplementerCommand(mission.review, {
       type: 'submit-resolution',
       respondedAt: input.respondedAt,
-      resolutions: resolutionsFor(findings, input.itemDispositions, evidence),
+      resolutions,
       resultingRevision: changeRevision(input.resultingRevision),
     });
     review = appendReviewPublicationEvents(review, input.publicationEvents);

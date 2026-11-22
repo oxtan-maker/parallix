@@ -47,10 +47,7 @@ export async function recordProviderResolution(context: LoopContext, outcome: st
   if (round?.response) { return; }
   const observation = await ports.provider.readResolution(identities.implementer, sinceIso);
   if (!observation || observation.disposition !== outcome) { throw new Error('Provider resolution does not match the observed disposition'); }
-  const items = outcome === 'PUSHBACK_ALL' && round?.decision?.kind === 'changes-requested'
-    ? round.decision.findings.map(finding => ({ kind: 'pushed_back' as const, findingId: finding.id }))
-    : observation.itemDispositions;
-  await ports.state.recordResolution(state, { ...observation, itemDispositions: items });
+  await ports.state.recordResolution(state, observation);
 }
 
 /** Translate only polled evidence; artifact submissions already use their owners. */

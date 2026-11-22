@@ -113,6 +113,12 @@ function approvalSlots(round: ReviewRound, next: ReviewRound | undefined, repair
 function sameChange(left: ReviewRound['subject']['change'], right: ReviewRound['subject']['change']): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
+/**
+ * A rebuttal is a response whose resulting revision is the revision under review (recordImplementerResolution
+ * accepts that only when every finding is disputed): the same checks apply, so the
+ * next round is expected on that revision and its verdict, when there is one, follows the repair. No verdict yet
+ * leaves the record at the repair, never a fabricated pass or failure.
+ */
 function expectedNextRevision(prior: ReviewRound): string | null {
   if (prior.response) { return prior.response.resultingRevision; }
   const repair = prior.integrationRepairAssessment;

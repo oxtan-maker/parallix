@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { deriveBelief } from '../../../../src/application/verification-policy/belief.js';
+import { parsePolicyArtifact } from '../../../../src/application/verification-policy/policy-artifact.js';
+import { syntheticPolicyArtifactV2 } from './policy-artifact.fixture.js';
 import { adaptVerificationHistory, readVerificationHistory,
   type VerificationHistoryFacts } from '../../../../src/application/verification-policy/history-adapter.js';
 import { applyImplementerCommand, applyReviewerCommand, changeRevision, recordReviewerResult,
@@ -263,4 +266,61 @@ test('typed read uses every existing owner once and does not mutate existing sta
   assert.equal(JSON.stringify(statistics), before);
   const missing = await readVerificationHistory({ ...ports, store: { load: async () => ({ kind: 'missing' as const }) } }, scope);
   assert.equal(missing.ok ? null : missing.failure.kind, 'unavailable');
+});
+
+function rebuttal(review: Review, resultingRevision = rev('a')): Review {
+  return applyImplementerCommand(review, { type: 'submit-resolution', respondedAt: at(11), resultingRevision,
+    resolutions: [{ findingId: reviewFindingId('f'), kind: 'disputed', rationale: 'the code is correct' }] });
+}
+
+function renewed(review: Review, verdict: 'approved' | 'changes-requested' | null, revision = rev('a')): Review {
+  const [first] = review.rounds;
+  const decision = verdict === 'approved'
+    ? { kind: 'approved' as const, revision, decidedAt: at(13), comment: null, source: { kind: 'local' as const } }
+    : verdict === 'changes-requested'
+      ? { kind: 'changes-requested' as const, revision, decidedAt: at(13), comment: null,
+        findings: [{ id: reviewFindingId('g'), summary: 'still wrong', location: null }] }
+      : null;
+  return { ...review, rounds: [first, { ...first, number: 2, startedAt: at(12), subject: { ...first.subject, revision },
+    decision, response: null, phase: decision ? 'pending-approval' : 'reviewing', disposition: null }] } as Review;
+}
+
+test('maps a rebuttal with no new commit and the renewed verdict on the same revision (TASK-2867.03)', () => {
+  const rebutted = rebuttal(decide(start(), 'request-changes'));
+  const sent = { kind: 'verdict', check: 'agent', passed: false }, repaired = { kind: 'repair', check: 'agent' };
+  assert.deepEqual(entries(mapped(renewed(rebutted, 'approved'))), [sent, repaired, { kind: 'verdict', check: 'agent', passed: true }]);
+  assert.deepEqual(entries(mapped(renewed(rebutted, 'changes-requested'))), [sent, repaired, sent]);
+  assert.deepEqual(entries(mapped(renewed(rebutted, null))), [sent, repaired],
+    'a renewed review that has no verdict yet is left unknown, not fabricated');
+  assert.deepEqual(entries(mapped(rebutted)), [sent, repaired]);
+});
+
+test('a rebuttal followed by a review of another revision stays an unmodelled change (TASK-2867.03)', () => {
+  const rebutted = rebuttal(decide(start(), 'request-changes'));
+  assert.deepEqual(entries(mapped(renewed(rebutted, 'approved', rev('b')))), [
+    { kind: 'verdict', check: 'agent', passed: false }, { kind: 'repair', check: 'agent' },
+    { kind: 'unmodelled-change' }, { kind: 'verdict', check: 'agent', passed: true },
+  ]);
+});
+
+test('a synthetic rebuttal sequence read through the typed history owner reaches the belief without fabricating a verdict (TASK-2867.03)', async () => {
+  const rebutted = rebuttal(decide(start(), 'request-changes'));
+  const readBelief = async (review: Review) => {
+    const ports = {
+      store: { load: async () => ({ kind: 'found' as const, mission: fixtureMission('task-x', { review }), version: 1 as never }) },
+      gates: { readIntegrationGates: async () => gate('stale') }, history: { loadAllByTypeForMission: async () => [] },
+      lifecycle: { findByMissionId: async () => [] }, operations: { all: async () => [] },
+      identity: { branchHead: () => null, changeIdentity: (revision: string) => revision },
+    };
+    const history = await readVerificationHistory(ports, { repositoryId: repositoryId('repo'), missionId: missionId('task-x') });
+    assert.equal(history.ok, true, JSON.stringify(history));
+    const parsed = parsePolicyArtifact(syntheticPolicyArtifactV2());
+    assert.equal(parsed.ok, true);
+    const belief = history.ok && parsed.ok ? deriveBelief(parsed.artifact, history.entries) : null;
+    assert.equal(belief?.ok, true, 'the rebuttal sequence replays into a belief');
+    return history.ok ? history.record : null;
+  };
+  assert.deepEqual(await readBelief(renewed(rebutted, 'approved')), { passed: ['agent'], failed: [] });
+  assert.deepEqual(await readBelief(renewed(rebutted, null)), { passed: [], failed: [] }, 'the unrenewed verdict stays unknown');
+  assert.deepEqual(await readBelief(renewed(rebutted, 'changes-requested')), { passed: [], failed: ['agent'] });
 });

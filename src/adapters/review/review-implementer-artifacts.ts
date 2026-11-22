@@ -154,6 +154,7 @@ async function closeImplementerRound(slug: string, context: {
   }
   const recorded = await recordImplementerResolutionFn(slug, {
     itemDispositions,
+    disposition,
     evidence: `${disposition} — implementer round summary for ${slug}`,
     resultingRevision,
     respondedAt: new Date().toISOString(),

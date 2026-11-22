@@ -36,7 +36,9 @@ import { applyReviewStateToReview, reviewStateDataFrom } from '../../../../src/a
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { missionId, type Mission } from '../../../../src/domain/mission.js';
 import { configureMissionWriteAuthorization } from '../../../../src/application/ports/mission-write-authorization.js';
+import { adaptVerificationHistory } from '../../../../src/application/verification-policy/history-adapter.js';
 import {
+  applyReviewerCommand,
   beginNextReviewRound,
   changeRevision,
   ConfiguredReviewerEligibility,
@@ -226,6 +228,57 @@ describe('review round advancement', () => {
     assert.equal(after.kind, 'found');
     assert.equal(reviewStatus(after.mission.review!), 'awaiting-implementation', 'the round stays awaiting-implementation, never advancing to a stale round 2');
     assert.equal(currentReviewRound(after.mission.review!).response, null, 'no resolution was recorded');
+  });
+
+  it('records a rebuttal on the unchanged revision and the history adapter reads its renewed review (TASK-2867.03)', async () => {
+    const { store } = await reviewInProgress();
+    await recordRequestedChanges(MISSION, {
+      findings: parseReviewFindings('## F1 (blocking): first\n## F2: second'),
+      comment: null,
+      revision: 'rev-1',
+      decidedAt: '2026-08-16T13:51:30.650Z',
+    }, { missionStore: store, lifecycleService: new MissionLifecycleService(store) });
+    const resolve = (itemDispositions: Parameters<typeof recordImplementerResolution>[1]['itemDispositions']) =>
+      recordImplementerResolution(MISSION, { itemDispositions, evidence: 'argued', resultingRevision: 'rev-1',
+        respondedAt: '2026-08-16T16:00:00.000Z' }, { missionStore: store });
+
+    const partial = await resolve([{ kind: 'pushed_back', findingId: reviewFindingId('F1') }]);
+    assert.equal(partial.outcome === 'unchanged' && partial.noRevisionChange, true, 'one undisputed finding is a claimed fix on an unchanged tree');
+    const mixed = await resolve([{ kind: 'fixed', findingId: reviewFindingId('F1') }, { kind: 'pushed_back', findingId: reviewFindingId('F2') }]);
+    assert.equal(mixed.outcome === 'unchanged' && mixed.noRevisionChange, true, 'a claimed fix on an unchanged tree stays rejected');
+
+    const rebutted = await resolve([{ kind: 'pushed_back', findingId: reviewFindingId('F1') }, { kind: 'parked', findingId: reviewFindingId('F2') }]);
+    assert.deepEqual(rebutted, { outcome: 'recorded' });
+    const loaded = await store.load(MISSION);
+    assert.equal(loaded.kind, 'found');
+    const review = loaded.mission.review!;
+    assert.equal(reviewStatus(review), 'ready-for-next-round');
+    const sent = { kind: 'verdict', check: 'agent', passed: false }, repaired = { kind: 'repair', check: 'agent' };
+    assert.deepEqual(adaptVerificationHistory(review, null), { ok: true, entries: [sent, repaired], record: { passed: [], failed: [] }, tests: 'unobserved' });
+
+    const renewed = applyReviewerCommand(beginNextReviewRound(review, reviewer, implementer, '2026-08-16T16:05:00.000Z', eligibility),
+      { type: 'approve', decidedAt: '2026-08-16T17:00:00.000Z', revision: changeRevision('rev-1'), comment: null, source: { kind: 'local' } });
+    assert.deepEqual(adaptVerificationHistory(renewed, null), { ok: true, tests: 'unobserved', record: { passed: ['agent'], failed: [] },
+      entries: [sent, repaired, { kind: 'verdict', check: 'agent', passed: true }] });
+  });
+
+  it('treats PUSHBACK_ALL with prose evidence and no per-finding list as a rebuttal, and CHANGES_MADE with none as an unchanged claimed fix (TASK-2867.03)', async () => {
+    const { store } = await reviewInProgress();
+    await recordRequestedChanges(MISSION, {
+      findings: parseReviewFindings('## F1 (blocking): first\n## F2: second'), comment: null, revision: 'rev-1',
+      decidedAt: '2026-08-16T13:51:30.650Z',
+    }, { missionStore: store, lifecycleService: new MissionLifecycleService(store) });
+    const resolve = (disposition: string) => recordImplementerResolution(MISSION, { itemDispositions: [], disposition,
+      evidence: 'the code is correct', resultingRevision: 'rev-1', respondedAt: '2026-08-16T16:00:00.000Z' }, { missionStore: store });
+
+    const claimed = await resolve('CHANGES_MADE');
+    assert.equal(claimed.outcome === 'unchanged' && claimed.noRevisionChange, true);
+    assert.deepEqual(await resolve('PUSHBACK_ALL'), { outcome: 'recorded' });
+    const loaded = await store.load(MISSION);
+    assert.equal(loaded.kind, 'found');
+    assert.deepEqual(currentReviewRound(loaded.mission.review!).response?.resolutions.map(item => item.kind), ['disputed', 'disputed']);
+    assert.deepEqual(adaptVerificationHistory(loaded.mission.review!, null), { ok: true, tests: 'unobserved', record: { passed: [], failed: [] },
+      entries: [{ kind: 'verdict', check: 'agent', passed: false }, { kind: 'repair', check: 'agent' }] });
   });
 
   it('accepts a resubmission of the round the reviewer has not decided yet', async () => {
