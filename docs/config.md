@@ -44,6 +44,7 @@ the mode only between missions: a mission in flight when the mode changes
 finishes on the fixed policy with a recorded reason; a mission that already has
 recorded policy decisions when pilot begins is never pinned late.
 When enabled, `px status <mission>` reports the ordered policy history or its typed fixed-policy fallback reason.
+Its integration-tests line says `passed` only for a current durable gate run covering the current change (the newest result wins when a gate both failed and passed) and `failed` for a current failure; with no run or receipt it says `unobserved`, and evidence that no longer covers the current verification inputs says `not current`.
 Agent-review, human-review and non-empty integration-test starts append
 observational policy decisions. Observation failures never change review or
 integration-gate outcomes.

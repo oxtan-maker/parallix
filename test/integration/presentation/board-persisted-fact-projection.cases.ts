@@ -38,7 +38,7 @@ import { emptyBoardRepositories } from '../../helpers/empty-board-repositories.j
 import { composeBoardProjection } from '../../../src/composition/board-projection.js';
 import { missionVersion, type MissionStore } from '../../../src/application/domain-ports.js';
 import type { Mission } from '../../../src/domain/mission.js';
-import type { DeclaredGateEvidence, GateEvidenceReader, MissionGateEvidence } from '../../../src/application/ports/gate-evidence.js';
+import type { DeclaredGateEvidence, GateEvidenceReader, IntegrationGateEvidence, MissionGateEvidence } from '../../../src/application/ports/gate-evidence.js';
 
 const SLUG = 'task-2343';
 const MISSION = missionId(SLUG);
@@ -381,6 +381,21 @@ test('board gate follows a mission from start to result without fabricating one 
   assert.equal(await boardGate(gateMission('review'), declaredEvidence(CURRENT_CHECKOUT, {
     proof: { state: 'stale', revision: 'b'.repeat(40), observedAt: '2026-10-18T08:00:00.000Z' },
   })), 'stale', 'a prior success after the inputs changed');
+});
+
+test('board integration gate reports a pass only from the durable run for the current change (PX-0072)', async () => {
+  const integrationEvidence = (gate: Partial<IntegrationGateEvidence['gates'][number]> | null): GateEvidenceReader => ({
+    ...declaredEvidence(CURRENT_CHECKOUT),
+    async readIntegrationGates() {
+      return { checkout: CURRENT_CHECKOUT, configured: ['e2e'], running: null,
+        gates: gate ? [{ key: 'e2e', proof: { state: 'absent' as const }, failure: null, ...gate }] : [] };
+    },
+  });
+  const proof = (state: 'current' | 'stale') => ({ proof: { state, revision: 'a'.repeat(40), observedAt: '2026-10-18T08:00:00.000Z' } as const });
+  assert.equal(await boardGate(gateMission('integration'), integrationEvidence(null)), 'not-run', 'no gate run or receipt is no pass');
+  assert.equal(await boardGate(gateMission('integration'), integrationEvidence({})), 'not-run', 'a recorded plan with no proof is no pass');
+  assert.equal(await boardGate(gateMission('integration'), integrationEvidence(proof('stale'))), 'stale', 'another change identity is not current');
+  assert.equal(await boardGate(gateMission('integration'), integrationEvidence(proof('current'))), 'passed');
 });
 
 test('board gate distinguishes unconfigured gates from unobservable evidence (TASK-2775)', async () => {

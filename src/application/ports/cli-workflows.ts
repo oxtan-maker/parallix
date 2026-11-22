@@ -98,7 +98,7 @@ export interface StatusMissionData {
   readonly reviewHistory: readonly ReviewRoundSummary[];
   /** Ordered verification-policy history; absent unless verificationPolicy is enabled. A fallback names the fixed-policy reason. */
   readonly verificationHistory?: { readonly fallback: string } | {
-    readonly entries: readonly import('../verification-policy/belief.js').VerificationHistoryEntry[]; readonly tests: 'observed' | 'unobserved';
+    readonly entries: readonly import('../verification-policy/belief.js').VerificationHistoryEntry[]; readonly tests: import('../verification-policy/history-adapter.js').IntegrationTestsState;
   };
   /**
    * The mission's activity in the shared read model the TUI renders from.

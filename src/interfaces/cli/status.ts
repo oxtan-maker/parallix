@@ -368,7 +368,7 @@ function logHumanReviewDue(missionData: StatusMissionData, log: (_msg: string) =
 function logVerificationHistory(history: StatusMissionData['verificationHistory'], log: (_msg: string) => void): void {
   if (!history) { return; }
   if ('fallback' in history) { log(`Verification policy history: fixed policy (${history.fallback})`); return; }
-  log(`Verification policy history: ${history.entries.length} entries; integration tests ${history.tests}`);
+  log(`Verification policy history: ${history.entries.length} entries; integration tests ${history.tests === 'unobserved' ? 'unobserved (no current gate run and receipt; not a pass)' : history.tests === 'not-current' ? 'not current (evidence does not cover the current verification inputs)' : history.tests}`);
   history.entries.forEach((entry, index) => log(`  ${index + 1}. ${entry.kind === 'unmodelled-change' ? entry.kind
     : `${entry.check} ${entry.kind}${entry.kind === 'verdict' ? ` ${entry.passed ? 'passed' : 'failed'}` : ''}`}`));
 }

@@ -326,7 +326,7 @@ test('a synthetic policy re-selection re-runs failed tests through the gate owne
     readHistory: async () => {
       const entries: VerificationHistoryEntry[] = evaluations++ === 0 ? []
         : [{ kind: 'verdict', check: 'tests', passed: false }];
-      return { ok: true, entries, record: verificationHistoryRecord(entries), tests: 'observed' };
+      return { ok: true, entries, record: verificationHistoryRecord(entries), tests: evaluations > 1 ? 'failed' : 'unobserved' };
     },
     identity: { branchHead: () => HEAD, changeIdentity: () => HEAD, onlyBookkeepingSince: () => false },
     writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async input => reviewEntryPin(input),

@@ -35,6 +35,7 @@ import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-work
 import { policyArtifactFixture, syntheticPolicyArtifactV2 } from './policy-artifact.fixture.js';
 import { createPolicyArtifactLoader } from '../../../../src/adapters/config/verification-policy.js';
 import { verificationHistoryRecord, type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
+import type { IntegrationTestsState } from '../../../../src/application/verification-policy/history-adapter.js';
 
 function reviewFor(phase: ReviewPhase, pending: boolean): NonNullable<Mission['review']> {
   const fixture = repeatReview(), current = fixture.rounds.at(-1)!;
@@ -458,7 +459,7 @@ const parsed = parsePolicyArtifact(policyArtifactFixture());
 if (!parsed.ok) { throw new Error(parsed.rejection.message); }
 const parsedArtifact = parsed.artifact;
 
-const policyHistory = (entries: readonly VerificationHistoryEntry[] = [], tests: 'observed' | 'unobserved' = 'unobserved') =>
+const policyHistory = (entries: readonly VerificationHistoryEntry[] = [], tests: IntegrationTestsState = 'unobserved') =>
   ({ ok: true as const, entries, record: verificationHistoryRecord(entries), tests });
 
 function policyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
@@ -609,7 +610,7 @@ test('artifact action presence permits a failed test re-run independently of the
   const flakyLoader = createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' },
     () => JSON.stringify(syntheticPolicyArtifactV2(undefined, undefined, 0.25)));
   const pending = policyPorts({ loadPolicy: flakyLoader, readHistory: async () =>
-    policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'observed') });
+    policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'passed') });
   assert.equal(await observePolicyReviewStart(startFacts(), pending.ports), 'recorded');
   assert.equal(pending.records[0]?.failureReason, null);
   assert.equal(pending.records[0]?.recommendedAction, 'tests');
@@ -617,14 +618,14 @@ test('artifact action presence permits a failed test re-run independently of the
   const rerunPassed = policyPorts({ loadPolicy: flakyLoader, readHistory: async () => policyHistory([
     { kind: 'verdict', check: 'tests', passed: false },
     { kind: 'verdict', check: 'tests', passed: true },
-  ], 'observed') });
+  ], 'passed') });
   assert.equal(await observePolicyReviewStart(startFacts(), rerunPassed.ports), 'recorded');
   assert.equal(rerunPassed.records[0]?.failureReason, null);
   assert.notEqual(rerunPassed.records[0]?.recommendedAction, 'tests');
 
   const zeroFlake = policyPorts({ loadPolicy: createPolicyArtifactLoader('/repo',
     { mode: 'shadow', artifact: 'policy.json' }, () => JSON.stringify(syntheticPolicyArtifactV2())),
-  readHistory: async () => policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'observed') });
+  readHistory: async () => policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'passed') });
   assert.equal(await observePolicyReviewStart(startFacts(), zeroFlake.ports), 'recorded');
   assert.equal(zeroFlake.records[0]?.failureReason, null);
   assert.equal(zeroFlake.records[0]?.effectiveMode, 'shadow');
@@ -635,7 +636,7 @@ test('artifact action presence permits a failed test re-run independently of the
   missingAction.vectors = missingAction.vectors.filter((vector: Record<string, unknown>) => vector.action !== 'tests');
   const absent = policyPorts({ loadPolicy: createPolicyArtifactLoader('/repo',
     { mode: 'shadow', artifact: 'policy.json' }, () => JSON.stringify(missingAction)),
-  readHistory: async () => policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'observed') });
+  readHistory: async () => policyHistory([{ kind: 'verdict', check: 'tests', passed: false }], 'failed') });
   assert.equal(await observePolicyReviewStart(startFacts(), absent.ports), 'recorded');
   assert.equal(absent.records[0]?.failureReason?.kind, 'no-recommendation');
   assert.equal(absent.records[0]?.recommendedAction, null, 'an artifact without the re-run vector keeps repair in charge');
@@ -644,7 +645,7 @@ test('artifact action presence permits a failed test re-run independently of the
     { kind: 'verdict', check: 'tests', passed: true },
     { kind: 'verdict', check: 'agent', passed: true },
     { kind: 'verdict', check: 'human', passed: true },
-  ], 'observed') });
+  ], 'passed') });
   assert.equal(await observePolicyReviewStart(startFacts(), complete.ports), 'recorded');
   assert.equal(complete.records[0]?.failureReason?.kind, 'no-recommendation');
   assert.equal(complete.records[0]?.effectiveMode, 'shadow');
@@ -669,7 +670,7 @@ test('the pilot recommends only an unfinished check, never one that passed on th
   for (let mask = 0; mask < 8; mask++) {
     const passed = checks.filter((_check, index) => mask & (1 << index));
     const fixture = policyPorts({ configuration: pilotConfiguration, readHistory: async () =>
-      policyHistory(passed.map(check => ({ kind: 'verdict' as const, check, passed: true })), 'observed') });
+      policyHistory(passed.map(check => ({ kind: 'verdict' as const, check, passed: true })), 'passed') });
     const selected = (await selectPolicyAction(SELECTION_FACTS, { ...fixture.ports, writer: { ...fixture.ports.writer,
       resolveReviewEntryPin: async input => reviewEntryPin({ ...input, artifactSha256: 'pinned-hash' }) } })).action;
     if (passed.length === checks.length) {
@@ -691,7 +692,7 @@ test('every unusable policy conclusion leaves the fixed policy in charge with a 
     ['history-unavailable', { readHistory: async () => ({ ok: false, failure: { kind: 'unavailable', message: 'gone' } }) }],
     ['history-contradiction', { readHistory: async () => ({ ok: false, failure: { kind: 'contradiction', message: 'x' } }) }],
     ['history-unmodelled-history', { readHistory: async () => ({ ok: false, failure: { kind: 'unmodelled-history', message: 'x' } }) }],
-    ['belief-unmodelled-history', { readHistory: async () => policyHistory([{ kind: 'verdict', check: 'agent', passed: false }], 'observed') }],
+    ['belief-unmodelled-history', { readHistory: async () => policyHistory([{ kind: 'verdict', check: 'agent', passed: false }], 'passed') }],
     ['policy-exception', { readHistory: async () => { throw new Error('boom'); } }],
     ['human-turn-unavailable', {}],
   ];
@@ -701,7 +702,7 @@ test('every unusable policy conclusion leaves the fixed policy in charge with a 
     assert.equal(fixture.failures[0]?.kind, kind, kind);
   }
   const contradiction = policyPorts({ configuration: pilotConfiguration, readHistory: async () => policyHistory([
-    { kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'agent', passed: false }], 'observed') });
+    { kind: 'verdict', check: 'agent', passed: true }, { kind: 'verdict', check: 'agent', passed: false }], 'passed') });
   assert.equal((await selectPolicyAction(SELECTION_FACTS, contradiction.ports)).action, null, 'a contradictory verdict is a bug detector, not a recommendation');
   assert.ok(contradiction.failures.length > 0);
   const slow = policyPorts({ configuration: pilotConfiguration, readHistory: () => new Promise<never>(() => {}) });

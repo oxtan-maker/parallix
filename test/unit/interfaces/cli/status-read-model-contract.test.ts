@@ -18,6 +18,8 @@ import { renderStatus, statusJson } from '../../../../src/interfaces/cli/status.
 import { type CheckpointData } from '../../../../src/domain/checkpoint.js';
 import { type MissionCard, type ReviewRoundSummary } from '../../../../src/application/projections/mission-board.js';
 import { reviewPublicationReference } from '../../../../src/adapters/review/review-publication.js';
+import { adaptVerificationHistory } from '../../../../src/application/verification-policy/history-adapter.js';
+import type { IntegrationGateEvidence } from '../../../../src/application/ports/gate-evidence.js';
 
 test('mission status renders concrete orphan recovery and preserves uncertain liveness (TASK-2826)', () => {
   for (const liveness of ['orphaned', 'live', 'unconfirmed'] as const) {
@@ -869,4 +871,28 @@ test('status renders the ordered verification-policy history, a fixed-policy fal
   assert.doesNotMatch(await render(), /Verification policy history/);
   assert.match(await render((async () => ({ entries, tests: 'unobserved' })) as never), /integration tests unobserved[\s\S]*human verdict failed[\s\S]*human repair/);
   assert.match(await render((async () => ({ fallback: 'missing' })) as never), /Verification policy history: fixed policy \(missing\)/);
+});
+
+test('status reports integration tests only from the durable gate run for the current change, naming the human wait (PX-0072)', () => {
+  const humanReviewDue = { reason: 'agent-review-approved' as const,
+    detail: 'Human review is due because agent review approved the current change.' };
+  const gates = (proof: IntegrationGateEvidence['gates'][number]['proof']): IntegrationGateEvidence => ({
+    checkout: { kind: 'present', revision: 'r', clean: true }, configured: ['e2e'], running: null,
+    gates: [{ key: 'e2e', proof, failure: null }] });
+  const render = (evidence: IntegrationGateEvidence) => {
+    const history = adaptVerificationHistory(null, evidence);
+    assert.ok(history.ok);
+    const lines: string[] = [];
+    renderStatus(statusResult({ slug: 'task-px-0072', missionData: { backlogStatus: 'review', reviewHistory: [], humanReviewDue,
+      verificationHistory: { entries: history.entries, tests: history.tests } } as never }), line => lines.push(line));
+    return lines.join('\n');
+  };
+  const noRun = render(gates({ state: 'absent' }));
+  assert.match(noRun, /Verification policy history: 0 entries; integration tests unobserved \(no current gate run and receipt; not a pass\)/);
+  assert.match(noRun, /Human review due: Human review is due because agent review approved/);
+  assert.doesNotMatch(noRun, /integration tests (observed|passed)/);
+  assert.match(render(gates({ state: 'stale', revision: 'old', observedAt: '2026-08-04T08:00:00Z' })), /integration tests not current \(evidence does not cover the current verification inputs\)/);
+  assert.match(render(gates({ state: 'stale', revision: 'r', observedAt: '2026-08-04T08:00:00Z' })), /integration tests not current/, 'stale inputs at the same revision are not current either');
+  assert.match(render(gates({ state: 'current', revision: 'other', observedAt: '2026-08-04T08:00:00Z' })), /integration tests not current/);
+  assert.match(render(gates({ state: 'current', revision: 'r', observedAt: '2026-08-04T08:00:00Z' })), /integration tests passed\n/);
 });

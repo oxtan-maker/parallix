@@ -2,7 +2,7 @@ import type { Review, ReviewRound } from '../../domain/review.js'; import type {
 import type { ApprovalCoverage } from '../../domain/approval-coverage.js';
 import { isEffectiveReviewerResult } from '../../domain/reviewer-result.js';
 import type { MissionStore } from '../domain-ports.js';
-import type { GateEvidenceReader, GateEvidenceScope, IntegrationGateEvidence } from '../ports/gate-evidence.js';
+import type { GateEvidenceReader, GateEvidenceScope, GateResultEvidence, IntegrationGateEvidence } from '../ports/gate-evidence.js';
 import type { LifecycleHistoryEntry, OperationalHistoryEntry } from '../ports/operation-history.js';
 import { isSuccessfulRebaseOutcome } from '../ports/rebase-workflow.js';
 import type { WorkflowOperation } from '../../domain/workflow-operation.js';
@@ -11,8 +11,14 @@ import { assessApprovalCoverage } from '../../domain/approval-coverage.js';
 import { observeLandedChange, type ChangeIdentityPort } from '../approval-coverage.js';
 import { observedRebases, type RebaseMeasurement } from '../projections/verification-observation-reader.js';
 import { verificationHistoryRecord, type BeliefRecord, type VerificationHistoryEntry } from './belief.js';
+/**
+ * What the durable integration gate runs say about the current change: `passed` only when every configured gate
+ * has a current proof, `failed` on a current failure, `not-current` when the only evidence covers other verification inputs
+ * (another revision, change identity or checkout state), and `unobserved` when no gate run exists, so a plan or approval never reads as a pass.
+ */
+export type IntegrationTestsState = 'passed' | 'failed' | 'not-current' | 'unobserved';
 export type PolicyHistory = { readonly ok: true; readonly entries: readonly VerificationHistoryEntry[];
-  readonly record: BeliefRecord; readonly tests: 'observed' | 'unobserved' }
+  readonly record: BeliefRecord; readonly tests: IntegrationTestsState }
   | { readonly ok: false; readonly failure: { readonly kind: 'unavailable' | 'invalid' | 'contradiction' | 'unmodelled-history'; readonly message: string } };
 type FailureKind = Extract<PolicyHistory, { ok: false }>['failure']['kind'];
 type Slot = { readonly at: number; readonly order: number; readonly entry: VerificationHistoryEntry }; type Repair = { readonly occurrence: string; readonly gates: ReadonlySet<string>; readonly at: number; readonly complete: boolean };
@@ -209,30 +215,45 @@ function gateResultMatchesCheckout(revision: string | null, checkoutRevision: st
   if (revision === checkoutRevision) { return true; }
   return targetBranch ? hasSameRevisionIdentity(revision, checkoutRevision, targetBranch, identity) : false;
 }
+/** One gate's newest observation wins, as the board's gate state does: a failure only outranks a current proof recorded after it. */
+function newestCurrentResult(gate: IntegrationGateEvidence['gates'][number]): IntegrationGateEvidence['gates'][number] {
+  const { proof, failure } = gate;
+  if (proof.state !== 'current' || failure?.state !== 'current') { return gate; }
+  return instant(failure.observedAt, `gate ${gate.key} failure`) <= instant(proof.observedAt, `gate ${gate.key} proof`)
+    ? { ...gate, failure: null } : { ...gate, proof: { state: 'absent' } };
+}
+type GateRow = IntegrationGateEvidence['gates'][number];
+/** Current evidence for another change identity is not current for this checkout; it is demoted before any newest-result or aggregate rule runs. */
+function currentForCheckout(row: GateRow, covers: (_revision: string | null) => boolean, mismatched: GateResultEvidence[]): GateRow {
+  const demote = <T extends GateResultEvidence>(result: T): T => {
+    if (result.state !== 'current' || covers(result.revision)) { return result; }
+    mismatched.push(result);
+    return { ...result, state: 'stale' };
+  };
+  return newestCurrentResult({ ...row, proof: row.proof.state === 'absent' ? row.proof : demote(row.proof),
+    failure: row.failure && demote(row.failure) });
+}
 function gateSlot(gates: IntegrationGateEvidence | null, testsAlreadyFailed: boolean,
-  targetBranch: string | undefined, identity: ChangeIdentityPort | undefined): { slot?: Slot; observed: boolean } {
-  if (!gates || gates.checkout.kind !== 'present' || gates.configured.length === 0) { return { observed: false }; }
+  targetBranch: string | undefined, identity: ChangeIdentityPort | undefined): { slot?: Slot; tests: IntegrationTestsState } {
+  if (!gates || gates.checkout.kind !== 'present' || gates.configured.length === 0) { return { tests: 'unobserved' }; }
   const checkoutRevision = gates.checkout.revision;
-  const outcomes = gates.configured.map(key => gates.gates.find(item => item.key === key));
-  if (outcomes.some(item => !item)) { return { observed: true }; }
-  for (const item of outcomes) {
-    if (item!.proof.state === 'current' && item!.failure?.state === 'current') { reject('contradiction', `gate ${item!.key} both passed and failed`); }
+  const mismatched: GateResultEvidence[] = [];
+  const covers = (revision: string | null) => gateResultMatchesCheckout(revision, checkoutRevision, targetBranch, identity);
+  // A configured key with no recorded row is an absent result, so rows that do exist still decide failed or not-current as the board does.
+  const outcomes = gates.configured.map(key => currentForCheckout(gates.gates.find(item => item.key === key)
+    ?? { key, proof: { state: 'absent' }, failure: null }, covers, mismatched));
+  const failures = outcomes.flatMap(item => item.failure?.state === 'current' ? [item.failure] : []);
+  if (failures.length) {
+    return { tests: 'failed', ...(testsAlreadyFailed ? {} : { slot: { at: Math.max(...failures.map(item => instant(item.observedAt, 'gate failure'))), order: 1e6, entry: { kind: 'verdict', check: 'tests', passed: false } } }) };
   }
-  const mismatched = outcomes.flatMap(item => [item!.proof.state === 'current' ? item!.proof : null,
-    item!.failure?.state === 'current' ? item!.failure : null])
-    .filter(item => item && !gateResultMatchesCheckout(item.revision, checkoutRevision, targetBranch, identity));
+  if (outcomes.every(item => item.proof.state === 'current')) {
+    return { tests: 'passed', slot: { at: Math.max(...outcomes.map(item => instant((item.proof as { observedAt: string }).observedAt, 'gate proof'))), order: 1e6, entry: { kind: 'verdict', check: 'tests', passed: true } } };
+  }
   if (mismatched.length) {
-    return { observed: true, slot: { at: Math.max(...mismatched.map(item => instant(item!.observedAt, 'gate result'))),
+    return { tests: 'not-current', slot: { at: Math.max(...mismatched.map(item => instant(item.observedAt, 'gate result'))),
       order: 1e6, entry: { kind: 'unmodelled-change' } } };
   }
-  const failures = outcomes.flatMap(item => item!.failure?.state === 'current' ? [item!.failure] : []);
-  if (failures.length && !testsAlreadyFailed) {
-    return { observed: true, slot: { at: Math.max(...failures.map(item => instant(item.observedAt, 'gate failure'))), order: 1e6, entry: { kind: 'verdict', check: 'tests', passed: false } } };
-  }
-  if (outcomes.every(item => item!.proof.state === 'current')) {
-    return { observed: true, slot: { at: Math.max(...outcomes.map(item => instant((item!.proof as { observedAt: string }).observedAt, 'gate proof'))), order: 1e6, entry: { kind: 'verdict', check: 'tests', passed: true } } };
-  }
-  return { observed: true };
+  return { tests: outcomes.some(item => item.proof.state === 'stale' || item.failure) ? 'not-current' : 'unobserved' };
 }
 /**
  * Rebases are outside the model. A completed rebase carries a judgement only when the existing identity owner says
@@ -326,7 +347,7 @@ function withGateSlot(mapped: Slot[], gates: IntegrationGateEvidence | null, rev
   const pendingFailedVerdict = latest?.kind === 'verdict' && !latest.passed;
   if (gate.slot && (!pendingFailedVerdict || gate.slot.entry.kind === 'unmodelled-change')) { mapped.push(gate.slot); }
   mapped.sort((left, right) => left.at - right.at || left.order - right.order);
-  return { mapped, observed: gate.observed };
+  return { mapped, tests: gate.tests };
 }
 /** Pure mapping of authoritative review, gate and completed-repair facts into ordered policy history. */
 export function adaptVerificationHistory(review: Review | null, gates: IntegrationGateEvidence | null,
@@ -334,10 +355,10 @@ export function adaptVerificationHistory(review: Review | null, gates: Integrati
   facts: VerificationHistoryFacts = {}): PolicyHistory {
   try {
     const identity = rebaseTransparent(facts.identity, facts.rebases ?? []);
-    const { mapped, observed } = withGateSlot(mappedHistorySlots(review, repairRows, repairCheckpoints, { ...facts, identity }),
+    const { mapped, tests } = withGateSlot(mappedHistorySlots(review, repairRows, repairCheckpoints, { ...facts, identity }),
       gates, review, identity);
     const entries = mapped.map(item => item.entry);
-    return { ok: true, entries, record: verificationHistoryRecord(entries), tests: observed ? 'observed' : 'unobserved' };
+    return { ok: true, entries, record: verificationHistoryRecord(entries), tests };
   } catch (error) {
     const failure = error instanceof Unmapped ? { kind: error.kind, message: error.message }
       : { kind: 'invalid' as const, message: 'recorded facts could not be read' };

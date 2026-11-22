@@ -8,6 +8,7 @@ import { SqliteWorkflowOperationStore, workflowOperationCollectionDefects } from
 import { SqliteBoardLaneEventRepository } from '../adapters/sqlite/board-lane-event-repository.js';
 import { retainedRepositoryRunRecords } from '../adapters/filesystem/run-history-store.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
+import { snapshotWorktreeTopology } from '../adapters/git/worktree.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import type { MissionTerminalCapability } from '../application/ports/mission-terminal.js';
 import type { RunRecord } from '../application/run-history-types.js';
@@ -38,10 +39,12 @@ export function createVerificationStatisticsReader(root: string, configuration?:
       new SqliteBoardLaneEventRepository(db).findByRepositoryId(repositoryId), historyRepo.findReboundRepairs(),
     ]);
     const operations = operationHistory.operations;
+    // One worktree listing serves every Mission; resolving each Mission through its own Git calls made this read scale with history.
+    const topology = snapshotWorktreeTopology({ cwd: root });
     const flowMissions = flowRunMissions ?? new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)]);
     return { repositoryId, history, operations, lifecycle, reboundRepairs,
       runs: retainedRepositoryRunRecords(root),
-      flowRuns: retainedFlowRunRecords(createMissionTerminalCapability(root, configuration ?? DEFAULT_CONFIGURATION), flowMissions),
+      flowRuns: retainedFlowRunRecords(createMissionTerminalCapability(root, configuration ?? DEFAULT_CONFIGURATION, mission => topology.resolveWorktree(mission)), flowMissions),
       repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
   });
 }

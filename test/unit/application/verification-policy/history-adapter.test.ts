@@ -101,8 +101,32 @@ test('maps authoritative verdicts and exact repairs while wrong-revision checks 
 
 test('maps landing failure and its verdict record, while exact and multi-gate repairs clear that record (TASK-2859.08, TASK-2867.02, TASK-2867.04)', () => {
   assert.deepEqual(entries(mapped(null, gate('pass'))), [{ kind: 'verdict', check: 'tests', passed: true }]);
-  assert.deepEqual(mapped(null, gate('stale')), { ok: true, entries: [], record: { passed: [], failed: [] }, tests: 'observed' });
+  assert.deepEqual(mapped(null, gate('stale')), { ok: true, entries: [], record: { passed: [], failed: [] }, tests: 'not-current' });
   assert.deepEqual(entries(mapped(null, gate('pass', 'other'))), [{ kind: 'unmodelled-change' }]);
+  const testsState = (gates: IntegrationGateEvidence | null) => { const value = mapped(null, gates); return value.ok ? value.tests : value.failure.kind; };
+  assert.equal(testsState(gate('pass')), 'passed');
+  assert.equal(testsState(gate('fail')), 'failed');
+  assert.equal(testsState(gate('pass', 'other')), 'not-current', 'a changed-identity pass is not current');
+  assert.equal(testsState({ ...gate('pass'), checkout: { kind: 'present', revision: 'r', clean: false },
+    gates: [{ ...gate('stale').gates[0], proof: { state: 'stale', revision: 'r', observedAt: at(8) } }] }), 'not-current', 'same-revision stale inputs are not current');
+  assert.equal(testsState(gate('none' as never)), 'unobserved', 'a configured gate with no run or receipt is no pass (PX-0072)');
+  assert.equal(testsState({ ...gate('pass'), gates: [] }), 'unobserved', 'a configured gate with no recorded outcome is no pass');
+  const gateRow = (key: string, proof: IntegrationGateEvidence['gates'][number]['proof'], failed?: { revision: string; observedAt: string }) =>
+    ({ key, proof, failure: failed ? { state: 'current' as const, exitCode: 1, ...failed } : null });
+  const two = (...gates: IntegrationGateEvidence['gates'][number][]): IntegrationGateEvidence => ({ ...gate('pass'), configured: ['e2e', 'docs'], gates });
+  const current = (revision: string, observedAt = at(10)) => ({ state: 'current' as const, revision, observedAt });
+  assert.equal(testsState(two(gateRow('e2e', { state: 'absent' }, { revision: 'r', observedAt: at(10) }), gateRow('docs', current('other')))), 'failed',
+    'a matching durable failure outranks another gate whose evidence covers a different identity');
+  assert.equal(testsState({ ...gate('pass'), gates: [gateRow('e2e', current('r', at(10)), { revision: 'other', observedAt: at(11) })] }), 'passed',
+    'a newer failure from another identity cannot discard a current pass');
+  assert.equal(testsState({ ...gate('pass'), gates: [gateRow('e2e', current('other', at(10)), { revision: 'r', observedAt: at(11) })] }), 'failed',
+    'a matching failure still reports when the pass belongs to another identity');
+  const partial = (state: 'pass' | 'fail' | 'stale') => ({ ...gate(state), configured: ['e2e', 'docs'] });
+  assert.equal(testsState(partial('fail')), 'failed', 'a durable failure still counts when another configured gate has no row');
+  assert.equal(testsState(partial('stale')), 'not-current', 'stale evidence still counts when another configured gate has no row');
+  assert.equal(testsState(partial('pass')), 'unobserved', 'a pass for one of two configured gates is no pass');
+  assert.equal(testsState({ ...gate('pass'), configured: [] }), 'unobserved');
+  assert.equal(testsState({ ...gate('pass'), checkout: { kind: 'absent' } }), 'unobserved');
 
   const pending = mapped(null, gate('fail'));
   assert.deepEqual(pending.ok && pending.record, { passed: [], failed: ['tests'] });
@@ -277,8 +301,12 @@ test('declared-gates returns reset history and malformed facts fall back with ty
   assert.deepEqual(entries(mapped(null, null, [], [], { lifecycle: [lane] })), [{ kind: 'unmodelled-change' }]);
   assert.equal(failure(mapped(null, null, [{ ...row('x', 'pass'), eventData: '{' }])), 'invalid');
   const both = gate('pass');
-  assert.equal(failure(mapped(null, { ...both, gates: [{ ...both.gates[0],
-    failure: { state: 'current', revision: 'r', observedAt: at(13), exitCode: 1 } }] })), 'contradiction');
+  const withFailure = (observedAt: string) => mapped(null, { ...both, gates: [{ ...both.gates[0],
+    failure: { state: 'current', revision: 'r', observedAt, exitCode: 1 } }] });
+  const outcome = (value: ReturnType<typeof withFailure>) => ({ tests: value.ok ? value.tests : value.failure.kind, entries: entries(value) });
+  assert.deepEqual(outcome(withFailure(at(12))), { tests: 'passed', entries: [{ kind: 'verdict', check: 'tests', passed: true }] }, 'a rerun pass after a failure is the newest result');
+  assert.deepEqual(outcome(withFailure(at(14))), { tests: 'failed', entries: [{ kind: 'verdict', check: 'tests', passed: false }] }, 'a failure after the pass is the newest result');
+  assert.equal(outcome(withFailure(at(13))).tests, 'passed', 'a tie keeps the pass, as the board gate does');
   assert.equal(failure(mapped(failedReview('other'), null, [row('wrong', 'pass')])), 'unmodelled-history');
 });
 
