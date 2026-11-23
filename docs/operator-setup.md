@@ -586,6 +586,10 @@ the incident-and-gate checkpoints.
 repair certification and pending patch assessment before review preparation.
 This includes an approved mission already in review with preparation pending;
 continuation preserves its approval without launching an agent to escape routing.
+Evidence you already recorded for the identical failure (same gate attempt, worktree,
+failure revision and failure evidence) is kept on resume and goes to the exact check
+before any implementer launch; only a passing check certifies it, and a failing
+check withdraws it and runs the ordinary repair.
 Restart rebases onto the current base before comparison and certifies outstanding
 repair checkpoints through their authorized verifier. Missing repair evidence or
 a contract blocker requires recovery before integration.

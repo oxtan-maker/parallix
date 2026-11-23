@@ -840,6 +840,25 @@ describe('Exact repair success coverage', () => {
     assert.match(repairCheckpointFailure([blocked, source]) ?? '', /human review/);
   });
 
+  test('reopening the identical occurrence keeps recorded evidence, recording metadata and occurrence (px-0070)', async () => {
+    const f = incidentFixture();
+    const open = { slug: f.mission.id, incidentId: 'same', command: 'npm test', attempt: 1, worktree: '/isolated/worktree',
+      failureRevision: 'failed-head', failureEvidenceId: 'retained-failure-1' };
+    await f.repair.open(open);
+    await f.record('CP-2');
+    const before = structuredClone(f.store.mission().checkpoints.find(cp => cp.name === 'CP-2')!);
+    assert.equal(before.repair!.evidenceRecorded, true);
+    assert.ok(before.recording);
+    await f.store.save({ ...f.store.mission() } as Mission); // an unrelated Mission write moves the revision
+    await f.repair.open(open);
+    const after = f.store.mission().checkpoints.find(cp => cp.name === 'CP-2')!;
+    assert.deepEqual(after.recording, before.recording);
+    assert.deepEqual(after.repair!.occurrence, before.repair!.occurrence);
+    assert.equal(after.repair!.evidenceRecorded, true);
+    assert.equal(after.repair!.verified, false);
+    assert.ok(await f.repair.prepareVerification(f.mission.id, 'CP-2', { worktree: open.worktree, executionRevision: 'fixed-head' }));
+  });
+
   test('reopening either occurrence invalidates prior coverage and preserves the failure rows (TASK-2802)', async () => {
     for (const incidentId of ['older', 'newer']) {
       const f = await coverageFixture();

@@ -8,6 +8,8 @@ import path from 'node:path';
 import { mkdtemp } from '../../helpers/temp-dir.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { RepairCheckpointService } from '../../../src/application/repair-checkpoint-service.js';
+import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
+import type { Mission } from '../../../src/domain/mission.js';
 import { buildTypedMissionRecoveryAdvice } from '../../../src/application/typed-mission-recovery-advice.js';
 import { rebound, type ReboundContext, type ReboundReason } from '../../../src/application/rebound-kernel.js';
 import type { RepairCheckpointPort } from '../../../src/application/ports/repair-checkpoint.js';
@@ -266,6 +268,105 @@ export function repairCheckpointCases(): void {
     assert.equal(repair.evidenceRecorded, false);
     assert.equal(repair.verified, false);
     assert.equal(repair.exactSuccessCoverage, undefined);
+  });
+
+  /** The same incident, gate attempt and failure the retained resume derives, with fresh evidence already recorded. */
+  async function recordedRepair(t: TestContext) {
+    const f = realRepair(t);
+    const options = { ...f.options, repairIncidentId: 'incident' };
+    const open = { slug: 'repair-fixture', incidentId: 'incident', command: reason.command, attempt: 1, worktree: f.options.worktree,
+      failureRevision: 'failed-head', failureEvidenceId: 'retained-failure:1' };
+    const { name } = (await f.checkpoints.open(open))!;
+    const missionRecord = new MissionCheckpointService(f.store);
+    const recorded = await missionRecord.record({ operationId: 'record', missionId: f.store.mission().id,
+      expectedVersion: (await f.store.load()).version, capabilities: new Set(['checkpoint:record']),
+      checkpoint: { missionId: f.store.mission().id, name, goalCheck: [{ criterion: 'criterion', evidence: 'npm test' }], nextActionText: 'handoff' } });
+    assert.equal(recorded.status, 'completed');
+    const checkpoint = () => f.store.mission().checkpoints.find(cp => cp.name === name)!;
+    return { ...f, options, open, name, checkpoint, before: structuredClone(checkpoint()) };
+  }
+
+  test('same-occurrence recorded evidence is certified by the exact check with no implementer launch (px-0070)', async t => {
+    const f = await recordedRepair(t);
+    const history = [{ blocker: { command: reason.command }, operator: 'operator', decision: 'd', evidence: 'npm test', occurredAt: '2026-10-21T13:00:00Z', missionRevision: 2, authorizedCriteria: ['criterion'], authorizedGates: [reason.command] }];
+    await f.store.save({ ...f.store.mission(), checkpoints: f.store.mission().checkpoints.map(cp => cp.name === f.name ? { ...cp, repair: { ...cp.repair!, corrections: history } } : cp) } as Mission);
+    let launches = 0;
+    let verifies = 0;
+    const outcome = await rebound(reason, { ...f.options,
+      startAgent: async () => { launches++; return { result: { status: 0 } }; },
+      verify: () => { verifies++; return { ok: true, command: reason.command, exactExecution: { command: reason.command, worktree: f.options.worktree, exitCode: 0 as const } }; } });
+    assert.equal(outcome.outcome, 'fixed');
+    assert.equal(outcome.attempts, 0);
+    assert.equal(launches, 0);
+    assert.equal(verifies, 1);
+    const after = f.checkpoint().repair!;
+    assert.equal(after.verified, true);
+    assert.equal(after.exactSuccessCoverage?.execution.producer, 'rebound-exact-verifier');
+    assert.deepEqual(after.occurrence, f.before.repair!.occurrence);
+    assert.deepEqual(f.checkpoint().recording, f.before.recording);
+    assert.deepEqual(after.corrections, history);
+  });
+
+  test('evidence recorded on a later repair attempt is certified without reopening or launching (px-0070 F1)', async t => {
+    const f = await recordedRepair(t);
+    const reopened = await f.checkpoints.open({ ...f.open, attempt: 2 });
+    assert.ok(reopened);
+    await f.store.save({ ...f.store.mission(), checkpoints: f.store.mission().checkpoints.map(cp => cp.name === f.name
+      ? { ...cp, repair: { ...cp.repair!, evidenceRecorded: true }, recording: f.before.recording } : cp) } as Mission);
+    const before = structuredClone(f.checkpoint());
+    assert.equal(before.repair!.attempt, 2);
+    let launches = 0;
+    const outcome = await rebound(reason, { ...f.options,
+      startAgent: async () => { launches++; return { result: { status: 0 } }; },
+      verify: () => ({ ok: true, command: reason.command, exactExecution: { command: reason.command, worktree: f.options.worktree, exitCode: 0 as const } }) });
+    assert.equal(outcome.outcome, 'fixed');
+    assert.equal(launches, 0);
+    const after = f.checkpoint();
+    assert.equal(after.repair!.attempt, 2, 'certification must not rewrite the retained attempt');
+    assert.equal(after.repair!.verified, true);
+    assert.deepEqual(after.recording, before.recording);
+    assert.deepEqual(after.repair!.occurrence, before.repair!.occurrence);
+  });
+
+  test('a failed exact check withdraws the recorded evidence and runs the ordinary repair (px-0070)', async t => {
+    const f = await recordedRepair(t);
+    const order: string[] = [];
+    const outcome = await rebound(reason, { ...f.options, maxAttempts: 1,
+      startAgent: async () => { order.push('launch'); return { result: { status: 0 } }; },
+      verify: () => { order.push('verify'); return { ok: false, command: reason.command, diagnostic: 'still failing' }; } });
+    assert.deepEqual(order, ['verify', 'launch', 'verify']);
+    assert.equal(outcome.outcome, 'exhausted');
+    const repair = f.checkpoint().repair!;
+    assert.equal(repair.evidenceRecorded, false);
+    assert.equal(repair.verified, false);
+    assert.equal(repair.exactSuccessCoverage, undefined);
+    assert.equal(f.checkpoint().recording, undefined);
+  });
+
+  test('changed occurrence evidence is not reused and the implementer runs before any check (px-0070)', async t => {
+    const f = await recordedRepair(t);
+    const order: string[] = [];
+    await rebound(reason, { ...f.options, maxAttempts: 1,
+      retainedFailure: { ...f.options.retainedFailure!, attempt: 2 },
+      startAgent: async () => { order.push('launch'); return { result: { status: 0 } }; },
+      verify: () => { order.push('verify'); return { ok: true, command: reason.command }; } });
+    assert.deepEqual(order, ['launch', 'verify']);
+    assert.equal(f.checkpoint().repair!.verified, false);
+    assert.equal(f.checkpoint().repair!.occurrence!.failureEvidenceId, 'retained-failure:2');
+    assert.equal(f.checkpoint().recording, undefined);
+  });
+
+  test('changed authority refuses recorded evidence before launch or check (px-0070)', async t => {
+    const f = await recordedRepair(t);
+    await f.store.save({ ...f.store.mission(), declaredGates: ['weakened gate'] } as Mission);
+    let touched = 0;
+    const outcome = await rebound(reason, { ...f.options,
+      startAgent: async () => { touched++; return { result: { status: 0 } }; },
+      verify: () => { touched++; return { ok: true, command: reason.command }; } });
+    assert.equal(outcome.outcome, 'human-only');
+    assert.match(outcome.diagnostic, /operator decision/);
+    assert.equal(touched, 0);
+    assert.equal(f.checkpoint().repair!.verified, false);
   });
 
   test('a deterministic launch failure consumes no retained repair attempt (TASK-2845 review F11)', async t => {

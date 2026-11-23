@@ -866,6 +866,43 @@ describe('retained verification repair continuation', { concurrency: false }, ()
     assert.deepEqual(f.fake.launches.map(launch => launch.role), ['implementer', 'reviewer']);
   });
 
+  test('same-occurrence recorded evidence reaches the exact check before any implementer launch (px-0070)', async () => {
+    const f = fixture({ passing: true, recorded: true });
+    const lookups: Parameters<NonNullable<RepairCheckpointPort['recordedEvidence']>>[0][] = [];
+    f.fake.ports.retainedRepair.checkpoints.recordedEvidence = async request => { lookups.push(request); return { name: 'CP-2', version: 8 }; };
+    f.fake.ports.artifacts.consumeReviewer = async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' });
+    await f.run();
+    assert.deepEqual(f.checks, [[f.command, f.fake.ports.worktree]]);
+    assert.deepEqual(f.verified, [['task-2757', 'CP-2']]);
+    assert.deepEqual(f.opens, [], 'certifying recorded evidence must not reopen (and so reset) the checkpoint');
+    assert.deepEqual(lookups.map(request => [request.incidentId, request.attempt, request.worktree, request.failureRevision, request.failureEvidenceId]),
+      [['incident', 1, f.fake.ports.worktree, 'head-1', 'retained-incident:1']]);
+    assert.deepEqual(f.fake.launches.map(launch => launch.role), ['reviewer']);
+    assert.deepEqual(f.fake.exits, []);
+  });
+
+  test('a failed exact check withdraws recorded evidence and keeps the implementer repair (px-0070)', async () => {
+    const f = fixture({ passing: false, recorded: true });
+    const discarded: string[] = [];
+    f.fake.ports.retainedRepair.checkpoints.recordedEvidence = async () => ({ name: 'CP-2', version: 8 });
+    f.fake.ports.retainedRepair.checkpoints.discardEvidence = async (_slug, name) => { discarded.push(name); };
+    await f.run();
+    assert.deepEqual(discarded, ['CP-2']);
+    assert.deepEqual(f.verified, []);
+    assert.equal(f.fake.launches[0].role, 'implementer');
+    assert.deepEqual(f.fake.exits, [1]);
+  });
+
+  test('an unrelated passing check on recorded evidence certifies nothing and launches no implementer (px-0070)', async () => {
+    const f = fixture({ recorded: true });
+    f.fake.ports.retainedRepair.checkpoints.recordedEvidence = async () => ({ name: 'CP-2', version: 8 });
+    f.fake.ports.retainedRepair.verify = async () => ({ ok: true, command: 'unrelated' });
+    await f.run();
+    assert.deepEqual(f.verified, []);
+    assert.equal(f.fake.launches.length, 0);
+    assert.deepEqual(f.fake.exits, [1]);
+  });
+
   test('unrelated passing check cannot certify retained recovery (TASK-2757)', async () => {
     const f = fixture();
     f.fake.ports.retainedRepair.verify = async () => ({ ok: true, command: 'unrelated' });

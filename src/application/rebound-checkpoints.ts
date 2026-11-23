@@ -167,6 +167,25 @@ function recoveryPromptLookup(context: ReboundContext) {
   return recoveryEvidenceForPrompt(context.worktree, context.slug);
 }
 
+/**
+ * Valid fresh evidence already recorded for this identical failure occurrence, as a checkpoint the exact verifier
+ * can run against before any implementer launch. Aggregate, workflow and reviewer repairs never reuse it.
+ */
+export async function recordedRepairCheckpoint(state: RepairPromptState, context: ReboundContext): Promise<PreparedRepairPrompt | null> {
+  const repairPort = context.repairCheckpoints ?? repairCheckpointPort();
+  if (context.repairPrompt !== undefined || isReviewerOutputFailure(state.reason) || state.repairObligations?.length
+    || !repairPort?.recordedEvidence) { return null; }
+  const command = repairCommand(state.reason);
+  const repairCheckpoint = await repairPort.recordedEvidence({ slug: context.slug, incidentId: state.occurrenceId,
+    command, attempt: 1, ...failureOccurrence(command, context.worktree, state.capturedEvidence) });
+  return repairCheckpoint ? { fixPrompt: '', repairPort, repairCheckpoint } : null;
+}
+
+/** A failed exact check leaves the recorded evidence uncertified, so the repair owes it again. */
+export async function discardRecordedEvidence(slug: string, prepared: PreparedRepairPrompt): Promise<void> {
+  await prepared.repairPort?.discardEvidence?.(slug, prepared.repairCheckpoint!.name);
+}
+
 /** The harness snapshots authority before the exact verifier and certifies only its success. */
 export async function runCheckpointVerification(context: ReboundContext, prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>, attempt: number) {
   const { repairPort, repairCheckpoint, repairCheckpointRefs } = prepared;

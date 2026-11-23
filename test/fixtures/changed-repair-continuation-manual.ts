@@ -24,6 +24,9 @@ import { ALL_ACTIONS, syntheticPolicyArtifactV2, v2State } from '../unit/applica
 
 const equivalent = process.argv.includes('--equivalent');
 const failingCheck = process.argv.includes('--failing-check');
+// The retained review resume scenario runs in its own disposable home before the approved-continuation scenario.
+const resumeScenario = equivalent && process.argv.includes('--resume-scenario');
+const undecidedReview = process.argv.includes('--policy-tests-repair') || resumeScenario;
 const aggregateMode = process.argv.includes('--aggregate-review') || process.argv.includes('--aggregate-execute');
 const aggregateExecute = process.argv.includes('--aggregate-execute');
 const reviewStartPolicy = process.argv.includes('--review-start-policy');
@@ -52,6 +55,12 @@ const git = (cwd: string, ...args: string[]) => {
   return result.stdout.trim();
 };
 try {
+  if (equivalent && !resumeScenario) {
+    console.log('SCENARIO 1: same-occurrence recorded evidence through public px review (retained resume)');
+    const nested = spawnSync(process.execPath, [...process.execArgv, process.argv[1], ...process.argv.slice(2), '--resume-scenario'], { stdio: 'inherit', timeout: 120_000 });
+    assert.equal(nested.status, 0, 'retained resume scenario failed');
+    console.log('SCENARIO 2: approved direct-review continuation');
+  }
   fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'manual-repair', targetUser: 'probe' },
@@ -99,17 +108,17 @@ try {
   const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: reviewFamilies.map(agentFamily), strategy: 'random' });
   // The pilot rehearsal opens an undecided review turn on the current revision, so the policy owns the next action.
   const startedReview = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
-    revision: changeRevision(policyTestsRepair ? repairedRevision : approvedRevision), baseline: changeRevision(baseline) }, agentFamily('custom'), agentFamily('codex'), '2026-10-01T08:00:00Z', eligibility);
-  const review = policyTestsRepair ? startedReview : applyReviewerCommand(startedReview, {
+    revision: changeRevision(undecidedReview ? repairedRevision : approvedRevision), baseline: changeRevision(baseline) }, agentFamily('custom'), agentFamily('codex'), '2026-10-01T08:00:00Z', eligibility);
+  const review = undecidedReview ? startedReview : applyReviewerCommand(startedReview, {
     type: 'approve', revision: changeRevision(approvedRevision), decidedAt: '2026-10-01T09:00:00Z', comment: 'historical approval', source: { kind: 'local' },
   });
   const approved = fixtureMission(slug, { repositoryId: services.repositoryId, status: 'integration', assignee: agentFamily('codex'), review,
     labels: missionLabels(['ai_sdlc']),
     brief: { goal: 'Review repaired behavior', why: 'Avoid historical approval replay', scope: 'deliverable.txt', outOfScope: ['Landing'] },
-    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands : policyTestsRepair ? [gateCommand] : [':'],
+    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands : policyTestsRepair ? [gateCommand] : resumeScenario ? [exactCommand] : [':'],
     checkpoints: [{ missionId: missionId(slug), name: 'CP-1', goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt:1', recordedRound: 1 }], nextActionText: 'Independent review',
       recording: { recordedAt: '2026-10-02T09:00:00Z', recordedRound: 1, missionRevision: 2 },
-      ...(policyTestsRepair ? {} : {
+      ...(undecidedReview ? {} : {
         repair: { incidentId: 'manual-successful-repair', command: ':', attempt: 1, authorizedGates: [':'],
           authorizedCriteria: ['The deliverable is repaired'], evidenceRecorded: true, verified: true } }) }],
   });
@@ -117,8 +126,8 @@ try {
     cause: { kind: 'integration-gate-failure', gate: aggregateMode ? 'static-analysis' : policyTestsRepair ? gateKey : 'unit',
       command: aggregateMode ? aggregateCommands[0] : policyTestsRepair ? gateCommand : ':' }, occurredAt: '2026-10-01T10:00:00Z' });
   // The pilot rehearsal starts from an unblocked review turn: no pending repair may shadow the policy decision.
-  const seededMission = policyTestsRepair ? approved : active;
-  await services.store.save({ ...seededMission, status: policyTestsRepair ? 'review' : equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
+  const seededMission = undecidedReview ? approved : active;
+  await services.store.save({ ...seededMission, status: undecidedReview ? 'review' : equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
     ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
   if (policyTestsRepair) {
     // The pilot joins every retained rebase observation to its admitted workflow operation; without one the
@@ -194,6 +203,66 @@ try {
       seededInterruption: true, fallbackImplementer: result.mission.assignee, configuredCommands: aggregateCommands,
       verifiedMissionRevision: repairs[0].exactSuccessCoverage?.verifiedMissionRevision, reviewerLaunches,
       finalLane: result.mission.status, landed: false, boundaries: 'disposable Git/SQLite/operator home; stubbed reviewer/provider' }));
+  } else if (resumeScenario) {
+    // Retained review resume: the identical failure occurrence already carries recorded evidence, so the exact
+    // check runs before any implementer launch and only its pass certifies the existing checkpoint.
+    const { captureRecoveryEvidence } = await import('../../src/application/recovery-evidence.js');
+    const { RepairCheckpointService } = await import('../../src/application/repair-checkpoint-service.js');
+    const { MissionCheckpointService } = await import('../../src/application/mission-checkpoint-service.js');
+    const captured = captureRecoveryEvidence({ missionId: slug, command: exactCommand, cwd: worktree,
+      capturedRevision: approvedRevision, exitCode: 1, signal: null, stdout: '', stderr: 'original missing marker', diagnostic: 'original failure' });
+    assert.ok(captured.ok && captured.ref);
+    if (!captured.ok || !captured.ref) { throw new Error('capture failed'); }
+    const ref = captured.ref;
+    const opened = await new RepairCheckpointService(services.store).open({ slug, incidentId: 'manual-resume-repair', command: exactCommand,
+      attempt: 1, worktree, failureRevision: approvedRevision, failureEvidenceId: `${ref.incidentId}:${ref.attempt}` });
+    assert.ok(opened, 'brief-backed disposable mission must open a repair checkpoint');
+    const recorded = await new MissionCheckpointService(services.store).record({ missionId: missionId(slug), operationId: 'manual-record',
+      capabilities: new Set(['checkpoint:record']), checkpoint: { missionId: missionId(slug), name: opened.name,
+        goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt' }], nextActionText: 'Certify repair' } });
+    assert.equal(recorded.status, 'completed', JSON.stringify(recorded));
+    const repairOf = async () => {
+      const loaded = await services.store.load(missionId(slug));
+      if (loaded.kind !== 'found') { throw new Error('missing disposable mission'); }
+      return loaded.mission.checkpoints.find(cp => cp.name === opened.name)!;
+    };
+    const before = structuredClone(await repairOf());
+    assert.equal(before.repair?.evidenceRecorded, true);
+    assert.ok(before.recording, 'the operator evidence write carries recording metadata');
+    if (!failingCheck) { fs.writeFileSync(path.join(temporary, 'allow-check'), 'authorized verifier can pass'); }
+    const launches: Array<{ kind: 'reviewer' | 'implementer'; evidenceRecordedAtLaunch: boolean | undefined }> = [];
+    setCommandPathProbe(() => '/disposable-review-or-repair-actor');
+    setLauncherHealthProbe(() => ({ ok: true }));
+    setWorkflowLaunchPort(input => ({
+      invocation: { command: 'disposable-review-or-repair-actor', args: [], options: { cwd: input.worktree } },
+      resultPromise: (async () => {
+        const reviewer = /Mode: review\./.test(input.prompt);
+        launches.push({ kind: reviewer ? 'reviewer' : 'implementer', evidenceRecordedAtLaunch: (await repairOf()).repair?.evidenceRecorded });
+        if (reviewer) { assert.equal(await run(['verdict', 'approve', '--actor', 'custom'], { baseCwd: input.worktree }), 0); }
+        return { status: 0, stdout: '', stderr: '' };
+      })(),
+    }));
+    console.log(`COMMAND: px review ${slug} --reviewer custom`);
+    const code = await run(['review', slug, '--reviewer', 'custom'], { baseCwd: worktree });
+    const after = await repairOf();
+    assert.equal(code, failingCheck ? 1 : 0);
+    assert.equal(fs.readFileSync(ref.stderrPath, 'utf8'), 'original missing marker');
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), baseline, 'human landing never ran');
+    if (failingCheck) {
+      assert.ok(launches.length > 0 && launches.every(launch => launch.kind === 'implementer'), 'a failed exact check falls back to the ordinary implementer repair');
+      assert.ok(launches.every(launch => launch.evidenceRecordedAtLaunch === false), 'the failed exact check withdrew the evidence before any implementer launch');
+      assert.equal(after.repair?.verified, false);
+      assert.equal(after.repair?.exactSuccessCoverage, undefined, 'a failed check certifies nothing');
+    } else {
+      assert.deepEqual(launches.map(launch => launch.kind), ['reviewer'], 'the passing exact check launches no implementer; review continues');
+      assert.equal(after.repair?.verified, true);
+      assert.equal(after.repair?.exactSuccessCoverage?.execution.producer, 'rebound-exact-verifier');
+      assert.deepEqual(after.recording, before.recording, 'the recorded evidence metadata survived the resume');
+      assert.deepEqual(after.repair?.occurrence, before.repair?.occurrence, 'the same occurrence was reopened, not replaced');
+    }
+    console.log(JSON.stringify({ observation: 'same-occurrence retained resume', control: failingCheck, code, launches,
+      verified: after.repair?.verified, certified: Boolean(after.repair?.exactSuccessCoverage),
+      occurrencePreserved: !failingCheck, exactCommand }));
   } else if (equivalent) {
     const { captureRecoveryEvidence } = await import('../../src/application/recovery-evidence.js');
     const { RepairCheckpointService } = await import('../../src/application/repair-checkpoint-service.js');

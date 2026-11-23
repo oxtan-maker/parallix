@@ -37,6 +37,26 @@ export class RepairCheckpointService implements RepairCheckpointPort {
     return { name, version };
   }
 
+  async recordedEvidence(request: OpenRepairCheckpoint) {
+    const loaded = await this.load(request.slug);
+    const prior = loaded.mission.brief ? priorRepairCheckpoint(loaded.mission.checkpoints, request) : undefined;
+    // Blockers and changed authority stay with open(), which refuses them; nothing here widens that.
+    if (!prior || loaded.mission.checkpoints.some(cp => cp.repair?.blocker) || !sameFailureOccurrence(prior, request)
+      || !prior.recording || !prior.repair!.evidenceRecorded || !freshGoalCheckRows(prior.goalCheck).length
+      || !sameRepairAuthority(prior.repair!.authorizedGates, loaded.mission.declaredGates ?? [])
+      || !sameRepairAuthority(prior.repair!.authorizedCriteria, loaded.mission.successCriteria ?? [])) { return null; }
+    return { name: prior.name, version: loaded.version };
+  }
+
+  async discardEvidence(slug: string, name: string): Promise<void> {
+    const loaded = await this.load(slug);
+    const checkpoint = loaded.mission.checkpoints.find(cp => cp.name === name);
+    if (!checkpoint?.repair) { return; }
+    const { recording: _recording, ...rest } = checkpoint;
+    await this._store.save({ ...loaded.mission, checkpoints: loaded.mission.checkpoints.map(cp => cp.name === name
+      ? { ...rest, repair: { ...checkpoint.repair!, evidenceRecorded: false, verified: false } } : cp) } as Mission, loaded.version);
+  }
+
   async readBlocker(slug: string, name: string): Promise<InvalidContractBlocker | undefined> {
     const loaded = await this.load(slug);
     return loaded.mission.checkpoints.find(cp => cp.name === name)?.repair?.blocker;
@@ -261,7 +281,8 @@ function nextRepairCheckpointName(checkpoints: readonly CheckpointData[]): strin
 
 function openRepairCheckpoint(mission: Mission, version: number, checkpoints: readonly CheckpointData[],
   request: OpenRepairCheckpoint, prior: CheckpointData | undefined, name: string): CheckpointData {
-  const occurrence = newFailureOccurrence(request, version + 1);
+  const retained = prior && sameOpenOccurrence(prior, request) ? prior : undefined;
+  const occurrence = retained?.repair?.occurrence ?? newFailureOccurrence(request, version + 1);
   return {
     missionId: mission.id,
     name,
@@ -269,12 +290,29 @@ function openRepairCheckpoint(mission: Mission, version: number, checkpoints: re
     // Reopening keeps its rows and provenance; a new incident carries accepted coverage.
     goalCheck: prior?.goalCheck ?? carriedGoalCheckRows(checkpoints),
     nextActionText: 'Record authorized repair evidence, complete remaining checkpoints and rerun the authorized required check.',
-    repair: openRepairRow(request, mission, prior?.repair, occurrence),
+    // The identical occurrence keeps the evidence recorded for it; the exact verifier still owns certification.
+    ...(retained?.recording ? { recording: retained.recording } : {}),
+    repair: openRepairRow(request, mission, prior?.repair, occurrence, Boolean(retained?.recording && retained.repair?.evidenceRecorded)),
   };
 }
 
+/** Same worktree, failure revision and failure evidence of an unsettled repair, whatever attempt it reached. */
+function sameFailureOccurrence(prior: CheckpointData, request: OpenRepairCheckpoint): boolean {
+  const repair = prior.repair;
+  const own = repair?.occurrence;
+  return Boolean(repair && own && !repair.verified && !repair.blocker
+    && request.worktree && request.failureRevision && request.failureEvidenceId
+    && own.worktree === request.worktree && own.failureRevision === request.failureRevision
+    && own.failureEvidenceId === request.failureEvidenceId);
+}
+
+/** Reopening at the same gate attempt keeps the evidence; a different attempt starts it over. */
+function sameOpenOccurrence(prior: CheckpointData, request: OpenRepairCheckpoint): boolean {
+  return prior.repair?.attempt === request.attempt && sameFailureOccurrence(prior, request);
+}
+
 function openRepairRow(request: OpenRepairCheckpoint, mission: Mission, prior: CheckpointData['repair'],
-  occurrence: RepairOccurrence | undefined): NonNullable<CheckpointData['repair']> {
+  occurrence: RepairOccurrence | undefined, evidenceRecorded: boolean): NonNullable<CheckpointData['repair']> {
   const priorUsed = prior?.attemptsUsed;
   const attemptsUsed = request.attempt === 1
     ? 0
@@ -283,7 +321,7 @@ function openRepairRow(request: OpenRepairCheckpoint, mission: Mission, prior: C
     ...prior, incidentId: request.incidentId, ...(request.gateKey ? { gateKey: request.gateKey } : {}),
     command: request.command,
     authorizedGates: mission.declaredGates ?? [], authorizedCriteria: mission.successCriteria ?? [],
-    attempt: request.attempt, attemptsUsed, evidenceRecorded: false, verified: false,
+    attempt: request.attempt, attemptsUsed, evidenceRecorded, verified: false,
     ...(request.maxAttempts === undefined ? {} : { maxAttempts: request.maxAttempts }),
     occurrence,
   };

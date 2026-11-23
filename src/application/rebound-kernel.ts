@@ -2,7 +2,7 @@ import { classifyRecoveryReason as classifyReboundReason } from './rebound-class
 import type { AgentLaunchResult } from './ports/agent-launch-result.js';
 import type { ReboundStartAgent } from './ports/repair-agent-launch.js';
 export type { ReboundLaunchOptions, ReboundStartAgent } from './ports/repair-agent-launch.js';
-import { prepareRepairPrompt, readRepairCheckpointBlocker, recordConsumedRepairAttempts, runCheckpointVerification } from './rebound-checkpoints.js';
+import { discardRecordedEvidence, prepareRepairPrompt, readRepairCheckpointBlocker, recordConsumedRepairAttempts, recordedRepairCheckpoint, runCheckpointVerification } from './rebound-checkpoints.js';
 import { elideBounceOutput } from './output-elision.js';
 import { DEFAULT_REBOUND_ATTEMPTS, reboundDiagnostic, transientRetryAllowed, reboundRequiresHuman, repairStrategy, differentGateVerification, repairVerificationRequiresHuman, launchRecoveryAction, repairBudgetAllows, reboundExhaustion, type ReboundReason, type ReboundClassification } from '../domain/rebound-policy.js';
 export { classifyReboundReason, reboundDiagnostic, isTransientVerifierFailure } from '../domain/rebound-policy.js';
@@ -283,6 +283,8 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
   const { context, slug, worktree, startAgent, maxAttempts, maxLaunchRetries, applyAgentFallback, log, error } = options;
   // Capture the original failure once, before launch, for fresh-context recovery.
   await captureOriginalFailureEvidence(state, worktree, context, log);
+  const recorded = await verifyRecordedRepair(state, context, log, error);
+  if (recorded) { return recorded; }
   for (let attempt = 1;repairBudgetAllows(attempt, maxAttempts);attempt++) {
     const strategy: RepairStrategy = repairStrategy(attempt);
     let prepared: Awaited<ReturnType<typeof prepareRepairPrompt>>;
@@ -327,6 +329,34 @@ async function runRepairAttempts(state: ReboundState, options: RepairOptions): P
     if (outcome) { return outcome; }
   }
   return null;
+}
+
+/**
+ * Evidence already recorded for this identical occurrence goes to the exact verifier before any implementer
+ * launch or attempt is spent. A pass certifies the existing checkpoint; a failure withdraws the evidence and
+ * the ordinary repair attempts run.
+ */
+async function verifyRecordedRepair(state: ReboundState, context: ReboundContext, log: NonNullable<ReboundContext['log']>,
+  error: NonNullable<ReboundContext['error']>): Promise<ReboundOutcome | null> {
+  const prepared = await recordedRepairCheckpoint(state, context).catch(() => null);
+  if (!prepared) { return null; }
+  try {
+    log(fmt.status('INFO', 'Recorded repair evidence found for this failure; running the exact check before any implementer launch.'));
+    const verification = await runCheckpointVerification(context, prepared, 0);
+    const { verified } = verification;
+    if (verified.workflowBlock) { return stopRepair(state, context, verified.workflowBlock.diagnostic); }
+    const mismatch = differentGateVerification(state.reason, verified, true);
+    if (mismatch) { return stopRepair(state, context, `Unrelated check ${verified.command} cannot certify ${mismatch.originalCommand}`); }
+    if (verified.ok) {
+      await verification.certify();
+      log(fmt.status('PASS', `${state.classification.label} repaired: the recorded evidence was certified by the exact check.`));
+      return { outcome: 'fixed', attempts: 0, diagnostic: verified.diagnostic || '', classification: state.classification, implementer: state.implementer };
+    }
+    refreshReboundState(state, verified, log);
+    if (repairVerificationRequiresHuman(verified.reason)) { return humanOnlyOutcome(state, context, error); }
+    await discardRecordedEvidence(context.slug, prepared);
+    return null;
+  } catch (cause) { return stopRepair(state, context, causeText(cause)); }
 }
 
 async function transitionRepairToImplementer(context: ReboundContext, slug: string): Promise<void> {

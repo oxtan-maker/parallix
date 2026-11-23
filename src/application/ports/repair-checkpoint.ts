@@ -53,6 +53,13 @@ export interface RepairCheckpointPort {
   open(_request: OpenRepairCheckpoint): Promise<{ name: string; version: number } | null>;
   /** Retain one consumed attempt only after the agent process actually ran. */
   recordAttempt?(_slug: string, _name: string, _attempt: number): Promise<void>;
+  /**
+   * Read-only: the unsettled checkpoint whose identical occurrence (worktree, failure revision and
+   * failure evidence) already carries valid fresh recorded evidence. Absent for anything else.
+   */
+  recordedEvidence?(_request: OpenRepairCheckpoint): Promise<{ name: string; version: number } | null>;
+  /** Withdraw recorded evidence that an exact check just failed to certify; it is owed again. */
+  discardEvidence?(_slug: string, _name: string): Promise<void>;
   readBlocker(_slug: string, _name: string): Promise<InvalidContractBlocker | undefined>;
   /** Snapshot accepted evidence and occurrences before execution. Legacy adapters produce no coverage. */
   prepareVerification?(_slug: string, _name: string, _scope: { worktree: string; executionRevision: string | null }): Promise<RepairVerificationSnapshot | undefined>;
