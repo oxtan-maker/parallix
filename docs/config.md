@@ -30,14 +30,22 @@ queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
 path, relative to the checkout or absolute. Shadow only observes: review and
 integration run the fixed sequence. In pilot mode every mission is pinned at
 review entry to the mode and artifact hash it entered under, and the policy
-chooses integration tests as the next action whenever it recommends them as an
-unfinished check; agent review and the human turn stay with the fixed review
-step, and a check that already passed on the current change is never
-recommended again. Operator commands still override and are recorded as
-overrides. Escalation, recovery, repair and a rebase stopped on conflicts make
-no policy decision. Any missing, invalid or mismatched artifact, contradictory
-or unmodelled history, policy error or recommendation that cannot be acted on
-(for example a human turn before agent approval) runs the fixed policy and
+encodes the round plan as well as action vectors. The pinned time policy starts
+agent review and integration tests concurrently and records the human request
+for the same revision before either automated verdict arrives. It waits for
+both automated verdicts. When both pass, the current human verdict remains the
+last required review; when either fails, the pending human request is withdrawn
+and the current automated findings enter one joint repair through the existing
+repair owner. A human rejection enters that same bounded repair mechanism.
+Verdicts and withdrawals are revision- and round-scoped, so stale delivery,
+restart, or duplicate delivery cannot approve a newer change or repeat a
+request or repair. Landing still requires the three current passes and an
+explicit human-controlled landing command.
+
+Operator commands still override and are recorded as overrides. Escalation,
+recovery, repair and a rebase stopped on conflicts make no policy decision. Any
+missing, invalid or mismatched artifact, contradictory or unmodelled history,
+policy error or round plan that cannot be acted on runs the fixed policy and
 records the typed reason. Every policy-selected action counts against the review
 allowance, so a check that fails forever still ends in a human handoff. Change
 the mode only between missions: a mission in flight when the mode changes
@@ -70,7 +78,12 @@ identity or a fixed-policy fallback reason. Missing, unreadable, invalid or
 hash-mismatched artifacts keep the fixed policy usable. Each loader retains its
 first successful artifact and hash, so replacing the file does not change an
 existing pin. Canonical bytes are compact UTF-8 JSON of the validated artifact
-with recursively sorted object keys and preserved array order.
+with recursively sorted object keys and preserved array order. Policy artifacts
+use contract `schemaVersion` 2. Its `roundPlan` is the closed rule-(a) contract:
+request agent, tests and human together; await agent and tests; withdraw human
+and jointly repair current automated findings on failure; otherwise await the
+human verdict. An older schema is invalid and takes the same typed fixed-policy
+fallback path.
 
 ## Decision provider setup
 

@@ -5,6 +5,7 @@ import { OperationalHistoryService } from '../../../../src/application/services/
 import { fixedVerificationNextAction, humanReviewDue } from '../../../../src/application/verification-policy/fixed-next-action.js';
 import {
   REVIEW_ENTRY_PIN_EVENT,
+  HUMAN_REVIEW_WITHDRAWAL_EVENT,
   REVIEW_START_DECISION_EVENT,
   observePolicyReviewStart,
   observePolicyTestsStart,
@@ -13,8 +14,9 @@ import {
   reviewStartDecision,
   reviewStartDecisionKey,
   selectPolicyAction,
+  selectPolicyRound,
 } from '../../../../src/application/verification-policy/review-start-decision.js';
-import type { ReviewStartDecision, ReviewStartDecisionInput, ReviewStartFailure,
+import type { HumanReviewWithdrawalInput, ReviewStartDecision, ReviewStartDecisionInput, ReviewStartFailure,
   ReviewEntryPinInput, ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
 import { attentionAction, attentionReason } from '../../../../src/application/projections/board.js';
 import { projectMissionCard, type MissionCard, type MissionOperationalFacts } from '../../../../src/application/projections/mission-board.js';
@@ -32,7 +34,7 @@ import { parsePolicyArtifact } from '../../../../src/application/verification-po
 import { approvedReview, fixtureMission } from '../../../fixtures/mission-builders.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { stubIntegrateWorkflowPorts } from '../../../helpers/stub-integrate-workflow-ports.js';
-import { policyArtifactFixture, syntheticPolicyArtifactV2 } from './policy-artifact.fixture.js';
+import { syntheticPolicyArtifactV2 } from './policy-artifact.fixture.js';
 import { createPolicyArtifactLoader } from '../../../../src/adapters/config/verification-policy.js';
 import { verificationHistoryRecord, type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import type { IntegrationTestsState } from '../../../../src/application/verification-policy/history-adapter.js';
@@ -406,6 +408,23 @@ test('OperationalHistoryService deduplicates agent replay without a run id (TASK
   assert.equal(entries.length, 1);
 });
 
+test('human withdrawal is round-scoped and idempotent across restart (TASK-2867.08)', async () => {
+  const { entries, repository } = historyRepository();
+  const input: HumanReviewWithdrawalInput = {
+    missionId: missionId('task-withdraw'), changeIdentity: 'patch-1', round: 2, reason: 'automated-failure',
+  };
+  const first = new OperationalHistoryService(repository);
+  assert.equal(await first.recordHumanReviewWithdrawal(input), true);
+  const restarted = new OperationalHistoryService(repository);
+  assert.equal(await restarted.recordHumanReviewWithdrawal(input), false);
+  assert.equal(await restarted.isHumanReviewWithdrawn(input), true);
+  assert.equal(await restarted.isHumanReviewWithdrawn({ ...input, round: 3 }), false);
+  assert.equal(await restarted.isHumanReviewWithdrawn({ ...input, changeIdentity: 'patch-2' }), false);
+  const withdrawals = entries.filter(entry => entry.eventType === HUMAN_REVIEW_WITHDRAWAL_EVENT);
+  assert.equal(withdrawals.length, 1);
+  assert.equal((JSON.parse(withdrawals[0]!.eventData) as HumanReviewWithdrawalInput).reason, 'automated-failure');
+});
+
 test('OperationalHistoryService sequences distinct same-round run identities (TASK-2859.09 F10)', async () => {
   const { entries, repository } = historyRepository();
   const service = new OperationalHistoryService(repository);
@@ -455,9 +474,14 @@ test('review-start observation isolates policy, writer and timeout failures (TAS
     () => { throw new Error('diagnostic output failed'); }), 'failed');
 });
 
-const parsed = parsePolicyArtifact(policyArtifactFixture());
+const parsed = parsePolicyArtifact(syntheticPolicyArtifactV2());
 if (!parsed.ok) { throw new Error(parsed.rejection.message); }
 const parsedArtifact = parsed.artifact;
+const humanOnlySource = syntheticPolicyArtifactV2();
+humanOnlySource.vectors = humanOnlySource.vectors.filter((vector: Record<string, unknown>) => vector.action === 'human');
+const parsedHumanOnly = parsePolicyArtifact(humanOnlySource);
+if (!parsedHumanOnly.ok) { throw new Error(parsedHumanOnly.rejection.message); }
+const humanOnlyArtifact = parsedHumanOnly.artifact;
 
 const policyHistory = (entries: readonly VerificationHistoryEntry[] = [], tests: IntegrationTestsState = 'unobserved') =>
   ({ ok: true as const, entries, record: verificationHistoryRecord(entries), tests });
@@ -498,19 +522,21 @@ test('shadow and pilot evaluate recommendations, probabilities, overrides and sw
   assert.equal(await observePolicyReviewStart(startFacts(), shadow.ports), 'recorded');
   assert.equal(shadow.records[0]?.configuredMode, 'shadow');
   assert.equal(shadow.records[0]?.effectiveMode, 'shadow');
-  assert.equal(shadow.records[0]?.recommendedAction, 'human');
-  assert.deepEqual(shadow.records[0]?.predictedPassProbability, { tests: 1, agent: 1, human: 1 });
+  assert.equal(shadow.records[0]?.recommendedAction, 'tests');
+  assert.deepEqual(shadow.records[0]?.predictedPassProbability, { tests: 0.7222222222222222, agent: 0.611111111111111, human: 0.5555555555555556 });
   assert.equal(shadow.records[0]?.operatorOverride, true);
   assert.equal(shadow.records[0]?.artifactSha256, 'pinned-hash');
 
-  const pilot = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' } });
+  const pilot = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' },
+    loadPolicy: () => ({ mode: 'shadow', hash: 'human-only', artifact: humanOnlyArtifact }) });
   assert.equal(await observePolicyReviewStart(startFacts({ actualAction: 'human', agentRunId: null }), pilot.ports), 'recorded');
   assert.equal(pilot.records[0]?.configuredMode, 'pilot');
-  assert.equal(pilot.records[0]?.effectiveMode, 'fixed', 'a human turn before agent approval falls back to the fixed policy');
-  assert.equal(pilot.records[0]?.failureReason?.kind, 'human-turn-unavailable');
-  assert.equal(pilot.records[0]?.recommendedAction, null);
+  assert.equal(pilot.records[0]?.effectiveMode, 'pilot', 'the concurrent plan may request human before agent settles');
+  assert.equal(pilot.records[0]?.failureReason, null);
+  assert.equal(pilot.records[0]?.recommendedAction, 'human');
 
   const approved = policyPorts({ configuration: { mode: 'pilot', artifact: 'policy.json' },
+    loadPolicy: () => ({ mode: 'shadow', hash: 'human-only', artifact: humanOnlyArtifact }),
     readHistory: async () => policyHistory([{ kind: 'verdict', check: 'agent', passed: true }]) });
   assert.equal(await observePolicyReviewStart(startFacts({ actualAction: 'human', agentRunId: null }), approved.ports), 'recorded');
   assert.equal(approved.records[0]?.effectiveMode, 'pilot');
@@ -530,8 +556,8 @@ test('tests action records the full linked row and preserves unknown policy valu
   assert.deepEqual(linked.records[0], {
     missionId: 'task-2859.10', repositoryId: 'repository-1', changeIdentity: 'patch-123',
     configuredMode: 'shadow', effectiveMode: 'shadow', artifactSha256: 'pinned-hash',
-    recommendedAction: 'human', predictedPassProbability: { tests: 1, agent: 1, human: 1 },
-    actualAction: 'tests', operatorOverride: true, verdictCorrelation: 'gate-run-42',
+    recommendedAction: 'tests', predictedPassProbability: { tests: 0.7222222222222222, agent: 0.611111111111111, human: 0.5555555555555556 },
+    actualAction: 'tests', operatorOverride: false, verdictCorrelation: 'gate-run-42',
     agentRunId: null, gateRunId: 'gate-run-42', operationId: 'operation-9', failureReason: null,
   });
 
@@ -694,7 +720,6 @@ test('every unusable policy conclusion leaves the fixed policy in charge with a 
     ['history-unmodelled-history', { readHistory: async () => ({ ok: false, failure: { kind: 'unmodelled-history', message: 'x' } }) }],
     ['belief-unmodelled-history', { readHistory: async () => policyHistory([{ kind: 'verdict', check: 'agent', passed: false }], 'passed') }],
     ['policy-exception', { readHistory: async () => { throw new Error('boom'); } }],
-    ['human-turn-unavailable', {}],
   ];
   for (const [kind, overrides] of cases) {
     const fixture = policyPorts({ configuration: pilotConfiguration, ...overrides });
@@ -708,6 +733,14 @@ test('every unusable policy conclusion leaves the fixed policy in charge with a 
   const slow = policyPorts({ configuration: pilotConfiguration, readHistory: () => new Promise<never>(() => {}) });
   assert.equal((await selectPolicyAction(SELECTION_FACTS, slow.ports)).action, null);
   assert.equal(slow.failures.at(-1)?.kind, 'observation-timeout');
+});
+
+test('pilot round selection returns the pinned concurrent rule while shadow remains observational (TASK-2867.08)', async () => {
+  const pilot = policyPorts({ configuration: pilotConfiguration });
+  const selected = await selectPolicyRound(SELECTION_FACTS, pilot.ports);
+  assert.deepEqual(selected, { plan: parsedArtifact.roundPlan, failure: null });
+  const shadow = policyPorts();
+  assert.deepEqual(await selectPolicyRound(SELECTION_FACTS, shadow.ports), { plan: null, failure: null });
 });
 
 test('a transient selection failure is carried to the action-start record instead of a re-derived reason (TASK-2859.19)', async () => {

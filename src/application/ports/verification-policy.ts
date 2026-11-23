@@ -28,7 +28,6 @@ export type ReviewStartFailureKind =
   | `history-${HistoryFailure}`
   | `belief-${BeliefFailureKind}`
   | 'no-recommendation'
-  | 'human-turn-unavailable'
   | 'mode-changed-in-flight'
   | 'policy-exception'
   | 'writer-failure'
@@ -135,6 +134,18 @@ export interface ReviewStartOutcome {
   readonly recordedAt: string;
 }
 
+/** Durable cancellation of the concurrent human request after the two automated verdicts have joined. */
+export interface HumanReviewWithdrawal {
+  readonly schemaVersion: 1;
+  readonly idempotencyKey: string;
+  readonly missionId: MissionId;
+  readonly changeIdentity: string;
+  readonly round: number;
+  readonly reason: 'automated-failure';
+  readonly recordedAt: string;
+}
+export type HumanReviewWithdrawalInput = Pick<HumanReviewWithdrawal, 'missionId' | 'changeIdentity' | 'round' | 'reason'>;
+
 export type ReviewStartOutcomeInput = Omit<ReviewStartOutcome, 'schemaVersion' | 'idempotencyKey' | 'recordedAt'>;
 
 /** The stored facts an outcome is settled from. */
@@ -187,6 +198,10 @@ export interface ReviewStartPolicyPorts {
     /** Append the outcome of every settled start of the Mission not yet recorded; returns how many rows were new. */
     settleReviewStartOutcomes(_missionId: MissionId,
       _build: (_start: ReviewStartDecision, _later: readonly ReviewStartDecision[], _all: readonly ReviewStartDecision[]) => ReviewStartOutcomeInput | null): Promise<number>;
+    /** Reuse operational history for the cancellation; no persistence schema change is needed. */
+    recordHumanReviewWithdrawal?(_input: HumanReviewWithdrawalInput): Promise<boolean>;
+    /** Exact round/change cancellation fence used by human-verdict consumers. */
+    isHumanReviewWithdrawn?(_input: Pick<HumanReviewWithdrawalInput, 'missionId' | 'changeIdentity' | 'round'>): Promise<boolean>;
   };
   /** The stored review rounds and run records an outcome is settled from; unreadable is a throw, never empty. */
   readonly readOutcomeFacts: (_missionId: MissionId) => Promise<ReviewOutcomeFacts>;
@@ -205,7 +220,9 @@ export type PolicyTestsOutcome =
   | { readonly kind: 'not-selected' }
   | { readonly kind: 'completed'; readonly verdict: 'passed' | 'failed' | 'cancelled';
     /** True only when the post-failure policy selection chose tests again before rebound began. */
-    readonly retryWithoutRepair?: boolean }
+    readonly retryWithoutRepair?: boolean;
+    /** Pinned failed-run identity included in the one joined repair prompt. */
+    readonly repairBrief?: string }
   | { readonly kind: 'human-handoff'; readonly reason: string; readonly detail: string };
 
 /** The pilot's choice: an action to run, or null with the typed reason the fixed policy stays in charge (absent when none applies). */
@@ -219,8 +236,18 @@ export interface PolicyActionPort {
   /** The policy's next unfinished check for the current change; null leaves the fixed policy in charge. */
   select(_facts: { readonly missionId: MissionId; readonly revision: string;
   }): Promise<PolicySelection>;
+  /** Static concurrent delivery tree carried by the pinned artifact; null keeps the serial fixed workflow. */
+  selectRound?(_facts: { readonly missionId: MissionId; readonly revision: string }): Promise<{
+    readonly plan: import('../verification-policy/policy-artifact.js').PolicyRoundPlan | null;
+    readonly failure: ReviewStartFailure | null;
+  }>;
   /** Run the integration tests through the integrate workflow's own claim, rebase and gate owners. */
   runTests(_stillSelected: (_revision: string) => Promise<boolean>): Promise<PolicyTestsOutcome>;
+  /** Rule-(a) tests run on the prepared revision. A red run waits for the agent verdict before choosing its one repair owner. */
+  runConcurrentTests?(_beforeGateRepair: () => Promise<void>, _sameRevision: (_revision: string) => Promise<boolean>,
+    _jointRepair: (_revision: string) => Promise<boolean>, _preparedRevision: string): Promise<PolicyTestsOutcome>;
+  /** Fence and durably record cancellation of the human request for this round. */
+  withdrawHuman?(_facts: { readonly missionId: MissionId; readonly revision: string; readonly round: number }): Promise<boolean>;
   /** Tests actions already started for this Mission, from durable records; a restart resumes the count. */
   testsActionsSpent(): Promise<number>;
   /** A rebase stopped on conflicts is outside the model: no decision while it is open. */

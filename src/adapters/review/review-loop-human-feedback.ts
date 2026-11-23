@@ -20,6 +20,7 @@ type ForgejoFeedbackComment = {
   readonly dismissed?: boolean;
   readonly location?: string;
   readonly reviewId?: string;
+  readonly commitId?: string;
 };
 
 function isHumanAuthor(comment: ForgejoFeedbackComment, configuredAgents: ReadonlySet<string>): boolean {
@@ -53,6 +54,8 @@ interface HumanFeedbackDependenciesBase {
   configuration?: ParallixConfiguration;
   missionStore: MissionStore | null; log: (_msg: string) => void; error: (_msg: string) => void;
   fetchComments: typeof getComments; tokenFor: typeof readToken; recordHumanNote: typeof createEvent;
+  /** Durable rule-(a) cancellation fence for an exact provider revision and round. */
+  isHumanReviewWithdrawn?: (_round: number, _revision: string) => Promise<boolean>;
 }
 type HumanFeedbackDependencies = HumanFeedbackDependenciesBase & (
   | { readOnly: true }
@@ -78,6 +81,15 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
       const seen = new Set<unknown>(Array.isArray(state.metadata.humanFeedbackSources) ? state.metadata.humanFeedbackSources : []);
       const configuredAgents = new Set([...WORKFLOW_AGENT_NAMES, CLASSIFIER_FORGEJO_USER, state.reviewer ?? '', state.implementer ?? ''].map(value => value.toLowerCase()).filter(Boolean));
       const normalized = comments.map((comment, index) => ({ comment, index }));
+      const withdrawnApprovals = new Set<number>();
+      if (dependencies.isHumanReviewWithdrawn) {
+        await Promise.all(normalized.map(async ({ comment, index }) => {
+          if (isApproval(comment) && comment.commitId
+            && await dependencies.isHumanReviewWithdrawn!(state.round, comment.commitId)) {
+            withdrawnApprovals.add(index);
+          }
+        }));
+      }
       // Only human review bodies and their inline comments are operator
       // corrections. Issue prose is discussion, never a workflow command.
       const feedback = normalized
@@ -86,7 +98,7 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
           const requested = isRequestChanges(comment);
           return {
             source: feedbackSource(comment, index), author: comment.user || 'unknown',
-            state: comment.dismissed ? 'dismissed' as const : 'current' as const,
+            state: comment.dismissed || withdrawnApprovals.has(index) ? 'dismissed' as const : 'current' as const,
             disposition: requested ? 'REQUEST_CHANGES' as const : null,
             approval: isApproval(comment), reason: comment.body || '',
             reviewId: comment.kind === 'inline-comment' ? comment.reviewId || comment.id || String(index) : comment.id || String(index),
@@ -117,7 +129,7 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
           records: unseen.filter(deferred).map(item => ({ source: item.source, author: item.author,
             reason: item.reviewId === currentRequest.reviewId ? item.reason : `Superseded by ${currentRequest.source}: ${item.reason}` })) };
       }
-      return dismissedApprovalObservation(normalized, configuredAgents);
+      return dismissedApprovalObservation(normalized, configuredAgents, withdrawnApprovals);
     },
     async acknowledge(state, feedback) {
       if (dependencies.readOnly) { return; }
@@ -136,13 +148,15 @@ export function composeHumanFeedback(dependencies: HumanFeedbackDependencies): H
   };
 }
 
-function dismissedApprovalObservation(normalized: readonly { comment: ForgejoFeedbackComment; index: number }[], configuredAgents: ReadonlySet<string>): Awaited<ReturnType<HumanFeedbackPort['reconcile']>> {
+function dismissedApprovalObservation(normalized: readonly { comment: ForgejoFeedbackComment; index: number }[],
+  configuredAgents: ReadonlySet<string>, withdrawn = new Set<number>()): Awaited<ReturnType<HumanFeedbackPort['reconcile']>> {
 
   // A dismissal is relevant only when the newest review decision is the
   // approval that would otherwise authorize this continuation. Older or
   // dismissed change requests are historical facts, not permanent stops.
   const latestReview = [...normalized].reverse().find(({ comment }) => comment.kind === 'review');
-  if (latestReview && latestReview.comment.dismissed && isApproval(latestReview.comment) && isHumanAuthor(latestReview.comment, configuredAgents)) {
+  if (latestReview && (latestReview.comment.dismissed || withdrawn.has(latestReview.index))
+    && isApproval(latestReview.comment) && isHumanAuthor(latestReview.comment, configuredAgents)) {
     // A dismissed approval remains the latest provider decision even
     // after its audit note has been consumed. It must stop this pass
     // every time; source de-duplication controls only event recording.

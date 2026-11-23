@@ -20,9 +20,9 @@ import { runParallelReviewerBatch } from './parallel-reviewers.js';
 import { applyReviewerArtifacts, incompleteReviewerDiagnostic, missingReviewerArtifacts, reviewerArtifactDiagnostic } from './reviewer-artifacts.js';
 import { applyReviewerOutcome, beginHumanTurn, persistedReviewerOutcome } from './reviewer-outcome.js';
 import { observeAgentReviewStart } from './review-start-observation.js';
+import { startConcurrentPolicyRound } from './concurrent-policy-round.js';
 
 type ReviewOutcome = { outcome: 'stop' | 'replan' | 'approved' } | { reviewState: unknown };
-
 /** Re-evaluate separation only at a judgment boundary, using the actual roles. */
 function routeCollidingReviewer(context: LoopContext): boolean {
   const { identities, state } = context;
@@ -402,7 +402,8 @@ async function continueResumedApproval(context: LoopContext, round: ReviewRound)
 
 async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promise<FreshReviewerResult> {
   if (await freshReviewSetup(context, round)) { return { action: 'return', value: { outcome: 'stop' } }; }
-  if (await testsPreferredAfterSetup(context, round)) { return { action: 'return', value: { outcome: 'replan' } }; }
+  const concurrent = await startConcurrentPolicyRound(context, round);
+  if (!concurrent && await testsPreferredAfterSetup(context, round)) { return { action: 'return', value: { outcome: 'replan' } }; }
   // Record the round's reviewer requirement before anything can decide it, so a
   // classifier verdict is measured against the same authority the reviewers answer (PX-0046.03).
   await establishReviewerPolicy(context, round);
@@ -495,6 +496,5 @@ async function freshReviewSetup(context: LoopContext, round: ReviewRound): Promi
   // opened. Pin routing to the revision that passed the complete setup.
   round.verifiedRevision = context.ports.preReview.head() ?? undefined;
   await pinReviewBaseline(context, round);
-
   return false;
 }

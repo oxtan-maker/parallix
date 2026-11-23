@@ -3,7 +3,7 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { retainedRepairCase } from '../../fixtures/review-repair-recovery.js';
-import { parityCase, type ParityScenario } from '../../fixtures/review-entry-parity.js';
+import { concurrentPolicyCase, parityCase, type ParityScenario } from '../../fixtures/review-entry-parity.js';
 import { reviewStatus } from '../../../src/domain/review.js';
 import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
 
@@ -75,6 +75,26 @@ for (const entry of ['cli', 'board'] as const) {
     assert.equal(decisions.filter(kind => kind === 'approved').length, 1 + outcome.launches.filter(kind => kind === 'review').length, 'every approval beyond the seeded one has a reviewer launch');
   });
 }
+
+it('public px review runs the pinned rule-(a) starts concurrently before either automated verdict (TASK-2867.08)', { timeout: 10000 }, async t => {
+  const outcome = await concurrentPolicyCase(t);
+  assert.equal(outcome.code, 0, outcome.messages);
+  assert.equal(outcome.gateRunStatus, 'passed');
+  assert.ok(['human', 'tests', 'agent'].every(action => outcome.startsBeforeVerdict.includes(action)), outcome.startsBeforeVerdict.join(','));
+  assert.equal(outcome.mission.status, 'integration', 'all-pass remains human-controlled in the integration lane');
+});
+
+it('public px review withdraws a red round and sends both automated findings to one repair (TASK-2867.08)', { timeout: 10000 }, async t => {
+  const outcome = await concurrentPolicyCase(t, true);
+  assert.equal(outcome.code, 0, outcome.messages);
+  assert.equal(outcome.gateRunStatus, 'failed', `the red-round evidence remains attached to the repaired revision\n${outcome.messages.slice(-5000)}`);
+  assert.equal(outcome.withdrawals, 1, 'the failed round withdraws its human request exactly once');
+  assert.deepEqual(outcome.launches, ['review', 'implement'], 'dual failure has exactly one joint repair attempt');
+  assert.equal((outcome.jointRepairPrompt ?? '').includes('Joint automated repair evidence'), true);
+  assert.match(outcome.jointRepairPrompt ?? '', /unit: .*test -f fix\.txt.*exit 1/s);
+  assert.match(outcome.jointRepairPrompt ?? '', /A1: agent finding/);
+  assert.equal(outcome.mission.status, 'active', 'the repaired change awaits a fresh public review entry');
+});
 
 for (const inferred of [false, true]) {
   it(`completed repair with settled children reaches its next lifecycle action (${inferred ? 'inferred' : 'explicit'} slug, TASK-2806)`, { timeout: 20000 }, async t => {

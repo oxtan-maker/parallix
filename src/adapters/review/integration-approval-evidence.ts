@@ -9,9 +9,21 @@ import { reviewStateDataFrom } from './review-state-mapping.js';
 import { missionBranchName } from '../filesystem/mission-utils.js';
 import { completedRebaseLineageForCheckout } from '../git/rebase-completion-recorder.js';
 import * as fmt from '../../application/presentation/cli-format.js';
+import type { ReviewStartPolicyPorts } from '../../application/ports/verification-policy.js';
+import { missionId } from '../../domain/mission.js';
 
 interface FeedbackMechanisms {
   providerEnabled: typeof isProviderEnabled; fetchComments: typeof getComments; tokenFor: typeof readToken;
+  isHumanReviewWithdrawn?: (_missionId: string, _round: number, _revision: string) => Promise<boolean>;
+}
+
+/** Match provider verdicts to the same durable change identity used by the withdrawal writer. */
+export function createHumanWithdrawalFence(slug: string, policy?: Omit<ReviewStartPolicyPorts, 'diagnostic'>) {
+  if (!policy?.writer.isHumanReviewWithdrawn) { return undefined; }
+  return async (_mission: string, round: number, revision: string) => {
+    const changeIdentity = policy.identity.changeIdentity(revision, policy.targetBranch);
+    return changeIdentity !== null && await policy.writer.isHumanReviewWithdrawn!({ missionId: missionId(slug), changeIdentity, round });
+  };
 }
 
 /** Retention reads the same provider corrections as review, without consuming them. */
@@ -25,7 +37,7 @@ export function createIntegrationApprovalEvidence(worktree: string, validation: 
     async reconcileHumanFeedback(mission, store) {
       const round = mission.review?.rounds.at(-1);
       const decision = round?.decision;
-      if (decision?.kind !== 'approved' || !decision.revision || !mission.review) { return false; }
+      if (!round || decision?.kind !== 'approved' || !decision.revision || !mission.review) { return false; }
       // Only historical restored decisions differ from their original provider judgment.
       const judgedRevision = decision.source.kind === 'mechanical-restoration' ? decision.source.approvedRevision : String(decision.revision);
       const providerEnabled = mechanisms.providerEnabled(worktree);
@@ -38,9 +50,13 @@ export function createIntegrationApprovalEvidence(worktree: string, validation: 
           approvalValid = Array.isArray(comments) && providerApprovalStillStanding(comments, judgedRevision);
           return comments;
         },
-        tokenFor: mechanisms.tokenFor });
+        tokenFor: mechanisms.tokenFor,
+        ...(mechanisms.isHumanReviewWithdrawn ? { isHumanReviewWithdrawn: (round, revision) =>
+          mechanisms.isHumanReviewWithdrawn!(String(mission.id), round, revision) } : {}) });
       const correction = await feedback.reconcile(new ReviewState(String(mission.id), reviewStateDataFrom(mission.review)));
-      return approvalValid && correction === null;
+      const withdrawn = mechanisms.isHumanReviewWithdrawn
+        ? await mechanisms.isHumanReviewWithdrawn(String(mission.id), round.number, judgedRevision) : false;
+      return approvalValid && correction === null && !withdrawn;
     },
   };
 }

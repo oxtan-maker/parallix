@@ -29,6 +29,12 @@ export interface TestsActionRequest {
   readonly policySelection: 'tests' | null;
   /** Asked after the mandatory rebase with the head to be tested; false when the policy no longer recommends tests there. */
   readonly stillSelected?: (_revision: string) => Promise<boolean>;
+  /** Concurrent rule-(a) join: a red run is durable, then waits here before the repair route may launch. */
+  readonly beforeRepair?: () => Promise<void>;
+  /** A prepared concurrent review revision already completed the review rebase; do not mutate its checkout. */
+  readonly preparedRevision?: string;
+  /** True keeps a red run for the review loop's joint implementer instead of starting the gate-only repair. */
+  readonly jointRepair?: (_revision: string) => Promise<boolean>;
   readonly executionContext: MissionExecutionContext;
   readonly missionServicesFn: IntegrationMissionServicesFactory;
   readonly seams: IntegrateSeams;
@@ -174,100 +180,122 @@ function evidenceFacts(ports: IntegrateWorkflowPorts, slug: string, context: Int
     testsCurrent: tree.ok && tree.commit ? completeCurrentTestsPass(readGateRun(ports, checkout), tree.commit, configured) : null };
 }
 
+async function rebaseTestsAction(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
+  slug: string, context: IntegrationContext, request: TestsActionRequest,
+  executionContext: LiveMissionExecutionContext): Promise<TestsActionOutcome | null> {
+  try {
+    await dependencies.runIntegrationRebase(slug, { baseWorktree: context.baseWorktree, baseBranch: context.baseBranch,
+      git: ports.git.git, executionContext, missionServicesFn: request.missionServicesFn });
+    return null;
+  } catch (error) {
+    if (stoppedByGateStep(ports, error)) { return handoff('rebase-dead-end', messageOf(error)); }
+    throw error;
+  }
+}
+
+async function runTestsActionGates(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
+  request: TestsActionRequest, context: IntegrationContext, services: IntegrationMissionServices,
+  checkout: string): Promise<GateStepDecision> {
+  let route: IntegrationGateRoute | null = null;
+  let redRun: IntegrationGateRunRecord | null = null;
+  let routed = false;
+  let retrySelected = false;
+  const seams: IntegrateSeams = { ...request.seams, routeIntegrationGateFailureFn: async failure => {
+    routed = true;
+    redRun = readGateRun(ports, checkout);
+    await request.beforeRepair?.();
+    route = await request.seams.routeIntegrationGateFailureFn(failure);
+    return route;
+  } };
+  const missionLoad = await services.store.load(missionId(request.slug));
+  try {
+    await dependencies.runRequiredLocalGates({ slug: request.slug, context, missionLoad, missionServices: services,
+      dryRun: true, noIntegrationGates: false, realAgent: request.realAgent ?? null,
+      realAgentModel: request.realAgentModel ?? null, seams, configuration: request.configuration,
+      ...(request.jointRepair || request.stillSelected ? { retryFailedTestsWithoutRepair: async revision => {
+        redRun = readGateRun(ports, checkout);
+        retrySelected = request.jointRepair
+          ? await request.jointRepair(revision)
+          : await request.stillSelected!(revision);
+        return retrySelected;
+      } } : {}) });
+  } catch (error) {
+    if (routed && !route) { return { kind: 'repair-refused', detail: messageOf(error) }; }
+    if (!stoppedByGateStep(ports, error)) { throw error; }
+    if (!route) { return { kind: 'stopped', detail: messageOf(error) }; }
+  }
+  return retrySelected ? { kind: 'retry-selected', redRun }
+    : route ? { kind: 'routed', route, redRun } : { kind: 'passed' };
+}
+
+async function resolveTestsContext(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
+  request: TestsActionRequest, services: IntegrationMissionServices)
+  : Promise<{ context: IntegrationContext; executionContext: LiveMissionExecutionContext } | { handoff: TestsActionOutcome }> {
+  const { slug } = request;
+  if (request.executionContext.missionId !== slug) {
+    return { handoff: handoff('mission-unavailable', `Execution context for ${request.executionContext.missionId} cannot run tests for ${slug}.`) };
+  }
+  const missionWorktree = request.executionContext.missionWorktree;
+  if (!missionWorktree) {
+    return { handoff: handoff('mission-checkout-unavailable', `Mission ${slug} has no checkout to test.`) };
+  }
+  const executionContext = { ...request.executionContext, missionWorktree };
+  const context = await dependencies.buildIntegrationContext(slug, { missionStore: services.store, executionContext,
+    getCurrentBranchFn: () => ports.git.getCurrentBranch(missionWorktree) });
+  return { context, executionContext };
+}
+
+type PreparedTestsAction = {
+  readonly services: IntegrationMissionServices;
+  readonly selected: Extract<FixedVerificationNextAction, { kind: 'tests' }>;
+  readonly resolved: { context: IntegrationContext; executionContext: LiveMissionExecutionContext };
+};
+
+async function prepareTestsAction(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
+  request: TestsActionRequest): Promise<PreparedTestsAction | { outcome: TestsActionOutcome }> {
+  const services = await request.missionServicesFn(ports.process.cwd());
+  const loaded = await services.store.load(missionId(request.slug));
+  if (loaded.kind !== 'found') { return { outcome: { kind: 'not-selected', next: null } }; }
+  let selected = fixedVerificationNextAction({ mission: loaded.mission, policySelection: request.policySelection });
+  const needsEvidence = needsLandingEvidence(request, loaded.mission.status);
+  const resolved = needsResolvedContext(selected, needsEvidence)
+    ? await resolveTestsContext(ports, dependencies, request, services) : null;
+  if (resolved && 'handoff' in resolved) { return { outcome: resolved.handoff }; }
+  if (needsEvidence && resolved) {
+    selected = fixedVerificationNextAction({ mission: loaded.mission,
+      ...evidenceFacts(ports, request.slug, resolved.context) });
+  }
+  if (selected.kind !== 'tests' || !resolved) {
+    return { outcome: { kind: 'not-selected', next: selected } };
+  }
+  return { services, selected, resolved };
+}
+
 export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies) {
-  async function rebase(slug: string, context: IntegrationContext, request: TestsActionRequest,
-    executionContext: LiveMissionExecutionContext): Promise<TestsActionOutcome | null> {
-    try {
-      await dependencies.runIntegrationRebase(slug, { baseWorktree: context.baseWorktree, baseBranch: context.baseBranch,
-        git: ports.git.git, executionContext, missionServicesFn: request.missionServicesFn });
-      return null;
-    } catch (error) {
-      // Rebase conflicts and dead ends are outside the verification model: the
-      // rebase workflow already printed its recovery path, and no gate runs.
-      if (stoppedByGateStep(ports, error)) { return handoff('rebase-dead-end', messageOf(error)); }
-      throw error;
-    }
-  }
-
-  async function runGates(request: TestsActionRequest, context: IntegrationContext, services: IntegrationMissionServices,
-    checkout: string): Promise<GateStepDecision> {
-    let route: IntegrationGateRoute | null = null;
-    let redRun: IntegrationGateRunRecord | null = null;
-    let routed = false;
-    let retrySelected = false;
-    const seams: IntegrateSeams = { ...request.seams, routeIntegrationGateFailureFn: async failure => {
-      // The gate step routes only a red run: that decision is the verdict. The
-      // record read here supplies its identity before a repair rerun replaces it.
-      routed = true;
-      redRun = readGateRun(ports, checkout);
-      route = await request.seams.routeIntegrationGateFailureFn(failure);
-      return route;
-    } };
-    const missionLoad = await services.store.load(missionId(request.slug));
-    try {
-      await dependencies.runRequiredLocalGates({ slug: request.slug, context, missionLoad, missionServices: services,
-        dryRun: true, noIntegrationGates: false, realAgent: request.realAgent ?? null,
-        realAgentModel: request.realAgentModel ?? null, seams, configuration: request.configuration,
-        ...(request.stillSelected ? { retryFailedTestsWithoutRepair: async revision => {
-          redRun = readGateRun(ports, checkout);
-          retrySelected = await request.stillSelected!(revision);
-          return retrySelected;
-        } } : {}) });
-    } catch (error) {
-      // A routed red run whose repair the rebound kernel or the lifecycle refused
-      // (for example an effective approval that must first be revoked) is
-      // reported, never treated as a completed repair.
-      if (routed && !route) { return { kind: 'repair-refused', detail: messageOf(error) }; }
-      if (!stoppedByGateStep(ports, error)) { throw error; }
-      if (!route) { return { kind: 'stopped', detail: messageOf(error) }; }
-    }
-    return retrySelected ? { kind: 'retry-selected', redRun }
-      : route ? { kind: 'routed', route, redRun } : { kind: 'passed' };
-  }
-
-  /** Resolve the live checkout and integration facts; nothing is rebased or run yet. */
-  async function resolveContext(request: TestsActionRequest, services: IntegrationMissionServices)
-    : Promise<{ context: IntegrationContext; executionContext: LiveMissionExecutionContext } | { handoff: TestsActionOutcome }> {
-    const { slug } = request;
-    if (request.executionContext.missionId !== slug) {
-      return { handoff: handoff('mission-unavailable', `Execution context for ${request.executionContext.missionId} cannot run tests for ${slug}.`) };
-    }
-    const missionWorktree = request.executionContext.missionWorktree;
-    if (!missionWorktree) { return { handoff: handoff('mission-checkout-unavailable', `Mission ${slug} has no checkout to test.`) }; }
-    const executionContext = { ...request.executionContext, missionWorktree };
-    const context = await dependencies.buildIntegrationContext(slug, { missionStore: services.store, executionContext,
-      getCurrentBranchFn: () => ports.git.getCurrentBranch(missionWorktree) });
-    return { context, executionContext };
-  }
-
   async function execute(request: TestsActionRequest): Promise<TestsActionOutcome> {
     const { slug } = request;
-    const services = await request.missionServicesFn(ports.process.cwd());
-    const loaded = await services.store.load(missionId(slug));
-    if (loaded.kind !== 'found') { return { kind: 'not-selected', next: null }; }
-    let selected = fixedVerificationNextAction({ mission: loaded.mission, policySelection: request.policySelection });
-    // Only the landing lane needs positive evidence before the fixed sequence may schedule tests.
-    const needsEvidence = needsLandingEvidence(request, loaded.mission.status);
-    const resolved = needsResolvedContext(selected, needsEvidence) ? await resolveContext(request, services) : null;
-    if (resolved && 'handoff' in resolved) { return resolved.handoff; }
-    if (needsEvidence && resolved) {
-      selected = fixedVerificationNextAction({ mission: loaded.mission, ...evidenceFacts(ports, slug, resolved.context) });
+    const prepared = await prepareTestsAction(ports, dependencies, request);
+    if ('outcome' in prepared) { return prepared.outcome; }
+    const { services, selected, resolved } = prepared;
+    if (!request.preparedRevision) {
+      const rebased = await rebaseTestsAction(ports, dependencies, slug, resolved.context, request, resolved.executionContext);
+      if (rebased) { return rebased; }
     }
-    if (selected.kind !== 'tests' || !resolved) { return { kind: 'not-selected', next: selected }; }
-    const rebased = await rebase(slug, resolved.context, request, resolved.executionContext);
-    if (rebased) { return rebased; }
     const { context } = resolved;
     const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
     const head = ports.gates.captureFinalIntegrationTree(checkout);
     const tested = head.ok ? head.commit ?? null : null;
     context.missionHeadSha = tested;
+    if (request.preparedRevision && tested !== request.preparedRevision) {
+      return handoff('interrupted', `Prepared concurrent revision ${request.preparedRevision} changed to ${tested ?? 'unreadable'} before its gates started.`);
+    }
     if (await choiceChanged(request, tested)) { return { kind: 'not-selected', next: selected }; }
     const previous = readGateRun(ports, checkout);
     if (completeCurrentTestsPass(previous, tested, ports.gates.loadPhaseGates(checkout, 'preIntegration'))) {
       return { kind: 'completed', verdict: 'passed', evidence: evidenceOf(previous), recorded: true, repairRoute: null,
         next: await nextAction(services, slug) };
     }
-    const decision = await runGates(request, context, services, checkout);
+    const decision = await runTestsActionGates(ports, dependencies, request, context, services, checkout);
     return await settle(slug, decision, readGateRun(ports, checkout), tested, previous,
       selection => nextAction(services, slug, selection));
   }
@@ -286,6 +314,9 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
 
 export type PolicyTestsActionOptions = IntegrateOptions & {
   readonly stillSelected?: TestsActionRequest['stillSelected'];
+  readonly beforeRepair?: TestsActionRequest['beforeRepair'];
+  readonly preparedRevision?: TestsActionRequest['preparedRevision'];
+  readonly jointRepair?: TestsActionRequest['jointRepair'];
   readonly executionContext: MissionExecutionContext;
   readonly missionServicesFn: IntegrationMissionServicesFactory;
 };
@@ -295,5 +326,6 @@ export async function runPolicyTestsAction(ports: IntegrateWorkflowPorts, depend
   slug: string, options: PolicyTestsActionOptions): Promise<TestsActionOutcome> {
   return await createTestsActionExecutor(ports, dependencies).runTestsAction({ slug, policySelection: 'tests',
     executionContext: options.executionContext, missionServicesFn: options.missionServicesFn,
-    seams: integrationSeams(options, ports), configuration: options.configuration, stillSelected: options.stillSelected });
+    seams: integrationSeams(options, ports), configuration: options.configuration, stillSelected: options.stillSelected,
+    beforeRepair: options.beforeRepair, preparedRevision: options.preparedRevision, jointRepair: options.jointRepair });
 }

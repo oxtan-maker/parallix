@@ -1,14 +1,15 @@
-import type { PerAction, PolicyAction } from './policy-artifact.js';
+import type { PerAction, PolicyAction, PolicyRoundPlan } from './policy-artifact.js';
 import { deriveBelief } from './belief.js';
 import { recommend } from './recommend.js';
 import { settleReviewStartOutcomes } from './review-start-outcome.js';
-import type { PolicyLoadResult, PolicySelection, ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
+import type { HumanReviewWithdrawal, HumanReviewWithdrawalInput, PolicyLoadResult, PolicySelection, ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
   ReviewStartDecisionInput, ReviewStartFacts, ReviewStartFailure,
   ReviewStartFailureKind, ReviewStartPolicyPorts, TestsActionStartFacts,
   VerificationActionStartFacts } from '../ports/verification-policy.js';
 
 export const REVIEW_START_DECISION_EVENT = 'verification.review-start-decision';
 export const REVIEW_ENTRY_PIN_EVENT = 'verification.review-entry-assignment';
+export const HUMAN_REVIEW_WITHDRAWAL_EVENT = 'verification.human-review-withdrawal';
 export const REVIEW_START_OBSERVATION_DEADLINE_MS = 250;
 
 function required(value: string, field: string): string {
@@ -37,6 +38,13 @@ export function reviewStartDecision(input: ReviewStartDecisionInput, actionSeque
     idempotencyKey: reviewStartDecisionKey({ ...input, actionSequence }),
     recordedAt: new Date().toISOString(),
   };
+}
+
+export function humanReviewWithdrawal(input: HumanReviewWithdrawalInput): HumanReviewWithdrawal {
+  if (!Number.isSafeInteger(input.round) || input.round < 1) { throw new Error('round must be a positive safe integer'); }
+  const idempotencyKey = ['human-withdrawal', required(input.missionId, 'missionId'),
+    required(input.changeIdentity, 'changeIdentity'), String(input.round)].map(encodeURIComponent).join(':');
+  return { ...input, schemaVersion: 1, idempotencyKey, recordedAt: new Date().toISOString() };
 }
 
 export function reviewEntryPinKey(input: Pick<ReviewEntryPin,
@@ -80,6 +88,7 @@ interface PolicyEvaluation {
   readonly recommendedAction: PolicyAction | null;
   readonly probabilities: PerAction<number | null>;
   readonly failureReason: ReviewStartFailure | null;
+  readonly roundPlan: PolicyRoundPlan | null;
 }
 
 type LoadedPolicy = Exclude<PolicyLoadResult, { mode: 'off' }>;
@@ -102,13 +111,14 @@ function fallback(context: EvaluationContext, failure: ReviewStartFailure,
   effectiveMode: PolicyEvaluation['effectiveMode'] = 'fixed', artifactSha256: string | null = null,
   probabilities: PerAction<number | null> = unknownProbabilities()): PolicyEvaluation {
   context.ports.diagnostic(failure);
-  return evaluation(context, effectiveMode, artifactSha256, null, probabilities, failure);
+  return evaluation(context, effectiveMode, artifactSha256, null, probabilities, failure, null);
 }
 
 function evaluation(context: EvaluationContext, effectiveMode: PolicyEvaluation['effectiveMode'],
   artifactSha256: string | null, recommendedAction: PolicyAction | null,
-  probabilities: PerAction<number | null>, failureReason: ReviewStartFailure | null): PolicyEvaluation {
-  return { changeIdentity: context.changeIdentity, effectiveMode, artifactSha256, recommendedAction, probabilities, failureReason };
+  probabilities: PerAction<number | null>, failureReason: ReviewStartFailure | null,
+  roundPlan: PolicyRoundPlan | null): PolicyEvaluation {
+  return { changeIdentity: context.changeIdentity, effectiveMode, artifactSha256, recommendedAction, probabilities, failureReason, roundPlan };
 }
 
 /** Attach the started action's own facts; an operator-invoked action that differs from the recommendation is an override. */
@@ -190,7 +200,6 @@ function evaluateHistory(context: EvaluationContext, loaded: ActivePolicy,
     return fallback(context, { kind: 'belief-unmodelled-history', message: `${[...failed][0]} repair is pending` },
       'fixed', loaded.hash);
   }
-  const passed = new Set(history.record.passed);
   let recommendation: ReturnType<typeof recommend>;
   try {
     recommendation = recommend(loaded.artifact, belief.belief, history.record);
@@ -203,13 +212,7 @@ function evaluateHistory(context: EvaluationContext, loaded: ActivePolicy,
     return fallback(context, { kind: 'no-recommendation', message: 'policy has no permitted recommendation' },
       mode, loaded.hash, recommendation.passProbabilities);
   }
-  // A human verdict is recorded against the round only after agent review approved it;
-  // recommending it earlier cannot be attributed to the human check, so the fixed policy runs.
-  if (mode === 'pilot' && recommendation.action === 'human' && !passed.has('agent')) {
-    return fallback(context, { kind: 'human-turn-unavailable', message: 'human review cannot be recorded before agent review approved the change' },
-      'fixed', loaded.hash, recommendation.passProbabilities);
-  }
-  return evaluation(context, mode, loaded.hash, recommendation.action, recommendation.passProbabilities, null);
+  return evaluation(context, mode, loaded.hash, recommendation.action, recommendation.passProbabilities, null, loaded.artifact.roundPlan);
 }
 
 async function evaluateWithPolicy(context: EvaluationContext, resolved: Awaited<ReturnType<typeof resolvePin>>,
@@ -244,7 +247,7 @@ async function evaluatePolicy(facts: PolicyEvaluationFacts, ports: ReviewStartPo
 /** A lost or already-failed evaluation keeps its typed reason with every unknown left unknown. */
 function unknownEvaluation(failure: ReviewStartFailure): PolicyEvaluation {
   return { changeIdentity: null, effectiveMode: 'fixed', artifactSha256: null, recommendedAction: null,
-    probabilities: unknownProbabilities(), failureReason: failure };
+    probabilities: unknownProbabilities(), failureReason: failure, roundPlan: null };
 }
 
 async function buildDecision(input: VerificationActionStartFacts, ports: ReviewStartPolicyPorts,
@@ -289,6 +292,43 @@ export async function selectPolicyAction(facts: PolicyEvaluationFacts,
       failure: reason && TRANSIENT_FAILURES.has(reason.kind) ? reason : null };
   } catch (error) { return unusable(ports, policyException(error)); }
   finally { if (timer !== undefined) { clearTimeout(timer); } }
+}
+
+/** Select the concurrent tree through the same mission pin, artifact identity and timeout boundary as action choice. */
+export async function selectPolicyRound(facts: PolicyEvaluationFacts,
+  ports: ReviewStartPolicyPorts): Promise<{ readonly plan: PolicyRoundPlan | null; readonly failure: ReviewStartFailure | null }> {
+  if (ports.configuration.mode !== 'pilot') { return { plan: null, failure: null }; }
+  const controller = new AbortController();
+  const lost = { kind: 'observation-timeout' as const, message: `policy round selection exceeded ${REVIEW_START_OBSERVATION_DEADLINE_MS} ms` };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>(resolve => {
+    timer = setTimeout(() => { controller.abort(); resolve(null); }, REVIEW_START_OBSERVATION_DEADLINE_MS);
+    timer.unref?.();
+  });
+  try {
+    const selected = await Promise.race([(async () => {
+      const context: EvaluationContext = { facts, ports,
+        changeIdentity: ports.identity.changeIdentity(facts.revision, ports.targetBranch) };
+      const resolved = await resolvePin(facts, ports, context.changeIdentity);
+      if (controller.signal.aborted) { return null; }
+      const pinned = pinEvaluation(context, resolved);
+      if (pinned) { return { plan: null, failure: pinned.failureReason }; }
+      const loaded = resolved.pin ? loadPolicy(ports, resolved.pin.artifactSha256 ?? undefined)
+        : resolved.initialLoad ?? loadPolicy(ports);
+      if ('failure' in loaded) { return { plan: null, failure: fallback(context, loaded.failure).failureReason }; }
+      if (loaded.loaded.mode === 'fixed') {
+        const concluded = fallback(context, artifactFailure(loaded.loaded.reason), 'fixed', resolved.pin?.artifactSha256 ?? null);
+        return { plan: null, failure: concluded.failureReason };
+      }
+      return { plan: loaded.loaded.artifact.roundPlan, failure: null };
+    })(), timeout]);
+    if (!selected) { try { ports.diagnostic(lost); } catch { /* diagnostic only */ } return { plan: null, failure: lost }; }
+    return selected;
+  } catch (error) {
+    const failure = policyException(error);
+    try { ports.diagnostic(failure); } catch { /* diagnostic only */ }
+    return { plan: null, failure };
+  } finally { if (timer !== undefined) { clearTimeout(timer); } }
 }
 
 /** The sole policy evaluator used by every durable verification-action start boundary. */

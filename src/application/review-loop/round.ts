@@ -13,7 +13,8 @@ import { ConfiguredReviewerEligibility } from '../../domain/review.js';
 import { agentFamily } from '../../domain/agents.js';
 import type { AgentLaunchResult } from '../ports/agent-launch-result.js';
 import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent } from '../rebound-kernel.js';
-import type { ReviewStartFailure } from '../ports/verification-policy.js';
+import type { PolicyTestsOutcome, ReviewStartFailure } from '../ports/verification-policy.js';
+import type { PolicyRoundPlan } from '../verification-policy/policy-artifact.js';
 import type { HumanReviewFeedback, ProviderApproval, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
 
 /** Default per-round relaunch cap. */
@@ -69,6 +70,16 @@ export class ReviewRound {
   integrationRepair = '';
   preReviewRepair = '';
   humanFeedback = '';
+  /** Gate evidence appended to the one implementer prompt after both automated verdicts join. */
+  jointRepair = '';
+  /** In-flight rule-(a) mechanisms for this round; the gate repair waits on the joined agent verdict. */
+  concurrentVerification?: {
+    readonly plan: PolicyRoundPlan;
+    readonly revision: string;
+    readonly tests: Promise<PolicyTestsOutcome>;
+    readonly settleAgent: (_verdict: import('./concurrent-policy-round.js').ConcurrentAgentVerdict) => void;
+    readonly withdraw: () => Promise<boolean>;
+  };
 
   readonly attempt: number;
 
@@ -102,7 +113,9 @@ export class ReviewRound {
 
   promptFacts(reviewOutcome?: unknown): ReviewPromptFacts {
     const { implementer, reviewer } = this._context.identities;
-    return { reviewer, implementer, attempt: this.attempt, reviewBaseline: this.reviewBaseline, integrationRepair: this.integrationRepair, preReviewRepair: this.preReviewRepair, ...(this.humanFeedback ? { humanFeedback: this.humanFeedback } : {}), ...(reviewOutcome === undefined ? {} : { reviewOutcome }) };
+    return { reviewer, implementer, attempt: this.attempt, reviewBaseline: this.reviewBaseline, integrationRepair: this.integrationRepair,
+      preReviewRepair: this.preReviewRepair, ...(this.jointRepair ? { jointRepair: this.jointRepair } : {}),
+      ...(this.humanFeedback ? { humanFeedback: this.humanFeedback } : {}), ...(reviewOutcome === undefined ? {} : { reviewOutcome }) };
   }
 }
 

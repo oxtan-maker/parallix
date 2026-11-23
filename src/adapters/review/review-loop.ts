@@ -1,5 +1,5 @@
 import { invalidateApprovedPrReview, recoverApprovalWithdrawal } from './integration-approval-invalidation.js';
-import { createIntegrationApprovalEvidence } from './integration-approval-evidence.js';
+import { createHumanWithdrawalFence, createIntegrationApprovalEvidence } from './integration-approval-evidence.js';
 import { createReviewObservationRecorder } from './review-observation-recording.js';
 import { providerReviewObservation, providerReviewChanges, providerResolution } from './review-provider-observations.js';
 import { reviewVerdictBlock } from '../../application/review-verdict-readiness.js';
@@ -11,7 +11,6 @@ import { composeHumanFeedback } from './review-loop-human-feedback.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import type { ReviewPreparationAdapterOptions } from '../cli/commands/review-preparation.js';
-
 /**
  * Review loop mechanisms.
  *
@@ -220,7 +219,7 @@ function agentPort(slug: string, branch: string, worktree: string, missionPath: 
       ? await readAgentLaunchContext(bindings.missionStore, slug, promptArtifacts(worktree)) : '';
     const stage = role === 'reviewer'
     ? `${buildCompactReviewPrompt({ reviewer: facts.reviewer, branch, implementer: facts.implementer, focus, attempt: facts.attempt, repoRoot: worktree, missionPath, actualReviewer: actual, reviewBaseline: facts.reviewBaseline, integrationRepair: typeof facts.integrationRepair === 'string' ? facts.integrationRepair : undefined })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`
-    : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome === undefined ? undefined : `${facts.reviewOutcome}`, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}`;
+    : `${buildCompactActOnReviewPrompt({ implementer: facts.implementer, branch, attempt: facts.attempt, reviewOutcome: facts.reviewOutcome === undefined ? undefined : `${facts.reviewOutcome}`, repoRoot: worktree, missionPath, actualImplementer: actual, reviewBaseline: facts.reviewBaseline })}${facts.humanFeedback ? `\n\nHuman review correction (authoritative): ${facts.humanFeedback}` : ''}${facts.jointRepair ? `\n\nJoint automated repair evidence (address in this same implementer attempt): ${facts.jointRepair}` : ''}`;
     return [snapshot, stage, role === 'reviewer' ? facts.preReviewRepair : null,
       role === 'reviewer' ? rejectedVerdictContext(worktree, slug) : null,
     ].filter(Boolean).join('\n\n');
@@ -380,6 +379,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
   const { log, error, exit, missionStore, lifecycleService, readState, writeState, fetchComments, tokenFor, recordHumanNote } = reviewLoopBindingsForRequest(bindings);
   const { worktree, branch, missionPath, artifactDir, task, key, verbose } = reviewLoopWorkspace(slug, target, log);
   const providerEnabled = (bindings.isProviderEnabled ?? isProviderEnabled)(worktree);
+  const withdrawalFence = createHumanWithdrawalFence(slug, bindings.reviewStartPolicy);
   const hasNoBacklogMirror = async () => {
     if (missionStore) {
       const loaded = await missionStore.load(missionId(slug));
@@ -393,7 +393,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     worktree,
     classification: bindings.classification,
     integrationRepair: bindings.integrationRepair,
-    integrationApprovalEvidence: createIntegrationApprovalEvidence(worktree, bindings.integrationValidation ?? (async () => null), bindings.configuration),
+    integrationApprovalEvidence: createIntegrationApprovalEvidence(worktree, bindings.integrationValidation ?? (async () => null), bindings.configuration, { providerEnabled: bindings.isProviderEnabled ?? isProviderEnabled, fetchComments: bindings.getComments ?? getComments, tokenFor: bindings.readToken ?? readToken, ...(withdrawalFence ? { isHumanReviewWithdrawn: withdrawalFence } : {}) }),
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
     retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore, bindings.configuration) : undefined,
@@ -435,7 +435,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     provider: providerEnabled ? providerPort(slug, branch, worktree, target, log, error,
       bindings.configuration ?? DEFAULT_CONFIGURATION, missionStore, bindings) : null,
     approvalRevocation: approvalRevocationPort(slug, branch, worktree, missionStore, lifecycleService),
-    humanFeedback: composeHumanFeedback({ slug, branch, worktree, executionContext: target.executionContext, providerEnabled, missionStore, configuration: bindings.configuration, log, error, fetchComments, tokenFor, recordHumanNote }),
+    humanFeedback: composeHumanFeedback({ slug, branch, worktree, executionContext: target.executionContext, providerEnabled, missionStore, configuration: bindings.configuration, log, error, fetchComments, tokenFor, recordHumanNote, ...(withdrawalFence ? { isHumanReviewWithdrawn: (round, revision) => withdrawalFence(slug, round, revision) } : {}) }),
     routing: reviewerRoutingPort(worktree, bindings.configuration),
     agents: agentPort(slug, branch, worktree, missionPath, target, bindings, writeState, log, error),
     artifacts: {

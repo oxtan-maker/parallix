@@ -2,7 +2,7 @@
   "product": {
     "name": "parallix"
   },
-  "verificationPolicy": { "mode": "pilot", "artifact": "config/verification-policy/money-policy.json" },
+  "verificationPolicy": { "mode": "pilot", "artifact": "config/verification-policy/time-policy.json" },
   "adapters": {
     "tasks": { "provider": "backlog-md", "storage": "backlog", "stateMap": "config/state-map.json" },
     "agents": {

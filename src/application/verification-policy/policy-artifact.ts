@@ -1,7 +1,6 @@
 /**
  * Verification-policy artifact: typed value and pure parser. Contract v2 takes state count, action names and vector
  * length from the artifact; its states say which checks the code is acceptable to and may carry the verdict record.
- * Contract v1 (27 states, three actions, Table 3 order) is read through a thin mapping onto the same value.
  * Parsing never throws, so a caller can fall back to the fixed policy and record the rejection code.
  */
 export const POLICY_ACTIONS = ['tests', 'agent', 'human'] as const;
@@ -11,8 +10,6 @@ export const POLICY_OBJECTIVES = ['money', 'time'] as const;
 export const POLICY_VERDICTS = ['unread', 'failed', 'passed'] as const;
 export const POLICY_RULE_OUTCOMES = ['passed', 'violated'] as const;
 export const POLICY_ROW_TOLERANCE = 1e-9;
-const V1_STATUSES = ['would-fail', 'would-pass', 'passed'] as const;
-const V1_STATE_COUNT = 27;
 const SHA256 = /^[0-9a-f]{64}$/;
 /** The three checks; also the actions a recommendation or a history entry can name. */
 export type PolicyAction = typeof POLICY_ACTIONS[number];
@@ -22,6 +19,19 @@ export type PolicyObservation = typeof POLICY_OBSERVATIONS[number];
 export type PolicyObjective = typeof POLICY_OBJECTIVES[number];
 export type PolicyVerdict = typeof POLICY_VERDICTS[number];
 export type PerAction<T> = { readonly [A in PolicyAction]: T };
+/** One non-anticipative concurrent stage: request checks, await named verdicts, then jointly repair any failures. */
+export interface PolicyRoundStage {
+  readonly request: readonly PolicyAction[];
+  readonly waitFor: readonly PolicyAction[];
+  readonly repair: readonly PolicyAction[];
+  readonly withdrawOnFailure: readonly PolicyAction[];
+}
+/** The delivery strategy selected by the concurrent recalculation. */
+export interface PolicyRoundPlan {
+  readonly rule: 'all-then-last';
+  readonly repairMode: 'joint';
+  readonly stages: readonly PolicyRoundStage[];
+}
 /** One entry per action the artifact defines. */
 export type ByActionName<T> = Readonly<Record<string, T>>;
 /** `acceptable`: the checks the code state passes; `verdicts`: the record carried in the state (all unread when omitted). */
@@ -31,12 +41,12 @@ export type PolicyMatrix = readonly (readonly number[])[];
 /** The solver's rule-check outcome; `violatingMissions` counts simulated missions that broke a rule. */
 export interface PolicyRuleCheck { readonly outcome: typeof POLICY_RULE_OUTCOMES[number]; readonly violatingMissions: number }
 export interface PolicyArtifact {
-  readonly schemaVersion: 1 | 2;
+  readonly schemaVersion: 2;
   readonly objective: PolicyObjective;
   readonly parameterHash: string;
   readonly solverVersion: string;
-  /** Absent for a v1 artifact, which predates the rule check. */
-  readonly ruleCheck: PolicyRuleCheck | null;
+  readonly ruleCheck: PolicyRuleCheck;
+  readonly roundPlan: PolicyRoundPlan;
   readonly discount: number;
   readonly states: readonly PolicyState[];
   readonly actions: readonly PolicyActionName[];
@@ -52,7 +62,7 @@ export interface PolicyArtifact {
   readonly predicted: { readonly policyValue: number; readonly currentSequenceValue: number };
 }
 export type PolicyRejectionCode = 'invalid-json' | 'not-an-object' | 'missing-field' | 'schema-version' | 'numbering'
-  | 'dimensions' | 'non-finite' | 'row-sum' | 'out-of-range' | 'absorbing-state' | 'action-names' | 'parameter-hash'
+  | 'dimensions' | 'non-finite' | 'row-sum' | 'out-of-range' | 'action-names' | 'parameter-hash'
   | 'rule-check' | 'unreadable';
 export interface PolicyRejection { readonly code: PolicyRejectionCode; readonly path: string; readonly message: string }
 export type PolicyParseResult =
@@ -103,18 +113,6 @@ const nonNegativeInteger = (value: unknown, path: string): number => {
   return Number.isInteger(number) && number >= 0 ? number : reject('rule-check', path, `${path} must be a non-negative integer`);
 };
 
-/** v1: 27 states in the model's Table 3 order; state k + 1 at position k (tests slowest, human fastest). */
-const TABLE_3 = V1_STATUSES.flatMap(tests => V1_STATUSES.flatMap(agent => V1_STATUSES.map(human => ({ tests, agent, human }))));
-function v1States(value: unknown): readonly PolicyState[] {
-  return list(value, V1_STATE_COUNT, 'artifact.states').map((entry, index) => {
-    const path = `artifact.states[${index}]`;
-    const from = fields(entry, path);
-    const statuses = Object.fromEntries(POLICY_ACTIONS.map(check =>
-      [check, oneOf([TABLE_3[index][check]], field(from, check, path), `${path}.${check}`)])) as Record<PolicyAction, typeof V1_STATUSES[number]>;
-    return { acceptable: perCheck(statuses, path, status => status !== 'would-fail'),
-      verdicts: perCheck(statuses, path, status => (status === 'passed' ? 'passed' : 'unread')) };
-  });
-}
 /** v2: any states, each saying which checks it is acceptable to and, optionally, the verdict record. */
 function v2States(value: unknown): readonly PolicyState[] {
   const seen = new Set<string>();
@@ -152,16 +150,47 @@ function ruleCheck(value: unknown): PolicyRuleCheck {
   return (outcome === 'passed') === (violatingMissions === 0) ? { outcome, violatingMissions }
     : reject('rule-check', 'artifact.ruleCheck', 'ruleCheck.outcome must be passed exactly when no mission violated a rule');
 }
-const hash = (root: Fields, version: 1 | 2): string => {
+
+function checkList(value: unknown, path: string): readonly PolicyAction[] {
+  const names = Array.isArray(value) ? value.map((entry, index) => oneOf(POLICY_ACTIONS, entry, `${path}[${index}]`, 'action-names'))
+    : reject('dimensions', path, `${path} must be an array`);
+  if (new Set(names).size !== names.length) { reject('action-names', path, `${path} must not repeat a check`); }
+  return names;
+}
+
+/** Validate the selected rule-(a) tree, including which pending request is withdrawn on an automated failure. */
+function roundPlan(value: unknown): PolicyRoundPlan {
+  const root = fields(value, 'artifact.roundPlan');
+  const rule = oneOf(['all-then-last'] as const, field(root, 'rule', 'artifact.roundPlan'), 'artifact.roundPlan.rule', 'action-names');
+  const repairMode = oneOf(['joint'] as const, field(root, 'repairMode', 'artifact.roundPlan'), 'artifact.roundPlan.repairMode', 'action-names');
+  const stages = list(field(root, 'stages', 'artifact.roundPlan'), 2, 'artifact.roundPlan.stages').map((entry, index) => {
+    const path = `artifact.roundPlan.stages[${index}]`;
+    const stage = fields(entry, path);
+    return {
+      request: checkList(field(stage, 'request', path), `${path}.request`),
+      waitFor: checkList(field(stage, 'waitFor', path), `${path}.waitFor`),
+      repair: checkList(field(stage, 'repair', path), `${path}.repair`),
+      withdrawOnFailure: checkList(field(stage, 'withdrawOnFailure', path), `${path}.withdrawOnFailure`),
+    };
+  });
+  const expected = [
+    { request: ['agent', 'tests', 'human'], waitFor: ['agent', 'tests'], repair: ['agent', 'tests'], withdrawOnFailure: ['human'] },
+    { request: [], waitFor: ['human'], repair: ['human'], withdrawOnFailure: [] },
+  ];
+  if (JSON.stringify(stages) !== JSON.stringify(expected)) {
+    reject('action-names', 'artifact.roundPlan.stages', 'roundPlan must encode rule (a): request agent, tests and human together; await both automated verdicts; withdraw human on failure');
+  }
+  return { rule, repairMode, stages };
+}
+const hash = (root: Fields): string => {
   const value = text(root, 'parameterHash', 'artifact');
-  return version === 2 && !SHA256.test(value)
+  return !SHA256.test(value)
     ? reject('parameter-hash', 'artifact.parameterHash', 'parameterHash must be a lowercase SHA-256 hex digest') : value;
 };
 
 function build(root: Fields): PolicyArtifact {
   const version = finite(field(root, 'schemaVersion', 'artifact'), 'artifact.schemaVersion');
-  if (version !== 1 && version !== 2) { reject('schema-version', 'artifact.schemaVersion', `schemaVersion ${version} is unsupported, expected 1 or 2`); }
-  const v = version as 1 | 2;
+  if (version !== 2) { reject('schema-version', 'artifact.schemaVersion', `schemaVersion ${version} is unsupported, expected 2`); }
   const objective = oneOf(POLICY_OBJECTIVES, text(root, 'objective', 'artifact'), 'artifact.objective', 'out-of-range');
   const discount = finite(field(root, 'discount', 'artifact'), 'artifact.discount');
   if (discount <= 0 || discount >= 1) { reject('out-of-range', 'artifact.discount', 'discount must be strictly between 0 and 1'); }
@@ -170,12 +199,11 @@ function build(root: Fields): PolicyArtifact {
   const upper = finite(field(bounds, 'upper', 'artifact.bounds'), 'artifact.bounds.upper');
   if (lower > upper) { reject('out-of-range', 'artifact.bounds', 'bounds.lower must not exceed bounds.upper'); }
   const predicted = fields(field(root, 'predicted', 'artifact'), 'artifact.predicted');
-  const parameterHash = hash(root, v);
+  const parameterHash = hash(root);
   const solverVersion = text(root, 'solverVersion', 'artifact');
-  const check = v === 2 ? ruleCheck(field(root, 'ruleCheck', 'artifact')) : null;
-  const states = (v === 1 ? v1States : v2States)(field(root, 'states', 'artifact'));
-  const actions = v === 1 ? exactNames(POLICY_ACTIONS, field(root, 'actions', 'artifact'), 'artifact.actions')
-    : v2Actions(field(root, 'actions', 'artifact'));
+  const check = ruleCheck(field(root, 'ruleCheck', 'artifact'));
+  const states = v2States(field(root, 'states', 'artifact'));
+  const actions = v2Actions(field(root, 'actions', 'artifact'));
   const count = states.length;
   const perAction = <T>(key: string, parse: (value: unknown, path: string) => T): ByActionName<T> => {
     const entries = fields(field(root, key, 'artifact'), `artifact.${key}`);
@@ -184,7 +212,8 @@ function build(root: Fields): PolicyArtifact {
   const matrix = (columns: number) => (value: unknown, path: string): PolicyMatrix =>
     list(value, count, path).map((row, index) => probabilities(row, columns, `${path}[${index}]`));
   const artifact: PolicyArtifact = {
-    schemaVersion: v, objective, discount, bounds: { lower, upper }, parameterHash, solverVersion, ruleCheck: check,
+    schemaVersion: 2, objective, discount, bounds: { lower, upper }, parameterHash, solverVersion, ruleCheck: check,
+    roundPlan: roundPlan(field(root, 'roundPlan', 'artifact')),
     states, actions,
     observations: exactNames(POLICY_OBSERVATIONS, field(root, 'observations', 'artifact'), 'artifact.observations'),
     transition: perAction('transition', matrix(count)),
@@ -200,17 +229,9 @@ function build(root: Fields): PolicyArtifact {
     predicted: { policyValue: finite(field(predicted, 'policyValue', 'artifact.predicted'), 'artifact.predicted.policyValue'),
       currentSequenceValue: finite(field(predicted, 'currentSequenceValue', 'artifact.predicted'), 'artifact.predicted.currentSequenceValue') },
   };
-  if (v === 1) {
-    for (const action of actions) {
-      const absorbing = artifact.transition[action][count - 1];
-      if (absorbing.some((entry, column) => entry !== Number(column === count - 1)) || artifact.cost[action][count - 1] !== 0) {
-        reject('absorbing-state', `artifact.transition.${action}`, 'state 27 must be absorbing with zero cost');
-      }
-    }
-  }
   return artifact;
 }
-/** Parse a contract-v1 or contract-v2 artifact from a decoded JSON value or JSON text. Pure; never throws. */
+/** Parse a contract-v2 artifact from a decoded JSON value or JSON text. Pure; never throws. */
 export function parsePolicyArtifact(input: unknown): PolicyParseResult {
   try {
     let decoded = input;

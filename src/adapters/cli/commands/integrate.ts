@@ -46,6 +46,9 @@ import * as conflict from './integrate-conflict.js';
 import * as execution from '../../git/mission-execution-context.js';
 import * as post from './integrate-post.js';
 import type { IntegrateWorkflowPorts } from '../../../application/ports/integrate-workflow.js';
+import { OperationalHistoryService } from '../../../application/services/operational-history-service.js';
+import { SqliteOperationalHistoryRepository } from '../../sqlite/operational-history-repository.js';
+import { missionId } from '../../../domain/mission.js';
 
 function createIntegrationGateRunner(configuration: ParallixConfiguration | undefined,
   policyFactory: VerificationActionPolicyFactory | undefined,
@@ -71,6 +74,32 @@ function createSubmitApproval(configuration: ParallixConfiguration | undefined):
       exit: code => { exitCode = code; },
     });
     return exitCode === null ? { ok: true } : { ok: false, diagnostic: `review submission exited ${exitCode}` };
+  };
+}
+
+function composeIntegrationGates(configuration: ParallixConfiguration | undefined,
+  runIntegrationGates: typeof repositoryGates.runPhaseGates): IntegrateWorkflowPorts['gates'] {
+  return {
+    readGateRun: checkout => readIntegrationGateRun(checkout, configuration),
+    approvalCoverage: (checkout, review) => missionApprovalCoverage(review, createGitChangeIdentity(checkout)),
+    approvalEvidence: worktree => createIntegrationApprovalEvidence(worktree,
+      async slug => new SqliteIntegrationValidationReader((await initOperatorState({ configuration })).db).read(slug), configuration,
+      { providerEnabled: reviewAdapter.isProviderEnabled, fetchComments: reviewAdapter.getComments, tokenFor: reviewAdapter.readToken,
+        isHumanReviewWithdrawn: async (slug, round, revision) => {
+          const state = await initOperatorState({ configuration });
+          const identity = createGitChangeIdentity(worktree).changeIdentity(revision, missionUtils.getPrimaryBranch(worktree) || 'main');
+          return identity !== null && await new OperationalHistoryService(new SqliteOperationalHistoryRepository(state.db))
+            .isHumanReviewWithdrawn({ missionId: missionId(slug), changeIdentity: identity, round });
+        } }),
+    invalidateApproval: options => integrationGateRebound.invalidateApprovedPrReview(options),
+    loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),
+    loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
+    runPhaseGates: (phase, options) => runIntegrationGates(phase, options),
+    captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
+    listChangedPathsBetween: (rootDir, fromCommit, toCommit) => gates.listChangedPathsBetween(rootDir, fromCommit, toCommit),
+    resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
+    isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
+    routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure({ ...options, runPhaseGatesFn: runIntegrationGates }),
   };
 }
 
@@ -164,21 +193,7 @@ export function createIntegratePorts(configuration?: ParallixConfiguration,
     rebase: {
       createRebaseWorkflowPort: options => rebaseWorkflow.createRebaseWorkflowPort({ ...options, configuration }),
     },
-    gates: {
-      readGateRun: checkout => readIntegrationGateRun(checkout, configuration),
-      approvalCoverage: (checkout, review) => missionApprovalCoverage(review, createGitChangeIdentity(checkout)),
-      approvalEvidence: worktree => createIntegrationApprovalEvidence(worktree,
-        async slug => new SqliteIntegrationValidationReader((await initOperatorState({ configuration })).db).read(slug), configuration),
-      invalidateApproval: options => integrationGateRebound.invalidateApprovedPrReview(options),
-      loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),
-      loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
-      runPhaseGates: (phase, options) => runIntegrationGates(phase, options),
-      captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
-      listChangedPathsBetween: (rootDir, fromCommit, toCommit) => gates.listChangedPathsBetween(rootDir, fromCommit, toCommit),
-      resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
-      isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
-      routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure({ ...options, runPhaseGatesFn: runIntegrationGates }),
-    },
+    gates: composeIntegrationGates(configuration, runIntegrationGates),
     checkout: composeIntegrationCheckout(),
     landing: composeIntegrationLanding(configuration),
   };

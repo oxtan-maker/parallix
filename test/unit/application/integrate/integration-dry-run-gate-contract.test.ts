@@ -206,7 +206,8 @@ const passedRun = (gateRunId: string | null, revision = HEAD, ran = plan): GateR
 
 async function testsAction(options: { status?: Mission['status']; review?: Mission['review']; result?: IntegrationGateRunResult;
   previous?: GateRunRecord | null; claim?: boolean; holder?: string; stillSelected?: (_revision: string) => Promise<boolean>; rebase?: () => void; selection?: 'tests' | null; refuseRepair?: string;
-  redUnreadable?: boolean; results?: IntegrationGateRunResult[]; validationWriteFails?: boolean; configured?: typeof gates } = {}) {
+  redUnreadable?: boolean; results?: IntegrationGateRunResult[]; validationWriteFails?: boolean; configured?: typeof gates;
+  beforeRepair?: () => Promise<void>; preparedRevision?: string; jointRepair?: (_revision: string) => Promise<boolean> } = {}) {
   const slug = 'px-tests-action';
   const calls: string[] = [];
   let mission = fixtureMission(slug, { repositoryId: repositoryId('test-repo'), status: options.status ?? 'review',
@@ -259,6 +260,7 @@ async function testsAction(options: { status?: Mission['status']; review?: Missi
   const executionContext = missionExecutionContext({ missionId: slug, missionWorktree: '/fixture/mission' });
   const run = () => quiet(() => executor.runTestsAction({ slug, policySelection: options.selection === undefined ? 'tests' : options.selection,
     executionContext, missionServicesFn: async () => services, stillSelected: options.stillSelected,
+    beforeRepair: options.beforeRepair, preparedRevision: options.preparedRevision, jointRepair: options.jointRepair,
     seams: {
       // The rebound kernel boundary: it owns the transition to active and the repair rerun.
       routeIntegrationGateFailureFn: async input => {
@@ -312,6 +314,24 @@ test('a failed tests action routes repair through the rebound kernel and returns
   assert.deepEqual(fixture.received.route?.executionContext, fixture.executionContext);
   assert.equal(fixture.unsuccessful.length, 1, 'the failed run stays recorded once through the validation writer');
   assert.equal(selections, 2, 'a policy decline after the red verdict retains the rebound path');
+});
+
+test('a concurrent red verdict waits for the automated join before entering the one repair owner (TASK-2867.08)', async () => {
+  const failedGate = { ...gates[0], exitCode: 7, stdout: '', stderr: 'unit defect' };
+  let joined = false;
+  const fixture = await testsAction({ result: receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }),
+    beforeRepair: async () => { fixture.calls.push('join'); joined = true; } });
+  const outcome = await fixture.run();
+  assert.equal(joined, true);
+  assert.equal(outcome.kind === 'completed' && outcome.verdict, 'failed');
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'join', 'rebound', 'release']);
+});
+
+test('a prepared concurrent revision runs gates without rebasing the reviewer worktree (TASK-2867.08)', async () => {
+  const fixture = await testsAction({ preparedRevision: HEAD });
+  const outcome = await fixture.run();
+  assert.equal(outcome.kind === 'completed' && outcome.verdict, 'passed');
+  assert.deepEqual(fixture.calls, ['gates', 'release'], 'the pinned review head is verified in place and never rewritten');
 });
 
 test('a synthetic policy re-selection re-runs failed tests through the gate owner without repair (TASK-2867.05)', async () => {

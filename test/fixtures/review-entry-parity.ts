@@ -11,6 +11,7 @@ import { readIntegrationGateRun } from '../../src/adapters/verification/integrat
 import { resolveConfiguration } from '../../src/composition/config.js';
 import type { Mission } from '../../src/domain/mission.js';
 import { requestReviewIntervention } from '../../src/domain/review.js';
+import { HUMAN_REVIEW_WITHDRAWAL_EVENT, REVIEW_START_DECISION_EVENT } from '../../src/application/verification-policy/review-start-decision.js';
 import { setLogger } from '../../src/application/presentation/cli-format.js';
 import { run as runCli } from '../../src/composition/create-cli.js';
 import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } from '../../src/adapters/agents/agents.js';
@@ -27,6 +28,12 @@ export interface ParityOutcome {
   readonly messages: string;
   /** Status of the integration gate-run evidence left in the checkout; null when none was written. */
   readonly gateRunStatus: string | null;
+}
+
+export interface ConcurrentPolicyOutcome extends ParityOutcome {
+  readonly startsBeforeVerdict: readonly string[];
+  readonly withdrawals: number;
+  readonly jointRepairPrompt: string | null;
 }
 
 /** The durable starting state of a scenario; every entry starts from the same bytes. */
@@ -96,5 +103,99 @@ export async function parityCase(scenario: ParityScenario, entry: 'cli' | 'board
     assert.deepEqual(outcome.mission.review!.rounds[0].decision, approvalBefore, 'restart preserves the original judgment and its provenance');
   }
   t.diagnostic(`${scenario}/${entry}: code=${code} status=${outcome.mission.status} rounds=${outcome.mission.review?.rounds.length} launches=${launches} lanes=${outcome.laneEvents.map(e => `${e.from_status}>${e.to_status}`)}\n${outcome.messages.slice(-1200)}`);
+  return outcome;
+}
+
+/** Public CLI rehearsal with real Git, SQLite and shell gates; only the agent process is deterministic. */
+export async function concurrentPolicyCase(t: TestContext, dualFailure = false): Promise<ConcurrentPolicyOutcome> {
+  const artifact = fs.readFileSync(path.resolve('config/verification-policy/time-policy.json'), 'utf8');
+  const gate = `mkdir -p .workflow; touch .workflow/tests-started; i=0; while test ! -f .workflow/agent-started; do i=$((i+1)); test "$i" -lt 500 || exit 9; sleep 0.01; done; ${dualFailure ? 'test -f fix.txt' : 'touch .workflow/tests-passed'}`;
+  const fixture = await openRepairFixture({ slug: 'task-concurrent-policy', state: 'undecided-review', gateCommand: gate,
+    verificationPolicy: { mode: 'pilot', artifact: 'config/time-policy.json', content: artifact } });
+  const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
+  process.env.PARALLIX_NO_BUBBLEWRAP = '1';
+  const messages: string[] = [];
+  const previousLogger = setLogger({ log: text => { messages.push(String(text)); }, error: text => { messages.push(String(text)); } });
+  t.after(async () => {
+    setLogger(previousLogger); setWorkflowLaunchPort(null); setCommandPathProbe(null); setLauncherHealthProbe(null);
+    if (priorConfinement === undefined) delete process.env.PARALLIX_NO_BUBBLEWRAP; else process.env.PARALLIX_NO_BUBBLEWRAP = priorConfinement;
+    await fixture.close();
+  });
+  setCommandPathProbe(() => '/fixture-agent'); setLauncherHealthProbe(() => ({ ok: true as const }));
+  const invoke = (args: string[]) => runCli(args, { operatorInvocation: false, baseCwd: fixture.worktree,
+    log: text => { messages.push(text); return text; }, error: text => { messages.push(text); return text; } });
+  let startsBeforeVerdict: string[] = [];
+  let reviewerLaunches = 0;
+  let jointRepairPrompt: string | null = null;
+  const launches: string[] = [];
+  setWorkflowLaunchPort(({ prompt, worktree }: { prompt: string; worktree?: string }) => ({
+    invocation: { command: 'fixture-agent', args: [], options: { cwd: worktree } },
+    resultPromise: (async () => {
+      if (/^Mode: act-on-review\./m.test(prompt)) {
+        launches.push('implement');
+        jointRepairPrompt = prompt;
+        fs.writeFileSync(path.join(fixture.worktree, 'fix.txt'), 'fixed together\n');
+        fixture.git(fixture.worktree, ['add', 'fix.txt']);
+        fixture.git(fixture.worktree, ['commit', '-m', 'fix joined verification findings']);
+        const round = (await fixture.load()).review!.rounds.at(-1)!;
+        assert.equal(await invoke(['resolve', '--slug', fixture.slug, '--actor', round.implementer,
+          '--finding', 'A1', '--fixed', 'joint repair prompt carried the gate and agent findings']), 0, messages.join('\n'));
+        return { status: 0, stdout: '', stderr: '' };
+      }
+      reviewerLaunches += 1;
+      launches.push('review');
+      assert.match(prompt, /^Mode: review\./m);
+      for (let count = 0; count < 500 && !fs.existsSync(path.join(fixture.worktree, '.workflow', 'tests-started')); count++) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.equal(fs.existsSync(path.join(fixture.worktree, '.workflow', 'tests-started')), true, 'integration tests started before agent verdict');
+      fs.mkdirSync(path.join(fixture.worktree, '.workflow'), { recursive: true });
+      fs.writeFileSync(path.join(fixture.worktree, '.workflow', 'agent-started'), 'started\n');
+      for (let count = 0; count < 500; count++) {
+        const rows = await fixture.database.query<{ event_data: string }>(
+          'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [REVIEW_START_DECISION_EVENT]);
+        startsBeforeVerdict = rows.map(row => (JSON.parse(row.event_data) as { actualAction: string }).actualAction);
+        if (['human', 'tests', 'agent'].every(action => startsBeforeVerdict.includes(action))) break;
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      const round = (await fixture.load()).review!.rounds.at(-1)!;
+      const verdict = dualFailure && reviewerLaunches === 1
+        ? ['request-changes', '--finding', 'A1', '--summary', 'agent finding']
+        : ['approve'];
+      assert.equal(await invoke(['verdict', verdict[0], '--slug', fixture.slug, '--actor', round.reviewer,
+        ...verdict.slice(1), '--comment', dualFailure && reviewerLaunches === 1 ? 'fixture red' : 'fixture pass']), 0);
+      return { status: 0, stdout: '', stderr: '' };
+    })(),
+  }));
+  const lanesBefore = (await fixture.laneEvents()).length;
+  const code = await enterReviewVia('cli', fixture, new SqliteMissionStore(fixture.database), messages, invoke,
+    dualFailure ? ['--max-attempts', '1'] : []);
+  const startsAfterFirstRun = await fixture.database.query<{ event_data: string }>(
+    'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [REVIEW_START_DECISION_EVENT]);
+  const withdrawalsAfterFirstRun = await fixture.database.query(
+    'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [HUMAN_REVIEW_WITHDRAWAL_EVENT]);
+  const launchCountAfterFirstRun = launches.length;
+  const implementerLaunchesAfterFirstRun = launches.filter(launch => launch === 'implement').length;
+  const restartCode = await invoke(['review', fixture.slug, ...(dualFailure ? ['--max-attempts', '1'] : [])]);
+  const startsAfterRestart = await fixture.database.query<{ event_data: string }>(
+    'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [REVIEW_START_DECISION_EVENT]);
+  const withdrawalRows = await fixture.database.query(
+    'SELECT event_data FROM operational_history WHERE event_type = ? ORDER BY id', [HUMAN_REVIEW_WITHDRAWAL_EVENT]);
+  assert.deepEqual(startsAfterRestart.map(row => row.event_data), startsAfterFirstRun.map(row => row.event_data),
+    'restart appends no human, tests, or agent request for the settled round key');
+  assert.equal(launches.length, launchCountAfterFirstRun, 'restart launches no duplicate reviewer or joint implementer');
+  assert.equal(reviewerLaunches, 1, 'restart launches no duplicate reviewer');
+  if (dualFailure) {
+    assert.equal(withdrawalsAfterFirstRun.length, 1, 'the red round writes one withdrawal before restart');
+    assert.equal(withdrawalRows.length, 1, 'restart does not repeat the withdrawal');
+    assert.equal(implementerLaunchesAfterFirstRun, 1, 'the dual failure launches one joint implementer');
+    assert.equal(launches.filter(launch => launch === 'implement').length, 1, 'restart launches no second joint implementer');
+  }
+  const outcome = { code, mission: await fixture.load(), launches, laneEvents: (await fixture.laneEvents()).slice(lanesBefore),
+    messages: messages.join('\n'), gateRunStatus: readIntegrationGateRun(fixture.worktree, resolveConfiguration(process.env))?.status ?? null,
+    startsBeforeVerdict, withdrawals: withdrawalRows.length, jointRepairPrompt };
+  t.diagnostic(`concurrent policy: code=${code} starts=${startsBeforeVerdict.join(',')} gate=${outcome.gateRunStatus} withdrawals=${outcome.withdrawals} launches=${launches.join(',')}`);
+  assert.equal(restartCode, dualFailure ? 1 : 0,
+    `restart preserves the settled result (an exhausted red round remains human-blocked)\n${outcome.messages.slice(-4000)}`);
   return outcome;
 }

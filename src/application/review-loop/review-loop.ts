@@ -27,10 +27,12 @@ import { DEFAULT_REBOUNDS_PER_ROUND, ReviewRound, stopIfControllerSuperseded, ty
 import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import { retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
+import { abortConcurrentPolicyRound, settleConcurrentPolicyRound, type ConcurrentAgentVerdict } from './concurrent-policy-round.js';
 export const DEFAULT_MAX_ATTEMPTS = AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS;
 
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
 type Start = Required<Pick<ReviewLoopRequest, 'dryRun' | 'isContinue' | 'verbose'>> & { slug: string };
+type RoundResult = 'stop' | 'next-round' | 'revoked' | 'replan' | 'approved';
 
 /** Explicit operator selection updates the lifecycle authority; otherwise resume its assignment. */
 async function resolveImplementer(slug: string, requested: string | undefined, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output, dryRun: boolean): Promise<string> {
@@ -211,32 +213,45 @@ async function handleApprovedRoundCorrection(context: LoopContext, feedback: Hum
   return 'stop';
 }
 
+async function handleHumanCorrection(context: LoopContext, round: ReviewRound, feedback: HumanReviewFeedback | null): Promise<RoundResult | null> {
+  if (feedback?.disposition !== 'REQUEST_CHANGES' || feedback.state !== 'current') { return null; }
+  if (context.state.phase === 'approved') { return await handleApprovedRoundCorrection(context, feedback); }
+  round.blockingFindings = [...feedback.findings];
+  round.humanFeedback = `${feedback.author} (${feedback.source}): ${feedback.reason}`;
+  if (!context.dryRun) {
+    const recorded = await recordHumanCorrection(context, round, feedback);
+    if (recorded !== 'recorded') { return recorded; }
+  }
+  if (context.state.phase !== 'fixing') { context.state.transitionTo('fixing'); }
+  context.state.disposition = 'REQUEST_CHANGES';
+  return await runImplementerPhase(context, round, 'REQUEST_CHANGES');
+}
+
+async function runAutomatedReview(context: LoopContext, round: ReviewRound,
+  dismissedApproval: boolean): Promise<RoundResult> {
+  let reviewed: Awaited<ReturnType<typeof runReviewerPhase>>;
+  try { reviewed = await runReviewerPhase(context, round, dismissedApproval); }
+  catch (error) { await abortConcurrentPolicyRound(context, round); throw error; }
+  const agent: ConcurrentAgentVerdict = 'outcome' in reviewed
+    ? reviewed.outcome === 'approved' ? 'passed' : 'stopped'
+    : reviewed.reviewState === 'APPROVED' ? 'passed' : 'failed';
+  const concurrent = await settleConcurrentPolicyRound(context, round, agent);
+  if (concurrent === 'repair-routed' || concurrent === 'stop') { return 'stop'; }
+  if ('outcome' in reviewed) { return reviewed.outcome; }
+  return await runImplementerPhase(context, round, reviewed.reviewState);
+}
+
 /** One round: the reviewing half, then the implementer's answer to it. */
-async function runRound(context: LoopContext, attempt: number): Promise<'stop' | 'next-round' | 'revoked' | 'replan' | 'approved'> {
+async function runRound(context: LoopContext, attempt: number): Promise<RoundResult> {
   if (await stopIfControllerSuperseded(context, `round ${attempt}`)) { return 'stop'; }
   context.emit({ kind: 'round-started', attempt: attempt, maxAttempts: context.maxAttempts });
   if (attempt > context.state.round) { context.state.advanceRound(); }
   const round = new ReviewRound(attempt, context);
   const humanFeedback = await reconciledHumanFeedback(context);
-  if (humanFeedback?.disposition === 'REQUEST_CHANGES' && humanFeedback.state === 'current') {
-    // An explicit human correction is newer authority than a stored provider
-    // approval.  Enter the existing fixing path directly, rather than launch a
-    // reviewer which could repeat the stale no-findings approval.
-    if (context.state.phase === 'approved') { return await handleApprovedRoundCorrection(context, humanFeedback); }
-    round.blockingFindings = [...humanFeedback.findings];
-    round.humanFeedback = `${humanFeedback.author} (${humanFeedback.source}): ${humanFeedback.reason}`;
-    if (!context.dryRun) {
-      const recorded = await recordHumanCorrection(context, round, humanFeedback);
-      if (recorded !== 'recorded') { return recorded; }
-    }
-    // A resumed round may already be fixing; only a reviewing round enters it.
-    if (context.state.phase !== 'fixing') { context.state.transitionTo('fixing'); }
-    context.state.disposition = 'REQUEST_CHANGES';
-    return await runImplementerPhase(context, round, 'REQUEST_CHANGES');
-  }
-  const reviewed = await runReviewerPhase(context, round, humanFeedback?.state === 'dismissed' && humanFeedback.approval);
-  if ('outcome' in reviewed) { return reviewed.outcome; }
-  return await runImplementerPhase(context, round, reviewed.reviewState);
+  // Human correction is newer authority than a provider approval; enter fixing directly.
+  const corrected = await handleHumanCorrection(context, round, humanFeedback);
+  return corrected ?? await runAutomatedReview(context, round,
+    Boolean(humanFeedback?.state === 'dismissed' && humanFeedback.approval));
 }
 
 async function resetAtEntry(request: ReviewLoopRequest, persisted: ReviewLoopState | null, ports: ReviewLoopPorts, out: Output): Promise<ReviewLoopState | null> {

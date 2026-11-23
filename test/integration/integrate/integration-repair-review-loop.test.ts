@@ -52,7 +52,7 @@ import { REVIEW_START_DECISION_EVENT } from '../../../src/application/verificati
 import type { ReviewStartDecision } from '../../../src/application/ports/verification-policy.js';
 import { readIntegrationGateRun } from '../../../src/adapters/verification/integration-verification-proof.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import { policyArtifactFixture } from '../../unit/application/verification-policy/policy-artifact.fixture.js';
+import { syntheticPolicyArtifactV2 } from '../../unit/application/verification-policy/policy-artifact.fixture.js';
 import { captureRecoveryEvidence } from '../../../src/application/recovery-evidence.js';
 import { MissionCheckpointService } from '../../../src/application/mission-checkpoint-service.js';
 
@@ -244,9 +244,11 @@ test('persisted integration repair with retained gate debt resumes through revie
 });
 
 test('public integrate dry-run records one linked tests action and leaves landing human-owned (TASK-2859.10)', async (t) => {
+  const artifact = syntheticPolicyArtifactV2();
+  artifact.vectors = artifact.vectors.filter((vector: { action: string }) => vector.action === 'human');
   const fixture = await openRepairFixture({ slug: 'task-2859.10', gateCommand: 'true',
     verificationPolicy: { mode: 'shadow', artifact: 'synthetic-policy.json',
-      content: JSON.stringify(policyArtifactFixture()) } });
+      content: JSON.stringify(artifact) } });
   t.after(() => fixture.close());
   const output: string[] = [];
   const previousLogger = setLogger({ log: line => { output.push(String(line)); }, error: line => { output.push(String(line)); } });
@@ -264,7 +266,8 @@ test('public integrate dry-run records one linked tests action and leaves landin
   assert.equal(decisions[0]!.actualAction, 'tests');
   assert.equal(decisions[0]!.gateRunId, gateRun?.gateRunId);
   assert.equal(decisions[0]!.verdictCorrelation, gateRun?.gateRunId);
-  assert.equal(decisions[0]!.operatorOverride, true, 'the explicit public command is an operator action');
+  assert.equal(decisions[0]!.recommendedAction, 'human');
+  assert.equal(decisions[0]!.operatorOverride, true, 'the explicit public tests command overrides the recommendation');
   assert.equal(decisions[0]!.configuredMode, 'shadow');
   assert.ok(decisions[0]!.artifactSha256);
   assert.equal(gateRun?.status, 'passed');

@@ -26,7 +26,7 @@ import { observePolicyReviewStart, reviewEntryPin, selectPolicyAction } from '..
 import { parsePolicyArtifact } from '../../../../src/application/verification-policy/policy-artifact.js';
 import type { ReviewStartDecisionInput, ReviewStartPolicyPorts } from '../../../../src/application/ports/verification-policy.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
-import { policyArtifactFixture } from '../verification-policy/policy-artifact.fixture.js';
+import { syntheticPolicyArtifactV2 } from '../verification-policy/policy-artifact.fixture.js';
 
 const SLUG = 'task-policy-action';
 
@@ -737,7 +737,7 @@ test('a rebase that moves the head re-evaluates the decision on the new identity
   assert.deepEqual(unchanged.mirrors.filter(lane => lane === 'approved'), ['approved']);
 });
 
-const parsedPolicy = parsePolicyArtifact(policyArtifactFixture());
+const parsedPolicy = parsePolicyArtifact(syntheticPolicyArtifactV2());
 if (!parsedPolicy.ok) { throw new Error(parsedPolicy.rejection.message); }
 // Narrowed here, at module scope: a hoisted function body never inherits the
 // guard's narrowing, so the factory below reads this already-parsed artifact.
@@ -805,7 +805,7 @@ test('an explicit operator override of the recommendation is recorded and the re
     return fake;
   })();
   const agentRow = shadow.records.find(record => record.actualAction === 'agent');
-  assert.equal(agentRow?.recommendedAction, 'human', 'the policy recommended another check');
+  assert.equal(agentRow?.recommendedAction, 'tests', 'the policy recommended another check');
   assert.equal(agentRow?.operatorOverride, true, 'the operator asked for the agent review instead');
   assert.deepEqual(overridden.launches.map(launch => launch.role), ['reviewer'], 'the requested action ran');
   assert.equal(overridden.current()?.phase, 'approved');

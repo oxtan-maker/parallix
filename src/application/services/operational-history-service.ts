@@ -1,9 +1,9 @@
 import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../ports/operation-history.js';
 import type { MissionId } from '../../domain/mission.js';
-import type { ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
+import type { HumanReviewWithdrawalInput, ReviewEntryPin, ReviewEntryPinInput, ReviewStartDecision,
   ReviewStartDecisionInput, ReviewStartOutcome, ReviewStartOutcomeInput } from '../ports/verification-policy.js';
 import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_TYPE } from '../integrate/validation-marker.js';
-import { REVIEW_ENTRY_PIN_EVENT, REVIEW_START_DECISION_EVENT, reviewEntryPin,
+import { HUMAN_REVIEW_WITHDRAWAL_EVENT, REVIEW_ENTRY_PIN_EVENT, REVIEW_START_DECISION_EVENT, humanReviewWithdrawal, reviewEntryPin,
   reviewStartDecision } from '../verification-policy/review-start-decision.js';
 import { REVIEW_START_OUTCOME_EVENT, reviewStartOutcome, reviewStartOutcomeKey, reviewerOfStart } from '../verification-policy/review-start-outcome.js';
 
@@ -155,6 +155,25 @@ export class OperationalHistoryService {
   /** Integration-test actions already started for this Mission, from the durable decision rows. */
   async countTestsActions(missionId: string): Promise<number> {
     return (await this.reviewStartDecisions(missionId)).filter(decision => decision.actualAction === 'tests').length;
+  }
+
+  /** Record a concurrent human-request cancellation once for its round and change identity. */
+  async recordHumanReviewWithdrawal(input: HumanReviewWithdrawalInput): Promise<boolean> {
+    const withdrawal = humanReviewWithdrawal(input);
+    return await this.repository.appendIdempotent({
+      eventType: HUMAN_REVIEW_WITHDRAWAL_EVENT,
+      eventData: JSON.stringify(withdrawal),
+      createdAt: withdrawal.recordedAt,
+    }, withdrawal.idempotencyKey);
+  }
+
+  /** Refuse a later human verdict only for the exact request that was cancelled. */
+  async isHumanReviewWithdrawn(input: Pick<HumanReviewWithdrawalInput, 'missionId' | 'changeIdentity' | 'round'>): Promise<boolean> {
+    const rows = await this.loadAllByTypeForMission(HUMAN_REVIEW_WITHDRAWAL_EVENT, input.missionId);
+    return rows.some(row => {
+      const withdrawal = JSON.parse(row.eventData) as HumanReviewWithdrawalInput;
+      return withdrawal.changeIdentity === input.changeIdentity && withdrawal.round === input.round;
+    });
   }
 
   /**

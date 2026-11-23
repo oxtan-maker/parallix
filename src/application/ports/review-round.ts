@@ -306,6 +306,8 @@ export interface ReviewPromptFacts {
   readonly preReviewRepair?: string;
   readonly reviewOutcome?: unknown;
   readonly humanFeedback?: string;
+  /** Joined automated failure evidence for the one current-round repair. */
+  readonly jointRepair?: string;
 }
 
 export interface ReviewAgentLaunch {

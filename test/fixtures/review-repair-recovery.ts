@@ -57,8 +57,8 @@ type ReviewEntry = 'cli' | 'board';
  * board dispatches a typed `review:submit` through production composition.
  * A refusal or stop is exit 1 for the CLI and a failed dispatch for the board.
  */
-export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture, store: SqliteMissionStore, messages: string[], invoke: (_args: string[]) => Promise<number>): Promise<number> {
-  if (entry === 'cli') { return await invoke(['review', fixture.slug]); }
+export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture, store: SqliteMissionStore, messages: string[], invoke: (_args: string[]) => Promise<number>, reviewArgs: readonly string[] = []): Promise<number> {
+  if (entry === 'cli') { return await invoke(['review', fixture.slug, ...reviewArgs]); }
   const repos = emptyBoardRepositories();
   const capabilities = composeProductionCapabilities(fixture.worktree, repositoryId('parallix'),
     { agentBlocklist: repos.blocklistRepo, operationalHistory: repos.historyRepo, boardLaneEvents: repos.laneEventRepo, usage: repos.usageRepo },

@@ -48,8 +48,13 @@ test('retention and landing distinguish dismissed approvals from withdrawn chang
   ] } });
   let comments = [{ kind: 'review', id: 'codex-approval', user: 'codex', isBot: false, state: 'APPROVED',
     dismissed: false, commitId: 'judged-A', body: '', updated: '2026-10-25T10:00:00Z', created: '2026-10-25T10:00:00Z' }];
-  let readWire = true;
+  let readWire = true, withdrawn = false;
+  const withdrawalChecks: Array<[string, number, string]> = [];
   const evidence = createIntegrationApprovalEvidence(path.resolve(import.meta.dirname, '..', '..', '..', '..'), async () => null, undefined, { providerEnabled: () => true,
+    isHumanReviewWithdrawn: async (missionId, reviewRound, revision) => {
+      withdrawalChecks.push([missionId, reviewRound, revision]);
+      return withdrawn && missionId === 'task-retention' && reviewRound === round.number && revision === 'judged-A';
+    },
     tokenFor: () => 'test-token', fetchComments: (branch, token) => readWire ? readProviderComments(branch, token, {
       apiCall: forgejoApiFixture((method, route) => {
         assert.equal(method, 'GET');
@@ -70,6 +75,11 @@ test('retention and landing distinguish dismissed approvals from withdrawn chang
   assert.equal(await evidence.reconcileHumanFeedback(mission, store), false, 'a different revision cannot replace the dismissed approval');
   comments[0] = { ...comments[0], dismissed: false };
   assert.equal(await evidence.reconcileHumanFeedback(mission, store), true, 'matching standing approval remains usable');
+  withdrawn = true;
+  assert.equal(await evidence.reconcileHumanFeedback(mission, store), false,
+    'an approval for the exact withdrawn round and change identity cannot authorize landing');
+  assert.ok(withdrawalChecks.some(check => check[0] === 'task-retention' && check[1] === round.number && check[2] === 'judged-A'));
+  withdrawn = false;
   const standing = comments[0];
   comments.push({ ...standing, id: 'legacy', commitId: '', created: 'unreadable' });
   assert.equal(await evidence.reconcileHumanFeedback(mission, store), true, 'unidentified legacy review cannot invalidate a matching standing approval');

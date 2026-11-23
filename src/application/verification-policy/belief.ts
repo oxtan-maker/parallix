@@ -83,8 +83,8 @@ function filter(
 }
 
 /**
- * A failed verdict then its repair. A v1 artifact's read action holds both; a v2 artifact splits them, so one that
- * defines no repair-<check> action cannot say what the repair did and the belief fails typed instead of guessing.
+ * A failed verdict then its repair. An artifact that defines no repair-<check> action cannot say what the repair did,
+ * so the belief fails typed instead of guessing.
  */
 function repaired(
   artifact: PolicyArtifact,
@@ -92,7 +92,6 @@ function repaired(
   check: PolicyAction,
   historyIndex: number,
 ): BeliefDerivation | readonly number[] {
-  if (artifact.schemaVersion === 1) { return failedBelief; }
   const repair = `repair-${check}` as const;
   return artifact.actions.includes(repair) ? filter(artifact, failedBelief, repair, null, historyIndex)
     : failed('unmodelled-history', `artifact defines no ${repair} action`, historyIndex);
@@ -245,7 +244,7 @@ function replay(artifact: PolicyArtifact, history: readonly VerificationHistoryE
   return { ok: true, belief };
 }
 
-/** Replay contract-v1 verification history. Pure and total: invalid inputs become typed failures. */
+/** Replay verification history against a contract-v2 artifact. Pure and total: invalid inputs become typed failures. */
 export function deriveBelief(artifact: PolicyArtifact, history: readonly VerificationHistoryEntry[]): BeliefDerivation {
   try {
     if (!Array.isArray(history)) { return failed('invalid', 'history is invalid'); }

@@ -20,12 +20,12 @@ export async function observeAgentReviewStart(context: LoopContext, round: Revie
 }
 
 /** Observe the already-committed integration handoff; restart replays the same key. */
-export async function observeHumanReviewStart(context: LoopContext): Promise<void> {
+export async function observeHumanReviewStart(context: LoopContext, round?: ReviewRound): Promise<void> {
   if (context.dryRun || !context.ports.reviewStarts) { return; }
-  const revision = context.ports.preReview.head();
+  const revision = round?.verifiedRevision ?? context.ports.preReview.head();
   if (!revision) { return; }
   await context.ports.reviewStarts.observe({ missionId: missionId(context.slug), actualAction: 'human', revision,
-    verdictCorrelation: `review:${context.state.round}:human-verdict`, agentRunId: null,
+    verdictCorrelation: `review:${round?.attempt ?? context.state.round}:human-verdict`, agentRunId: null,
     operatorInvocation: context.operatorInvocation,
     selectionFailure: takeSelectionFailure(context) });
 }

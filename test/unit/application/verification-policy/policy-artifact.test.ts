@@ -4,18 +4,21 @@ import { deriveBelief, verificationCheckStates, verificationHistoryRecord, verif
   type VerificationHistoryEntry } from '../../../../src/application/verification-policy/belief.js';
 import { POLICY_ACTIONS, parsePolicyArtifact, type PolicyAction, type PolicyArtifact, type PolicyRejectionCode } from '../../../../src/application/verification-policy/policy-artifact.js';
 import { recommend } from '../../../../src/application/verification-policy/recommend.js';
-import { ALL_ACTIONS, policyArtifactFixture as fixture, syntheticPolicyArtifactV2 as syntheticV2,
-  v2State, oneHot, half, type Json } from './policy-artifact.fixture.js';
+import { ALL_ACTIONS, syntheticPolicyArtifactV2 as syntheticV2, v2State, oneHot, type Json } from './policy-artifact.fixture.js';
 
 type AlphaVector = { action: PolicyAction; values: number[] };
 type FilterModel = { transition: number[][][]; observation: number[][][]; prior: number[] };
 
-/** Independent reference of the belief filter: B_y P' pi, normalized. Contract v1 is outside the research solver, which now solves the current model. */
+/** Independent reference of the belief filter: B_y P' pi, normalized. */
 function referenceUpdate(model: FilterModel, belief: number[], action: number, observation: 0 | 1) {
   const next = belief.map((_p, column) => model.observation[action][column][observation]
     * belief.reduce((sum, p, row) => sum + p * model.transition[action][row][column], 0));
   const probability = next.reduce((sum, value) => sum + value, 0);
   return { probability, belief: next.map(value => value / probability) };
+}
+
+function referencePredict(model: FilterModel, belief: number[], action: number) {
+  return belief.map((_p, column) => belief.reduce((sum, p, row) => sum + p * model.transition[action][row][column], 0));
 }
 
 /** Independent reference of the maximizing alpha vector. */
@@ -24,75 +27,40 @@ function referenceSelect(vectors: AlphaVector[], belief: number[]) {
   return vectors.reduce((best, vector) => value(vector) > value(best) ? vector : best, vectors[0]);
 }
 
-const mutated = (change: (a: Json) => void): Json => { const a = fixture(); change(a); return a; };
 const code = (input: unknown): PolicyRejectionCode | 'accepted' => { const r = parsePolicyArtifact(input); return r.ok ? 'accepted' : r.rejection.code; };
-const artifact = (): PolicyArtifact => { const result = parsePolicyArtifact(fixture()); if (!result.ok) { throw new Error(result.rejection.message); } return result.artifact; };
+const parsedV2 = (input: Json): PolicyArtifact => { const result = parsePolicyArtifact(input); if (!result.ok) { throw new Error(result.rejection.message); } return result.artifact; };
+const mutatedV2 = (change: (a: Json) => void, base: Json = syntheticV2()): Json => { change(base); return base; };
+const artifact = (): PolicyArtifact => parsedV2(syntheticV2());
 const failure = (result: ReturnType<typeof deriveBelief>) => result.ok ? 'ok' : result.failure.kind;
 
-test('parses an exact contract-v1 fixture as value and as text, preserving every field (TASK-2859.03)', () => {
-  for (const input of [fixture(), JSON.stringify(fixture())]) {
+test('parses a contract-v2 fixture as value and text without sharing mutable state (TASK-2867.08)', () => {
+  const source = syntheticV2();
+  for (const input of [source, JSON.stringify(source)]) {
     const result = parsePolicyArtifact(input);
     assert.ok(result.ok);
-    assert.ok(result.ok);
-    const { states, schemaVersion, ruleCheck, ...rest } = result.artifact;
-    const { states: sourceStates, schemaVersion: sourceVersion, ...sourceRest } = fixture();
+    const { states, ...rest } = result.artifact;
+    const { states: sourceStates, ...sourceRest } = source;
     assert.deepEqual(rest, sourceRest);
-    // the thin v1-to-v2 mapping: a status says acceptable and, once passed, the carried verdict
-    assert.deepEqual([schemaVersion, sourceVersion, ruleCheck, states.length, sourceStates.length], [1, 1, null, 27, 27]);
-    assert.deepEqual(states[0], { acceptable: { tests: false, agent: false, human: false }, verdicts: { tests: 'unread', agent: 'unread', human: 'unread' } });
-    assert.deepEqual(states[13], { acceptable: { tests: true, agent: true, human: true }, verdicts: { tests: 'unread', agent: 'unread', human: 'unread' } });
-    assert.deepEqual(states[26], { acceptable: { tests: true, agent: true, human: true }, verdicts: { tests: 'passed', agent: 'passed', human: 'passed' } });
+    assert.deepEqual(states.map(state => state.acceptable), sourceStates.map((state: Json) => state.acceptable));
+    assert.ok(states.every(state => POLICY_ACTIONS.every(check => state.verdicts[check] === 'unread')));
   }
-});
-
-test('parsed artifacts do not share mutable state objects across parses (TASK-2859.03)', () => {
-  const first = parsePolicyArtifact(fixture());
+  const first = parsePolicyArtifact(source);
   assert.ok(first.ok);
   if (first.ok) { (first.artifact.states[0].acceptable as { tests: boolean }).tests = true; }
-  assert.equal(code(fixture()), 'accepted');
+  assert.equal(parsedV2(source).states[0].acceptable.tests, false);
 });
 
-test('rejects each malformed class with a typed rejection and never throws (TASK-2859.03)', () => {
+test('rejects non-v2 and hostile inputs with typed results and never throws (TASK-2867.08)', () => {
   const cases: Array<[string, unknown, PolicyRejectionCode]> = [
     ['not json', '{nope', 'invalid-json'], ['null', null, 'not-an-object'], ['hostile getter', { get schemaVersion(): never { throw new Error('x'); } }, 'unreadable'],
     ['throwing proxy', { get schemaVersion(): never { throw new Proxy({}, { getPrototypeOf() { throw new Error('trap'); } }); } }, 'unreadable'],
-    ['schema version', mutated(a => { a.schemaVersion = 3; }), 'schema-version'],
-    ['missing field', mutated(a => { delete a.parameterHash; }), 'missing-field'],
-    ['missing action matrix', mutated(a => { delete a.transition.human; }), 'missing-field'],
-    ['unknown objective', mutated(a => { a.objective = 'speed'; }), 'out-of-range'],
-    ['swapped states', mutated(a => { [a.states[0], a.states[1]] = [a.states[1], a.states[0]]; }), 'numbering'],
-    ['numbered actions', mutated(a => { a.actions = [0, 1, 2]; }), 'numbering'],
-    ['reordered observations', mutated(a => { a.observations = ['passed', 'not-passed']; }), 'numbering'],
-    ['numbered vector action', mutated(a => { a.vectors[0].action = 0; }), 'numbering'],
-    ['26 states', mutated(a => { a.states.pop(); }), 'dimensions'],
-    ['26 transition rows', mutated(a => { a.transition.agent.pop(); }), 'dimensions'],
-    ['26 transition columns', mutated(a => { a.transition.human[3].pop(); }), 'dimensions'],
-    ['3 observation columns', mutated(a => { a.observation.tests[2] = [0.2, 0.3, 0.5]; }), 'dimensions'],
-    ['26 costs', mutated(a => { a.cost.tests.pop(); }), 'dimensions'],
-    ['26 prior values', mutated(a => { a.prior.pop(); }), 'dimensions'],
-    ['26 vector values', mutated(a => { a.vectors[1].values.pop(); }), 'dimensions'],
-    ['sparse vectors', mutated(a => { delete a.vectors[1]; }), 'not-an-object'], ['no vectors', mutated(a => { a.vectors = []; }), 'dimensions'],
-    ['NaN cost', mutated(a => { a.cost.agent[5] = NaN; }), 'non-finite'],
-    ['infinite vector value', mutated(a => { a.vectors[0].values[2] = Infinity; }), 'non-finite'],
-    ['string entry', mutated(a => { a.transition.tests[0][0] = '1'; }), 'non-finite'],
-    ['transition row off by 2e-9', mutated(a => { a.transition.tests[4][4] = 0.5 + 2e-9; }), 'row-sum'],
-    ['observation row off by 2e-9', mutated(a => { a.observation.agent[0] = [0.25, 0.75 + 2e-9]; }), 'row-sum'],
-    ['prior off by 2e-9', mutated(a => { a.prior[13] = 1 - 2e-9; }), 'row-sum'],
-    ['negative probability', mutated(a => { Object.assign(a.transition.human[0], { 0: -0.5, 1: 0.5, 26: 1 }); }), 'out-of-range'],
-    ['sparse actions', mutated(a => { a.actions = new Array(3); }), 'numbering'], ['deleted state', mutated(a => { delete a.states[0]; }), 'not-an-object'],
-    ['sparse transition row', mutated(a => { a.transition.tests[3] = Object.assign(new Array(27), { 26: 1 }); }), 'non-finite'],
-    ['probability above 1', mutated(a => { a.prior = oneHot(0); a.prior[0] = 1 + 5e-10; }), 'out-of-range'],
-    ['negative cost', mutated(a => { a.cost.tests[0] = -1; }), 'out-of-range'],
-    ['discount 1', mutated(a => { a.discount = 1; }), 'out-of-range'],
-    ['reversed bounds', mutated(a => { a.bounds = { lower: 15, upper: 14 }; }), 'out-of-range'],
-    ['state 27 not absorbing', mutated(a => { a.transition.tests[26] = half(25); }), 'absorbing-state'],
-    ['state 27 with cost', mutated(a => { a.cost.human[26] = 1; }), 'absorbing-state'],
+    ['contract v1', mutatedV2(a => { a.schemaVersion = 1; }), 'schema-version'],
+    ['missing field', mutatedV2(a => { delete a.parameterHash; }), 'missing-field'],
   ];
   for (const [name, input, expected] of cases) { assert.equal(code(input), expected, name); }
-  assert.equal(code(mutated(a => { a.transition.tests[4][4] = 0.5 + 5e-10; })), 'accepted');
-  const iterated = parsePolicyArtifact(mutated(a => { let reads = 0; a.states[Symbol.iterator] = function* () { yield a.states[0]; };
+  const iterated = parsePolicyArtifact(mutatedV2(a => { let reads = 0; a.states[Symbol.iterator] = function* () { yield a.states[0]; };
     a.states = new Proxy(a.states, { get: (target, key) => (key === 'length' && reads++ ? 0 : Reflect.get(target, key)) }); }));
-  assert.equal(iterated.ok && iterated.artifact.states.length, 27);
+  assert.equal(iterated.ok && iterated.artifact.states.length, 8);
   const rejected = parsePolicyArtifact(null); assert.ok(!rejected.ok && Object.isFrozen(rejected.rejection));
   for (const input of [undefined, 7, Symbol('x'), () => 1]) { assert.doesNotThrow(() => parsePolicyArtifact(input)); }
 });
@@ -102,13 +70,14 @@ test('replays hand-computed verdict, repair, reset, retained-pass and failed-ver
   const agentPass = { kind: 'verdict', check: 'agent', passed: true } as const;
   const passed = deriveBelief(a, [agentPass]);
   assert.ok(passed.ok);
-  assert.ok(Math.abs(passed.belief[13] - 3 / 7) < 1e-12 && Math.abs(passed.belief[26] - 4 / 7) < 1e-12);
+  assert.deepEqual(passed.belief, referenceUpdate({ prior: [...a.prior], transition: POLICY_ACTIONS.map(action => a.transition[action].map(row => [...row])),
+    observation: POLICY_ACTIONS.map(action => a.observation[action].map(row => [...row])) }, [...a.prior], 1, 1).belief);
   const repaired = deriveBelief(a, [agentPass, { kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' }]);
-  assert.ok(repaired.ok); assert.deepEqual(repaired.belief, oneHot(13));
+  assert.ok(repaired.ok); repaired.belief.forEach((mass, index) => assert.ok(Math.abs(mass - a.prior[index]) < 1e-15));
   const reset = deriveBelief(a, [agentPass, { kind: 'unmodelled-change' }]);
   assert.ok(reset.ok); assert.deepEqual(reset, { ok: true, belief: a.prior });
   const retained = deriveBelief(a, [{ kind: 'retained-pass', check: 'tests' }]);
-  assert.ok(retained.ok); assert.deepEqual(retained, { ok: true, belief: oneHot(22) });
+  assert.ok(retained.ok); assert.ok(retained.belief.every((mass, index) => a.states[index].acceptable.tests ? mass > 0 : mass === 0));
   const pending = deriveBelief(a, [{ kind: 'verdict', check: 'human', passed: false }]);
   assert.ok(pending.ok);
   assert.deepEqual(verificationHistoryRecord([{ kind: 'verdict', check: 'human', passed: false }]),
@@ -117,8 +86,8 @@ test('replays hand-computed verdict, repair, reset, retained-pass and failed-ver
 });
 
 test('returns typed contradictions, invalid inputs and unmodelled history without throwing (TASK-2859.04)', () => {
-  const impossibleVerdict = artifact(); (impossibleVerdict.prior as number[]).splice(0, 27, ...oneHot(26));
-  const noRetainedMass = artifact(); (noRetainedMass.prior as number[]).splice(0, 27, ...oneHot(0));
+  const impossibleVerdict = artifact(); (impossibleVerdict.prior as number[]).splice(0, 8, ...oneHot(7, 8));
+  const noRetainedMass = artifact(); (noRetainedMass.prior as number[]).splice(0, 8, ...oneHot(0, 8));
   const contradiction = deriveBelief(impossibleVerdict, [{ kind: 'verdict', check: 'tests', passed: false }, { kind: 'repair', check: 'tests' }]);
   assert.equal(failure(contradiction), 'contradiction'); assert.equal('belief' in contradiction, false);
   assert.equal(failure(deriveBelief(noRetainedMass, [{ kind: 'retained-pass', check: 'tests' }])), 'contradiction');
@@ -192,17 +161,29 @@ test('request-changes enters pending repair without losing earlier passes or hid
 
 test('matches the research filter deterministically and stays normalized over 200 fixed-seed steps (TASK-2859.04)', () => {
   const a = artifact();
-  const model: FilterModel = { prior: [...a.prior],
-    transition: POLICY_ACTIONS.map(action => a.transition[action].map(row => [...row])),
-    observation: POLICY_ACTIONS.map(action => a.observation[action].map(row => [...row])) };
+  const model: FilterModel = { prior: [...a.prior], transition: a.actions.map(action => a.transition[action].map(row => [...row])),
+    observation: a.actions.map(action => a.observation[action].map(row => [...row])) };
   const history: VerificationHistoryEntry[] = [];
   let expected = [...a.prior]; let seed = 19;
+  const random = () => ((seed = seed * 48_271 % 2_147_483_647) - 1) / 2_147_483_646;
+  const sample = (distribution: readonly number[]) => {
+    const target = random(); let cumulative = 0;
+    for (let index = 0; index < distribution.length; index += 1) { cumulative += distribution[index]; if (target < cumulative) { return index; } }
+    return distribution.length - 1;
+  };
+  let hidden = sample(model.prior);
   for (let step = 0; step < 200; step += 1) {
-    seed = seed * 48_271 % 2_147_483_647;
-    const action = seed % 3 as 0 | 1 | 2; const passed = seed % 5 !== 0;
+    const action = Math.floor(random() * 3) as 0 | 1 | 2;
+    hidden = sample(model.transition[action][hidden]);
+    const passed = sample(model.observation[action][hidden]) === 1;
     history.push({ kind: 'verdict', check: POLICY_ACTIONS[action], passed });
-    if (!passed) { history.push({ kind: 'repair', check: POLICY_ACTIONS[action] }); }
     expected = referenceUpdate(model, expected, action, passed ? 1 : 0).belief;
+    if (!passed) {
+      history.push({ kind: 'repair', check: POLICY_ACTIONS[action] });
+      const repair = action + 3;
+      hidden = sample(model.transition[repair][hidden]);
+      expected = referencePredict(model, expected, repair);
+    }
   }
   const actual = deriveBelief(a, history); assert.ok(actual.ok);
   assert.ok(actual.belief.every(Number.isFinite));
@@ -211,28 +192,13 @@ test('matches the research filter deterministically and stays normalized over 20
   assert.deepEqual(deriveBelief(a, history), actual);
 });
 
-test('selects only permitted vectors and reports each predicted pass probability (TASK-2859.05)', () => {
-  const a = artifact();
-  const belief = Array<number>(27).fill(0);
-  Object.assign(belief, { 0: 0.1, 9: 0.2, 4: 0.3, 26: 0.4 });
-  const unrestricted = recommend(a, belief, { passed: [], failed: [] });
-  assert.ok(unrestricted.kind === 'recommendation');
-  assert.equal(unrestricted.action, 'human');
-  assert.ok(Math.abs(unrestricted.passProbabilities.tests - 0.6) < 1e-12);
-  assert.ok(Math.abs(unrestricted.passProbabilities.agent - 0.7) < 1e-12);
-  assert.ok(Math.abs(unrestricted.passProbabilities.human - 0.7) < 1e-12);
-  const restricted = recommend(a, belief, { passed: ['human'], failed: [] });
-  assert.ok(restricted.kind === 'recommendation'); assert.equal(restricted.action, 'tests');
-  assert.equal(recommend(a, belief, { passed: [...POLICY_ACTIONS], failed: [] }).kind, 'no-recommendation');
-});
-
 test('rejects malformed beliefs before selection or probability calculation (TASK-2859.05 F1)', () => {
   const a = artifact(); const record = { passed: [], failed: [] };
-  const negative = oneHot(0); negative[0] = 1.1; negative[1] = -0.1;
-  const unnormalized = oneHot(0); unnormalized[0] = 0.5;
+  const negative = oneHot(0, 8); negative[0] = 1.1; negative[1] = -0.1;
+  const unnormalized = oneHot(0, 8); unnormalized[0] = 0.5;
   const cases: Array<[unknown, string]> = [
-    [[1], 'dimensions'], [Array(28).fill(1 / 28), 'dimensions'],
-    [Array(27).fill(NaN), 'non-finite'], [negative, 'negative'], [unnormalized, 'not-normalized'],
+    [[1], 'dimensions'], [Array(9).fill(1 / 9), 'dimensions'],
+    [Array(8).fill(NaN), 'non-finite'], [negative, 'negative'], [unnormalized, 'not-normalized'],
   ];
   for (const [belief, reason] of cases) {
     const result = recommend(a, belief as readonly number[], record);
@@ -241,62 +207,24 @@ test('rejects malformed beliefs before selection or probability calculation (TAS
   }
 });
 
-test('matches the reference best vector on 1000 beliefs reached from a synthetic contract-v1 artifact (TASK-2859.05)', () => {
-  const states = artifact().states;
-  const fresh = [0.03, 0.07, 0.11, 0.13, 0.17, 0.19, 0.14, 0.16];
-  const freshStates = [0, 1, 3, 4, 9, 10, 12, 13];
-  const code = { 'would-fail': 0, 'would-pass': 1, passed: 2 } as const;
-  const status = (state: (typeof states)[number], check: PolicyAction) =>
-    state.verdicts[check] === 'passed' ? 'passed' : state.acceptable[check] ? 'would-pass' : 'would-fail';
-  const transition = POLICY_ACTIONS.map((action, slot) => states.map((state, index) => {
-    const row = Array<number>(27).fill(0);
-    if (index === 26 || status(state, action) === 'passed') { row[index] = 1; }
-    else if (status(state, action) === 'would-pass') {
-      const statuses = POLICY_ACTIONS.map(check => code[status(state, check)]);
-      statuses[slot] = 2;
-      row[9 * statuses[0] + 3 * statuses[1] + statuses[2]] = 1;
-    } else { freshStates.forEach((next, position) => { row[next] = fresh[position]; }); }
-    return row;
-  }));
-  const observation = POLICY_ACTIONS.map(action => states.map(state => status(state, action) === 'passed' ? [0, 1] : [1, 0]));
-  const prior = Array<number>(27).fill(0); freshStates.forEach((state, index) => { prior[state] = fresh[index]; });
-  const cost = POLICY_ACTIONS.map((_action, slot) => states.map((_state, index) => index === 26 ? 0 : slot + 1));
-  const model: FilterModel = { transition, observation, prior };
-  const vectors: AlphaVector[] = POLICY_ACTIONS.flatMap((action, slot) => [
-    { action, values: states.map((state, index) => 7 * code[status(state, action)] - (index * (slot + 2) % 11)) },
-    { action, values: states.map((state, index) => 4 * code[status(state, action)] + (index * (slot + 3) % 13) - 8) },
-  ]);
-  const byAction = <T>(values: T[]) => Object.fromEntries(POLICY_ACTIONS.map((name, slot) => [name, values[slot]]));
-  const emitted = { schemaVersion: 1, objective: 'time', parameterHash: '0'.repeat(64), solverVersion: 'synthetic-unit', discount: 0.99,
-    states: states.map(state => Object.fromEntries(POLICY_ACTIONS.map(check => [check, status(state, check)]))),
-    actions: [...POLICY_ACTIONS], observations: ['not-passed', 'passed'], transition: byAction(transition), observation: byAction(observation),
-    cost: byAction(cost), prior, vectors, bounds: { lower: -20, upper: 20 }, predicted: { policyValue: 0, currentSequenceValue: 0 } };
-  const parsed = parsePolicyArtifact(JSON.stringify(emitted)); assert.ok(parsed.ok);
-  const a = parsed.artifact;
+test('matches the reference best vector on 1000 deterministic contract-v2 beliefs (TASK-2859.05, TASK-2867.08)', () => {
+  const a = artifact();
+  const vectors = a.vectors as AlphaVector[];
   const record = { passed: [] as PolicyAction[], failed: [] as PolicyAction[] };
   let seed = 2_859_005; const random = () => ((seed = seed * 48_271 % 2_147_483_647) - 1) / 2_147_483_646;
-  const sample = (distribution: readonly number[]) => {
-    const target = random(); let cumulative = 0;
-    for (let index = 0; index < distribution.length; index += 1) { cumulative += distribution[index]; if (target < cumulative) { return index; } }
-    return distribution.length - 1;
-  };
-  let belief = [...model.prior]; let hidden = sample(model.prior); const selected = new Set<PolicyAction>();
+  const selected = new Set<PolicyAction>();
   for (let compared = 0; compared < 1000; compared += 1) {
+    const weights = a.states.map(() => random());
+    const total = weights.reduce((sum, value) => sum + value, 0);
+    const belief = weights.map(value => value / total);
     const expected = referenceSelect(vectors, belief);
     const actual = recommend(a, belief, record);
     assert.ok(actual.kind === 'recommendation'); assert.equal(actual.action, expected.action); selected.add(actual.action);
-    const action = Math.floor(random() * POLICY_ACTIONS.length) as 0 | 1 | 2;
-    hidden = sample(model.transition[action][hidden]);
-    const observed = sample(model.observation[action][hidden]) as 0 | 1;
-    belief = referenceUpdate(model, belief, action, observed).belief;
-    if (hidden === 26) { hidden = sample(model.prior); belief = [...model.prior]; }
   }
-  assert.ok(selected.size > 1, 'the reachable-belief comparison must exercise more than one selected action');
+  assert.ok(selected.size > 1, 'the deterministic belief comparison must exercise more than one selected action');
 });
 
 // Contract v2 (TASK-2867.01): every dimension comes from the artifact. All fixtures are SYNTHETIC.
-const parsedV2 = (input: Json): PolicyArtifact => { const result = parsePolicyArtifact(input); if (!result.ok) { throw new Error(result.rejection.message); } return result.artifact; };
-const mutatedV2 = (change: (a: Json) => void, base: Json = syntheticV2()): Json => { change(base); return base; };
 const recommended = (a: PolicyArtifact, history: VerificationHistoryEntry[]) => {
   const belief = deriveBelief(a, history); assert.ok(belief.ok);
   const record = verificationHistoryRecord(history);
@@ -396,12 +324,20 @@ test('the parsed v2 value carries action names, parameter hash, solver version a
   assert.deepEqual(parsedV2(mutatedV2(a => { a.ruleCheck = { outcome: 'violated', violatingMissions: 3 }; })).ruleCheck, { outcome: 'violated', violatingMissions: 3 });
 });
 
-test('rejects each invalid v2 class with its own typed reason (TASK-2867.01)', () => {
-  const cases: Array<[string, Json, PolicyRejectionCode]> = [
+test('rejects each invalid v2 class with its own typed reason (TASK-2867.01, TASK-2867.08 F1)', () => {
+  const cases: Array<[string, Json, PolicyRejectionCode | 'accepted']> = [
     ['transition rows differ from the state count', mutatedV2(a => { a.transition.tests.pop(); }), 'dimensions'],
     ['transition columns differ from the state count', mutatedV2(a => { a.transition.merge[0] = [1]; }), 'dimensions'],
     ['vector length differs from the state count', mutatedV2(a => { a.vectors[0].values.pop(); }), 'dimensions'],
     ['prior length differs from the state count', mutatedV2(a => { a.prior.pop(); }), 'dimensions'],
+    ['cost is not finite', mutatedV2(a => { a.cost.tests[0] = Number.NaN; }), 'non-finite'],
+    ['transition entry is not numeric', mutatedV2(a => { a.transition.tests[0][0] = '1'; }), 'non-finite'],
+    ['vector value is not finite', mutatedV2(a => { a.vectors[0].values[0] = Number.POSITIVE_INFINITY; }), 'non-finite'],
+    ['discount reaches one', mutatedV2(a => { a.discount = 1; }), 'out-of-range'],
+    ['bounds are reversed', mutatedV2(a => { a.bounds = { lower: 11, upper: 10 }; }), 'out-of-range'],
+    ['cost is negative', mutatedV2(a => { a.cost.tests[0] = -1; }), 'out-of-range'],
+    ['transition probability exceeds one', mutatedV2(a => { a.transition.tests[0][0] = 1.1; }), 'out-of-range'],
+    ['row sum stays inside tolerance', mutatedV2(a => { a.transition['repair-agent'][0][0] += 5e-10; }), 'accepted'],
     ['unknown action name', mutatedV2(a => { a.actions[6] = 'deploy'; }), 'action-names'],
     ['repair declared for only some checks', mutatedV2(a => { a.actions = a.actions.filter((name: string) => name !== 'repair-human'); }), 'action-names'],
     ['repeated action name', mutatedV2(a => { a.actions[6] = 'tests'; }), 'action-names'],
@@ -415,14 +351,20 @@ test('rejects each invalid v2 class with its own typed reason (TASK-2867.01)', (
     ['rule check outcome is unknown', mutatedV2(a => { a.ruleCheck.outcome = 'maybe'; }), 'rule-check'],
     ['rule check passed with violations', mutatedV2(a => { a.ruleCheck.violatingMissions = 2; }), 'rule-check'],
     ['rule check count is fractional', mutatedV2(a => { a.ruleCheck = { outcome: 'violated', violatingMissions: 1.5 }; }), 'rule-check'],
+    ['round plan is absent', mutatedV2(a => { delete a.roundPlan; }), 'missing-field'],
+    ['round plan serializes agent before tests', mutatedV2(a => { a.roundPlan.stages[0].request = ['agent']; }), 'action-names'],
+    ['round plan omits human withdrawal', mutatedV2(a => { a.roundPlan.stages[0].withdrawOnFailure = []; }), 'action-names'],
     ['state omits acceptability', mutatedV2(a => { delete a.states[2].acceptable; }), 'missing-field'],
     ['state record verdict is unknown', mutatedV2(a => { a.states[2].record = { tests: 'lost', agent: 'unread', human: 'unread' }; }), 'out-of-range'],
     ['two states repeat', mutatedV2(a => { a.states[1] = a.states[0]; }), 'numbering'],
+    ['observations are reversed', mutatedV2(a => { a.observations.reverse(); }), 'numbering'],
     ['no states', mutatedV2(a => { a.states = []; }), 'dimensions'],
     ['row does not sum to 1', mutatedV2(a => { a.transition.agent[0][0] = 0.5; }), 'row-sum'],
     ['schema version 3', mutatedV2(a => { a.schemaVersion = 3; }), 'schema-version'],
   ];
   for (const [name, input, expected] of cases) { assert.equal(code(input), expected, name); }
   const codes = new Set(cases.map(([, , expected]) => expected));
-  for (const required of ['dimensions', 'action-names', 'parameter-hash', 'rule-check']) { assert.ok(codes.has(required as PolicyRejectionCode), required); }
+  for (const required of ['dimensions', 'non-finite', 'out-of-range', 'numbering', 'action-names', 'parameter-hash', 'rule-check', 'accepted']) {
+    assert.ok(codes.has(required as PolicyRejectionCode | 'accepted'), required);
+  }
 });
