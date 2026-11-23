@@ -102,7 +102,7 @@ test('selecting a mission card opens retained mission history through GET reads 
   const view = await render(() => overview('missing', []), context, () => React.createElement(Board, { snapshot: board, onRefresh: async () => {} }));
   await view.click('[data-board-card]');
   assert.match(view.dialog(), /mission history/);
-  assert.match(view.dialog(), /No terminal and no retained history for this mission/);
+  assert.match(view.dialog(), /Missing history: no terminal or retained operation/);
   const historyReads = view.reads.filter(read => read.path.startsWith('/api/terminal/'));
   assert.ok(historyReads.length > 0 && historyReads.every(read => read.init?.method === undefined), 'history reads never send a mutation method');
   assert.ok(historyReads.every(read => read.path.startsWith(`/api/terminal/${encodeURIComponent(MISSION)}`)), 'the browser passes only the canonical Mission ID');
@@ -123,11 +123,11 @@ test('selecting a mission card opens retained mission history through GET reads 
 test('the history view shows the retained tail and appends only output after it (TASK-2749)', async context => {
   let tail = true;
   const view = await render(url => {
-    if (!url.pathname.endsWith('/history')) { return overview('live', [operation('execute-codex-a1-x', 'running')], { kind: 'live', operation: 'execute-codex-a1-x-s0-1' }); }
+    if (!url.pathname.endsWith('/history')) { return overview('live-operation', [operation('execute-codex-a1-x', 'running')], { kind: 'live', operation: 'execute-codex-a1-x-s0-1', runId: 'execute-codex-a1-x' }); }
     if (tail) { tail = false; return page(0, 22, 'first line <b>bold</b>\n', { running: true }); }
     return url.searchParams.get('after') === '22' ? page(22, 34, 'second line\n', { running: true }) : page(34, 34, '', { running: true });
   }, context);
-  assert.match(view.dialog(), /Live: operation execute-codex-a1-x-s0-1 is running/);
+  assert.match(view.dialog(), /Live operation: execute-codex-a1-x-s0-1 is running/);
   assert.equal(view.text(), 'first line <b>bold</b>\n', 'history text is rendered as text, never markup');
   assert.equal(view.mount.querySelector('[aria-label="Retained history"] b'), null);
   await view.poll();
@@ -138,13 +138,37 @@ test('the history view shows the retained tail and appends only output after it 
   assert.equal(view.text(), 'first line <b>bold</b>\nsecond line\n', 'an empty page appends nothing');
 });
 
+test('current pipe capture tails by cursor when no terminal host is available (TASK-2861.04)', async context => {
+  const piped = { ...operation('workflow-active-a1-pipe', 'running', 'active'), captureKind: 'coordinator', family: null, attempt: null, terminalHost: 'pipe' };
+  const view = await render(url => {
+    if (url.pathname.endsWith('/live')) { return { kind: 'not-live', probe: { kind: 'unavailable', reason: 'host-missing', detail: 'tmux is unavailable' } }; }
+    if (!url.pathname.endsWith('/history')) { return overview('current-capture', [piped], { kind: 'absent' }); }
+    const after = url.searchParams.get('after');
+    if (after === null) { return page(0, 13, 'PIPE-CURRENT\n', { runId: piped.runId, running: true }); }
+    if (after === '13') { return page(13, 23, 'PIPE-MORE\n', { runId: piped.runId, running: true }); }
+    return page(23, 23, '', { runId: piped.runId, running: true });
+  }, context);
+
+  assert.match(view.dialog(), /Current pipe capture/);
+  assert.equal(view.text('Live pane'), 'No live pane (unavailable: tmux is unavailable).');
+  assert.equal(view.text(), 'PIPE-CURRENT\n');
+  await view.pollCadence(ACTIVE_POLL_MS);
+  await view.pollCadence(ACTIVE_POLL_MS);
+  assert.equal(view.text(), 'PIPE-CURRENT\nPIPE-MORE\n');
+  assert.deepEqual(
+    view.reads.filter(read => read.path.includes('/history')).map(read => new URL(read.path, 'http://x').searchParams.get('after')),
+    [null, '13', '23'],
+    'pipe capture follows each byte cursor once without rereading displayed history',
+  );
+});
+
 test('active transcript ticks advance by cursor without repeating overview discovery (PX-0058.02)', async context => {
   let overviewReads = 0;
   const view = await render(url => {
-    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: 'worker', output: 'ACTIVE\n' }; }
+    if (url.pathname.endsWith('/live')) { return { kind: 'live-operation', operation: 'worker', runId: 'worker', output: 'ACTIVE\n' }; }
     if (!url.pathname.endsWith('/history')) {
       overviewReads += 1;
-      return overview('live', [operation('worker', 'running')], { kind: 'live', operation: 'worker' });
+      return overview('live-operation', [operation('worker', 'running')], { kind: 'live', operation: 'worker', runId: 'worker' });
     }
     const after = Number(url.searchParams.get('after') ?? 0);
     return page(after, after + 5, 'bytes', { runId: 'worker', running: true });
@@ -166,13 +190,13 @@ test('active transcript ticks advance by cursor without repeating overview disco
 test('a transcript read error survives unrelated overview success until transcript recovery (PX-0058.02)', async context => {
   let failTranscript = false;
   const view = await render(url => {
-    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: 'worker', output: 'ACTIVE\n' }; }
+    if (url.pathname.endsWith('/live')) { return { kind: 'live-operation', operation: 'worker', runId: 'worker', output: 'ACTIVE\n' }; }
     if (url.pathname.endsWith('/history')) {
       if (failTranscript) { return new Error('transcript offline'); }
       const after = Number(url.searchParams.get('after') ?? 0);
       return page(after, after + 5, 'bytes', { runId: 'worker', running: true });
     }
-    return overview('live', [operation('worker', 'running')], { kind: 'live', operation: 'worker' });
+    return overview('live-operation', [operation('worker', 'running')], { kind: 'live', operation: 'worker', runId: 'worker' });
   }, context);
 
   failTranscript = true;
@@ -228,13 +252,16 @@ test('probe failures and failed reads keep displayed history and recover (TASK-2
   mode = 'ok';
   await view.poll();
   assert.doesNotMatch(view.dialog(), /Refresh interrupted/);
-  assert.match(view.dialog(), /No operation is running\. Showing retained history\./);
+  assert.match(view.dialog(), /Ended work: no operation is running\. Showing retained history\./);
 });
 
 test('follow output pauses while scrolled back and resumes on request (TASK-2749)', async context => {
   let newer = false;
   const view = await render(url => {
-    if (!url.pathname.endsWith('/history')) { return overview('live', newer ? [operation('new'), operation('old', 'running')] : [operation('old', 'running')], { kind: 'live', operation: 'w' }); }
+    if (!url.pathname.endsWith('/history')) {
+      const runId = newer ? 'new' : 'old';
+      return overview('live-operation', newer ? [operation('new'), operation('old', 'running')] : [operation('old', 'running')], { kind: 'live', operation: 'w', runId });
+    }
     if (url.searchParams.get('run') === 'new') { return page(0, 8, 'NEW-RUN'); }
     const after = Number(url.searchParams.get('after') ?? -1);
     if (after < 0) { return page(0, 10, 'line 0000\n', { running: true }); }
@@ -263,6 +290,28 @@ test('follow output pauses while scrolled back and resumes on request (TASK-2749
   assert.equal(pre.scrollTop, 1400);
 });
 
+test('concurrent live output selects only the retained transcript with the same run identity (TASK-2861.04)', async context => {
+  const current = operation('review-codex-a1-current', 'running', 'review');
+  const unrelated = operation('active-codex-a1-newer', 'running', 'active');
+  const view = await render(url => {
+    if (url.pathname.endsWith('/live')) {
+      return { kind: 'live-operation', operation: 'review-window', runId: current.runId, output: 'CURRENT-LIVE-PANE\n' };
+    }
+    if (url.pathname.endsWith('/history')) {
+      const runId = url.searchParams.get('run');
+      return page(0, 19, runId === current.runId ? 'CORRELATED-HISTORY\n' : 'UNRELATED-HISTORY\n', { runId });
+    }
+    return overview('live-operation', [unrelated, current], { kind: 'live', operation: 'stale-active-window', runId: unrelated.runId, execution: true });
+  }, context);
+
+  assert.equal(view.text('Live pane'), 'CURRENT-LIVE-PANE\n');
+  assert.match(view.dialog(), new RegExp(`Live operation review-window · run ${current.runId}`));
+  assert.equal(view.text(), 'CORRELATED-HISTORY\n');
+  assert.equal((view.mount.querySelector('[aria-label="Operation"]') as unknown as { value: string }).value, current.runId);
+  assert.ok(view.reads.filter(read => read.path.includes('/history')).every(read => new URL(read.path, 'http://x').searchParams.get('run') === current.runId));
+  assert.doesNotMatch(view.dialog(), /UNRELATED-HISTORY/);
+});
+
 test('search and copy preserve history while the current terminal stays visible (TASK-2749, TASK-2816)', async context => {
   const copied: string[] = [];
   let liveOutput = 'LIVE-PANE-TEXT';
@@ -270,7 +319,7 @@ test('search and copy preserve history while the current terminal stays visible 
   Object.defineProperty(globalThis.navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { copied.push(text); } } });
   const view = await render(url => {
     if (url.pathname.endsWith('/search')) { return { ok: true, hits: [{ ref: 'run:review-claude-a1-y:stdout@5000+4', runId: 'review-claude-a1-y', stream: 'stdout', offset: 5000, preview: 'E401 failed' }], totalHits: 1, searchedRuns: [], scanLimited: false, coverage: [], errors: [] }; }
-    if (url.pathname.endsWith('/live')) { return { kind: 'live', operation: null, output: liveOutput }; }
+    if (url.pathname.endsWith('/live')) { return { kind: 'live-operation', operation: 'execute', runId: 'execute-codex-a1-x', output: liveOutput }; }
     if (url.pathname.endsWith('/history')) {
       return url.searchParams.get('run') === 'review-claude-a1-y' ? page(4000, 7048, 'context E401 failed\n', { runId: 'review-claude-a1-y', hasEarlier: true, atEnd: false }) : page(0, 6, 'tail\n');
     }
@@ -298,10 +347,24 @@ test('search and copy preserve history while the current terminal stays visible 
   assert.equal(view.text(), 'context E401 failed\n', 'the live pane never replaces the history');
 });
 
+test('newer pipe history does not present an idle retained console as current activity (TASK-2861.04)', async context => {
+  const piped = { ...operation('workflow-active-a1-pipe'), captureKind: 'coordinator', family: null, attempt: null, terminalHost: 'pipe' };
+  const view = await render(url => {
+    if (url.pathname.endsWith('/live')) { return { kind: 'idle-console', output: 'OLDER-IDLE-CONSOLE\n' }; }
+    if (url.pathname.endsWith('/history')) { return page(0, 19, 'NEWER-PIPE-HISTORY\n', { runId: piped.runId }); }
+    return overview('ended', [piped], { kind: 'idle' });
+  }, context);
+
+  assert.equal(view.text('Retained idle console'), 'OLDER-IDLE-CONSOLE\n');
+  assert.equal(view.text(), 'NEWER-PIPE-HISTORY\n');
+  assert.match(view.dialog(), /Retained idle console/);
+  assert.doesNotMatch(view.dialog(), /Live:|current activity/i);
+});
+
 test('polling skips pending reads and closing cancels them (TASK-2661, TASK-2749)', async context => {
   let pending: AbortSignal | undefined;
   const view = await render((url, init) => url.pathname.endsWith('/live')
-    ? { kind: 'live', operation: null, output: 'CURRENT-WITHOUT-HISTORY' }
+    ? { kind: 'live-operation', operation: 'worker', runId: null, output: 'CURRENT-WITHOUT-HISTORY' }
     : new Promise((_resolve, reject) => {
       pending = init!.signal!;
       pending.addEventListener('abort', () => reject(new Error('closed')), { once: true });
@@ -324,13 +387,13 @@ test('browser output polling uses active and idle cadence, backs off failures an
   const view = await render(url => {
     if (mode === 'failure') { return new Error('offline'); }
     if (url.pathname.endsWith('/live')) {
-      return mode === 'active' ? { kind: 'live', operation: 'worker', output: 'ACTIVE\n' } : { kind: 'not-live', probe: { kind: 'absent' } };
+      return mode === 'active' ? { kind: 'live-operation', operation: 'worker', runId: 'worker', output: 'ACTIVE\n' } : { kind: 'not-live', probe: { kind: 'absent' } };
     }
     if (url.pathname.endsWith('/history')) {
       const after = Number(url.searchParams.get('after') ?? 0);
       return page(after, after, '', { runId: 'worker', running: mode === 'active' });
     }
-    return mode === 'active' ? overview('live', [operation('worker', 'running')], { kind: 'live', operation: 'worker' }) : overview('ended', [operation('worker')]);
+    return mode === 'active' ? overview('live-operation', [operation('worker', 'running')], { kind: 'live', operation: 'worker', runId: 'worker' }) : overview('ended', [operation('worker')]);
   }, context);
   assert.deepEqual(view.scheduledCadences(), [ACTIVE_POLL_MS, ACTIVE_POLL_MS, IDLE_POLL_MS]);
   mode = 'idle';
@@ -361,7 +424,7 @@ for (const stop of ['close', 'mission change', 'unmount'] as const) {
       ? new Promise(resolve => { pending.push({ resolve, signal: init!.signal!, path: url.pathname }); })
       : overview('missing', []), context);
     const complete = async (index: number, body: unknown) => { pending[index]!.resolve(body); await view.settle(); };
-    const live = (output: string) => ({ kind: 'live', operation: null, output });
+    const live = (output: string) => ({ kind: 'live-operation', operation: 'worker', runId: null, output });
     context.after(() => { for (const request of pending) { request.resolve(live('cleanup')); } });
     assert.equal(pending.length, 1, 'opening the mission starts live reads immediately (TASK-2816)');
     await view.poll();
@@ -476,7 +539,9 @@ test('history wire validators check every required field and numeric range (TASK
   invalid(validateHistoryPage, validPage, Object.keys(validPage).filter(key => key !== 'ok'));
   invalid(validateHistorySearch, validSearch, Object.keys(validSearch));
   invalid(body => validateHistorySearch({ ...validSearch, hits: [body] }), hit, Object.keys(hit));
-  invalid(validateHistoryLive, { kind: 'live', operation: null, output: '' }, ['kind', 'operation', 'output']);
+  invalid(validateHistoryLive, { kind: 'live-operation', operation: 'execute', runId: null, output: '' }, ['kind', 'operation', 'runId', 'output']);
+  invalid(validateHistoryLive, { kind: 'starting', operation: 'execute', runId: null, output: '' }, ['kind', 'operation', 'runId', 'output']);
+  invalid(validateHistoryLive, { kind: 'idle-console', output: '' }, ['kind', 'output']);
   invalid(validateHistoryLive, { kind: 'not-live', probe: { kind: 'absent' } }, ['kind', 'probe']);
   for (const probe of [
     { kind: 'absent' }, { kind: 'idle' }, { kind: 'starting', operation: 'execute' },
@@ -503,7 +568,7 @@ test('history wire validators check every required field and numeric range (TASK
     { kind: 'live', operation: 'execute', execution: 'yes' },
     { kind: 'live', operation: null }, { kind: 'unavailable', reason: 'unknown', detail: '' },
   ]) { assert.equal(validateHistoryLive({ kind: 'not-live', probe }), null); }
-  for (const state of ['starting', 'live', 'ended', 'capture-only', 'missing', 'probe-failed', 'probe-timeout', 'ambiguous']) {
+  for (const state of ['starting', 'live-operation', 'idle-console', 'current-capture', 'ended', 'missing', 'probe-failed', 'probe-timeout', 'ambiguous']) {
     assert.ok(validateHistoryOverview({ ...validOverview, state }));
   }
 });
@@ -544,10 +609,11 @@ test('terminal route JSON projects application history into browser validated re
 
 for (const [state, probe, description] of [
   ['starting', { kind: 'starting', operation: 'execute' }, /Starting:/],
-  ['live', { kind: 'live', operation: 'execute', execution: null }, /Live: operation execute/],
-  ['ended', { kind: 'idle' }, /No operation is running/],
-  ['capture-only', { kind: 'absent' }, /without a terminal/],
-  ['missing', { kind: 'absent' }, /No terminal and no retained history/],
+  ['live-operation', { kind: 'live', operation: 'execute', execution: null }, /Live operation: execute/],
+  ['idle-console', { kind: 'idle' }, /Retained idle console/],
+  ['current-capture', { kind: 'absent' }, /Current pipe capture/],
+  ['ended', { kind: 'absent' }, /Ended work/],
+  ['missing', { kind: 'absent' }, /Missing history/],
   ['probe-failed', { kind: 'unavailable', reason: 'failed', detail: 'failed' }, /could not be inspected/],
   ['probe-timeout', { kind: 'unavailable', reason: 'timeout', detail: 'timeout' }, /did not answer in time/],
   ['ambiguous', { kind: 'ambiguous', sessions: ['other'], detail: 'ambiguous' }, /could not be attributed/],

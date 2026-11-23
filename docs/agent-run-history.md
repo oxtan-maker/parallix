@@ -132,23 +132,31 @@ unavailable; retained history stays readable and observation never retires it.
 
 ## Mission history on the board
 
-Selecting a mission card in `px web` immediately shows its current terminal
-above the retained history. Current output refreshes every second while an
-operation is active and every five seconds when idle. Retained history opens at
-the newest operation, then appends only bytes after its current cursor; broader
-operation discovery runs on the bounded idle cadence. Earlier history loads
-page by page; search covers every retained operation (literal text); the
-operation and stream selectors switch between records; copy copies what is
-shown. Scrolling back keeps the selected operation and position when new runs
-arrive; resume following to return to the newest operation. Failed reads retry
-with bounded backoff. Incomplete or malformed history responses are reported as
-read errors; already loaded history stays visible until a valid refresh
-recovers. Each output consumer serializes its own refreshes, and closing the
-mission view cancels every read.
-The view states whether an operation is starting, live, ended, ran without a terminal (pipe),
-has no history, or whether the terminal could not be inspected; a failed or
-timed-out inspection keeps the history on screen and is not reported as "no
-terminal".
+Selecting a mission card in `px web` shows current operation output above the
+retained history. Current output refreshes every second while an operation is
+active and every five seconds when idle. Retained history opens at its tail and
+appends only bytes after its current cursor; broader operation discovery runs
+on the bounded idle cadence. A terminal operation is paired with retained
+output only when both report the same run identity. An inactive console remains
+available as **Retained idle console**, not as current activity. When an
+operation uses the pipe host, or tmux is unavailable, its current durable
+capture stays visible and follows the same incremental tail path.
+
+Earlier history loads page by page; search covers every retained operation
+(literal text); the operation and stream selectors switch between records; copy
+copies what is shown. Scrolling back keeps the selected operation and position
+when new runs arrive; resume following to return to the current operation.
+Failed reads retry with bounded backoff. Incomplete or malformed history
+responses are reported as read errors; already loaded history stays visible
+until a valid refresh recovers. Each output consumer serializes its own
+refreshes, and closing the mission view cancels every read.
+
+The status line distinguishes a starting operation, a correlated live
+operation, a current pipe capture, a retained idle console, ended work, missing
+history, an ambiguous terminal, and failed or timed-out terminal probes. Each
+state says whether to wait, follow current output, select retained history, or
+retry inspection. A failed or timed-out probe keeps retained history on screen
+and is never reported as terminal absence.
 
 ## Search retained output
 
@@ -251,10 +259,11 @@ This is best effort when the recorded process identity is stale or a child
 has escaped its supervisor: removing a tmux window alone does not prove that
 all detached descendants have exited.
 
-The web mission view reads the current terminal screen independently of retained
-transcripts. Rotating or expiring transcript segments does not interrupt that
-display. Private transcript segments supply the console's replay after a command
-finishes; durable history keeps its existing access and redaction rules.
+The web mission view reads an active terminal screen independently of retained
+transcripts and labels an inactive console as retained output. Rotating or
+expiring transcript segments does not interrupt that display. Private transcript
+segments supply the console's replay after a command finishes; durable history
+keeps its existing access and redaction rules.
 
 ### Where transcripts are stored and how much is kept
 

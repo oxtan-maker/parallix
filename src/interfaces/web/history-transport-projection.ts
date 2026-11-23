@@ -48,7 +48,10 @@ export function toHistorySearch(value: MissionHistorySearchResult): HistorySearc
   })) };
 }
 export function toHistoryLive(value: MissionLiveView): LiveView {
-  return required(validateHistoryLive(value.kind === 'live'
-    ? { kind: value.kind, operation: value.operation, output: value.output }
-    : { kind: value.kind, probe: probe(value.probe) }));
+  switch (value.kind) {
+    case 'live-operation': case 'starting':
+      return required(validateHistoryLive({ kind: value.kind, operation: value.operation, runId: value.runId, output: value.output }));
+    case 'idle-console': return required(validateHistoryLive({ kind: value.kind, output: value.output }));
+    case 'not-live': return required(validateHistoryLive({ kind: value.kind, probe: probe(value.probe) }));
+  }
 }

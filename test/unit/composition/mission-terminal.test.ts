@@ -77,6 +77,43 @@ test('a pipe-executed mission operation is retained as one attributed, partial-c
   assert.deepEqual([hosted, other, fs.readdirSync(runsDir).length], [0, 0, 1], 'a supervised operation and non-mission commands add no second record');
 });
 
+test('an idle console beside newer pipe history is retained output, not current activity (TASK-2861.04)', t => {
+  const root = mkdtemp('px-mission-terminal-idle-console-');
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const mission = 'task-999999.8';
+  const repositoryId = resolveCanonicalRepositoryId(root);
+  const configuration = resolveConfiguration({ PARALLIX_TERMINAL_STATE_DIR: path.join(root, 'terminal') });
+  const capture = openRunCapture({
+    worktree: root,
+    identity: { repositoryId, missionId: mission, role: 'active', family: null, attempt: null },
+    runId: 'workflow-active-a1-pipe',
+    captureKind: 'coordinator',
+    terminalHost: 'pipe',
+  });
+  capture.write('stdout', Buffer.from('NEWER-PIPE-HISTORY\n'));
+  capture.finish({ exitCode: 0, signal: null });
+  const socket = missionSocketPath({ repositoryKey: 'abc123', missionId: mission }, configuration);
+  fs.mkdirSync(path.dirname(socket), { recursive: true });
+  fs.writeFileSync(socket, '');
+  const capability = createMissionTerminalResources(root, {
+    configuration,
+    repositoryKeyFn: () => 'abc123',
+    resolveWorktreeFn: () => null,
+    spawnSyncFn: ((_cmd: string, args: string[]) => {
+      if (args.includes('list-sessions')) { return { status: 0, stdout: 'task-999999_8\n' }; }
+      if (args.includes('list-windows')) { return { status: 0, stdout: 'console\t\t\t\n' }; }
+      if (args.includes('capture-pane')) { return { status: 0, stdout: 'OLDER-IDLE-CONSOLE\n' }; }
+      throw new Error(`unexpected tmux command: ${args.join(' ')}`);
+    }) as never,
+  });
+
+  const result = capability.live(mission);
+  assert.ok('kind' in result);
+  assert.equal(result.kind, 'idle-console');
+  assert.ok('output' in result);
+  assert.equal(result.output, 'OLDER-IDLE-CONSOLE\n');
+});
+
 
 test('retained operations and readable output survive failed and timed out probes (TASK-2764)', async () => {
   const root = mkdtemp('px-retained-probe-');

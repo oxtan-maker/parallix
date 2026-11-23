@@ -6,7 +6,7 @@ export type HistoryProbe =
   | { readonly kind: 'ambiguous'; readonly sessions: readonly string[]; readonly detail: string }
   | { readonly kind: 'unavailable'; readonly reason: 'host-missing' | 'failed' | 'timeout'; readonly detail: string };
 
-export type MissionViewState = 'starting' | 'live' | 'ended' | 'capture-only' | 'missing' | 'probe-failed' | 'probe-timeout' | 'ambiguous';
+export type MissionViewState = 'starting' | 'live-operation' | 'idle-console' | 'current-capture' | 'ended' | 'missing' | 'probe-failed' | 'probe-timeout' | 'ambiguous';
 
 export interface HistoryOperation {
   readonly legacy: boolean;
@@ -51,5 +51,8 @@ export interface HistoryPage {
 
 export interface HistoryHit { readonly ref: string; readonly runId: string; readonly stream: 'stdout' | 'stderr'; readonly offset: number; readonly preview: string }
 export interface HistorySearch { readonly searchedRuns: readonly string[]; readonly coverage: readonly string[]; readonly errors: readonly string[]; readonly hits: readonly HistoryHit[]; readonly totalHits: number; readonly scanLimited: boolean }
-export type LiveView = { readonly kind: 'live'; readonly operation: string | null; readonly output: string } | { readonly kind: 'not-live'; readonly probe: HistoryProbe };
+export type LiveView =
+  | { readonly kind: 'live-operation' | 'starting'; readonly operation: string; readonly runId: string | null; readonly output: string }
+  | { readonly kind: 'idle-console'; readonly output: string }
+  | { readonly kind: 'not-live'; readonly probe: HistoryProbe };
 

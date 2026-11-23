@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
-import { describeState, loadLive, loadOverview, loadPage, searchHistory, type HistoryOperation, type HistoryOverview, type HistorySearch } from './mission-history-data.js';
+import { describeState, loadLive, loadOverview, loadPage, searchHistory, type HistoryOperation, type HistoryOverview, type HistorySearch, type LiveView } from './mission-history-data.js';
 import { MODAL, RADIUS, SPACE, TYPE } from './palette.js';
 
 /**
@@ -120,19 +120,30 @@ function usePolling(missionId: string, tick: (_signal: AbortSignal) => Promise<P
   }, [missionId]);
 }
 
-function LivePane({ missionId }: { missionId: string }) {
-  const [live, setLive] = useState<string | null>(null);
-  const pane = useRef<HTMLPreElement>(null);
-  useLayoutEffect(() => {
-    if (pane.current) { pane.current.scrollTop = pane.current.scrollHeight; }
-  }, [live]);
+function useLiveView(missionId: string): LiveView | null {
+  const [live, setLive] = useState<LiveView | null>(null);
   usePolling(missionId, async signal => {
     const result = await loadLive(missionId, signal);
     if (signal.aborted || result.ok === false) { return { ok: false }; }
-    setLive(result.value.kind === 'live' ? result.value.output : `No live pane (${result.value.probe.kind}${'detail' in result.value.probe ? `: ${result.value.probe.detail}` : ''}).`);
-    return { ok: true, active: result.value.kind === 'live' };
+    setLive(result.value);
+    return { ok: true, active: result.value.kind === 'live-operation' || result.value.kind === 'starting' };
   });
-  return <pre ref={pane} aria-label="Live pane" style={{ maxHeight: 200, minHeight: 80, flexShrink: 0, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{live ?? 'Loading live pane…'}</pre>;
+  return live;
+}
+
+function LivePane({ live }: { live: LiveView | null }) {
+  const pane = useRef<HTMLPreElement>(null);
+  const output = live === null ? 'Loading live pane…' : live.kind === 'not-live'
+    ? `No live pane (${live.probe.kind}${'detail' in live.probe ? `: ${live.probe.detail}` : ''}).`
+    : live.output;
+  useLayoutEffect(() => {
+    if (pane.current) { pane.current.scrollTop = pane.current.scrollHeight; }
+  }, [output]);
+  const label = live?.kind === 'idle-console' ? 'Retained idle console' : 'Live pane';
+  const heading = live?.kind === 'live-operation' || live?.kind === 'starting'
+    ? `${live.kind === 'starting' ? 'Starting operation' : 'Live operation'} ${live.operation} · ${live.runId === null ? 'run identity unavailable' : `run ${live.runId}`}`
+    : live?.kind === 'idle-console' ? label : null;
+  return <div>{heading !== null && <strong>{heading}</strong>}<pre ref={pane} aria-label={label} style={{ maxHeight: 200, minHeight: 80, flexShrink: 0, margin: 0, overflow: 'auto', whiteSpace: 'pre-wrap', borderTop: `1px solid ${MODAL.accentEdge}`, paddingTop: SPACE.md }}>{output}</pre></div>;
 }
 
 function SearchPanel({ missionId, onError, onJump }: { missionId: string; onError: (_detail: string | null) => void; onJump: (_runId: string, _stream: 'stdout' | 'stderr', _offset: number) => void }) {
@@ -176,6 +187,7 @@ function Toolbar({ operations, selection, pinned, follow, canCopy, onSelect, onC
       <label>Operation{' '}
         <select aria-label="Operation" value={selection?.runId ?? ''} onChange={event => onSelect(event.target.value === '' ? null : { runId: event.target.value, stream: selection?.stream ?? 'stdout' })}>
           {operations.length === 0 && <option value="">none retained</option>}
+          {operations.length > 0 && selection === null && <option value="">select retained operation</option>}
           {operations.map(operation => <option key={operation.runId} value={operation.runId}>{operationLabel(operation)}</option>)}
         </select>
       </label>
@@ -218,9 +230,35 @@ function useFollow(chunks: readonly Chunk[]) {
   return { follow, setFollow, transcript, onScroll, holdPosition };
 }
 
-function selectionFor(pinned: Selection | null, overview: HistoryOverview | null): Selection | null {
-  const newest = overview?.operations[0];
-  return pinned ?? (newest ? { runId: newest.runId, stream: 'stdout' } : null);
+function stdoutSelection(runId: string): Selection {
+  return { runId, stream: 'stdout' };
+}
+
+function correlatedRunId(overview: HistoryOverview, live: LiveView | null): string | null {
+  const probeRun = (overview.probe.kind === 'live' || overview.probe.kind === 'starting') && typeof overview.probe.runId === 'string' ? overview.probe.runId : null;
+  const liveRun = (live?.kind === 'live-operation' || live?.kind === 'starting') && live.runId !== null ? live.runId : null;
+  // The direct terminal read may advance before the slower overview refresh.
+  // Pair the transcript with what is visibly in the live pane first.
+  return liveRun ?? probeRun;
+}
+
+function uncorrelatedSelection(overview: HistoryOverview): Selection | null {
+  if (overview.state === 'live-operation' || overview.state === 'starting') { return null; }
+  if (overview.state === 'current-capture') {
+    const capture = overview.operations.find(operation => operation.state === 'running' && operation.terminalHost === 'pipe');
+    return capture ? stdoutSelection(capture.runId) : null;
+  }
+  const newest = overview.operations[0];
+  return newest ? stdoutSelection(newest.runId) : null;
+}
+
+function selectionForLive(pinned: Selection | null, overview: HistoryOverview | null, live: LiveView | null): Selection | null {
+  if (pinned !== null || overview === null) { return pinned; }
+  const correlated = correlatedRunId(overview, live);
+  if (correlated !== null) {
+    return overview.operations.some(operation => operation.runId === correlated) ? stdoutSelection(correlated) : null;
+  }
+  return uncorrelatedSelection(overview);
 }
 
 function coverageFor(overview: HistoryOverview | null, selection: Selection | null): string[] {
@@ -243,7 +281,8 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
   const [pinned, setPinned] = useState<Selection | null>(null);
   const pausedAutomatically = useRef(false);
   const [copied, setCopied] = useState<string | null>(null);
-  const selection = selectionFor(pinned, overview);
+  const live = useLiveView(missionId);
+  const selection = selectionForLive(pinned, overview, live);
   const selectionKey = selection ? `${selection.runId}:${selection.stream}` : '';
   const { chunks, edges, startAt, loadEarlier, appendNewer } = useTranscript(missionId, selection, setHistoryError);
   const { follow, setFollow, transcript, onScroll, holdPosition } = useFollow(chunks);
@@ -294,7 +333,7 @@ export function MissionHistory({ missionId, onClose }: { missionId: string; onCl
           <h2 style={{ margin: 0, fontSize: TYPE.title }}>{missionId} — mission history</h2>
           <button type="button" onClick={onClose}>close</button>
         </header>
-        <LivePane key={missionId} missionId={missionId} />
+        <LivePane live={live} />
         <p role="status" style={{ margin: 0 }}>{overview ? describeState(overview) : 'Loading mission history…'}</p>
         {readError !== null && <p role="status" style={{ margin: 0, color: MODAL.warning }}>Refresh interrupted ({readError}); showing what was already loaded. Retrying…</p>}
         <Toolbar operations={overview?.operations ?? []} selection={selection} pinned={pinned !== null} follow={follow} canCopy={chunks.length > 0}

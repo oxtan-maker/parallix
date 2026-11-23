@@ -122,9 +122,11 @@ function summary({ run, legacy }: IndexedRun): MissionOperationSummary {
 function viewState(probe: MissionTerminalProbe, newest: IndexedRun | undefined): MissionViewState {
   if (probe.kind === 'ambiguous') { return 'ambiguous'; }
   if (probe.kind === 'unavailable') { return probe.reason === 'timeout' ? 'probe-timeout' : 'probe-failed'; }
-  if (probe.kind === 'live' || probe.kind === 'starting') { return probe.kind; }
+  if (probe.kind === 'live') { return 'live-operation'; }
+  if (probe.kind === 'starting') { return 'starting'; }
+  if (newest?.run.state === 'running' && newest.run.record.terminalHost === 'pipe') { return 'current-capture'; }
+  if (probe.kind === 'idle') { return 'idle-console'; }
   if (!newest) { return 'missing'; }
-  if (newest.run.record.terminalHost === 'pipe') { return 'capture-only'; }
   // A hosted operation whose record is open but whose window is not up yet.
   return newest.run.state === 'running' && probe.kind === 'absent' ? 'starting' : 'ended';
 }
@@ -197,7 +199,8 @@ function liveOf(host: MissionTerminalHostPort, identity: MissionTerminalScope): 
   const operation = probe.kind === 'idle' ? null : probe.operation;
   const captured = host.capture(identity, session, operation);
   if (captured.ok === false) { return { kind: 'not-live', probe: { kind: 'unavailable', reason: captured.reason, detail: captured.detail } }; }
-  return { kind: 'live', operation, output: captured.output };
+  return probe.kind === 'idle' ? { kind: 'idle-console', output: captured.output }
+    : { kind: probe.kind === 'live' ? 'live-operation' : 'starting', operation: probe.operation, runId: probe.runId ?? null, output: captured.output };
 }
 
 /** The owned session an operator action may use; ambiguous or undecidable terminals are refused. */

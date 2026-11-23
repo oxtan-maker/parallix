@@ -96,14 +96,15 @@ export interface MissionOperationSummary extends Pick<RunRecord, 'runId' | 'role
 /**
  * The Mission view's state:
  * - `starting`: an operation is launching and has not produced a hosted command yet
- * - `live`: an operation runs in the Mission terminal
+ * - `live-operation`: an operation runs in the Mission terminal
+ * - `idle-console`: only the retained console remains in the Mission terminal
+ * - `current-capture`: an operation is currently writing retained output without a live terminal
  * - `ended`: no operation runs; retained history is available
- * - `capture-only`: the newest operation ran without a terminal (pipe execution); only its capture exists
  * - `missing`: no terminal and no retained history
  * - `probe-failed` / `probe-timeout`: the terminal could not be inspected; history is still returned
  * - `ambiguous`: terminal sessions exist that cannot be attributed to this Mission
  */
-export type MissionViewState = 'starting' | 'live' | 'ended' | 'capture-only' | 'missing' | 'probe-failed' | 'probe-timeout' | 'ambiguous';
+export type MissionViewState = 'starting' | 'live-operation' | 'idle-console' | 'current-capture' | 'ended' | 'missing' | 'probe-failed' | 'probe-timeout' | 'ambiguous';
 
 export interface MissionHistoryOverview {
   readonly missionId: string;
@@ -178,7 +179,8 @@ export interface MissionHistorySearchQuery {
 }
 
 export type MissionLiveView =
-  | { readonly kind: 'live'; readonly operation: string | null; readonly output: string }
+  | { readonly kind: 'live-operation' | 'starting'; readonly operation: string; readonly runId: string | null; readonly output: string }
+  | { readonly kind: 'idle-console'; readonly output: string }
   | { readonly kind: 'not-live'; readonly probe: MissionTerminalProbe };
 
 /** The published capability. Every method takes a Mission ID as given by an input boundary. */

@@ -534,12 +534,13 @@ test('web host: mission history routes are GET-only, typed, bounded to projected
   const reads: string[] = [];
   let builds = 0;
   let failing = false;
+  let liveView: Awaited<ReturnType<WebMissionTerminal['live']>> = { kind: 'idle-console', output: 'retained console\n' };
   const overview = { missionId, state: 'ended', probe: { kind: 'absent' }, operations: [], unattributed: [], notices: [] };
   const terminal: WebMissionTerminal = {
     overview: id => { reads.push(`overview ${id}`); if (failing) { throw new Error('tmux exploded'); } return overview as never; },
     page: (id, request) => { reads.push(`page ${id} ${JSON.stringify(request)}`); return request.runId === 'execute-codex-a1-gone' ? { ok: false, error: 'missing', detail: 'no retained operation' } : { ok: true, runId: request.runId, stream: request.stream, from: 0, to: 5, text: '<b>x\n', hasEarlier: false, atEnd: true, running: false, gaps: [] }; },
     search: (id, query) => { reads.push(`search ${id} ${JSON.stringify(query)}`); return { ok: true, hits: [], totalHits: 0, searchedRuns: [], scanLimited: false, coverage: [], errors: [] }; },
-    live: id => { reads.push(`live ${id}`); return { kind: 'live', operation: null, output: 'agent output\n' }; },
+    live: id => { reads.push(`live ${id}`); return liveView; },
   };
   await withHost({ buildProjection: async () => { builds++; return projection; }, missionTerminal: () => terminal }, async info => {
     const board = await fetch(`${info.origin}/api/board`);
@@ -555,7 +556,12 @@ test('web host: mission history routes are GET-only, typed, bounded to projected
     assert.equal((await page.json()).text, '<b>x\n', 'text is data; the browser renders it as text');
     assert.equal((await fetch(`${info.origin}/api/terminal/${missionId}/history?run=execute-codex-a1-gone`)).status, 404);
     assert.equal((await fetch(`${info.origin}/api/terminal/${missionId}/search?q=E401`)).status, 200);
-    assert.deepEqual(await (await fetch(`${info.origin}/api/terminal/${missionId}/live`)).json(), { kind: 'live', operation: null, output: 'agent output\n' });
+    const liveUrl = `${info.origin}/api/terminal/${missionId}/live`;
+    assert.deepEqual(await (await fetch(liveUrl)).json(), { kind: 'idle-console', output: 'retained console\n' });
+    liveView = { kind: 'starting', operation: 'review-codex-a1', runId: 'review-codex-a1-run', output: 'starting\n' };
+    assert.deepEqual(await (await fetch(liveUrl)).json(), liveView);
+    liveView = { kind: 'live-operation', operation: 'review-codex-a1', runId: 'review-codex-a1-run', output: 'agent output\n' };
+    assert.deepEqual(await (await fetch(liveUrl)).json(), liveView);
     for (const bad of [
       'history?run=../../etc/passwd', 'history?run=execute-codex-a1-x&stream=tty', 'history?run=execute-codex-a1-x&before=-1',
       'history?run=execute-codex-a1-x&before=1&after=2', 'history', 'search?q=', `search?q=${'x'.repeat(201)}`, 'search?q=a&run=%2Ftmp%2Fx.sock',
@@ -570,6 +576,8 @@ test('web host: mission history routes are GET-only, typed, bounded to projected
       `page ${missionId} {"runId":"execute-codex-a1-x","stream":"stderr","after":12}`,
       `page ${missionId} {"runId":"execute-codex-a1-gone","stream":"stdout"}`,
       `search ${missionId} {"pattern":"E401"}`,
+      `live ${missionId}`,
+      `live ${missionId}`,
       `live ${missionId}`,
     ], 'invalid input and unknown cards never reach the capability; search is literal');
     failing = true;

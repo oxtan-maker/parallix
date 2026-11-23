@@ -4,7 +4,7 @@ import type { HistoryOverview, HistoryPage, HistorySearch, LiveView } from './hi
 
 type ObjectValue = Record<string, unknown>;
 type Check = (_value: ObjectValue, _problems: string[]) => void;
-const states = ['starting', 'live', 'ended', 'capture-only', 'missing', 'probe-failed', 'probe-timeout', 'ambiguous'];
+const states = ['starting', 'live-operation', 'idle-console', 'current-capture', 'ended', 'missing', 'probe-failed', 'probe-timeout', 'ambiguous'];
 function strings(value: ObjectValue, keys: string[], problems: string[]) {
   for (const key of keys) { checkString(value, key, 'history', problems); }
 }
@@ -78,8 +78,12 @@ function search(value: ObjectValue, problems: string[]) {
   if (Array.isArray(value.hits) && typeof value.totalHits === 'number' && value.totalHits < value.hits.length) { problems.push('hit count mismatch'); }
 }
 function live(value: ObjectValue, problems: string[]) {
-  enums(value, 'kind', ['live', 'not-live'], problems);
-  if (value.kind === 'live') { checkNullableString(value, 'operation', 'live', problems); strings(value, ['output'], problems); }
+  enums(value, 'kind', ['live-operation', 'starting', 'idle-console', 'not-live'], problems);
+  if (value.kind === 'live-operation' || value.kind === 'starting') {
+    strings(value, ['operation', 'output'], problems);
+    checkNullableString(value, 'runId', 'live', problems);
+  }
+  else if (value.kind === 'idle-console') { strings(value, ['output'], problems); }
   else if (value.kind === 'not-live') { nested(value.probe, probe, problems); }
 }
 function validate<T>(value: unknown, check: Check): T | null {

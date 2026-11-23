@@ -51,11 +51,12 @@ export function loadLive(missionId: string, signal?: AbortSignal): Promise<Read<
 /** One plain sentence per view state; never claims a live terminal that is not there. */
 export function describeState(overview: HistoryOverview): string {
   switch (overview.state) {
-    case 'live': return `Live: operation ${'operation' in overview.probe ? overview.probe.operation : ''} is running; its output is appended as it arrives.`;
-    case 'starting': return 'Starting: an operation is launching and has not produced terminal output yet.';
-    case 'ended': return 'No operation is running. Showing retained history.';
-    case 'capture-only': return 'The newest operation ran without a terminal (pipe execution). Showing its captured output.';
-    case 'missing': return 'No terminal and no retained history for this mission.';
+    case 'live-operation': return `Live operation: ${'operation' in overview.probe ? overview.probe.operation : 'unknown'} is running. Following its correlated output.`;
+    case 'starting': return 'Starting: an operation is launching. Wait for its correlated output or select retained history.';
+    case 'current-capture': return 'Current pipe capture: following retained output while the operation runs without a terminal.';
+    case 'idle-console': return 'Retained idle console: no operation is running. Select an operation to inspect durable history.';
+    case 'ended': return 'Ended work: no operation is running. Showing retained history.';
+    case 'missing': return 'Missing history: no terminal or retained operation is available for this mission.';
     case 'probe-timeout': return `The terminal did not answer in time (${'detail' in overview.probe ? overview.probe.detail : 'timeout'}). Retained history is still shown.`;
     case 'probe-failed': return `The terminal could not be inspected (${'detail' in overview.probe ? overview.probe.detail : 'failed'}). Retained history is still shown.`;
     case 'ambiguous': return `Terminal sessions could not be attributed to this mission (${'detail' in overview.probe ? overview.probe.detail : 'ambiguous'}). Retained history is still shown.`;
