@@ -44,7 +44,7 @@ test('CLI preserves review flags and reports stop diagnostics while closing its 
     } } }, operatorState: { close: async () => { closed++; } } } as unknown as ProductionApplicationServices;
   ownWorkflowCli(registry, async () => graph);
   await registry.review(['task-test', '--reviewer', 'codex']);
-  assert.deepEqual(requests[0].invocation, { command: 'review', args: ['task-test', '--reviewer', 'codex'], interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
+  assert.deepEqual(requests[0].invocation, { command: 'review', args: ['task-test', '--reviewer', 'codex'] });
   await assert.rejects(async () => registry.stop(['task-test']), /Stop is pending/);
   assert.equal(closed, 2);
   pending = false;
@@ -65,7 +65,7 @@ test('public rebase enters durable workflow ownership and the inherited worker r
   assert.equal(directRuns, 0);
   assert.equal(opened, 1);
   assert.equal(requests[0].kind, 'rebase:run');
-  assert.deepEqual(requests[0].invocation, { command: 'rebase', args: ['task-test', '--push'], interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) });
+  assert.deepEqual(requests[0].invocation, { command: 'rebase', args: ['task-test', '--push'] });
 
   configureMissionWriteAuthorization({ operationId: 'owned-rebase', generation: 2, inherited: true, assert: async () => {} });
   try {
@@ -351,6 +351,17 @@ test('retained diagnostics survive long trailing replay before command, signal a
       assert.match(result.error!.message, /budget exhausted \(2 attempts\)/);
     } else { assert.doesNotMatch(result.error!.message, /budget exhausted/); }
   }
+});
+
+test('workflow footer names the retained blocker as cause with an integrate next action and ignores the generic exit (TASK-2862)', async () => {
+  const { workflowFailureEvidence } = await import('../../../src/composition/workflow-failure-evidence.js');
+  const operation = { id: 'owned', missionId: 'task-test', command: 'integrate:merge', createdAt: '2026-01-01', updatedAt: '2026-01-03', reason: 'px integrate task-test exited with status 1: Integration preflight failed. Blocked by main-index-conflicts.' } as import('../../../src/application/ports/workflow-operation.js').WorkflowOperationRecord;
+  const facts = workflowFailureEvidence(operation, [], [], []);
+  assert.match(facts.cause ?? '', /Blocked by main-index-conflicts/);
+  assert.match(facts.next ?? '', /px integrate task-test --dry-run/);
+  const generic = workflowFailureEvidence({ ...operation, reason: 'Workflow exited with status 1' }, [], [], []);
+  assert.equal(generic.cause, undefined);
+  assert.equal(generic.next, undefined);
 });
 
 test('workflow footer rejects malformed telemetry and preserves human-only intervention (TASK-2772)', async () => {

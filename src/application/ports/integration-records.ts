@@ -54,6 +54,8 @@ export interface IntegrationMissionServices {
   lifecycle: Pick<MissionLifecycleService, 'transition'>;
   integration: Pick<MissionIntegrationService, 'decideIntegration' | 'close'>;
   operationalHistory?: Pick<OperationalHistoryService, 'loadLatestByTypeForMission' | 'recordIntegrationValidation'> | null;
+  /** Durable lifetime review-action owner, bound to the same operational history. */
+  reviewActions?: Pick<OperationalHistoryService, 'countReviewActions' | 'recordReviewAction'> | null;
   readStatsMissionFlow?: () => Promise<readonly StatsMissionFlow[] | null>;
 }
 
@@ -91,4 +93,5 @@ export interface IntegrationFailedGate {
   failureReason?: import('../../domain/failure-reason.js').FailureReason;
 }
 
-export type IntegrationStash = { created?: boolean; message?: string; rootDir?: string };
+/** `objectId` is the verified stash commit; absent when the push could not be proven to be the marker stash. */
+export type IntegrationStash = { created?: boolean; message?: string; rootDir?: string; objectId?: string };

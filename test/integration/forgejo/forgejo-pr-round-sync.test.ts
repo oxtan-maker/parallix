@@ -87,7 +87,7 @@ test('Forgejo PR round sync: mission branch is pushed after implementer CHANGES_
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: second round updates the same PR, not a replacement', async () => {
   const { publishes, run } = roundLoop({ reviews: ['REQUEST_CHANGES', 'REQUEST_CHANGES', 'APPROVED'], dispositions: ['CHANGES_MADE', 'CHANGES_MADE'] });
-  await run({ maxAttempts: 3 });
+  await run({ actionLimit: 40 });
   assert.equal(publishes.length, 2, `Expected 2 publications for 2 CHANGES_MADE rounds; got ${publishes.length}.`);
 });
 
@@ -113,7 +113,7 @@ test('Forgejo PR round sync: no push after APPROVED disposition (loop exits)', a
 for (const disposition of ['BLOCKED', 'PARKED', 'PUSHBACK_ALL']) {
   test(`Forgejo PR round sync: no push after ${disposition} disposition (loop exits)`, async () => {
     const { publishes, run } = roundLoop({ reviews: ['REQUEST_CHANGES', 'APPROVED'], dispositions: [disposition] });
-    await run({ maxAttempts: 1 });
+    await run({ actionLimit: 40 });
     assert.equal(publishes.length, 0, `${disposition} never publishes a revision at the round boundary`);
   });
 }
@@ -317,7 +317,7 @@ test('Forgejo PR round sync: PR ref publishes round-one commit before round two 
       if (actOnReviewLaunches === 1) { sh(`git -C ${worktree} tag round1 HEAD`, worktree); }
     });
 
-    await runReviewLoop({ slug, implementer: 'claude', reviewer: 'codex', maxAttempts: 3 }, ports);
+    await runReviewLoop({ slug, implementer: 'claude', reviewer: 'codex', actionLimit: 40 }, ports);
 
     assert.deepEqual(pushed, [branch, branch], 'two CHANGES_MADE rounds publish to the same PR ref (one PR identity)');
     const round1Commit = sh(`git -C ${worktree} rev-parse -q --verify round1^{commit}`, worktree);
@@ -359,7 +359,7 @@ test('Forgejo PR round sync: production default skips push when CHANGES_MADE adv
 // ---------------------------------------------------------------------------
 test('Forgejo PR round sync: resume with existing CHANGES_MADE still pushes (implementer skipped)', async () => {
   const { publishes, run, fake } = roundLoop({ reviews: ['REQUEST_CHANGES'], dispositions: ['CHANGES_MADE'], newRevision: false });
-  await run({ maxAttempts: 1, isContinue: true });
+  await run({ actionLimit: 40, isContinue: true });
   assert.ok(fake.logs.some(line => line.includes('Skipping implementer launch')), fake.logs.join(' | '));
   assert.equal(publishes.length, 1, 'The resume guard must fall open so the committed round change is published.');
 });

@@ -365,7 +365,7 @@ describe("Declared gate rebounce and review-loop resume —", () => {
       },
       output: { log: line => logs.push(line), error: line => logs.push(line), exit: () => { throw new Error('unexpected exit'); } },
     });
-    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
 
     assert.equal(prompts.length, 1, 'the same implementer receives one repair prompt');
     assert.match(prompts[0], /Gate command: \.\/scripts\/verify-local\.sh static-analysis/);
@@ -427,7 +427,7 @@ for (const kind of ['gate', 'hook'] as const) {
       } },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'repair-brief', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'repair-brief', actionLimit: 40 }, fake.ports);
     assert.equal(fake.launches.length, 2);
     assert.deepEqual(fake.launches.map(l => l.role), ['implementer', 'reviewer']);
     assert.ok(order.indexOf('implementer') < order.lastIndexOf('gate'));

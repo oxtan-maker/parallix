@@ -837,12 +837,12 @@ describe("integration repair", () => {
         assert.equal(fixture.mission().review!.intervention, null);
         assert.deepEqual(fixture.mission().review!.stageLaunches, []);
         assert.equal(request.isContinue, true);
-        assert.ok(request.maxAttempts >= 9);
+        assert.equal(request.actionLimit, 40);
         // The loop itself is not exercised: a held controller fence declines it.
         return fakeReviewLoopPorts({ lock: { tryAcquire: () => false, release: () => {} } }).ports;
       },
     });
-    const context = await adapter.preflight([slug, '--max-attempts', '1']);
+    const context = await adapter.preflight([slug]);
     if (context?.kind !== 'mutation') { assert.fail('review entry must resolve a mutation context'); }
     await adapter.enter(context);
     assert.equal(continued, true);

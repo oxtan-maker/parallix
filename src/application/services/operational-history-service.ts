@@ -6,6 +6,9 @@ import { INTEGRATION_VALIDATION_EVENT_TYPE, INTEGRATION_VALIDATION_FAILED_EVENT_
 import { HUMAN_REVIEW_WITHDRAWAL_EVENT, REVIEW_ENTRY_PIN_EVENT, REVIEW_START_DECISION_EVENT, humanReviewWithdrawal, reviewEntryPin,
   reviewStartDecision } from '../verification-policy/review-start-decision.js';
 import { REVIEW_START_OUTCOME_EVENT, reviewStartOutcome, reviewStartOutcomeKey, reviewerOfStart } from '../verification-policy/review-start-outcome.js';
+import { parseReviewAction, reviewActionStarted } from '../review-action-history.js';
+import { REVIEW_ACTION_STARTED_EVENT, type ReviewActionStarted,
+  type ReviewActionStartedInput } from '../ports/review-action-history.js';
 
 
 /**
@@ -152,11 +155,6 @@ export class OperationalHistoryService {
     return await this.missionPin(input);
   }
 
-  /** Integration-test actions already started for this Mission, from the durable decision rows. */
-  async countTestsActions(missionId: string): Promise<number> {
-    return (await this.reviewStartDecisions(missionId)).filter(decision => decision.actualAction === 'tests').length;
-  }
-
   /** Record a concurrent human-request cancellation once for its round and change identity. */
   async recordHumanReviewWithdrawal(input: HumanReviewWithdrawalInput): Promise<boolean> {
     const withdrawal = humanReviewWithdrawal(input);
@@ -174,6 +172,43 @@ export class OperationalHistoryService {
       const withdrawal = JSON.parse(row.eventData) as HumanReviewWithdrawalInput;
       return withdrawal.changeIdentity === input.changeIdentity && withdrawal.round === input.round;
     });
+  }
+
+  private async reviewActions(missionId: string, repositoryId: string): Promise<readonly ReviewActionStarted[]> {
+    const rows = this.repository.findByTypesForMissions
+      ? await this.repository.findByTypesForMissions([REVIEW_ACTION_STARTED_EVENT], [missionId], repositoryId)
+      : await this.loadAllByTypeForMission(REVIEW_ACTION_STARTED_EVENT, missionId);
+    const parsed = rows.map(row => parseReviewAction(row, repositoryId));
+    if (parsed.some(entry => entry === null)) {
+      throw new Error(`review action history for ${missionId} contains an invalid record`);
+    }
+    return parsed.filter((entry): entry is ReviewActionStarted => entry?.repositoryId === repositoryId);
+  }
+
+  /** Lifetime review-step action count, reconstructed only from durable start records. */
+  async countReviewActions(missionId: string, repositoryId: string): Promise<number> {
+    return (await this.reviewActions(missionId, repositoryId))
+      .reduce((highest, action) => Math.max(highest, action.actionSequence), 0);
+  }
+
+  /**
+   * Record one action start. A replay returns its existing record; concurrent
+   * sequence allocation is elected by the repository's idempotent append.
+   */
+  async recordReviewAction(input: ReviewActionStartedInput): Promise<ReviewActionStarted> {
+    for (;;) {
+      const records = await this.reviewActions(input.missionId, input.repositoryId);
+      const existing = records.find(record => record.action === input.action
+        && record.correlation === input.correlation && record.changeIdentity === input.changeIdentity);
+      if (existing) { return existing; }
+      const actionSequence = records.reduce((highest, record) => Math.max(highest, record.actionSequence), 0) + 1;
+      const action = reviewActionStarted(input, actionSequence);
+      if (await this.repository.appendIdempotent({
+        eventType: REVIEW_ACTION_STARTED_EVENT,
+        eventData: JSON.stringify(action),
+        createdAt: action.recordedAt,
+      }, action.idempotencyKey)) { return action; }
+    }
   }
 
   /**

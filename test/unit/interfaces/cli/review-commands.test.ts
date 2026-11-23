@@ -206,13 +206,12 @@ test("bare review binds the review preparation loop without implicitly approving
 });
 
 // ============================================================================
-// Unknown-flag guard (--max-attempt typo silently ignored the override)
+// Unknown-flag guard
 // ============================================================================
 
 test('flagValue supports --flag=value form', () => {
-  assert.equal(flagValue(['--max-attempts=7'], '--max-attempts'), '7');
   assert.equal(flagValue(['a', '--focus=tests', 'b'], '--focus'), 'tests');
-  assert.equal(flagValue(['--max-attempts='], '--max-attempts'), null);
+  assert.equal(flagValue(['--focus='], '--focus'), null);
 });
 
 test('unknownReviewFlags flags typos but not values of value-taking flags', () => {
@@ -221,15 +220,15 @@ test('unknownReviewFlags flags typos but not values of value-taking flags', () =
     ['--max-attempt']
   );
   assert.deepEqual(unknownReviewFlags(['--comment', '--not-a-flag but a message body']), []);
-  assert.deepEqual(unknownReviewFlags(['task-1', '--max-attempts=7']), []);
+  assert.deepEqual(unknownReviewFlags(['task-1', '--max-attempts=7']), ['--max-attempts']);
 });
 
-test('review rejects an unknown flag with a suggestion instead of ignoring it', async () => {
+test('review rejects the retired per-entry attempt override instead of running old and new budgets in parallel (TASK-2859.20)', async () => {
   const errors: string[] = [];
   let exitCode: { value: number | null } = { value: null };
   let startReviewLoopCalled = 0;
 
-  await review(['task-2322', '--max-attempt', '7'], {
+  await review(['task-2322', '--max-attempts', '7'], {
     inferSlugFn: (s) => s || 'task-2322',
     log: () => {},
     error: (m) => errors.push(m),
@@ -239,18 +238,15 @@ test('review rejects an unknown flag with a suggestion instead of ignoring it', 
 
   assert.equal(startReviewLoopCalled, 0, 'the loop must not start when a flag is misspelled');
   assert.equal(exitCode.value, 1);
-  assert.ok(
-    errors.some(e => e.includes('--max-attempt') && e.includes('--max-attempts')),
-    `expected a suggestion for --max-attempts; got: ${errors.join(' | ')}`
-  );
+  assert.ok(errors.some(e => e.includes('Unknown flag') && e.includes('--max-attempts')), errors.join(' | '));
 });
 
-test('review passes an explicit --max-attempts through to the review loop', async () => {
+test('review passes the repository action limit through to the review loop (TASK-2859.20)', async () => {
   let received: { value: ObservedLoop | null } = { value: null };
   const exits: number[] = [];
   const exit = (code: number) => { exits.push(code); };
 
-  await review(['task-2322', '--max-attempts', '7'], {
+  await review(['task-2322'], {
     continueReviewClearsInterventionFn: async () => false,
     readReviewStateFn: async slug => new ReviewState(slug, { round: 1, startedAt: '2026-01-01T00:00:00Z' }),
     inferSlugFn: (s) => s || 'task-2322',
@@ -260,7 +256,7 @@ test('review passes an explicit --max-attempts through to the review loop', asyn
     reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); }
   });
 
-  assert.equal(received.value && received.value.maxAttempts, 7);
+  assert.equal(received.value && received.value.actionLimit, 40);
   assert.notEqual(received.value && received.value.exit, process.exit, 'nested review loops must not retain process.exit from the parent command');
   // The use case observes the injected exit (TASK-2620) and still forwards to it.
   assert.ok(received.value?.exit);
@@ -282,7 +278,7 @@ test('review carries the existing operator-invocation fact into the loop (TASK-2
   }
 });
 
-test('a manual review continuation renews the five-round budget at the current round', async () => {
+test('a manual review continuation retains the lifetime action limit instead of renewing a round window (TASK-2859.20)', async () => {
   let received: { value: ObservedLoop | null } = { value: null };
 
   await review(['task-2436'], {
@@ -293,10 +289,10 @@ test('a manual review continuation renews the five-round budget at the current r
     reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
   });
 
-  assert.equal(received.value && received.value.maxAttempts, 9);
+  assert.equal(received.value && received.value.actionLimit, 40);
 });
 
-test('review automation retains its five-round limit', async () => {
+test('review automation uses the default lifetime action limit (TASK-2859.20)', async () => {
   let received: { value: ObservedLoop | null } = { value: null };
 
   await review(['task-2436'], {
@@ -306,7 +302,7 @@ test('review automation retains its five-round limit', async () => {
     reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
   });
 
-  assert.equal(received.value && received.value.maxAttempts, 5);
+  assert.equal(received.value && received.value.actionLimit, 40);
 });
 
 // Unavailable authority cannot be reduced to a missing Mission. Known missions
@@ -372,7 +368,7 @@ test('review forwards current-work agent publication into the review loop', asyn
   assert.equal(typeof received.value?.onAgentLaunched, 'function');
 });
 
-test('review rejects a non-numeric --max-attempts', async () => {
+test('review rejects a valued retired --max-attempts flag before loop dispatch (TASK-2859.20)', async () => {
   const errors: string[] = [];
   let exitCode: { value: number | null } = { value: null };
   let startReviewLoopCalled = 0;
@@ -389,10 +385,7 @@ test('review rejects a non-numeric --max-attempts', async () => {
 
   assert.equal(startReviewLoopCalled, 0);
   assert.equal(exitCode.value, 1);
-  assert.ok(
-    errors.some(e => /--max-attempts requires a positive integer/.test(e)),
-    `expected a positive-integer error; got: ${errors.join(' | ')}`
-  );
+  assert.ok(errors.some(e => /Unknown flag.*--max-attempts/.test(e)), errors.join(' | '));
 });
 
 test('review operation precedence and push identity are pure policies (TASK-2668.07)', () => {

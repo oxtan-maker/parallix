@@ -118,6 +118,8 @@ export interface MissionApplicationServices {
    * Bound to the same SQLite authority as `store`.
    */
   readonly operationalHistory: import('../application/services/operational-history-service.js').OperationalHistoryService;
+  /** Review-action view of the same append-only operational-history authority. */
+  readonly reviewActions: import('../application/services/operational-history-service.js').OperationalHistoryService;
   /**
    * The repository identity these use cases are bound to, canonicalized to the
    * primary checkout. Callers that build an intake request must read it from

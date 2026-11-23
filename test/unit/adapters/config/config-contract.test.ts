@@ -11,7 +11,7 @@ import './product-config.cases.js';
 // task-2455.01-target-user-repro and task-2455.02-task-provider-config-repro
 // suites (TASK-2622.14).
 import { describe, test, mock } from 'node:test';
-import { resolveGateResources, resolveVerificationResource, resolveMaxConcurrentGates } from '../../../../src/adapters/config/product-config.js';
+import { resolveGateResources, resolveVerificationResource, resolveMaxConcurrentGates, resolveReviewActionLimit } from '../../../../src/adapters/config/product-config.js';
 import { normalizeGates } from '../../../../src/adapters/config/repository-gate-schema.js';
 import { loadPhaseGateParallelism } from '../../../../src/adapters/config/repository-gates.js';
 import { terminalHostConfig } from '../../../../src/adapters/config/terminal-host-config.js';
@@ -135,6 +135,29 @@ test('verificationPolicy invalid block disables only itself and reports once (TA
     });
   }
   withConfig(null, root => assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode: 'off' }));
+});
+
+test('review action limit defaults to 40 and accepts a positive safe-integer override (TASK-2859.20)', () => {
+  withConfig(null, root => assert.equal(resolveReviewActionLimit(root), 40));
+  withConfig({ reviewActionLimit: 73 }, root => {
+    assert.equal(resolveReviewActionLimit(root), 73);
+    assert.equal(loadEffectiveConfig(root).reviewActionLimit, 73);
+  });
+});
+
+test('invalid review action limits report once and fall back to 40 (TASK-2859.20)', () => {
+  for (const value of [null, 0, -1, 1.5, '9', Number.MAX_SAFE_INTEGER + 1]) {
+    withConfig({ product: { name: 'Kept' }, reviewActionLimit: value }, root => {
+      const report = mock.method(console, 'error', () => {});
+      try {
+        assert.equal(resolveReviewActionLimit(root), 40, String(value));
+        assert.equal(loadEffectiveConfig(root).product.name, 'Kept', 'an invalid limit does not discard other config');
+        assert.equal(resolveReviewActionLimit(root), 40);
+        assert.equal(report.mock.callCount(), 1);
+        assert.match(String(report.mock.calls[0].arguments[0]), /positive safe integer.*using 40/);
+      } finally { report.mock.restore(); }
+    });
+  }
 });
 
 describe("workflow.config.json discovery and readiness", () => {

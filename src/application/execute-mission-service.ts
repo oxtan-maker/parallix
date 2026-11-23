@@ -124,7 +124,18 @@ export class ExecuteMissionService {
         return failure('cancelled', 'cancelled after durable launch; re-query task state', evidence);
       }
 
-      await this.review(request, prepared, launch.agent);
+      try {
+        await this.review(request, prepared, launch.agent);
+      } catch (error) {
+        // The implementer's assignment is already committed and recorded. A
+        // later review stop belongs to the review workflow: keep its blocked
+        // publication and return the accepted implementation evidence instead
+        // of relabelling the whole operation as failed execution. Closing the
+        // execute bracket does not erase the review-side blocker.
+        await this.endWork(request);
+        const message = error instanceof Error ? error.message : 'Review preparation and review failed';
+        return failure('execution', message, evidence, failureReasonFromCause(error, 'review-preparation'));
+      }
       await this.endWork(request);
       return { status: 'completed', value: { agent: launch.agent }, durableEvidence: evidence };
     } catch (error) {
@@ -167,14 +178,23 @@ export class ExecuteMissionService {
       ...reviewPublisher,
       onAutonomousStop: async (reason: string) => { preparationFailure = reason; await reviewPublisher.onAutonomousStop(reason); },
     };
-    const reviewed = await new ExecuteReviewPreparationService({
-      checkpoints: this._ports.checkpointValidation,
-      reviewPreparation: this._ports.reviewPreparationExecution,
-      review: this._ports.autonomousReview,
-      repairLaunch: this._ports.repairLaunch,
-      output: this._ports.output,
-    }).run(reviewPreparationRequest);
-    if (!reviewed) { throw new Error(preparationFailure ?? "Review preparation and review failed"); }
+    let reviewed: boolean;
+    try {
+      reviewed = await new ExecuteReviewPreparationService({
+        checkpoints: this._ports.checkpointValidation,
+        reviewPreparation: this._ports.reviewPreparationExecution,
+        review: this._ports.autonomousReview,
+        repairLaunch: this._ports.repairLaunch,
+        output: this._ports.output,
+      }).run(reviewPreparationRequest);
+    } catch (error) {
+      if (!preparationFailure) {
+        preparationFailure = error instanceof Error ? error.message : 'Review preparation and review failed';
+        await reviewPublisher.onAutonomousStop(preparationFailure);
+      }
+      throw error;
+    }
+    if (!reviewed || preparationFailure) { throw new Error(preparationFailure ?? "Review preparation and review failed"); }
   }
 
   /** Pending retained approval is settled by the shared continuation before any launch or review entry. */

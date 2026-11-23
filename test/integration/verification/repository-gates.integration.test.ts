@@ -81,9 +81,13 @@ test('operator cancellation terminates real owned process groups while earlier f
   const checkout = fs.mkdtempSync(path.join(os.tmpdir(), 'px-gates-cancel-'));
   try {
     const controller = new AbortController();
+    let markRedSettled!: () => void;
+    const redSettled = new Promise<void>(resolve => { markRedSettled = resolve; });
     const started = Date.now();
     const running = runPhaseGates('integration', {
-      slug: 'task-2586', checkoutPath: checkout, maxParallel: 2, log: () => {}, error: () => {}, signal: controller.signal,
+      slug: 'task-2586', checkoutPath: checkout, maxParallel: 2, log: () => {},
+      error: line => { if (line.includes('Repository gate "red" exited with code 7')) { markRedSettled(); } },
+      signal: controller.signal,
       gates: [
         { key: 'red', command: 'printf defect >&2; exit 7', order: 1 },
         { key: 'peer', command: 'touch ready; sleep 30; touch leaked', order: 2 },
@@ -91,6 +95,7 @@ test('operator cancellation terminates real owned process groups while earlier f
       ],
     });
     while (!fs.existsSync(path.join(checkout, 'ready'))) { await new Promise(resolve => setTimeout(resolve, 10)); }
+    await redSettled;
     controller.abort();
     const result = await running;
     assert.equal(result.cancelled, true);

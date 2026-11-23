@@ -83,14 +83,16 @@ function listMarkerStashes(stdout: string): { index: number; ref: string }[] {
  * True when a live rebase is in progress in the given worktree.
  *
  * Delegates to the rebase-state owner (`IntegrateGitPort['detectRebaseState']`), which answers
- * from the `.git/rebase-*` directory, the REBASE_HEAD metadata ref and the unmerged index. The
+ * from the `.git/rebase-*` directory alone; REBASE_HEAD and unmerged entries do not prove a live
+ * rebase and never authorise the abort and hard reset. The
  * previous probe, `git rebase --show-current`, is git's unambiguous prefix match for
  * `--show-current-patch`: it buffered the entire current commit patch and failed with ENOBUFS on
  * a large change (TASK-2828). The application layer stays free of `node:fs` because the adapter
  * owns the filesystem read behind the port.
  */
 function liveRebaseInProgress(baseWorktree: string, detectRebaseState: IntegrateGitPort['detectRebaseState']): boolean {
-  return detectRebaseState(baseWorktree).inProgress;
+  // Unmerged entries alone are not a rebase: aborting and hard-resetting would discard a conflicted stash restore.
+  return Boolean(detectRebaseState(baseWorktree).rebaseDir);
 }
 
 /**

@@ -201,7 +201,7 @@ test("base-started console execute, review preparation, review and retry resolve
   for (const command of ['active:execute', 'review:submit', 'review:submit', 'integrate:merge'] as const) {
     const result = await supervise('task-97778', fixture.primary, fixture.configuration, command,
       command === 'active:execute' ? undefined : {
-        command: command === 'integrate:merge' ? 'integrate' : 'review', args: ['task-97778'], interactive: true,
+        command: command === 'integrate:merge' ? 'integrate' : 'review', args: ['task-97778'],
       });
     assert.deepEqual(result.executed, [fixture.worktrees['task-97778']]);
   }

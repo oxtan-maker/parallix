@@ -264,8 +264,9 @@ async function ensureWorkflowAgentConfig(command: string, target: string, config
 
 async function hostTargetCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, cli?: CliInvocation) {
   const terminal = missionTerminalRequest(parsed.command, parsed.args) ? await import('./mission-terminal.js') : null;
-  const hosted = cli && terminal ? await terminal.hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli, { configuration }) : null;
-  return { terminal, hosted };
+  let fallbackReason: string | null = null;
+  const hosted = cli && terminal ? await terminal.hostMissionCommand(parsed.command, parsed.args, parsed.target, log, cli, { configuration, onPipeFallback: reason => { fallbackReason = reason; } }) : null;
+  return { terminal, hosted, fallbackReason };
 }
 
 async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfiguration, log: typeof fmt.log.plain, error: typeof fmt.log.plainError, cli?: CliInvocation, operatorInvocation = true): Promise<number> {
@@ -275,7 +276,7 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
     process.chdir(parsed.target);
     parsed = { ...parsed, target: missionCommandTarget(parsed.command, parsed.args, parsed.target, configuration) };
     process.chdir(parsed.target);
-    const { terminal, hosted } = await hostTargetCommand(parsed, configuration, log, cli);
+    const { terminal, hosted, fallbackReason } = await hostTargetCommand(parsed, configuration, log, cli);
     if (hosted !== null) { return hosted; }
     if (parsed.command === 'review-event') { return await runReviewEventCommand(parsed, configuration, log, error); }
     if (parsed.command === 'verify-env') {
@@ -292,7 +293,7 @@ async function runTargetCommand(parsed: ParsedArgs, configuration: ParallixConfi
       errorFn: error,
     }));
     // A mission operation run in this process is retained as mission history too.
-    return await (terminal && hasGitRepository(parsed.target) ? terminal.captureMissionCommand(parsed.command || '', parsed.args, parsed.target, configuration, invoke) : invoke());
+    return await (terminal && hasGitRepository(parsed.target) ? terminal.captureMissionCommand(parsed.command || '', parsed.args, parsed.target, configuration, invoke, fallbackReason) : invoke());
   } catch (err) {
     error(fmt.status('FAIL', (err as Error).message));
     return 1;

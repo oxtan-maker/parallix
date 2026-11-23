@@ -200,7 +200,7 @@ test('successful CLI integration exit ends its activity without a false blocker 
 
 for (const control of [
   { name: 'nonzero exit', code: 1 as const, reason: 'px integrate task-nested exited with status 1' },
-  { name: 'workflow exception', error: new Error('landing failed'), reason: 'px integrate task-nested exited with status 1' },
+  { name: 'workflow exception', error: new Error('landing failed'), reason: 'px integrate task-nested exited with status 1: Integration failed: landing failed' },
   { name: 'cleanup', cleanup: new Error('release failed'), reason: 'release failed' },
 ]) {
   test(`CLI integration preserves ${control.name} failure (px-0024)`, async t => {

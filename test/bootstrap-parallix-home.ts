@@ -1,4 +1,4 @@
-import { createTestTranscriptRoot, restoreFixtureTmpdir } from './lib/test-tmpdir.js';
+import { createTestTranscriptRoot, restoreFixtureTmpdir, retireFixtureCheckoutTmpdir } from './lib/test-tmpdir.js';
 import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
@@ -251,6 +251,7 @@ function cleanupTempDirs() {
   cleanupRan = true;
   for (const dir of tempRoots.reverse()) {
     try {
+      retireFixtureCheckoutTmpdir(dir);
       fs.rmSync(dir, { recursive: true, force: true });
     } catch (_) {
       // best-effort cleanup only

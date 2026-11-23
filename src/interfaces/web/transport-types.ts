@@ -1,5 +1,6 @@
 import type { ProviderExecutionFacts } from '../../application/projections/provider-execution.js';
 import type { RepairBudgetFacts } from '../../application/projections/repair-budget.js';
+import type { ReviewActionFacts } from '../../application/ports/review-action-history.js';
 /**
  * Web transport wire vocabulary: the versioned DTO types, request kinds, and
  * the `WebTransportError` raised when a value cannot cross the JSON wire.
@@ -7,7 +8,7 @@ import type { RepairBudgetFacts } from '../../application/projections/repair-bud
 
 
 
-export const WEB_TRANSPORT_VERSION = 4 as const;
+export const WEB_TRANSPORT_VERSION = 5 as const;
 export type WebTransportVersion = typeof WEB_TRANSPORT_VERSION;
 export const SUPPORTED_WEB_TRANSPORT_VERSIONS: readonly number[] = [WEB_TRANSPORT_VERSION];
 
@@ -187,8 +188,8 @@ export interface WebMissionCard {
   readonly reviewRecovery: import('../../application/review-recovery.js').ReviewRecovery | null;
   readonly reviewDisposition: string | null;
   readonly reviewHistory: readonly WebReviewRoundSummary[];
-  /** Autonomous attempts per review entry; never a validity bound on reviewRound. */
-  readonly reviewWindowAllowance?: number | null;
+  /** Added in transport v5: lifetime review actions used against the configured limit; null when unknown. */
+  readonly reviewActions: ReviewActionFacts | null;
   /** The retained repair-attempt budget; null when the mission retains no repair fact. */
   readonly repairBudget?: RepairBudgetFacts | null;
   readonly blockingReason: string | null;

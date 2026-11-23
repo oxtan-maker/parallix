@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { mkdtemp } from '../helpers/temp-dir.js';
+import { retireFixtureCheckoutTmpdir } from '../lib/test-tmpdir.js';
 
 /**
  * Fixture lifetimes (TASK-2622.04).
@@ -30,11 +32,23 @@ export interface CaseRoot {
   dispose(): void;
 }
 
+const activeCaseRoots = new Set<string>();
+
+/** Whether this worker currently owns the exact root as a disposable case fixture. */
+export function isCaseRoot(root: string): boolean {
+  return activeCaseRoots.has(path.resolve(root));
+}
+
 export function caseRoot(prefix: string): CaseRoot {
   const root = mkdtemp(prefix);
+  activeCaseRoots.add(path.resolve(root));
   return {
     lifetime: 'case',
     root,
-    dispose() { fs.rmSync(root, { recursive: true, force: true }); },
+    dispose() {
+      retireFixtureCheckoutTmpdir(root);
+      activeCaseRoots.delete(path.resolve(root));
+      fs.rmSync(root, { recursive: true, force: true });
+    },
   };
 }

@@ -30,6 +30,8 @@ import {
   type ObservedExecutionFacts,
   type ProcessLivenessProbe,
 } from '../../domain/execution-activity.js';
+import { noReviewActions, reviewActionFactsByMission } from '../review-action-history.js';
+import type { ReviewActionFacts, ReviewActionReadAdapter } from '../ports/review-action-history.js';
 import type { ExecutionActivityReadPort } from '../../application/ports/execution-activity.js';
 
 export type { ProcessLivenessProbe } from '../../domain/execution-activity.js';
@@ -150,6 +152,8 @@ export interface BoardProjectionOptions {
    * covers it (TASK-2555). Omitted means only a recorded branch move is shown.
    */
   changeIdentity?: ChangeIdentityPort;
+  /** Recorded review actions and the configured limit; omitted means actions used are unknown, never zero. */
+  reviewActions?: ReviewActionReadAdapter;
 }
 
 /** A mission that published no current-work fact at all. */
@@ -242,6 +246,7 @@ export class BoardProjectionBuilder {
       (runningSessions ?? []).map((session) => [session.missionId, session]),
     );
 
+    const actions = await this.reviewActionFacts();
     // Build mission cards with operational facts
     const cards = await Promise.all(visibleMissions.map(async (mission) => {
       const owner = operations.find(operation => operation.repositoryId === mission.repositoryId && operation.missionId === mission.id) ?? null;
@@ -252,6 +257,7 @@ export class BoardProjectionBuilder {
         currentWorkByMission.get(mission.id) ?? NO_CURRENT_WORK,
         runningSessions === null ? undefined : sessionByMission.get(mission.id) ?? null,
         owner,
+        actions?.(mission.id) ?? null,
       );
     }));
 
@@ -297,11 +303,12 @@ export class BoardProjectionBuilder {
     if (mission === null) { return null; }
 
     const owner = await this._options?.workflowOperations?.latest(mission.id) ?? null;
-    const [reviews, gateStatus, runningSessions, activitySnapshots] = await Promise.all([
+    const [reviews, gateStatus, runningSessions, activitySnapshots, actions] = await Promise.all([
       this._reviews.loadReviews([mission.id]),
       this._gates.observeGate(mission, owner),
       this.runningSessions(),
       this.missionExecutionActivities(mission.id),
+      this.reviewActionFacts(),
     ]);
 
     const work = projectExecutionActivity(activitySnapshots, {
@@ -319,6 +326,7 @@ export class BoardProjectionBuilder {
       work,
       liveSession,
       owner,
+      actions?.(mission.id) ?? null,
     );
     return projectReviewRecoveryCard(this.observeCardExecution(card, owner), this._options?.reviewExecution);
   }
@@ -333,6 +341,20 @@ export class BoardProjectionBuilder {
   private observeExecution(board: BoardProjection, operations: readonly WorkflowOperation[]): BoardProjection {
     const observed = this._options?.providerExecution ? projectProviderExecution(board, this._options.providerExecution, operations) : board;
     return projectWorkflowBoard(observed, operations);
+  }
+
+  /**
+   * One stored-record read per build. An unreadable history is unknown (null), never zero actions;
+   * a Mission absent from a readable history has used none.
+   */
+  private async reviewActionFacts(): Promise<((id: MissionId) => ReviewActionFacts) | null> {
+    const adapter = this._options?.reviewActions;
+    if (!adapter) { return null; }
+    try {
+      const limit = adapter.limit;
+      const byMission = reviewActionFactsByMission(await adapter.loadActions(), limit);
+      return id => byMission.get(id) ?? noReviewActions(limit);
+    } catch { return null; }
   }
 
   private now(): number { return (this._options?.now ?? Date.now)(); }
@@ -372,6 +394,7 @@ export class BoardProjectionBuilder {
     // "nothing running" that `null` means.
     liveSession: RunningAgentSession | null | undefined,
     owner: WorkflowOperation | null,
+    reviewActions: ReviewActionFacts | null,
   ): MissionCard {
     const identity = this._options?.changeIdentity;
     const approvalCoverage = isClosedMission(mission) ? null
@@ -392,6 +415,7 @@ export class BoardProjectionBuilder {
       ownedAction: owner !== null || (work.currentWork !== null
         ? work.currentWork.freshness !== 'stale'
         : liveSession !== null && liveSession !== undefined),
+      reviewActions,
     };
     return projectMissionCard({ ...mission, review: reviewFact.review }, facts);
   }

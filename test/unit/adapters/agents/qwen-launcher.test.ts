@@ -319,3 +319,14 @@ test('oversized Qwen stdin survives every session policy and stale fallback (TAS
     assert.ok(!fresh.args.includes('ignored'));
   } finally { __setSpawnAndTeeForTest(null); fs.rmSync(worktree, { recursive: true, force: true }); }
 });
+
+test('qwen runs in text output mode, so overload wording cannot reach provider-unavailable (TASK-2871)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const { detectLimitHit } = await import('../../../../src/application/services/agent-limit.js');
+  const inv = buildQwenInvocation({ prompt: 'p', worktree: '/tmp/wt' });
+  assert.deepEqual(inv.args.slice(0, 2), ['--output-format', 'text'], 'Qwen exposes no structured overload event in this mode');
+  const stderr = 'API Error: 503 server overloaded';
+  const failureReason = normalizeProviderFailure({ status: 1, stderr });
+  assert.equal(failureReason?.code, 'process-failed');
+  assert.equal(detectLimitHit({ agent: 'qwen', status: 1, stderr, failureReason }), null);
+});

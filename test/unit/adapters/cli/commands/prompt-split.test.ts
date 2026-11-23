@@ -17,8 +17,14 @@ import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
 
 const STAGES = ['draft', 'execute', 'review', 'act-on-review', 'portfolio'] as const;
 const GRAPHIFY_GUIDANCE = 'Parallix updates existing Graphify graphs after successful squash integration on the receiving base worktree; review, edits and checkpoints do not trigger updates.';
-const REVIEW_COVERAGE_GUIDANCE =
+const PARENT_REVIEW_CONTROL_GUIDANCE =
+  '- The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone\'s prose. Do not re-run a listed command whose recorded status is `passed`; cite the recorded result from this block instead. Re-running is permitted only when the block reports no recorded gate result, reports a `failed` status, reports a control as not yet run, or the command you need is not listed here.';
+const REVIEW_CONTROL_GUIDANCE =
+  '- The block below reports which controls the workflow has already executed for this mission and which it has not, derived from machine records rather than from anyone\'s prose. Cite those recorded results; do not re-run or supplement them. This rule is mandatory and cannot be relaxed by repository policy or review focus: do not run tests, execute project code, or use executable probes. Review only the source, the assigned diff, and recorded evidence. If evidence is absent, failed, or insufficient, report that gap instead of producing new execution evidence.';
+const PARENT_REVIEW_COVERAGE_GUIDANCE =
   'Do not run large batched test coverage commands that Parallix has already run or intentionally schedules for a later verification phase. Run a focused test only when it validates a specific review finding.';
+const REVIEW_COVERAGE_GUIDANCE =
+  'Do not run tests or execute project code or probes, whether focused or batched. Implementers and Parallix own execution; assess their recorded results and report missing or insufficient evidence.';
 const DRAFT_NEL_GUIDANCE =
   '- You own sizing and splitting for each mission before execution. Keep NEL out of execution scope constraints, success criteria, checkpoints and review requirements; implementers and reviewers do not enforce NEL. Never defer decomposition to either role or ask them to compress code to fit an estimate.';
 const EXECUTE_NEL_GUIDANCE =
@@ -57,6 +63,12 @@ function parentPrompt(stage: string): string {
     ? `${parent.replace(
       'Do not run any large test gates, thats run automatically by parallix at suitable steps and is not your job. Specific test to validate a code finding is ok.',
       REVIEW_COVERAGE_GUIDANCE,
+    ).replace(
+      PARENT_REVIEW_COVERAGE_GUIDANCE,
+      REVIEW_COVERAGE_GUIDANCE,
+    ).replace(
+      PARENT_REVIEW_CONTROL_GUIDANCE,
+      REVIEW_CONTROL_GUIDANCE,
     ).replace(
       "- When `{{attempt}}` is 2 or later, before beginning this review round compact the prior-round working context. Reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This compaction is independent of the mission's declared gates.",
       "- When `{{attempt}}` is 2 or later, before beginning this review round reload the locked mission goal and scope; committed checkpoint or gate evidence when present; current round and disposition; unresolved findings and implementer resolutions; and the exact post-rebase revision and review baseline shown by `git diff {{reviewBaseline}}..HEAD`. This reload is independent of the mission's declared gates.",
@@ -135,10 +147,10 @@ for (const [i, stage] of STAGES.entries()) {
     // The file heading and the named mandatory policy amendment are the only
     // core lines newer than the frozen split baseline.
     const extra = nonBlank(core).filter(l => !nonBlank(parentPrompt(stage)).includes(l));
-    const amendment = stage === 'draft' ? DRAFT_NEL_GUIDANCE
-      : stage === 'execute' ? EXECUTE_NEL_GUIDANCE
-        : stage === 'review' ? REVIEW_NEL_GUIDANCE : undefined;
-    assert.deepEqual(extra, amendment ? [heading, amendment] : [heading],
+    const amendments = stage === 'draft' ? [DRAFT_NEL_GUIDANCE]
+      : stage === 'execute' ? [EXECUTE_NEL_GUIDANCE]
+        : stage === 'review' ? [REVIEW_NEL_GUIDANCE] : [];
+    assert.deepEqual(extra, [heading, ...amendments],
       `${stage}: only the heading and authorized mandatory amendment may be new`);
   });
 }
@@ -306,7 +318,7 @@ test('task-2465: configured override supplies opinion content and retains a name
   }
 });
 
-test('task-2602: runtime review prompt retains non-core coverage guidance with the shipped asset and configured override', () => {
+test('task-2602: runtime review prompt retains non-core evidence guidance with the shipped asset and configured override', () => {
   const root = registeredMkdtemp('task-2602-review-prompt-');
   try {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -323,6 +335,8 @@ test('task-2602: runtime review prompt retains non-core coverage guidance with t
 
     assert.ok(defaultPrompt.includes(REVIEW_COVERAGE_GUIDANCE));
     assert.ok(overriddenPrompt.includes(REVIEW_COVERAGE_GUIDANCE));
+    assert.match(overriddenPrompt, /do not run tests, execute project code, or use executable probes/i);
+    assert.match(overriddenPrompt, /Review only the source, the assigned diff, and recorded evidence/i);
     assert.match(overriddenPrompt, /REPO-LOCAL-OPINION-PLACEHOLDER-2602/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

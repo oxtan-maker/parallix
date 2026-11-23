@@ -6,6 +6,11 @@
   "type": "object",
   "additionalProperties": true,
   "properties": {
+    "reviewActionLimit": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Lifetime review-step action bound. Invalid values are reported once and fall back to 40."
+    },
     "verificationPolicy": {
       "type": "object",
       "description": "Invalid policy configuration disables only this block. Shadow only observes; pilot lets the policy choose integration tests in the review step.",

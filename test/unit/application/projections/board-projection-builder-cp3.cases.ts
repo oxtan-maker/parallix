@@ -24,6 +24,7 @@ import { missionVersion } from '../../../../src/application/domain-ports.js';
 import type { Mission } from '../../../../src/domain/mission.js';
 import type { OperationalHistoryEntry, BoardLaneEventEntry, ReboundRepairHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
+import { fixtureMission } from '../../../fixtures/mission-builders.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,6 +62,19 @@ class MockHistoryRepo implements OperationalHistoryRepository {
     && (JSON.parse(row.eventData) as { missionId?: unknown }).missionId === id); }
   async append() {}
   async clear() {}
+}
+
+class ScopedActionHistoryRepo extends MockHistoryRepo {
+  readonly scopedReads: { types: readonly string[]; missionIds: readonly string[]; repositoryId: string }[] = [];
+  async findByTypesForMissions(types: readonly string[], missionIds: readonly string[], repositoryId: string) {
+    this.scopedReads.push({ types, missionIds, repositoryId });
+    return this.entries.filter(row => {
+      if (!types.includes(row.eventType)) { return false; }
+      const data = JSON.parse(row.eventData) as { missionId?: unknown; repositoryId?: unknown };
+      return missionIds.includes(String(data.missionId ?? ''))
+        && (data.repositoryId === undefined || data.repositoryId === null || data.repositoryId === repositoryId);
+    });
+  }
 }
 
 /**
@@ -358,6 +372,35 @@ test('composeBoardProjection wires all eight adapters into BoardProjectionBuilde
 
   // Verify the builder is a BoardProjectionBuilder instance
   assert.ok(builder instanceof BoardProjectionBuilder);
+});
+
+test('board review actions use repository scope and retain legacy rows when ids collide (TASK-2859.21 F1, F3)', async () => {
+  const rootDir = createTempBacklog({});
+  const repo = repositoryId('repo-a'), id = missionId('px-0042');
+  const mission = fixtureMission(id, { repositoryId: repo, status: 'active' });
+  const store: MissionStore = { load: async () => ({ kind: 'found', mission, version: missionVersion(1) }),
+    save: async () => missionVersion(1), loadByRepository: async () => [mission] };
+  const action = (repositoryId: string | null, actionSequence: number) => ({ eventType: 'review.action-started',
+    createdAt: '2026-11-23T10:00:00.000Z', eventData: JSON.stringify({ schemaVersion: 1,
+      ...(repositoryId === null ? {} : { repositoryId }),
+      missionId: id, changeIdentity: 'rev', action: 'agent', correlation: `c-${repositoryId}-${actionSequence}`,
+      actionSequence, configuredLimit: 40, failureReason: actionSequence === 40
+        ? { version: 1, code: 'review-action-limit', source: 'lifecycle' } : null,
+      idempotencyKey: `review-action:${repositoryId}:${id}:${actionSequence}`, recordedAt: '2026-11-23T10:00:00.000Z' }) });
+  const history = new ScopedActionHistoryRepo([action(repo, 2), action(null, 3), action('repo-b', 40)]);
+  try {
+    const builder = composeBoardProjection({ rootDir, missionStore: store, repositoryId: repo,
+      blocklistRepo: new MockBlocklistRepo(), historyRepo: history, laneEventRepo: new MockLaneEventRepo(),
+      usageRepo: new MockUsageRepo(), knownAgentFamilies: [], launcherProbe: () => ({ available: true, detail: null }),
+      readAgentConfig: () => null, detectRunningSessions: () => null, gitFn: () => ({ status: 0, stdout: '', stderr: '' }),
+      gateEvidence: { readDeclaredGates: async () => ({ checkout: { kind: 'absent' }, gates: [] }),
+        readIntegrationGates: async () => ({ checkout: { kind: 'absent' }, configured: [], gates: [], running: null }) } }).builder;
+    const card = (await builder.build()).stages.flatMap(stage => stage.cards).find(value => value.id === id);
+    assert.deepEqual(card?.reviewActions, { used: 3, limit: 40, limitHit: null });
+    assert.ok(history.scopedReads.some(read => read.types.includes('review.action-started')
+      && read.repositoryId === repo && read.missionIds.length === 1 && read.missionIds[0] === id),
+    'the card read is bounded by repository and its owned Mission population');
+  } finally { fs.rmSync(rootDir, { recursive: true, force: true }); }
 });
 
 test('board FLOW retains recovered returns outside its cached analytical event families (TASK-2836 F1)', async () => {

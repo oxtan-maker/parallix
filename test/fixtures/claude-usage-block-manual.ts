@@ -1,5 +1,7 @@
 /** Manual public CLI/browser exercise; no live provider or operator state.
- * Run: node --import tsx test/fixtures/claude-usage-block-manual.ts
+ * Run: node --import tsx test/fixtures/claude-usage-block-manual.ts [--overload]
+ * Default: Claude usage quota (hour-rounded reset block). --overload: structured 529
+ * overloaded_error (exact five-minute ISO provider-unavailable block).
  */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -23,6 +25,7 @@ const bin = path.join(root, 'bin');
 const clock = path.join(root, 'clock');
 const preload = path.join(root, 'clock.mjs');
 const cli = path.resolve('build/px.mjs');
+const overload = process.argv.includes('--overload');
 const slug = 'px-98026';
 const worktree = path.join(root, slug);
 const db = new SqliteDatabaseAdapter();
@@ -59,7 +62,11 @@ globalThis.Date = class extends NativeDate {
   fs.writeFileSync(path.join(bin, 'claude'), `#!/bin/sh
 if [ "$1" = --help ]; then echo 'installed Claude stub'; exit 0; fi
 echo claude >> '${root}/launches'
-echo 'You’ve hit your 5-hour limit · resets 10:50am (Europe/Stockholm)' >&2
+${overload
+    ? `echo '{"type":"result","is_error":true,"api_error_status":529,"api_error":"overloaded_error"}'
+echo 'API Error: 529 overloaded_error' >&2`
+    : `echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1793613000},"api_error_status":429,"api_error":"usage_limit_reached"}'
+echo 'You’ve hit your 5-hour limit · resets 10:50am (Europe/Stockholm)' >&2`}
 exit 1
 `, { mode: 0o755 });
   fs.writeFileSync(path.join(bin, 'opencode'), `#!/bin/sh
@@ -93,14 +100,27 @@ exit 0
     successCriteria: ['Retain payload'], completedSuccessCriteria: [0], declaredGates: ['./check.sh'], predictedNelBucket: 'Small',
     checkpoints: [{ missionId: fixtureMission(slug).id, name: 'CP-1', goalCheck: [{ criterion: 'Retain payload', evidence: 'payload.txt' }], nextActionText: 'review' }],
   }), null);
-  await command(['review', slug, '--max-attempts', '1']);
+  await command(['review', slug]);
+  const actionRows = await db.query<{ event_data: string }>(
+    "SELECT event_data FROM operational_history WHERE event_type = 'review.action-started' ORDER BY id",
+  );
+  const reviewActions = actionRows.map(row => JSON.parse(row.event_data) as { action: string; actionSequence: number });
+  assert.deepEqual(reviewActions.map(action => [action.actionSequence, action.action]),
+    [[1, 'agent'], [2, 'agent'], [3, 'repair'], [4, 'repair']],
+    'reviewer starts and the peer reviewer recovery launches share the lifetime durable counter');
   const launches = fs.readFileSync(path.join(root, 'launches'), 'utf8').trim().split('\n');
   assert.deepEqual(launches.slice(0, 2), ['claude', 'custom']);
   assert.equal(launches.filter(family => family === 'claude').length, 1);
   const blocks = new SqliteBlocklistRepository(db);
   const block = await blocks.findByAgent('claude');
-  assert.equal(block?.until, '2026-11-02 11'); assert.match(block.reason!, /^parsed:.*5-hour/);
-  console.log(JSON.stringify({ launches, block }));
+  // The frozen clock makes the overload expiry exact: 09:00+01:00 plus five minutes.
+  assert.equal(block?.until, overload ? '2026-11-02T08:05:00.000Z' : '2026-11-02 11');
+  assert.equal(block.reason, overload ? 'typed: provider-unavailable' : 'typed: agent-quota');
+  if (overload) {
+    const status = await command(['status', slug]);
+    assert.match(status.output, /claude: blocked until 2026-11-02T08:05:00\.000Z \(typed: provider-unavailable\)/);
+  }
+  console.log(JSON.stringify({ launches, reviewActions, block }));
   web = spawn(process.execPath, [cli, 'web', '--port', '0'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
   const origin = await new Promise<string>((resolve, reject) => {
     let output = '';
@@ -116,31 +136,29 @@ exit 0
   const page = await browser.newPage(); await page.goto(origin);
   const snapshot = async () => await (await fetch(`${origin}/api/board`)).json() as { agentAvailability: { family: string; available: boolean; reason: string | null; blockedFor: { ms?: number } }[] };
   const active = (await snapshot()).agentAvailability.find(item => item.family === 'claude')!;
-  assert.equal(active.available, false); assert.equal(active.reason, block.reason); assert.equal(active.blockedFor.ms, 7_200_000);
+  assert.equal(active.available, false); assert.equal(active.reason, block.reason); assert.equal(active.blockedFor.ms, overload ? 300_000 : 7_200_000);
   await page.getByTitle(block.reason!, { exact: true }).waitFor();
-  assert.match(await page.getByTitle(block.reason!, { exact: true }).innerText(), /blocked · 2h/);
+  assert.match(await page.getByTitle(block.reason!, { exact: true }).innerText(), overload ? /blocked · 5m/ : /blocked · 2h/);
   const openPicker = async () => {
     const button = page.locator(`article[data-board-card="${slug}"] button[aria-haspopup="menu"]`).first();
     await button.focus(); await button.press('ArrowDown');
   };
   await openPicker();
   const item = page.getByRole('menuitem').filter({ hasText: 'claude —' });
-  assert.equal(await item.isDisabled(), true); assert.match(await item.innerText(), /5-hour.*2h/);
+  assert.equal(await item.isDisabled(), true); assert.match(await item.innerText(), overload ? /provider-unavailable.*5m/ : /agent-quota.*2h/);
   console.log(JSON.stringify({ active, picker: await item.innerText() }));
   await page.keyboard.press('Escape');
-  fs.writeFileSync(clock, '2026-11-02T11:00:00+01:00');
+  fs.writeFileSync(clock, overload ? '2026-11-02T09:05:00+01:00' : '2026-11-02T11:00:00+01:00');
   await page.reload();
   // The subscription refreshes its existing projection on its normal poll.
   await page.waitForFunction(async () => {
-    const board = await (await fetch('/api/board')).json(); return board.agentAvailability.find((item: { family: string }) => item.family === 'claude').available;
+    const board = await (await fetch('/api/board')).json();
+    const item = board.agentAvailability.find((candidate: { family: string }) => candidate.family === 'claude');
+    return item?.available === true && item.reason === null && item.blockedFor.ms === 0;
   }, { timeout: 15_000 });
-  await page.reload(); await openPicker();
-  assert.equal(await item.isDisabled(), false); assert.equal(await item.innerText(), 'claude — available');
-  assert.equal(await page.getByTitle(block.reason!, { exact: true }).count(), 0);
-  const expired = (await snapshot()).agentAvailability.find(item => item.family === 'claude')!;
-  assert.equal(expired.reason, null); assert.equal(expired.blockedFor.ms, 0);
   assert.deepEqual(await blocks.findByAgent('claude'), block, 'expiry is interpreted without rewriting the stored row');
-  console.log(JSON.stringify({ expired, picker: await item.innerText(), result: 'PASS' }));
+  if (overload) { assert.match((await command(['status', slug])).output, /claude: available/); }
+  console.log(JSON.stringify({ expiry: 'available with no reason and zero blocked duration', result: 'PASS' }));
 } finally {
   await browser?.close();
   if (web && web.exitCode === null && web.signalCode === null) {

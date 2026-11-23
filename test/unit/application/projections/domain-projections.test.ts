@@ -688,7 +688,7 @@ test('repair-budget projection keeps absent, legacy, malformed and settled facts
   assert.equal(projectRepairBudget([checkpoint(repairRow(2, 2, true))]), null, 'verified repair history is not an active budget');
 });
 
-test('mission cards keep the review allowance and repair budget as separate server facts (TASK-2845)', () => {
+test('mission cards keep the repair budget fact and leave review actions unknown without recorded history (TASK-2845, TASK-2859.21)', () => {
   const mission = {
     id, repositoryId: repo, title: 'Repair budget', labels: missionLabels(['ai_sdlc']),
     status: 'review' as const, closedAt: null, assignee: null, review: null, netEngineeringLines: null,
@@ -697,6 +697,6 @@ test('mission cards keep the review allowance and repair budget as separate serv
   const card = projectMissionCard(mission, {
     latestGate: 'not-run', reviewApproval: null, currentWork: null, blockingReason: null, flags: [],
   });
-  assert.equal(card.reviewWindowAllowance, 5);
+  assert.equal(card.reviewActions, null);
   assert.deepEqual(card.repairBudget, { attemptsUsed: 2, maxAttempts: 2, exhausted: true });
 });

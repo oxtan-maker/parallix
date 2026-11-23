@@ -129,6 +129,16 @@ export function launchFailureAllowsReplacement(error: unknown): boolean {
     && !code.startsWith('provider-');
 }
 
+/** A typed quota result has no artifact to recover and retains the reviewer requirement. */
+export async function stopForQuotaLaunchResult(context: LoopContext, round: ReviewRound): Promise<boolean> {
+  const reason = recognizedFailureReason(round.reviewerLaunch?.result?.failureReason);
+  if (reason?.code !== 'agent-quota') { return false; }
+  const message = `Reviewer ${context.identities.reviewer} launch stopped with ${reason.code}.`;
+  context.emit({ kind: 'reviewer-launch-failed', reviewer: context.identities.reviewer, message });
+  await context.escalateToHumanReview('REVIEWER_LAUNCH_FAILURE');
+  return true;
+}
+
 /** A persisted requirement must follow newly evidenced unavailability on resume. */
 export async function refreshReviewerAvailability(state: Pick<ReviewStatePort, 'reviewerProgress' | 'replaceReviewer' | 'recordReviewerPolicy'>,
   routing: ReviewerRoutingPort, observed: ReviewLoopState, revision: string, changed?: (_policy: ReviewerPolicy) => void,

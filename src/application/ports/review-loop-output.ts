@@ -57,12 +57,12 @@ export type ReviewLoopEvent =
   | { readonly kind: 'review-pr-confirmed'; readonly id: string; readonly branch: string }
   | { readonly kind: 'local-provider' }
   | { readonly kind: 'review-resumed'; readonly round: number; readonly phase: ReviewPhase }
-  | { readonly kind: 'round-started'; readonly attempt: number; readonly maxAttempts: number }
+  | { readonly kind: 'round-started'; readonly attempt: number; readonly actionLimit: number }
   | { readonly kind: 'review-reset'; readonly slug: string }
   | { readonly kind: 'reviewer-escalated'; readonly reason: string }
   | { readonly kind: 'approved-round-correction'; readonly slug: string; readonly round: number; readonly diagnostic?: string }
   | { readonly kind: 'approved-round-revoked'; readonly slug: string; readonly round: number; readonly operator: string }
-  | { readonly kind: 'attempts-exhausted'; readonly maxAttempts: number }
+  | { readonly kind: 'action-limit-reached'; readonly count: number; readonly limit: number }
   | { readonly kind: 'controller-active'; readonly slug: string }
   | { readonly kind: 'local-review'; readonly attempt: number }
   | { readonly kind: 'review-probe'; readonly attempt: number; readonly reviewer: string; readonly startedAt: string }
@@ -113,7 +113,7 @@ export type ReviewLoopEvent =
   | { readonly kind: 'agent-fallback'; readonly role: 'reviewer' | 'implementer'; readonly original: string; readonly fallback: string }
   | { readonly kind: 'assignee-failed'; readonly fallback: string }
   | { readonly kind: 'controller-superseded'; readonly slug: string; readonly boundary: string; readonly round: number; readonly phase: ReviewPhase }
-  | { readonly kind: 'review-started'; readonly slug: string; readonly implementer: string; readonly reviewer: string; readonly branch: string; readonly focus: string; readonly maxAttempts: number; readonly intervalMs: number; readonly timeoutMs: number; readonly verbose: boolean; readonly dryRun: boolean }
+  | { readonly kind: 'review-started'; readonly slug: string; readonly implementer: string; readonly reviewer: string; readonly branch: string; readonly focus: string; readonly actionLimit: number; readonly intervalMs: number; readonly timeoutMs: number; readonly verbose: boolean; readonly dryRun: boolean }
   | { readonly kind: 'review-verdict'; readonly disposition: string | null; readonly findings: readonly { id: string; summary: string }[]; readonly verbose: boolean; readonly round?: number }
   | { readonly kind: 'agent-selection'; readonly outcome: 'nominated' | 'skipped-blocked' | 'launch-failed' | 'fallback'; readonly fields: { agent?: string; step: 'review'; reason?: string; retry?: boolean; error?: string } }
   | { readonly kind: 'recovery-progress'; readonly channel: 'log' | 'error'; readonly diagnostic: string };

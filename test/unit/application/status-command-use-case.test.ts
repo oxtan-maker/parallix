@@ -166,6 +166,7 @@ describe('StatusCommandUseCase and status rendering', () => {
         { agent: 'codex', block: { kind: 'none' } },
         { agent: 'qwen', block: { kind: 'indefinite', reason: 'quota' } },
         { agent: 'vibe', block: { kind: 'until', untilMs: Date.parse('2026-09-24T00:00:00.000Z'), reason: null } },
+        { agent: 'claude', block: { kind: 'until', untilMs: Date.parse('2026-11-23T09:48:00.000Z'), reason: 'typed: provider-unavailable' } },
       ],
       agentOverride: 'codex',
       lastThreeCommits: [],
@@ -176,6 +177,7 @@ describe('StatusCommandUseCase and status rendering', () => {
     assert.ok(lines.some(l => l.includes('codex: available')), 'should render an unblocked agent');
     assert.ok(lines.some(l => l.includes('qwen: blocked (quota)')), 'should render an indefinite block with its reason');
     assert.ok(lines.some(l => l.includes('vibe: blocked until 2026-09-24T00:00:00.000Z')), 'should render a timed block');
+    assert.ok(lines.some(l => l.includes('claude: blocked until 2026-11-23T09:48:00.000Z (typed: provider-unavailable)')), 'should render a sub-hour provider-unavailable expiry (TASK-2871)');
     assert.ok(lines.some(l => l.includes('WORKFLOW_AGENT override:')), 'should render env override');
   });
 

@@ -19,15 +19,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { caseRoot } from '../../fixtures/case-root.js';
+import { initCommittedRepository } from '../../fixtures/git-repository.js';
 import { inMemoryOperationalHistory } from '../../fixtures/operational-history.js';
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { cleanupRunnerTempRoots } from '../../lib/test-runner-temp-roots.js';
+import { checkoutTestTmpdir, retireFixtureCheckoutTmpdir } from '../../lib/test-tmpdir.js';
 import { ensureCheckoutCache, readCheckoutCacheOwner } from '../../../src/adapters/verification/checkout-cache.js';
 import { recoverRecordedTempRoots } from '../../../src/adapters/verification/temp-root-registry.js';
 import { probeProcessLiveness, processStartIdentity } from '../../../src/adapters/process/process-liveness.js';
 
 const testRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const fixtureUrl = (file: string) => pathToFileURL(path.join(testRoot, 'fixtures', file)).href;
+const testLibUrl = (file: string) => pathToFileURL(path.join(testRoot, 'lib', file)).href;
 
 function hardKillFixtureEnv(overrides: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = { ...process.env, ...overrides };
@@ -46,6 +49,7 @@ import fs from 'node:fs';
 const { caseRoot } = await import(${JSON.stringify(fixtureUrl('case-root.ts'))});
 const { initCommittedRepository } = await import(${JSON.stringify(fixtureUrl('git-repository.ts'))});
 const { openMigratedMissionStore } = await import(${JSON.stringify(fixtureUrl('mission-sqlite-store.ts'))});
+const { checkoutTestTmpdir } = await import(${JSON.stringify(testLibUrl('test-tmpdir.ts'))});
 let built = [];
 // Runs after the case and its t.after hooks, before the worker's exit sweep.
 test.after(() => {
@@ -57,9 +61,10 @@ test('probe', async (t) => {
   const owned = caseRoot('lifetime-probe-');
   t.after(() => owned.dispose());
   initCommittedRepository(owned.root);
+  const cache = checkoutTestTmpdir(owned.root);
   const migrated = await openMigratedMissionStore();
   t.after(() => migrated.close());
-  built = [owned.root, migrated.root];
+  built = [owned.root, migrated.root, cache];
   fs.writeFileSync(process.env.LIFETIME_REPORT, JSON.stringify(built));
   if (process.env.LIFETIME_MODE === 'failure') { assert.fail('deliberate probe failure'); }
   if (process.env.LIFETIME_MODE === 'hang') { await new Promise(() => setInterval(() => {}, 1_000)); }
@@ -115,7 +120,7 @@ function startProbe(mode: 'success' | 'failure' | 'hang'): Probe {
 }
 
 function assertReclaimed(roots: readonly string[]) {
-  assert.equal(roots.length, 2);
+  assert.equal(roots.length, 3);
   for (const root of roots) { assert.equal(fs.existsSync(root), false, `${root} was not reclaimed`); }
 }
 
@@ -196,11 +201,46 @@ test('TASK-2622.04: builders return independent case-owned state', () => {
   assert.equal(fs.existsSync(b.root), false);
 });
 
+test('TASK-2865.01: disposing a direct fixture checkout retires its cache', t => {
+  const checkout = caseRoot('lifetime-cache-checkout-');
+  initCommittedRepository(checkout.root);
+  const cache = checkoutTestTmpdir(checkout.root);
+  t.after(() => fs.rmSync(cache, { recursive: true, force: true }));
+  assert.equal(fs.existsSync(cache), true, 'the fixture checkout creates its stable sibling cache');
+
+  checkout.dispose();
+
+  assert.equal(fs.existsSync(cache), false, 'fixture teardown retires its matching checkout cache');
+});
+
+test('TASK-2865.01: fixture retirement preserves an active linked-checkout cache', t => {
+  const repositoryRoot = caseRoot('lifetime-linked-repository-');
+  const scratch = caseRoot('lifetime-linked-checkout-');
+  t.after(() => repositoryRoot.dispose());
+  t.after(() => scratch.dispose());
+  const repository = initCommittedRepository(repositoryRoot.root);
+  const linkedCheckout = path.join(scratch.root, 'linked');
+  repository.git('branch', 'linked-cache-control');
+  repository.git('worktree', 'add', linkedCheckout, 'linked-cache-control');
+  t.after(() => {
+    if (fs.existsSync(linkedCheckout)) { repository.git('worktree', 'remove', '--force', linkedCheckout); }
+  });
+  const cacheBase = path.join(scratch.root, 'cache');
+  fs.mkdirSync(cacheBase);
+  const cache = checkoutTestTmpdir(linkedCheckout, cacheBase);
+  fs.writeFileSync(path.join(cache, 'warm-entry'), 'warm');
+
+  assert.equal(retireFixtureCheckoutTmpdir(linkedCheckout, cacheBase), false,
+    'fixture retirement defers linked worktrees to their real checkout owner');
+  assert.equal(fs.readFileSync(path.join(cache, 'warm-entry'), 'utf8'), 'warm',
+    'the active linked checkout keeps its warm isolated cache');
+});
+
 test('TASK-2622.04: a passing case disposes its root, repository and database', async () => {
   const probe = startProbe('success');
   const roots = await probe.roots;
   assert.deepEqual(await probe.exited, { code: 0, signal: null });
-  assert.deepEqual(probe.disposedBeforeExit(), [true, true], 'dispose/close ran at the end of the case');
+  assert.deepEqual(probe.disposedBeforeExit(), [true, true, true], 'dispose/close ran at the end of the case');
   assertReclaimed(roots);
 });
 
@@ -208,7 +248,7 @@ test('TASK-2622.04: a failing case still disposes its fixtures', async () => {
   const probe = startProbe('failure');
   const roots = await probe.roots;
   assert.deepEqual(await probe.exited, { code: 1, signal: null });
-  assert.deepEqual(probe.disposedBeforeExit(), [true, true], 'dispose/close ran despite the failed assertion');
+  assert.deepEqual(probe.disposedBeforeExit(), [true, true, true], 'dispose/close ran despite the failed assertion');
   assertReclaimed(roots);
 });
 
@@ -256,19 +296,21 @@ test('TASK-2853: a SIGKILLed disposable stand-in cache is reclaimed after its co
     await new Promise(resolve => setTimeout(resolve, 10));
     owner = readCheckoutCacheOwner(abandonedCache);
   }
-  const children = owner?.owner.children ?? [];
+  assert.ok(owner, 'the cache retains its durable runner owner before forced termination');
+  const children = owner.owner.children ?? [];
   assert.equal(children.length, 1, 'the cache durably records its suite consumer before forced termination');
   forced.kill('SIGKILL');
   assert.equal((await forced.exited).signal, 'SIGKILL');
   for (const child of children) {
     try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGKILL'); } catch (_) {}
   }
+  const processes = [owner.owner, ...children];
   for (let attempt = 0; attempt < 200
-    && children.some(child => probeProcessLiveness(child.pid, child.startId) !== false); attempt++) {
+    && processes.some(identity => probeProcessLiveness(identity.pid, identity.startId) !== false); attempt++) {
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  assert.ok(children.every(child => probeProcessLiveness(child.pid, child.startId) === false),
-    'forced suite consumers are confirmed dead before recovery');
+  assert.ok(processes.every(identity => probeProcessLiveness(identity.pid, identity.startId) === false),
+    'the forced runner and its suite consumers are confirmed dead before recovery');
   forced.checkout.dispose();
 
   const activeControl = caseRoot('lifetime-runner-active-control-');

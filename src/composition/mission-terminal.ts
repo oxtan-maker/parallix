@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import type { WorkflowOperationRecord as WorkflowOperation } from '../application/ports/workflow-operation.js';
 import type { ParallixConfiguration } from "../application/ports/configuration.js";
 import { randomUUID } from 'node:crypto';
+import { constants as osConstants } from 'node:os';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { missionId } from '../domain/mission.js';
 import { resolveCanonicalRepositoryId } from '../adapters/git/repository-identity.js';
@@ -13,12 +14,16 @@ import { resolveConfiguredCredentialRedactor } from '../application/recovery-evi
 import type { RunSource } from '../application/run-history-types.js';
 import { loadAdapterConfig, resolveCanonicalRepositoryRoot } from '../adapters/config/product-config.js';
 import { terminalHostConfig } from '../adapters/config/terminal-host-config.js';
+import type { TerminalHostConfig } from '../adapters/config/terminal-host-config.js';
+import type { TerminalHostAvailability } from '../application/ports/terminal-host-selection.js';
+import { selectTerminalHost, selectionAfterLaunchFailure } from '../application/ports/terminal-host-selection.js';
 import { inferSlug, isMissionSlugCandidate, resolveWorktree } from '../adapters/filesystem/mission-utils.js';
 import { missionRepositoryKey } from '../adapters/filesystem/mission-repository-key.js';
 import { openRunCapture, correlateRunOperation } from '../adapters/filesystem/run-history-store.js';
 import type { RunCapture } from '../adapters/filesystem/run-history-store.js';
 import { missionTerminalRequest } from '../interfaces/cli/mission-terminal-policy.js';
 import { missionSocketPath, prepareTmuxLaunch, probeTmux, reconcileOrphanSessions, superviseTmuxLaunch } from '../adapters/process/tmux-host.js';
+import type { TmuxLaunch, TmuxLaunchExit } from '../adapters/process/tmux-host.js';
 import type { CliInvocation } from '../adapters/process/cli-invocation.js';
 import { observeTmuxLaunchExecution } from '../adapters/process/tmux-launch-execution.js';
 
@@ -40,10 +45,10 @@ function operationIdentity(command: string, args: string[], target: string): { s
 }
 
 /** Open the operation's retained, redacted history record; capture never blocks the command. */
-function openOperationCapture(worktree: string, identity: OpenRunCaptureInput['identity'], runId: string, configuration: ParallixConfiguration, tmuxSocketPath: string | null, log: (_line: string) => void): RunCapture | null {
+function openOperationCapture(worktree: string, identity: OpenRunCaptureInput['identity'], runId: string, configuration: ParallixConfiguration, tmuxSocketPath: string | null, log: (_line: string) => void, hostFallbackReason: string | null = null): RunCapture | null {
   try {
     return openRunCapture({
-      worktree, identity, runId, captureKind: 'coordinator', terminalHost: tmuxSocketPath ? 'tmux' : 'pipe', tmuxSocketPath,
+      worktree, identity, runId, captureKind: 'coordinator', terminalHost: tmuxSocketPath ? 'tmux' : 'pipe', hostFallbackReason, tmuxSocketPath,
       redactor: resolveConfiguredCredentialRedactor(configuration.runtime.credentialRedactor),
     });
   } catch (error) {
@@ -52,70 +57,141 @@ function openOperationCapture(worktree: string, identity: OpenRunCaptureInput['i
   }
 }
 
-function finishOperation(capture: RunCapture | null, exitCode: number | null, source: RunSource, omissions: string[]): void {
-  try { capture?.finish({ exitCode, signal: null, sources: [source], omissions }); } catch { /* the record stays `running` and reads as interrupted */ }
+function finishOperation(capture: RunCapture | null, result: TmuxLaunchExit, source: RunSource, omissions: string[]): void {
+  try { capture?.finish({ ...result, sources: [source], omissions }); } catch { /* the record stays `running` and reads as interrupted */ }
 }
 
-/** Composition supplies the process host; workflow policy stays in the child CLI. */
-export async function hostMissionCommand(command: string, args: string[], target: string, log: (_line: string) => void, cli: CliInvocation, options: { interactive?: boolean; configuration: ParallixConfiguration }): Promise<number | null> {
-  // Owned workflows host their executor, while this foreground process
-  // remains the signal and replay boundary.
-  if (!shouldHostForeground(command, args, options.interactive)) { return null; }
+function numericExit(result: TmuxLaunchExit): number {
+  if (result.exitCode !== null) { return result.exitCode; }
+  const number = result.signal ? osConstants.signals[result.signal] : undefined;
+  return number ? 128 + number : 1;
+}
+
+interface HostMissionOptions {
+  readonly interactive?: boolean;
+  readonly configuration: ParallixConfiguration;
+  /** Receives the reason the pipe host took over, so the pipe-executed operation's record carries it. */
+  readonly onPipeFallback?: (_reason: string) => void;
+  /** tmux probe seam; unit tests pass a double so they never run tmux. */
+  readonly probe?: () => TerminalHostAvailability;
+  /** Supervision seam; unit tests pass a double so a prepared launch never runs tmux. */
+  readonly supervise?: typeof superviseTmuxLaunch;
+}
+
+/** Select the terminal host; `false` means the pipe host runs the operation, after reporting why. */
+function isHosted(config: TerminalHostConfig, slug: string, socketPath: string, log: (_line: string) => void, options: HostMissionOptions): boolean {
   const configuration = options.configuration;
-  const operation = operationIdentity(command, args, target);
-  if (!operation || configuration.terminal.missionTerminal === operation.slug) { return null; }
-  const { slug, worktree, identity, terminal, runId } = operation;
-  const config = terminalHostConfig(loadAdapterConfig(worktree));
-  if (config.host === 'pipe') { return null; }
-  if (!terminalHostReady(config, probeTmux(), log)) { return null; }
-  reconcileOrphanSessions(terminal, { allRoles: true, configuration });
-  const socketPath = missionSocketPath(terminal, configuration);
-  if (configuration.terminal.tmux?.startsWith(`${socketPath},`)) {
-    return null;
+  const selection = selectTerminalHost({
+    config,
+    inherited: configuration.terminal.missionTerminal === slug || Boolean(configuration.terminal.tmux?.startsWith(`${socketPath},`)),
+    interactive: options.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    probe: options.probe ?? probeTmux,
+  });
+  if (selection.kind === 'refused') { throw new Error(`Terminal host unavailable: ${selection.reason}`); }
+  if (selection.kind === 'hosted') { return true; }
+  if (selection.kind === 'pipe' && selection.reason) {
+    options.onPipeFallback?.(selection.reason);
+    if (selection.notify) { log(`tmux terminal host unavailable (${selection.reason}); running through the pipe host.`); }
   }
-  let launch;
-  try { launch = prepareTmuxLaunch({
-    identity: terminal, runId, spawnIndex: 0, command: cli.command, args: [...cli.args, command, ...args], cwd: worktree,
-    env: { ...configuration.forwardedEnvironment, PARALLIX_MISSION_TERMINAL: slug, PARALLIX_MISSION_SOCKET: socketPath, PARALLIX_OPERATION_CAPTURE: runId, PARALLIX_TERMINAL_RETURN_DIR: resolveCanonicalRepositoryRoot(worktree) },
-  }, { configuration }); } catch (error) {
-    if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw error; }
-    // An unsafe transcript destination is actionable even when pipe hosting takes over.
-    log(`Mission terminal unavailable; running through the pipe host: ${(error as Error).message}`);
-    return null;
-  }
-  log(`Mission terminal: px attach ${slug} (detach with Ctrl-b d).`);
-  // The supervisor records every pane byte of the operation, attached or not.
-  const capture = openOperationCapture(worktree, identity, runId, configuration, socketPath, log);
-  capture?.addTmuxSession(launch.sessionName);
-  const stopObservation = observeTmuxLaunchExecution(launch, (pid, identity) => capture?.observeExecution(pid, identity));
-  let result: number;
-  try {
-    result = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => { try { capture?.write(stream, chunk); } catch { /* keep the command running */ } } });
-  } finally { stopObservation(); }
-  finishOperation(capture, result, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, review preparation and review messages (stderr merged by the terminal)`, complete: true },
-    launch.started() ? [] : ['The operation did not start in the terminal; it may run through the pipe host as a separate operation.']);
-  return hostedMissionResult(launch, result, config);
-}
-
-function shouldHostForeground(command: string, args: readonly string[], interactive?: boolean): boolean {
-  const owned = command === 'draft' || command === 'integrate'
-    || command === 'review' && ['enter', 'submit'].includes(reviewOperation(args));
-  return !owned && (interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY));
-}
-
-function terminalHostReady(config: ReturnType<typeof terminalHostConfig>, probe: ReturnType<typeof probeTmux>, log: (_line: string) => void): boolean {
-  if (probe.available) { return true; }
-  if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw new Error(`Terminal host unavailable: ${probe.reason}`); }
-  if (config.host !== 'auto') { log(`tmux terminal host unavailable (${probe.reason}); running through the pipe host.`); }
   return false;
 }
 
-function hostedMissionResult(launch: ReturnType<typeof prepareTmuxLaunch>, result: number, config: ReturnType<typeof terminalHostConfig>): number | null {
-  if (!launch.started() && result === 70) {
-    if (config.host === 'tmux' && config.whenUnavailable === 'fail') { throw new Error('Terminal host failed before the command started.'); }
+/** Composition supplies the process host; workflow policy stays in the child CLI. */
+export async function hostMissionCommand(command: string, args: string[], target: string, log: (_line: string) => void, cli: CliInvocation, options: HostMissionOptions): Promise<number | null> {
+  // Owned workflows host their executor, while this foreground process
+  // remains the signal and replay boundary.
+  if (isOwnedWorkflow(command, args)) { return null; }
+  const configuration = options.configuration;
+  const operation = operationIdentity(command, args, target);
+  if (!operation) { return null; }
+  const { slug, worktree, identity, terminal, runId } = operation;
+  const config = terminalHostConfig(loadAdapterConfig(worktree));
+  const result = await runHostedOperation({
+    config, configuration, identity: terminal, runId, cwd: worktree, command: cli.command, args: [...cli.args, command, ...args],
+    ...(options.supervise ? { supervise: options.supervise } : {}),
+    extraEnv: { PARALLIX_TERMINAL_RETURN_DIR: resolveCanonicalRepositoryRoot(worktree) },
+    select: socketPath => isHosted(config, slug, socketPath, log, options),
+    // An unsafe transcript destination is actionable even when pipe hosting takes over; a command that never started only records the reason.
+    onPipeHandover: (reason, phase) => {
+      if (phase === 'prepare') { log(`Mission terminal unavailable; running through the pipe host: ${reason}`); }
+      options.onPipeFallback?.(reason);
+    },
+    onPrepared: socketPath => {
+      log(`Mission terminal: px attach ${slug} (detach with Ctrl-b d).`);
+      // The supervisor records every pane byte of the operation, attached or not.
+      return openOperationCapture(worktree, identity, runId, configuration, socketPath, log);
+    },
+    finish: (capture, exit, started) => finishOperation(capture, exit, { kind: 'terminal-bytes', path: 'stdout', covers: `everything the hosted ${command} operation drew in its terminal pane: harness, preflight, gates, agent output, review preparation and review messages (stderr merged by the terminal)`, complete: true },
+      started ? [] : ['The operation did not start in the terminal; it may run through the pipe host as a separate operation.']),
+  });
+  return result === null ? null : numericExit(result);
+}
+
+/** What differs per caller; everything else about hosting one operation in tmux is shared. */
+interface HostedOperation {
+  readonly config: TerminalHostConfig;
+  readonly configuration: ParallixConfiguration;
+  readonly identity: NativeMissionTerminalIdentity & { readonly role: string };
+  readonly runId: string;
+  readonly cwd: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly extraEnv?: Readonly<Record<string, string>>;
+  /** Applies the shared selection policy to the resolved socket; `false` means the caller already handed the operation to the pipe host. */
+  readonly select: (_socketPath: string) => boolean;
+  /** The launch failed before the command started and the pipe host takes over; `prepare` failures never created a session. */
+  readonly onPipeHandover: (_reason: string, _phase: 'prepare' | 'start') => void;
+  /** Open the caller's capture contract for the prepared launch; capture never blocks the command. */
+  readonly onPrepared: (_socketPath: string, _launch: TmuxLaunch) => RunCapture | null;
+  /** Supervision seam; defaults to the native supervisor. */
+  readonly supervise?: typeof superviseTmuxLaunch;
+  /** Close a capture the lifecycle opened; callers whose capture is closed elsewhere omit it. */
+  readonly finish?: (_capture: RunCapture | null, _exit: TmuxLaunchExit, _started: boolean) => void;
+}
+
+/**
+ * Host one mission operation in tmux: resolve the socket, select the host,
+ * reconcile orphans, prepare the launch, open capture, observe the immutable
+ * execution identity, relay supervised output, finish and clean up. Returns
+ * the operation's structured exit, or `null` when the pipe host must run it (it
+ * never started here). A command that started is never replayed.
+ */
+async function runHostedOperation(operation: HostedOperation): Promise<TmuxLaunchExit | null> {
+  const { config, configuration, identity, runId } = operation;
+  const socketPath = missionSocketPath(identity, configuration);
+  if (!operation.select(socketPath)) { return null; }
+  reconcileOrphanSessions(identity, { allRoles: true, configuration });
+  let launch: TmuxLaunch;
+  try {
+    launch = prepareTmuxLaunch({
+      identity, runId, spawnIndex: 0, command: operation.command, args: [...operation.args], cwd: operation.cwd,
+      env: { ...configuration.forwardedEnvironment, PARALLIX_MISSION_TERMINAL: identity.missionId, PARALLIX_MISSION_SOCKET: socketPath, PARALLIX_OPERATION_CAPTURE: runId, ...operation.extraEnv },
+    }, { configuration });
+  } catch (error) {
+    const failed = selectionAfterLaunchFailure(config, (error as Error).message);
+    if (failed.kind === 'refused') { throw error; }
+    operation.onPipeHandover(failed.reason, 'prepare');
     return null;
   }
-  return result;
+  const capture = operation.onPrepared(socketPath, launch);
+  capture?.addTmuxSession(launch.sessionName);
+  const stopObservation = observeTmuxLaunchExecution(launch, (pid, processIdentity) => capture?.observeExecution(pid, processIdentity));
+  let exit: TmuxLaunchExit;
+  try {
+    exit = await (operation.supervise ?? superviseTmuxLaunch)(launch, { onOutput: (stream, chunk) => { try { capture?.write(stream, chunk); } catch { /* keep the command running */ } } });
+  } finally { stopObservation(); }
+  const started = launch.started();
+  operation.finish?.(capture, exit, started);
+  if (started || exit.exitCode !== 70 || exit.signal !== null) { return exit; }
+  const failed = selectionAfterLaunchFailure(config, 'Terminal host failed before the command started');
+  if (failed.kind === 'refused') { throw new Error(failed.reason); }
+  operation.onPipeHandover(failed.reason, 'start');
+  return null;
+}
+
+function isOwnedWorkflow(command: string, args: readonly string[]): boolean {
+  return command === 'draft' || command === 'integrate'
+    || command === 'review' && ['enter', 'submit'].includes(reviewOperation(args));
 }
 
 type Write = typeof process.stdout.write;
@@ -136,11 +212,11 @@ function tee(stream: NodeJS.WriteStream, name: 'stdout' | 'stderr', capture: Run
  * (TASK-2749). A hosted operation's supervisor already records it, so the child
  * it hosts does not record itself a second time.
  */
-export async function captureMissionCommand(command: string, args: string[], target: string, configuration: ParallixConfiguration, run: () => Promise<number>): Promise<number> {
+export async function captureMissionCommand(command: string, args: string[], target: string, configuration: ParallixConfiguration, run: () => Promise<number>, hostFallbackReason: string | null = null): Promise<number> {
   if (configuration.terminal.operationCapture) { return run(); }
   const operation = operationIdentity(command, args, target);
   if (!operation) { return run(); }
-  const capture = openOperationCapture(operation.worktree, operation.identity, operation.runId, configuration, null, () => {});
+  const capture = openOperationCapture(operation.worktree, operation.identity, operation.runId, configuration, null, () => {}, hostFallbackReason);
   if (!capture) { return run(); }
   const restore = [tee(process.stdout, 'stdout', capture), tee(process.stderr, 'stderr', capture)];
   let exitCode: number | null = null;
@@ -149,7 +225,7 @@ export async function captureMissionCommand(command: string, args: string[], tar
     return exitCode;
   } finally {
     restore.forEach(undo => undo());
-    finishOperation(capture, exitCode, { kind: 'terminal-bytes', path: 'stdout', covers: `what the ${command} operation printed through this process (stdout and stderr kept apart)`, complete: false },
+    finishOperation(capture, { exitCode, signal: null }, { kind: 'terminal-bytes', path: 'stdout', covers: `what the ${command} operation printed through this process (stdout and stderr kept apart)`, complete: false },
       ['Output a child process wrote straight to the terminal (for example a gate run with inherited stdio) bypasses this process and is not captured in pipe execution.']);
   }
 }
@@ -169,9 +245,9 @@ export function correlateMissionCapture(checkout: string, configuration: Paralli
 
 /** Headless hosting uses the same native resolver and capture machinery as CLI. */
 export async function hostWorkflowExecutor(cli: CliInvocation, operation: WorkflowOperation, root: string, runId: string,
-  capture: RunCapture, configuration: ParallixConfiguration): Promise<WorkflowExecutorExit> {
+  capture: RunCapture, configuration: ParallixConfiguration, probe?: () => TerminalHostAvailability, supervise?: typeof superviseTmuxLaunch): Promise<WorkflowExecutorExit> {
   const args = [...cli.args, '--workflow-execute', operation.id, root];
-  const hosted = await hostWorkflowTerminal(cli, args, operation, root, runId, capture, configuration);
+  const hosted = await hostWorkflowTerminal(cli, args, operation, root, runId, capture, configuration, probe, supervise);
   if (hosted) { return hosted; }
   capture.setTerminalHost?.('pipe', null);
   const child = spawn(cli.command, args, { cwd: root, env: { ...configuration.forwardedEnvironment, PARALLIX_OPERATION_CAPTURE: runId }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -184,26 +260,27 @@ export async function hostWorkflowExecutor(cli: CliInvocation, operation: Workfl
 interface WorkflowExecutorExit { readonly exitCode: number | null; readonly signal: string | null; }
 
 async function hostWorkflowTerminal(cli: CliInvocation, args: readonly string[], operation: WorkflowOperation, root: string,
-  runId: string, capture: RunCapture, configuration: ParallixConfiguration): Promise<WorkflowExecutorExit | null> {
+  runId: string, capture: RunCapture, configuration: ParallixConfiguration, probe: () => TerminalHostAvailability = probeTmux, supervise?: typeof superviseTmuxLaunch): Promise<WorkflowExecutorExit | null> {
   const policy = terminalHostConfig(loadAdapterConfig(root));
-  if (policy.host === 'pipe' || operation.invocation?.interactive === false) { return null; }
-  const required = policy.host === 'tmux' && policy.whenUnavailable === 'fail';
-  const probe = probeTmux();
-  if (!probe.available) {
-    if (required) { throw new Error(`Terminal host unavailable: ${probe.reason}`); }
-    return null;
-  }
-  const identity = { repositoryKey: missionRepositoryKey(root), missionId: operation.missionId, role: operation.command.split(':')[0] };
-  const socket = missionSocketPath(identity, configuration);
-  let launch;
-  try {
-    launch = prepareTmuxLaunch({ identity, runId, spawnIndex: 0, command: cli.command, args, cwd: root,
-      env: { ...configuration.forwardedEnvironment, PARALLIX_MISSION_TERMINAL: operation.missionId, PARALLIX_MISSION_SOCKET: socket, PARALLIX_OPERATION_CAPTURE: runId } }, { configuration });
-  } catch (error) { if (required) { throw error; } return null; }
-  capture.setTerminalHost?.('tmux', socket);
-  capture.addTmuxSession(launch.sessionName);
-  const exitCode = await superviseTmuxLaunch(launch, { onOutput: (stream, chunk) => capture.write(stream, chunk) });
-  if (launch.started() || exitCode !== 70) { return { exitCode, signal: null }; }
-  if (required) { throw new Error('Terminal host failed before the workflow started'); }
-  return null;
+  const exit = await runHostedOperation({
+    config: policy, configuration, runId, cwd: root, command: cli.command, args, ...(supervise ? { supervise } : {}),
+    identity: { repositoryKey: missionRepositoryKey(root), missionId: operation.missionId, role: operation.command.split(':')[0] },
+    select: () => {
+      // The executor is hosted for the retained mission console whether or not a caller TTY exists; attaching stays the operator's TTY-conditional choice.
+      const selection = selectTerminalHost({ config: policy, inherited: false, interactive: true, probe });
+      if (selection.kind === 'refused') { throw new Error(`Terminal host unavailable: ${selection.reason}`); }
+      if (selection.kind === 'hosted') { return true; }
+      pipeFallback(capture, selection.kind === 'pipe' ? selection.reason : null);
+      return false;
+    },
+    onPipeHandover: reason => pipeFallback(capture, reason),
+    // The supervisor that opened this capture finishes it, including after a pipe handover.
+    onPrepared: socketPath => { capture.setTerminalHost?.('tmux', socketPath); return capture; },
+  });
+  return exit;
+}
+
+/** The pipe host takes over; a reason it was not the terminal host is recorded once in the coordinator transcript. */
+function pipeFallback(capture: RunCapture, reason: string | null): void {
+  if (reason) { capture.write('stdout', Buffer.from(`Terminal host unavailable (${reason}); running through the pipe host.\n`)); }
 }

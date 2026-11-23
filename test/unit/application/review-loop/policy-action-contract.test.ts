@@ -37,24 +37,23 @@ function storeFor(mission: Mission) {
 function reviewing(): Mission { return fixtureMission(SLUG, { status: 'review', assignee: agentFamily('codex'), review: repeatReview() }); }
 
 function scripted(selections: Array<'agent' | 'human' | 'tests' | null>, outcome: () => PolicyTestsOutcome,
-  rebaseInProgress = () => false, spent: () => number = () => 0) {
+  rebaseInProgress = () => false) {
   const calls = { select: [] as unknown[], tests: 0, reselect: undefined as undefined | ((_revision: string) => Promise<boolean>) };
   const queue = [...selections];
   const actions: PolicyActionPort = {
     select: async facts => { calls.select.push(facts); return { action: queue.length > 1 ? queue.shift()! : queue[0] ?? null, failure: null }; },
     runTests: async reselect => { calls.tests += 1; calls.reselect = reselect; return outcome(); },
-    testsActionsSpent: async () => spent(),
     rebaseInProgress,
   };
   return { actions, calls };
 }
 
-function loop(actions: PolicyActionPort | undefined, mission = reviewing(), maxAttempts = 3, operatorInvocation = false, humanFeedback?: NonNullable<Parameters<typeof fakeReviewLoopPorts>[0]>['humanFeedback']) {
+function loop(actions: PolicyActionPort | undefined, mission = reviewing(), actionLimit = 40, operatorInvocation = false, humanFeedback?: NonNullable<Parameters<typeof fakeReviewLoopPorts>[0]>['humanFeedback']) {
   const fake = fakeReviewLoopPorts({
     slug: SLUG, ...(humanFeedback ? { humanFeedback } : {}), missionStore: storeFor(mission), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }), ...(actions ? { policyActions: actions } : {}),
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
-  const run = () => runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts,
+  const run = () => runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit,
     skipReviewPreparation: true, operatorInvocation }, fake.ports);
   return { fake, run };
 }
@@ -102,7 +101,7 @@ test('escalation, repair, human intervention, rebase conflict and dry-run make n
   const dry = scripted(['tests'], () => passed);
   const fake = fakeReviewLoopPorts({ slug: SLUG, missionStore: storeFor(reviewing()), policyActions: dry.actions,
     state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }) });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 2, dryRun: true,
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 40, dryRun: true,
     skipReviewPreparation: true }, fake.ports);
   assert.deepEqual([dry.calls.select.length, dry.calls.tests], [0, 0], 'dry-run');
 });
@@ -126,17 +125,6 @@ test('every non-pass tests exit returns to a typed human handoff, never a silent
   }
 });
 
-test('checks that fail or pass forever end within the existing review allowance (TASK-2859.19)', async () => {
-  for (const verdict of ['failed', 'passed'] as const) {
-    const { actions, calls } = scripted(['tests'], () => ({ kind: 'completed', verdict }));
-    const { fake, run } = loop(actions, reviewing(), 5);
-    await run();
-    assert.equal(calls.tests, 5, `${verdict}: one tests action per attempt of the allowance, no more`);
-    assert.equal(fake.current()?.disposition, 'MAX_ATTEMPTS');
-    assert.equal(fake.launches.length, 0);
-  }
-});
-
 test('a failed tests action selected again returns to policy without entering repair (TASK-2867.05)', async () => {
   const outcomes: PolicyTestsOutcome[] = [
     { kind: 'completed', verdict: 'failed', retryWithoutRepair: true },
@@ -150,7 +138,6 @@ test('a failed tests action selected again returns to policy without entering re
     'the passing re-run returned to the selected agent check without an implementer repair');
   assert.equal(fake.current()?.phase, 'approved');
 });
-
 test('a restart after an interrupted tests action rederives the next action from recorded history (TASK-2859.19)', async () => {
   const interrupted = scripted(['tests'], () => ({ kind: 'human-handoff', reason: 'interrupted', detail: 'killed mid-run' }));
   const first = loop(interrupted.actions);
@@ -163,49 +150,6 @@ test('a restart after an interrupted tests action rederives the next action from
   assert.equal(resumed.calls.tests, 1);
   assert.equal(second.fake.current()?.phase, 'approved');
   assert.deepEqual(second.fake.launches.map(launch => launch.role), ['reviewer']);
-});
-
-test('the allowance a restart sees is the durable count of tests actions, so it cannot restore the budget (TASK-2859.19)', async () => {
-  let started = 4;
-  const { actions, calls } = scripted(['tests'], () => { started += 1; return { kind: 'completed', verdict: 'failed' }; }, () => false, () => started);
-  const { fake, run } = loop(actions, reviewing(), 5);
-  await run();
-  assert.equal(calls.tests, 1, 'four durable tests actions leave one attempt of five');
-  assert.equal(fake.current()?.disposition, 'MAX_ATTEMPTS');
-  const exhausted = scripted(['tests'], () => passed, () => false, () => 5);
-  const none = loop(exhausted.actions, reviewing(), 5);
-  await none.run();
-  assert.equal(exhausted.calls.tests, 0, 'a fully spent allowance runs no further tests action after a restart');
-});
-
-test('tests actions spent before a continuation window do not consume the window the operator opened (px-0074)', async () => {
-  const spent = scripted(['agent'], () => passed, () => false, () => 5);
-  const fake = fakeReviewLoopPorts({
-    slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex', round: 6, phase: 'reviewing' }),
-    policyActions: spent.actions,
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
-  });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 10, isContinue: true, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
-  assert.notEqual(fake.current()?.disposition, 'MAX_ATTEMPTS', 'five earlier tests actions leave the round 6..10 window intact');
-  assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer']);
-});
-
-test('a continuation resumed at round 1 after the window was spent by tests actions opens a fresh window (px-0074)', async () => {
-  const spent = scripted(['agent'], () => passed, () => false, () => 5);
-  const fake = fakeReviewLoopPorts({
-    slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
-    policyActions: spent.actions,
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
-  });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 5, isContinue: true, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
-  assert.notEqual(fake.current()?.disposition, 'MAX_ATTEMPTS', 'five tests actions spent at round 1 do not consume the resumed window');
-  assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer']);
-  // The same durable count on a first entry, which is not a continuation, stays spent.
-  const first = scripted(['agent'], () => passed, () => false, () => 5);
-  const none = loop(first.actions, reviewing(), 5);
-  await none.run();
-  assert.equal(none.fake.current()?.disposition, 'MAX_ATTEMPTS');
-  assert.equal(none.fake.launches.length, 0);
 });
 
 test('a pending human change request is routed before any policy action and is not consumed by it (TASK-2859.19)', async () => {
@@ -231,16 +175,6 @@ test('the tests action re-asks the policy on the rebased head (TASK-2859.19)', a
   assert.deepEqual(calls.select[before], { missionId: SLUG, revision: 'rebased-head' });
 });
 
-test('an unreadable allowance history leaves the fixed policy in charge instead of failing the loop (TASK-2859.19)', async () => {
-  const { actions, calls } = scripted(['tests'], () => passed);
-  const broken: PolicyActionPort = { ...actions, testsActionsSpent: async () => { throw new Error('history unavailable'); } };
-  const { fake, run } = loop(broken);
-  await run();
-  assert.deepEqual([calls.select.length, calls.tests], [0, 0], 'no policy action runs without the durable count');
-  assert.ok(fake.errors.some(line => line.includes('history-unavailable')), 'the typed reason is reported');
-  assert.equal(fake.current()?.phase, 'approved', 'the fixed round still ran');
-});
-
 test('a rebase that changes the recommendation sends the round back to the policy before any reviewer launches (TASK-2859.19)', async () => {
   const { actions, calls } = scripted(['agent', 'tests', 'tests', 'agent'], () => passed);
   const { fake, run } = loop(actions);
@@ -251,7 +185,28 @@ test('a rebase that changes the recommendation sends the round back to the polic
   const flapping = scripted(['agent', 'tests'], () => ({ kind: 'not-selected' }));
   const bounded = loop(flapping.actions, reviewing(), 5);
   await bounded.run();
-  assert.ok(flapping.calls.select.length < 40, 'a recommendation that keeps flipping still ends within the allowance');
+  assert.ok(flapping.calls.select.length < 40, 'a recommendation that keeps flipping still reaches the lifetime action limit');
+});
+
+test('post-setup selection cannot replan after the fixed-sequence decision closes (TASK-2859.20 review)', async () => {
+  const completed = fixtureMission(SLUG, { status: 'done', assignee: agentFamily('codex'), review: repeatReview() });
+  let missionReads = 0;
+  const policy = scripted(['tests'], () => passed);
+  const fake = fakeReviewLoopPorts({
+    slug: SLUG,
+    missionStore: { load: async () => ({ kind: 'found' as const,
+      mission: missionReads++ === 0 ? reviewing() : completed, version: missionVersion(1) }) } as never,
+    state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
+    policyActions: policy.actions,
+  });
+
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 1,
+    skipReviewPreparation: true }, fake.ports);
+
+  assert.equal(policy.calls.select.length, 0,
+    'both selectors defer to the closed fixed-sequence decision instead of entering an uncounted replan loop');
+  assert.deepEqual(fake.stops, ['action limit 1 reached'], 'the next review-step action remains the termination owner');
+  assert.deepEqual(fake.launches, [], 'the boundary action is recorded without launching its mechanism');
 });
 
 test('a direct operator command overrides the policy and runs no policy-selected tests (TASK-2859.19)', async () => {
@@ -274,7 +229,7 @@ test('a transient selection failure survives later successful re-selections unti
     agents: { launch: async launch => { await launch.onStarted?.({ agent: launch.agent, runId: 'run-1' }); return { agent: launch.agent, result: { status: 0 } }; } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
   assert.equal(observed[0]?.actualAction, 'agent');
   assert.deepEqual(observed[0]?.selectionFailure, failure, 'the post-setup selection did not clear the earlier failure');
   assert.equal(observed[1]?.selectionFailure ?? null, null, 'it is carried once, to the next start only');
@@ -293,7 +248,7 @@ test('a failed selection followed by a replan to tests is not recorded against t
     agents: { launch: async launch => { await launch.onStarted?.({ agent: launch.agent, runId: 'run-1' }); return { agent: launch.agent, result: { status: 0 } }; } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 4, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
   assert.equal(base.calls.tests, 1, 'the replan ran the policy-selected tests once');
   assert.equal(observed.length > 0 && observed.every(facts => (facts.selectionFailure ?? null) === null), true,
     'no fixed action ran under the failed selection, so no start record names it');
@@ -317,7 +272,7 @@ test('an approved agent round returns to the policy, which dispatches the select
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     task: { mirrorApproved: async () => { order.push('mirror-approved'); } },
   });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, skipReviewPreparation: true }, fake.ports);
   assert.deepEqual(order, ['agent', 'tests', 'human', 'mirror-approved'], 'the tests ran after the approval and before the human turn and the lane mirror');
   assert.equal(base.calls.tests, 1, 'the selected action is dispatched exactly once');
   assert.equal(starts.find(start => start.actualAction === 'tests')?.gateRunId, 'gate-1', 'a gate run was recorded for the tests action');
@@ -325,39 +280,23 @@ test('an approved agent round returns to the policy, which dispatches the select
   assert.equal(fake.current()?.disposition, 'APPROVED', 'the agent approval stays the only verdict; none is fabricated for the human');
 });
 
-test('after an approval a spent allowance dispatches no further tests and a restart never repeats a completed action (PX-0074.01)', async () => {
-  let started = 0;
-  const forever = scripted(['agent', 'agent', 'tests'], () => { started += 1; return passed; }, () => false, () => started);
-  const bounded = loop(forever.actions, reviewing(), 3);
+test('after approval a completed policy action is not repeated on restart (PX-0074.01)', async () => {
+  const forever = scripted(['agent', 'agent', 'tests'], () => passed);
+  const bounded = loop(forever.actions, reviewing(), 4);
   await bounded.run();
   assert.equal(forever.calls.tests, 1, 'a policy that keeps choosing tests after the approval still dispatches the completed action once');
   assert.deepEqual(bounded.fake.mirrors.filter(lane => lane === 'approved'), ['approved'], 'the human turn then begins once');
-  assert.notEqual(bounded.fake.current()?.disposition, 'MAX_ATTEMPTS');
+  assert.equal(bounded.fake.current()?.disposition, 'APPROVED');
   // A restart over the approved round sees the recorded history, which no longer recommends tests: nothing is dispatched again.
-  const restarted = scripted(['human'], () => passed, () => false, () => 1);
+  const restarted = scripted(['human'], () => passed);
   const approved = new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' });
   approved.transitionTo('approved');
   approved.disposition = 'APPROVED';
   const again = fakeReviewLoopPorts({ slug: SLUG, missionStore: storeFor(reviewing()), state: approved, policyActions: restarted.actions });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, isContinue: true, skipReviewPreparation: true }, again.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, isContinue: true, skipReviewPreparation: true }, again.ports);
   assert.equal(restarted.calls.tests, 0, 'a completed action is not re-dispatched on restart');
   assert.equal(again.launches.length, 0, 'no second reviewer ran for the already approved round');
   assert.deepEqual(again.mirrors.filter(lane => lane === 'approved'), ['approved']);
-});
-
-test('an allowance spent by the time the agent approves dispatches no tests and ends in MAX_ATTEMPTS after the hand-off (PX-0074.01)', async () => {
-  let started = 0;
-  const base = scripted(['agent', 'agent', 'tests'], () => passed, () => false, () => started);
-  const fake = fakeReviewLoopPorts({
-    slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
-    policyActions: base.actions,
-    agents: { launch: async launch => { started = 3; return { agent: launch.agent, result: { status: 0 } }; } },
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
-  });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true }, fake.ports);
-  assert.equal(base.calls.tests, 0);
-  assert.equal(fake.current()?.disposition, 'MAX_ATTEMPTS');
-  assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), ['approved'], 'the approval still reaches its human turn');
 });
 
 test('a tests action that ends in a handoff or cancellation still begins the human turn of the approval (PX-0074.01)', async () => {
@@ -377,24 +316,10 @@ test('a tests action that ends in a handoff or cancellation still begins the hum
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
       task: { mirrorApproved: async () => { order.push('mirror-approved'); } },
     });
-    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, skipReviewPreparation: true }, fake.ports);
     assert.deepEqual(order, ['agent', 'human', 'mirror-approved'], JSON.stringify(outcome));
     assert.equal(base.calls.tests, 1);
   }
-});
-
-test('a post-approval tests action that consumes the final attempt ends in MAX_ATTEMPTS after the hand-off (PX-0074.01)', async () => {
-  let started = 2;
-  const base = scripted(['agent', 'agent', 'tests'], () => { started += 1; return passed; }, () => false, () => started);
-  const fake = fakeReviewLoopPorts({
-    slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
-    policyActions: base.actions,
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
-  });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true }, fake.ports);
-  assert.equal(base.calls.tests, 1, 'the last allowed attempt still ran');
-  assert.equal(fake.current()?.disposition, 'MAX_ATTEMPTS');
-  assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), ['approved'], 'the approval still reaches its human turn');
 });
 
 // Six passing orders of agent review, human review and integration tests (PX-0074.02).
@@ -521,7 +446,7 @@ async function runPassingOrder(row: PassingOrder) {
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
       task: { mirrorApproved: async () => { effects.mirrors.push('approved'); } },
     });
-    await runReviewLoop({ slug: SLUG, implementer: ORDER_IMPLEMENTER, reviewer: ORDER_REVIEWER, maxAttempts: 4, skipReviewPreparation: true, isContinue }, fake.ports);
+    await runReviewLoop({ slug: SLUG, implementer: ORDER_IMPLEMENTER, reviewer: ORDER_REVIEWER, actionLimit: 4, skipReviewPreparation: true, isContinue }, fake.ports);
     assert.deepEqual(fake.errors, [], row.order.join('>'));
     return fake;
   };
@@ -590,8 +515,8 @@ function repairing(verdicts: Verdict[], base: ReturnType<typeof scripted>, extra
     preReview: { head: () => `head-${head}` },
     ...extra,
   });
-  const run = (maxAttempts = 4, operatorInvocation = false) => runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude',
-    maxAttempts, skipReviewPreparation: true, operatorInvocation }, fake.ports);
+  const run = (actionLimit = 40, operatorInvocation = false) => runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude',
+    actionLimit, skipReviewPreparation: true, operatorInvocation }, fake.ports);
   return { fake, run, resolutions };
 }
 
@@ -639,7 +564,7 @@ test('human changes requested records the operator correction, repairs before an
       consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' }) },
     preReview: { head: () => `head-${head}` },
   });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 4, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, skipReviewPreparation: true }, fake.ports);
   assert.deepEqual(events.slice(0, 3), ['record:operator', 'acknowledge', 'implementer'], 'the correction is durable and acknowledged before the repair launches');
   assert.equal(events.filter(event => event === 'implementer').length, 1, 'the repair is dispatched once');
   assert.equal(events.indexOf('reviewer') > events.indexOf('implementer'), true, 'no reviewer ran ahead of the correction');
@@ -648,8 +573,7 @@ test('human changes requested records the operator correction, repairs before an
 });
 
 test('a failed integration-test check is dispatched once by the loop and returns to the decision owner (PX-0074.03)', async () => {
-  let started = 0;
-  const base = scripted(['tests', 'agent'], () => { started += 1; return { kind: 'completed', verdict: 'failed' }; }, () => false, () => started);
+  const base = scripted(['tests', 'agent'], () => ({ kind: 'completed', verdict: 'failed' }), () => false);
   const { fake, run } = repairing(['APPROVED'], base);
   await run(5);
   // The repair itself belongs to the tests action owner (the rebound kernel behind runTests); its own
@@ -698,7 +622,7 @@ test('an approval recorded for another round is stale and never reaches the huma
       consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'PUSHBACK_ALL' }) },
   });
   launched = () => fake.launches.length > 0;
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 2, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 2, skipReviewPreparation: true }, fake.ports);
   assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), [], 'a previous round approval is not this round outcome');
   assert.ok(fake.launches.some(launch => launch.role === 'reviewer'), 'the current round still ran its own reviewer');
 });
@@ -709,7 +633,7 @@ test('a rebase that moves the head re-evaluates the decision on the new identity
     const calls = { select: [] as string[], tests: 0 };
     const actions: PolicyActionPort = { select: async facts => { calls.select.push(facts.revision);
       return { action: facts.revision === changed && calls.tests === 0 ? 'tests' : 'agent', failure: null }; },
-    runTests: async () => { calls.tests += 1; rebased.head = 'head-2'; return passed; }, testsActionsSpent: async () => 0, rebaseInProgress: () => false };
+    runTests: async () => { calls.tests += 1; rebased.head = 'head-2'; return passed; }, rebaseInProgress: () => false };
     return { actions, calls };
   };
   rebased.head = 'head-1';
@@ -718,7 +642,7 @@ test('a rebase that moves the head re-evaluates the decision on the new identity
     state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
     preReview: { head: () => rebased.head, rebase: async () => { rebased.head = 'head-2'; return { ok: true as const }; } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) } });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 4, skipReviewPreparation: true }, changed.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, skipReviewPreparation: true }, changed.ports);
   assert.ok(moved.calls.select.includes('head-2'), 'the rebased change identity was evaluated');
   assert.equal(moved.calls.tests, 1, 'the new identity owed the tests check, which ran before any reviewer launched');
   assert.equal(changed.launches[0]?.role, 'reviewer');
@@ -731,7 +655,7 @@ test('a rebase that moves the head re-evaluates the decision on the new identity
     state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
     preReview: { head: () => rebased.head, rebase: async () => ({ ok: true as const }) },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) } });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 4, skipReviewPreparation: true }, unchanged.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, skipReviewPreparation: true }, unchanged.ports);
   assert.equal(same.calls.tests, 0, 'a same-identity rebase dispatches nothing new');
   assert.deepEqual(unchanged.launches.map(launch => launch.role), ['reviewer'], 'the existing pass stands: one review, no replan');
   assert.deepEqual(unchanged.mirrors.filter(lane => lane === 'approved'), ['approved']);
@@ -762,13 +686,13 @@ function realPolicyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
 /** The real selector and start recorder drive the real loop; only the mechanisms are fakes. */
 async function runWithRealPolicy(policy: ReturnType<typeof realPolicyPorts>, operatorInvocation: boolean) {
   const actions: PolicyActionPort = { select: facts => selectPolicyAction(facts, policy.ports),
-    runTests: async () => ({ kind: 'not-selected' }), testsActionsSpent: async () => 0, rebaseInProgress: () => false };
+    runTests: async () => ({ kind: 'not-selected' }), rebaseInProgress: () => false };
   const fake = fakeReviewLoopPorts({ slug: SLUG, missionStore: storeFor(reviewing()), policyActions: actions,
     state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
     reviewStarts: { observe: async facts => { await observePolicyReviewStart(facts, policy.ports); } },
     agents: { launch: async launch => { await launch.onStarted?.({ agent: launch.agent, runId: 'run-1' }); return { agent: launch.agent, result: { status: 0 } }; } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) } });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true, operatorInvocation }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 3, skipReviewPreparation: true, operatorInvocation }, fake.ports);
   return fake;
 }
 
@@ -801,7 +725,7 @@ test('an explicit operator override of the recommendation is recorded and the re
       reviewStarts: { observe: async facts => { await observePolicyReviewStart(facts, shadow.ports); } },
       agents: { launch: async launch => { await launch.onStarted?.({ agent: launch.agent, runId: 'run-1' }); return { agent: launch.agent, result: { status: 0 } }; } },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) } });
-    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 3, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
+    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 3, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
     return fake;
   })();
   const agentRow = shadow.records.find(record => record.actualAction === 'agent');
@@ -811,13 +735,14 @@ test('an explicit operator override of the recommendation is recorded and the re
   assert.equal(overridden.current()?.phase, 'approved');
 });
 
-test('negative verdicts that never clear end in MAX_ATTEMPTS rather than looping (PX-0074.03)', async () => {
+test('negative verdicts that never clear stop at the lifetime action limit (PX-0074.03)', async () => {
   const base = scripted(['agent'], () => passed);
   const { fake, run } = repairing(['REQUEST_CHANGES'], base);
-  await run(3);
-  assert.equal(fake.current()?.disposition, 'MAX_ATTEMPTS');
-  assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 3, 'one reviewer per allowed attempt');
-  assert.equal(fake.launches.filter(launch => launch.role === 'implementer').length, 3);
+  await run(5);
+  assert.deepEqual(fake.stops, ['action limit 5 reached']);
+  assert.equal(fake.current()?.metadata.humanEscalationReason, 'action limit 5 reached');
+  assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 2);
+  assert.equal(fake.launches.filter(launch => launch.role === 'implementer').length, 2);
   assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), []);
 });
 
@@ -863,7 +788,7 @@ test('a restart on a round recorded as fixing repairs once and never re-runs the
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }),
       consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'CHANGES_MADE' }) },
     preReview: { head: () => `head-${head}` } });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 4, isContinue: true, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, isContinue: true, skipReviewPreparation: true }, fake.ports);
   assert.deepEqual(fake.launches.map(launch => launch.role), ['implementer', 'reviewer'], 'the recorded negative verdict is repaired, not re-reviewed');
 });
 
@@ -880,8 +805,7 @@ test('a recorded human-intervention blocker stops the entry with no decision, la
 
 test('a check that fails after the agent approval is repaired once, then the approval reaches its human turn exactly once (PX-0074.03)', async () => {
   const order: string[] = [];
-  let started = 0;
-  const base = scripted(['agent', 'agent', 'tests', 'human'], () => { started += 1; return { kind: 'completed', verdict: 'failed' }; }, () => false, () => started);
+  const base = scripted(['agent', 'agent', 'tests', 'human'], () => ({ kind: 'completed', verdict: 'failed' }), () => false);
   const { fake, run } = repairing(['APPROVED'], base, {
     reviewStarts: { observe: async facts => { order.push(facts.actualAction); } },
     task: { mirrorApproved: async () => { order.push('mirror-approved'); } },

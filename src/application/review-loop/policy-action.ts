@@ -2,6 +2,7 @@ import { missionId } from '../../domain/mission.js';
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import type { PolicyTestsOutcome } from '../ports/verification-policy.js';
 import type { LoopContext, ReviewRound } from './round.js';
+import { startReviewAction } from './action-limit.js';
 
 /**
  * How a policy-selected integration-test action ended for the loop:
@@ -37,6 +38,7 @@ export async function runPolicyTestsAction(context: LoopContext): Promise<Policy
   context.selectionFailure ??= selection.failure;
   context.selectedAction = selection.action;
   if (selection.action !== 'tests') { return 'none'; }
+  if (!await startReviewAction(context, 'tests', `tests:${revision}:${context.actionCount + 1}`, revision)) { return 'stop'; }
   const reselect = async (head: string) => {
     const again = await actions.select({ missionId: missionId(slug), revision: head });
     context.selectionFailure ??= again.failure;
@@ -60,16 +62,6 @@ async function humanCorrectionPending(context: LoopContext): Promise<boolean> {
   if (context.reconciledFeedback === undefined) { context.reconciledFeedback = await context.ports.humanFeedback.reconcile(context.state); }
   const feedback = context.reconciledFeedback;
   return feedback?.disposition === 'REQUEST_CHANGES' && feedback.state === 'current';
-}
-
-/** Tests actions already started for this Mission, from durable records; zero without a policy port, null when the history cannot be read. */
-export async function testsActionsSpent(context: LoopContext): Promise<number | null> {
-  try { return await context.ports.policyActions?.testsActionsSpent() ?? 0; }
-  catch (error) {
-    // The durable count is unavailable: the fixed policy continues and no policy action may run unbounded.
-    context.ports.output.error(`Policy actions disabled for ${context.slug} (history-unavailable): ${error instanceof Error ? error.message : String(error)}`);
-    return null;
-  }
 }
 
 /** Only a live review-entry action the fixed sequence itself owns is open to a policy decision. */
@@ -108,7 +100,7 @@ export async function testsPreferredAfterSetup(context: LoopContext, round: Revi
   const actions = context.ports.policyActions;
   // A tests choice the executor already declined is not asked again; a conflicted rebase makes no decision.
   if (!actions || context.policyDisabled || context.dryRun || context.operatorInvocation || !round.verifiedRevision
-    || context.selectedAction === 'tests' || actions.rebaseInProgress()) { return false; }
+    || context.selectedAction === 'tests' || actions.rebaseInProgress() || !await decisionIsOpen(context)) { return false; }
   const selection = await actions.select({ missionId: missionId(context.slug), revision: round.verifiedRevision });
   context.selectionFailure ??= selection.failure;
   return selection.action === 'tests';

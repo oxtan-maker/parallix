@@ -14,6 +14,8 @@ import type { IntegrateStateMapPort, IntegrateWorkflowPorts } from '../ports/int
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import { completeCurrentTestsPass } from './tests-action.js';
 import { abortWith } from './support.js';
+import { missionId } from '../../domain/mission.js';
+import { actionLimitDetail } from '../review-loop/action-limit.js';
 
 export interface RecoveryDecision {
   established: boolean;
@@ -265,6 +267,67 @@ function eligibleIntegrationShortcut(evidence: CapturedIntegrationShortcutEviden
     && evidence.head !== null && evidence.reviewedRevision !== null;
 }
 
+async function handOffIntegrationShortcut(context: IntegrationContext, missionServices: IntegrationMissionServices,
+  ports: IntegrateWorkflowPorts, reason: string, revision: string, reviewedRevision: string): Promise<never> {
+  let handoff: Awaited<ReturnType<IntegrateWorkflowPorts['review']['requestHumanIntervention']>>;
+  try {
+    handoff = await ports.review.requestHumanIntervention(context.slug, reason, {
+      executionContext: context.executionContext,
+      missionServices,
+      revision,
+      reviewedRevision,
+    });
+  } catch (error) {
+    throw abortWith(ports.landing,
+      `Human approval was not submitted for ${context.slug}: ${reason}.`,
+      `Human attention could not be persisted: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+  if (!handoff.ok) {
+    throw abortWith(ports.landing,
+      `Human approval was not submitted for ${context.slug}: ${reason}.`,
+      `Human attention could not be persisted: ${handoff.diagnostic ?? 'review-state writer refused the handoff'}.`);
+  }
+  throw abortWith(ports.landing,
+    `Human approval was not submitted for ${context.slug}: ${reason}. Human attention was recorded.`);
+}
+
+async function startIntegrationShortcutHumanAction(context: IntegrationContext,
+  missionServices: IntegrationMissionServices, ports: IntegrateWorkflowPorts,
+  revision: string, reviewedRevision: string, repositoryId: string): Promise<void> {
+  const history = missionServices.reviewActions;
+  const unavailable = (detail: string) => handOffIntegrationShortcut(context, missionServices, ports,
+    `ACTION_HISTORY_UNAVAILABLE: ${detail}`, revision, reviewedRevision);
+  if (!history) { return await unavailable('operational review action history unavailable'); }
+
+  const limit = ports.productConfig.resolveReviewActionLimit(context.missionWorktree);
+  let count: number;
+  try {
+    count = await history.countReviewActions(context.slug, repositoryId);
+  } catch (error) {
+    return await unavailable(error instanceof Error ? error.message : String(error));
+  }
+  if (count >= limit) {
+    return await handOffIntegrationShortcut(context, missionServices, ports, actionLimitDetail(limit), revision, reviewedRevision);
+  }
+
+  let started: Awaited<ReturnType<NonNullable<IntegrationMissionServices['reviewActions']>['recordReviewAction']>>;
+  try {
+    started = await history.recordReviewAction({
+      repositoryId,
+      missionId: missionId(context.slug),
+      changeIdentity: revision,
+      action: 'human',
+      correlation: `integrate-shortcut:${reviewedRevision}:${revision}:${count + 1}`,
+      configuredLimit: limit,
+    });
+  } catch (error) {
+    return await unavailable(error instanceof Error ? error.message : String(error));
+  }
+  if (started.actionSequence >= limit) {
+    return await handOffIntegrationShortcut(context, missionServices, ports, actionLimitDetail(limit), revision, reviewedRevision);
+  }
+}
+
 async function submitIntegrationShortcutApproval(context: IntegrationContext, missionServices: IntegrationMissionServices,
   ports: IntegrateWorkflowPorts, revision: string, reviewedRevision: string): Promise<Awaited<ReturnType<IntegrateWorkflowPorts['review']['submitApproval']>>> {
   try {
@@ -311,6 +374,8 @@ export async function approveEligibleIntegrationShortcut(context: IntegrationCon
     throw abortWith(ports.landing, shortcutRefusal(context.slug, evidence.head,
       evidence.agentReviewCurrent, evidence.testsConfigured, evidence.testsCurrent, evidence.action));
   }
+  await startIntegrationShortcutHumanAction(context, missionServices, ports,
+    evidence.head, evidence.reviewedRevision, mission.repositoryId);
   const submitted = await submitIntegrationShortcutApproval(context, missionServices, ports,
     evidence.head, evidence.reviewedRevision);
   if (!submitted.ok) {

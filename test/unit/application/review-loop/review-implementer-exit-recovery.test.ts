@@ -39,7 +39,7 @@ function missingOutput(events: string[], options: { missionStore?: MissionStore;
   });
 }
 
-const request = { slug: 'task-2623', implementer: 'claude', reviewer: 'codex', maxAttempts: 1 };
+const request = { slug: 'task-2623', implementer: 'claude', reviewer: 'codex', actionLimit: 40 };
 
 test('task-2623: exited implementer with no protocol output recovers before provider disposition polling', async () => {
   const events: string[] = [];

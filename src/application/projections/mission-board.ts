@@ -7,9 +7,8 @@ import type { ProviderExecutionFacts } from './provider-execution.js';
 import { projectReviewHistory, type ReviewRoundSummary } from './review-history.js';
 import { effectiveRepairObligations } from '../../domain/repair-coverage.js';
 import { projectRepairBudget, type RepairBudgetFacts } from './repair-budget.js';
-import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
-export { projectReviewHistory } from './review-history.js';
-export type { ReviewRoundSummary } from './review-history.js';
+import type { ReviewActionFacts } from '../ports/review-action-history.js';
+export { projectReviewHistory, type ReviewRoundSummary };
 import type { AgentFamily } from '../../domain/agents.js';
 import { isPlannedCheckpoint, latestEvidencedCheckpoint, type CheckpointData, type GoalCheckRow } from '../../domain/checkpoint.js';
 import { isClosedMission, type Mission, type MissionId, type MissionLabel, type MissionStatus } from '../../domain/mission.js';
@@ -96,6 +95,8 @@ export interface MissionOperationalFacts {
   /** Whether the effective approval still covers the branch (TASK-2555); absent when not observed. */
   readonly approvalCoverage?: ApprovalCoverage | null;
   readonly ownedAction?: boolean;
+  /** Review actions used against the limit; absent when the recorded history was not read. */
+  readonly reviewActions?: ReviewActionFacts | null;
 }
 
 export interface CommandAvailability {
@@ -203,8 +204,8 @@ export interface MissionCard {
    * the card rather than living in the previous reviewer's context.
    */
   readonly reviewHistory: readonly ReviewRoundSummary[];
-  /** Autonomous attempts per review entry; never a validity bound on reviewRound. */
-  readonly reviewWindowAllowance?: number | null;
+  /** Lifetime review actions used against the configured limit; null when the history was not readable. */
+  readonly reviewActions?: ReviewActionFacts | null;
   /** Latest unresolved retained repair-attempt budget. */
   readonly repairBudget?: RepairBudgetFacts | null;
   readonly currentWork: LiveMissionWork | null;
@@ -483,7 +484,7 @@ function cardReview(mission: Mission, facts: MissionOperationalFacts, reviewedSu
     approvalCoverage: facts.approvalCoverage ?? null,
     reviewProgress: projectReviewProgress(mission, reviewActive, facts.blockingReason),
     reviewHistory: projectReviewHistory(mission.review),
-    reviewWindowAllowance: AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS,
+    reviewActions: facts.reviewActions ?? null,
     repairBudget: projectRepairBudget(mission.checkpoints),
   };
 }

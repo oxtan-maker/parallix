@@ -228,7 +228,7 @@ test('review loop preserves persisted round data when the reviewer identity chan
 
   // This regression covers the resume snapshot itself. Keep the loop on its
   // persisted round so it does not start a separate re-review cycle.
-  await runReviewLoop({ slug: 'task-1305-resume', isContinue: true, maxAttempts: 3, implementer: 'claude', reviewer: 'gemini' }, fake.ports);
+  await runReviewLoop({ slug: 'task-1305-resume', isContinue: true, actionLimit: 40, implementer: 'claude', reviewer: 'gemini' }, fake.ports);
   const writes = fake.writes;
 
   assert.deepEqual(fake.exits, []);

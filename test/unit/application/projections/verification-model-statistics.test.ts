@@ -5,9 +5,11 @@ import type { ReviewStartDecision, ReviewStartOutcome } from '../../../../src/ap
 import { modelSaving, verificationModelStatistics } from '../../../../src/application/projections/verification-model-statistics.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 import { renderVerificationModelStatistics } from '../../../../src/application/presentation/verification-statistics.js';
+import { REVIEW_ACTION_STARTED_EVENT, type ReviewActionStarted } from '../../../../src/application/ports/review-action-history.js';
 import { REVIEW_START_DECISION_EVENT } from '../../../../src/application/verification-policy/review-start-decision.js';
 import { REVIEW_START_OUTCOME_EVENT } from '../../../../src/application/verification-policy/review-start-outcome.js';
 import type { PolicyAction } from '../../../../src/application/verification-policy/policy-artifact.js';
+import { missionId as toMissionId } from '../../../../src/domain/mission.js';
 
 const REPO = 'repo-a';
 type Probabilities = ReviewStartDecision['predictedPassProbability'];
@@ -123,4 +125,48 @@ test('model statistics count only decisions recorded inside the report windows (
   const windowed = verificationModelStatistics(history, REPO, null, undefined, [window]).calibration.find(entry => entry.check === 'agent')!;
   assert.deepEqual([windowed.starts, windowed.observedPassRate], [1, 1], 'the earlier decision is outside the window');
   assert.equal(check(history, 'agent').starts, 2, 'no window means every recorded decision');
+});
+
+const action = (missionId: string, actionSequence: number, configuredLimit = 40,
+  repositoryId = REPO): OperationalHistoryEntry => row(REVIEW_ACTION_STARTED_EVENT, {
+  schemaVersion: 1, repositoryId, missionId: toMissionId(missionId), changeIdentity: 'rev', action: 'agent',
+  correlation: `c${actionSequence}`, actionSequence, configuredLimit,
+  failureReason: actionSequence >= configuredLimit ? { version: 1, code: 'review-action-limit', source: 'lifecycle' } : null,
+  idempotencyKey: `review-action:${missionId}:${actionSequence}`, recordedAt: '2026-10-01T00:00:00Z',
+} satisfies ReviewActionStarted);
+
+test('review actions are reported per Mission against the recorded limit with explicit limit hits (TASK-2859.21)', () => {
+  const history = [action('task-1', 1), action('task-1', 2), action('task-2', 1, 2), action('task-2', 2, 2), action('task-3', 40)];
+  const model = verificationModelStatistics(history, REPO, null);
+  assert.deepEqual(model.actions, [
+    { missionId: 'task-1', actionsUsed: 2, configuredLimit: 40, limitHits: 0 },
+    { missionId: 'task-2', actionsUsed: 2, configuredLimit: 2, limitHits: 1 },
+    { missionId: 'task-3', actionsUsed: 40, configuredLimit: 40, limitHits: 1 },
+  ]);
+  const lines = renderVerificationModelStatistics({ model } as never).join('\n');
+  assert.match(lines, /Review actions task-2: 2 of 2; limit hits 1/);
+  assert.match(lines, /Review actions task-1: 2 of 40; limit hits 0/);
+});
+
+test('review actions respect Mission scope, exclude unreadable rows and never report a Mission without actions as zero (TASK-2859.21)', () => {
+  const broken = { eventType: REVIEW_ACTION_STARTED_EVENT, eventData: '{not json', createdAt: '2026-10-01T00:00:00Z' };
+  const model = verificationModelStatistics([action('task-1', 1), action('task-9', 3), broken], REPO, null, new Set(['task-1', 'task-2']));
+  assert.deepEqual(model.actions.map(entry => entry.missionId), ['task-1'], 'task-2 recorded nothing, so it is absent rather than zero');
+  assert.equal(model.unreadableActionRows, 1);
+  assert.equal(model.unreadableRows, 0, 'the decision and outcome meaning of unreadable rows is unchanged');
+  assert.match(renderVerificationModelStatistics({ model } as never).join('\n'), /Unreadable action rows excluded: 1/);
+});
+
+test('review actions retain scoped legacy rows and exclude a foreign Mission-id collision (TASK-2859.21 F1, F3)', () => {
+  const current = action('px-0042', 3);
+  const { repositoryId: _repositoryId, ...legacyData } = JSON.parse(current.eventData) as ReviewActionStarted;
+  const legacy = { ...current, eventData: JSON.stringify(legacyData) };
+  const model = verificationModelStatistics([
+    action('px-0042', 2),
+    legacy,
+    action('px-0042', 40, 40, 'repo-b'),
+  ], REPO, null, new Set(['px-0042']));
+  assert.deepEqual(model.actions, [
+    { missionId: 'px-0042', actionsUsed: 3, configuredLimit: 40, limitHits: 0 },
+  ], 'a legacy row belongs to the scoped reader while a foreign hit cannot cross the repository boundary');
 });

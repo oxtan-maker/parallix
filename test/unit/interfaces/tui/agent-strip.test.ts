@@ -63,6 +63,16 @@ test('AgentStrip renders a red dot and countdown for a family blocked until a fu
   assert.ok(!frame.includes('wip:'), `the strip must not stand in board cards for sessions. Got: ${frame}`);
 });
 
+test('AgentStrip renders a five-minute provider-unavailable countdown (TASK-2871)', async () => {
+  const rows = projectAgentAvailability(
+    [{ family: agentFamily('claude'), launcherAvailable: true, block: { kind: 'until', untilMs: NOW_MS + 300_000, reason: 'typed: provider-unavailable' } }],
+    NOW_MS,
+  );
+  const frame = await renderStrip(rows);
+  assert.ok(frame.includes('5m'), `strip must render the sub-hour countdown. Got: ${frame}`);
+  assert.ok(frame.includes('claude'), `strip must name the blocked family. Got: ${frame}`);
+});
+
 /** Collect every `<Text>` node's color prop and rendered text from an element tree. */
 function textNodes(node: unknown, found: Array<{ color: unknown; text: string }> = []): Array<{ color: unknown; text: string }> {
   if (node === null || node === undefined || typeof node === 'boolean') { return found; }

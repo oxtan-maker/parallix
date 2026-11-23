@@ -14,8 +14,9 @@ export interface IntegrationVerificationEvidencePort {
     readonly missionId: MissionId;
     readonly operatorInvocation: boolean;
   }): Promise<{
+    /** Settles the run; resolves after any outward publication of the terminal result. */
     complete(_outcomes: readonly IntegrationGateEvidenceOutcome[],
-      _disposition: 'passed' | 'failed' | 'cancelled'): boolean;
+      _disposition: 'passed' | 'failed' | 'cancelled'): boolean | Promise<boolean>;
   } | null>;
 }
 

@@ -9,6 +9,7 @@ import { isRetainedRebaseOutcome, REBASE_OBSERVATION_STAGES } from '../../applic
 
 import { LANES, GATES, ACTION_STATES, CERTAINTIES, ATTENTION_REASONS, COMMAND_KINDS, isPlainObject, checkKeys, checkString, checkNullableString, checkBoolean, checkFiniteNumber, checkNullableFiniteNumber, checkEnum, checkStringArray, checkOptString, checkDuration } from './transport-validation-primitives.js';
 import { checkReviewProgress } from './review-progress-shape.js';
+import { checkReviewActions } from './review-actions-shape.js';
 
 
 export function checkCommandAction(object: unknown, path: string, problems: string[]): void {
@@ -159,13 +160,6 @@ export function checkProjectionFreshness(object: unknown, path: string, problems
   }
 }
 
-function checkReviewWindowAllowance(value: unknown, path: string, problems: string[]): void {
-  if (value === null) { return; }
-  if (!Number.isSafeInteger(value) || Number(value) < 1) {
-    problems.push(`${path} must be a whole positive attempt count or null`);
-  }
-}
-
 function checkRepairBudget(value: unknown, path: string, problems: string[]): void {
   if (value === null) { return; }
   if (!isPlainObject(value)) { problems.push(`${path} must be an object or null`); return; }
@@ -188,10 +182,10 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   checkKeys(object,
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'currentCheckpoint', 'checkpointEvidence', 'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewWindowAllowance', 'repairBudget', 'reviewProgress', 'humanReviewDue', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
+      'reviewDisposition', 'reviewRecovery', 'reviewHistory', 'reviewActions', 'repairBudget', 'reviewProgress', 'humanReviewDue', 'blockingReason', 'flags', 'activity', 'actions', 'execution'],
     ['id', 'title', 'lane', 'status', 'closed', 'agent', 'checkpoint', 'checkpointDescription',
       'nextActionText', 'gate', 'pullRequest', 'reviewApproved', 'reviewRound', 'reviewPhase',
-      'reviewDisposition', 'reviewHistory', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
+      'reviewDisposition', 'reviewHistory', 'reviewActions', 'blockingReason', 'flags', 'activity', 'actions'], path, problems);
   checkString(object, 'id', path, problems);
   checkString(object, 'title', path, problems);
   checkEnum(object, 'lane', LANES, path, problems);
@@ -232,11 +226,10 @@ export function checkMissionCard(object: unknown, path: string, problems: string
   } else {
     problems.push(`${path}.reviewHistory must be an array`);
   }
-  // The budget facts are optional-and-nullable: an omitted field means the
-  // snapshot predates them, and null means the server has no such fact.
-  if (Object.prototype.hasOwnProperty.call(object, 'reviewWindowAllowance')) {
-    checkReviewWindowAllowance(object.reviewWindowAllowance, `${path}.reviewWindowAllowance`, problems);
-  }
+  // Transport v5 always carries review actions; null means the server could not
+  // read them. Older snapshots are rejected by the transport-version check.
+  checkReviewActions(object.reviewActions, `${path}.reviewActions`, problems);
+  // The retained repair budget remains optional-and-nullable.
   if (Object.prototype.hasOwnProperty.call(object, 'repairBudget')) {
     checkRepairBudget(object.repairBudget, `${path}.repairBudget`, problems);
   }

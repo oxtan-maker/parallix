@@ -40,7 +40,7 @@ export class IntegrateCommandUseCase {
       if (exits.terminatedWith(error)) {
         const failed = exits.failure();
         if (failed === null) { await bestEffort(() => this._currentWork.ended(publication)); }
-        else { await bestEffort(() => this._currentWork.blocked(publication, `${publication.summary} exited with status ${failed}`)); }
+        else { await bestEffort(() => this._currentWork.blocked(publication, exitedMessage(publication.summary, failed, exits.reason()))); }
         throw error;
       }
       // A stop reason appears only when automation genuinely cannot continue.
@@ -51,7 +51,7 @@ export class IntegrateCommandUseCase {
     // Returning exit observers must not turn an unsuccessful workflow into success.
     const failed = exits.failure();
     if (failed !== null) {
-      const error = new Error(`${publication.summary} exited with status ${failed}`);
+      const error = new Error(exitedMessage(publication.summary, failed, exits.reason()));
       await bestEffort(() => this._currentWork.blocked(publication, error.message));
       throw error;
     }
@@ -63,6 +63,11 @@ export class IntegrateCommandUseCase {
   executeForSlug(slug: string): Promise<unknown> {
     return this.execute([slug], {});
   }
+}
+
+/** A failing exit keeps the concrete blocker the workflow named instead of only its status. */
+function exitedMessage(summary: string, status: number, reason: string | null): string {
+  return `${summary} exited with status ${status}${reason ? `: ${reason}` : ''}`;
 }
 
 async function bestEffort(publish: () => Promise<void>): Promise<void> {

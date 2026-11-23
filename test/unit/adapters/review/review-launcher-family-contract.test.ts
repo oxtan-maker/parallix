@@ -281,7 +281,7 @@ function routingOver(nominate: (_excluded: ReadonlySet<string>) => string, statu
 }
 
 function selectFor(implementer: string, routing: ReviewerRoutingPort, logs: string[]) {
-  return selectReviewer({ implementer, isContinue: false, persisted: null, maxAttempts: 1, dryRun: true, providerEnabled: false, slug: 'task-999' }, routing, reviewLoopReporter({ log: msg => logs.push(msg), error: msg => logs.push(msg) }));
+  return selectReviewer({ implementer, isContinue: false, persisted: null, dryRun: true, providerEnabled: false, slug: 'task-999' }, routing, reviewLoopReporter({ log: msg => logs.push(msg), error: msg => logs.push(msg) }));
 }
 
 test('review-loop reviewer selection excludes the author family (review-loop path)', () => {

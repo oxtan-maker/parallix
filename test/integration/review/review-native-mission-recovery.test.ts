@@ -237,7 +237,7 @@ async function driveStartTransition(
     output: { error: (msg: string) => { error.value = msg; }, exit: () => {} },
   });
   try {
-    await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: SLUG, implementer: 'claude', reviewer: 'codex', actionLimit: 40 }, fake.ports);
   } catch (err) {
     error.value = err instanceof Error ? err.message : String(err);
   }

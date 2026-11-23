@@ -65,7 +65,7 @@ test('review observation excludes its admitted legacy owner but retains other wo
     createdAt: '2026-11-10T10:00:00.000Z', updatedAt: '2026-11-10T10:00:00.000Z', reason: null,
   }), phase: 'executing' as const, generation: 1, owner: { pid: process.pid, identity: 'legacy-owner' },
     launcher: { pid: 42, identity: 'legacy-supervisor' },
-    operatorInvocation: true, invocation: { command: 'review' as const, args: ['task-one'], interactive: false } };
+    operatorInvocation: true, invocation: { command: 'review' as const, args: ['task-one'] } };
   t.mock.method(reviewLivenessSystem, 'startProcessTableRead', async () => []);
   t.mock.method(reviewLivenessSystem, 'detectRunningMissionSessions', () => []);
   const runs: RunSummary[] = [{ record: {

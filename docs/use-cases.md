@@ -116,6 +116,9 @@ Idle review missions remain visible after workflow failures, failed gates or
 stale work when review is available. The queue retains the diagnostic and offers
 review recovery to both the board operator and `px lead`. The configured reviewer
 owns the decision, and existing approval requirements still apply.
+When implementation evidence has already been accepted, an automatic reviewer
+startup failure leaves that evidence intact and remains a review recovery; it
+does not turn the completed assignment into an implementation blocker.
 
 **Confidence:** Confirmed. The queue is the board's own, so a mission with a live
 agent is never touched; attempts are bounded per failure; an item counts as

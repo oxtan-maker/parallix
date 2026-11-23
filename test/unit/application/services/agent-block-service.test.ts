@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { AgentBlockService, agentBlockOf } from '../../../../src/application/services/agent-block-service.js';
+import { detectLimitHit } from '../../../../src/application/services/agent-limit.js';
+import { failureReason } from '../../../../src/domain/failure-reason.js';
 
 class MemoryBlockRepository {
   private readonly entries = new Map<string, { agent: string; blocked: boolean; until?: string; reason?: string }>();
@@ -95,4 +97,19 @@ test('AgentBlock service keeps unblocked rows unblocked and indefinite or malfor
   assert.deepEqual(states.map(agentBlockOf), [
     { kind: 'none' }, { kind: 'indefinite', reason: 'operator' }, { kind: 'indefinite', reason: 'quota' }, { kind: 'none' },
   ], 'an unparseable expiry stays blocked without inventing an instant');
+});
+
+test('AgentBlock service blocks a five-minute provider-unavailable ISO row until exactly its expiry (TASK-2871)', async () => {
+  const detected = new Date('2026-11-23T09:43:00Z');
+  const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: failureReason('provider-unavailable', 'provider'), now: detected });
+  assert.ok(hit && !hit.reroute);
+  const repo = new MemoryBlockRepository();
+  await repo.save({ agent: 'claude', blocked: true, until: hit.until, reason: hit.reason });
+  const expiry = detected.getTime() + 300_000;
+  const service = new AgentBlockService(repo);
+  assert.equal(hit.until, '2026-11-23T09:48:00.000Z');
+  assert.deepEqual(agentBlockOf(await service.query('claude', expiry - 1)), { kind: 'until', untilMs: expiry, reason: 'typed: provider-unavailable' });
+  assert.equal((await service.query('claude', expiry - 1)).eligible, false);
+  assert.equal((await service.query('claude', expiry)).eligible, true);
+  assert.equal((await service.query('claude', expiry + 1)).eligible, true);
 });

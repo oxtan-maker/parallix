@@ -182,9 +182,9 @@ export interface RecoveryClaimTestHooks {
   readonly onAbandonedTakeoverLock?: () => void;
 }
 
-/** Take the claim, or return null when another live run holds it. */
-export function claimRecoveryLock(mission: string, hooks: RecoveryClaimTestHooks = {}): (() => Promise<void>) | null {
-  const dir = claimDir(mission);
+/** Take one process-owned local claim, or return null when another live process holds it. */
+function claimLocalProcessLockWithHooks(key: string, hooks: RecoveryClaimTestHooks): (() => Promise<void>) | null {
+  const dir = claimDir(key);
   const token = crypto.randomUUID();
   fs.mkdirSync(claimsRoot(), { recursive: true });
   const held = (): (() => Promise<void>) => async (): Promise<void> => { releaseOwned(dir, token); };
@@ -218,6 +218,16 @@ export function claimRecoveryLock(mission: string, hooks: RecoveryClaimTestHooks
   } finally {
     releaseTakeover();
   }
+}
+
+/** The shared process-owned local claim primitive for non-recovery adapters. */
+export function claimLocalProcessLock(key: string): (() => Promise<void>) | null {
+  return claimLocalProcessLockWithHooks(key, {});
+}
+
+/** Take the recovery claim, preserving its recovery-specific test seams. */
+export function claimRecoveryLock(mission: string, hooks: RecoveryClaimTestHooks = {}): (() => Promise<void>) | null {
+  return claimLocalProcessLockWithHooks(mission, hooks);
 }
 
 /** The live process holding a mission's claim, so a refused second actor can name it; null when free or unreadable. */

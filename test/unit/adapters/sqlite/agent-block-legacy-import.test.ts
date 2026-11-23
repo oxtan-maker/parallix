@@ -102,3 +102,18 @@ test('legacy AgentBlock import fails clearly when configuration is missing', asy
     /Blocklist source not found/,
   );
 });
+
+test('legacy AgentBlock import keeps a sub-hour ISO expiry verbatim across replay (TASK-2871)', async () => {
+  const until = '2099-11-23T09:48:00.000Z';
+  const { dir, file } = legacyFile({ blocklist: { claude: { blocked: true, until, reason: 'typed: provider-unavailable' } } });
+  try {
+    const firstDb = new MockDatabase();
+    const first = await new SqliteImporter(firstDb).importLegacyBlocklist(file);
+    assert.deepEqual(first.imported, ['claude']);
+    const insert = firstDb.executed.find(({ sql }) => sql.includes('INSERT INTO agent_blocklist'));
+    assert.ok(insert?.params?.includes(until), 'the ISO instant is written without hourly rounding');
+
+    const replayDb = new MockDatabase([{ agent: 'claude', blocked: 1, until, reason: 'typed: provider-unavailable' }]);
+    assert.deepEqual((await new SqliteImporter(replayDb).importLegacyBlocklist(file)).unchanged, ['claude']);
+  } finally { remove(dir); }
+});

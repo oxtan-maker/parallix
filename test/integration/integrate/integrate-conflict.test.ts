@@ -135,17 +135,38 @@ test('maybeDropStashAfterCollision returns null when a collision file is missing
   } finally { cleanup(dir); }
 });
 
-test('maybeDropStashAfterCollision drops the stash when there are no unmerged conflicts', () => {
+test('maybeDropStashAfterCollision keeps the stash unless identity and a benign collision are both proven (TASK-2862)', () => {
   const dir = tempDir();
   try {
-    const result = ic.maybeDropStashAfterCollision(
-      { stdout: 'nothing to restore', stderr: '', status: 1 },
-      dir,
-      {
-        gitRunner: () => ({ status: 0, stdout: '', stderr: '' }),
-      },
-    );
-    assert.deepEqual(result, { ok: true, ref: 'stash@{0}' });
+    fs.writeFileSync(path.join(dir, 'kept.txt'), 'landed');
+    const calls: string[][] = [];
+    const marker = 'integrate:task-1: temporary integration checkout stash';
+    const gitRunner = (args: string[]) => {
+      calls.push(args);
+      if (args.includes('list')) { return { status: 0, stdout: `stash@{0}\0recordedobject\0On main: ${marker}\n`, stderr: '' }; }
+      return { status: 0, stdout: args.includes('rev-parse') ? 'recordedobject\n' : '', stderr: '' };
+    };
+    const collision = { stdout: 'kept.txt already exists, no checkout', stderr: '', status: 1 };
+    // Unidentified stash, and a failure with no parsed collision, both retain the stash.
+    assert.equal(ic.maybeDropStashAfterCollision(collision, dir, { gitRunner }), null);
+    assert.equal(ic.maybeDropStashAfterCollision({ stdout: 'nothing to restore', stderr: '', status: 1 }, dir, { gitRunner, expectedObjectId: 'recordedobject' }), null);
+    // An index that cannot be scanned is not proof of a benign collision.
+    assert.equal(ic.maybeDropStashAfterCollision(collision, dir, { gitRunner: () => ({ status: 128, stdout: '', stderr: 'fatal' }), expectedObjectId: 'recordedobject' }), null);
+    assert.ok(!calls.some(args => args.includes('drop')), 'nothing was dropped');
+    assert.deepEqual(ic.maybeDropStashAfterCollision(collision, dir, { gitRunner, expectedObjectId: 'recordedobject', marker }), { ok: true, ref: 'stash@{0}' });
+  } finally { cleanup(dir); }
+});
+
+test('maybeDropStashAfterCollision keeps a stash whose object is not the recorded integration stash (TASK-2862)', () => {
+  const dir = tempDir();
+  try {
+    const calls: string[][] = [];
+    const gitRunner = (args: string[]) => {
+      calls.push(args);
+      return { status: 0, stdout: args.includes('rev-parse') ? 'unrelatedobject\n' : '', stderr: '' };
+    };
+    assert.equal(ic.maybeDropStashAfterCollision({ stdout: '', stderr: '', status: 1 }, dir, { gitRunner, expectedObjectId: 'integrationobject' }), null);
+    assert.ok(!calls.some(args => args.includes('drop')), 'unrelated top stash must not be dropped');
   } finally { cleanup(dir); }
 });
 

@@ -118,6 +118,12 @@ if (process.env.REHEARSAL_INTEGRATION_REBOUND === '1' && prompt.includes('The in
 if (/^Mode: review\./m.test(prompt)) {
   if (process.env.REHEARSAL_DIRTY_HANDOFF_REPAIR) px(['rebase', slug]);
   px(['verify', 'all']);
+  const startupFailureMarker = path.join(process.env.REHEARSAL_STATE, 'reviewer-startup-failed');
+  if (process.env.REHEARSAL_REVIEWER_STARTUP_RECOVERY === '1' && !fs.existsSync(startupFailureMarker)) {
+    fs.writeFileSync(startupFailureMarker, sessionID);
+    console.error('controlled reviewer startup failure');
+    process.exit(23);
+  }
   const lostMarker = path.join(process.env.REHEARSAL_STATE, 'lost-reviewer');
   if (process.env.REHEARSAL_LOST_REVIEWER_RESTART === '1' && !fs.existsSync(lostMarker)) {
     fs.writeFileSync(lostMarker, sessionID);

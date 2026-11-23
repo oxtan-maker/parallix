@@ -13,6 +13,7 @@ const integrationRebound = process.argv.includes('--integration-rebound') || agg
 const preferredReviewerFallback = process.argv.includes('--preferred-reviewer-fallback');
 const oneReviewer = process.argv.includes('--one-reviewer');
 const lostReviewerRestart = process.argv.includes('--lost-reviewer-restart');
+const reviewerStartupRecovery = process.argv.includes('--reviewer-startup-recovery');
 const configureReviewOpinion = process.argv.includes('--configure-review-opinion');
 const reviewOpinionArgument = process.argv.indexOf('--review-opinion-file');
 const reviewOpinionValue = reviewOpinionArgument >= 0 ? process.argv[reviewOpinionArgument + 1] : null;
@@ -38,15 +39,20 @@ const env = { ...process.env, PARALLIX_HOME: path.join(scratch, 'home'),
 if (dirtyHandoffRepair) env.REHEARSAL_DIRTY_HANDOFF_REPAIR = '1';
 if (integrationRebound) env.REHEARSAL_INTEGRATION_REBOUND = '1';
 if (aggregateIntegrationRebound) env.REHEARSAL_AGGREGATE_INTEGRATION_REBOUND = '1';
-for (const key of ['NODE_OPTIONS', 'NODE_V8_COVERAGE', 'PI_BIN', 'CLAUDE_BIN', 'CODEX_BIN', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_OPERATION_CAPTURE', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET']) delete env[key];
+for (const key of ['NODE_OPTIONS', 'NODE_V8_COVERAGE', 'PI_BIN', 'CLAUDE_BIN', 'CODEX_BIN', 'PARALLIX_AGENT_LAUNCH', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_OPERATION_CAPTURE', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET']) delete env[key];
 if (preferredReviewerFallback) env.CLAUDE_BIN = claudeAgent;
 if (oneReviewer) env.CLAUDE_BIN = claudeAgent;
 if (preferredReviewerFallback || oneReviewer) env.PATH = scratch + path.delimiter + env.PATH;
 if (lostReviewerRestart) env.REHEARSAL_LOST_REVIEWER_RESTART = '1';
+if (reviewerStartupRecovery) env.REHEARSAL_REVIEWER_STARTUP_RECOVERY = '1';
 if (reviewOpinionFile) env.REHEARSAL_EXPECTED_REVIEW_OPINION_FILE = reviewOpinionFile;
-const run = (cwd, args) => {
+const invoke = (cwd, args) => {
   const result = spawnSync(cli, args, { cwd, env, encoding: 'utf8', timeout: 120000, maxBuffer: 20 * 1024 * 1024 });
   fs.appendFileSync(path.join(scratch, 'cli.log'), 'px ' + args.join(' ') + '\n' + result.stdout + result.stderr + '\n');
+  return result;
+};
+const run = (cwd, args) => {
+  const result = invoke(cwd, args);
   assert.equal(result.status, 0, 'px ' + args.join(' ') + '\n' + result.stdout + '\n' + result.stderr);
   return result.stdout;
 };
@@ -135,33 +141,49 @@ process.exit(1);
 
   fs.symlinkSync(path.join(repository, 'node_modules'), path.join(root, 'node_modules'));
   fs.symlinkSync(path.join(repository, 'node_modules'), path.join(worktree, 'node_modules'));
-  run(worktree, ['active', slug, '--implementer', 'custom', ...(preferredReviewerFallback ? ['--reviewer', 'claude'] : [])]);
-  const approved = JSON.parse(run(worktree, ['status', slug, '--json']));
-  assert.equal(approved.missionStatus, 'integration');
-  if (oneReviewer) {
-    assert.equal(approved.review.progress.requiredApprovals, 1);
-    assert.equal(approved.review.progress.independentAvailable, 1);
-    assert.deepEqual(approved.review.progress.selected, ['claude']);
-    assert.ok(approved.review.progress.reviewers.every(reviewer => reviewer.state === 'completed'));
-    const headlessStatus = run(worktree, ['status', slug]);
-    assert.match(headlessStatus, /1\/1 claude.*completed/);
-    assert.doesNotMatch(headlessStatus, /\x1b/);
-    const headlessHistory = run(worktree, ['history', slug, 'list']);
-    assert.match(headlessHistory, /reviewer claude #/);
-    const history = JSON.parse(run(worktree, ['history', slug, 'list', '--json']));
-    const retainedRunIds = history.map(item => item.record.runId);
-    assert.ok(approved.review.progress.reviewers.every(reviewer => retainedRunIds.includes(reviewer.runId)),
-      'completed status labels correlate with retained history run IDs');
-    const tty = spawnSync('script', ['-q', '-e', '-c', `${cli} status ${slug}`, '/dev/null'],
-      { cwd: worktree, env, encoding: 'utf8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 });
-    assert.equal(tty.status, 0, `TTY status capture failed: ${tty.stdout}${tty.stderr}`);
-    assert.match(tty.stdout, /1\/1 claude.*completed/);
-    const reviewLaunches = fs.readFileSync(path.join(scratch, 'agent-launches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
-      .filter(launch => launch.mode === 'review');
-    assert.equal(reviewLaunches.length, lostReviewerRestart ? 3 : 2, 'lost reviewer is restarted once before repair and re-review');
-    assert.equal(new Set(reviewLaunches.map(launch => launch.sessionID)).size, reviewLaunches.length, 'every reviewer restart uses a fresh native session');
-    if (lostReviewerRestart) assert.ok(fs.existsSync(path.join(scratch, 'lost-reviewer')));
-  }
+  const activeArgs = ['active', slug, '--implementer', 'custom', ...(preferredReviewerFallback ? ['--reviewer', 'claude'] : [])];
+  const activeResult = reviewerStartupRecovery ? invoke(worktree, activeArgs) : null;
+  if (reviewerStartupRecovery) {
+    assert.notEqual(activeResult.status, 0, 'controlled reviewer startup must stop the public active workflow');
+    const stopped = JSON.parse(run(worktree, ['status', slug, '--json']));
+    assert.equal(stopped.missionStatus, 'review');
+    assert.deepEqual(stopped.completedSuccessCriteria, [0]);
+    assert.deepEqual(stopped.checkpoints.map(checkpoint => [checkpoint.name, checkpoint.recorded]), [['CP-1', true]]);
+    run(worktree, ['review', slug, '--reviewer', 'custom']);
+    const recovered = JSON.parse(run(worktree, ['status', slug, '--json']));
+    assert.equal(recovered.missionStatus, 'integration');
+    console.log(JSON.stringify({ lifecycle: 'public-reviewer-startup-failure-recovery', invocation: `px ${activeArgs.join(' ')}`,
+      implementationCriteriaAccepted: stopped.completedSuccessCriteria.length, recordedCheckpoints: stopped.checkpoints.map(checkpoint => checkpoint.name),
+      failedReviewLane: stopped.missionStatus, recoveryCommand: `px review ${slug} --reviewer custom`, recoveredLane: recovered.missionStatus,
+      operatorState: env.PARALLIX_HOME, disposableRepository: root }, null, 2));
+  } else {
+    run(worktree, activeArgs);
+    const approved = JSON.parse(run(worktree, ['status', slug, '--json']));
+    assert.equal(approved.missionStatus, 'integration');
+    if (oneReviewer) {
+      assert.equal(approved.review.progress.requiredApprovals, 1);
+      assert.equal(approved.review.progress.independentAvailable, 1);
+      assert.deepEqual(approved.review.progress.selected, ['claude']);
+      assert.ok(approved.review.progress.reviewers.every(reviewer => reviewer.state === 'completed'));
+      const headlessStatus = run(worktree, ['status', slug]);
+      assert.match(headlessStatus, /1\/1 claude.*completed/);
+      assert.doesNotMatch(headlessStatus, /\x1b/);
+      const headlessHistory = run(worktree, ['history', slug, 'list']);
+      assert.match(headlessHistory, /reviewer claude #/);
+      const history = JSON.parse(run(worktree, ['history', slug, 'list', '--json']));
+      const retainedRunIds = history.map(item => item.record.runId);
+      assert.ok(approved.review.progress.reviewers.every(reviewer => retainedRunIds.includes(reviewer.runId)),
+        'completed status labels correlate with retained history run IDs');
+      const tty = spawnSync('script', ['-q', '-e', '-c', `${cli} status ${slug}`, '/dev/null'],
+        { cwd: worktree, env, encoding: 'utf8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 });
+      assert.equal(tty.status, 0, `TTY status capture failed: ${tty.stdout}${tty.stderr}`);
+      assert.match(tty.stdout, /1\/1 claude.*completed/);
+      const reviewLaunches = fs.readFileSync(path.join(scratch, 'agent-launches.jsonl'), 'utf8').trim().split('\n').map(JSON.parse)
+        .filter(launch => launch.mode === 'review');
+      assert.equal(reviewLaunches.length, lostReviewerRestart ? 3 : 2, 'lost reviewer is restarted once before repair and re-review');
+      assert.equal(new Set(reviewLaunches.map(launch => launch.sessionID)).size, reviewLaunches.length, 'every reviewer restart uses a fresh native session');
+      if (lostReviewerRestart) assert.ok(fs.existsSync(path.join(scratch, 'lost-reviewer')));
+    }
   if (!oneReviewer && !preferredReviewerFallback) {
     assert.equal(approved.review.progress.mode, 'same-agent');
     assert.equal(approved.review.progress.requiredApprovals, 1);
@@ -258,6 +280,7 @@ process.exit(1);
       publicationUnitRuns: after.filter(row => !row.covered && row.checkout === root),
       integrationUnitRuns: after.filter(row => row.covered), successfulRunsPerUnchangedCandidate: 1,
       postSquashHookRuns: 1, coverageMerge: 'passed', isolatedQualityBoundary: 'passed (double; real Sonar wiring covered by owning contracts)' }, null, 2));
+  }
   }
 } catch (error) {
   console.error('Rehearsal log:\n' + (fs.existsSync(path.join(scratch, 'cli.log')) ? fs.readFileSync(path.join(scratch, 'cli.log'), 'utf8').slice(-18000) : ''));

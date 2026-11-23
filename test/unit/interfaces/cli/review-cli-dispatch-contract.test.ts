@@ -491,9 +491,9 @@ describe("review use case", { concurrency: false }, () => {
     assert.equal(calls[0].operation, 'forgejo-unavailable');
   });
 
-  test('ReviewCommandUseCase dispatches retry-after-failure continuation to mocked port', async () => {
+  test('ReviewCommandUseCase dispatches inferred review entry to the mocked port', async () => {
     const calls: Array<{ operation: string; args: string[] }> = [];
-    await new ReviewCommandUseCase(mockedPort(calls)).execute(['task-2332.14', '--max-attempts', '2']);
+    await new ReviewCommandUseCase(mockedPort(calls)).execute(['task-2332.14']);
     assert.deepEqual(calls.map(call => call.operation), ['enter']);
   });
 

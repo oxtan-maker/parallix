@@ -4,6 +4,8 @@ import type { ReviewStartDecision, ReviewStartOutcome } from '../ports/verificat
 import { POLICY_ACTIONS, type PolicyAction } from '../verification-policy/policy-artifact.js';
 import { REVIEW_START_DECISION_EVENT } from '../verification-policy/review-start-decision.js';
 import { REVIEW_START_OUTCOME_EVENT } from '../verification-policy/review-start-outcome.js';
+import { REVIEW_ACTION_STARTED_EVENT, type ReviewActionStarted } from '../ports/review-action-history.js';
+import { isReviewActionLimitHit, parseReviewAction } from '../review-action-history.js';
 
 const BIN_COUNT = 5;
 
@@ -44,8 +46,21 @@ export interface ModelSaving {
   readonly percentage: number | null;
 }
 
+/** One Mission's recorded review actions against the limit its latest action was recorded under. */
+export interface ReviewActionUsage {
+  readonly missionId: string;
+  readonly actionsUsed: number;
+  readonly configuredLimit: number;
+  /** Stored limit-hit records; a count at the limit without such a record is not a hit. */
+  readonly limitHits: number;
+}
+
 export interface VerificationModelStatistics {
   readonly calibration: readonly CheckCalibration[];
+  /** Missions with at least one recorded action, in Mission order; a Mission with none is absent, not zero. */
+  readonly actions: readonly ReviewActionUsage[];
+  /** Action rows that could not be read; they are excluded from `actions`, never counted as an action. */
+  readonly unreadableActionRows: number;
   /** Decision or outcome rows that could not be read; they are excluded, never counted as an outcome. */
   readonly unreadableRows: number;
   readonly saving: ModelSaving;
@@ -106,6 +121,26 @@ export function modelSaving(values: PolicyModelValues | null | undefined): Model
   return { policyValue, currentSequenceValue, absolute, percentage: Number.isFinite(ratio) ? ratio : null };
 }
 
+function actionUsage(history: readonly OperationalHistoryEntry[], repositoryId: string,
+  missions: ReadonlySet<string> | undefined,
+  windows: readonly ReportingWindow[] | undefined): { readonly usage: readonly ReviewActionUsage[]; readonly unreadable: number } {
+  const byMission = new Map<string, ReviewActionStarted[]>();
+  let unreadable = 0;
+  for (const entry of history.filter(value => value.eventType === REVIEW_ACTION_STARTED_EVENT)) {
+    const action = parseReviewAction(entry, repositoryId);
+    if (!action) { unreadable += 1; continue; }
+    if (action.repositoryId !== repositoryId || (missions && !missions.has(action.missionId))
+      || (windows && !windows.some(window => reportingWindowContains(window, action.recordedAt)))) { continue; }
+    byMission.set(action.missionId, [...(byMission.get(action.missionId) ?? []), action]);
+  }
+  const usage = [...byMission].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([missionId, rows]) => {
+    const latest = rows.reduce((best, row) => row.actionSequence > best.actionSequence ? row : best);
+    return { missionId, actionsUsed: latest.actionSequence, configuredLimit: latest.configuredLimit,
+      limitHits: rows.filter(isReviewActionLimitHit).length };
+  });
+  return { usage, unreadable };
+}
+
 /**
  * Calibration per check from the recorded review-start decisions of one repository and their settled outcomes, plus the
  * model saving. With reporting windows only decisions recorded inside one of them count. A row recorded without a repository belongs to the one that reads it, as the policy history owner treats it.
@@ -118,6 +153,7 @@ export function verificationModelStatistics(history: readonly OperationalHistory
     && (!missions || missions.has(start.missionId))
     && (!windows || windows.some(window => reportingWindowContains(window, start.recordedAt))));
   const outcomes = new Map(settled.rows.map(outcome => [outcome.startKey, outcome]));
+  const actions = actionUsage(history, repositoryId, missions, windows);
   return { calibration: POLICY_ACTIONS.map(check => calibrationOf(check, starts, outcomes)), saving: modelSaving(values),
-    unreadableRows: decisions.unreadable + settled.unreadable };
+    actions: actions.usage, unreadableActionRows: actions.unreadable, unreadableRows: decisions.unreadable + settled.unreadable };
 }

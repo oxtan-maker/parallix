@@ -17,7 +17,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 type CodexUsage = { input_tokens?: number; output_tokens?: number; cached_input_tokens?: number; reasoning_output_tokens?: number; total_tokens?: number };
-type CodexPayload = { id?: string; model_provider?: string; model?: string; effort?: string; type?: string; info?: { total_token_usage?: CodexUsage; model_context_window?: number }; rate_limits?: { primary?: { used_percent?: unknown; resets_at?: unknown } | null } | null; error?: unknown };
+type CodexRateLimitWindow = { used_percent?: unknown; resets_at?: unknown; usedPercent?: unknown; resetsAt?: unknown };
+type CodexRateLimits = { primary?: CodexRateLimitWindow | null; secondary?: CodexRateLimitWindow | null };
+type CodexPayload = { id?: string; model_provider?: string; model?: string; effort?: string; type?: string; info?: { total_token_usage?: CodexUsage; model_context_window?: number }; rate_limits?: CodexRateLimits | null; error?: unknown };
 /**
  * How the newest turn ended: `codex_error_info` names Codex's machine identity for a
  * failed turn; an error without a string identity is still a failed turn.
@@ -73,10 +75,24 @@ function applyCodexUsage(payload: CodexPayload, state: CodexState) {
     state.lastUsage = payload.info?.total_token_usage || state.lastUsage;
     state.contextWindow = payload.info?.model_context_window || state.contextWindow;
     state.usagePercent = typeof payload.rate_limits?.primary?.used_percent === 'number' ? payload.rate_limits.primary.used_percent : state.usagePercent;
-    // Epoch seconds advertised by the provider in the newest snapshot; utilisation alone never
-    // implies a reset instant, and an earlier snapshot's reset is stale once the newest omits it.
-    const resetsAt = payload.rate_limits?.primary?.resets_at;
-    state.rateLimitResetsAt = typeof resetsAt === 'number' && Number.isFinite(resetsAt) && resetsAt > 0 ? resetsAt : null;
+    // The newest snapshot is authoritative. A reset only describes an exhausted window;
+    // choose the later of the primary and secondary windows when both are exhausted.
+    state.rateLimitResetsAt = latestExhaustedRateLimitReset(payload.rate_limits);
+}
+
+function latestExhaustedRateLimitReset(value: unknown): number | null {
+  if (!value || typeof value !== 'object') { return null; }
+  const rateLimits = value as CodexRateLimits;
+  const resets = [rateLimits.primary, rateLimits.secondary].map(exhaustedWindowReset).filter((reset): reset is number => reset !== null);
+  return resets.length > 0 ? Math.max(...resets) : null;
+}
+
+function exhaustedWindowReset(value: CodexRateLimitWindow | null | undefined): number | null {
+  if (!value || typeof value !== 'object') { return null; }
+  const usedPercent = value.used_percent ?? value.usedPercent;
+  const resetsAt = value.resets_at ?? value.resetsAt;
+  return typeof usedPercent === 'number' && Number.isFinite(usedPercent) && usedPercent >= 100
+    && typeof resetsAt === 'number' && Number.isFinite(resetsAt) && resetsAt > 0 ? resetsAt : null;
 }
 
 function codexTerminalError(error: unknown): CodexTerminalError | null {
@@ -210,4 +226,5 @@ export {
   parseCodexRollout,
   collectRolloutFiles,
   extractCodexTelemetry,
+  latestExhaustedRateLimitReset,
 };

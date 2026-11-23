@@ -1,12 +1,8 @@
 /** Automatic mission terminal hosting, with explicit operator overrides. */
 
-export type TerminalHostKind = 'auto' | 'pipe' | 'tmux';
-export type TerminalUnavailablePolicy = 'fallback' | 'fail';
+import type { TerminalHostConfig, TerminalHostKind, TerminalUnavailablePolicy } from '../../application/ports/terminal-host-selection.js';
 
-export interface TerminalHostConfig {
-  readonly host: TerminalHostKind;
-  readonly whenUnavailable: TerminalUnavailablePolicy;
-}
+export type { TerminalHostConfig, TerminalHostKind, TerminalUnavailablePolicy };
 
 export const DEFAULT_TERMINAL_HOST_CONFIG: TerminalHostConfig = Object.freeze({ host: 'auto', whenUnavailable: 'fallback' });
 

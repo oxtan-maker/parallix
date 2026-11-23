@@ -31,7 +31,7 @@ try {
 
   // A typed failure response at the public HTTP boundary, scoped to this disposable page.
   await page.route('**/api/commands', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-    kind: 'command-result', transportVersion: 4, status: 'failed', value: null,
+    kind: 'command-result', transportVersion: 5, status: 'failed', value: null,
     error: { kind: 'execution', message: 'Disposable command failed' }, durableEvidence: [],
   }) }));
   await page.locator('[data-action-kind="review:submit"]').click();

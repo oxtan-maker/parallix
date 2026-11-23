@@ -3,8 +3,8 @@ id: TASK-2868
 title: >-
   Block codex until its provider-advertised reset when a turn is rejected by the
   usage limit
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-21 08:11'
 labels:
   - bug

@@ -13,7 +13,7 @@ export const reviewerOutputRenderers = {
     return;
   }),
   'round-started': reviewEventRenderer('round-started', (event, output) => {
-    output.log('\n' + fmt.status('INFO', `========== Round ${event.attempt} / ${event.maxAttempts} ==========`));
+    output.log('\n' + fmt.status('INFO', `========== Round ${event.attempt} · review action limit ${event.actionLimit} ==========`));
     return;
   }),
   'review-reset': reviewEventRenderer('review-reset', (event, output) => {
@@ -33,8 +33,8 @@ export const reviewerOutputRenderers = {
     output.log(fmt.status('INFO', `A human requested changes on ${event.slug} while its round ${event.round} approval is still effective. Run: px revoke-review --slug ${event.slug} --decision ${event.round} --reason <text> --operator <name>, then px review ${event.slug}.`));
     return;
   }),
-  'attempts-exhausted': reviewEventRenderer('attempts-exhausted', (event, output) => {
-    output.log(fmt.status('INFO', `Autonomous review stopped: reached ${event.maxAttempts} attempts. Hand off to human review.`));
+  'action-limit-reached': reviewEventRenderer('action-limit-reached', (event, output) => {
+    output.log(fmt.status('INFO', `Autonomous review stopped: action limit ${event.limit} reached at action ${event.count}. Hand off to human review.`));
     return;
   }),
   'controller-active': reviewEventRenderer('controller-active', (event, output) => {
@@ -251,7 +251,7 @@ export const reviewerOutputRenderers = {
     output.log(fmt.status('INFO', `Independence: ${reviewIndependence(event.implementer, event.reviewer)}`));
     output.log(fmt.status('INFO', `Branch: ${event.branch}`));
     if (event.verbose) {
-      output.log(fmt.status('INFO', `Focus: ${event.focus} | Max attempts: ${event.maxAttempts}`));
+      output.log(fmt.status('INFO', `Focus: ${event.focus} | Review action limit: ${event.actionLimit}`));
       output.log(fmt.status('INFO', `Poll interval: ${Math.round(event.intervalMs / 1000)}s | Poll timeout: ${Math.round(event.timeoutMs / 1000)}s | Verbose: on`));
     }
     if (event.dryRun) { output.log(fmt.status('DRY-RUN', 'No agents will be launched.')); }

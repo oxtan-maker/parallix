@@ -4,12 +4,14 @@ import type { MissionLifecycleService } from '../application/mission-lifecycle-s
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { IntegrationMissionServices } from '../application/ports/integration-records.js';
 import type { OperationalHistoryService } from '../application/services/operational-history-service.js';
+import type { ReviewActionHistoryPort } from '../application/ports/review-action-history.js';
 import type { RepositoryId } from '../domain/repository.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget } from '../adapters/review/review-loop.js';
 import { bindReviewPersistence, reviewLoopBindings } from '../adapters/review/review-persistence.js';
 import { createReviewStartPolicyPorts, createTestsActionPolicyFactory, type ReviewStartObservationServices } from './review-start-observation.js';
 import { createPolicyActionPort } from './review-policy-actions.js';
+import { missionId } from '../domain/mission.js';
 
 export { bindReviewPersistence, reviewLoopBindings };
 
@@ -45,14 +47,25 @@ export function createPersistentReviewLoopPorts(
   const policy = services
     ? createReviewStartPolicyPorts(target.executionContext, slug, bindings.configuration, services)
     : undefined;
-  const policyActions = services && policy ? createPolicyActionPort({ slug, history: services.history, executionContext: target.executionContext,
+  const policyActions = services && policy ? createPolicyActionPort({ slug, executionContext: target.executionContext,
     configuration: bindings.configuration, policy, missionServices: { store: mission.store, lifecycle: mission.lifecycle,
       integration: mission.integration, operationalHistory: mission.operationalHistory },
     policyFactory: createTestsActionPolicyFactory(bindings.configuration, services) }) : undefined;
-  return createReviewLoopPorts(slug, target, {
+  const actionHistory: ReviewActionHistoryPort = mission.operationalHistory ? {
+    count: () => mission.operationalHistory!.countReviewActions(slug, mission.repositoryId),
+    record: input => mission.operationalHistory!.recordReviewAction({
+      repositoryId: mission.repositoryId, missionId: missionId(slug), ...input,
+    }),
+  } : {
+    count: async () => { throw new Error('operational review action history unavailable'); },
+    record: async () => { throw new Error('operational review action history unavailable'); },
+  };
+  const ports = createReviewLoopPorts(slug, target, {
     ...bindings,
     ...persistence,
     ...(policy ? { reviewStartPolicy: policy } : {}),
     ...(policyActions ? { policyActions } : {}),
+    actionHistory,
   });
+  return ports;
 }

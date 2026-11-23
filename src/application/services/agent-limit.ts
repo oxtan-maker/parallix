@@ -1,6 +1,7 @@
 import { recognizedFailureReason } from '../../domain/failure-reason.js';
 const DEFAULT_FALLBACK_HOURS = 1;
 const SIGINT_SHORT_BLOCK_MINUTES = 15;
+const PROVIDER_UNAVAILABLE_BLOCK_MINUTES = 5;
 function formatBlockUntil(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -39,7 +40,7 @@ export function detectLimitHit({ agent, status, signal, error, now = new Date(),
   const typed = recognizedFailureReason(failureReason);
   return typedLimitHit(agent, now, typed) ?? terminationLimit(now, signal, typed);
 }
-export { formatBlockUntil, ceilToNextHour, endOfCurrentUtcMonth, DEFAULT_FALLBACK_HOURS, SIGINT_SHORT_BLOCK_MINUTES };
+export { formatBlockUntil, ceilToNextHour, endOfCurrentUtcMonth, DEFAULT_FALLBACK_HOURS, SIGINT_SHORT_BLOCK_MINUTES, PROVIDER_UNAVAILABLE_BLOCK_MINUTES };
 
 function typedLimitHit(agent: string, now: Date, typed: ReturnType<typeof recognizedFailureReason>): DetectedLimitHit | null {
   if (typed?.code === 'provider-entitlement') { return { reroute: true, kind: 'entitlement', reason: 'typed: provider-entitlement' }; }
@@ -54,9 +55,9 @@ function terminationLimit(now: Date, signal: string | null | undefined, typed: R
   return { until: formatBlockUntil(ceilToNextHour(new Date(now.getTime() + SIGINT_SHORT_BLOCK_MINUTES * 60000))), source: 'sigint', reason: `signal: ${signal}` };
 }
 
+/** Transient overload is not a quota: an exact ISO instant, never rounded to the hour. */
 function availabilityLimit(now: Date): DetectedLimitHit {
-  const target = new Date(now.getTime() + DEFAULT_FALLBACK_HOURS * 3600000);
-  return { until: formatBlockUntil(ceilToNextHour(target)), source: 'structured', reason: 'typed: provider-unavailable' };
+  return { until: new Date(now.getTime() + PROVIDER_UNAVAILABLE_BLOCK_MINUTES * 60000).toISOString(), source: 'structured', reason: 'typed: provider-unavailable' };
 }
 
 function quotaLimit(agent: string, now: Date, typed: NonNullable<ReturnType<typeof recognizedFailureReason>>): DetectedLimitHit {

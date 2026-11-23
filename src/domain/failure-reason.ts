@@ -6,7 +6,7 @@ export const FAILURE_REASON_CODES = [
   'mission-contract-incomplete', 'classification-missing', 'incomplete-evidence', 'incomplete-success-criteria', 'missing-artifacts',
   'unverifiable-claims', 'malformed-gates', 'git-hook-failed', 'git-conflict', 'git-no-merge', 'git-remote-missing', 'git-dirty', 'git-behind', 'git-failed',
   'provider-session-missing', 'provider-config', 'provider-auth', 'provider-unavailable', 'provider-entitlement', 'provider-rate-limit',
-  'resource-exhausted', 'filesystem-failed', 'process-failed', 'unexpected',
+  'resource-exhausted', 'filesystem-failed', 'process-failed', 'review-action-limit', 'unexpected',
 ] as const;
 export type FailureReasonCode = typeof FAILURE_REASON_CODES[number];
 export type FailureSource = 'lifecycle' | 'git' | 'forgejo' | 'provider' | 'process' | 'filesystem' | 'verification' | 'review-preparation';

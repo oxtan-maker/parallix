@@ -23,7 +23,7 @@ test("start resumes the review-preparation-assigned reviewer instead of reselect
     } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
-  await runReviewLoop({ slug, implementer: 'claude', maxAttempts: 3 }, fake.ports);
+  await runReviewLoop({ slug, implementer: 'claude', actionLimit: 40 }, fake.ports);
   assert.deepEqual(fake.launches.map(launch => [launch.role, launch.agent, launch.prompt?.attempt, launch.sessionPolicy]), [['reviewer', 'custom', 3, 'fresh-ephemeral']]);
   assert.equal(fake.current()?.reviewer, 'custom');
   assert.deepEqual(fake.exits, []);
@@ -104,7 +104,7 @@ test('a persisted no-mirror wave child enters the autonomous review loop without
     } },
   });
 
-  await runReviewLoop({ slug: childSlug, maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: childSlug, actionLimit: 40 }, fake.ports);
 
   assert.equal(preparations, 1, 'the missing mirror must not stop the loop before review preparation');
   assert.doesNotMatch(fake.errors.join('\n'), /unresolved task|not found|ambiguous/i);
@@ -221,7 +221,7 @@ test('start derives the implementer from the Mission assignee when no task file 
     routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
   });
-  await runReviewLoop({ slug, maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug, actionLimit: 40 }, fake.ports);
   assert.ok(fake.writes.some(write => write.implementer === 'claude'));
   assert.ok(!fake.writes.some(write => write.implementer === 'autonomous'));
 });
@@ -236,7 +236,7 @@ test('start fails closed when the Mission store cannot load the assignee (TASK-2
     routing: { eligibleFamilies: () => ['claude', 'codex'], nominate: () => 'codex' },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'APPROVED' }) },
   });
-  await assert.rejects(runReviewLoop({ slug, maxAttempts: 1 }, fake.ports), /store unavailable/);
+  await assert.rejects(runReviewLoop({ slug, actionLimit: 40 }, fake.ports), /store unavailable/);
   assert.deepEqual(fake.launches, []);
   assert.deepEqual(fake.writes, []);
 });
@@ -344,7 +344,7 @@ for (const refused of [false, true]) {
       assert.notEqual(state.phase, 'approved', 'approval must never be a bookkeeping write');
       await persist(state);
     };
-    await runReviewLoop({ slug, isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug, isContinue: true, actionLimit: 40 }, fake.ports);
     assert.deepEqual(effects, refused ? ['decision'] : ['decision', 'mirror']);
     assert.deepEqual(fake.exits, refused ? [1] : []);
     assert.deepEqual(fake.launches, [], 'existing provider verdict needs no new agent');

@@ -89,7 +89,7 @@ test('direct rebase admission owns a durable generation without changing the mis
   const f = fixture();
   const admitted = await f.service.admit({ operationId: 'rebase-one', requestKey: 'rebase-one', kind: 'rebase:run',
     missionId: 'task-one', missionStatusAtRequest: 'refined', capabilities: new Set(['rebase:run']),
-    invocation: { command: 'rebase', args: ['task-one'], interactive: false } });
+    invocation: { command: 'rebase', args: ['task-one'] } });
   assert.equal(admitted.status, 'accepted');
   assert.equal(admitted.status === 'accepted' && admitted.operation.command, 'rebase:run');
   assert.equal(admitted.status === 'accepted' && admitted.operation.generation, 0);
@@ -437,7 +437,7 @@ test('browser review resumes through the same operator continuation as px review
     f.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
     // `px review task-one` from a direct operator, exactly as the owned CLI admits it.
     const cli: BoardCommandRequest = { operationId: shape, requestKey: shape, missionId: 'task-one', kind: 'review:submit',
-      capabilities: new Set(['review:submit']), operatorInvocation: true, invocation: { command: 'review', args: ['task-one'], interactive: false } };
+      capabilities: new Set(['review:submit']), operatorInvocation: true, invocation: { command: 'review', args: ['task-one'] } };
     const browser: BoardCommandRequest = { operationId: shape, requestKey: shape, missionId: 'task-one', kind: 'review:submit',
       missionStatusAtRequest: 'review', capabilities: new Set(['review:submit']) };
     const result = await f.service.admit(shape === 'cli' ? cli : browser);
@@ -445,7 +445,7 @@ test('browser review resumes through the same operator continuation as px review
     const operation = await f.service.operation(shape);
     admitted.push({ command: operation?.command, operatorInvocation: operation?.operatorInvocation,
       permit: operation?.reviewOperatorResume?.recovery.action,
-      invocation: { ...operation?.invocation, interactive: false } });
+      invocation: { ...operation?.invocation } });
     await f.service.run(shape, async run => {
       executed.push(run);
       const ownedResume = bindReviewOperatorResume(f.store, true, {}, async () => ({
@@ -458,18 +458,18 @@ test('browser review resumes through the same operator continuation as px review
   }
   assert.deepEqual(admitted[1], admitted[0]);
   assert.deepEqual(admitted[0], { command: 'review:submit', operatorInvocation: true, permit: 'acknowledge-and-resume',
-    invocation: { command: 'review', args: ['task-one'], interactive: false } });
+    invocation: { command: 'review', args: ['task-one'] } });
   assert.deepEqual(executed.map(run => [run.kind, run.operatorInvocation]), [['review:submit', true], ['review:submit', true]]);
 });
 
-test('CLI recovery preserves explicit options and interactive mode (PX-0041.03)', async () => {
+test('CLI recovery preserves explicit options (PX-0041.03)', async () => {
   const f = fixture();
   const review = requestReviewIntervention(pendingReview('task-one'), {
     requestedAt: '2026-11-04T10:00:00.000Z', requestedBy: 'workflow', reason: 'MAX_ATTEMPTS',
   });
   f.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
-  const invocation = { command: 'review' as const, interactive: true,
-    args: ['task-one', '--max-attempts', '1', '--reviewer', 'configured-reviewer', '--actor', 'operator'] };
+  const invocation = { command: 'review' as const,
+    args: ['task-one', '--reviewer', 'configured-reviewer', '--actor', 'operator'] };
   const admitted = await f.service.admit({ operationId: 'cli-options', missionId: 'task-one', kind: 'review:submit',
     capabilities: new Set(['review:submit']), operatorInvocation: true, invocation });
   assert.equal(admitted.status, 'accepted');
@@ -536,7 +536,7 @@ test('browser review resumes only for an acknowledge-and-resume decision (TASK-2
     liveness: { workflow: true, coordinator: false, execution: false, reviewer: false } }) });
   directLive.missions.set('task-one', fixtureMission('task-one', { status: 'review', review }));
   const directRefusal = await directLive.service.admit({ ...request, missionStatusAtRequest: undefined,
-    operatorInvocation: true, invocation: { command: 'review', args: ['task-one'], interactive: false } });
+    operatorInvocation: true, invocation: { command: 'review', args: ['task-one'] } });
   assert.equal(directRefusal.status, 'failed');
   assert.deepEqual(directLive.launches, [], 'pre-existing owned work is refused before direct CLI admission');
 });

@@ -1,12 +1,15 @@
 import { failureReason, recognizedFailureReason, type FailureReason } from '../../domain/failure-reason.js';
+import { DECISION_CREDENTIAL_ENV } from '../../domain/decision-credentials.js';
 import type { ParallixConfiguration } from "../../application/ports/configuration.js";
 import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js";
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn, type ChildProcess } from 'node:child_process';
 import type { AgentProcessResult, AgentProcessSpawn } from './agent-process-types.js';
 import { spawnAndTee, type SpawnTeeOptions } from '../process/spawn-tee.js';
-import { extractCodexTelemetry } from './codex-telemetry.js';
+import { wrapWithBubblewrap } from '../process/bubblewrap.js';
+import { extractCodexTelemetry, latestExhaustedRateLimitReset } from './codex-telemetry.js';
 
 type CodexRolloutTelemetry = NonNullable<ReturnType<typeof extractCodexTelemetry>>;
 import { codexHomeRoot, originatingCodexStateRoot } from '../config/state-homes.js';
@@ -57,12 +60,14 @@ interface StartCodexAgentOptions extends CodexInvocationOptions {
 // Injectable I/O for tests. Production uses the real spawn-tee / export capture.
 let _spawnAndTee: AgentProcessSpawn = spawnAndTee;
 let _sessionPort: SessionMarkerPort | null = null;
+let _rateLimitProbeTimeoutMs = 1000;
 
 // Test hooks: override the launcher's I/O without touching the public signature.
 function __setSpawnAndTeeForTest(fn: AgentProcessSpawn | null) { _spawnAndTee = fn || spawnAndTee; }
 /** @deprecated Test compatibility hook; file-backed sessions are no longer used. */
 function __setSessionsForTest(_mod: unknown) { /* no-op */ }
 function __setSessionPortForTest(port: SessionMarkerPort | null) { _sessionPort = port; }
+function __setRateLimitProbeTimeoutForTest(timeoutMs: number | null) { _rateLimitProbeTimeoutMs = timeoutMs ?? 1000; }
 
 // Codex outputs "To continue this session, run codex resume <id>" at the end.
 // Also captures the session ID from the "Interaction Summary" block.
@@ -169,7 +174,7 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
     return recognizedFailureReason(result.failureReason)?.code === 'provider-session-missing';
   }
 
-  function processResult(result: AgentProcessResult) {
+  async function processResult(result: AgentProcessResult) {
     if (result && result.stdout) {
       result.sessionId = extractCodexSessionId(result.stdout) || undefined;
     }
@@ -182,7 +187,12 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
           result.telemetry = telemetry;
           if (telemetry.model) {result.model = telemetry.model;}
           if (telemetry.provider) {result.provider = telemetry.provider;}
-          result.failureReason = rolloutFailureReason(result, telemetry) ?? result.failureReason;
+          let translated = rolloutFailureReason(result, telemetry);
+          if (translated && typeof translated.context?.resetAt !== 'string') {
+            const probedReset = await probeCodexRateLimitReset(worktree, configuration, env);
+            if (probedReset !== null) { translated = usageLimitFailureReason(probedReset); }
+          }
+          result.failureReason = translated ?? result.failureReason;
         }
       } catch (_) {
         // Telemetry is best-effort; never let it break the launch result.
@@ -219,19 +229,117 @@ function startCodexDraftAgent({ configuration = DEFAULT_CONFIGURATION, prompt, w
 
 /**
  * Codex records why a turn stopped in its own rollout, not in a stream Parallix parses.
- * Translate its usage-limit identity into the canonical capacity fact; the reset is the
- * provider-advertised `rate_limits.primary.resets_at`. A provider-typed reason already
- * on the result wins, and every other identity keeps the fail-closed process reason.
+ * Translate server overload into provider-unavailable and usage limits into agent-quota.
+ * The quota reset is the latest provider-advertised reset among exhausted windows.
+ * A provider-typed reason already on the result wins, and every other identity keeps
+ * the fail-closed process reason.
  */
 function rolloutFailureReason(result: AgentProcessResult, telemetry: CodexRolloutTelemetry): FailureReason | null {
   const processFailed = !((result.status === 0 || result.status === undefined) && !result.signal && !result.error);
   const prior = result.failureReason as FailureReason | undefined;
   if (!processFailed || (prior && prior.source !== 'process')) { return null; }
+  if (telemetry.terminalError?.codexErrorInfo === 'server_overloaded') {
+    return failureReason('provider-unavailable', 'provider', { providerCode: 'server_overloaded' });
+  }
   if (telemetry.terminalError?.codexErrorInfo !== 'usage_limit_exceeded') { return null; }
-  const resetAt = telemetry.rateLimitResetsAt === null ? null : new Date(telemetry.rateLimitResetsAt * 1000);
+  return usageLimitFailureReason(telemetry.rateLimitResetsAt);
+}
+
+function usageLimitFailureReason(resetEpochSeconds: number | null): FailureReason {
+  const resetAt = resetEpochSeconds === null ? null : new Date(resetEpochSeconds * 1000);
   return failureReason('agent-quota', 'provider', {
     providerCode: 'usage_limit_exceeded',
     ...(resetAt && Number.isFinite(resetAt.getTime()) ? { resetAt: resetAt.toISOString() } : {}),
+  });
+}
+
+async function probeCodexRateLimitReset(worktree: string, configuration: ParallixConfiguration, extraEnv: NodeJS.ProcessEnv): Promise<number | null> {
+  let child: ChildProcess;
+  try {
+    const environment: NodeJS.ProcessEnv = { ...configuration.forwardedEnvironment, ...extraEnv, HOME: configuration.storage.homeDirectory, CODEX_HOME: codexStateRoot(worktree) };
+    for (const name of DECISION_CREDENTIAL_ENV) { delete environment[name]; }
+    const confined = wrapWithBubblewrap(resolveCodexCommand(), ['app-server'], worktree, configuration);
+    child = spawn(confined.command, confined.args, {
+      cwd: worktree,
+      env: environment,
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+  } catch { return null; }
+
+  return await new Promise(resolve => {
+    let settled = false;
+    let responseBuffer = '';
+    let deadline: NodeJS.Timeout;
+    const armDeadline = () => {
+      clearTimeout(deadline);
+      deadline = setTimeout(() => finish(null), _rateLimitProbeTimeoutMs);
+      deadline.unref();
+    };
+    const finish = (resetAt: number | null) => {
+      if (settled) { return; }
+      settled = true;
+      clearTimeout(deadline);
+      void terminateAndReap(child).then(() => resolve(resetAt));
+    };
+    const write = (message: object) => {
+      if (!child.stdin?.writable) { finish(null); return; }
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    };
+    const handleLine = (line: string) => {
+      let parsed: unknown;
+      try { parsed = JSON.parse(line); } catch { finish(null); return; }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { finish(null); return; }
+      const response = parsed as { id?: unknown; result?: { rateLimits?: unknown }; error?: unknown };
+      if (response.id === 1) {
+        if (response.error || !response.result) { finish(null); return; }
+        armDeadline();
+        write({ method: 'initialized' });
+        write({ id: 2, method: 'account/rateLimits/read', params: null });
+      } else if (response.id === 2) {
+        finish(response.error ? null : latestExhaustedRateLimitReset(response.result?.rateLimits));
+      }
+    };
+
+    child.once('error', () => finish(null));
+    child.once('close', () => finish(null));
+    child.stdin?.once('error', () => finish(null));
+    child.stdout?.on('data', chunk => {
+      responseBuffer += String(chunk);
+      if (responseBuffer.length > 64 * 1024) { finish(null); return; }
+      let newline = responseBuffer.indexOf('\n');
+      while (!settled && newline >= 0) {
+        const line = responseBuffer.slice(0, newline).trim();
+        responseBuffer = responseBuffer.slice(newline + 1);
+        if (line) { handleLine(line); }
+        newline = responseBuffer.indexOf('\n');
+      }
+    });
+    armDeadline();
+    write({ id: 1, method: 'initialize', params: { clientInfo: { name: 'parallix', version: '1' }, capabilities: null } });
+  });
+}
+
+async function terminateAndReap(child: ChildProcess): Promise<void> {
+  child.stdin?.end();
+  if (child.exitCode !== null || child.signalCode !== null) { return; }
+  child.kill('SIGTERM');
+  if (await waitForChildClose(child, 50)) { return; }
+  child.kill('SIGKILL');
+  await waitForChildClose(child, 100);
+}
+
+function waitForChildClose(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) { return Promise.resolve(true); }
+  return new Promise(resolve => {
+    const timer = setTimeout(() => done(false), timeoutMs);
+    timer.unref();
+    const onClose = () => done(true);
+    const done = (closed: boolean) => {
+      clearTimeout(timer);
+      child.off('close', onClose);
+      resolve(closed);
+    };
+    child.once('close', onClose);
   });
 }
 
@@ -322,6 +430,7 @@ export {
   resolveCodexCommand,
   startCodexDraftAgent,
   __setSpawnAndTeeForTest,
+  __setRateLimitProbeTimeoutForTest,
   __setSessionsForTest,
   __setSessionPortForTest
 };

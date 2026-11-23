@@ -55,11 +55,18 @@ test('model entitlement and transient rate limit reroute without family blocks',
   assert.equal(rate?.until, undefined);
 });
 
-test('typed provider unavailability creates a bounded checked block (TASK-2837)', () => {
-  const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: failureReason('provider-unavailable', 'provider'), now });
-  assert.equal(hit?.until, formatBlockUntil(new Date('2026-05-01T13:00:00Z')));
-  assert.equal(hit?.source, 'structured');
-  assert.equal(hit?.reason, 'typed: provider-unavailable');
+test('typed provider unavailability creates an exact five-minute ISO block (TASK-2871)', () => {
+  for (const instant of [now, new Date('2026-05-01T11:58:30.250Z'), new Date('2026-05-01T12:00:00Z')]) {
+    const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: failureReason('provider-unavailable', 'provider'), now: instant });
+    assert.equal(hit?.reroute, undefined);
+    assert.equal(hit?.until, new Date(instant.getTime() + 300000).toISOString(), 'no next-hour rounding');
+    assert.equal(hit?.source, 'structured');
+    assert.equal(hit?.reason, 'typed: provider-unavailable');
+  }
+});
+
+test('unstructured overload text alone never creates an availability block (TASK-2871)', () => {
+  assert.equal(detectLimitHit({ agent: 'claude', status: 1, stderr: '529 {"type":"overloaded_error"} service overloaded', stdout: 'Overloaded', now }), null);
 });
 
 test('structured retry-after and fallback resets remain bounded and round upwards', () => {

@@ -35,7 +35,7 @@ function routing(eligible: string[], supported: (_agent: string) => boolean, nom
 function select(request: Partial<ReviewerSelectionRequest> & { implementer: string }, port: ReviewerRoutingPort) {
   const logs: string[] = [];
   const errors: string[] = [];
-  const selected = selectReviewer({ isContinue: false, persisted: null, maxAttempts: 5, dryRun: true, providerEnabled: false, slug: 'task-test-fallback', ...request }, port, reviewLoopReporter({ log: line => logs.push(line), error: line => errors.push(line) }));
+  const selected = selectReviewer({ isContinue: false, persisted: null, dryRun: true, providerEnabled: false, slug: 'task-test-fallback', ...request }, port, reviewLoopReporter({ log: line => logs.push(line), error: line => errors.push(line) }));
   return { selected, logs, errors };
 }
 
@@ -43,7 +43,7 @@ test('reviewer presentation distinguishes initial selection from continued and l
   for (const [round, isContinue] of [[1, false], [1, true], [2, false]] as const) {
     const lines: string[] = [];
     const events: unknown[] = [];
-    const selected = selectReviewer({ implementer: 'codex', isContinue, persisted: { reviewer: 'claude', round, phase: 'reviewing' }, maxAttempts: 5, dryRun: false, providerEnabled: false, slug: 'task-test' },
+    const selected = selectReviewer({ implementer: 'codex', isContinue, persisted: { reviewer: 'claude', round, phase: 'reviewing' }, dryRun: false, providerEnabled: false, slug: 'task-test' },
       routing(['codex', 'claude'], () => true, () => { throw new Error('persisted reviewer must not be nominated again'); }),
       { emit: event => { events.push(event); renderReviewLoopEvent(event, { log: line => lines.push(line), error: line => lines.push(line) }); } });
     assert.deepEqual(selected, { reviewer: 'claude', reviewerSource: 'persisted' });
@@ -145,7 +145,7 @@ describe("review fallback", { concurrency: false }, () => {
       },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-test-cp1-fallback', implementer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-test-cp1-fallback', implementer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
     assert.deepEqual(fake.exits, [], `the loop must not exit on usage-limit; errors: ${fake.errors.join(' | ')}`);
     assert.ok(fake.logs.some(l => l.includes('Selected reviewer: custom')), `Expected selected-reviewer=custom; got: ${fake.logs.join(' | ')}`);
     assert.deepEqual(blocklistWrites, ['custom']);
@@ -416,7 +416,7 @@ describe('availability-aware reviewer policy (PX-0046.03)', { concurrency: false
         return { consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES', reviewFindings: [{ id: 'F1', summary: 'counterexample' }] };
       } },
     });
-    return { fake, store, reviewers, startRows, approvalWrites, verdictWrites, slug, run: async (isContinue = false) => await runReviewLoop({ slug, implementer: 'codex', maxAttempts: 1, skipReviewPreparation: true, isContinue }, fake.ports) };
+    return { fake, store, reviewers, startRows, approvalWrites, verdictWrites, slug, run: async (isContinue = false) => await runReviewLoop({ slug, implementer: 'codex', actionLimit: 40, skipReviewPreparation: true, isContinue }, fake.ports) };
   }
 
   test('a usage-blocked independent reviewer leaves one required approval without a failed launch (PX-0046.03)', async () => {

@@ -3,6 +3,7 @@ import { missionVersion } from '../../src/application/domain-ports.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../../src/application/ports/integration-records.js';
 import { repositoryId } from '../../src/domain/repository.js';
 import { fixtureMission } from '../fixtures/mission-builders.js';
+import { reviewActionStarted } from '../../src/application/review-action-history.js';
 
 type Overrides = Omit<Partial<IntegrationMissionServices>, 'store' | 'lifecycle' | 'integration'> & {
   store?: Partial<MissionStore>;
@@ -24,8 +25,13 @@ function completeIntegration(integration: Partial<IntegrationMissionServices['in
 
 /** Each fixture supplies its observed state and explicitly opts into writes. */
 export function integrationServices(overrides: Overrides = {}): IntegrationMissionServices {
+  let reviewActionCount = 0;
   return {
     ...overrides,
+    reviewActions: overrides.reviewActions === undefined ? {
+      countReviewActions: async () => reviewActionCount,
+      recordReviewAction: async input => reviewActionStarted(input, ++reviewActionCount),
+    } : overrides.reviewActions,
     store: completeStore(overrides.store) ? overrides.store : {
       async load(id) {
         return { kind: 'found', mission: fixtureMission(id, {

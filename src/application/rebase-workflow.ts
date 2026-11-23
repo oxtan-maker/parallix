@@ -1,7 +1,8 @@
-import { failureReason, recognizedFailureReason } from '../domain/failure-reason.js';
+import { failureReason } from '../domain/failure-reason.js';
 import { recoverRebaseLock } from './rebase-lock-recovery.js';
 import { resolveRecordedImplementer, recordImplementerLaunch } from './rebase-identity.js';
 import { replacementImplementer } from '../domain/rebase-policy.js';
+import { conflictResolverCapacityFailure } from './rebase-conflict-capacity.js';
 /**
  * Rebase workflow policy (TASK-2332.12).
  *
@@ -266,7 +267,8 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
     return await port.startAgent('conflict-resolution', { ...launchOptions, prompt: task, agent: implementer, pinnedAgent: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    if (launchFailureReason(err)?.code !== 'agent-quota') {
+    const capacityFailure = conflictResolverCapacityFailure(err, implementer);
+    if (!capacityFailure) {
       fmt.log.fail(`Implementer ${fmt.agent(implementer)} cannot run conflict resolution: ${message}`);
       fmt.log.info(`You may need to abort the rebase: ${fmt.command('git rebase --abort')}`);
       port.exit(1);
@@ -276,7 +278,7 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
     // fallback, because pinned work has no fallback.
     const replacement = selectReplacementFamily(ctx, implementer);
     if (replacement) {
-      fmt.log.info(`Implementer ${fmt.agent(implementer)} hit an agent usage limit; substituting ${fmt.agent(replacement)} for conflict resolution.`);
+      fmt.log.info(`${capacityFailure.substitution}; substituting ${fmt.agent(replacement)} for conflict resolution.`);
       try { task = await prompt(); }
       catch (error) {
         fmt.log.fail(`Cannot construct conflict-resolution task: ${String(error)}`);
@@ -290,8 +292,7 @@ async function launchConflictResolver(ctx: RebaseContext, implementer: string, p
         return null;
       }
     }
-    const resetTime = launchFailureReason(err)?.context?.resetAt;
-    fmt.log.fail(`Implementer ${fmt.agent(implementer)} hit an agent usage limit${resetTime ? ` (resets ${resetTime})` : ''}.`);
+    fmt.log.fail(capacityFailure.unavailable);
     fmt.log.info('No eligible replacement family is available under the current mission policy, so the rebase cannot continue automatically.');
     fmt.log.info(`Recovery: ${fmt.command('git rebase --abort')}`);
     port.exit(1);
@@ -489,7 +490,3 @@ async function prepareRebaseContext(args: string[], port: RebaseWorkflowPort, sl
 }
 
 function blocksRebaseStart(opts: { resumeInPlace?: boolean } | undefined, state: ReturnType<RebaseWorkflowPort['detectRebaseState']>): boolean { return !opts?.resumeInPlace && state.inProgress; }
-
-function launchFailureReason(error: unknown) {
-  return recognizedFailureReason((error as { failureReason?: unknown } | null)?.failureReason);
-}

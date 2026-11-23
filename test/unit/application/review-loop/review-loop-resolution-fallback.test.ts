@@ -5,6 +5,7 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 
 test('TASK-1048: review loop adopts an implementer launcher fallback for the poll, state, and assignee', async () => {
   const dispositionPolls: string[] = [];
+  let reviews = 0;
   // The implementer's act-on-review launch hits capacity and the launcher runs
   // another family. The loop must poll the disposition for the family that
   // actually ran, persist it as the implementer, and record it as assignee.
@@ -24,12 +25,13 @@ test('TASK-1048: review loop adopts an implementer launcher fallback for the pol
         return { agent: 'custom', result: {} };
       },
     },
-    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true, reviewState: 'REQUEST_CHANGES' }) },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true,
+      reviewState: ++reviews === 1 ? 'REQUEST_CHANGES' : 'APPROVED' }) },
     preReview: { head: () => null },
     output: { error: message => { throw new Error(message); }, exit: code => { throw new Error(`exit(${code})`); } },
   });
 
-  await runReviewLoop({ slug: 'task-1048-regress', implementer: 'gemini', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-1048-regress', implementer: 'gemini', reviewer: 'codex', actionLimit: 40 }, fake.ports);
 
   assert.deepEqual(dispositionPolls, ['custom'], 'disposition should have been polled for the fallback agent');
   assert.ok(fake.writes.some(state => state.implementer === 'custom'), 'review state should have been rewritten to the fallback agent');

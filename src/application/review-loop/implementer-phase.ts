@@ -5,6 +5,7 @@ import { recordProviderResolution } from './provider-observations.js';
  * a blocked/parked implementer, or human escalation when no new revision exists.
  */
 import { currentReviewRound } from '../../domain/review.js';
+import { startReviewAction } from './action-limit.js';
 import { missionId } from '../../domain/mission.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
 import { isArtifactInfraFailure, isPollTimeout, type ImplementerArtifactFacts } from '../ports/review-round.js';
@@ -309,6 +310,7 @@ export async function runImplementerPhase(context: LoopContext, round: ReviewRou
     context.emit({ kind: 'existing-disposition', attempt: round.attempt, value: disposition.value });
     disposition.skippedLaunch = true;
   } else {
+    if (!await startReviewAction(context, 'repair', `review:${round.attempt}:repair`)) { return 'stop'; }
     if (await launchImplementer(context, round, reviewState, disposition)) { return 'stop'; }
     if (await consumeImplementerOutput(context, round, reviewState, disposition)) { return 'stop'; }
     if (await pollDisposition(context, round, reviewState, disposition)) { return 'stop'; }

@@ -170,7 +170,7 @@ export class WorkflowOperationService implements BoardCommandDispatcher {
     if (assessment.outcome === 'missing') { return failure('unavailable', 'Mission authority could not find this mission'); }
     if (assessment.outcome === 'refused') { return failure('conflict', assessment.reason); }
     return { request: request.operatorInvocation ? request : { ...request, operatorInvocation: true,
-      invocation: { command: 'review', args: [request.missionId], interactive: false } },
+      invocation: { command: 'review', args: [request.missionId] } },
       permit: { missionId: loaded.mission.id, missionVersion: loaded.version, recovery: assessment.recovery } };
   }
 

@@ -55,7 +55,7 @@ test('review-start change identity uses the execution context base branch (TASK-
   assert.equal(ports?.targetBranch, 'release/next');
 });
 
-test('only pilot composes policy actions, bound to the loop and the rebase state of its checkout (TASK-2859.19)', async () => {
+test('only pilot composes policy actions bound to the loop and rebase state (TASK-2859.19, TASK-2859.20)', async () => {
   const worktree = mkdtemp('policy-actions-');
   const policy = (mode: 'shadow' | 'pilot') => ({
     configuration: { mode, artifact: 'policy.json' }, repositoryId: 'repository-1' as never, targetBranch: 'main', operationId: null,
@@ -66,13 +66,11 @@ test('only pilot composes policy actions, bound to the loop and the rebase state
     readOutcomeFacts: async () => ({ review: null, runs: [] }),
   });
   const input = (mode: 'shadow' | 'pilot') => ({ slug: 'task-2859.19', executionContext: { missionWorktree: worktree } as never,
-    configuration: DEFAULT_CONFIGURATION, policy: policy(mode), policyFactory: (() => undefined) as never, missionServices: {} as never,
-    history: { countTestsActions: async () => 2 } });
+    configuration: DEFAULT_CONFIGURATION, policy: policy(mode), policyFactory: (() => undefined) as never, missionServices: {} as never });
   assert.equal(createPolicyActionPort(input('shadow')), undefined, 'shadow runs the fixed policy with no policy action port');
   const port = createPolicyActionPort(input('pilot'));
   assert.ok(port);
   assert.equal(port.rebaseInProgress(), false);
-  assert.equal(await port.testsActionsSpent(), 2, 'the spent count comes from the durable history');
   assert.equal((await port.select({ missionId: missionId('task-2859.19'), revision: 'abc' })).action, null,
     'an unusable policy leaves the fixed policy in charge');
 });

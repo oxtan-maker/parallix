@@ -62,7 +62,8 @@ export async function enterReviewVia(entry: ReviewEntry, fixture: RepairFixture,
   const repos = emptyBoardRepositories();
   const capabilities = composeProductionCapabilities(fixture.worktree, repositoryId('parallix'),
     { agentBlocklist: repos.blocklistRepo, operationalHistory: repos.historyRepo, boardLaneEvents: repos.laneEventRepo, usage: repos.usageRepo },
-    makeExecutePorts().ports, store, NO_EXECUTION_ACTIVITY, undefined, null, { configuration: resolveConfiguration(process.env) });
+    makeExecutePorts().ports, store, NO_EXECUTION_ACTIVITY, undefined, fixture.database,
+    { configuration: resolveConfiguration(process.env) });
   const result = await capabilities.commandController.dispatch({ operationId: `board-${fixture.slug}-${Date.now()}`, kind: 'review:submit', missionId: fixture.slug,
     missionStatusAtRequest: (await fixture.load()).status, agent: agentFamily('custom'), capabilities: new Set(['review:submit']), cancellation: { requested: false } });
   if (result.status !== 'completed') { messages.push(result.error?.message ?? result.status); }

@@ -249,7 +249,7 @@ describe("pre-review rebase launcher configuration", () => {
         agents: { launch: async launch => { note(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
         artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
       });
-      await runReviewLoop({ slug: 'task-lcfg-iso', implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+      await runReviewLoop({ slug: 'task-lcfg-iso', implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
 
       // The rebase's own push check may also run the gate; what matters is the loop's gate after the rebase.
       const events = fs.readFileSync(order, 'utf8').trim().split('\n');

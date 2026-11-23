@@ -2,8 +2,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { build } from 'esbuild';
-import { caseRoot } from './case-root.js';
-import { checkoutTestTmpdir } from '../lib/test-tmpdir.js';
+import { caseRoot, isCaseRoot } from './case-root.js';
+import { checkoutTestTmpdir, retireFixtureCheckoutTmpdir } from '../lib/test-tmpdir.js';
 
 /**
  * Immutable test-only entry; never added to the production CLI bundle.
@@ -103,11 +103,20 @@ async function buildSharedBundle(checkout: string, cacheRoot: string, shared: st
 
 export async function bundleWorkflowChild() {
   const checkout = process.cwd();
+  const fixtureOwnedCheckout = isCaseRoot(checkout);
   const cacheRoot = path.join(checkoutTestTmpdir(checkout), BUNDLE_CACHE_DIR);
   const shared = path.join(cacheRoot, bundleCacheKey(checkout));
   const entry = path.join(shared, 'workflow-child.mjs');
   if (!fs.existsSync(entry)) { await buildSharedBundle(checkout, cacheRoot, shared); }
   // Each owner/observer is already isolated in its own process; match the
   // runner's finite compiler pool rather than multiplying host-sized pools.
-  return { cli: { command: process.execPath, args: ['--v8-pool-size=1', entry] }, close() {} };
+  let closed = false;
+  return {
+    cli: { command: process.execPath, args: ['--v8-pool-size=1', entry] },
+    close() {
+      if (closed) { return; }
+      closed = true;
+      if (fixtureOwnedCheckout) { retireFixtureCheckoutTmpdir(checkout); }
+    },
+  };
 }

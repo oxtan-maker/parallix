@@ -8,6 +8,7 @@ import * as pathMod from 'node:path';
 import * as osMod from 'node:os';
 import { withAsyncCommandProgress, withCommandProgress } from './command-progress.js';
 import { commandProgressLabel } from './command-identity.js';
+import { parseUnmergedFiles } from './unmerged-paths.js';
 
 export interface GitOptions {
   /** Explicit wall bound for admission; default waits until release/cancellation. */
@@ -261,16 +262,7 @@ export function getUncommittedCount(cwd: string = process.cwd()): number {
   return result.stdout.trim().split('\n').length;
 }
 
-export function parseUnmergedFiles(output: string = ''): string[] {
-  return Array.from(new Set(
-    output
-      .split('\n')
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map(line => line.split('\t')[1])
-      .filter(Boolean)
-  ));
-}
+export { parseUnmergedFiles };
 
 interface RebaseStateResult {
   branch?: string | null;
@@ -328,7 +320,7 @@ export function detectRebaseState(cwd: string = process.cwd(), options: DetectRe
   const rebaseHeadResult = gitRunner(['-C', cwd, 'rev-parse', '-q', '--verify', 'REBASE_HEAD']);
   const rebaseHead = rebaseHeadResult.status === 0 ? rebaseHeadResult.stdout.trim() : '';
 
-  const unmergedResult = gitRunner(['-C', cwd, 'ls-files', '-u']);
+  const unmergedResult = gitRunner(['-C', cwd, 'ls-files', '-u', '-z']);
   const unmergedFiles = unmergedResult.status === 0 ? parseUnmergedFiles(unmergedResult.stdout) : [];
 
   const inProgress = Boolean(rebaseDir || unmergedFiles.length > 0);

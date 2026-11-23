@@ -157,7 +157,8 @@ test('codex exit 1 with real rollout telemetry is misclassified as a launch fail
 // TASK-2841: a Codex turn that ended with a terminal error is not a completed run,
 // however many rollout tokens it consumed (TASK-2834 spent 4004977 before its usage
 // limit). With the limit-hit detector stubbed out the gate alone must reroute; only the
-// typed usage-limit identity reaches the second block-persistence site.
+// typed usage-limit and server-overload identities reach the second block-persistence site
+// (TASK-2871); an unknown identity stays fail-closed.
 test('codex exit 1 whose rollout turn ended with a terminal error reroutes despite token usage', async (t) => {
   const originalCodexHome = process.env.CODEX_HOME;
   delete process.env.CODEX_HOME;
@@ -165,7 +166,7 @@ test('codex exit 1 whose rollout turn ended with a terminal error reroutes despi
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
   });
-  for (const [identity, expectedBlocks] of [['usage_limit_exceeded', ['codex']], ['server_overloaded', []]] as const) {
+  for (const [identity, expectedBlocks] of [['usage_limit_exceeded', ['codex']], ['server_overloaded', ['codex']], ['future_overload', []]] as const) {
     const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'task-2841-codex-terminal-'));
     t.after(() => fs.rmSync(worktree, { recursive: true, force: true }));
     const codexScript = `
@@ -182,6 +183,7 @@ test('codex exit 1 whose rollout turn ended with a terminal error reroutes despi
       process.exit(1);
     `;
     const blockCalls: string[] = [];
+    const blockWrites: { until: string; reason?: string }[] = [];
     const launched: string[] = [];
     const result = await withSharedLaunchers(() => withPathLaunchers({ codex: codexScript }, () => startAgent('draft', {
       configuration: launchConfiguration(),
@@ -195,13 +197,19 @@ test('codex exit 1 whose rollout turn ended with a terminal error reroutes despi
         return next;
       },
       detectLimitHitFn: () => null,
-      updateAgentBlockFn: (agent) => { blockCalls.push(agent); return { reason: null }; },
+      updateAgentBlockFn: (agent, until, options) => { blockCalls.push(agent); blockWrites.push({ until, reason: options?.reason }); return { reason: null }; },
       log: () => {}
     })));
 
     assert.equal(result.agent, 'vibe', `${identity}: a terminal-error turn must reroute instead of returning the failed codex launch`);
     assert.deepEqual(launched, ['codex', 'vibe'], identity);
     assert.deepEqual(blockCalls, expectedBlocks, identity);
+    if (identity === 'server_overloaded') {
+      const [write] = blockWrites;
+      assert.equal(write.reason, 'typed: provider-unavailable', 'the canonical typed reason, not an exit diagnostic');
+      const remainingMs = Date.parse(write.until) - Date.now();
+      assert.ok(remainingMs > 240_000 && remainingMs <= 300_000, `five-minute ISO expiry, got ${write.until}`);
+    }
   }
 });
 

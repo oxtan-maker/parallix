@@ -557,7 +557,7 @@ describe('Cancel surfaces', () => {
       }
       calls.push(init!);
       return new Response(
-        JSON.stringify({ kind: 'command-result', transportVersion: 4, status: 'completed', value: { slug: SLUG, cleanupCommand: 'git worktree remove /tmp/x && git branch -D mission/x' }, error: null, durableEvidence: [] }),
+        JSON.stringify({ kind: 'command-result', transportVersion: 5, status: 'completed', value: { slug: SLUG, cleanupCommand: 'git worktree remove /tmp/x && git branch -D mission/x' }, error: null, durableEvidence: [] }),
         { headers: { 'content-type': 'application/json' } },
       );
     };

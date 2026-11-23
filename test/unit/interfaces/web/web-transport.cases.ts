@@ -820,12 +820,16 @@ test('snapshot validation accepts the extended card and fails closed on malforme
   }
 });
 
-test('transport version 4 rejects v2 and v3 payloads as incompatible clients, not invalid payloads', () => {
-  assert.equal(WEB_TRANSPORT_VERSION, 4);
-  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [4]);
+test('transport version 5 rejects prior and future payloads as incompatible clients, not invalid payloads (TASK-2859.21)', () => {
+  assert.equal(WEB_TRANSPORT_VERSION, 5);
+  assert.deepStrictEqual([...SUPPORTED_WEB_TRANSPORT_VERSIONS], [5]);
 
   const snapshot = webProjection.snapshot(makeProjection({}));
-  assert.equal(snapshot.transportVersion, 4);
+  assert.equal(snapshot.transportVersion, 5);
+  for (const unsupported of [4, 6]) {
+    const result = validateWebBoardSnapshot({ ...snapshot, transportVersion: unsupported });
+    assert.deepStrictEqual(result, { ok: false, code: 'incompatible-client', field: 'transportVersion', received: unsupported, supported: [5] });
+  }
   // v3 carried historical metrics inside the snapshot; a v3 client must be
   // told its transport is incompatible rather than shown a partial payload.
   const v3Snapshot = validateWebBoardSnapshot({ ...snapshot, metrics: {}, transportVersion: 3 });
@@ -841,7 +845,7 @@ test('transport version 4 rejects v2 and v3 payloads as incompatible clients, no
     code: 'incompatible-client',
     field: 'transportVersion',
     received: 2,
-    supported: [4],
+    supported: [5],
   });
 
   const v2Result = validateWebCommandResult({

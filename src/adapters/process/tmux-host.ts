@@ -10,6 +10,9 @@ import { agentRunId } from '../../domain/agent-run.js';
 import { missionTerminalIdentity } from './mission-terminal-identity.js';
 import { ensurePrivateDir, terminalSocketFallbackRoot, terminalStateRoot } from './terminal-state-root.js';
 import { prepareMissionTranscript, type MissionTranscript } from './terminal-transcript.js';
+import { commandScript, paneScript, shellQuote } from './tmux-launch-scripts.js';
+
+export { shellQuote } from './tmux-launch-scripts.js';
 
 /** Mission-keyed persistent terminals; operation windows retain run attribution. */
 
@@ -60,11 +63,6 @@ export function missionSocketPath(input: { readonly repositoryKey: string; reado
   return path.join(terminalSocketFallbackRoot(configuration), `${digest}.sock`);
 }
 
-/** Single-quote one value for POSIX `sh`. */
-export function shellQuote(value: string): string {
-  return `'${String(value).replace(/'/g, `'\\''`)}'`;
-}
-
 export type TmuxLaunchInput = {
   /** Distinguishes a second spawn inside one launch (for example a stale-resume retry). */
   readonly spawnIndex: number;
@@ -96,6 +94,11 @@ export interface TmuxLaunch {
   cleanup(): void;
 }
 
+export interface TmuxLaunchExit {
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
 /** Session identity follows the mission, not an agent or attempt. */
 export function tmuxSessionName(identity: { readonly missionId: string }, _spawnIndex = 0): string {
   return tmuxMissionName(identity.missionId);
@@ -106,54 +109,6 @@ function operationWindowName(runId: string, spawnIndex: number): string {
 }
 
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * Record the supervised command PID before exec, without changing its terminal.
- * Supplied input becomes the command's stdin; its private file is unlinked once open.
- */
-function commandScript(socketPath: string, scratch: string, command: string, args: readonly string[], hasInput: boolean): string {
-  const input = shellQuote(path.join(scratch, 'stdin'));
-  return [
-    '#!/bin/sh',
-    `{ printf '%s\\n' "$$"; if [ -r /proc/$$/stat ]; then cat /proc/$$/stat; else ps -p "$$" -o lstart=; fi; } > ${shellQuote(path.join(scratch, 'command.identity.tmp'))}`,
-    `mv ${shellQuote(path.join(scratch, 'command.identity.tmp'))} ${shellQuote(path.join(scratch, 'command.identity'))}`,
-    `printf '%s' "$$" > ${shellQuote(path.join(scratch, 'command.pid'))}`,
-    `tmux -S ${shellQuote(socketPath)} set-option -w -t "$TMUX_PANE" @px_command_pid "$$"`,
-    ...(hasInput ? [`exec 3< ${input} || exit 66`, `rm -f ${input}`] : []),
-    `exec ${[command, ...args].map(shellQuote).join(' ')}${hasInput ? ' <&3 3<&-' : ''}`,
-    '',
-  ].join('\n');
-}
-
-function paneScript(socketPath: string, windowName: string, scratch: string, presenter?: TmuxLaunchInput['presenter']): string {
-  const t = `tmux -S ${shellQuote(socketPath)}`;
-  const agentOut = shellQuote(path.join(scratch, 'agent.out'));
-  // Agent output goes to a private fifo: `tee` forwards the raw bytes to the
-  // host's raw channel while the presenter draws the readable view on the pane.
-  const run = presenter
-    ? [`mkfifo ${agentOut}`,
-      `tee ${shellQuote(path.join(scratch, 'raw'))} < ${agentOut} | ${[presenter.command, ...presenter.args].map(shellQuote).join(' ')} &`,
-      'presenter=$!',
-      `sh ${shellQuote(path.join(scratch, 'command.sh'))} > ${agentOut} 2>&1`,
-      'status=$?',
-      'wait "$presenter"']
-    : [`sh ${shellQuote(path.join(scratch, 'command.sh'))}`, 'status=$?'];
-  return [
-    '#!/bin/sh',
-    `${t} wait-for ${shellQuote(`${windowName}-go`)}`,
-    `. ${shellQuote(path.join(scratch, 'pane.env'))}`,
-    `rm -f ${shellQuote(path.join(scratch, 'pane.env'))}`,
-    ...run,
-    `printf '%s' "$status" > ${shellQuote(path.join(scratch, 'status'))}`,
-    `${t} set-option -w -t "$TMUX_PANE" @px_host_pid ''`,
-    `${t} set-option -w -t "$TMUX_PANE" @px_supervisor_pid ''`,
-    `${t} set-option -w -t "$TMUX_PANE" @px_command_pid ''`,
-    // Keep the pane until its output relay drains; only the console stays idle.
-    `${t} wait-for ${shellQuote(`${windowName}-done`)}`,
-    'exit "$status"',
-    '',
-  ].join('\n');
-}
 
 function consolePxScript(command: string | undefined, mission: string): string {
   if (!command) { return '#!/bin/sh\nexit 127\n'; }
@@ -178,6 +133,7 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
   const fifo = shellQuote(path.join(scratch, 'out'));
   const raw = shellQuote(path.join(scratch, 'raw'));
   const status = shellQuote(path.join(scratch, 'status'));
+  const paneExit = shellQuote(path.join(scratch, 'pane-exit'));
   // The private, unredacted transcript only feeds the console's display of a
   // finished command; it is never history, attach or web output (TASK-2749).
   // Bounded segment writers keep it on disk-backed storage (TASK-2816).
@@ -186,6 +142,16 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
   const name = shellQuote(sessionName);
   const consoleTarget = shellQuote(`=${sessionName}:console`);
   const target = shellQuote(`=${sessionName}:${windowName}`);
+  const capturePaneExit = shellQuote(`run-shell ${shellQuote(`printf '%s\\n%s\\n' '#{pane_dead_status}' '#{pane_dead_signal}' > ${paneExit}.tmp; mv ${paneExit}.tmp ${paneExit}`)}`);
+  const retainDeadPane = presented ? '' : ` \\; set-option -w -t ${target} remain-on-exit on \\; set-hook -w -t ${target} pane-died ${capturePaneExit}`;
+  const completionWait = presented
+    ? [`while [ ! -s ${status} ] && ${t} display-message -p -t ${target} '#{pane_id}' >/dev/null 2>&1; do sleep 0.1; done`]
+    : [`while [ ! -s ${paneExit} ] && ${t} display-message -p -t ${target} '#{pane_id}' >/dev/null 2>&1; do sleep 0.1; done`];
+  const resultRead = presented
+    ? [`result=$(cat ${status})`, "signal=''"]
+    : [`result=$(sed -n '1p' ${paneExit})`, `signal=$(sed -n '2p' ${paneExit})`,
+      'if [ -n "$signal" ]; then result=$((128 + signal)); fi'];
+  const resultFile = presented ? status : paneExit;
   return [
     '#!/bin/sh',
     'cleanup() {',
@@ -200,15 +166,21 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     '  [ -z "$writer" ] || kill "$writer" 2>/dev/null',
     '}',
 
-    "trap 'cleanup INT; exit 130' INT",
-    "trap 'cleanup TERM; exit 143' TERM",
-    "trap 'cleanup HUP; exit 129' HUP",
+    'terminate() {',
+    '  cleanup "$1"',
+    '  trap - "$1"',
+    '  kill -s "$1" "$$"',
+    '  exit 1',
+    '}',
+    "trap 'terminate INT' INT",
+    "trap 'terminate TERM' TERM",
+    "trap 'terminate HUP' HUP",
     // On terminal teardown dash reports a HUP-killed background job ("Hangup")
     // on stderr, a pipe to the harness that is already gone. Catching PIPE
     // turns that write into EPIPE so the HUP cleanup above still stops the
     // command; a caught signal resets to default in the children it execs.
     "trap ':' PIPE",
-    `rm -f ${fifo} ${transcriptFifo} ${status}`,
+    `rm -f ${fifo} ${transcriptFifo} ${status} ${paneExit}`,
     `mkfifo ${fifo} || exit 70`,
     ...(presented ? [] : [`mkfifo ${transcriptFifo} || exit 70`]),
     // Presented launches relay the raw stream to the supervisor separately from the pane's readable view.
@@ -221,30 +193,31 @@ function hostScript(socketPath: string, sessionName: string, windowName: string,
     `${t} pipe-pane -t ${consoleTarget}`,
     // Publish ownership in the same tmux queue as creation: another client
     // must never observe an operation window as an idle, closable console.
-    `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} \\; set-option -w -t ${target} @px_run_id ${shellQuote(runId)} \\; set-option -w -t ${target} @px_host_pid "$$" \\; set-option -w -t ${target} @px_supervisor_pid ${supervisorPid} >/dev/null || exit 70`,
+    `${t} new-window -d -t ${name} -n ${shellQuote(windowName)} -c ${shellQuote(cwd)} ${shellQuote(`sh ${shellQuote(path.join(scratch, 'pane.sh'))}`)} \\; set-option -w -t ${target} @px_run_id ${shellQuote(runId)} \\; set-option -w -t ${target} @px_host_pid "$$" \\; set-option -w -t ${target} @px_supervisor_pid ${supervisorPid}${retainDeadPane} >/dev/null || exit 70`,
     `${t} pipe-pane -t ${target} -o ${shellQuote(`cat > ${fifo}`)} || { cleanup; exit 70; }`,
     ...(presented ? [`${writer(shellQuote(windowName))} < ${fifo} &`]
       : [`${writer(shellQuote(windowName))} < ${transcriptFifo} &`, 'writer=$!', `cat ${fifo} | tee ${transcriptFifo} &`]),
     'relay=$!',
     `${t} select-window -t ${target}`,
     `${t} wait-for -S ${shellQuote(`${windowName}-go`)}`,
-    `while [ ! -s ${status} ] && ${t} display-message -p -t ${target} '#{pane_id}' >/dev/null 2>&1; do sleep 0.1; done &`,
+    ...completionWait.map(line => `${line} &`),
     'completion=$!',
     'wait "$completion"',
-    `${t} pipe-pane -t ${target}`,
+    ...(presented ? [`${t} pipe-pane -t ${target}`] : [`${t} kill-window -t ${target} 2>/dev/null`]),
     'wait "$relay"',
     '[ -z "$writer" ] || wait "$writer"',
     ...(presented ? ['wait "$rawrelay"'] : []),
-    `if [ -s ${status} ]; then`,
-    `  result=$(cat ${status})`,
+    `if [ -s ${resultFile} ]; then`,
+    ...resultRead.map(line => `  ${line}`),
     // Show the completed command in the surviving operator shell before the
     // operation window disappears. The replay reaches only the console and its
     // private transcript; retained history never receives it (TASK-2749).
     `  ${t} send-keys -t ${consoleTarget} -l ${shellQuote(`sh ${shellQuote(transcript.replay)} ${shellQuote(transcript.dir)} ${shellQuote(windowName)} `)}"$result"`,
     `  ${t} send-keys -t ${consoleTarget} Enter`,
     `  ${t} select-window -t ${consoleTarget}`,
-    `  ${t} wait-for -S ${shellQuote(`${windowName}-done`)}`,
-    `  ${t} kill-window -t ${target} 2>/dev/null`,
+    ...(presented ? [`  ${t} wait-for -S ${shellQuote(`${windowName}-done`)}`] : []),
+    ...(presented ? [`  ${t} kill-window -t ${target} 2>/dev/null`] : []),
+    '  if [ -n "$signal" ]; then trap - "$signal"; kill -s "$signal" "$$"; exit 1; fi',
     '  exit "$result"',
     'fi',
     'cleanup',
@@ -385,14 +358,14 @@ export function tmuxAttachArgs(socketPath: string, sessionName: string, readOnly
  * `onOutput` receives every byte the operation pane relays (stderr merged by
  * the terminal), whether or not an operator is attached (TASK-2749).
  */
-export function superviseTmuxLaunch(launch: TmuxLaunch, options: { onOutput?: (_stream: 'stdout' | 'stderr', _chunk: Buffer) => void } = {}): Promise<number> {
+export function superviseTmuxLaunch(launch: TmuxLaunch, options: { onOutput?: (_stream: 'stdout' | 'stderr', _chunk: Buffer) => void } = {}): Promise<TmuxLaunchExit> {
   return new Promise((resolve, reject) => {
     const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
     const child = childProcess.spawn(launch.command, launch.args, { stdio: ['inherit', 'pipe', 'pipe'], detached: true });
     let client: childProcess.ChildProcess | null = null;
     let finished = false;
     let commandClosed = false;
-    let commandExitCode = 1;
+    let commandExit: TmuxLaunchExit = { exitCode: 1, signal: null };
     let attachedOnce = false;
     let attaching: ReturnType<typeof setTimeout> | null = null;
     let readiness: childProcess.ChildProcess | null = null;
@@ -410,18 +383,18 @@ export function superviseTmuxLaunch(launch: TmuxLaunch, options: { onOutput?: (_
         : ['-S', launch.socketPath, 'display-message', '-p', '-t', `=${launch.sessionName}:${launch.windowName}`, '#{pane_id}'], { timeout: 500 }, error => {
         readiness = null;
         if (finished) { return; }
-        if (error) { if (commandClosed) { settle(commandExitCode); } else { scheduleAttach(); } return; }
+        if (error) { if (commandClosed) { settle(commandExit); } else { scheduleAttach(); } return; }
         client = childProcess.spawn('tmux', ['-S', launch.socketPath, 'attach-session', '-t', `=${launch.sessionName}`], { stdio: 'inherit' });
         attachedOnce = true;
         const attached = client;
         attached.once('error', () => {
           if (client === attached) { client = null; }
-          if (commandClosed) { settle(commandExitCode); } else { scheduleAttach(); }
+          if (commandClosed) { settle(commandExit); } else { scheduleAttach(); }
         });
         attached.once('exit', code => {
           if (client !== attached) { return; }
           client = null;
-          if (commandClosed) { settle(commandExitCode); }
+          if (commandClosed) { settle(commandExit); }
           // A non-zero attach can race the just-created server/window. Retry
           // while the supervised command is still alive; a clean detach must
           // remain detached and therefore does not trigger a new attachment.
@@ -443,11 +416,11 @@ export function superviseTmuxLaunch(launch: TmuxLaunch, options: { onOutput?: (_
       process.removeListener('SIGTERM', terminate);
       launch.cleanup();
     };
-    const settle = (code: number) => { if (finished) { return; } cleanup(); resolve(code); };
+    const settle = (result: TmuxLaunchExit) => { if (finished) { return; } cleanup(); resolve(result); };
     child.once('error', err => { cleanup(); reject(err); });
-    child.once('close', code => {
+    child.once('close', (code, signal) => {
       commandClosed = true;
-      commandExitCode = code ?? 1;
+      commandExit = { exitCode: code, signal: signal ?? null };
       if (attaching) { clearTimeout(attaching); attaching = null; }
       // An attached client is part of this interactive command's lifecycle.
       // Keep px alive while the operator reads the retained console, then
@@ -455,7 +428,7 @@ export function superviseTmuxLaunch(launch: TmuxLaunch, options: { onOutput?: (_
       // inherited-stdio tmux child orphaned after the entry process exits.
       if (client) { return; }
       if (interactive && !attachedOnce) { if (!readiness) { attach(); } return; }
-      settle(code ?? 1);
+      settle(commandExit);
     });
   });
 }

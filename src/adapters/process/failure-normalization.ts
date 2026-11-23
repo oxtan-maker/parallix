@@ -117,7 +117,7 @@ function providerFailureCode(status: unknown, code: unknown): FailureReasonCode 
   if (status === 429 || ['insufficient_quota', 'rate_limit_exceeded', 'resource_exhausted'].includes(String(code))) { return 'agent-quota'; }
   if (status === 401 || code === 'authentication_error') { return 'provider-auth'; }
   if (status === 403) { return 'provider-entitlement'; }
-  if (typeof status === 'number' && status >= 500 && status <= 599) { return 'provider-unavailable'; }
+  if ((typeof status === 'number' && status >= 500 && status <= 599) || code === 'overloaded_error') { return 'provider-unavailable'; }
   if (code === 'session_not_found') { return 'provider-session-missing'; }
   if (['invalid_model', 'invalid_argument', 'unsupported_option'].includes(String(code))) { return 'provider-config'; }
   return 'unexpected';

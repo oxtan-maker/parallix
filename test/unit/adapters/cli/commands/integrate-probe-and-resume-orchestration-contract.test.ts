@@ -170,6 +170,16 @@ describe("integrate orchestration and gates", () => {
     cleanup();
   });
 
+  test('integrate preflight failure reports its concrete blocker with the failing exit (TASK-2862)', async (t) => {
+    setupMocks();
+    mock.method(git, 'getCurrentBranch', () => 'wrong-branch');
+    const exits: Array<{ code: number; reason?: string | null }> = [];
+    const exitFn = (code: number, reason?: string | null) => { exits.push({ code, reason }); };
+    await loadIntegrate()([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices, exitFn }).catch(() => {});
+    cleanup();
+    assert.match(exits.at(-1)?.reason ?? '', /Integration preflight failed\. Blocked by .*px integrate .* --dry-run/);
+  });
+
   test('integrate preflight failure stops execution', async (t) => {
     setupMocks();
     mock.method(git, 'getCurrentBranch', () => 'wrong-branch');

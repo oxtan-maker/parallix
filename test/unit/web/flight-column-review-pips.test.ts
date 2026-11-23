@@ -338,7 +338,7 @@ function px0031Card(overrides: Partial<MissionCard> = {}): WebMissionCard {
     reviewPhase: 'fixing',
     reviewDisposition: 'REQUEST_CHANGES',
     reviewRecovery: px0031Recovery,
-    reviewWindowAllowance: 5,
+    reviewActions: { used: 12, limit: 40, limitHit: null },
     repairBudget: px0031Budget,
     reviewHistory: Array.from({ length: 6 }, (_unused, index) => round(index + 1, 'REQUEST_CHANGES')),
     ...overrides,
@@ -352,7 +352,7 @@ test('the px-0031 card keeps all six review attempts and explicitly shows spent 
   assert.equal(attempts(html).length, 6);
   assert.doesNotMatch(html, /data-review-continuation-round/);
   assert.match(html, /data-review-attempt="6"[^>]*data-review-state="changes-requested"/);
-  assert.match(repair, /Autonomous review window: 5 attempts per review entry/);
+  assert.doesNotMatch(repair, /Autonomous review window|attempts per review entry/);
   assert.equal(visibleText(repair), 'repair attempts spent (2/2)');
   assert.match(repair, /data-repair-exhausted="true"/);
   assert.match(repair, /aria-label="Retained repair attempts: 2 of 2 spent; the repair budget is exhausted; next decision: acknowledge-and-resume"/);
@@ -370,12 +370,12 @@ for (const continuation of [7, 12]) {
   });
 }
 
-test('round, autonomous allowance and repair usage remain three facts without changing actions (TASK-2845)', () => {
+test('round and repair usage remain distinct while the retired autonomous allowance is not displayed (TASK-2845, TASK-2859.20)', () => {
   const withBudget = renderPips(px0031Card());
   const withoutBudget = renderPips(px0031Card({ repairBudget: null }));
   const actions = (html: string) => html.match(/data-action-kind="[^"]+"/g) ?? [];
   assert.match(withBudget, /data-review-round="6"/);
-  assert.match(repairTag(withBudget), /Autonomous review window: 5 attempts per review entry/);
+  assert.doesNotMatch(repairTag(withBudget), /Autonomous review window|attempts per review entry/);
   assert.match(withBudget, /data-repair-attempts-used="2"/);
   assert.deepEqual(actions(withBudget), actions(withoutBudget));
   assert.doesNotMatch(visibleText(repairTag(withBudget)), /approved|complete|passed/i);
@@ -384,10 +384,10 @@ test('round, autonomous allowance and repair usage remain three facts without ch
 test('pre-review repair usage is shown without inventing review facts (TASK-2845)', () => {
   const html = renderPips(px0031Card({
     pullRequest: null, reviewRound: null, reviewPhase: null, reviewHistory: [],
-    reviewWindowAllowance: null,
+    reviewActions: null,
   }));
   assert.equal(visibleText(repairTag(html)), 'repair attempts spent (2/2)');
-  assert.doesNotMatch(html, /data-review-round=|data-review-window-allowance/);
+  assert.doesNotMatch(html, /data-review-round=|data-review-actions/);
 });
 
 test('ordinary reviews retain every attempt with no added allowance decoration (TASK-2845)', () => {
@@ -400,4 +400,34 @@ test('repair usage below the limit is distinct from a spent budget (TASK-2845)',
   const html = renderPips(px0031Card({ repairBudget: { attemptsUsed: 1, maxAttempts: 2, exhausted: false } }));
   assert.equal(visibleText(repairTag(html)), 'repair attempts (1/2)');
   assert.doesNotMatch(repairTag(html), /spent|data-repair-recovery-cue/);
+});
+
+function actionsTag(html: string): string {
+  return /<p[^>]*data-review-actions[\s\S]*?<\/p>/.exec(html)?.[0] ?? '';
+}
+
+test('the flight card shows server-owned actions against the limit apart from review history and repair usage (TASK-2859.21)', () => {
+  const html = renderPips(px0031Card());
+  const tag = actionsTag(html);
+  assert.equal(visibleText(tag), 'review actions 12/40');
+  assert.match(tag, /data-review-actions-used="12"[^>]*data-review-actions-limit="40"[^>]*data-review-action-limit-hit="false"/);
+  assert.equal(attempts(html).length, 6, 'review history keeps one mark per recorded round');
+  assert.equal(visibleText(repairTag(html)), 'repair attempts spent (2/2)');
+});
+
+test('the flight card shows a limit hit only from its stored record (TASK-2859.21)', () => {
+  const hit = { actionSequence: 40, limit: 40, recordedAt: '2026-11-23T10:00:00.000Z' };
+  const reached = actionsTag(renderPips(px0031Card({ reviewActions: { used: 40, limit: 40, limitHit: hit } })));
+  assert.equal(visibleText(reached), 'review actions 40/40 · limit 40 reached');
+  assert.match(reached, /data-review-action-limit-hit="true"/);
+  const atCount = actionsTag(renderPips(px0031Card({ reviewActions: { used: 40, limit: 40, limitHit: null } })));
+  assert.equal(visibleText(atCount), 'review actions 40/40');
+  assert.match(atCount, /data-review-action-limit-hit="false"/);
+});
+
+test('the flight card keeps an unknown limit unknown and omits the fact without server data (TASK-2859.21)', () => {
+  const unknownLimit = actionsTag(renderPips(px0031Card({ reviewActions: { used: 3, limit: null, limitHit: null } })));
+  assert.equal(visibleText(unknownLimit), 'review actions 3 (limit unknown)');
+  assert.doesNotMatch(unknownLimit, /data-review-actions-limit/);
+  assert.equal(actionsTag(renderPips(px0031Card({ reviewActions: null, reviewRound: 40 }))), '');
 });

@@ -5,19 +5,9 @@ import { agentFamily } from '../domain/agents.js';
 import { changeRevision, ConfiguredReviewerEligibility, startReview } from '../domain/review.js';
 
 import type { ReviewRoundEntryPort, StartReviewRound } from './ports/review-round.js';
-import { DEFAULT_MAX_ATTEMPTS, runReviewLoop } from './review-loop/review-loop.js';
+import { runReviewLoop } from './review-loop/review-loop.js';
 
-/**
- * The attempt limit a review entry runs with. A continuation without an
- * explicit limit grants one fresh autonomous window after the persisted round;
- * an explicit limit never falls below the round already reached.
- */
-export function reviewRoundLimit(persistedRound: number | null, requested: number | null): number {
-  if (requested !== null) { return Math.max(requested, persistedRound ?? 1); }
-  return persistedRound ? Math.max(persistedRound + DEFAULT_MAX_ATTEMPTS - 1, DEFAULT_MAX_ATTEMPTS) : DEFAULT_MAX_ATTEMPTS;
-}
-
-type ReviewRoundRequest = Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> & { readonly rawMaxAttempts: string | null };
+type ReviewRoundRequest = Omit<StartReviewRound, 'isContinue'>;
 type PersistedRound = Awaited<ReturnType<ReviewRoundEntryPort['loadRound']>>;
 type OperatorEntry = 'absent' | 'ready' | 'stopped';
 
@@ -26,11 +16,6 @@ export class ReviewRoundUseCase {
   constructor(private readonly _entry: ReviewRoundEntryPort, private readonly _runLoop: typeof runReviewLoop = runReviewLoop) {}
 
   async enter(request: ReviewRoundRequest): Promise<void> {
-    const parsed = request.rawMaxAttempts === null ? DEFAULT_MAX_ATTEMPTS : Number(request.rawMaxAttempts);
-    if (!Number.isInteger(parsed) || parsed < 1) {
-      this._entry.invalidMaxAttempts(request.rawMaxAttempts ?? '');
-      return;
-    }
     const persisted = await this._entry.loadRound(request.slug);
     const operatorEntry = await this.prepareOperatorEntry(request, persisted);
     if (operatorEntry === 'stopped') { return; }
@@ -45,8 +30,7 @@ export class ReviewRoundUseCase {
         return;
       }
     }
-    const maxAttempts = reviewRoundLimit(persisted?.round ?? null, request.rawMaxAttempts === null ? null : parsed);
-    const round = { ...request, maxAttempts, isContinue: Boolean(persisted) };
+    const round = { ...request, isContinue: Boolean(persisted) };
     await this._runLoop(round, await this._entry.mechanisms(round));
   }
 

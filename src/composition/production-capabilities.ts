@@ -11,6 +11,7 @@ import { authorizedOperationId } from '../application/ports/mission-write-author
 import { MissionEditService } from '../application/mission-edit-service.js';
 import { createReviewClassification } from './review-classification.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
+import { resolveReviewActionLimit } from '../adapters/config/product-config.js';
 import type { ExecuteMissionPorts } from '../application/ports/execute-mission.js';
 import type { TuiCapabilities } from '../application/tui-capabilities.js';
 import type { BoardCommandDispatcher, BoardProgressSink } from '../application/controller/board-command.js';
@@ -237,7 +238,6 @@ function createBoardReviewPreparationWorkflow(
         },
         clearHumanIntervention,
         invalidateResolvedBlocker: async () => undefined,
-        invalidMaxAttempts: () => undefined,
         missingReviewAggregate: () => { throw new Error(`Mission ${slug} is unknown or has no valid Review aggregate.`); },
         missionUnavailable: (_mission, reason) => { throw new Error(`Mission authority is unavailable for ${slug}: ${reason}`); },
         reviewRecoveryRefused: (_mission, reason) => { throw new Error(`Review recovery refused for ${slug}: ${reason}`); },
@@ -250,7 +250,7 @@ function createBoardReviewPreparationWorkflow(
           mission: { store, lifecycle, operationalHistory: missionServices.operationalHistory, repositoryId, integration: missionServices.integration },
           operatorState: { db: database, repositories: { boardLaneEvents: persistence.laneEvents } },
         }),
-      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, rawMaxAttempts: null, executionContext: live.context, operatorInvocation: false });
+      }, reviewLoop).enter({ slug, reviewer: agent, focus: 'all', actionLimit: resolveReviewActionLimit(worktree), dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null, executionContext: live.context, operatorInvocation: false });
     },
   };
 }

@@ -386,6 +386,11 @@ describe("git pure helpers", () => {
     assert.deepEqual(git.parseUnmergedFiles(output), ['a.txt']);
   });
 
+  test('parseUnmergedFiles reads NUL-delimited raw paths, including a tab or newline in a name (TASK-2862)', () => {
+    const output = ['100644 aaaaa 1\ttab\tname.md', '100644 bbbbb 2\ttab\tname.md', '100644 ccccc 3\tline\nbreak.md'].join('\0') + '\0';
+    assert.deepEqual(git.parseUnmergedFiles(output), ['tab\tname.md', 'line\nbreak.md']);
+  });
+
   test('parseUnmergedFiles returns an empty array for empty output', () => {
     assert.deepEqual(git.parseUnmergedFiles(''), []);
   });

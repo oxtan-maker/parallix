@@ -6,13 +6,14 @@ import { isSpuriousCodexExit } from "./codex.js";
 import { isSpuriousVibeExit } from "./vibe.js";
 import { isSpuriousOpencodeExit } from "./opencode.js";
 import { isSpuriousQwenExit } from "./qwen.js";
-import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS, type DetectedLimitHit } from "../../application/services/agent-limit.js";
+import { detectLimitHit, formatBlockUntil, DEFAULT_FALLBACK_HOURS, PROVIDER_UNAVAILABLE_BLOCK_MINUTES, type DetectedLimitHit } from "../../application/services/agent-limit.js";
 import { AgentPoolExhaustedError } from "../../domain/agents.js";
 import type { LaunchResultLike, AgentFailureDetails, AgentBlockWriter, AgentLog, StartAgentLoopState, StartAgentLoopDeps, LaunchVerdict } from './agent-launch-context.js';
 
 
-export function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike | null | undefined) {
-  if (!result || agent === 'custom') {return false;}
+/** The detected persistent block for a failed launch, or null when it is not positively classified. */
+function launchFailureBlockHit(agent: string, result: LaunchResultLike | null | undefined) {
+  if (!result || agent === 'custom') {return null;}
   const hit = detectLimitHit({
     agent,
     failureReason: result.failureReason,
@@ -25,7 +26,11 @@ export function shouldPersistLaunchFailureBlock(agent: string, result: LaunchRes
     signal: result.signal,
     error: result.error ?? null
   });
-  return !!hit && !hit.reroute;
+  return hit && !hit.reroute ? hit : null;
+}
+
+export function shouldPersistLaunchFailureBlock(agent: string, result: LaunchResultLike | null | undefined) {
+  return launchFailureBlockHit(agent, result) !== null;
 }
 
 
@@ -81,15 +86,19 @@ export function launchFailureBlockReason(result: AgentProcessResult | null | und
  * do not read it as a live production block path.
  */
 export async function persistLaunchFailureBlock(agent: string, result: AgentProcessResult | null | undefined, updateAgentBlockFn: AgentBlockWriter, log: AgentLog): Promise<void> {
-  if (!shouldPersistLaunchFailureBlock(agent, result)) {
+  const hit = launchFailureBlockHit(agent, result);
+  if (!hit) {
     log(fmt.status('INFO', `Skipping blocklist write for ${fmt.agent(agent)}; failure not positively classified as a provider availability/quota block.`));
     return;
   }
-  const blockReason = launchFailureBlockReason(result);
-  const blockUntil = formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
+  // Provider unavailability keeps the one shared detector's expiry and canonical reason.
+  const unavailable = hit.reason === 'typed: provider-unavailable';
+  const blockReason = unavailable ? hit.reason : launchFailureBlockReason(result);
+  const blockUntil = unavailable ? hit.until : formatBlockUntil(new Date(Date.now() + DEFAULT_FALLBACK_HOURS * 60 * 60 * 1000));
+  const duration = unavailable ? `${PROVIDER_UNAVAILABLE_BLOCK_MINUTES}m` : `${DEFAULT_FALLBACK_HOURS}h`;
   try {
     const blockResult = await updateAgentBlockFn(agent, blockUntil, { reason: blockReason });
-    log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(agent)} (${DEFAULT_FALLBACK_HOURS}h block, ${blockResult.reason || blockReason})`));
+    log(fmt.status('INFO', `Wrote checked AgentBlock for ${fmt.agent(agent)} (${duration} block, ${blockResult.reason || blockReason})`));
   } catch (err) {
     log(fmt.status('WARN', `Could not persist blocklist entry for ${fmt.agent(agent)}: ${(err as Error & { code?: string }).message}`));
   }
@@ -198,7 +207,11 @@ async function handleLimitHit(state: StartAgentLoopState, deps: StartAgentLoopDe
     if (typeof deps.onLimitHit === 'function') {
       deps.onLimitHit({ agent: chosen, until: limitHit.until, source: limitHit.source });
     }
-    deps.refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`, { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: limitHit.until } });
+    if (limitHit.reason === 'typed: provider-unavailable') {
+      deps.refuseFallbackWhenPinned(`provider unavailable; blocked until ${limitHit.until}`, { version: 1, code: 'provider-unavailable', source: 'provider' });
+    } else {
+      deps.refuseFallbackWhenPinned(`usage limit hit; blocked until ${limitHit.until}`, { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: limitHit.until } });
+    }
     // A pinned agent fails loudly above; everything else reselects next round.
     state.chosen = undefined;
     return { kind: 'continue' };

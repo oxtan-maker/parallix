@@ -60,6 +60,7 @@ describe('Execute Mission adapters', () => {
       getTaskStatus() { return 'active'; },
       recordActiveStats() {},
       resolveStageTelemetry() { return null; },
+      resolveReviewActionLimit() { return 40; },
       async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
       async performReviewPreparation() { return { ok: true as const }; },
       async repairReviewPreparation() { return { repaired: false }; },
@@ -404,6 +405,7 @@ describe('Execute Mission characterization', () => {
       getTaskStatus() { calls.push('status'); return 'active'; },
       recordActiveStats(record: { implementer: string }) { calls.push(`stats:${record.implementer}`); },
       resolveStageTelemetry() { calls.push('telemetry'); return null; },
+      resolveReviewActionLimit() { return 40; },
       async validateCheckpointsBeforeReviewPreparation() { return { ok: true as const }; },
       async performReviewPreparation(slug: string, options: { executionContext: LiveMissionExecutionContext; forgejoUser?: string }) {
         calls.push(`review-preparation:${slug}:${options.executionContext.missionWorktree}:${options.forgejoUser}`);
@@ -454,13 +456,25 @@ describe('Execute Mission characterization', () => {
   });
 
   // TASK-2723: the explicit reviewer reaches the real review-loop selection.
-  async function reviewWithReviewer(reviewer: string | undefined, routing: Record<string, unknown> = {}) {
+  async function reviewWithReviewer(reviewer: string | undefined, routing: Record<string, unknown> = {}, actionLimit = 40) {
     const fake = fakeReviewLoopPorts({ slug: 'task-1', routing: routing });
     let nested: Parameters<ExecuteMissionRuntime['reviewLoopMechanisms']> | null = null;
-    const { runtime, transitionStore } = executeFixture({ reviewLoopMechanisms: (...args) => { nested = args; return fake.ports; } });
+    const resolvedRoots: string[] = [];
+    const { runtime, transitionStore } = executeFixture({
+      resolveReviewActionLimit: root => { resolvedRoots.push(root ?? ''); return actionLimit; },
+      reviewLoopMechanisms: (...args) => { nested = args; return fake.ports; },
+    });
     const outcome = await buildExecuteWorkflow(runtime, transitionStore).execute(executeRequest({ agent: 'claude', reviewer }));
-    return { fake, outcome, nested };
+    return { fake, outcome, nested, resolvedRoots };
   }
+
+  test('execute autonomous review uses the mission worktree action limit (TASK-2859.20 review)', async () => {
+    const { fake, resolvedRoots } = await reviewWithReviewer('qwen', {
+      eligibleFamilies: () => ['claude', 'codex', 'qwen'],
+    }, 7);
+    assert.deepEqual(resolvedRoots, ['/worktree']);
+    assert.match(fake.logs.join('\n'), /review action limit 7/i);
+  });
 
   test('execute workflow: an explicit reviewer is the preferred first automatic reviewer (TASK-2837)', async () => {
     const { fake, nested } = await reviewWithReviewer('qwen', { eligibleFamilies: () => ['claude', 'codex', 'qwen'] });

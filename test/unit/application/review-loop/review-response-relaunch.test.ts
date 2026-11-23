@@ -25,7 +25,7 @@ function reviewLoopHarness(options: {
   });
 }
 const reviewerLaunches = (fake: ReturnType<typeof fakeReviewLoopPorts>) => fake.launches.filter(launch => launch.role === 'reviewer');
-const request = { slug: 'task-2239', implementer: 'claude', reviewer: 'codex', maxAttempts: 3 } satisfies Partial<NonNullable<Parameters<typeof runReviewLoop>[0]>>;
+const request = { slug: 'task-2239', implementer: 'claude', reviewer: 'codex', actionLimit: 40 } satisfies Partial<NonNullable<Parameters<typeof runReviewLoop>[0]>>;
 
 test('accepted child request-changes proceeds to fixing despite verdict readiness closing (px-0017)', async () => {
   let decided = false;
@@ -53,7 +53,6 @@ test('accepted child request-changes proceeds to fixing despite verdict readines
   assert.deepEqual(fake.exits, []);
   assert.equal(fake.launches.length, 1);
 });
-
 for (const recovery of ['artifact', 'timeout'] as const) {
   for (const verdict of ['REQUEST_CHANGES', 'APPROVED'] as const) {
     test(`${recovery} retry reconciles accepted ${verdict} before verdict readiness (px-0017 F1)`, async () => {
@@ -174,17 +173,4 @@ test('reviewer launch failure after a response records a reviewer-specific human
 
   assert.ok(fake.writes.some(state => (state.metadata as Record<string, unknown>)?.humanEscalationReason === 'REVIEWER_LAUNCH_FAILURE'), 'reviewer failure must retain its escalation reason in lifecycle state');
   assert.ok(fake.logs.some(message => /human review.*reviewer/i.test(message)), 'reviewer failure must use the explicit human-review path');
-});
-
-test('post-response transition escalates at the maximum reviewer-attempt boundary without launching another reviewer', async () => {
-  const fake = reviewLoopHarness({
-    reviewer: () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }),
-    implementer: () => ({ consumed: true, ok: true as const, disposition: 'PUSHBACK_ALL' }),
-  });
-
-  await runReviewLoop({ ...request, maxAttempts: 1 }, fake.ports);
-
-  assert.equal(reviewerLaunches(fake).length, 1, 'the decision beyond maxAttempts must not launch a reviewer');
-  assert.ok(fake.writes.some(state => state.disposition === 'MAX_ATTEMPTS'), 'attempt exhaustion must be retained in lifecycle state');
-  assert.ok(fake.logs.some(message => /reached 1 attempts.*human review/i.test(message)), 'attempt exhaustion must take the explicit human-review path');
 });

@@ -447,3 +447,14 @@ test('oversized stdin survives every Claude session policy and stale fallback (T
     assert.ok(!fresh.args.includes('ignored'));
   } finally { claude.__setSpawnAndTeeForTest(null); }
 });
+
+test('Claude stream-json 529 overloaded_error reaches provider-unavailable and the shared five-minute block (TASK-2871)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const { detectLimitHit } = await import('../../../../src/application/services/agent-limit.js');
+  const stdout = JSON.stringify({ type: 'result', subtype: 'success', is_error: true, api_error_status: 529, api_error: 'overloaded_error', result: 'API Error: 529' });
+  const failureReason = normalizeProviderFailure({ status: 1, stdout });
+  assert.equal(failureReason?.code, 'provider-unavailable');
+  const now = new Date('2026-11-23T09:43:00Z');
+  const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason, now });
+  assert.equal(hit?.until, '2026-11-23T09:48:00.000Z');
+});

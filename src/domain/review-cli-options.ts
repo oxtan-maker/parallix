@@ -15,7 +15,6 @@ export const REVIEW_OPTIONS = {
   '--implementer': { value: 'agent', purpose: 'Override the implementer for this review.' },
   '--reviewer': { value: 'agent', purpose: 'Prefer this reviewer first, including when resuming review.' },
   '--focus': { value: 'focus', purpose: 'Choose the reviewer prompt focus.' },
-  '--max-attempts': { value: 'n', purpose: 'Bound the round count for this invocation.' },
   '--poll-timeout-seconds': { value: 'seconds', purpose: 'Bound provider polling for this invocation.' },
   '--dry-run': { value: null, purpose: 'Preview without launching agents or acknowledging recovery.' },
   '--reset': { value: null, purpose: 'Explicitly reset recorded loop state before review.' },

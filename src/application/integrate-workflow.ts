@@ -59,7 +59,7 @@ export interface IntegrateOptions extends Partial<IntegrateSeams> {
   operatorInvocation?: boolean;
   missionServicesFn?: IntegrationMissionServicesFactory;
   /** Board composition receives the terminal status without terminating the UI process. */
-  exitFn?: (_code: number) => void;
+  exitFn?: (_code: number, _reason?: string | null) => void;
   /** The outer `px integrate` publication nested repair and review report into (TASK-2620). */
   nestedWork?: unknown;
   /**
@@ -277,11 +277,11 @@ class IntegrateWorkflow {
     // data is preserved and the temporary stash can be dropped; only a genuine
     // conflict (or a missing file) should fail the run.
     const stashRootDir = stash.rootDir as string;
-    if (this.dependencies.ports.checkout.maybeDropStashAfterCollision(restoreResult, stashRootDir)) {
+    if (this.dependencies.ports.checkout.maybeDropStashAfterCollision(restoreResult, stashRootDir, { expectedObjectId: stash.objectId, marker: stash.message })) {
       fmt.log.info('[RESTORE] Stashed working-tree change was preserved on disk by the landed commit; dropped the temporary stash.');
       return 0;
     }
-    this.dependencies.ports.checkout.reportStashPopFailure(slug, restoreResult, { rootDir: stashRootDir });
+    this.dependencies.ports.checkout.reportStashPopFailure(slug, restoreResult, { rootDir: stashRootDir, stash });
     return 1;
   }
 
@@ -385,9 +385,8 @@ class IntegrateWorkflow {
       assertRecoveredIntegrationHandoff(recovered, this.dependencies.landing, slug);
     }
 
-    if (this.dependencies.printIntegrationPreflight(context, { gitFn: this.dependencies.ports.git.git, configuration: options.configuration }).failures.length > 0) {
-      throw abortWith(this.dependencies.landing, '\nIntegration preflight failed. Resolve the blockers above before running integrate.');
-    }
+    const { failures } = this.dependencies.printIntegrationPreflight(context, { gitFn: this.dependencies.ports.git.git, configuration: options.configuration });
+    if (failures.length > 0) { throw abortWith(this.dependencies.landing, `\nIntegration preflight failed. Blocked by ${failures.join(', ')}. Resolve the blockers above, then retry: px integrate ${slug} --dry-run`); }
 
     // TASK-2625: a resolvable mission HEAD only enables recording the
     // integration-validation marker. The marker itself is keyed on the commit

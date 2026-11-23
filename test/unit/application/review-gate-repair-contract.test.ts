@@ -494,7 +494,7 @@ describe("pre review gate repair continues", { concurrency: false }, () => {
       },
       output: { log: line => logs.push(line), error: line => logs.push(line), exit: () => { throw new Error('unexpected exit'); } },
     });
-    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', actionLimit: 40 }, fake.ports);
 
     const resumed = lifecycleCommands.find(request => request.command.type === 'submit-for-review');
     assert.ok(resumed?.command.type === 'submit-for-review');

@@ -21,6 +21,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { missionVersion, MissionStaleVersion } from '../../../../src/application/domain-ports.js';
+import { DEFAULT_REVIEW_ACTION_LIMIT } from '../../../../src/application/ports/review-action-history.js';
 import type {
   MissionLoadResult,
   MissionTransitionStore,
@@ -203,8 +204,10 @@ test("board review preparation resume enters the shared review round owner witho
   assert.equal(launches[0].slug, SLUG);
   assert.equal(launches[0].options.worktree, '/external/mission', 'board composition carries the resolved mission checkout into the loop');
   assert.equal(launches[0].options.isContinue, true);
-  // Same limit `px review` grants a continuation of persisted round N.
-  assert.equal(launches[0].options.maxAttempts, 5, 'the continuation limit is the shared owner contract');
+  assert.equal(launches[0].options.actionLimit, DEFAULT_REVIEW_ACTION_LIMIT,
+    'the board continuation uses the shared lifetime action limit');
+  assert.equal('maxAttempts' in launches[0].options, false,
+    'the retired per-entry attempt budget is not run beside the lifetime action limit');
 });
 
 test("board review preparation resume launches the loop again without inventing a second lane event", async () => {

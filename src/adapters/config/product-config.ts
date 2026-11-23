@@ -14,6 +14,7 @@ import {
 import type { GithubPublishConfig } from '../../application/ports/github-publish.js';
 import type { VerificationPolicyConfiguration } from '../../application/ports/verification-policy.js';
 import { verificationPolicyConfig } from './verification-policy.js';
+import { DEFAULT_REVIEW_ACTION_LIMIT } from '../../application/ports/review-action-history.js';
 
 const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'agents'] as const;
 
@@ -26,6 +27,7 @@ export const SUPPORTED_TASK_PROVIDERS = ['backlog-md'] as const;
 
 const DEFAULT_CONFIG = Object.freeze({
   verificationPolicy: { mode: 'off' } as VerificationPolicyConfiguration,
+  reviewActionLimit: DEFAULT_REVIEW_ACTION_LIMIT,
   product: {
     name: 'Workflow',
   },
@@ -121,6 +123,15 @@ export function loadWorkflowConfig(rootDir: string = process.cwd()): LoadedConfi
 }
 
 const reportedPolicyConfigs = new Set<string>();
+const reportedReviewActionLimits = new Set<string>();
+
+function configuredReviewActionLimit(value: unknown, report: (message: string) => void): number {
+  if (value === undefined) { return DEFAULT_REVIEW_ACTION_LIMIT; }
+  if (Number.isSafeInteger(value) && Number(value) > 0) { return Number(value); }
+  report(`reviewActionLimit must be a positive safe integer; using ${DEFAULT_REVIEW_ACTION_LIMIT}.`);
+  return DEFAULT_REVIEW_ACTION_LIMIT;
+}
+
 export function loadEffectiveConfig(rootDir: string = process.cwd()): typeof DEFAULT_CONFIG {
   const loaded = loadWorkflowConfig(rootDir);
   if (!loaded.found || loaded.parseError || !isPlainObject(loaded.config)) {
@@ -133,7 +144,16 @@ export function loadEffectiveConfig(rootDir: string = process.cwd()): typeof DEF
     const key = path.resolve(rootDir);
     if (!reportedPolicyConfigs.has(key)) { reportedPolicyConfigs.add(key); console.error(message); }
   });
-  return { ...deepMerge(defaultConfig(), loaded.config), verificationPolicy } as typeof DEFAULT_CONFIG;
+  const reviewActionLimit = configuredReviewActionLimit(loaded.config.reviewActionLimit, message => {
+    const key = path.resolve(rootDir);
+    if (!reportedReviewActionLimits.has(key)) { reportedReviewActionLimits.add(key); console.error(message); }
+  });
+  return { ...deepMerge(defaultConfig(), loaded.config), verificationPolicy, reviewActionLimit } as typeof DEFAULT_CONFIG;
+}
+
+/** Resolve the repository-owned review bound without constructing policy readers. */
+export function resolveReviewActionLimit(rootDir: string = process.cwd()): number {
+  return loadEffectiveConfig(rootDir).reviewActionLimit;
 }
 
 function isSupportedTaskProvider(value: unknown): boolean {

@@ -16,7 +16,6 @@ export interface ReviewerSelectionRequest {
   readonly implementer: string;
   readonly isContinue: boolean;
   readonly persisted: Pick<ReviewLoopState, 'reviewer' | 'round' | 'phase'> | null;
-  readonly maxAttempts: number;
   readonly dryRun: boolean;
   readonly providerEnabled: boolean;
   readonly slug: string;
@@ -203,11 +202,10 @@ export function selectReviewer(
   if (!selection.reviewer && !fallbackForUnnamedReviewer(selection, context, selectErr)) { return null; }
 
   const round = request.persisted?.round || 1;
-  const willLaunchRounds = request.maxAttempts >= round;
   const resumesInFixingPhase = request.persisted?.phase === 'fixing' && !request.dryRun;
   const resumesDecidedPhase = request.persisted?.phase === 'approved' && !request.dryRun;
 
-  const routed = routeSelectedReviewer(selection, context, persistedContinueReviewer, willLaunchRounds, resumesInFixingPhase, resumesDecidedPhase);
+  const routed = routeSelectedReviewer(selection, context, persistedContinueReviewer, resumesInFixingPhase, resumesDecidedPhase);
   if (!routed) { return null; }
 
   context.emit({ kind: 'reviewer-selected', reviewer: selection.reviewer, source: selection.source, round, isContinue: request.isContinue });
@@ -224,7 +222,7 @@ function continuedReviewer(request: ReviewerSelectionRequest): string | null {
   return request.persisted?.reviewer ?? null;
 }
 
-function routeSelectedReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null, willLaunchRounds: boolean, resumesInFixingPhase: boolean, resumesDecidedPhase: boolean): boolean {
+function routeSelectedReviewer(selection: Selection, context: Context, persistedContinueReviewer: string | null, resumesInFixingPhase: boolean, resumesDecidedPhase: boolean): boolean {
   if (selection.source === 'fallback') {
     context.emit({ kind: 'autonomous-reviewer-selected' });
     return true;
@@ -235,7 +233,7 @@ function routeSelectedReviewer(selection: Selection, context: Context, persisted
   } else if (resumesInFixingPhase) {
     context.emit({ kind: 'fixing-reviewer-resumed', reviewer: selection.reviewer });
     return true;
-  } else if ((context.dryRun && selection.source === 'explicit') || !willLaunchRounds) {
+  } else if (context.dryRun && selection.source === 'explicit') {
     // No round will launch, so the reviewer only has to be an eligible family.
     return validateWithoutLaunch(selection, context, persistedContinueReviewer);
   } else {

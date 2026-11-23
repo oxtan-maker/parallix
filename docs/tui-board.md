@@ -114,9 +114,13 @@ worker, and no card header carries a work badge or an execution count row.
 
 A web flight card with an unresolved retained repair shows its usage below the
 existing progression row, for example `repair attempts spent (2/2)`. Its tooltip
-distinguishes the autonomous review allowance from repair usage. Review history
-keeps one mark per recorded round. The Review recovery disclosure carries the
-recorded recovery guidance; repair usage does not change enabled actions.
+keeps the repair usage and recovery cue together. A web flight card also shows
+the Mission's review actions against the configured limit, for example `review
+actions 12/40`, and says so when a stored record shows the limit was reached; it
+never infers that from the count, and an unreadable history shows no figure.
+Review history keeps one mark per recorded round.
+The Review recovery disclosure carries the recorded recovery guidance; repair
+usage does not change enabled actions.
 
 Web cards show the available commands alongside Cancel. When no command can
 run, one unavailable control explains why. Commands that can run together remain

@@ -310,7 +310,11 @@ for (const pinned of [false, true]) {
       },
     };
     if (pinned) {
-      await assert.rejects(startAgent('review', options), /Pinned agent.*usage limit hit/);
+      await assert.rejects(startAgent('review', options), (error: Error & { failureReason?: unknown }) => {
+        assert.match(error.message, /Pinned agent.*usage limit hit/);
+        assert.deepEqual(error.failureReason, { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: blocks.get('claude')!.until } });
+        return true;
+      });
       assert.deepEqual(launched, ['claude']);
     } else {
       assert.equal((await startAgent('review', options)).agent, 'vibe');
@@ -321,6 +325,34 @@ for (const pinned of [false, true]) {
     assert.equal(blocks.get('claude')!.until, formatBlockUntil(ceilToNextHour(new Date('2026-11-03T20:50:00.000Z'))));
   });
 }
+
+test('pinned Claude refusal after a structured 529 reports provider availability, not usage quota (TASK-2871)', async () => {
+  const { detectLimitHit } = await import('../../../../src/application/services/agent-limit.js');
+  const { resolveBlockContext } = await import('../../../../src/adapters/agents/agent-block-selection.js');
+  const blocks = new Map<string, { until: string; reason?: string }>();
+  const stdout = JSON.stringify({ type: 'result', is_error: true, api_error_status: 529, api_error: 'overloaded_error' });
+  const now = new Date('2026-11-23T09:43:00Z');
+  const options: StartAgentOptions = {
+    configuration: resolveConfiguration(environment), prompt: 'Review', agent: 'claude', pinnedAgent: true,
+    isAgentBlockedFn: (family: string) => blocks.has(family),
+    assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null, log: () => {},
+    runtimeBlockContextFn: async (_step: string, tried: ReadonlySet<string>) => resolveBlockContext(['claude', 'vibe'], tried, new Set(blocks.keys())),
+    selectAgentFn: () => { throw new Error('a pinned agent never reselects'); },
+    detectLimitHitFn: (input) => detectLimitHit({ ...input!, now }),
+    updateAgentBlockFn: (family: string, until: string, writeOptions?: { reason?: string }) => {
+      blocks.set(family, { until, reason: writeOptions?.reason }); return { reason: writeOptions?.reason };
+    },
+    launchAgentFn: () => ({ invocation: { command: 'claude', args: [] }, result: { failureReason: normalizeProviderFailure({ status: 1, stdout }), status: 1, stdout, stderr: '' } }),
+  };
+  await assert.rejects(startAgent('review', options), (error: Error & { failureReason?: { code?: string; context?: unknown } }) => {
+    assert.match(error.message, /Pinned agent.*provider unavailable; blocked until 2026-11-23T09:48:00.000Z/);
+    assert.doesNotMatch(error.message, /usage limit/);
+    assert.equal(error.failureReason?.code, 'provider-unavailable');
+    assert.equal(error.failureReason?.context, undefined);
+    return true;
+  });
+  assert.deepEqual(blocks.get('claude'), { until: '2026-11-23T09:48:00.000Z', reason: 'typed: provider-unavailable' });
+});
 
 // ---------- px-0051: a saturated custom pool reroutes to another eligible agent instead of waiting ----------
 

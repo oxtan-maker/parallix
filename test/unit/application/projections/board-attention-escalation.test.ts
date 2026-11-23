@@ -103,8 +103,9 @@ test('SC10: review-loop escalation during px active leaves the mission in NEEDS 
   const outcome = await new ExecuteMissionService(ports, undefined, new ActivityRecorderFixture(repo, { processId: 7 }))
     .execute(executeRequest());
 
-  // The run itself completed; the mission still cannot progress autonomously.
-  assert.equal(outcome.status, 'completed');
+  // The implementation assignment completed, but the review workflow still
+  // reports its own failure so the caller can resume it explicitly.
+  assert.equal(outcome.status, 'failed');
   const state = boardState(appended);
   assert.equal(state.working, false, 'an escalated mission must leave WORKING');
   assert.equal(state.attention, 'blocking');

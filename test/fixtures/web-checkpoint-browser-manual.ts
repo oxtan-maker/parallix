@@ -34,7 +34,7 @@ const cases = [
     checkpointEvidence: checkpoints(100, 99), pullRequest: { ...pullRequest, id: '826' }, reviewRound: 5 }),
   makeCard({ id: missionId('task-checkpoint-repair'), title: 'Exhausted retained repair', gate: 'failed',
     checkpointEvidence: checkpoints(3, 1), reviewRound: 6,
-    reviewWindowAllowance: 5,
+    reviewActions: { used: 5, limit: 40, limitHit: null },
     reviewRecovery: { action: 'acknowledge-and-resume', humanStop: 'MAX_ATTEMPTS',
       evidence: ['Review stopped for human review: MAX_ATTEMPTS'], guidance: 'Acknowledge the stop and resume.' },
     repairBudget: { attemptsUsed: 2, maxAttempts: 2, exhausted: true } }),
@@ -137,11 +137,11 @@ try {
   assert.match(await long.getByRole('group', { name: 'Checkpoint plan' }).getAttribute('aria-description') ?? '', /99\/100 completed · Current: CP-100/);
   assert.equal(await long.locator('[data-gate="unavailable"] svg[aria-label="Unknown"]').count(), 1);
   assert.equal(await long.locator('[data-review-attempt]').count(), 5, 'ordinary review history stays intact');
-  assert.equal(await long.locator('[data-review-window-allowance], [data-repair-budget]').count(), 0);
+  assert.equal(await long.locator('[data-review-actions], [data-repair-budget]').count(), 0);
   const repair = fixture.page.locator('[data-board-card="task-checkpoint-repair"]');
   assert.equal(await repair.locator('[data-review-attempt]').count(), 6, 'round six keeps every review attempt');
   assert.equal(await repair.locator('[data-repair-budget]').textContent(), 'repair attempts spent (2/2)');
-  assert.match(await repair.locator('[data-repair-budget]').getAttribute('title') ?? '', /Autonomous review window: 5 attempts per review entry/);
+  assert.equal(await repair.locator('[data-review-actions]').textContent(), 'review actions 5/40', 'server-owned actions against the limit');
   await repair.locator('[data-review-recovery] > summary').click();
   assert.equal(await repair.getByText('Acknowledge the stop and resume.', { exact: true }).isVisible(), true);
 

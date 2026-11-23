@@ -485,6 +485,7 @@ async function launchFixAttempt(options: {
       sessionPolicy,
     });
   } catch (err: unknown) {
+    if ((err as { reviewActionLimitReached?: unknown } | null)?.reviewActionLimitReached === true) { throw err; }
     return { ok: false, implementer, diagnostic: `Could not launch ${role} (${implementer}): ${(err as Error).message}`, repairAttempted: false, ...none };
   }
 

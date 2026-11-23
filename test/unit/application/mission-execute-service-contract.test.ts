@@ -224,6 +224,34 @@ test("execute mission use case reports a refused review preparation as an execut
   assert.equal(outcome.error?.message, "Review preparation failed");
 });
 
+test('reviewer startup failure retains accepted implementation evidence and a resumable review stop (PX-0065.03)', async () => {
+  const publications: Array<{ phase: string; state: 'running' | 'blocked' | 'ended'; reason?: string }> = [];
+  const { ports } = strictPorts({
+    autonomousReview: {
+      async start(review) {
+        await review.onAutonomousStop?.('Reviewer startup failed; retry with px review task-1.');
+      },
+    },
+  });
+  const outcome = await new ExecuteMissionService(ports, undefined, {
+    async running(publication) { publications.push({ phase: publication.phase, state: 'running' }); },
+    async blocked(publication, reason) { publications.push({ phase: publication.phase, state: 'blocked', reason }); },
+    async ended(publication) { publications.push({ phase: publication.phase, state: 'ended' }); },
+  }).execute(request());
+
+  assert.equal(outcome.status, 'failed', 'review startup remains a workflow failure for the caller to recover');
+  assert.equal(outcome.durableEvidence.length, 2, 'the completed implementation stays accepted');
+  assert.deepEqual(outcome.durableEvidence.map(item => item.id), ['task-1:agent', 'task-1:active']);
+  const stored = await ports.missionTransitions.load(missionId('task-1'));
+  assert.equal(stored.kind === 'found' && stored.mission.status, 'review');
+  assert.ok(publications.some(item => item.phase === 'review' && item.state === 'blocked'
+    && item.reason?.includes('px review task-1')));
+  assert.equal(publications.some(item => item.phase === 'execute' && item.state === 'blocked'), false,
+    'a reviewer startup failure must not become an implementation blocker');
+  assert.equal(publications.some(item => item.state === 'ended'), true,
+    'the accepted execute assignment closes while the review stop remains visible for recovery');
+});
+
 test('execute mission use case keeps telemetry failures non-fatal', async () => {
   const { ports, calls } = strictPorts({
     telemetry: {

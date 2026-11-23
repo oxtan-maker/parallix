@@ -859,6 +859,6 @@ test('Pi output-token-limit stop reaches the review launch caller (TASK-2827)', 
     slug: 'task-2827-pi', provider: {}, agents: { launch: async () => launch },
     routing: { eligibleFamilies: () => ['custom'], nominate: () => 'custom' },
   });
-  await runReviewLoop({ slug: 'task-2827-pi', maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-2827-pi', actionLimit: 40 }, fake.ports);
   assert.match([...fake.logs, ...fake.errors].join(' | '), /Incomplete reviewer artifact.*output-token-limit/);
 });

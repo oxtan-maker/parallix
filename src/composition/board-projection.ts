@@ -40,7 +40,9 @@ import type { Mission, MissionId } from '../domain/mission.js';
 import type { ExecutionActivityPort } from '../application/recording/execution-activity-recorder.js';
 import type { SqliteDatabaseAdapter } from '../adapters/sqlite/database-adapter.js';
 import { SqliteReviewProjectionReader } from '../adapters/sqlite/review-projection-reader.js';
-import { loadEffectiveConfig } from '../adapters/config/product-config.js';
+import { loadEffectiveConfig, resolveReviewActionLimit } from '../adapters/config/product-config.js';
+import { parseReviewAction } from '../application/review-action-history.js';
+import { REVIEW_ACTION_STARTED_EVENT, type ReviewActionStarted } from '../application/ports/review-action-history.js';
 import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import { VerificationGateEvidenceReader } from '../adapters/verification/gate-evidence-reader.js';
 import { VerificationGateObserver } from '../application/projections/gate-observation.js';
@@ -337,6 +339,22 @@ async function boardVerificationInput(deps: {
     repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
 }
 
+async function loadRepositoryReviewActions(
+  deps: Pick<BoardProjectionCompositionDeps, 'historyRepo' | 'repositoryId'>,
+  missions: MissionReadAdapter,
+): Promise<readonly ReviewActionStarted[]> {
+  const missionIds = (await missions.loadAllMissions()).map(mission => String(mission.id));
+  const rows = deps.historyRepo.findByTypesForMissions
+    ? await deps.historyRepo.findByTypesForMissions([REVIEW_ACTION_STARTED_EVENT], missionIds, deps.repositoryId)
+    : await deps.historyRepo.findByType(REVIEW_ACTION_STARTED_EVENT);
+  const actions = rows.map(row => parseReviewAction(row, deps.repositoryId));
+  if (actions.some(action => action === null)) {
+    throw new Error('review action history contains an invalid record');
+  }
+  return actions.filter((action): action is ReviewActionStarted => action?.repositoryId === deps.repositoryId
+    && missionIds.includes(action.missionId));
+}
+
 /** The sole production constructor for board reads and mission details. */
 export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
   const catalog = createRepositoryMissionCatalog(deps);
@@ -405,6 +423,10 @@ export function composeBoardProjection(deps: BoardProjectionCompositionDeps) {
       isProcessAlive: processLivenessProbe,
       changeIdentity,
       completedMissionRetentionDays,
+      reviewActions: {
+        get limit() { return resolveReviewActionLimit(deps.rootDir); },
+        loadActions: () => loadRepositoryReviewActions(deps, missions),
+      },
       metricsAdapter: new ConcreteMetricsReadAdapter({
         verification: verificationStatisticsReader((requestedMissions, flowRunMissions) => boardVerificationInput(
           { metricsSession, workflowOperations, repositoryId: deps.repositoryId, rootDir: deps.rootDir, missionTerminal },

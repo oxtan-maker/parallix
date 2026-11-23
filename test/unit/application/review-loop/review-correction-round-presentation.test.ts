@@ -9,7 +9,7 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
  * Focused correction-presentation tests for TASK-2478. These drive the review
  * loop through the REQUEST_CHANGES → act-on-review seam so the operator-facing
  * correction chain (finding named before the implementer launch) is asserted
- * without launching real agents. maxAttempts=1 keeps the run in round 1.
+ * without launching real agents. The scripted outcomes keep the run bounded.
  */
 function requestChanges(consumeReviewer?: () => Promise<ReviewerArtifactFacts>) {
   let head = 0;
@@ -37,7 +37,7 @@ function requestChanges(consumeReviewer?: () => Promise<ReviewerArtifactFacts>) 
 
 test('ACTING ON REVIEW restates the concrete findings before the implementer launch', async () => {
   const fake = requestChanges();
-  await runReviewLoop({ slug: 'task-999', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-999', reviewer: 'codex', actionLimit: 40 }, fake.ports);
   const { logs, errors } = fake;
 
   const idxActingOn = logs.findIndex((m) => m.includes('ACTING ON REVIEW'));
@@ -71,7 +71,7 @@ test('re-round reruns verification against the revised tree and approves round 2
       : { consumed: true, ok: true, reviewState: 'APPROVED', reviewFindings: [] };
   });
   // Round 1 -> REQUEST_CHANGES; round 2 -> APPROVED on the revised tree.
-  await runReviewLoop({ slug: 'task-999', reviewer: 'codex', maxAttempts: 2 }, fake.ports);
+  await runReviewLoop({ slug: 'task-999', reviewer: 'codex', actionLimit: 40 }, fake.ports);
   const { logs, errors } = fake;
 
   const verifiedIdx = logs.findIndex((m) => m.includes('verification passed against the revised tree'));
@@ -85,6 +85,6 @@ test('re-round reruns verification against the revised tree and approves round 2
 
 test('REQUEST_CHANGES still emits no APPROVED verdict line', async () => {
   const fake = requestChanges();
-  await runReviewLoop({ slug: 'task-999', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-999', reviewer: 'codex', actionLimit: 40 }, fake.ports);
   assert.ok(!fake.logs.some((m) => /APPROVED/.test(m) && m.includes('====')), 'no APPROVED verdict for a request-changes run');
 });

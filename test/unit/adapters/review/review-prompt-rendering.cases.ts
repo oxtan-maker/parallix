@@ -172,9 +172,9 @@ test('buildCompactReviewPrompt inlines the contract instead of redirecting to do
   });
   assert.match(prompt, /Entrypoint: \$review all/);
   // task-2483 replaced the vague verification sentence with the machine-derived
-  // already-executed controls block and its explicit do-not-re-run rule.
+  // already-executed controls block; PX-0065.02 makes its evidence-only rule unconditional.
   assert.match(prompt, /which controls the workflow has already executed for this mission and which it has not/i);
-  assert.match(prompt, /Do not re-run a listed command whose recorded status is `passed`/);
+  assert.match(prompt, /Cite those recorded results; do not re-run or supplement them/);
   assert.match(prompt, /Submit your final decision with `px verdict`/);
   assert.match(prompt, /do not post to Forgejo directly/i);
   assert.match(prompt, /final chat response does \*\*not\*\* submit a review/);
@@ -219,6 +219,25 @@ test('dry-run review builder preserves runtime separation-of-duties constraints'
   assert.match(prompt, /mutate workflow state/i);
   assert.match(prompt, /submit the verdict with `px verdict`/);
   assert.match(prompt, /temporary diagnostic files under `\/tmp`/);
+});
+
+test('rendered review prompts require evidence-only verification and bar reviewer execution (PX-0065.02)', () => {
+  const inputs = [
+    buildCompactReviewPrompt({
+      reviewer: 'codex', branch: 'mission/px-0065-evidence', implementer: 'claude', attempt: 1,
+    }),
+    buildReviewPrompt({
+      reviewer: 'custom', branch: 'mission/px-0065-dry-run', implementer: 'custom', attempt: 2,
+    }),
+  ];
+
+  for (const prompt of inputs) {
+    assert.match(prompt, /mandatory and cannot be relaxed by repository policy or review focus/i);
+    assert.match(prompt, /do not run tests, execute project code, or use executable probes/i);
+    assert.match(prompt, /Review only the source, the assigned diff, and recorded evidence/i);
+    assert.match(prompt, /report that gap instead of producing new execution evidence/i);
+    assert.doesNotMatch(prompt, /Run a focused test only|Use a small isolated probe|Re-running is permitted|running a verification command yourself is permitted/i);
+  }
 });
 
 test('buildCompactReviewPrompt names the slug and primaryBranch, never a mission document', () => {

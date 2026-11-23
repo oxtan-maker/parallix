@@ -21,6 +21,8 @@ import path from 'node:path';
 import { mkdtemp as registeredMkdtemp } from '../../../helpers/temp-dir.js';
 import { mockModule, installModuleMocks } from '../../../lib/module-mock.js';
 import { detectLimitHit, formatBlockUntil, ceilToNextHour } from '../../../../src/application/services/agent-limit.js';
+import { startAgent } from '../../../../src/adapters/agents/agents.js';
+import { setBubblewrapProbeForTest, withSandboxProfile } from '../../../../src/adapters/process/bubblewrap.js';
 const codexModule = mockModule<typeof import('../../../../src/adapters/agents/codex.js')>('../../../../src/adapters/agents/codex.js', import.meta.url);
 await installModuleMocks();
 
@@ -587,9 +589,15 @@ describe('Codex rollout quota identity', () => {
   const usageLimitComplete = { type: 'event_msg', payload: { type: 'task_complete', turn_id: 'turn-2834', last_agent_message: null, error: { message: 'You’ve hit your usage limit. Try again at 4:09 PM.', codex_error_info: 'usage_limit_exceeded' } } };
   const processFailed = { version: 1, code: 'process-failed', source: 'process', context: { exitCode: 1 } } as const;
 
-  async function launchWritingRollout(events: unknown[]) {
+  test.afterEach(() => {
+    codexModule.__setRateLimitProbeTimeoutForTest(null);
+    setBubblewrapProbeForTest(null);
+  });
+
+  async function launchWritingRollout(events: unknown[], extraEnvironment: NodeJS.ProcessEnv | ((worktree: string) => NodeJS.ProcessEnv) = {}, confineProbe = false) {
     const worktree = registeredMkdtemp('task-2841-codex-');
     const operatorHome = registeredMkdtemp('task-2841-operator-');
+    const resolvedEnvironment = typeof extraEnvironment === 'function' ? extraEnvironment(worktree) : extraEnvironment;
     codexModule.__setSpawnAndTeeForTest(async () => {
       const sessions = path.join(codexHomeRoot(worktree), '.codex', 'sessions', '2026', '11', '04');
       fs.mkdirSync(sessions, { recursive: true });
@@ -597,7 +605,11 @@ describe('Codex rollout quota identity', () => {
       return { status: 1, signal: null, stdout: '', stderr: 'ERROR: usage limit\n', error: null, failureReason: processFailed };
     });
     try {
-      return await codexModule.startCodexDraftAgent({ configuration: resolveConfiguration({ HOME: operatorHome }), prompt: 'Execute.', worktree }).resultPromise;
+      const launch = () => codexModule.startCodexDraftAgent({ configuration: resolveConfiguration({ HOME: operatorHome, PATH: '/missing-codex-binary', ...resolvedEnvironment }), prompt: 'Execute.', worktree });
+      const handle = confineProbe
+        ? withSandboxProfile({ terminalStateRoots: [], worktree, worktreeWritable: true, writable: [] }, launch)
+        : launch();
+      return await handle.resultPromise;
     } finally {
       codexModule.__setSpawnAndTeeForTest(null);
       fs.rmSync(worktree, { recursive: true, force: true });
@@ -606,6 +618,72 @@ describe('Codex rollout quota identity', () => {
   }
   const { codexHomeRoot } = codexModule;
   const blockAt = (result: { failureReason?: unknown; status?: number | null }) => detectLimitHit({ agent: 'codex', status: result.status, failureReason: result.failureReason, now: quotaStopped });
+  const fallbackBlock = formatBlockUntil(ceilToNextHour(new Date(quotaStopped.getTime() + 3600000)));
+  const noRolloutWindows = [
+    { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, rate_limits: { primary: null, secondary: null } } }, usageLimitComplete,
+  ];
+
+  function fakeAppServer(rateLimits: unknown, mode: 'success' | 'init-error' | 'response-error' | 'malformed' | 'non-object' | 'hang-init' | 'hang-response' = 'success') {
+    const bin = registeredMkdtemp('task-2868-app-server-');
+    const logPath = path.join(bin, 'probe.jsonl');
+    const executable = path.join(bin, 'codex');
+    fs.writeFileSync(executable, `#!/usr/bin/env node
+const fs = require('node:fs');
+const readline = require('node:readline');
+const logPath = ${JSON.stringify(logPath)};
+const mode = ${JSON.stringify(mode)};
+const rateLimits = ${JSON.stringify(rateLimits)};
+const log = event => fs.appendFileSync(logPath, JSON.stringify(event) + '\\n');
+const decisionCredentials = ['TYPESAFE_API_KEY', 'OPENROUTER_API_KEY', 'AI_GATEWAY_API_KEY'].filter(name => Object.hasOwn(process.env, name));
+log({ event: 'start', pid: process.pid, codexHome: process.env.CODEX_HOME, args: process.argv.slice(2), decisionCredentials, confinement: process.env.TASK_2868_BWRAP });
+process.on('SIGTERM', () => { log({ event: 'terminated' }); process.exit(0); });
+const input = readline.createInterface({ input: process.stdin });
+input.on('line', line => {
+  const request = JSON.parse(line);
+  log({ event: 'request', method: request.method });
+  if (request.method === 'initialize') {
+    if (mode === 'hang-init') return;
+    const response = mode === 'init-error' ? { id: request.id, error: { code: -1 } } : { id: request.id, result: {} };
+    process.stdout.write(JSON.stringify(response) + '\\n');
+  } else if (request.method === 'account/rateLimits/read') {
+    if (mode === 'hang-response') return;
+    if (mode === 'malformed') { process.stdout.write('not-json\\n'); return; }
+    if (mode === 'non-object') { process.stdout.write('null\\n'); return; }
+    const response = mode === 'response-error'
+      ? { id: request.id, error: { code: -1 } }
+      : { id: request.id, result: { ordinaryUsageAllowed: false, rateLimits } };
+    process.stdout.write(JSON.stringify(response) + '\\n');
+  }
+});
+`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, 'bwrap'), `#!/bin/sh
+marker=missing
+while [ "$1" != "--" ]; do
+  if [ "$1" = "--die-with-parent" ]; then marker=die-with-parent; fi
+  shift
+done
+shift
+export TASK_2868_BWRAP="$marker"
+exec "$@"
+`, { mode: 0o755 });
+    return {
+      bin,
+      logPath,
+      readLog: () => fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as { event: string; pid?: number; codexHome?: string; args?: string[]; method?: string; decisionCredentials?: string[]; confinement?: string }) : [],
+    };
+  }
+
+  function assertFallback(result: Awaited<ReturnType<typeof launchWritingRollout>>, label: string) {
+    assert.deepEqual(result.failureReason, { version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_exceeded' } }, label);
+    assert.deepEqual(blockAt(result), { until: fallbackBlock, source: 'fallback', reason: 'typed: agent-quota' }, label);
+  }
+
+  function assertStopped(server: ReturnType<typeof fakeAppServer>, label: string) {
+    const log = server.readLog();
+    const pid = log.find(entry => entry.event === 'start')?.pid;
+    assert.ok(pid);
+    assert.throws(() => process.kill(pid, 0), (error: unknown) => (error as NodeJS.ErrnoException).code === 'ESRCH', `${label}: probe must be reaped`);
+  }
 
   test('retained TASK-2834 usage-limit rollout yields a provider agent-quota reason that blocks until the advertised reset', async () => {
     const result = await launchWritingRollout([
@@ -615,22 +693,159 @@ describe('Codex rollout quota identity', () => {
     assert.deepEqual(blockAt(result), { until: formatBlockUntil(ceilToNextHour(new Date(1793804950 * 1000))), source: 'structured', reason: 'typed: agent-quota' });
   });
 
-  test('usage-limit rollout without a parseable primary reset keeps the one hour fallback block', async () => {
+  test('rollout reset selection uses the latest exhausted primary or secondary window (TASK-2868)', async () => {
+    const snapshots = [
+      { rate_limits: { primary: { used_percent: 100, resets_at: 1794326400 }, secondary: { used_percent: 100, resets_at: 1794412800 } }, expected: 1794412800 },
+      { rate_limits: { primary: { used_percent: 99, resets_at: 1794500000 }, secondary: { used_percent: 125, resets_at: 1794412800 } }, expected: 1794412800 },
+    ];
+    for (const snapshot of snapshots) {
+      const result = await launchWritingRollout([
+        { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, ...snapshot } }, usageLimitComplete,
+      ]);
+      assert.equal((result.failureReason as { context?: { resetAt?: string } }).context?.resetAt, new Date(snapshot.expected * 1000).toISOString());
+    }
+  });
+
+  test('start-of-turn usage rejection recovers the exhausted app-server reset (TASK-2868)', async () => {
+    const server = fakeAppServer({
+      primary: { usedPercent: 101, resetsAt: 1794326400 },
+      secondary: { usedPercent: 100, resetsAt: 1794412800 },
+    });
+    setBubblewrapProbeForTest(() => true);
+    let expectedCodexHome = '';
+    try {
+      const result = await launchWritingRollout([
+        { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, rate_limits: { primary: null, secondary: null } } },
+        usageLimitComplete,
+      ], worktree => {
+        expectedCodexHome = codexModule.codexStateRoot(worktree);
+        return {
+          PATH: `${server.bin}${path.delimiter}${process.env.PATH || ''}`,
+          TYPESAFE_API_KEY: 'must-not-reach-codex', OPENROUTER_API_KEY: 'must-not-reach-codex', AI_GATEWAY_API_KEY: 'must-not-reach-codex',
+        };
+      }, true);
+      assert.deepEqual(result.failureReason, { version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_exceeded', resetAt: '2026-11-11T16:00:00.000Z' } });
+      assert.deepEqual(blockAt(result), { until: formatBlockUntil(ceilToNextHour(new Date(1794412800 * 1000))), source: 'structured', reason: 'typed: agent-quota' });
+      let checkedBlock: { agent: string; until: string; reason?: string } | null = null;
+      await assert.rejects(startAgent('execute', {
+        prompt: 'Execute.', agent: 'codex', pinnedAgent: true, allowUnsandboxedMutation: true,
+        isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null, log: () => {},
+        detectLimitHitFn: input => detectLimitHit({ ...input, agent: input?.agent ?? 'codex', now: quotaStopped }),
+        updateAgentBlockFn: (agent, until, options) => {
+          checkedBlock = { agent, until, reason: options?.reason };
+          return { reason: options?.reason };
+        },
+        launchAgentFn: () => ({ invocation: { command: 'scripted-codex', args: [] }, resultPromise: Promise.resolve(result) }),
+      }), /Pinned agent.*usage limit hit/);
+      assert.deepEqual(checkedBlock, { agent: 'codex', until: formatBlockUntil(ceilToNextHour(new Date(1794412800 * 1000))), reason: 'typed: agent-quota' });
+      const log = server.readLog();
+      assert.equal(log.find(entry => entry.event === 'start')?.codexHome, expectedCodexHome);
+      assert.deepEqual(log.find(entry => entry.event === 'start')?.args, ['app-server']);
+      assert.deepEqual(log.find(entry => entry.event === 'start')?.decisionCredentials, [], 'decision-provider credentials must not reach app-server');
+      assert.equal(log.find(entry => entry.event === 'start')?.confinement, 'die-with-parent', 'the app-server probe must retain Bubblewrap parent-death confinement');
+      assert.deepEqual(log.filter(entry => entry.event === 'request').map(entry => entry.method), ['initialize', 'initialized', 'account/rateLimits/read']);
+      assertStopped(server, 'successful confined probe');
+    } finally {
+      fs.rmSync(server.bin, { recursive: true, force: true });
+    }
+  });
+
+  test('non-exhausted, missing and malformed rollout windows keep the one hour fallback block', async () => {
     const fallback = formatBlockUntil(ceilToNextHour(new Date(quotaStopped.getTime() + 3600000)));
-    for (const primary of [undefined, null, { used_percent: 100 }, { used_percent: 100, resets_at: '4:09 PM' }, { used_percent: 100, resets_at: Number.NaN }]) {
-      const tokenCount = { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, ...(primary === undefined ? {} : { rate_limits: { primary } }) } };
+    const snapshots = [undefined, null, { primary: null, secondary: null },
+      { primary: { used_percent: 99, resets_at: 1794412800 } },
+      { primary: { used_percent: 100 } },
+      { primary: { used_percent: 100, resets_at: '4:09 PM' } },
+      { primary: { used_percent: Number.NaN, resets_at: 1794412800 }, secondary: { used_percent: '100', resets_at: 1794412800 } },
+      { primary: { used_percent: 100, resets_at: 0 }, secondary: { used_percent: 100, resets_at: Number.POSITIVE_INFINITY } },
+    ];
+    for (const rateLimits of snapshots) {
+      const tokenCount = { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, ...(rateLimits === undefined ? {} : { rate_limits: rateLimits }) } };
       // The newest token_count is the rate-limit snapshot: an earlier advertised reset is stale once it is gone.
       for (const earlier of [[], [retainedTokenCount]]) {
         const result = await launchWritingRollout([...earlier, tokenCount, usageLimitComplete]);
-        const label = JSON.stringify({ primary, afterEarlierReset: earlier.length > 0 });
+        const label = JSON.stringify({ rateLimits, afterEarlierReset: earlier.length > 0 });
         assert.deepEqual(result.failureReason, { version: 1, code: 'agent-quota', source: 'provider', context: { providerCode: 'usage_limit_exceeded' } }, label);
         assert.deepEqual(blockAt(result), { until: fallback, source: 'fallback', reason: 'typed: agent-quota' }, label);
       }
     }
   });
 
+  test('missing and unspawnable app-server preserve the one hour fallback (TASK-2868)', async () => {
+    assertFallback(await launchWritingRollout(noRolloutWindows), 'missing app-server');
+    const notExecutable = registeredMkdtemp('task-2868-not-executable-');
+    fs.writeFileSync(path.join(notExecutable, 'codex'), '#!/bin/sh\nexit 0\n', { mode: 0o644 });
+    try {
+      assertFallback(await launchWritingRollout(noRolloutWindows, { PATH: `${notExecutable}${path.delimiter}${process.env.PATH || ''}` }), 'spawn failure');
+    } finally { fs.rmSync(notExecutable, { recursive: true, force: true }); }
+  });
+
+  test('app-server protocol failures preserve fallback and reap the probe (TASK-2868)', async () => {
+    const cases = [
+      { label: 'initialize protocol failure', server: fakeAppServer(null, 'init-error') },
+      { label: 'response protocol failure', server: fakeAppServer(null, 'response-error') },
+      { label: 'malformed protocol response', server: fakeAppServer(null, 'malformed') },
+      { label: 'valid JSON non-object response', server: fakeAppServer(null, 'non-object') },
+    ];
+    for (const { label, server } of cases) {
+      try {
+        const result = await launchWritingRollout(noRolloutWindows, { PATH: `${server.bin}${path.delimiter}${process.env.PATH || ''}` });
+        assertFallback(result, label);
+        assertStopped(server, label);
+      } finally { fs.rmSync(server.bin, { recursive: true, force: true }); }
+    }
+  });
+
+  test('unusable app-server windows preserve fallback and reap the probe (TASK-2868)', async () => {
+    const cases = [
+      { label: 'no exhausted window', server: fakeAppServer({ primary: { usedPercent: 99, resetsAt: 1794412800 }, secondary: null }) },
+      { label: 'malformed windows', server: fakeAppServer({ primary: { usedPercent: '100', resetsAt: 1794412800 }, secondary: { usedPercent: 100, resetsAt: 'later' } }) },
+    ];
+    for (const { label, server } of cases) {
+      try {
+        const result = await launchWritingRollout(noRolloutWindows, { PATH: `${server.bin}${path.delimiter}${process.env.PATH || ''}` });
+        assertFallback(result, label);
+        assertStopped(server, label);
+      } finally { fs.rmSync(server.bin, { recursive: true, force: true }); }
+    }
+  });
+
+  test('initialization and response timeouts preserve fallback and reap the probe (TASK-2868)', async () => {
+    codexModule.__setRateLimitProbeTimeoutForTest(100);
+    for (const mode of ['hang-init', 'hang-response'] as const) {
+      const server = fakeAppServer(null, mode);
+      try {
+        const result = await launchWritingRollout(noRolloutWindows, { PATH: `${server.bin}${path.delimiter}${process.env.PATH || ''}` });
+        assertFallback(result, mode);
+        assertStopped(server, mode);
+      } finally { fs.rmSync(server.bin, { recursive: true, force: true }); }
+    }
+  });
+
+  test('the app-server probe is skipped for non-usage failures and an already-qualified rollout reset', async () => {
+    const server = fakeAppServer({ primary: { usedPercent: 100, resetsAt: 1794412800 } });
+    const probeEnvironment = { PATH: `${server.bin}${path.delimiter}${process.env.PATH || ''}` };
+    try {
+      const withReset = await launchWritingRollout([retainedTokenCount, usageLimitComplete], probeEnvironment);
+      assert.equal((withReset.failureReason as { context?: { resetAt?: string } }).context?.resetAt, '2026-11-04T15:09:10.000Z');
+      const messageOnly = await launchWritingRollout([
+        { type: 'event_msg', payload: { type: 'token_count', info: retainedTokenCount.payload.info, rate_limits: null } },
+        { type: 'event_msg', payload: { type: 'task_complete', error: { message: 'usage_limit_exceeded; reset at 2026-11-11T16:00:00Z' } } },
+      ], probeEnvironment);
+      assert.deepEqual(messageOnly.failureReason, processFailed);
+      assert.deepEqual(server.readLog(), [], 'neither provider message text nor an existing rollout reset may trigger the probe');
+    } finally { fs.rmSync(server.bin, { recursive: true, force: true }); }
+  });
+
+  test('rollout server_overloaded identity reaches provider-unavailable and the five-minute block (TASK-2871)', async () => {
+    const overloadedComplete = { type: 'event_msg', payload: { type: 'task_complete', error: { message: 'wording is not evidence', codex_error_info: 'server_overloaded' } } };
+    const result = await launchWritingRollout([retainedTokenCount, overloadedComplete]);
+    assert.deepEqual(result.failureReason, { version: 1, code: 'provider-unavailable', source: 'provider', context: { providerCode: 'server_overloaded' } });
+    assert.deepEqual(blockAt(result), { until: new Date(quotaStopped.getTime() + 300000).toISOString(), source: 'structured', reason: 'typed: provider-unavailable' });
+  });
+
   test('unknown or malformed rollout terminal errors keep the fail-closed process-failed reason', async () => {
-    for (const error of [{ codex_error_info: 'server_overloaded' }, { codex_error_info: 42 }, { message: 'usage limit' }, 'usage_limit_exceeded']) {
+    for (const error of [{ codex_error_info: 'future_overload' }, { codex_error_info: 42 }, { message: 'usage limit' }, 'usage_limit_exceeded']) {
       const result = await launchWritingRollout([retainedTokenCount, { type: 'event_msg', payload: { type: 'task_complete', error } }]);
       assert.deepEqual(result.failureReason, processFailed, JSON.stringify(error));
       assert.equal(blockAt(result), null);

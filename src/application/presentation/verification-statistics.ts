@@ -77,6 +77,10 @@ export function renderVerificationModelStatistics(report: VerificationStatistics
     lines.push(`Calibration ${check.check}: starts ${check.starts}; matched ${check.matched} (passed ${check.matchedPassed}); excluded unknown outcome ${check.unknownOutcome}, unknown prediction ${check.unknownPrediction}; mean predicted ${percent(check.meanPredicted)}; observed pass rate ${percent(check.observedPassRate)}; mean absolute error ${check.meanAbsoluteErrorPoints === null ? 'unknown' : `${check.meanAbsoluteErrorPoints.toFixed(1)} points`}`);
     for (const bin of check.bins) {lines.push(`  predicted ${percent(bin.lower)}-${percent(bin.upper)}: n=${bin.count}; mean predicted ${percent(bin.meanPredicted)}; observed ${percent(bin.observedPassRate)}`);}
   }
+  for (const mission of report.model.actions) {
+    lines.push(`Review actions ${mission.missionId}: ${mission.actionsUsed} of ${mission.configuredLimit}; limit hits ${mission.limitHits}`);
+  }
+  if (report.model.unreadableActionRows > 0) {lines.push(`Unreadable action rows excluded: ${report.model.unreadableActionRows}`);}
   if (report.model.unreadableRows > 0) {lines.push(`Unreadable decision or outcome rows excluded: ${report.model.unreadableRows}`);}
   const { saving } = report.model;
   lines.push(`Model saving J_mu(pi_0) - V(pi_0): J_mu(pi_0) ${figure(saving.currentSequenceValue)}; V(pi_0) ${figure(saving.policyValue)}; saving ${figure(saving.absolute)}; percentage of J_mu(pi_0) ${saving.percentage === null ? 'unknown' : `${saving.percentage.toFixed(1)}%`}`);

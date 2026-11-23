@@ -270,7 +270,7 @@ printf '%s\\n200' "$data"
     const next = beginNextReviewRound(loaded.mission.review!, agentFamily('claude'), agentFamily('codex'), new Date().toISOString(), eligibility);
     await store.save({ ...loaded.mission, status: 'review', rawStatus: 'review', closedAt: null, review: next }, loaded.version);
     const resumed = options.deferHistoricalReview
-      ? await run(['review', slug, '--dry-run', '--max-attempts', '2']) : null;
+      ? await run(['review', slug, '--dry-run']) : null;
     if (resumed) {
       assert.equal(resumed.code, 0, resumed.output);
       assert.deepEqual([comments.length, reviews.length], [3, 0], 'dry-run resume retires stale recovery without provider mutation');

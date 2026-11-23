@@ -72,7 +72,7 @@ async function dispatchOwnedCli(command: 'draft' | 'review' | 'rebase' | 'integr
   if (command === 'review' || command === 'integrate') { assertWorkflowControl(); }
   const kind = workflowKind(command);
   const request: BoardCommandRequest = { operationId: randomUUID(), missionId: slug, kind,
-    capabilities: new Set([kind]), cancellation, operatorInvocation: operatorReview && command === 'review', invocation: { command, args, interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) } };
+    capabilities: new Set([kind]), cancellation, operatorInvocation: operatorReview && command === 'review', invocation: { command, args } };
   const result = await controller.dispatch(request);
   if (cancellation.requested) { throw new Error(result.error?.message ?? 'Workflow interrupted'); }
   if (result.status !== 'completed') { throw new Error(result.error?.message ?? result.status); }

@@ -23,7 +23,7 @@ const WORKTREES = new Map<string, MissionId>([
 ]);
 
 // A real `ps -eo pid=,args=` line for a running review loop, plus its child.
-const REVIEW_PARENT = 'node /home/dev/parallix-task-2328/node_modules/.bin/tsx src/entry/px.ts review --max-attempts 8';
+const REVIEW_PARENT = 'node /home/dev/parallix-task-2328/node_modules/.bin/tsx src/entry/px.ts review';
 const REVIEW_CHILD = '/usr/bin/node --import file:///home/dev/parallix-task-2328/node_modules/tsx/dist/loader.mjs src/entry/px.ts review';
 const BOARD = 'node /home/dev/parallix/node_modules/.bin/tsx src/entry/px.ts board';
 // A same-named draft launched from an unrelated checkout: same slug, other repo.

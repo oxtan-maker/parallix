@@ -757,3 +757,19 @@ test('unrecognized structured quota drift keeps generic process classification (
     });
   }
 });
+
+test('provider overload facts normalize to provider-unavailable without reading diagnostics (TASK-2871)', async () => {
+  const { normalizeProviderFailure } = await import('../../../../src/adapters/process/failure-normalization.js');
+  const cases: [string, unknown, string][] = [
+    ['Claude 529 overloaded result', { type: 'result', is_error: true, api_error_status: 529, api_error: 'overloaded_error' }, 'provider-unavailable'],
+    ['5xx error event', { type: 'error', error: { status: 503, message: 'x' } }, 'provider-unavailable'],
+    ['overloaded_error code without status', { type: 'error', error: { code: 'overloaded_error' } }, 'provider-unavailable'],
+    ['rate limit stays quota', { type: 'error', error: { status: 429 } }, 'agent-quota'],
+    ['entitlement stays entitlement', { type: 'error', error: { status: 403 } }, 'provider-entitlement'],
+    ['overload wording is not a fact', { type: 'error', error: { message: 'Overloaded, 529' } }, 'unexpected'],
+  ];
+  for (const [name, event, code] of cases) {
+    assert.equal(normalizeProviderFailure({ status: 1, stdout: JSON.stringify(event) })?.code, code, name);
+  }
+  assert.equal(normalizeProviderFailure({ status: 1, stderr: 'API Error: 529 overloaded_error' })?.code, 'process-failed');
+});

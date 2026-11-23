@@ -200,6 +200,12 @@ observed only when the operator rejects the handoff, so a handoff that ends by
 merge stays unknown. Starts whose recorded outcome lacks a pass result stay unknown.
 Calibration pools every recorded prediction, whichever policy artifact made it.
 
+Review actions are reported per Mission as the actions used against the limit
+recorded with the latest action, with the number of stored limit-hit records. A
+count at the limit without such a record is not a hit, a Mission with no recorded
+action is absent rather than zero, and an action row that cannot be read is
+counted separately and excluded. The web card shows the same server-owned facts.
+
 The saving is `J_mu(pi_0) - V(pi_0)`, read from the configured policy artifact,
 and its percentage divides by `J_mu(pi_0)`. With no configured or readable
 artifact, or a zero `J_mu(pi_0)`, the affected figure is unknown rather than

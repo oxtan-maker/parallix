@@ -16,6 +16,10 @@ import { stubIntegrateWorkflowPorts, type IntegrateWorkflowPortOverrides } from 
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { recordApproval } from '../../../../src/adapters/review/review-round.js';
 import { reviewStatistics } from '../../../../src/application/services/review-statistics.js';
+import { reviewActionStarted } from '../../../../src/application/review-action-history.js';
+import type { ReviewActionStartedInput } from '../../../../src/application/ports/review-action-history.js';
+import { createIntegrationHumanIntervention } from '../../../../src/adapters/review/integration-human-intervention.js';
+import { repeatReview } from '../../../fixtures/repeat-review.js';
 
 const startedAt = '2026-09-27T10:00:00Z';
 const approvedAt = '2026-09-27T10:30:00Z';
@@ -154,15 +158,33 @@ function shortcutPorts(overrides: IntegrateWorkflowPortOverrides = {}) {
     },
     landing: { createAbort: () => new Error('integration aborted'), ...overrides.landing },
     process: { ...overrides.process },
+    productConfig: { resolveReviewActionLimit: () => 40, ...overrides.productConfig },
     review: { ...overrides.review },
   });
+}
+
+function reviewActionLedger(initial = 0) {
+  let count = initial;
+  const records: ReturnType<typeof reviewActionStarted>[] = [];
+  return {
+    records,
+    reviewActions: {
+      countReviewActions: async () => count,
+      recordReviewAction: async (input: ReviewActionStartedInput) => {
+        const record = reviewActionStarted(input, ++count);
+        records.push(record);
+        return record;
+      },
+    },
+  };
 }
 
 test('eligible integrate records one local human approval transition and preserves the agent statistics (TASK-2859.16)', async () => {
   const initial = shortcutMission();
   const store = inMemoryTransitionStore(initial);
   const lifecycle = new MissionLifecycleService(store);
-  const services = integrationServices({ store, lifecycle });
+  const ledger = reviewActionLedger();
+  const services = integrationServices({ store, lifecycle, reviewActions: ledger.reviewActions });
   let submissions = 0;
   const ports = shortcutPorts({ review: { submitApproval: async (slug, _message, options) => {
     submissions++;
@@ -182,12 +204,65 @@ test('eligible integrate records one local human approval transition and preserv
   assert.equal(context.promoteBacklogOnCloseout, true,
     'the review-to-integration shortcut retains the delayed Backlog approval promotion');
   assert.equal(submissions, 1);
+  assert.deepEqual(ledger.records.map(record => [record.actionSequence, record.action]), [[1, 'human']],
+    'the eligible shortcut records exactly one durable human action before approval');
   assert.equal(store.events.length, 1, 'approval and lifecycle use the existing atomic transition writer once');
   assert.deepEqual(reviewStatistics(integrated.mission.review!), before,
     'the shortcut replays the standing agent decision instead of adding an approval statistic');
   await approveEligibleIntegrationShortcut(context, integrated, services, ports);
   assert.equal(submissions, 1, 'a replayed integrate cannot submit a second approval');
   assert.equal(store.events.length, 1, 'a replayed integrate cannot write a second lifecycle transition');
+  assert.equal(ledger.records.length, 1, 'a replayed integrated mission cannot count another human action');
+});
+
+test('the integrate shortcut records action 40, persists attention, and does not submit approval (TASK-2859.20 review)', async () => {
+  const initial = shortcutMission('task-2859-shortcut-limit');
+  const store = inMemoryTransitionStore(initial);
+  const ledger = reviewActionLedger(39);
+  const services = integrationServices({
+    store,
+    lifecycle: new MissionLifecycleService(store),
+    reviewActions: ledger.reviewActions,
+  });
+  const attention: string[] = [];
+  let submissions = 0;
+  const ports = shortcutPorts({ review: {
+    requestHumanIntervention: async (_slug, reason) => { attention.push(reason); return { ok: true }; },
+    submitApproval: async () => { submissions++; return { ok: true }; },
+  } });
+
+  await assert.rejects(approveEligibleIntegrationShortcut(
+    integrationContext({ slug: String(initial.id), missionStatus: 'review', missionReview: initial.review }),
+    await store.load(initial.id), services, ports,
+  ), /integration aborted/);
+
+  assert.deepEqual(ledger.records.map(record => [record.actionSequence, record.action,
+    record.failureReason?.code]), [[40, 'human', 'review-action-limit']]);
+  assert.deepEqual(attention, ['action limit 40 reached']);
+  assert.equal(submissions, 0);
+  assert.equal((await store.load(initial.id)).mission.status, 'review');
+});
+
+test('integration action-limit handoff persists the existing review attention state (TASK-2859.20 repair)', async () => {
+  const initial = fixtureMission('task-2859-integration-attention', {
+    status: 'review', assignee: agentFamily('codex'), review: repeatReview(),
+  });
+  const store = inMemoryTransitionStore(initial);
+  const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store) });
+  const context = integrationContext({ slug: String(initial.id), missionStatus: 'review', missionReview: initial.review });
+
+  const result = await createIntegrationHumanIntervention()(String(initial.id), 'action limit 40 reached', {
+    executionContext: context.executionContext,
+    missionServices: services,
+    revision: shortcutHead,
+    reviewedRevision: shortcutHead,
+  });
+
+  assert.deepEqual(result, { ok: true });
+  const persisted = (await store.load(initial.id)).mission.review;
+  assert.equal(persisted?.intervention?.reason, 'action limit 40 reached');
+  assert.equal(persisted?.intervention?.requestedBy, 'workflow');
+  assert.ok(persisted?.intervention?.requestedAt);
 });
 
 test('shortcut submits the exact tested revision and provider refusal leaves no local approval (TASK-2859.16)', async () => {

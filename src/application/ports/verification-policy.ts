@@ -248,8 +248,6 @@ export interface PolicyActionPort {
     _jointRepair: (_revision: string) => Promise<boolean>, _preparedRevision: string): Promise<PolicyTestsOutcome>;
   /** Fence and durably record cancellation of the human request for this round. */
   withdrawHuman?(_facts: { readonly missionId: MissionId; readonly revision: string; readonly round: number }): Promise<boolean>;
-  /** Tests actions already started for this Mission, from durable records; a restart resumes the count. */
-  testsActionsSpent(): Promise<number>;
   /** A rebase stopped on conflicts is outside the model: no decision while it is open. */
   rebaseInProgress(): boolean;
 }

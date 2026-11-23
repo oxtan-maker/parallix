@@ -2,11 +2,12 @@
 
 `test/e2e/agents/real-agent-smoke.test.ts` is a **blocking** integration gate
 that runs a real agent through the full production lifecycle. It normally uses
-the repository's configured custom runner and model behavior. If production
-custom admission is already saturated, it can instead use Codex with
-`gpt-6-luna` and low reasoning effort when Codex is eligible, unblocked, and
-available. It exists to fail closed when Parallix breaks its own launcher or
-lifecycle path while developing itself.
+the `gemma-kub2` provider from the operator's pi model configuration when that
+provider is configured and reachable. Otherwise it uses the repository's
+configured custom runner and model behavior or, when production custom
+admission is saturated, Codex with `gpt-6-luna` and low reasoning effort. It
+exists to fail closed when Parallix breaks its own launcher or lifecycle path
+while developing itself.
 
 This is a second, additive tier on top of the deterministic
 `test/e2e/lifecycle/mission-lifecycle.test.ts` harness (the `workflow` gate), which
@@ -22,9 +23,16 @@ configured local agent, integration must stop rather than merge silently.
 
 ## Prerequisites
 
+- For the preferred self-development route, `pi` must be present on `PATH`, the
+  operator's pi `models.json` must declare the `gemma-kub2` provider and model,
+  and that provider's `/models` endpoint must be reachable. The smoke only uses
+  this cheap endpoint check for selection; the lifecycle itself proves model
+  capability. Its disposable pi settings pin the selected provider and model
+  without changing the operator's defaults, credentials, or sessions.
 - `opencode` installed and present on `PATH`, with a working default local
-  model configured in opencode's own state (no repo config needed for this —
-  opencode remembers its own last-selected model).
+  model configured in opencode's own state, is required when the kub2 route is
+  unavailable and the configured runner is `opencode` (no repo config needed
+  for this — opencode remembers its own last-selected model).
 - `adapters.agents.models.custom` in this repo's `workflow.config.json` is an
   *optional* override, not a prerequisite: pinning a specific model string
   there is a footgun (it goes stale whenever the operator repoints the
@@ -58,27 +66,34 @@ Model prose and tool results stay in the workflow capture rather than the live
 progress feed. The disposable repository starts with a committed root
 `AGENTS.md`, so agents can find its instructions in the mission worktree.
 
-## Configured admission and concurrent replay
+## Smoke selection, admission, and concurrent replay
 
-Before starting the lifecycle, the smoke asks production custom admission for
-a slot. An admitted probe is released immediately and the configured custom
-runner remains selected. If admission is saturated, the smoke selects Codex
-with `gpt-6-luna` and low effort only when the existing agent policy, block
-authority, and launcher availability checks all allow it. Otherwise custom
+An explicit real-agent override remains first. Without one, the smoke reads the
+`gemma-kub2` provider and model from the operator's pi model configuration and
+selects it when a no-inference `GET /models` check succeeds. That route uses pi
+with a disposable settings directory that isolates credentials and sessions. If the
+provider is missing or unreachable, the existing order is unchanged: an
+admitted production custom probe keeps the configured custom runner; saturated
+custom admission selects Codex with `gpt-6-luna` and low effort when agent
+policy, block authority, and launcher availability allow it; otherwise custom
 remains selected and follows its existing admission wait/failure behavior.
 
-This decision is made once. A custom launcher or lifecycle failure never
-retries on Codex, and a capacity change after custom was selected is handled by
-normal custom admission. Separate smoke repositories and mission worktrees
-share a disposable lease-only admission database under the system temporary
-directory while retaining isolated
-mission state, credentials, blocklists, and runner sessions.
+This decision is made once. A kub2 or other custom launcher or lifecycle
+failure never retries on another family, and a capacity change after custom was
+selected is handled by normal custom admission. The kub2 route has its own
+shared disposable lease home and a capacity of two, independent of
+`adapters.agents.maxConcurrentCustom` and production admission state. Separate
+smoke repositories and mission worktrees therefore can hold two kub2 smoke
+leases while retaining isolated mission state, credentials, blocklists, and
+runner sessions. The kub2 llama.cpp server itself reports one backend slot, so
+two admitted smokes may queue inference even though both lifecycle processes
+run concurrently.
 
-Build the CLI before replaying (`npm run build`). Use the configured custom
-runner with a reachable model backend and sufficient temporary storage. For a
-capacity-two replay, confirm the canonical checkout already configures two
-slots; do not change capacity to make a replay pass. Run two copies of the
-smoke invocation in separate terminals. They share admission automatically.
+Build the CLI before replaying (`npm run build`). Ensure the selected backend is
+reachable and temporary storage is sufficient. Run two copies of the smoke
+invocation in separate terminals. Kub2 runs share their dedicated two-slot
+admission pool automatically; fallback custom runs share the existing smoke
+admission pool and use the canonical checkout's configured custom capacity.
 Give the first a bounded tool wait so overlap can be observed:
 
 ```sh
@@ -105,12 +120,13 @@ absolute `PARALLIX_E2E_CUSTOM_ADMISSION_HOME` beneath a disposable directory.
 The E2E bootstrap maps that explicit test-only value to
 `PARALLIX_CUSTOM_ADMISSION_HOME`; an inherited production admission home is
 still discarded to protect operator state.
-Capacity still comes from the canonical checkout. Keep the session and active
-wall deadlines finite; `PARALLIX_REAL_AGENT_TIMEOUT_MS` bounds each session,
-with three times that allowance for the active phase. Retained fixtures and captures
-contain copied credentials: remove only the directories belonging to these
-runs after inspection, once their children have exited. Do not remove a shared
-admission database while another run is using it.
+Kub2 capacity remains two; fallback custom capacity comes from the canonical
+checkout. Keep the session and active wall deadlines finite;
+`PARALLIX_REAL_AGENT_TIMEOUT_MS` bounds each session, with three times that
+allowance for the active phase. Retained fixtures and captures contain copied
+credentials: remove only the directories belonging to these runs after
+inspection, once their children have exited. Do not remove a shared admission
+database while another run is using it.
 
 ## First-value rehearsal
 
@@ -163,26 +179,29 @@ values are forwarded as dedicated environment values only to
 `custom-agent-smoke`; they are never concatenated into its shell command.
 Without both flags, the configured `custom-agent-smoke` command remains
 `node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts`, and smoke selection retains the
-configured custom runner (`opencode` or `pi`) and its existing model behavior.
+normal order: a reachable kub2 route first, then the configured custom runner
+or Codex capacity fallback.
 
-The gate runs **one** full lifecycle per invocation, with whichever custom
-runner this repository configures (`adapters.agents.runners.custom` in
-`workflow.config.json`, currently `opencode`). Running every supported runner
-back-to-back would multiply the gate's wall time, so the non-configured runner
-is exercised on demand instead — the harness itself is runner-parameterized
-(`opencode` and `pi`), and switching costs only an env var:
+The gate runs **one** full lifecycle per invocation. When kub2 is configured and
+reachable, that route uses pi regardless of `PARALLIX_REAL_AGENT_RUNNER`; the
+environment value only selects the configured custom runner after kub2 falls
+through. This repository currently configures pi. To bypass kub2 and exercise
+a custom runner and the configured custom model explicitly, select the custom
+family as well as the runner:
 
 ```
-PARALLIX_REAL_AGENT_RUNNER=pi node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts
+PARALLIX_REAL_AGENT=custom PARALLIX_REAL_AGENT_RUNNER=opencode \
+  node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts
 ```
 
 ## Expected runtime and determinism
 
 Unlike the stubbed lifecycle harness, this test drives real local-model
 inference calls for the draft, execute, and review agents and is expected to be
-**slower and less deterministic**. Runs using the configured custom local model
-share production admission capacity across worktrees; a queued session waits
-until an occupied slot is released.
+**slower and less deterministic**. Concurrent kub2 runs can hold both smoke
+leases but queue on the server's single inference slot. Runs using the fallback
+configured custom model share production admission capacity across worktrees;
+a queued session waits until an occupied slot is released.
 A green full-lifecycle run measured ~4
 minutes (242s) on the reference workstation; failing runs usually fail faster
 (a draft-phase failure is often visible within ~40s). The smoke makes no
@@ -199,8 +218,8 @@ a genuine Parallix regression.
 ## Lifecycle depth covered
 
 The gate runs the full `draft -> active -> review` lifecycle through the
-production launcher for the family selected before launch: normally the
-configured custom runner, or Codex for the admitted capacity fallback.
+production launcher for the family selected before launch: preferably the kub2
+pi route, otherwise the configured custom runner or Codex capacity fallback.
 
 While the original implementation stopped at `draft` (because `draft` and `active` both
 funnel through the same launcher code path), the corrected smoke test exercises

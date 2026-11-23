@@ -126,7 +126,7 @@ function toWebMissionCard(card: MissionCard): WebMissionCard {
     reviewRecovery: card.reviewRecovery ?? null,
     reviewDisposition: card.reviewDisposition,
     reviewHistory: card.reviewHistory.map(({ number, disposition }) => ({ number, disposition })),
-    reviewWindowAllowance: card.reviewWindowAllowance ?? null,
+    reviewActions: card.reviewActions ?? null,
     repairBudget: card.repairBudget ?? null,
     blockingReason: card.blockingReason,
     flags: [...card.flags],

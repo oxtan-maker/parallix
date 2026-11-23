@@ -31,7 +31,7 @@ function providerNone(consumeReviewer: () => Promise<ReviewerArtifactFacts>, run
 describe("review loop", { concurrency: false }, () => {
   test('review loop skips reviewer and implementer launches for autonomous fallback in provider=none mode', async () => {
     const fake = providerNone(async () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }));
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, fake.ports);
     const { logs, errors } = fake;
 
     assert.deepEqual(fake.launches, [], 'autonomous fallback should not launch any agents');
@@ -63,7 +63,7 @@ describe("review presentation", { concurrency: false }, () => {
       lines.push('[PASS] Pre-review gate passed for area "docs".');
       return { ok: true as const };
     });
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, fake.ports);
     const logs = [...lines, ...fake.logs];
     assert.equal(logs.filter((m) => m.includes('Pre-review gate passed for area')).length, 1, `pre-review gate success announced exactly once on the happy path`);
     assert.equal(fake.errors.length, 0, `no errors on happy path: ${fake.errors.join(' | ')}`);
@@ -71,7 +71,7 @@ describe("review presentation", { concurrency: false }, () => {
 
   test('verdict prominence: APPROVED emitted before the review-stopped transition line', async () => {
     const fake = happyPath();
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, fake.ports);
     const approvedIdx = fake.logs.findIndex((m) => /APPROVED/.test(m) && m.includes('===='));
     const stopIdx = fake.logs.findIndex((m) => m.includes('Autonomous review stopped: reviewer approved'));
     assert.ok(approvedIdx !== -1, 'prominent APPROVED verdict is presented');
@@ -82,25 +82,24 @@ describe("review presentation", { concurrency: false }, () => {
   test('non-APPROVED persisted state emits no APPROVED presentation', async () => {
     // REQUEST_CHANGES routes into the fixing branch; no approval is presented.
     const fake = happyPath('REQUEST_CHANGES');
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, fake.ports);
     assert.ok(!fake.logs.some((m) => /APPROVED/.test(m) && m.includes('====')), 'no APPROVED verdict for a non-approval state');
   });
 
   test('verbose review start exposes poll/provider lines that default hides', async () => {
     const verbose = happyPath();
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1, verbose: true }, verbose.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40, verbose: true }, verbose.ports);
     const quiet = happyPath();
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, quiet.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, quiet.ports);
     assert.ok(verbose.logs.some((m) => m.includes('Forgejo validation skipped')), 'verbose on: provider-skipped line present');
-    // TASK-2477/F4: Max attempts is part of the demoted review-start header too.
-    assert.ok(quiet.logs.some((m) => /Poll interval|Poll timeout|Max attempts/.test(m)) === false, 'default off: poll/timeout/max-attempts lines absent');
+    assert.ok(quiet.logs.some((m) => /Poll interval|Poll timeout|Review action limit/.test(m)) === false, 'default off: poll/timeout/action-limit lines absent');
     assert.ok(verbose.logs.some((m) => /Poll interval|Poll timeout/.test(m)), 'verbose on: poll lines present');
-    assert.ok(verbose.logs.some((m) => /Max attempts/.test(m)), 'verbose on: max-attempts line present');
+    assert.ok(verbose.logs.some((m) => /Review action limit: 40/.test(m)), 'verbose on: action-limit line present');
   });
 
   test('incomplete reviewer-artifact infrastructure failure survives at default verbosity', async () => {
     const fake = providerNone(async () => ({ failureReason: { version: 1, code: 'infrastructure', source: 'review-preparation' }, consumed: true, ok: false as const, diagnostic: 'persist failed (outcome): sqlite busy' }));
-    await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, fake.ports);
     assert.ok(fake.errors.some((m) => m.includes('Reviewer artifact infrastructure failure')), 'infra failure message surfaces at default verbosity');
     assert.deepEqual(fake.stops, ['REVIEWER_ARTIFACT_INFRA_FAILURE'], 'an infrastructure failure escalates to a human instead of relaunching');
   });
@@ -187,7 +186,7 @@ test('application review succeeds through structured observations without termin
   fake.ports.output.emit = event => { events.push(event); };
   fake.ports.output.log = () => assert.fail('application must not render terminal output');
   fake.ports.output.error = () => assert.fail('application must not render terminal errors');
-  await runReviewLoop({ slug: 'task-999', maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-999', actionLimit: 40 }, fake.ports);
   const verdict = events.findIndex(event => event.kind === 'review-verdict' && event.disposition === 'APPROVED');
   const stopped = events.findIndex(event => event.kind === 'reviewer-approved');
   assert.ok(verdict >= 0 && stopped > verdict, 'authoritative verdict precedes completion');

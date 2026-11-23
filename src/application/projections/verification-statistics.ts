@@ -17,6 +17,7 @@ import { firstByKey, groupByKey } from './population-index.js';
 import { ActivityCosts, interval, type ActivityEvent, type Interval } from './verification-activity-costs.js';
 import { REVIEW_START_DECISION_EVENT } from '../verification-policy/review-start-decision.js';
 import { REVIEW_START_OUTCOME_EVENT } from '../verification-policy/review-start-outcome.js';
+import { REVIEW_ACTION_STARTED_EVENT } from '../ports/review-action-history.js';
 export type { RebaseMeasurement } from './verification-observation-reader.js';
 
 /**
@@ -26,7 +27,7 @@ export type { RebaseMeasurement } from './verification-observation-reader.js';
  */
 export const VERIFICATION_HISTORY_EVENT_TYPES: readonly string[] = [
   'mission.current-work', 'flow.activity', VERIFICATION_MEASUREMENT_EVENT, 'flow.rebase', 'lead.operator-judgment',
-  REVIEW_START_DECISION_EVENT, REVIEW_START_OUTCOME_EVENT,
+  REVIEW_START_DECISION_EVENT, REVIEW_START_OUTCOME_EVENT, REVIEW_ACTION_STARTED_EVENT,
 ];
 export interface VerificationStatisticsInput {
   readonly repositoryId: string;

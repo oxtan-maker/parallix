@@ -2,7 +2,7 @@ import type { WorkflowOperation } from '../../domain/workflow-operation.js';
 import type { ReviewOperatorResumePermit } from '../review-recovery.js';
 import type { ExecutionActivityActor } from '../../domain/execution-activity.js';
 
-export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'rebase' | 'integrate'; readonly args: readonly string[]; readonly interactive?: boolean; }
+export interface WorkflowInvocation { readonly command: 'draft' | 'review' | 'rebase' | 'integrate'; readonly args: readonly string[]; }
 /** Transport details remain application state, outside the domain operation. */
 export interface WorkflowOperationRecord extends WorkflowOperation {
   readonly activityActor?: ExecutionActivityActor;

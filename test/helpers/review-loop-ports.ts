@@ -54,6 +54,7 @@ export interface ReviewLoopFakeOverrides {
   readonly missionStore?: ReviewLoopPorts['missionStore'];
   readonly lifecycle?: ReviewLoopPorts['lifecycle'];
   readonly reviewStarts?: ReviewLoopPorts['reviewStarts'];
+  readonly actionHistory?: ReviewLoopPorts['actionHistory'];
   readonly policyActions?: ReviewLoopPorts['policyActions'];
 }
 
@@ -97,6 +98,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
   const writes: Record<string, unknown>[] = [];
   const mirrors: string[] = [];
   const stops: string[] = [];
+  let actionCount = 0;
   let current: ReviewLoopState | null = overrides.state ?? null;
   const state: ReviewStatePort = {
     read: async () => current,
@@ -166,6 +168,19 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       ...overrides.preReview,
     },
     ...(overrides.reviewStarts ? { reviewStarts: overrides.reviewStarts } : {}),
+    actionHistory: overrides.actionHistory ?? {
+      count: async () => actionCount,
+      record: async input => ({
+        schemaVersion: 1,
+        repositoryId: 'fixture-repository',
+        missionId: slug as import('../../src/domain/mission.js').MissionId,
+        ...input,
+        actionSequence: ++actionCount,
+        failureReason: null,
+        idempotencyKey: `fake-review-action:${slug}:${actionCount}`,
+        recordedAt: new Date().toISOString(),
+      }),
+    },
     ...(overrides.policyActions ? { policyActions: overrides.policyActions } : {}),
     output: {
       emit: event => renderReviewLoopEvent(event, ports.output),
@@ -189,7 +204,8 @@ export function fakeLoopContext(fake: ReviewLoopFake, overrides: Partial<LoopCon
     ports: fake.ports,
     slug: 'fake-mission',
     focus: 'all',
-    maxAttempts: 1,
+    actionLimit: 40,
+    actionCount: 0,
     reboundsPerRound: 6,
     dryRun: false,
     isContinue: false,

@@ -19,6 +19,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import childProcess from 'node:child_process';
+import { unresolvedIndexGuidance } from '../../../src/application/integrate/checkout-recovery-guidance.js';
 import { mockModule, installModuleMocks } from '../../lib/module-mock.js';
 import { createRequire } from 'node:module';
 const _require = createRequire(import.meta.url);
@@ -123,6 +124,7 @@ const {
   buildConflictResolutionPrompt,
   stashMainCheckoutIfNeeded,
   restoreMainCheckoutStash,
+  maybeDropStashAfterCollision,
   isNoMergeToAbortResult,
   VARIANT_B_AUTOMATION_SUMMARY,
   evaluateTaskStatusForIntegration,
@@ -1536,14 +1538,16 @@ test('printIntegrationPreflight tolerates a missing task file and reports unknow
 test('getUnresolvedIndexConflicts deduplicates conflicted paths from git ls-files -u', () => {
   const result = getUnresolvedIndexConflicts('/tmp/main-checkout', {
     gitRunner(args) {
-      assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'ls-files', '-u']);
+      // NUL-delimited output carries raw paths, so a name with a tab round-trips (TASK-2862).
+      assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'ls-files', '-u', '-z']);
       return {
         status: 0,
         stdout: [
           '100644 aaaaa 1\tserver/src/App.java',
           '100644 bbbbb 2\tserver/src/App.java',
-          '100644 ccccc 3\tworkflow/lib/commands/integrate.js'
-        ].join('\n'),
+          '100644 ccccc 3\tworkflow/lib/commands/integrate.js',
+          '100644 ddddd 2\tdocs/tab\tname.md'
+        ].join('\0') + '\0',
         stderr: ''
       };
     }
@@ -1551,7 +1555,7 @@ test('getUnresolvedIndexConflicts deduplicates conflicted paths from git ls-file
 
   assert.deepEqual(result, {
     ok: true,
-    files: ['server/src/App.java', 'workflow/lib/commands/integrate.js']
+    files: ['server/src/App.java', 'workflow/lib/commands/integrate.js', 'docs/tab\tname.md']
   });
 });
 
@@ -1590,9 +1594,9 @@ test('printIntegrationPreflight reports unresolved index conflicts with recovery
     assert.ok(result.failures.includes('main-index-conflicts'));
     const output = lines.join('\n');
     assert.match(output, /Integration checkout conflicts: unresolved merge entries detected/i);
-    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rm "workflow/lib/commands/integrate\\.js"`));
-    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} add "backlog/tasks/task-113\\.md"`));
-    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} stash drop`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} --literal-pathspecs add -- backlog/tasks/task-113\\.md`));
+    assert.match(output, new RegExp(`git -C ${FAKE_ROOT} --literal-pathspecs rm -- workflow/lib/commands/integrate\\.js`));
+    assert.doesNotMatch(output, /stash drop|rebase in progress/);
     assert.match(output, /Retry with: px integrate task-113 --dry-run/);
   } finally {
     console.log = originalLog;
@@ -1649,6 +1653,10 @@ test('printIntegrationPreflight fails fast on an in-progress rebase in the integ
     assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --continue`));
     assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --abort`));
     assert.match(output, new RegExp(`git -C ${FAKE_ROOT} rebase --skip`));
+    // Each choice states what it discards, and the receiving checkout is named (TASK-2862).
+    assert.match(output, /Receiving checkout: .* on branch main/);
+    assert.match(output, /Abort: discards the rebase progress/);
+    assert.match(output, /Skip: drops the commit currently being replayed/);
     assert.match(output, /Retry with: px integrate task-1322 --dry-run/);
   } finally {
     console.log = originalLog;
@@ -1673,7 +1681,16 @@ test('reportStashPopFailure confirms landed integration and prints merge-conflic
   try {
     reportStashPopFailure('task-113', { stdout: '', stderr: 'conflict output' }, {
       rootDir: '/tmp/main-checkout',
+      stash: { created: true, objectId: 'abc123object' },
       gitRunner(args) {
+        if (args.includes('symbolic-ref')) { return { status: 0, stdout: 'main\n', stderr: '' }; }
+        // An unrelated stash sits above the integration stash; only the recorded object is responsible.
+        if (args.includes('stash')) {
+          return { status: 0, stderr: '', stdout: [
+            'stash@{0}\0unrelatedobject\0On main: operator work',
+            'stash@{1}\0abc123object\0On main: integrate:task-113: temporary integration checkout stash',
+          ].join('\n') };
+        }
         if (args.includes('--oneline')) {
           assert.deepEqual(args, ['-C', '/tmp/main-checkout', 'log', '-1', '--oneline']);
           return { status: 0, stdout: 'abc123 mission/task-113: harden integrate preflight\n', stderr: '' };
@@ -1692,8 +1709,62 @@ test('reportStashPopFailure confirms landed integration and prints merge-conflic
     const output = lines.join('\n');
     assert.match(output, /Integration commit landed: abc123 mission\/task-113: harden integrate preflight/);
     assert.match(output, /Stash restore failure type: merge-conflict/);
-    assert.match(output, /Resolve workflow\/lib\/commands\/integrate\.js, then run git add "workflow\/lib\/commands\/integrate\.js" or git rm "workflow\/lib\/commands\/integrate\.js"/);
-    assert.match(output, /git stash drop/);
+    assert.match(output, /git -C \/tmp\/main-checkout --literal-pathspecs add -- workflow\/lib\/commands\/integrate\.js/);
+    assert.match(output, /Receiving checkout: \/tmp\/main-checkout on branch main/);
+    assert.match(output, /Responsible integration stash: stash@\{1\} \(object abc123object/);
+    assert.match(output, /stash show --stat --include-untracked abc123object/);
+    assert.match(output, /test "\$\(git -C \/tmp\/main-checkout rev-parse --verify -q 'stash@\{1\}'\)" = abc123object && git -C \/tmp\/main-checkout stash drop 'stash@\{1\}'/);
+    assert.doesNotMatch(output, /stash drop(?! 'stash@\{1\}')|stash@\{0\}/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('reportStashPopFailure inspects genuine rebase metadata before describing unresolved entries (TASK-2862)', () => {
+  const lines: unknown[] = [];
+  const originalError = console.error;
+  console.error = (line: unknown) => lines.push(line);
+  try {
+    reportStashPopFailure('task-113', { stdout: '', stderr: 'conflict output' }, {
+      rootDir: '/tmp/main-checkout',
+      gitRunner(args) {
+        if (args.includes('symbolic-ref')) { return { status: 0, stdout: 'main\n', stderr: '' }; }
+        if (args.includes('stash')) { return { status: 0, stdout: '', stderr: '' }; }
+        if (args.includes('--oneline')) { return { status: 0, stdout: 'abc123 landed\n', stderr: '' }; }
+        return { status: 0, stdout: '\0abc123\0unrelated commit\n', stderr: '' };
+      },
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: ['src/conflicted.ts'] }),
+      detectRebaseStateFn: () => ({
+        branch: 'main', otherOperation: null, inProgress: true, rebaseHead: 'def456', detached: true,
+        unmergedFiles: ['src/conflicted.ts'], rebaseDir: '/tmp/main-checkout/.git/rebase-merge'
+      })
+    });
+
+    const output = lines.join('\n');
+    assert.match(output, /These entries belong to the paused rebase/);
+    assert.match(output, /git -C \/tmp\/main-checkout rebase --continue/);
+    assert.match(output, /git -C \/tmp\/main-checkout rebase --abort/);
+    assert.match(output, /git -C \/tmp\/main-checkout rebase --skip/);
+    assert.doesNotMatch(output, /No rebase metadata was found/);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('reportStashPopFailure offers only read-only inspection when the index cannot be read (TASK-2862)', () => {
+  const lines: unknown[] = [];
+  const originalError = console.error;
+  console.error = (line: unknown) => lines.push(line);
+  try {
+    reportStashPopFailure('task-113', { stdout: 'docs/index.md already exists, no checkout', stderr: '' }, {
+      rootDir: '/tmp/main-checkout',
+      gitRunner: () => ({ status: 0, stdout: '', stderr: '' }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: false as const, files: [], error: 'ls-files failed' })
+    });
+    const output = lines.join('\n');
+    assert.match(output, /index-unreadable \(ls-files failed\)/);
+    assert.match(output, /git -C \/tmp\/main-checkout status --short/);
+    assert.doesNotMatch(output, /file-collision|mv --|stash pop --index|stash drop|git -C \S+ (add|rm) /);
   } finally {
     console.error = originalError;
   }
@@ -1711,6 +1782,8 @@ test('reportStashPopFailure prints file-collision recovery steps when no merge e
     }, {
       rootDir: '/tmp/main-checkout',
       gitRunner(args) {
+        if (args.includes('symbolic-ref')) { return { status: 0, stdout: 'main\n', stderr: '' }; }
+        if (args.includes('stash')) { return { status: 0, stdout: '', stderr: '' }; }
         if (args.includes('--oneline')) {
           return { status: 0, stdout: 'def456 unrelated latest commit\n', stderr: '' };
         }
@@ -1727,9 +1800,9 @@ test('reportStashPopFailure prints file-collision recovery steps when no merge e
     const output = lines.join('\n');
     assert.match(output, /Integration landing not confirmed by HEAD: def456 unrelated latest commit/);
     assert.match(output, /Stash restore failure type: file-collision/);
-    assert.match(output, /git -C \/tmp\/main-checkout stash show --name-only stash@\{0\}/);
-    assert.match(output, /mv \/tmp\/main-checkout\/docs\/index\.md \/tmp\/main-checkout\/docs\/index\.md\.pre-stash-pop/);
-    assert.match(output, /git -C \/tmp\/main-checkout stash pop/);
+    assert.match(output, /mv -- \/tmp\/main-checkout\/docs\/index\.md \/tmp\/main-checkout\/docs\/index\.md\.pre-stash-pop/);
+    assert.match(output, /git -C \/tmp\/main-checkout stash list/);
+    assert.doesNotMatch(output, /git -C \S+ stash (pop(?! --index)|drop)/);
   } finally {
     console.error = originalError;
   }
@@ -2363,12 +2436,20 @@ test('stashMainCheckoutIfNeeded no-ops when the main checkout is already clean',
 
 test('stashMainCheckoutIfNeeded creates an explicit include-untracked stash', () => {
   const gitCalls: string[][] = [];
+  let stashProbe = 0;
   const result = stashMainCheckoutIfNeeded({
     slug: 'task-097',
     dirtyEntries: ['?? backlog/tasks/task-099 - fix-act-on-review.md'],
     rootDir: '/tmp/main-checkout',
     gitRunner(args) {
       gitCalls.push(args);
+      if (args.includes('rev-parse')) {
+        stashProbe += 1;
+        return stashProbe === 1
+          ? { status: 1, stdout: '', stderr: '' }
+          : { status: 0, stdout: 'abc123object\n', stderr: '' };
+      }
+      if (args.includes('log')) { return { status: 0, stdout: 'On main: integrate:task-097: temporary integration checkout stash\n', stderr: '' }; }
       return { status: 0, stdout: '', stderr: '' };
     }
   });
@@ -2376,9 +2457,10 @@ test('stashMainCheckoutIfNeeded creates an explicit include-untracked stash', ()
   assert.deepEqual(result, {
     created: true,
     message: 'integrate:task-097: temporary integration checkout stash',
-    rootDir: '/tmp/main-checkout'
+    rootDir: '/tmp/main-checkout',
+    objectId: 'abc123object'
   });
-  assert.deepEqual(gitCalls, [[
+  assert.deepEqual(gitCalls.find(args => args.includes('push')), [
     '-C',
     '/tmp/main-checkout',
     'stash',
@@ -2386,28 +2468,33 @@ test('stashMainCheckoutIfNeeded creates an explicit include-untracked stash', ()
     '--include-untracked',
     '-m',
     'integrate:task-097: temporary integration checkout stash'
-  ]]);
+  ]);
+
+  // A push that did not create the marker stash (e.g. nothing to save) must not claim an older stash (TASK-2862).
+  const unverified = stashMainCheckoutIfNeeded({
+    slug: 'task-097', dirtyEntries: ['?? x'], rootDir: '/tmp/main-checkout',
+    gitRunner: args => ({ status: 0, stdout: args.includes('log') ? 'On main: someone else\n' : 'oldobject\n', stderr: '' })
+  });
+  assert.equal((unverified as { objectId?: string }).objectId, undefined);
 });
 
-test('restoreMainCheckoutStash pops the temporary stash back onto the main checkout', () => {
+test('restoreMainCheckoutStash pops only the recorded stash by its re-resolved reference (TASK-2862)', () => {
+  const marker = 'integrate:task-097: temporary integration checkout stash';
   const gitCalls: string[][] = [];
-  const result = restoreMainCheckoutStash({
-    message: 'integrate:task-097: temporary integration checkout stash',
-    rootDir: '/tmp/main-checkout',
-    gitRunner(args) {
-      gitCalls.push(args);
-      return { status: 0, stdout: '', stderr: '' };
-    }
-  });
-
+  const runner = (args: string[]) => {
+    gitCalls.push(args);
+    return { status: 0, stderr: '', stdout: args.includes('list')
+      ? `stash@{0}\0unrelatedobject\0On main: operator work\nstash@{1}\0recordedobject\0On main: ${marker}\n` : '' };
+  };
+  const result = restoreMainCheckoutStash({ message: marker, objectId: 'recordedobject', rootDir: '/tmp/main-checkout', gitRunner: runner });
   assert.equal(result.status, 0);
-  assert.deepEqual(gitCalls, [[
-    '-C',
-    '/tmp/main-checkout',
-    'stash',
-    'pop',
-    '--index'
-  ]]);
+  assert.deepEqual(gitCalls.at(-1), ['-C', '/tmp/main-checkout', 'stash', 'pop', '--index', 'stash@{1}']);
+
+  // Unknown ownership applies nothing: no pop is attempted.
+  gitCalls.length = 0;
+  const unowned = restoreMainCheckoutStash({ message: marker, rootDir: '/tmp/main-checkout', gitRunner: runner });
+  assert.equal(unowned.status, 1);
+  assert.ok(!gitCalls.some(args => args.includes('pop')), 'an unidentified stash is never popped');
 });
 
 test('findExistingSquashCommit returns the SHA when a mission squash commit is in the recent log', () => {
@@ -2604,17 +2691,20 @@ test('maybeDropStashAfterCollision drops the stash on a benign file-collision', 
     // The landed squash commit already restored the file, so it exists on disk.
     fs.writeFileSync(path.join(root, 'config', 'agents.json'), '{"filtered":true}');
     const gitCalls: string[][] = [];
+    const marker = 'integrate:task-1: temporary integration checkout stash';
     const gitRunner: NonNullable<NonNullable<Parameters<typeof maybeDropStashAfterCollision>[2]>["gitRunner"]> = (args) => {
       gitCalls.push(args);
       const cmd = args.join(' ');
       if (cmd.includes('ls-files')) {return { status: 0, stdout: '', stderr: '' };}
+      if (cmd.includes('stash list')) {return { status: 0, stdout: `stash@{0}\0recordedobject\0On main: ${marker}\n`, stderr: '' };}
+      if (cmd.includes('rev-parse')) {return { status: 0, stdout: 'recordedobject\n', stderr: '' };}
       if (cmd.includes('stash') && cmd.includes('drop')) {return { status: 0, stdout: '', stderr: '' };}
       return { status: 1, stdout: '', stderr: '' };
     };
     const result = maybeDropStashAfterCollision(
       { status: 1, stdout: '', stderr: 'config/agents.json already exists, no checkout\n' },
       root,
-      { gitRunner }
+      { gitRunner, expectedObjectId: 'recordedobject', marker }
     );
     assert.deepEqual(result, { ok: true, ref: 'stash@{0}' });
     const dropCall = gitCalls.find((call) => call.includes('stash') && call.includes('drop'));
@@ -2656,5 +2746,164 @@ test('maybeDropStashAfterCollision does not drop when a colliding file is missin
     assert.equal(result, null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function task2862RealGit(rootDir: string, ...args: string[]) {
+  return childProcess.spawnSync('git', [
+    '-C', rootDir, '-c', 'user.name=t', '-c', 'user.email=t@example.invalid', ...args,
+  ], { encoding: 'utf8' });
+}
+
+function task2862RealRepo() {
+  const rootDir = fs.mkdtempSync(path.join(os.tmpdir(), 'integrate-conflict-git-'));
+  childProcess.spawnSync('git', ['init', '-q', '-b', 'main', rootDir]);
+  return rootDir;
+}
+
+function task2862GitRunner(rootDir: string) {
+  return (args: string[]) => {
+    const result = task2862RealGit(rootDir, ...args.slice(2));
+    return {
+      status: result.status ?? 1,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      signal: null,
+    };
+  };
+}
+
+test('index guidance for a pathspec-magic file name stages only that file in real Git (TASK-2862)', () => {
+  const rootDir = task2862RealRepo();
+  try {
+    const magic = ':(glob)*';
+    fs.writeFileSync(path.join(rootDir, magic), 'base\n');
+    fs.writeFileSync(path.join(rootDir, 'other.txt'), 'base\n');
+    task2862RealGit(rootDir, 'add', '-A');
+    task2862RealGit(rootDir, 'commit', '-qm', 'base');
+    task2862RealGit(rootDir, 'checkout', '-qb', 'side');
+    fs.writeFileSync(path.join(rootDir, magic), 'side\n');
+    task2862RealGit(rootDir, 'commit', '-qam', 'side');
+    task2862RealGit(rootDir, 'checkout', '-q', 'main');
+    fs.writeFileSync(path.join(rootDir, magic), 'main\n');
+    task2862RealGit(rootDir, 'commit', '-qam', 'main');
+    task2862RealGit(rootDir, 'merge', 'side');
+    fs.writeFileSync(path.join(rootDir, 'other.txt'), 'edited\n');
+    const conflicts = getUnresolvedIndexConflicts(rootDir);
+    assert.deepEqual(conflicts.files, [magic]);
+
+    fs.writeFileSync(path.join(rootDir, magic), 'resolved\n');
+    const add = unresolvedIndexGuidance(rootDir, conflicts.files, { rebaseMetadata: false })
+      .find(line => / add -- /.test(line))!;
+    assert.equal(childProcess.spawnSync('sh', ['-c', add]).status, 0);
+    assert.equal(task2862RealGit(rootDir, 'ls-files', '-u').stdout, '', 'the conflict is resolved');
+    assert.equal(task2862RealGit(rootDir, 'diff', '--cached', '--name-only').stdout.trim(), magic,
+      'no unrelated path was staged');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('restoring the integration stash leaves an unrelated stash above it untouched in real Git (TASK-2862)', () => {
+  const rootDir = task2862RealRepo();
+  try {
+    fs.writeFileSync(path.join(rootDir, 'a.txt'), 'a\n');
+    fs.writeFileSync(path.join(rootDir, 'b.txt'), 'b\n');
+    task2862RealGit(rootDir, 'add', '-A');
+    task2862RealGit(rootDir, 'commit', '-qm', 'base');
+    fs.writeFileSync(path.join(rootDir, 'a.txt'), 'integration-local\n');
+    const gitRunner = task2862GitRunner(rootDir);
+    const stash = stashMainCheckoutIfNeeded({
+      slug: 'task-1', dirtyEntries: [' M a.txt'], rootDir, gitRunner,
+    }) as { created: boolean; message?: string; rootDir?: string; objectId?: string };
+    assert.ok(stash.created && stash.objectId, 'the pushed stash is identified');
+    fs.writeFileSync(path.join(rootDir, 'b.txt'), 'operator\n');
+    task2862RealGit(rootDir, 'stash', 'push', '-m', 'operator work');
+
+    const restored = restoreMainCheckoutStash({ ...stash, gitRunner });
+    assert.equal(restored.status, 0);
+    assert.equal(fs.readFileSync(path.join(rootDir, 'a.txt'), 'utf8'), 'integration-local\n');
+    assert.match(task2862RealGit(rootDir, 'stash', 'list').stdout, /operator work/);
+    assert.doesNotMatch(task2862RealGit(rootDir, 'stash', 'list').stdout, /integrate:task-1/);
+    assert.equal(fs.readFileSync(path.join(rootDir, 'b.txt'), 'utf8'), 'b\n',
+      'the unrelated stash was not applied');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('a benign collision drops the verified integration stash below an unrelated stash in real Git (TASK-2862)', () => {
+  const rootDir = task2862RealRepo();
+  try {
+    fs.writeFileSync(path.join(rootDir, 'tracked.txt'), 'base\n');
+    fs.writeFileSync(path.join(rootDir, 'operator.txt'), 'base\n');
+    task2862RealGit(rootDir, 'add', '-A');
+    task2862RealGit(rootDir, 'commit', '-qm', 'base');
+    fs.writeFileSync(path.join(rootDir, 'tracked.txt'), 'integration-local\n');
+    fs.writeFileSync(path.join(rootDir, 'collision.txt'), 'stashed-untracked\n');
+    const gitRunner = task2862GitRunner(rootDir);
+    const stash = stashMainCheckoutIfNeeded({
+      slug: 'task-1',
+      dirtyEntries: [' M tracked.txt', '?? collision.txt'],
+      rootDir,
+      gitRunner,
+    }) as { created: boolean; message?: string; rootDir?: string; objectId?: string };
+    assert.ok(stash.objectId && stash.message, 'the integration stash is identified');
+
+    fs.writeFileSync(path.join(rootDir, 'collision.txt'), 'landed\n');
+    task2862RealGit(rootDir, 'add', 'collision.txt');
+    task2862RealGit(rootDir, 'commit', '-qm', 'land collision');
+    fs.writeFileSync(path.join(rootDir, 'operator.txt'), 'operator\n');
+    task2862RealGit(rootDir, 'stash', 'push', '-m', 'operator work');
+
+    const restore = restoreMainCheckoutStash({ ...stash, gitRunner });
+    assert.notEqual(restore.status, 0, 'the untracked collision keeps the integration stash');
+    assert.equal(fs.readFileSync(path.join(rootDir, 'tracked.txt'), 'utf8'), 'integration-local\n',
+      'tracked content was restored');
+    assert.equal(fs.readFileSync(path.join(rootDir, 'collision.txt'), 'utf8'), 'landed\n',
+      'landed collision content was preserved');
+
+    const dropped = maybeDropStashAfterCollision(restore, rootDir, {
+      gitRunner,
+      expectedObjectId: stash.objectId,
+      marker: stash.message,
+    });
+    assert.deepEqual(dropped, { ok: true, ref: 'stash@{1}' });
+    const remaining = task2862RealGit(rootDir, 'stash', 'list').stdout;
+    assert.match(remaining, /operator work/);
+    assert.doesNotMatch(remaining, /integrate:task-1/);
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test('a repeated no-op stash push does not claim an older same-marker stash in real Git (TASK-2862)', () => {
+  const rootDir = task2862RealRepo();
+  try {
+    fs.writeFileSync(path.join(rootDir, 'a.txt'), 'base\n');
+    task2862RealGit(rootDir, 'add', '-A');
+    task2862RealGit(rootDir, 'commit', '-qm', 'base');
+    fs.writeFileSync(path.join(rootDir, 'a.txt'), 'integration-local\n');
+    const gitRunner = task2862GitRunner(rootDir);
+    const first = stashMainCheckoutIfNeeded({
+      slug: 'task-1', dirtyEntries: [' M a.txt'], rootDir, gitRunner,
+    }) as { created: boolean; message?: string; rootDir?: string; objectId?: string };
+    assert.ok(first.objectId, 'the first workflow identifies its newly created stash');
+
+    // Git reports success without creating another stash after the first workflow cleaned the checkout.
+    const repeated = stashMainCheckoutIfNeeded({
+      slug: 'task-1', dirtyEntries: [' M a.txt'], rootDir, gitRunner,
+    }) as { created: boolean; message?: string; rootDir?: string; objectId?: string };
+    assert.equal(repeated.objectId, undefined, 'the unchanged same-marker stash is not attributed to this push');
+    assert.equal(task2862RealGit(rootDir, 'rev-parse', 'refs/stash').stdout.trim(), first.objectId);
+
+    const restore = restoreMainCheckoutStash({ ...repeated, gitRunner });
+    assert.equal(restore.status, 1, 'unknown ownership fails closed without applying a stash');
+    assert.match(task2862RealGit(rootDir, 'stash', 'list').stdout, /integrate:task-1/,
+      'the older stash is retained');
+    assert.equal(fs.readFileSync(path.join(rootDir, 'a.txt'), 'utf8'), 'base\n',
+      'the older stash was not applied');
+  } finally {
+    fs.rmSync(rootDir, { recursive: true, force: true });
   }
 });

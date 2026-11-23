@@ -50,8 +50,11 @@ function integrationFailure(error: unknown, ports: IntegrateWorkflowPorts, state
     // Report and fail. Rethrowing here is swallowed by the terminal exit
     // port call below, which would end the run with a success code and no
     // output at all.
-    if (!ports.landing.isAbort(error)) {
-      fmt.log.fail(`Integration failed: ${(error as Error)?.message || String(error)}`);
+    if (ports.landing.isAbort(error)) {
+      state.failureReason = (error as Error).message || null;
+    } else {
+      state.failureReason = `Integration failed: ${(error as Error)?.message || String(error)}`;
+      fmt.log.fail(state.failureReason);
       if ((error as Error)?.stack) {
         fmt.log.fail(String((error as Error).stack));
       }
@@ -61,10 +64,31 @@ function integrationFailure(error: unknown, ports: IntegrateWorkflowPorts, state
   return exitCode;
 }
 
+/** Runs one resolved integration, restores the temporary stash and reports the exit with its concrete reason. */
+async function runResolvedIntegration(slug: string, request: IntegrateRequest, options: ResolvedIntegrateOptions, ports: IntegrateWorkflowPorts, steps: IntegrateEntrySteps): Promise<{ exitCode: number; failureReason: string | null }> {
+  const seams = integrationSeams(options, ports);
+  const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null, failureReason: null };
+  let exitCode: number;
+  try {
+    // TASK-2620: a repair re-review no longer restarts integration. The
+    // run executes once; on a repaired-and-re-approved revision it stops in
+    // the integration lane for the human.
+    exitCode = await steps.runIntegration(slug, request, options, seams, state);
+  } catch (error) {
+    exitCode = integrationFailure(error, ports, state);
+  }
+  const restoreFailed = steps.restoreTemporaryStash(slug, state.temporaryStash) === 1;
+  exitCode = Math.max(exitCode, restoreFailed ? 1 : 0);
+  const restoreReason = restoreFailed ? 'Temporary stash restore failed after integration; follow the [RESTORE] recovery steps above.' : null;
+  if (state.nextActionMessage) { fmt.log.info(state.nextActionMessage); }
+  return { exitCode, failureReason: exitCode === 0 ? null : state.failureReason ?? restoreReason };
+}
+
 export async function runIntegrateEntry(args: string[], options: IntegrateOptions, ports: IntegrateWorkflowPorts, steps: IntegrateEntrySteps) {
     const exitFn = options.exitFn ?? ports.process.terminate;
     let request: IntegrateRequest;
     let exitCode = 0;
+    let failureReason: string | null = null;
     try {
       request = parseIntegrateArgs(args, options.configuration);
     } catch (error) {
@@ -107,25 +131,12 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
         fmt.log.fail(execution.reason);
         exitCode = 1;
       } else {
-        const seams = integrationSeams(options, ports);
-        const state: IntegrateRunState = { temporaryStash: null, nextActionMessage: null };
-        try {
-          // TASK-2620: a repair re-review no longer restarts integration. The
-          // run executes once; on a repaired-and-re-approved revision it stops in
-          // the integration lane for the human.
-          exitCode = await steps.runIntegration(slug, request, { ...options, executionContext: execution.context }, seams, state);
-        } catch (error) {
-          exitCode = integrationFailure(error, ports, state);
-        }
-        exitCode = Math.max(exitCode, steps.restoreTemporaryStash(slug, state.temporaryStash));
-        if (state.nextActionMessage) {
-          fmt.log.info(state.nextActionMessage);
-        }
+        ({ exitCode, failureReason } = await runResolvedIntegration(slug, request, { ...options, executionContext: execution.context }, ports, steps));
       }
     } finally {
       await releaseIntegration();
     }
-    exitFn(exitCode);
+    exitFn(exitCode, failureReason);
     return { exitCode };
   }
 

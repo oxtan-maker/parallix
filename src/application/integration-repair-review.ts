@@ -1,4 +1,6 @@
-import type { IntegrationRepairFacts } from '../domain/integration-repair-policy.js';
+import { latestIntegrationRepair, type IntegrationRepairFacts } from '../domain/integration-repair-policy.js';
+import { missionId } from '../domain/mission.js';
+import type { MissionStore } from './domain-ports.js';
 export * from '../domain/integration-repair-policy.js';
 /**
  * The one repair range every audience sees. With both baselines recorded it is the mission
@@ -64,6 +66,13 @@ export function integrationRepairReviewBrief(facts: IntegrationRepairFacts | nul
   if (facts.log) { lines.push('- Failed gate output (tail):', '```', facts.log, '```'); }
   lines.push('- The review scope is yours: review the repair range, the whole mission diff, or both, as the change warrants.');
   return lines.join('\n');
+}
+
+/** Resolve the recorded integration-repair prompt context for one Mission. */
+export async function missionIntegrationRepairReviewBrief(store: MissionStore | null | undefined, slug: string): Promise<string> {
+  if (!store) { return ''; }
+  const loaded = await store.load(missionId(slug));
+  return loaded.kind === 'found' ? integrationRepairReviewBrief(latestIntegrationRepair(loaded.mission)) : '';
 }
 
 /** The pull-request comment that tells the human what the repaired revision went through. */

@@ -49,6 +49,7 @@ export async function createMissionApplicationServices(
   return {
     store,
     operationalHistory,
+    reviewActions: operationalHistory,
     readStatsMissionFlow,
     repositoryId: repoId,
     intake: new MissionIntakeService(store),

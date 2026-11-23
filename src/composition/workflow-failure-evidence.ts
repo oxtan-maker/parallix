@@ -29,7 +29,14 @@ export function workflowFailureEvidence(operation: WorkflowOperationRecord, runs
   const recovery = outcomes.filter(event => event.operationId === operation.id && event.missionId === operation.missionId).at(-1);
   if (recovery?.diagnostic) { diagnostics.push(recovery.diagnostic); }
   return { exitCode: run?.exitCode, signal: run?.signal, output, diagnostics,
-    ...recoveryFacts(recovery, operation.missionId) };
+    ...retainedCause(operation), ...recoveryFacts(recovery, operation.missionId) };
+}
+
+/** The blocker the workflow retained for its operation; the generic exit status is already shown as the command outcome. */
+function retainedCause(operation: WorkflowOperationRecord): Partial<WorkflowFailureFacts> {
+  const reason = operation.reason?.trim();
+  if (!reason || /^Workflow exited with status \d+$/.test(reason)) { return {}; }
+  return { cause: reason, ...(operation.command.startsWith('integrate') ? { next: `Resolve the blocker named as the cause (its detail is in the retained output), then retry: px integrate ${operation.missionId} --dry-run` } : {}) };
 }
 
 function recoveryFacts(recovery: ReboundOutcomeRecord | undefined, mission: string): Partial<WorkflowFailureFacts> {

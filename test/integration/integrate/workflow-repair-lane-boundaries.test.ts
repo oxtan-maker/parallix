@@ -463,7 +463,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   await operations.insert({ id: 'fixture-review', repositoryId: repositoryId('repo'), missionId: missionId(slug),
     requestKey: 'fixture-review', command: 'review:submit', generation: 1, phase: 'executing', providerStarted: false,
     agent: null, reviewer: 'codex', originalStatus: 'review', previousAssignee: 'custom',
-    operatorInvocation: true, invocation: { command: 'review', args: [slug], interactive: false },
+    operatorInvocation: true, invocation: { command: 'review', args: [slug] },
     owner: { pid: process.pid, identity: 'fixture-executor' }, createdAt: HANDOFF_AT, updatedAt: HANDOFF_AT, reason: null });
   const environment: NodeJS.ProcessEnv = { ...process.env, PARALLIX_WORKFLOW_OPERATION: 'fixture-review', PARALLIX_WORKFLOW_GENERATION: '1', PARALLIX_HOME: stateHome, PRIMARY_WORKTREE: primaryRepo, PARALLIX_NO_BUBBLEWRAP: '1', TASK_2582_SLUG: slug, TASK_2582_TRACE: trace, TASK_2582_REVIEWED: path.join(root, 'reviewed') };
   // Bundled child commands cannot attribute coverage to src/; keep only the covered parent payload.
@@ -481,7 +481,7 @@ test('production CLI autonomous re-review and child verdict/resolve keep authori
   } });
   await installReviewRepairAgent();
   const output: string[] = [];
-  const code = await run(['review', slug, '--reviewer', 'codex', '--implementer', 'custom', '--max-attempts', '3'], {
+  const code = await run(['review', slug, '--reviewer', 'codex', '--implementer', 'custom'], {
     baseCwd: repo, environment, log: line => { output.push(String(line)); return null; }, error: line => { output.push(String(line)); return null; },
   });
   assert.equal(code, 0, output.join('\n'));

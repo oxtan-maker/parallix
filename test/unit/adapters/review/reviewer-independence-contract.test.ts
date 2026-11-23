@@ -151,7 +151,7 @@ describe('current-role reviewer independence', { concurrency: false }, () => {
       launcherStatus: () => ({ supported: true, detail: '' }),
       runtimeMatrix: () => [],
     };
-    const common = { maxAttempts: 2, dryRun: false, providerEnabled: true, slug: 'px-0054-stable' };
+    const common = { dryRun: false, providerEnabled: true, slug: 'px-0054-stable' };
 
     const explicit = selectReviewer({
       ...common,
@@ -177,7 +177,6 @@ describe('current-role reviewer independence', { concurrency: false }, () => {
       implementer: 'claude',
       isContinue: true,
       persisted: { reviewer: 'claude', round: 2, phase: 'reviewing' },
-      maxAttempts: 2,
       dryRun: false,
       providerEnabled: true,
       slug: 'px-0054-restart',
@@ -224,7 +223,7 @@ describe('current-role reviewer independence', { concurrency: false }, () => {
     await runReviewLoop({
       slug: 'px-0054-fallback',
       implementer: 'codex',
-      maxAttempts: 2,
+      actionLimit: 40,
       skipReviewPreparation: true,
     }, fake.ports);
 
@@ -283,7 +282,6 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
       implementer: 'custom',
       isContinue: false,
       persisted: null,
-      maxAttempts: 1,
       dryRun: false,
       providerEnabled: true,
       slug: 'task-2384',

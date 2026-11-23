@@ -8,6 +8,7 @@ import path from 'node:path';
 import * as fmt from '../presentation/cli-format.js';
 import { resolveIntegrationTaskPath } from './support.js';
 import type { PreflightReport } from './preflight.js';
+import { pausedRebaseGuidance, receivingCheckoutLine, unresolvedIndexGuidance } from './checkout-recovery-guidance.js';
 import type {
   IntegrateCheckoutPort,
   IntegrateGitPort,
@@ -25,41 +26,43 @@ interface CheckoutTarget {
   conventionalWorktreePathFn: IntegrateMissionPathsPort['conventionalWorktreePath'];
 }
 
-function checkRebaseAndIndex(report: PreflightReport, context: IntegrationContext, { baseWorktree, detectRebaseStateFn, getUnresolvedIndexConflictsFn }: CheckoutTarget) {
+/** Prints blockers from Git state; returns true when unmerged index entries block the checkout. */
+function checkRebaseAndIndex(report: PreflightReport, context: IntegrationContext, { baseWorktree, baseBranch, detectRebaseStateFn, getUnresolvedIndexConflictsFn }: CheckoutTarget): boolean {
   const { failures, log, detail } = report;
+  const identity = { baseWorktree, baseBranch, observedBranch: context.mainBranch };
+  const info = (text: string) => log(fmt.status('INFO', text));
   const rebaseState = detectRebaseStateFn(baseWorktree);
-  if (rebaseState.inProgress) {
+  // Only Git's rebase directory is rebase metadata: `inProgress` also covers
+  // any unmerged entry, and REBASE_HEAD stays resolvable after a rebase ends.
+  const rebaseMetadata = Boolean(rebaseState.rebaseDir);
+  const indexConflicts = getUnresolvedIndexConflictsFn(baseWorktree);
+  const indexBlocked = indexConflicts.ok && indexConflicts.files.length > 0;
+  if (rebaseMetadata || indexBlocked || !indexConflicts.ok) { info(receivingCheckoutLine(identity)); }
+
+  if (rebaseMetadata) {
     failures.push('rebase-in-progress');
     log(fmt.status('FAIL', `Integration checkout rebase: rebase in progress in ${baseWorktree}`));
     if (rebaseState.rebaseHead) {
-      log(fmt.status('INFO', `Current rebase head: ${rebaseState.rebaseHead}`));
+      info(`Current rebase head: ${rebaseState.rebaseHead}`);
     }
-    rebaseState.unmergedFiles.forEach(file => log(fmt.status('INFO', `  - ${file}`)));
-    log(fmt.status('INFO', 'Finish or abort the existing rebase before retrying:'));
-    log(fmt.status('INFO', `  git -C ${baseWorktree} rebase --continue`));
-    log(fmt.status('INFO', `  git -C ${baseWorktree} rebase --abort`));
-    log(fmt.status('INFO', `  git -C ${baseWorktree} rebase --skip`));
-    log(fmt.status('INFO', `Retry with: px integrate ${context.slug} --dry-run`));
+    rebaseState.unmergedFiles.forEach(file => info(`  - ${file}`));
+    pausedRebaseGuidance(baseWorktree).forEach(info);
+    info(`Retry with: px integrate ${context.slug} --dry-run`);
   }
 
-  const indexConflicts = getUnresolvedIndexConflictsFn(baseWorktree);
   if (!indexConflicts.ok) {
     failures.push('main-index-conflict-check');
     log(fmt.status('FAIL', `Integration checkout conflict scan: could not inspect ${baseWorktree} (${indexConflicts.error || 'unknown error'})`));
-  } else if (indexConflicts.files.length > 0) {
+  } else if (indexBlocked) {
     failures.push('main-index-conflicts');
     log(fmt.status('FAIL', `Integration checkout conflicts: unresolved merge entries detected in ${baseWorktree}`));
-    indexConflicts.files.forEach(file => log(fmt.status('INFO', `  - ${file}`)));
-    log(fmt.status('INFO', 'Resolve each conflicted path, then drop the stale stash entry before retrying:'));
-    indexConflicts.files.forEach(file => {
-      log(fmt.status('INFO', `  git -C ${baseWorktree} rm "${file}"`));
-      log(fmt.status('INFO', `  git -C ${baseWorktree} add "${file}"`));
-    });
-    log(fmt.status('INFO', `  git -C ${baseWorktree} stash drop`));
-    log(fmt.status('INFO', `Retry with: px integrate ${context.slug} --dry-run`));
+    indexConflicts.files.forEach(file => info(`  - ${file}`));
+    unresolvedIndexGuidance(baseWorktree, indexConflicts.files, { rebaseMetadata }).forEach(info);
+    if (!rebaseMetadata) { info(`Retry with: px integrate ${context.slug} --dry-run`); }
   } else {
     detail('Integration checkout conflicts: no unresolved merge entries in the git index');
   }
+  return indexBlocked;
 }
 
 /**
@@ -145,8 +148,12 @@ export function checkIntegrationCheckout(report: PreflightReport, context: Integ
     log(fmt.status('INFO', `Retry with: git -C ${baseWorktree} checkout ${baseBranch}`));
   }
 
-  checkRebaseAndIndex(report, context, target);
-  checkDirtyEntries(report, context, target);
+  // Dirty-path stash advice is moot while unmerged entries already block the checkout.
+  if (checkRebaseAndIndex(report, context, target)) {
+    detail('Integration checkout dirty state: not evaluated while unresolved index entries block the checkout');
+  } else {
+    checkDirtyEntries(report, context, target);
+  }
 
   const cwd = context.executionCheckout;
   const gitDir = path.join(cwd, '.git');

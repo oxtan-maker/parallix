@@ -22,6 +22,7 @@ import type { AgentLaunchResult } from './agent-launch-result.js';
 import type { ReviewOperatorResumeAssessment } from '../review-recovery.js';
 import type { LiveMissionExecutionContext } from './mission-execution-context.js';
 import type { PolicyActionPort, ReviewStartFacts } from './verification-policy.js';
+import type { ReviewActionHistoryPort } from './review-action-history.js';
 export type { ReviewStartFacts } from './verification-policy.js';
 
 /* ------------------------------------------------------------------ *
@@ -38,7 +39,7 @@ export interface StartReviewRound {
   readonly implementer?: string;
   readonly reviewer?: string;
   readonly focus: string;
-  readonly maxAttempts: number;
+  readonly actionLimit: number;
   readonly dryRun: boolean;
   readonly reset: boolean;
   readonly isContinue: boolean;
@@ -58,7 +59,6 @@ export interface ReviewRoundEntryPort {
   loadMission(_slug: string): Promise<{ readonly kind: 'found' | 'missing' } | { readonly kind: 'unavailable'; readonly reason: string }>;
   clearHumanIntervention(_slug: string): Promise<void>;
   invalidateResolvedBlocker(_slug: string): Promise<void>;
-  invalidMaxAttempts(_raw: string): void;
   missingReviewAggregate(_slug: string): void;
   missionUnavailable(_slug: string, _reason: string): void;
   reviewRecoveryRefused(_slug: string, _reason: string): void;
@@ -449,6 +449,8 @@ export interface ReviewLoopPorts {
   readonly reviewStarts?: ReviewStartObservationPort;
   /** Absent unless verificationPolicy.mode is pilot; shadow and off run the fixed policy. */
   readonly policyActions?: PolicyActionPort;
+  /** Durable lifetime counter, independent of verification-policy mode. */
+  readonly actionHistory: ReviewActionHistoryPort;
   readonly output: ReviewLoopOutput;
   readonly lock: ReviewControllerLock;
   readonly classification?: import('./review-classification.js').ReviewClassificationPorts;
@@ -462,15 +464,11 @@ export interface ReviewLoopRequest {
   readonly implementer?: string;
   readonly reviewer?: string;
   readonly focus?: string;
-  readonly maxAttempts?: number;
+  readonly actionLimit?: number;
   readonly reboundsPerRound?: number;
   readonly dryRun?: boolean;
   readonly reset?: boolean;
   readonly isContinue?: boolean;
-  /** Policy-selected tests actions spent by earlier entries of this run; a floor under the durable count. */
-  readonly policyActionsUsed?: number;
-  /** Durable tests actions already spent when this attempt window opened; they do not consume it. */
-  readonly policyActionsBaseline?: number;
   /** The caller already ran the review preparation transition (e.g. `px active` repair). */
   readonly skipReviewPreparation?: boolean;
   readonly verbose?: boolean;

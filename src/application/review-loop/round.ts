@@ -16,6 +16,7 @@ import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent }
 import type { PolicyTestsOutcome, ReviewStartFailure } from '../ports/verification-policy.js';
 import type { PolicyRoundPlan } from '../verification-policy/policy-artifact.js';
 import type { HumanReviewFeedback, ProviderApproval, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
+import { ReviewActionLimitReached, startReviewAction } from './action-limit.js';
 
 /** Default per-round relaunch cap. */
 export const DEFAULT_REBOUNDS_PER_ROUND = 6;
@@ -30,7 +31,9 @@ export interface LoopContext {
   readonly ports: ReviewLoopPorts;
   readonly slug: string;
   readonly focus: string;
-  readonly maxAttempts: number;
+  readonly actionLimit: number;
+  /** In-memory mirror of the durable lifetime count; history remains authoritative on restart. */
+  actionCount: number;
   readonly reboundsPerRound: number;
   readonly dryRun: boolean;
   readonly isContinue: boolean;
@@ -156,15 +159,21 @@ function excludedFor(context: LoopContext, role: ReviewRole): string {
  * instructions; without it the kernel's repair prompt is launched on its own.
  */
 export function reboundCollaborators(context: LoopContext, role: ReviewRole, prompt?: () => ReviewPromptFacts): Pick<ReboundContext, 'startAgent' | 'applyAgentFallback' | 'readHead' | 'slug' | 'worktree' | 'log' | 'error'> {
-  const startAgent: ReboundStartAgent = async (_step, launchOptions) => await context.ports.agents.launch({
-    role,
-    agent: (prompt ? context.identities[role] : launchOptions.agent) as string,
-    exclude: prompt ? [excludedFor(context, role)] : (launchOptions.exclude as string[] | undefined) ?? [],
-    ...(prompt ? { prompt: prompt() } : {}),
-    ...(role === 'reviewer' ? { sessionPolicy: 'fresh-ephemeral' as const } : {}),
-    ...(role === 'reviewer' ? { pinnedAgent: true } : {}),
-    recovery: { prompt: launchOptions.prompt as (_actual: string) => unknown, sessionPolicy: launchOptions.sessionPolicy },
-  }) ?? null;
+  const startAgent: ReboundStartAgent = async (_step, launchOptions) => {
+    const agent = (prompt ? context.identities[role] : launchOptions.agent) as string;
+    const admitted = await startReviewAction(context, 'repair',
+      `review:${context.state.round}:rebound:${role}:${agent}:${context.actionCount + 1}`);
+    if (!admitted) { throw new ReviewActionLimitReached(context.actionLimit); }
+    return await context.ports.agents.launch({
+      role,
+      agent,
+      exclude: prompt ? [excludedFor(context, role)] : (launchOptions.exclude as string[] | undefined) ?? [],
+      ...(prompt ? { prompt: prompt() } : {}),
+      ...(role === 'reviewer' ? { sessionPolicy: 'fresh-ephemeral' as const } : {}),
+      ...(role === 'reviewer' ? { pinnedAgent: true } : {}),
+      recovery: { prompt: launchOptions.prompt as (_actual: string) => unknown, sessionPolicy: launchOptions.sessionPolicy },
+    }) ?? null;
+  };
   return {
     slug: context.slug,
     worktree: context.ports.worktree,

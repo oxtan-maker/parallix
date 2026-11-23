@@ -38,12 +38,17 @@ describe("usage-blocked implementer", () => {
   /** A `startAgent` that throws a PinnedAgentUnavailable-style usage-block for the pinned family. */
   function usageBlockStartAgent(
     launches: Array<{ step: string; options: Record<string, unknown> }>,
-    opts: { replacement?: string | null; onReplacement?: (_options: Record<string, unknown>) => { agent: string } },
+    opts: { replacement?: string | null; unavailable?: boolean; onReplacement?: (_options: Record<string, unknown>) => { agent: string } },
   ): RebaseWorkflowPort['startAgent'] {
     return async (step: string, options: Record<string, unknown>) => {
       launches.push({ step, options });
       const pinned = String(options.agent ?? '');
       if (options.pinnedAgent && pinned && pinned !== opts.replacement) {
+        if (opts.unavailable) {
+          throw Object.assign(new Error(
+            `Pinned agent "${pinned}" cannot run this step: provider unavailable; blocked until 2026-09-12T13:05:00.000Z`,
+          ), { failureReason: { version: 1, code: 'provider-unavailable', source: 'provider' } });
+        }
         throw Object.assign(new Error(
           `Pinned agent "${pinned}" cannot run this step: usage limit hit; blocked until 2026-09-12 13:00`,
         ), { failureReason: { version: 1, code: 'agent-quota', source: 'provider', context: { resetAt: '2026-09-12 13:00' } } });
@@ -150,6 +155,36 @@ describe("usage-blocked implementer", () => {
     assert.ok(selectionCalls[0]?.exclude.has('codex'), 'blocked implementer must be excluded from selection');
     assert.equal(exited.length, 1);
     assert.equal(exited[0], 0, 'rebase completes cleanly after substitution');
+  });
+  test('provider-unavailable pinned implementer substitutes an eligible replacement family (TASK-2871)', async () => {
+    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
+    const exited: number[] = [];
+    let output = '';
+    const port = makePort({
+      startAgent: usageBlockStartAgent(launches, { replacement: 'mistral', unavailable: true, onReplacement: () => ({ agent: 'mistral' }) }),
+      selectAgent: (_step: string, options: { exclude?: Set<string> } = {}) => options.exclude?.has('mistral') ? null : 'mistral',
+      exit: (code: number) => { exited.push(code); },
+    });
+    await captured(async () => { await runRebaseWorkflow(['task-2494'], port); }).then((lines) => { output = lines.join('\n'); });
+    assert.ok(launches.some((l) => l.options.agent === 'mistral'), 'a replacement-family launch must occur');
+    assert.match(output, /temporarily unavailable/);
+    assert.ok(!/usage limit/i.test(output), 'an overload is not reported as a usage limit');
+    assert.deepEqual(exited, [0]);
+  });
+  test('provider-unavailable pinned implementer without a replacement reports availability, not usage (TASK-2871)', async () => {
+    const launches: Array<{ step: string; options: Record<string, unknown> }> = [];
+    const exited: number[] = [];
+    let output = '';
+    const port = makePort({
+      startAgent: usageBlockStartAgent(launches, { replacement: null, unavailable: true }),
+      selectAgent: () => null,
+      exit: (code: number) => { exited.push(code); },
+    });
+    await captured(async () => { await runRebaseWorkflow(['task-2494'], port); }).then((lines) => { output = lines.join('\n'); });
+    assert.match(output, /temporarily unavailable from its provider/);
+    assert.ok(!/usage limit/i.test(output));
+    assert.equal(exited.length, 1);
+    assert.ok(exited[0] !== 0);
   });
   test('TASK-2494 repro: selector never returns the excluded pinned implementer', async () => {
     const launches: Array<{ step: string; options: Record<string, unknown> }> = [];

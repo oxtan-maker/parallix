@@ -107,6 +107,17 @@ test('an in-process family is never tmux-hosted and its rendered output is captu
   assert.ok(session.teeOptions.stdoutSink, 'pi renders through a sink, so the sink is captured');
 });
 
+test('an in-process family never probes tmux and refuses when tmux is required (TASK-2861.01)', () => {
+  const unprobed = () => { throw new Error('a restricted launch must not probe'); };
+  const fallback = setup('tmux', 'fallback', true);
+  const session = openRunSession({ ...fallback.input, family: 'pi' }, { ...fallback.deps, probe: unprobed })!;
+  assert.equal(session.teeOptions.terminalHost, undefined);
+  assert.ok(fallback.logs.some(line => /pi needs an outer mission command terminal.*pipe host/.test(line)), 'an explicit tmux request is told why');
+  const required = setup('tmux', 'fail', true);
+  assert.throws(() => openRunSession({ ...required.input, family: 'pi' }, { ...required.deps, probe: unprobed }),
+    (err: unknown) => err instanceof TerminalHostUnavailableError && /outer mission command terminal/.test((err as Error).message));
+});
+
 test('available tmux hosts the launch and records the attach target (TASK-2643)', t => {
   // The fixture state home holds the transcript whatever backs the host's
   // temporary directory (TASK-2816 places transcripts on disk-backed storage).

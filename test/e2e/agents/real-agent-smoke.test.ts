@@ -32,7 +32,10 @@ import { defaultStepEligibleFamilies } from '../../../src/adapters/agents/agent-
 import { defaultIsAgentBlockedNow } from '../../../src/adapters/agents/agent-launch-authority.js';
 import {
   CODEX_SMOKE_MODEL,
+  configureKub2SmokeAdmission,
   configureRealAgentSmokeAdmissionHome,
+  parsePiJson,
+  resolveKub2SmokeRoute,
   selectRealAgentSmoke,
   type RealAgentSmokeSelection,
 } from '../../helpers/real-agent-smoke-selection.js';
@@ -347,7 +350,7 @@ function copyRunnerConfiguration(source: string, target: string, ancestors = new
   }
 }
 
-function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', model = null, runnerCommandPath = '' }: { slug: string; title: string; agent?: string; runner?: string; model?: string | null; runnerCommandPath?: string }) {
+function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', model = null, piProvider = null, runnerCommandPath = '' }: { slug: string; title: string; agent?: string; runner?: string; model?: string | null; piProvider?: string | null; runnerCommandPath?: string }) {
   const toolWaitSeconds = Number(process.env.PARALLIX_REAL_AGENT_TOOL_WAIT_SECONDS || 0);
   assert.ok(Number.isInteger(toolWaitSeconds) && toolWaitSeconds >= 0 && toolWaitSeconds <= 60,
     'Manual smoke tool wait must be an integer from 0 to 60 seconds');
@@ -372,9 +375,7 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', m
     }
     const piModelsPath = path.join(piAgentHome, 'models.json');
     if (fs.existsSync(piModelsPath)) {
-      // Pi writes models.json with trailing commas, which JSON.parse rejects.
-      const raw = fs.readFileSync(piModelsPath, 'utf8');
-      const piModels = JSON.parse(raw.replace(/,\s*([\]}])/g, '$1'));
+      const piModels = parsePiJson(fs.readFileSync(piModelsPath, 'utf8'));
       for (const provider of Object.values(piModels.providers || {})) {
         if (provider && typeof provider === 'object' && 'apiKey' in provider && typeof provider.apiKey === 'string' && /^(?:dummy|placeholder)/i.test(provider.apiKey)) {
           provider.apiKey = LOCAL_PI_E2E_API_KEY;
@@ -383,12 +384,18 @@ function setupRepository({ slug, title, agent = 'custom', runner = 'opencode', m
       fs.writeFileSync(piModelsPath, `${JSON.stringify(piModels, null, 2)}\n`, 'utf8');
     }
     const piSettingsPath = path.join(piAgentHome, 'settings.json');
-    if (fs.existsSync(piSettingsPath)) {
-      const settings = JSON.parse(fs.readFileSync(piSettingsPath, 'utf8').replace(/,\s*([\]}])/g, '$1'));
+    if (fs.existsSync(piSettingsPath) || piProvider) {
+      const settings = fs.existsSync(piSettingsPath) ? parsePiJson(fs.readFileSync(piSettingsPath, 'utf8')) : {};
       // The smoke owns model credentials, not the operator's optional packages
       // or skills. Those can bootstrap during shutdown and outlive the probe.
       settings.packages = [];
       settings.skills = [];
+      // A routed smoke (PX-0076) pins its provider and model so the operator's
+      // own default can never decide where the lifecycle runs.
+      if (piProvider && model) {
+        settings.defaultProvider = piProvider;
+        settings.defaultModel = model;
+      }
       fs.writeFileSync(piSettingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf8');
     }
   }
@@ -763,7 +770,7 @@ function snapshotDefaultParallixState(homes: readonly string[] = DEFAULT_PARALLI
 }
 
 async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
-  const { agent, runner, model } = selection;
+  const { agent, runner, model, piProvider } = selection;
   const preflightError = preflightCheck(agent, runner);
   if (preflightError) {
     return assert.fail(
@@ -779,7 +786,7 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
     `[${tempPreflight.bucket}] ${tempPreflight.detail}`
   );
   const defaultStateSnapshots = snapshotDefaultParallixState();
-  const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', agent, runner, model });
+  const repo = setupRepository({ slug, title: 'Real Agent Launcher Smoke', agent, runner, model, piProvider: piProvider ?? null });
   const worktree = path.resolve(repo.repoRoot, '..', `${path.basename(repo.repoRoot)}-${slug}`);
   // Parallix-owned state isolation goes through configuration, not a hard
   // filesystem sandbox: PARALLIX_HOME is the highest-precedence resolver input
@@ -815,6 +822,11 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
   delete env.PARALLIX_CODEX_REASONING_EFFORT;
   if (selection.reasoningEffort) {
     env.PARALLIX_CODEX_REASONING_EFFORT = selection.reasoningEffort;
+  }
+  if (selection.reason === 'kub2-pi') {
+    // Own two-slot lease pool, independent of the shared smoke admission
+    // state and of maxConcurrentCustom in the canonical workflow.config.json.
+    configureKub2SmokeAdmission(env);
   }
   if (agent === 'custom' && runner === 'opencode') {
     env.XDG_CONFIG_HOME = repo.opencodeConfigHome;
@@ -1166,11 +1178,9 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
 
 // Runner selection: one full lifecycle per gate run, with whichever runner
 // this repository currently configures (adapters.agents.runners.custom).
-// Running both runners back-to-back doubles the gate's wall time, so the
-// non-configured runner is exercised on demand instead:
-//   PARALLIX_REAL_AGENT_RUNNER=pi node test/e2e/agents/real-agent-smoke.test.ts
-// The whole harness above stays runner-parameterized (preflight,
-// repo setup), so switching costs an env var, not a code change.
+// A reachable kub2 route preempts this fallback. To exercise another custom
+// runner explicitly, set both PARALLIX_REAL_AGENT=custom and this runner value.
+// The whole harness above stays runner-parameterized (preflight, repo setup).
 const CONFIGURED_RUNNER = process.env.PARALLIX_REAL_AGENT_RUNNER
   || workflowConfig?.adapters?.agents?.runners?.custom
   || 'opencode';
@@ -1183,6 +1193,7 @@ async function resolveSmokeSelection(): Promise<RealAgentSmokeSelection> {
     explicitModel: OVERRIDE_MODEL,
     configuredCustomModel: CUSTOM_MODEL,
     configuredCustomRunner: CONFIGURED_RUNNER,
+    resolveKub2Route: () => resolveKub2SmokeRoute(path.join(os.homedir(), '.pi', 'agent')),
     acquireCustomCapacity: () => tryAcquireCustomCapacity(process.cwd(), configuration),
     codexEligible: () => defaultStepEligibleFamilies('draft', configuration).includes('codex'),
     codexBlocked: () => defaultIsAgentBlockedNow('codex', configuration),
@@ -1209,6 +1220,8 @@ export {
   snapshotDefaultParallixState,
   selectRealAgentSmoke,
   configureRealAgentSmokeAdmissionHome,
+  configureKub2SmokeAdmission,
+  resolveKub2SmokeRoute,
   executeRealAgentSmoke,
 };
 

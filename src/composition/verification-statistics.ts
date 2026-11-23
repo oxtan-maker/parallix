@@ -16,6 +16,8 @@ import { createMissionTerminalCapability } from './mission-terminal-capability.j
 import type { MissionTerminalCapability } from '../application/ports/mission-terminal.js';
 import type { ReboundRepairHistoryEntry } from '../application/ports/operation-history.js';
 import type { RunRecord } from '../application/run-history-types.js';
+import { REVIEW_ACTION_STARTED_EVENT } from '../application/ports/review-action-history.js';
+import { createMissionStore } from './mission-persistence.js';
 
 /**
  * The per-Mission retained runs behind the FLOW projection: the compatibility
@@ -43,14 +45,22 @@ function configuredPolicyValues(root: string): PolicyModelValues | null {
 /** All consumers read the same repository-scoped facts and pure calculation. */
 export function createVerificationStatisticsReader(root: string, configuration?: ParallixConfiguration,
   sharedRepairs?: () => Promise<readonly ReboundRepairHistoryEntry[]>): VerificationStatisticsReadPort {
-  return verificationStatisticsReader(async (_requestedMissions, flowRunMissions) => {
+  return verificationStatisticsReader(async (requestedMissions, flowRunMissions) => {
     const { db } = await initOperatorState({ configuration });
     const repositoryId = resolveCanonicalRepositoryId(root);
     const historyRepo = new SqliteOperationalHistoryRepository(db);
+    const missionStore = createMissionStore(db);
+    const actionMissions = requestedMissions ?? new Set(
+      (await missionStore.loadByRepository?.(repositoryId) ?? []).map(mission => String(mission.id)),
+    );
+    const nonActionTypes = VERIFICATION_HISTORY_EVENT_TYPES.filter(type => type !== REVIEW_ACTION_STARTED_EVENT);
     // The projection reads only these event families; a retained repair transcript is megabytes of audit text per
     // row and reaches the projection through `reboundRepairs`, so the payload read stays scoped to what it observes.
     const [history, operationHistory, lifecycle, reboundRepairs] = await Promise.all([
-      historyRepo.findByTypes(VERIFICATION_HISTORY_EVENT_TYPES),
+      Promise.all([
+        historyRepo.findByTypes(nonActionTypes),
+        historyRepo.findByTypesForMissions([REVIEW_ACTION_STARTED_EVENT], [...actionMissions], repositoryId),
+      ]).then(rows => rows.flat()),
       new SqliteWorkflowOperationStore(db, repositoryId).readHistorical(),
       new SqliteBoardLaneEventRepository(db).findByRepositoryId(repositoryId),
       sharedRepairs ? sharedRepairs() : historyRepo.findReboundRepairs(),

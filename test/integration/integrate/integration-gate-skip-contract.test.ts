@@ -664,6 +664,7 @@ test('a complete green policy tests receipt survives agent and human approval an
     const approvalContext = integrationContext({ slug: SLUG, missionStatus: 'review', missionReview: approved,
       baseWorktree: repo.root, missionWorktree: repo.root });
     const approvalPorts = stubIntegrateWorkflowPorts({
+      productConfig: { resolveReviewActionLimit: () => 40 },
       gates: {
         resolveIntegrationVerificationWorktree: () => repo.root,
         captureFinalIntegrationTree: root => captureFinalIntegrationTree(root),

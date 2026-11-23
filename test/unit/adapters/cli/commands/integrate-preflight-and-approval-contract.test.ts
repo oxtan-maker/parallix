@@ -294,6 +294,51 @@ describe("preflight reporting", () => {
     assert.ok(result.failures.includes('main-index-conflict-check'));
   });
 
+  test('stash-restore conflict with unmerged entries and no rebase metadata is reported as unresolved index state, not a rebase (TASK-2862)', () => {
+    const unmerged = ['docs/spaced name.md', "it's $(touch x).md"];
+    const context = integrationContext({
+      slug: TEST_SLUG,
+      branch: 'mission/' + TEST_SLUG,
+      currentBranch: 'mission/' + TEST_SLUG,
+      missionDir: '/tmp/dir',
+      task: { ok: true, taskFile: '/tmp/task.md' },
+      taskStatus: 'ready-for-integration',
+      pr: { exists: true, state: 'open', merged: false, number: 41 },
+      approval: { ok: true, reviewState: 'APPROVED' },
+      mainBranch: 'main',
+      baseWorktree: '/tmp/base checkout',
+      baseBranch: 'main',
+      missionWorktree: '/tmp/mission',
+      mainDirty: true,
+      mainDirtyEntries: unmerged.map(file => `UU ${file}`)
+    });
+    const lines: string[] = [];
+
+    const result = printIntegrationPreflight(context, {
+      log: text => lines.push(text),
+      readTokenFn: () => 'token',
+      resolveTokenFileFn: () => 'file',
+      // The shared git owner reports inProgress for any unmerged entry; only rebaseDir is rebase metadata.
+      detectRebaseStateFn: () => ({ inProgress: true, rebaseHead: '', detached: false, unmergedFiles: unmerged, rebaseDir: null }),
+      getUnresolvedIndexConflictsFn: () => ({ ok: true as const, files: unmerged }),
+      findMissionDocInBranchesFn: noMissionDocBranches,
+      conventionalWorktreePathFn: () => '/tmp/mission',
+      configuration: resolveConfiguration(environment)
+    });
+    const output = lines.join('\n');
+
+    assert.ok(result.failures.includes('main-index-conflicts'));
+    assert.ok(!result.failures.includes('rebase-in-progress'), 'unmerged entries alone are not a rebase');
+    assert.ok(!result.warnings.includes('main-dirty'), 'a blocked checkout must not promise another stash');
+    assert.doesNotMatch(output, /rebase in progress|rebase --(continue|abort|skip)|will be stashed|stash drop/i);
+    assert.doesNotMatch(output, /git -C \S+ rm "/);
+    assert.match(output, /\/tmp\/base checkout.*main|main.*\/tmp\/base checkout/);
+    assert.match(output, /git -C '\/tmp\/base checkout' status --short/);
+    assert.match(output, /git -C '\/tmp\/base checkout' --literal-pathspecs ls-files -u -- 'docs\/spaced name\.md' 'it'\\''s \$\(touch x\)\.md'/);
+    assert.match(output, /git -C '\/tmp\/base checkout' --literal-pathspecs add -- 'docs\/spaced name\.md'/);
+    assert.match(output, /Retry with: px integrate task-preflight-test --dry-run/);
+  });
+
   test('printIntegrationPreflight main-dirty warning', (t) => {
     const context = integrationContext({
       slug: TEST_SLUG,

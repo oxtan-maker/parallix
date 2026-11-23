@@ -12,6 +12,9 @@ import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { fakeLoopContext, fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { syntheticPolicyArtifactV2 } from '../verification-policy/policy-artifact.fixture.js';
+import { reviewActionStarted } from '../../../../src/application/review-action-history.js';
+import type { ReviewActionStarted } from '../../../../src/application/ports/review-action-history.js';
+import { missionId } from '../../../../src/domain/mission.js';
 
 const SLUG = 'task-concurrent-policy-round';
 const passed: PolicyTestsOutcome = { kind: 'completed', verdict: 'passed' };
@@ -29,10 +32,27 @@ function concurrentActions(overrides: Partial<PolicyActionPort>): PolicyActionPo
   return {
     select: async () => ({ action: 'agent', failure: null }),
     runTests: async () => passed,
-    testsActionsSpent: async () => 0,
     rebaseInProgress: () => false,
     selectRound: async () => ({ plan: concurrentRuleA, failure: null }),
     ...overrides,
+  };
+}
+
+function recordedActions(slug: string) {
+  const records: ReviewActionStarted[] = [];
+  return {
+    records,
+    history: {
+      count: async () => records.length,
+      record: async (input: Omit<ReviewActionStarted, 'schemaVersion' | 'repositoryId' | 'missionId' | 'actionSequence' | 'failureReason' | 'idempotencyKey' | 'recordedAt'>) => {
+        const existing = records.find(record => record.action === input.action && record.correlation === input.correlation
+          && record.changeIdentity === input.changeIdentity);
+        if (existing) { return existing; }
+        const record = reviewActionStarted({ repositoryId: 'repo-a', missionId: missionId(slug), ...input }, records.length + 1);
+        records.push(record);
+        return record;
+      },
+    },
   };
 }
 
@@ -44,9 +64,11 @@ test('rule (a) exposes human, tests and agent starts before either automated ver
     runConcurrentTests: async () => { order.push('tests-start'); await agentStart; order.push('tests-verdict'); return passed; },
     withdrawHuman: async () => { assert.fail('all-pass round must retain the human request'); },
   });
+  const actionHistory = recordedActions(SLUG);
   const fake = fakeReviewLoopPorts({
     slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
     policyActions: actions,
+    actionHistory: actionHistory.history,
     reviewStarts: { observe: async facts => { order.push(`${facts.actualAction}-start`); } },
     agents: { launch: async launch => {
       order.push('agent-launch');
@@ -56,11 +78,13 @@ test('rule (a) exposes human, tests and agent starts before either automated ver
     } },
     artifacts: { consumeReviewer: async () => { order.push('agent-verdict'); return { consumed: true, ok: true as const, reviewState: 'APPROVED' }; } },
   });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 2, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
   assert.deepEqual(order.slice(0, 4), ['human-start', 'tests-start', 'agent-launch', 'agent-start']);
   assert.ok(order.indexOf('tests-verdict') > order.indexOf('agent-start'));
   assert.ok(order.indexOf('agent-verdict') > order.indexOf('agent-start'));
   assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), ['approved']);
+  assert.deepEqual(actionHistory.records.map(record => [record.actionSequence, record.action]),
+    [[1, 'human'], [2, 'tests'], [3, 'agent']]);
 });
 
 test('dual automated failure withdraws human and releases exactly one joint repair route (TASK-2867.08)', async () => {
@@ -78,9 +102,11 @@ test('dual automated failure withdraws human and releases exactly one joint repa
     },
     withdrawHuman: async () => { order.push('human-withdrawn'); return true; },
   });
+  const actionHistory = recordedActions(SLUG);
   const fake = fakeReviewLoopPorts({
     slug: SLUG, missionStore: storeFor(reviewing()), state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
     policyActions: actions,
+    actionHistory: actionHistory.history,
     reviewStarts: { observe: async facts => { order.push(`${facts.actualAction}-start`); } },
     agents: { launch: async launch => {
       if (launch.role === 'implementer') {
@@ -95,7 +121,7 @@ test('dual automated failure withdraws human and releases exactly one joint repa
     } },
   });
   Object.assign(fake.ports.preReview, { head: () => head });
-  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 5, skipReviewPreparation: true }, fake.ports);
   assert.deepEqual(order.filter(item => item === 'human-withdrawn'), ['human-withdrawn']);
   assert.deepEqual(order.filter(item => item === 'joint-repair'), ['joint-repair']);
   assert.ok(order.indexOf('joint-repair') > order.indexOf('agent-failed'), 'repair waits for both automated verdicts');
@@ -122,7 +148,7 @@ test('a reviewer settlement throw drains the concurrent gate and withdraws befor
     artifacts: { consumeReviewer: async () => { throw new Error('review settlement exploded'); } },
   });
   await assert.rejects(
-    runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports),
+    runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports),
     /review settlement exploded/,
   );
   assert.deepEqual(order, ['tests-failed', 'tests-drained', 'human-withdrawal-attempted'],

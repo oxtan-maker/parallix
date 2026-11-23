@@ -89,12 +89,14 @@ export function stubIntegrateWorkflowPorts(overrides: IntegrateWorkflowPortOverr
     productConfig: {
       isForgejoReviewEnabled: () => { throw new Error('Unexpected integrate boundary: productConfig.isForgejoReviewEnabled'); },
       resolveIntegrationMode: () => { throw new Error('Unexpected integrate boundary: productConfig.resolveIntegrationMode'); },
+      resolveReviewActionLimit: () => { throw new Error('Unexpected integrate boundary: productConfig.resolveReviewActionLimit'); },
       ...overrides.productConfig,
     },
     review: {
       readReviewState: () => { throw new Error('Unexpected integrate boundary: review.readReviewState'); },
       submitForReview: () => { throw new Error('Unexpected integrate boundary: review.submitForReview'); },
       submitApproval: () => { throw new Error('Unexpected integrate boundary: review.submitApproval'); },
+      requestHumanIntervention: () => { throw new Error('Unexpected integrate boundary: review.requestHumanIntervention'); },
       resolveForgejoUser: () => { throw new Error('Unexpected integrate boundary: review.resolveForgejoUser'); },
       ...overrides.review,
     },

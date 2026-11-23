@@ -20,6 +20,7 @@ import type { RunCapture } from '../filesystem/run-history-store.js';
 import type { OutputCapture, TerminalHost } from '../process/spawn-tee.js';
 import { prepareTmuxLaunch, probeTmux, reconcileOrphanSessions, missionSocketPath, tmuxSessionName } from '../process/tmux-host.js';
 import type { TmuxProbe, SpawnSyncFn } from '../process/tmux-host.js';
+import { selectTerminalHost } from '../../application/ports/terminal-host-selection.js';
 import { CLAUDE_STREAM_PRESENTER_FLAG } from './claude-stream-view.js';
 import { cliInvocation, type CliInvocation } from '../process/cli-invocation.js';
 import { git } from '../git/git.js';
@@ -174,23 +175,19 @@ export function openRunSession(input: RunSessionInput, deps: RunSessionDeps = {}
 interface TerminalChoice { useTmux: boolean; inheritedTerminal: boolean; fallbackReason: string | null; }
 
 function chooseTerminalHost(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, config: TerminalHostConfig, deps: RunSessionDeps, configuration: ParallixConfiguration): TerminalChoice {
-  let fallbackReason: string | null = null;
-  let useTmux = false;
-  const inheritedTerminal = configuration.terminal.missionTerminal === input.slug && Boolean(configuration.terminal.missionSocket);
-  if (inheritedTerminal) { useTmux = true; }
-  else if (config.host !== 'pipe' && (deps.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
-    const probe = terminalProbe(input, identity, configuration, deps);
-    if (probe.available) {
-      useTmux = true;
-    } else if (config.host === 'tmux' && config.whenUnavailable === 'fail') {
-      throw new TerminalHostUnavailableError(probe.reason ?? 'tmux is not available');
-    } else {
-      fallbackReason = probe.reason;
-      if (config.host !== 'auto') { input.log(fmt.status('WARN', `tmux terminal host unavailable (${probe.reason}); launching ${fmt.agent(input.family)} through the pipe host.`)); }
-    }
-  }
+  const selection = selectTerminalHost({
+    config,
+    inherited: configuration.terminal.missionTerminal === input.slug && Boolean(configuration.terminal.missionSocket),
+    interactive: deps.interactive ?? Boolean(process.stdin.isTTY && process.stdout.isTTY),
+    restriction: () => launchRestriction(input, identity, configuration),
+    probe: deps.probe ?? (() => probeTmux()),
+  });
+  if (selection.kind === 'refused') { throw new TerminalHostUnavailableError(selection.reason); }
+  if (selection.kind === 'pipe' && selection.notify) { input.log(fmt.status('WARN', `tmux terminal host unavailable (${selection.reason}); launching ${fmt.agent(input.family)} through the pipe host.`)); }
+  const useTmux = selection.kind !== 'pipe';
+  const inheritedTerminal = selection.kind === 'inherited';
   reconcilePreviousTerminalSessions(input, identity, deps, configuration, useTmux, inheritedTerminal);
-  return { useTmux, inheritedTerminal, fallbackReason };
+  return { useTmux, inheritedTerminal, fallbackReason: selection.kind === 'pipe' ? selection.reason : null };
 }
 
 function captureRunSession(input: RunSessionInput, worktree: string, identity: AgentRunIdentity & { repositoryKey: string }, runId: string, choice: TerminalChoice, now: () => Date, configuration: ParallixConfiguration): RunCapture | null {
@@ -281,13 +278,10 @@ function finishRunCapture(input: RunSessionInput, worktree: string, runId: strin
   }
 }
 
-function terminalProbe(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, configuration: ParallixConfiguration, deps: RunSessionDeps): TmuxProbe {
-  return Buffer.byteLength(missionSocketPath(identity, configuration)) > 100
-    ? { available: false, version: null, reason: 'Mission terminal socket path exceeds the portable Unix socket limit' }
-    : IN_PROCESS_FAMILIES.has(input.family)
-      ? { available: false, version: null, reason: `${input.family} needs an outer mission command terminal` }
-      : (deps.probe ?? (() => probeTmux()))();
-
+/** Provider and input-contract reasons a launch cannot be tmux-hosted. */
+function launchRestriction(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, configuration: ParallixConfiguration): string | null {
+  if (Buffer.byteLength(missionSocketPath(identity, configuration)) > 100) { return 'Mission terminal socket path exceeds the portable Unix socket limit'; }
+  return IN_PROCESS_FAMILIES.has(input.family) ? `${input.family} needs an outer mission command terminal` : null;
 }
 
 function reconcilePreviousTerminalSessions(input: RunSessionInput, identity: AgentRunIdentity & { repositoryKey: string }, deps: RunSessionDeps, configuration: ParallixConfiguration, useTmux: boolean, inheritedTerminal: boolean): void {

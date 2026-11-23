@@ -210,7 +210,7 @@ describe("context compaction", { concurrency: false }, () => {
       agents: { launch: async launch => { order.push(`launch:${launch.role}`); return { agent: launch.agent, result: { status: 0 } }; } },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2317-baseline', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2317-baseline', implementer: 'claude', reviewer: 'codex', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
 
     const rebaseIndex = order.indexOf('rebase');
     const recaptureIndex = order.indexOf('baseline', rebaseIndex);
@@ -248,7 +248,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
 
     await runReviewLoop({
       slug: 'task-2641-human-correction', implementer: 'claude', reviewer: 'codex',
-      maxAttempts: 1, skipReviewPreparation: true,
+      actionLimit: 40, skipReviewPreparation: true,
     }, fake.ports);
 
     const implementerLaunch = fake.launches.find(launch => launch.role === 'implementer');
@@ -273,7 +273,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
       }) },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true, isContinue: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2641-dismissed', implementer: 'claude', reviewer: 'codex', actionLimit: 40, skipReviewPreparation: true, isContinue: true }, fake.ports);
     assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 1);
     assert.equal(probes, 0, 'continuation must not reuse an existing provider decision');
     assert.ok(fake.mirrors.includes('approved'), 'only the newly launched reviewer supplies approval');
@@ -428,7 +428,7 @@ describe('human review reconciliation', { concurrency: false }, () => {
       humanFeedback: { reconcile: async () => ({ source: 'forgejo:review:31', author: 'operator', state: 'dismissed', disposition: 'REQUEST_CHANGES', approval: false, reason: 'withdrawn' as const, findings: [] }) },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
     });
-    await runReviewLoop({ slug: 'task-2641-dismissed-change', implementer: 'claude', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, dismissedChange.ports);
+    await runReviewLoop({ slug: 'task-2641-dismissed-change', implementer: 'claude', reviewer: 'codex', actionLimit: 40, skipReviewPreparation: true }, dismissedChange.ports);
     assert.equal(dismissedChange.launches.filter(launch => launch.role === 'reviewer').length, 1);
     assert.deepEqual(dismissedChange.stops, []);
   });
@@ -589,7 +589,8 @@ describe("completed controls", { concurrency: false }, () => {
       const block = buildCompletedControlsBlock(missionPath, repoRoot);
       assert.equal(nonBlankLines(block).length, 1);
       assert.match(block, /No verification gate result is recorded/);
-      assert.match(block, /permitted/);
+      assert.match(block, /report the missing evidence and do not execute verification yourself/);
+      assert.doesNotMatch(block, /permitted|re-run/i);
       assertWithinBudget(block);
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });
@@ -602,6 +603,7 @@ describe("completed controls", { concurrency: false }, () => {
       fs.writeFileSync(path.join(path.dirname(missionPath), '.workflow', 'gate-result.json'), '{ not json');
       const block = buildCompletedControlsBlock(missionPath, repoRoot);
       assert.match(block, /No verification gate result is recorded/);
+      assert.match(block, /do not execute verification yourself/);
       assert.match(block, /npm run typecheck/);
       assertWithinBudget(block);
     } finally {

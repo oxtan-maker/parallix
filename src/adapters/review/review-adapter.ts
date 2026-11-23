@@ -10,6 +10,10 @@ import { DEFAULT_CONFIGURATION } from "../../application/ports/configuration.js"
 import { resolveReviewAdapter, isForgejoReviewEnabled, resolveReviewArtifactDir } from '../config/product-config.js';
 import * as forgejo from '../forgejo/forgejo.js';
 import type { HttpRequestFn } from '../forgejo/forgejo-auth.js';
+import { publishGateRunReport } from '../forgejo/forgejo-gate-report.js';
+import type { ForgejoAsyncApiCall } from '../forgejo/forgejo-types.js';
+import type { GateRunReportPublisher } from '../../application/ports/gate-run-report.js';
+import { PARALLIX_FORGEJO_USER } from './setup-review-repository.js';
 
 const NOOP_PR_STATUS = Object.freeze({
   exists: false,
@@ -203,4 +207,14 @@ export function getPrAuthor(branch: string, token: string, options: Parameters<t
 export async function getLatestDispositionEvidenceForPr(prNumber: number, implementerUser: string, sinceIso: string, token: string, options: Parameters<typeof forgejo.getLatestDispositionEvidenceForPr>[4] = {}) {
   if (!token) { return null; }
   return withForgejo(options.rootDir || process.cwd(), () => forgejo.getLatestDispositionEvidenceForPr(prNumber, implementerUser, sinceIso, token, options), null);
+}
+
+/** Publishes gate-run reports on the mission's Forgejo pull request; a disabled provider or missing token publishes nothing. */
+export function createGateRunReportPublisher(configuration?: ParallixConfiguration, apiCall?: ForgejoAsyncApiCall): GateRunReportPublisher {
+  return { publish: async (root, report) => {
+    const token = readToken(PARALLIX_FORGEJO_USER, { rootDir: root, configuration });
+    if (!token) { return; }
+    const result = await publishGateRunReport(report, { branch: `mission/${report.missionId}`, token, rootDir: root, configuration, apiCall });
+    if (!result.ok) { throw new Error(result.error ?? 'gate result publication failed'); }
+  } };
 }

@@ -66,7 +66,8 @@ function announceApproval(context: LoopContext): void {
  * automatic left to dispatch: record the human start and mirror the approved
  * lane. An approval alone never moves the lane.
  */
-export async function beginHumanTurn(context: LoopContext): Promise<void> {
-  await observeHumanReviewStart(context);
+export async function beginHumanTurn(context: LoopContext, round?: ReviewRound): Promise<boolean> {
+  if (!await observeHumanReviewStart(context, round)) { return false; }
   if (!context.dryRun) { await context.ports.task.mirrorApproved(); }
+  return true;
 }

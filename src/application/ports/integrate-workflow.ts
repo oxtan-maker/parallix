@@ -71,7 +71,8 @@ export interface IntegrateFileSystemPort {
 export interface IntegrateGitPort {
   git: IntegrateGitRunner;
   getCurrentBranch(_rootDir?: string): string;
-  detectRebaseState(_rootDir: string): { inProgress: boolean; rebaseHead?: string | null; unmergedFiles: string[] };
+  /** `inProgress` also covers unmerged index entries; only a non-null `rebaseDir` is rebase metadata. */
+  detectRebaseState(_rootDir: string): { inProgress: boolean; rebaseHead?: string | null; unmergedFiles: string[]; rebaseDir?: string | null };
 }
 
 export interface IntegrateBacklogPort {
@@ -153,12 +154,15 @@ export interface IntegrationAgentFallbackOptions {
 export interface IntegrateProductConfigPort {
   isForgejoReviewEnabled(_rootDir: string): boolean;
   resolveIntegrationMode(_rootDir: string): IntegrationMode;
+  resolveReviewActionLimit(_rootDir: string): number;
 }
 
 export interface IntegrateReviewPort {
   readReviewState(_slug: string, _rootDir: string, _missionStore?: MissionStore | null): Promise<IntegrationReviewSnapshot | null> | IntegrationReviewSnapshot | null;
   submitForReview(_slug: string, _skipGate: boolean, _options: IntegrationReviewSubmissionOptions): Promise<unknown>;
   submitApproval(_slug: string, _message: string, _options: IntegrationApprovalSubmissionOptions): Promise<{ ok: boolean; diagnostic?: string }>;
+  requestHumanIntervention(_slug: string, _reason: string,
+    _options: IntegrationApprovalSubmissionOptions): Promise<{ ok: boolean; diagnostic?: string }>;
   resolveForgejoUser(_reviewer: string): string | null;
 }
 
@@ -280,10 +284,10 @@ export interface IntegrateGatesPort {
 }
 
 export interface IntegrateCheckoutPort {
-  stashMainCheckoutIfNeeded(_options: { slug: string; dirtyEntries: string[]; rootDir: string }): { created?: boolean; message?: string; rootDir?: string } | null;
+  stashMainCheckoutIfNeeded(_options: { slug: string; dirtyEntries: string[]; rootDir: string }): IntegrationStash | null;
   restoreMainCheckoutStash(_stash: IntegrationStash): IntegrateCommandResult;
-  maybeDropStashAfterCollision(_restoreResult: IntegrateCommandResult, _rootDir: string): unknown;
-  reportStashPopFailure(_slug: string, _restoreResult: IntegrateCommandResult, _options: { rootDir: string }): void;
+  maybeDropStashAfterCollision(_restoreResult: IntegrateCommandResult, _rootDir: string, _options?: { expectedObjectId?: string; marker?: string }): unknown;
+  reportStashPopFailure(_slug: string, _restoreResult: IntegrateCommandResult, _options: { rootDir: string; stash?: IntegrationStash }): void;
   prepareNoisePatchForSquash(_rootDir: string, _options: { gitRunner: IntegrateGitRunner }): { ok: boolean; error?: string; patchPath?: string | null; cleanup?: () => void };
   restoreNoisePatchAfterSquash(_rootDir: string, _patchPath: string, _options: { gitRunner: IntegrateGitRunner }): { ok: boolean; error?: string };
   getUnresolvedIndexConflicts(_rootDir: string): { ok: boolean; error?: string; files: string[] };
@@ -296,7 +300,7 @@ export interface IntegrateCheckoutPort {
 
 export interface IntegrateLandingPort {
   /** The error that ends a run with exit code 1 after its diagnostics were printed. */
-  createAbort(): Error;
+  createAbort(_reason?: string): Error;
   isAbort(_error: unknown): boolean;
   classifyHookFailure(_result: { failureReason?: unknown }): { isHookFailure: boolean; hookType: string | null };
   reportSyncMergedFailure(_syncResult: { statusCode?: number | null; error?: string; raw?: string }): void;

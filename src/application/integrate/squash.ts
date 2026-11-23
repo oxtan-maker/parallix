@@ -1,4 +1,4 @@
-import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../ports/integration-records.js';
+import type { IntegrationMissionServices, IntegrationMissionServicesFactory, IntegrationStash } from '../ports/integration-records.js';
 import type { IntegrationContext } from './context.js';
 import type { ParallixConfiguration } from '../ports/configuration.js';
 /**
@@ -18,8 +18,10 @@ import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 
 /** Run-scoped values the final `finally` block of `integrate()` still reads after a failure. */
 export interface IntegrateRunState {
-  temporaryStash: { created?: boolean, message?: string, rootDir?: string } | null;
+  temporaryStash: IntegrationStash | null;
   nextActionMessage: string | null;
+  /** Concrete reason of the abort that ended the run, reported with the failing exit. */
+  failureReason?: string | null;
 }
 
 export interface LandingRun {

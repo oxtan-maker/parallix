@@ -45,7 +45,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
   test('--continue on a round already fixing treats a current human correction as the fixing round (TASK-2675)', async () => {
     const { fake } = continueFixing('task-2675-human-correction', { pollDisposition: () => 'BLOCKED' });
     fake.ports.humanFeedback.reconcile = async () => ({ source: 'forgejo:review:7', author: 'human', state: 'current', disposition: 'REQUEST_CHANGES', approval: false, reason: 'operator correction' as const, findings: [] });
-    await runReviewLoop({ slug: 'task-2675-human-correction', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-2675-human-correction', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.ok(actOnReview(fake).length > 0, `Expected the implementer to act on the correction; got errors: ${fake.errors.join(' | ')}`);
     assert.ok(!fake.errors.some(m => m.includes('Cannot transition')), fake.errors.join(' | '));
@@ -53,7 +53,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
 
   test('SC1: --continue skip-check BLOCKED re-launches implementer instead of skipping', async () => {
     const { fake } = continueFixing('task-1221-sc1', { pollDisposition: () => 'BLOCKED' });
-    await runReviewLoop({ slug: 'task-1221-sc1', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-sc1', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.ok(actOnReview(fake).length > 0, `Expected implementer re-launch (act-on-review) after stale BLOCKED; got launches: ${JSON.stringify(fake.launches)}`);
     assert.ok(fake.logs.some(m => m.includes('Re-launching implementer')), `Expected re-launch log message; got: ${fake.logs.join(' | ')}`);
@@ -61,11 +61,13 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
   });
 
   test('SC2: Re-launched implementer posts CHANGES_MADE → loop continues to next round', async () => {
+    let reviews = 0;
     const { fake } = continueFixing('task-1221-sc2', {
       pollDisposition: () => 'BLOCKED', // skip-check always finds stale BLOCKED
-      reviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'REQUEST_CHANGES' }),
+      reviewer: async () => ({ consumed: true, ok: true as const,
+        reviewState: ++reviews === 1 ? 'REQUEST_CHANGES' : 'APPROVED' }),
     });
-    await runReviewLoop({ slug: 'task-1221-sc2', isContinue: true, maxAttempts: 2 }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-sc2', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.equal(actOnReview(fake).length, 2, `Expected 2 act-on-review launches (re-launch + round 2); got: ${JSON.stringify(fake.launches)}`);
     assert.ok(fake.logs.some(m => m.includes('Re-launching implementer')), `Expected re-launch log in: ${fake.logs.join(' | ')}`);
@@ -77,7 +79,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
       pollDisposition: () => 'BLOCKED',
       consumeImplementer: async () => ({ consumed: true, ok: true as const, disposition: 'BLOCKED' }),
     });
-    await runReviewLoop({ slug: 'task-1221-sc3', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-sc3', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.equal(actOnReview(fake).length, 1, `Expected 1 act-on-review re-launch; got: ${JSON.stringify(fake.launches)}`);
     assert.ok(fake.logs.some(m => m.includes('Autonomous review stopped') && m.includes('BLOCKED') && m.includes('Hand off')), `Expected stop/review preparation message; got: ${fake.logs.join(' | ')}`);
@@ -87,13 +89,13 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
 
   test('SC4: Non-continue (fresh start) path is unaffected', async () => {
     const fake = fakeReviewLoopPorts({ slug: 'task-1221-sc4', routing: { eligibleFamilies: () => ['codex', 'custom'], nominate: () => 'codex' }, provider: {} });
-    await runReviewLoop({ slug: 'task-1221-sc4', maxAttempts: 1, dryRun: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-sc4', actionLimit: 40, dryRun: true }, fake.ports);
     assert.ok(fake.logs.some(m => m.includes('DRY-RUN')), 'Expected DRY-RUN marker in logs');
   });
 
   test('SC5: PARKED disposition also triggers re-launch (not just BLOCKED)', async () => {
     const { fake } = continueFixing('task-1221-sc5', { pollDisposition: () => 'PARKED' });
-    await runReviewLoop({ slug: 'task-1221-sc5', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-sc5', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.ok(actOnReview(fake).length > 0, `Expected implementer re-launch after stale PARKED; got launches: ${JSON.stringify(fake.launches)}`);
     assert.ok(fake.logs.some(m => m.includes('Re-launching implementer')), `Expected re-launch log message for PARKED; got: ${fake.logs.join(' | ')}`);
@@ -122,7 +124,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
       preReview: { head: () => null },
     });
 
-    await runReviewLoop({ slug, isContinue: true, maxAttempts: 26 }, fake.ports);
+    await runReviewLoop({ slug, isContinue: true, actionLimit: 40 }, fake.ports);
 
     const launch = fake.launches.find(candidate => candidate.role === 'implementer');
     assert.ok(launch, 'the existing fixing round still launches its implementer');
@@ -132,7 +134,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
 
   test('Skip-check non-BLOCKED/PARKED disposition still skips (existing behaviour preserved)', async () => {
     const { fake } = continueFixing('task-1221-skip-normal', { pollDisposition: () => 'CHANGES_MADE' });
-    await runReviewLoop({ slug: 'task-1221-skip-normal', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-skip-normal', isContinue: true, actionLimit: 40 }, fake.ports);
     assert.ok(fake.logs.some(m => m.includes('Skipping implementer launch')), `Expected "Skipping implementer launch" for non-blocking disposition; got: ${fake.logs.join(' | ')}`);
     assert.equal(actOnReview(fake).length, 0);
   });
@@ -144,7 +146,7 @@ describe("stale blocked relaunch", { concurrency: false }, () => {
       pollDisposition: (_implementer, sinceIso) => { pollCalls.push(sinceIso); return 'BLOCKED'; },
       consumeImplementer: async () => (++consumeCall === 1 ? { consumed: false } : { consumed: true, ok: true, disposition: 'BLOCKED' }),
     });
-    await runReviewLoop({ slug: 'task-1221-sc1-forge-race', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-1221-sc1-forge-race', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.equal(actOnReview(fake).length, 1, `Expected 1 act-on-review re-launch; got: ${JSON.stringify(fake.launches)}`);
     assert.ok(fake.logs.some(m => m.includes('Re-launching implementer')), `Expected re-launch log; got: ${fake.logs.join(' | ')}`);
@@ -178,7 +180,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
 
   test('reviewer-non-submission: error fires without completing recovery retries (forgejoEnabled=true, poll returns POLL_TIMEOUT)', async () => {
     const fake = silentReviewer({ pollReview: async () => POLL_TIMEOUT });
-    await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-9001', actionLimit: 40 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries before escalation (got ${reviewerLaunches(fake)} reviewer launches)`);
     assert.ok(fake.launches.filter(launch => launch.role === 'reviewer').every(launch => launch.sessionPolicy === 'fresh-ephemeral'),
@@ -191,7 +193,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
 
   test('reviewer-non-submission: null poll result breaks recovery loop prematurely (forgejoEnabled=true, poll returns null)', async () => {
     const fake = silentReviewer({ pollReview: async () => null });
-    await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-9001', actionLimit: 40 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries even when poll returns null (got ${reviewerLaunches(fake)} reviewer launches)`);
     assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
@@ -223,7 +225,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
       },
     });
 
-    await runReviewLoop({ slug, maxAttempts: 26, reboundsPerRound: 0, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug, actionLimit: 40, reboundsPerRound: 0, skipReviewPreparation: true }, fake.ports);
 
     assert.ok(rejectedWrites > 0, 'the provider observation reaches the authoritative recorder');
     assert.equal(fake.launches.filter(launch => launch.role === 'implementer').length, 0,
@@ -253,7 +255,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
       },
     });
 
-    await runReviewLoop({ slug, maxAttempts: 26, reboundsPerRound: 0, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug, actionLimit: 40, reboundsPerRound: 0, skipReviewPreparation: true }, fake.ports);
 
     assert.equal(rejectedWrites, 1, 'the provider approval reaches the authoritative recorder');
     assert.ok(!fake.mirrors.includes('approved'), 'an ignored approval cannot mutate the task lane');
@@ -265,7 +267,7 @@ describe("reviewer non submission bounce", { concurrency: false }, () => {
 
   test('reviewer-non-submission: forgejoEnabled=false — recovery loop breaks on null reviewState', async () => {
     const fake = silentReviewer(null);
-    await runReviewLoop({ slug: 'task-9001', maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-9001', actionLimit: 40 }, fake.ports);
 
     assert.equal(reviewerLaunches(fake), 3, `recovery loop should complete 2 retries with forgejoEnabled=false (got ${reviewerLaunches(fake)} reviewer launches)`);
     assert.ok(fake.errors.some(e => e.includes('Recovery dossier for task-9001') && e.includes('Incomplete reviewer artifact')),
@@ -307,7 +309,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
 
   test('a current REQUEST_CHANGES on an approved round stops with revoke guidance and retains the correction (TASK-2679)', async () => {
     const fake = approvedRound('task-2679-approved', 'approved', correction);
-    await runReviewLoop({ slug: 'task-2679-approved', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-2679-approved', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.ok(!fake.errors.some(m => m.includes('Cannot transition')), fake.errors.join(' | '));
     assert.equal(implementerLaunches(fake).length, 0, 'no implementer may launch under an effective approval');
@@ -319,8 +321,8 @@ describe("human correction on an approved round", { concurrency: false }, () => 
 
   test('a second continuation re-observes the retained correction without double consuming it (TASK-2679)', async () => {
     const fake = approvedRound('task-2679-retry', 'approved', correction);
-    await runReviewLoop({ slug: 'task-2679-retry', isContinue: true, maxAttempts: 1 }, fake.ports);
-    await runReviewLoop({ slug: 'task-2679-retry', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-2679-retry', isContinue: true, actionLimit: 40 }, fake.ports);
+    await runReviewLoop({ slug: 'task-2679-retry', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.equal(fake.stops.length, 2, 'each continuation stops on the same retained correction');
     assert.equal(implementerLaunches(fake).length, 0);
@@ -337,7 +339,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
         return { ok: true as const };
       },
     } satisfies import("../../../../src/application/ports/review-round.js").ApprovalRevocationPort;
-    await runReviewLoop({ slug: 'task-2679-revoke', isContinue: true, maxAttempts: 1 }, { ...fake.ports, approvalRevocation });
+    await runReviewLoop({ slug: 'task-2679-revoke', isContinue: true, actionLimit: 40 }, { ...fake.ports, approvalRevocation });
 
     assert.equal(requests.length, 1);
     assert.deepEqual(requests[0], { round: 1, operator: 'human', reason: 'Human change request forgejo:review:9: corr' });
@@ -349,7 +351,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
   test('a failed revocation stops with guidance and the diagnostic, keeping the correction (TASK-2679)', async () => {
     const fake = approvedRound('task-2679-revoke-fail', 'approved', correction);
     const approvalRevocation = { revoke: async () => ({ ok: false as const, diagnostic: 'version conflict' }) } satisfies import("../../../../src/application/ports/review-round.js").ApprovalRevocationPort;
-    await runReviewLoop({ slug: 'task-2679-revoke-fail', isContinue: true, maxAttempts: 1 }, { ...fake.ports, approvalRevocation });
+    await runReviewLoop({ slug: 'task-2679-revoke-fail', isContinue: true, actionLimit: 40 }, { ...fake.ports, approvalRevocation });
 
     assert.equal(implementerLaunches(fake).length, 0);
     assert.equal(fake.current()?.phase, 'approved');
@@ -362,7 +364,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
     const fake = approvedRound('task-2679-revoke-loop', 'approved', correction);
     let calls = 0;
     const approvalRevocation = { revoke: async () => { calls++; return { ok: true as const }; } } satisfies import("../../../../src/application/ports/review-round.js").ApprovalRevocationPort;
-    await runReviewLoop({ slug: 'task-2679-revoke-loop', isContinue: true, maxAttempts: 1 }, { ...fake.ports, approvalRevocation });
+    await runReviewLoop({ slug: 'task-2679-revoke-loop', isContinue: true, actionLimit: 40 }, { ...fake.ports, approvalRevocation });
 
     assert.equal(calls, 2);
     assert.equal(implementerLaunches(fake).length, 0);
@@ -371,7 +373,7 @@ describe("human correction on an approved round", { concurrency: false }, () => 
 
   test('a round already fixing continues without a phase transition (TASK-2679)', async () => {
     const fake = approvedRound('task-2679-fixing', 'fixing', correction);
-    await runReviewLoop({ slug: 'task-2679-fixing', isContinue: true, maxAttempts: 1 }, fake.ports);
+    await runReviewLoop({ slug: 'task-2679-fixing', isContinue: true, actionLimit: 40 }, fake.ports);
 
     assert.ok(implementerLaunches(fake).length > 0, fake.errors.join(' | '));
     assert.deepEqual(fake.stops.filter(reason => reason === 'APPROVED_ROUND_HUMAN_CORRECTION'), []);
@@ -379,12 +381,12 @@ describe("human correction on an approved round", { concurrency: false }, () => 
 
   test('dismissed or historical feedback is not a current correction on an approved round (TASK-2679)', async () => {
     const dismissed = approvedRound('task-2679-dismissed', 'approved', { ...correction, state: 'dismissed' });
-    await runReviewLoop({ slug: 'task-2679-dismissed', isContinue: true, maxAttempts: 1 }, dismissed.ports);
+    await runReviewLoop({ slug: 'task-2679-dismissed', isContinue: true, actionLimit: 40 }, dismissed.ports);
     assert.ok(!dismissed.stops.includes('APPROVED_ROUND_HUMAN_CORRECTION'));
     assert.ok(!dismissed.logs.some(m => m.includes('px revoke-review')));
 
     const historical = approvedRound('task-2679-historical', 'approved', null);
-    await runReviewLoop({ slug: 'task-2679-historical', isContinue: true, maxAttempts: 1 }, historical.ports);
+    await runReviewLoop({ slug: 'task-2679-historical', isContinue: true, actionLimit: 40 }, historical.ports);
     assert.ok(!historical.stops.includes('APPROVED_ROUND_HUMAN_CORRECTION'));
   });
 
@@ -396,13 +398,30 @@ describe("human correction on an approved round", { concurrency: false }, () => 
       if (attempts++ === 0) { throw new Error('disk full'); }
       await persist(next);
     };
-    await assert.rejects(runReviewLoop({ slug: 'task-2679-persist', isContinue: true, maxAttempts: 1 }, fake.ports), /disk full/);
+    await assert.rejects(runReviewLoop({ slug: 'task-2679-persist', isContinue: true, actionLimit: 40 }, fake.ports), /disk full/);
     assert.equal(implementerLaunches(fake).length, 0);
     assert.deepEqual(fake.current()?.metadata.humanFeedbackSources ?? [], [], 'nothing consumed the correction before the failed write');
   });
 });
 
 describe('exited reviewer artifacts', () => {
+  test('a typed reviewer quota result stops without artifact-recovery relaunches (TASK-2859.20)', async () => {
+    const fake = fakeReviewLoopPorts({
+      slug: 'task-reviewer-quota',
+      routing: { eligibleFamilies: () => ['claude'], nominate: () => 'claude' },
+      agents: { launch: async launch => ({ agent: launch.agent, result: {
+        status: 1, failureReason: { version: 1, code: 'agent-quota', source: 'provider' },
+      } }) },
+      artifacts: { consumeReviewer: async () => assert.fail('a typed launch failure has no artifact to consume') },
+    });
+
+    await runReviewLoop({ slug: 'task-reviewer-quota', implementer: 'codex', reviewer: 'claude',
+      actionLimit: 40, skipReviewPreparation: true }, fake.ports);
+
+    assert.equal(fake.launches.length, 1);
+    assert.deepEqual(fake.stops, ['REVIEWER_LAUNCH_FAILURE']);
+  });
+
   for (const stopReason of [undefined, 'length', 'output-token-limit']) {
     test(`exited reviewer ${stopReason ?? 'normal'} recovers without full provider timeout (TASK-2827)`, async () => {
       const requests: import('../../../../src/application/ports/review-round.js').ProviderPollRequest[] = [];
@@ -413,7 +432,7 @@ describe('exited reviewer artifacts', () => {
         provider: { pollReview: async (_reviewer, _since, request) => { requests.push(request); return POLL_TIMEOUT; } },
         artifacts: { consumeReviewer: async () => ({ consumed: false }) },
       });
-      await runReviewLoop({ slug: 'task-2827-repro', maxAttempts: 1 }, fake.ports);
+      await runReviewLoop({ slug: 'task-2827-repro', actionLimit: 40 }, fake.ports);
       assert.ok(requests.every(request => request.quick === true), `full timeout polls: ${JSON.stringify(requests)}`);
       const warning = fake.logs.findIndex(message => /Incomplete reviewer artifact/.test(message));
       const rebound = fake.logs.findIndex(message => /Bouncing to reviewer/.test(message));
@@ -436,7 +455,7 @@ test('exited reviewer recovery respects the per-round cap and reports its final 
     agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0, stopReason: ++launches > 1 ? 'output-token-limit' : 'stop' } }) },
     provider: { pollReview: async () => { assert.fail('exited reviewer must not wait for provider'); } },
   });
-  await runReviewLoop({ slug: 'task-2827-cap', maxAttempts: 1, reboundsPerRound: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-2827-cap', actionLimit: 40, reboundsPerRound: 1 }, fake.ports);
   assert.equal(launches, 2);
   assert.deepEqual(fake.stops, ['REBOUNDS_PER_ROUND_EXHAUSTED']);
   assert.match(fake.errors.join(' | '), /Incomplete reviewer artifact.*output-token-limit.*px review task-2827-cap/);
@@ -448,7 +467,7 @@ test('an already spent round budget still reports the missing artifact cause and
     slug: 'task-2827-spent', provider: {},
     agents: { launch: async launch => ({ agent: launch.agent, result: { status: 0, stopReason: 'output-token-limit' } }) },
   });
-  await runReviewLoop({ slug: 'task-2827-spent', maxAttempts: 1, reboundsPerRound: 0 }, fake.ports);
+  await runReviewLoop({ slug: 'task-2827-spent', actionLimit: 40, reboundsPerRound: 0 }, fake.ports);
   assert.equal(fake.launches.length, 1);
   assert.deepEqual(fake.stops, ['REBOUNDS_PER_ROUND_EXHAUSTED']);
   assert.match(fake.errors.join(' | '), /Incomplete reviewer artifact.*output-token-limit.*px review task-2827-spent/);
@@ -475,7 +494,7 @@ describe('preferred reviewer runtime fallback authority', () => {
       },
     });
 
-    await runReviewLoop({ slug: 'task-2837-actual-reviewer', implementer: 'custom', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2837-actual-reviewer', implementer: 'custom', reviewer: 'codex', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
     assert.equal(fake.current()?.reviewer, 'vibe');
     assert.deepEqual(artifacts, ['vibe']);
     assert.deepEqual(telemetry, [{ reviewer: 'vibe', stateReviewer: 'vibe' }]);
@@ -483,7 +502,7 @@ describe('preferred reviewer runtime fallback authority', () => {
     assert.ok(fake.logs.some(line => line.includes('reviewer fell back from codex to vibe')), fake.logs.join(' | '));
     assert.ok(!fake.mirrors.some(effect => effect.startsWith('assign:')), 'reviewer fallback never changes the Backlog assignee');
 
-    await runReviewLoop({ slug: 'task-2837-actual-reviewer', implementer: 'custom', reviewer: 'codex', isContinue: true, maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2837-actual-reviewer', implementer: 'custom', reviewer: 'codex', isContinue: true, actionLimit: 40, skipReviewPreparation: true }, fake.ports);
     assert.equal(fake.launches.length, 1, 'continuation retains the decided round instead of launching either family again');
     assert.equal(fake.current()?.reviewer, 'vibe');
   });
@@ -496,7 +515,7 @@ describe('preferred reviewer runtime fallback authority', () => {
       artifacts: { consumeReviewer: async () => ({ consumed: false }) },
     });
 
-    await runReviewLoop({ slug: 'task-2837-blocked-recovery', implementer: 'custom', reviewer: 'codex', maxAttempts: 1, reboundsPerRound: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: 'task-2837-blocked-recovery', implementer: 'custom', reviewer: 'codex', actionLimit: 40, reboundsPerRound: 1, skipReviewPreparation: true }, fake.ports);
     assert.deepEqual(fake.launches.filter(launch => launch.role === 'reviewer').map(launch => launch.agent), ['codex', 'vibe']);
     assert.equal(fake.current()?.reviewer, 'vibe');
   });
@@ -532,7 +551,7 @@ describe('preferred reviewer runtime fallback authority', () => {
       artifacts: { consumeReviewer: async () => { artifactConsumes++; return { consumed: false }; } },
     });
 
-    await runReviewLoop({ slug, implementer: 'custom', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug, implementer: 'custom', reviewer: 'codex', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
     assert.equal(authoritative.phase, 'approved');
     assert.equal(authoritative.reviewer, 'vibe');
     assert.deepEqual(fallbackPersists.at(-1), { phase: 'approved', reviewer: 'vibe' }, 'fallback identity merges into the decided round without stale state');
@@ -573,7 +592,7 @@ describe('preferred reviewer runtime fallback authority', () => {
       preReview: { head: () => null },
     });
 
-    await runReviewLoop({ slug, implementer: 'custom', reviewer: 'codex', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug, implementer: 'custom', reviewer: 'codex', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
     assert.equal(authoritative.reviewer, 'vibe');
     assert.ok(persistedReviewers.length > 1, 'the implementer phase performs later bookkeeping writes');
     assert.ok(persistedReviewers.slice(1).every(reviewer => reviewer === 'vibe'), JSON.stringify(persistedReviewers));
@@ -593,7 +612,7 @@ test('a reviewer recovery launch result is the same AgentLaunchResult the artifa
     } },
     artifacts: { consumeReviewer: async (_reviewer, _state, launch) => { consumed.push(launch); return { consumed: false }; } },
   });
-  await runReviewLoop({ slug: 'task-2846-single-launch-type', implementer: 'custom', reviewer: 'codex', maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: 'task-2846-single-launch-type', implementer: 'custom', reviewer: 'codex', actionLimit: 40 }, fake.ports);
   assert.ok(launched.length >= 2, 'the recovery rebound launched again');
   assert.ok(consumed.some(launch => launch === launched[0]), 'the consumer reads the launch result unchanged');
   assert.equal(fake.current()?.reviewer, 'vibe', 'the fallback family from the recovery launch result is adopted');

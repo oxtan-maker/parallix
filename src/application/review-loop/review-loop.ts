@@ -4,7 +4,7 @@ import { resumeIntegrationAssessment } from './integration-assessment.js';
  * The application-owned autonomous review loop.
  *
  * Start preparation (implementer identity, the start review preparation, reviewer
- * selection, the round state), the round sequence, and the max-attempts
+ * selection, the round state), the round sequence, and the lifetime action
  * escalation are decided here. Each round runs the reviewing half
  * (`reviewer-phase.ts`) and, unless the reviewer approved, the implementer half
  * (`implementer-phase.ts`). Mechanisms are reached only through the typed ports
@@ -21,14 +21,14 @@ import { pendingRetainedRepair, resumeRetainedRepair } from './retained-repair.j
 import { selectReviewer } from './reviewer-selection.js';
 import { runReviewerPhase } from './reviewer-phase.js';
 import { runImplementerPhase } from './implementer-phase.js';
-import { reconciledHumanFeedback, runPolicyTestsAction, testsActionsSpent } from './policy-action.js';
+import { reconciledHumanFeedback, runPolicyTestsAction } from './policy-action.js';
 import { beginHumanTurn } from './reviewer-outcome.js';
 import { DEFAULT_REBOUNDS_PER_ROUND, ReviewRound, stopIfControllerSuperseded, type LoopContext } from './round.js';
-import { AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS } from '../../domain/review-window-policy.js';
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import { retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
 import { abortConcurrentPolicyRound, settleConcurrentPolicyRound, type ConcurrentAgentVerdict } from './concurrent-policy-round.js';
-export const DEFAULT_MAX_ATTEMPTS = AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS;
+import { isReviewActionLimitReached, loadReviewActionCount } from './action-limit.js';
+import { DEFAULT_REVIEW_ACTION_LIMIT } from '../ports/review-action-history.js';
 
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
 type Start = Required<Pick<ReviewLoopRequest, 'dryRun' | 'isContinue' | 'verbose'>> & { slug: string };
@@ -244,7 +244,7 @@ async function runAutomatedReview(context: LoopContext, round: ReviewRound,
 /** One round: the reviewing half, then the implementer's answer to it. */
 async function runRound(context: LoopContext, attempt: number): Promise<RoundResult> {
   if (await stopIfControllerSuperseded(context, `round ${attempt}`)) { return 'stop'; }
-  context.emit({ kind: 'round-started', attempt: attempt, maxAttempts: context.maxAttempts });
+  context.emit({ kind: 'round-started', attempt: attempt, actionLimit: context.actionLimit });
   if (attempt > context.state.round) { context.state.advanceRound(); }
   const round = new ReviewRound(attempt, context);
   const humanFeedback = await reconciledHumanFeedback(context);
@@ -287,7 +287,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const { slug } = request;
   const out: Output = { emit: event => ports.output.emit(event), exit: code => ports.output.exit(code) };
   const start = reviewStart(request);
-  const maxAttempts = request.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const actionLimit = request.actionLimit ?? DEFAULT_REVIEW_ACTION_LIMIT;
   let persisted = await ports.state.read();
   if (entryHasHumanEscalation(persisted)) {
     ports.output.error(`Review entry blocked for ${slug}: ${persisted.metadata.humanEscalationReason}. Operator recovery: px review ${slug}.`);
@@ -305,7 +305,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   // round; resume those instead of selecting a new reviewer.
   if (prepared.reviewPreparationRan) { persisted = await ports.state.read(); }
   const selected = selectReviewer({
-    preferredReviewer: request.reviewer, implementer, isContinue: start.isContinue, persisted, maxAttempts,
+    preferredReviewer: request.reviewer, implementer, isContinue: start.isContinue, persisted,
     dryRun: start.dryRun, providerEnabled: Boolean(ports.provider), slug,
   }, ports.routing, out);
   if (!selected) {
@@ -315,7 +315,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const identities = { implementer, reviewer: selected.reviewer };
   const state = await startState(persisted, identities, prepared.pullRequest, start.dryRun, ports, out);
   const context: LoopContext = {
-    ...out, ...start, ports, state, identities, maxAttempts,
+    ...out, ...start, ports, state, identities, actionLimit, actionCount: 0,
     operatorInvocation: request.operatorInvocation ?? false,
     ...loopSettings(request),
     initialRound: state.round,
@@ -328,42 +328,29 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
       out.emit({ kind: 'reviewer-escalated', reason: reason });
     },
   };
-  context.emit({ kind: 'review-started', slug, implementer, reviewer: identities.reviewer, branch: ports.branch, focus: context.focus, maxAttempts, intervalMs: ports.polling.intervalMs, timeoutMs: ports.polling.timeoutMs, verbose: start.verbose, dryRun: start.dryRun });
+  if (!await loadReviewActionCount(context)) { return; }
+  context.emit({ kind: 'review-started', slug, implementer, reviewer: identities.reviewer, branch: ports.branch, focus: context.focus, actionLimit, intervalMs: ports.polling.intervalMs, timeoutMs: ports.polling.timeoutMs, verbose: start.verbose, dryRun: start.dryRun });
   await runReviewRounds(context, request, restarted);
 }
 
 async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest, restarted: boolean): Promise<void> {
-  const { ports, maxAttempts } = context;
-  // Every policy-selected tests action spends one attempt of the same allowance, so
-  // checks that fail forever still end in MAX_ATTEMPTS. The spent count is read from
-  // durable decision rows, so a restart cannot restore the budget.
-  let used = request.policyActionsUsed ?? 0;
-  const durable = await testsActionsSpent(context);
-  // An unreadable history leaves the fixed policy in charge for this run.
-  context.policyDisabled = durable === null;
-  // Every continuation entry, whatever its persisted round, opens a fresh attempt window, so tests
-  // actions spent before the window do not consume it. In-run restarts carry the baseline instead of re-deriving it.
-  const baseline = request.policyActionsBaseline ?? (request.isContinue ? durable ?? 0 : 0);
-  const windowRequest = { ...request, policyActionsBaseline: baseline };
-  const spentIn = (count: number | null) => Math.max(used, count === null ? 0 : count - baseline);
-  const spentAttempts = async () => spentIn(await testsActionsSpent(context));
-  let allowance = maxAttempts - spentIn(durable);
-  for (let attempt = context.initialRound; attempt <= allowance;) {
+  const { ports } = context;
+  for (let attempt = context.initialRound;;) {
     const tests = await runPolicyTestsAction(context);
     if (tests === 'stop') { return; }
     if (tests === 'repaired') {
-      await runOwnedReviewLoop({ ...windowRequest, policyActionsUsed: used + 1, isContinue: true, reset: false }, ports, restarted);
+      await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, ports, restarted);
       return;
     }
-    if (tests === 'ran' || tests === 'retry') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
+    if (tests === 'ran' || tests === 'retry') { continue; }
     const outcome = await runRound(context, attempt);
-    // The pre-review rebase changed what the policy recommends: it chooses again, and the re-plan spends an attempt.
-    if (outcome === 'replan') { used += 1; allowance = maxAttempts - await spentAttempts(); continue; }
+    // Policy evaluation and re-planning are not review-step actions.
+    if (outcome === 'replan') { continue; }
     attempt += 1;
     if (outcome === 'stop') { return; }
     // An approval is durable but is not the end of the decision: the policy chooses again on the approved state.
     if (outcome === 'approved') {
-      await settleApproval(context, windowRequest, used, restarted, spentAttempts);
+      await settleApproval(context, request, restarted);
       return;
     }
     // A revoked approval reopened the Review: start again as a continuation
@@ -373,49 +360,25 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
         await context.escalateToHumanReview('APPROVED_ROUND_HUMAN_CORRECTION');
         return;
       }
-      await runOwnedReviewLoop({ ...windowRequest, policyActionsUsed: used, isContinue: true, reset: false }, ports, true);
+      await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, ports, true);
       return;
     }
   }
-  await exhaustAttempts(context);
 }
 
-/**
- * Return control to the next-action decision after an approved agent round. A
- * policy-selected tests action stays within the attempt allowance. A selected
- * same-revision retry returns to the policy; any repaired failure re-enters
- * review. Every other outcome hands the durable approval to the human turn. A
- * spent allowance dispatches nothing and ends in MAX_ATTEMPTS after hand-off.
- */
-async function settleApproval(context: LoopContext, request: ReviewLoopRequest, used: number, restarted: boolean,
-  spentAttempts: () => Promise<number>): Promise<void> {
-  let spent = Math.max(used, await spentAttempts());
-  while (spent < context.maxAttempts) {
+/** Return an approved round to the next-action owner before opening its human turn. */
+async function settleApproval(context: LoopContext, request: ReviewLoopRequest, restarted: boolean): Promise<void> {
+  for (;;) {
     const tests = await runPolicyTestsAction(context);
     if (tests === 'repaired') {
-      await runOwnedReviewLoop({ ...request, policyActionsUsed: spent + 1, isContinue: true, reset: false }, context.ports, restarted);
+      await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, context.ports, restarted);
       return;
     }
-    if (tests === 'retry') {
-      spent = Math.max(spent + 1, await spentAttempts());
-      continue;
-    }
-    // 'stop' already escalated its typed handoff; the approval itself is still durable and owes its human turn.
+    if (tests === 'retry') { continue; }
+    if (tests === 'stop' && context.actionCount >= context.actionLimit) { return; }
     await beginHumanTurn(context);
-    // A dispatched passing action that consumed the final attempt ends like any other spent allowance.
-    if (tests === 'ran' && Math.max(spent + 1, await spentAttempts()) >= context.maxAttempts) { await exhaustAttempts(context); }
     return;
   }
-  await beginHumanTurn(context);
-  await exhaustAttempts(context);
-}
-
-async function exhaustAttempts(context: LoopContext): Promise<void> {
-  const { state, ports, maxAttempts } = context;
-  state.disposition = 'MAX_ATTEMPTS';
-  state.metadata = { ...state.metadata, humanEscalationReason: 'MAX_ATTEMPTS', humanEscalatedAt: new Date().toISOString() };
-  await ports.state.persist(state);
-  context.emit({ kind: 'attempts-exhausted', maxAttempts: maxAttempts });
 }
 
 /**
@@ -430,6 +393,8 @@ export async function runReviewLoop(request: ReviewLoopRequest, ports: ReviewLoo
   }
   try {
     await runOwnedReviewLoop(request, ports);
+  } catch (error) {
+    if (!isReviewActionLimitReached(error)) { throw error; }
   } finally {
     ports.lock.release();
   }

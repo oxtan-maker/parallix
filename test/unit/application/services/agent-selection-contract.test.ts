@@ -27,6 +27,8 @@ import { SqliteAgentSelectionSnapshotAdapter } from '../../../../src/adapters/ag
 import { resolveReviewPreparationReviewAssignment } from '../../../../src/adapters/cli/commands/review-preparation.js';
 import { AGENT_SELECTION_OUTCOMES, recordAgentSelectionOutcome } from '../../../../src/application/services/agent-selection-telemetry.js';
 import fs from 'node:fs';
+import { detectLimitHit } from '../../../../src/application/services/agent-limit.js';
+import { failureReason } from '../../../../src/domain/failure-reason.js';
 import { createLauncherProbe } from '../../../../src/adapters/agents/launcher-availability.js';
 import { ConcreteAgentReadAdapter } from '../../../../src/adapters/backlog/concrete-agent-read-adapter.js';
 import type { AgentBlockEntry, AgentBlocklistRepository } from '../../../../src/application/ports/agent-blocklist.js';
@@ -555,6 +557,27 @@ describe('Launcher availability', () => {
     assert.equal(projectAgentAvailability(availability, untilMs)[0].available, true);
     assert.equal(projectAgentAvailability(availability, untilMs)[0].reason, null);
   });
+
+  test('a persisted five-minute provider-unavailable row is selectable exactly at expiry (TASK-2871)', async () => {
+    const detected = new Date();
+    const hit = detectLimitHit({ agent: 'claude', status: 1, failureReason: failureReason('provider-unavailable', 'provider'), now: detected });
+    assert.ok(hit && !hit.reroute);
+    const adapter = new ConcreteAgentReadAdapter({
+      rootDir: '/fixture',
+      knownAgentFamilies: [agentFamily('claude')],
+      blocklistRepo: {
+        async findAll() { return [{ agent: 'claude', blocked: true, until: hit.until, reason: hit.reason }]; },
+        async findByAgent() { return undefined; }, async save() {}, async deleteByAgent() {}, async clear() {},
+      },
+      readAgentConfig: () => null,
+      launcherAvailable: createLauncherProbe({ probe: () => ({ supported: true }) }),
+    });
+    const availability = await adapter.loadAgentAvailability();
+    const expiry = detected.getTime() + 300_000;
+    assert.equal(projectAgentAvailability(availability, expiry - 1)[0].available, false);
+    assert.equal(projectAgentAvailability(availability, expiry)[0].available, true);
+    assert.equal(projectAgentAvailability(availability, expiry + 1)[0].available, true);
+  });
   // ---------------------------------------------------------------------------
   // The board's launcher probe. `workflowLauncherStatus` spawns per call, so the
   // probe caches; a board that never probes reports every configured family as
@@ -860,7 +883,7 @@ test("composed review, review preparation, active and runtime fallback obey the 
   const active = new AgentExecutionAdapter(runtime, null as never, null, null, configuration);
   const reviewPreparation = new ReviewSubmissionService(createReviewPreparationPorts(configuration));
   const review = () => selectReviewer({ implementer: 'vibe', isContinue: false, persisted: null,
-    maxAttempts: 1, dryRun: false, providerEnabled: false, slug: 'selection-fixture' },
+    dryRun: false, providerEnabled: false, slug: 'selection-fixture' },
     createReviewLoopPorts('selection-fixture', { executionContext: missionExecutionContext({ missionId: 'selection-fixture', missionWorktree: root }) }, { configuration, isProviderEnabled: () => false }).routing,
     { emit: () => {} });
   for (const [strategy, value, expected] of [['random', 0.4, 'claude'], ['weighted', 0.75, 'qwen']] as const) {

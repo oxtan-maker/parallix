@@ -20,7 +20,6 @@ export function createPolicyActionPort(input: {
   readonly policy: Omit<ReviewStartPolicyPorts, 'diagnostic'>;
   readonly policyFactory: VerificationActionPolicyFactory;
   readonly missionServices: IntegrationMissionServices;
-  readonly history: { countTestsActions(_missionId: string): Promise<number> };
 }): PolicyActionPort | undefined {
   if (input.policy.configuration.mode !== 'pilot') { return undefined; }
   const diagnostic = createReviewStartFailureDiagnostics(fmt.log.plain);
@@ -55,7 +54,6 @@ export function createPolicyActionPort(input: {
       return await input.policy.writer.recordHumanReviewWithdrawal({ missionId: facts.missionId, changeIdentity,
         round: facts.round, reason: 'automated-failure' });
     },
-    testsActionsSpent: () => input.history.countTestsActions(input.slug),
     rebaseInProgress: () => detectRebaseState(input.executionContext.missionWorktree).inProgress,
   };
 }

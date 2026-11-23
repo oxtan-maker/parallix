@@ -21,7 +21,6 @@ function fixture(round: number | null = 2, controllerFree = false, overrides: Re
     clearHumanIntervention: async () => { calls.push('clear intervention'); },
     invalidateResolvedBlocker: async () => { calls.push('invalidate blocker'); },
     mechanisms: request => { calls.push('bind mechanisms'); requests.push(request); return fake.ports; },
-    invalidMaxAttempts: raw => { calls.push(`invalid ${raw}`); },
     missingReviewAggregate: () => { calls.push('missing aggregate'); },
     missionUnavailable: (_slug, reason) => { calls.push(`unavailable ${reason}`); },
     reviewRecoveryRefused: (_slug, reason) => { calls.push(`recovery refused ${reason}`); },
@@ -32,29 +31,29 @@ function fixture(round: number | null = 2, controllerFree = false, overrides: Re
 const base = {
   slug: 'task-2637',
   executionContext: missionExecutionContext({ missionId: 'task-2637', missionWorktree: '/fixture/task-2637' }),
-  focus: 'all', dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null,
+  focus: 'all', actionLimit: 40, dryRun: false, reset: false, verbose: false, pollTimeoutSeconds: null,
 };
 const resolveExecutionContext = (slug: string, root: string) => ({ ok: true as const,
   context: missionExecutionContext({ missionId: slug, missionWorktree: `/fixture/${slug}`, baseWorktree: root }) });
 
 test('continuing a review clears intervention, invalidates its blocker, then resumes from the persisted round', async () => {
   const { calls, requests, useCase } = fixture(3, false, {}, true);
-  await useCase.enter({ ...base, rawMaxAttempts: null });
+  await useCase.enter({ ...base });
   assert.deepEqual(calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
-  assert.equal(requests[0].maxAttempts, 7);
+  assert.equal(requests[0].actionLimit, 40);
   assert.equal(requests[0].isContinue, true);
 });
 
 test('continuing a dry-run preserves the intervention ordering without mutating its blocker', async () => {
   const { calls, requests, useCase } = fixture(1);
-  await useCase.enter({ ...base, dryRun: true, rawMaxAttempts: '2' });
+  await useCase.enter({ ...base, dryRun: true });
   assert.deepEqual(calls, ['bind mechanisms']);
-  assert.equal(requests[0].maxAttempts, 2);
+  assert.equal(requests[0].actionLimit, 40);
 });
 
 test('starting a review runs the application loop over the bound mechanisms, not an adapter workflow', async () => {
   const { fake, useCase } = fixture(null, true);
-  await useCase.enter({ ...base, dryRun: true, rawMaxAttempts: '1' });
+  await useCase.enter({ ...base, dryRun: true });
   assert.ok(fake.logs.some(line => line.includes('No agents will be launched.')), fake.logs.join('\n'));
   assert.ok(fake.logs.some(line => line.includes('DRY-RUN: reviewer')), fake.logs.join('\n'));
   assert.deepEqual(fake.launches, []);
@@ -63,7 +62,7 @@ test('starting a review runs the application loop over the bound mechanisms, not
 test('rejects an unknown mission without a persisted Review before entry effects (TASK-2696)', async () => {
   const { calls, requests, fake, useCase, port } = fixture(null, true);
   port.loadMission = async () => ({ kind: 'missing' });
-  await useCase.enter({ ...base, rawMaxAttempts: null });
+  await useCase.enter({ ...base });
   assert.deepEqual(calls, ['missing aggregate']);
   assert.deepEqual(requests, []);
   assert.deepEqual(fake.launches, []);
@@ -76,7 +75,7 @@ test('direct operator recovery uses authoritative eligibility before acknowledgm
     { outcome: 'refused' as const, recovery: null, reason: 'review work is still live' },
   ]) {
     const f = fixture(2, false, {}, true, assessment);
-    await f.useCase.enter({ ...base, rawMaxAttempts: null });
+    await f.useCase.enter({ ...base });
     const expected = assessment.outcome === 'unavailable' ? ['unavailable database offline']
       : assessment.outcome === 'missing' ? ['missing aggregate']
         : ['recovery refused review work is still live'];
@@ -88,7 +87,7 @@ test('direct operator recovery uses authoritative eligibility before acknowledgm
   const permitted = fixture(2, false, {}, true, {
     outcome: 'permitted', recovery: { action: 'acknowledge-and-resume', humanStop: 'MAX_ATTEMPTS', evidence: ['settled'], guidance: 'resume' },
   });
-  await permitted.useCase.enter({ ...base, rawMaxAttempts: null });
+  await permitted.useCase.enter({ ...base });
   assert.deepEqual(permitted.calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
 });
 
@@ -103,7 +102,7 @@ test("start creates the missing Review through review preparation and completes 
     routing: { nominate: () => { return assert.fail("start must use the review preparation reviewer"); } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
-  await useCase.enter({ ...base, rawMaxAttempts: '1' });
+  await useCase.enter({ ...base });
   assert.equal(reviewPreparations, 1);
   assert.deepEqual(calls, ['bind mechanisms']);
   assert.deepEqual(fake.launches.map(launch => [launch.role, launch.agent]), [['reviewer', 'claude']]);
@@ -122,28 +121,21 @@ test("starting a known mission without Review still stops at rejected review pre
     } },
     routing: { nominate: () => { return assert.fail("rejected review preparation must not select a reviewer"); } },
   });
-  await useCase.enter({ ...base, rawMaxAttempts: '1' });
+  await useCase.enter({ ...base });
   assert.equal(reviewPreparations, 1);
   assert.deepEqual(fake.exits, [1]);
   assert.deepEqual(fake.launches, []);
   assert.deepEqual(fake.writes, []);
 });
 
-test('a MAX_ATTEMPTS stop resumes through one attempt window that only an operator entry can open (TASK-2839)', async () => {
-  const { reviewRoundLimit } = await import('../../../src/application/review-round-use-case.js');
-  const { DEFAULT_MAX_ATTEMPTS } = await import('../../../src/application/review-loop/review-loop.js');
-  assert.equal(reviewRoundLimit(10, null), 10 + DEFAULT_MAX_ATTEMPTS - 1, 'a fresh autonomous window after the stopped round');
-  assert.equal(reviewRoundLimit(null, null), DEFAULT_MAX_ATTEMPTS);
-  assert.equal(reviewRoundLimit(1, null), DEFAULT_MAX_ATTEMPTS);
-  assert.equal(reviewRoundLimit(10, 3), 10, 'an explicit limit never falls below the reached round');
-  assert.equal(reviewRoundLimit(2, 9), 9);
+test('a retained human stop can only be cleared by an operator and cannot replace the lifetime action limit (TASK-2839, TASK-2859.20)', async () => {
   const stopped = () => new ReviewState('task-2637', { round: 10, phase: 'reviewing', disposition: 'MAX_ATTEMPTS', metadata: { humanEscalationReason: 'MAX_ATTEMPTS' } });
   const operator = fixture(10, false, {}, true);
-  await operator.useCase.enter({ ...base, rawMaxAttempts: null });
+  await operator.useCase.enter({ ...base });
   assert.deepEqual(operator.calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
-  assert.equal(operator.requests[0].maxAttempts, reviewRoundLimit(10, null));
+  assert.equal(operator.requests[0].actionLimit, 40);
   const automatic = fixture(10, true, { state: stopped() });
-  await automatic.useCase.enter({ ...base, rawMaxAttempts: null });
+  await automatic.useCase.enter({ ...base });
   assert.deepEqual(automatic.calls, ['bind mechanisms'], 'no acknowledgment or intervention clear without the operator port');
   assert.match(automatic.fake.errors.join('\n'), /Review entry blocked for task-2637: MAX_ATTEMPTS/);
   assert.deepEqual(automatic.fake.writes, [], 'the retained stop and round limit stay unchanged');
@@ -151,13 +143,13 @@ test('a MAX_ATTEMPTS stop resumes through one attempt window that only an operat
 
 test('direct operator acknowledgment precedes continuation readiness and dry-run preserves retained stops (TASK-2759)', async () => {
   const direct = fixture(2, false, {}, true);
-  await direct.useCase.enter({ ...base, rawMaxAttempts: null });
+  await direct.useCase.enter({ ...base });
   assert.deepEqual(direct.calls, ['acknowledge operator', 'clear intervention', 'invalidate blocker', 'bind mechanisms']);
   const dry = fixture(2, false, {}, true);
-  await dry.useCase.enter({ ...base, dryRun: true, rawMaxAttempts: null });
+  await dry.useCase.enter({ ...base, dryRun: true });
   assert.deepEqual(dry.calls, ['bind mechanisms']);
   const missing = fixture(null, false, {}, true);
-  await missing.useCase.enter({ ...base, rawMaxAttempts: null });
+  await missing.useCase.enter({ ...base });
   assert.deepEqual(missing.calls, ['acknowledge operator', 'bind mechanisms']);
 });
 
@@ -167,10 +159,10 @@ test('nested reviewer launch failure blocks outer post-execute review entry (px-
     reviewPreparation: { reviewPreparation: async () => ({ ok: true }) },
     agents: { launch: async () => { throw new Error('nested reviewer unavailable'); } },
   });
-  await useCase.enter({ ...base, rawMaxAttempts: '1' });
+  await useCase.enter({ ...base });
   assert.equal(fake.current()?.metadata.humanEscalationReason, 'REVIEWER_LAUNCH_FAILURE');
   assert.equal(fake.launches.length, 1);
-  await useCase.enter({ ...base, rawMaxAttempts: '1' });
+  await useCase.enter({ ...base });
   assert.equal(fake.launches.length, 1, 'outer entry must stop before another blocked verdict launch');
   assert.ok(fake.errors.some(line => line.includes('REVIEWER_LAUNCH_FAILURE') && line.includes('review task-2637')));
 });
@@ -187,7 +179,7 @@ test('workflow rejection after launch stops provider polling and output retries 
       nextAction: 'px review task-2637',
     } : null },
   });
-  await useCase.enter({ ...base, rawMaxAttempts: '1' });
+  await useCase.enter({ ...base });
   assert.equal(fake.launches.length, 1);
   assert.equal(polls, 0);
   assert.deepEqual(fake.exits, [1]);
@@ -207,7 +199,7 @@ for (const exited of [false, true]) {
         cause: 'operator stop', diagnostic: 'operator stop; px review task-2637', nextAction: 'operator continuation',
       } : null },
     });
-    await useCase.enter({ ...base, rawMaxAttempts: '1' });
+    await useCase.enter({ ...base });
     assert.equal(launches, 2);
     assert.equal(polls, exited ? 0 : 1);
     assert.deepEqual(fake.stops, [], 'retained authority must not be replaced with retry exhaustion');
@@ -250,8 +242,8 @@ for (const mode of ['start', 'continue'] as const) {
         return mechanisms(request);
       };
       const request = { ...base, dryRun: invocation === 'dry-run' };
-      if (mode === 'start') { await f.useCase.enter({ ...request, rawMaxAttempts: '1' }); }
-      else { await f.useCase.enter({ ...request, rawMaxAttempts: null }); }
+      if (mode === 'start') { await f.useCase.enter({ ...request }); }
+      else { await f.useCase.enter({ ...request }); }
       assert.equal(f.requests.length, 1);
       assert.deepEqual(f.fake.launches, []);
     });
@@ -347,7 +339,7 @@ for (const stopped of [false, true]) {
     const f = fixture(1, true, { state,
       stateport: { reset: async () => { resets++; return true; } },
     });
-    await f.useCase.enter({ ...base, reset: true, dryRun: !stopped, rawMaxAttempts: '1' });
+    await f.useCase.enter({ ...base, reset: true, dryRun: !stopped });
     assert.equal(resets, 0);
     assert.deepEqual(f.calls, ['bind mechanisms']);
     if (stopped) { assert.deepEqual(f.fake.exits, [1]); }

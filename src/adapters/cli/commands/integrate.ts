@@ -36,6 +36,7 @@ import * as runtimeMatrix from '../../agents/runtime-matrix.js';
 import * as productConfig from '../../config/product-config.js';
 import * as reviewState from '../../review/review-state.js';
 import * as reviewCommands from '../../review/review-commands.js';
+import { createIntegrationHumanIntervention } from '../../review/integration-human-intervention.js';
 import { applyAgentFallback } from '../../review/review-agent-fallback.js';
 import * as reviewAdapter from '../../review/review-adapter.js';
 import * as rebaseWorkflow from '../../rebase/rebase-workflow-adapter.js';
@@ -59,7 +60,8 @@ function createIntegrationGateRunner(configuration: ParallixConfiguration | unde
     return repositoryGates.runPhaseGates(phase, {
       ...options, configuration, operatorInvocation,
       verificationEvidence: createIntegrationVerificationEvidencePort(configuration,
-        processIdentityForObservation(process.pid), testsActionObservationBinding(policy, fmt.log.plain)),
+        processIdentityForObservation(process.pid), testsActionObservationBinding(policy, fmt.log.plain),
+        reviewAdapter.createGateRunReportPublisher(configuration)),
     });
   };
 }
@@ -183,11 +185,13 @@ export function createIntegratePorts(configuration?: ParallixConfiguration,
     productConfig: {
       isForgejoReviewEnabled: rootDir => productConfig.isForgejoReviewEnabled(rootDir),
       resolveIntegrationMode: rootDir => productConfig.resolveIntegrationMode(rootDir),
+      resolveReviewActionLimit: rootDir => productConfig.resolveReviewActionLimit(rootDir),
     },
     review: {
       readReviewState: (slug, rootDir, missionStore) => reviewState.readReviewState(slug, rootDir, missionStore),
       submitForReview: (slug, skipGate, options) => reviewCommands.submitForReview(slug, skipGate, options),
       submitApproval: createSubmitApproval(configuration),
+      requestHumanIntervention: createIntegrationHumanIntervention(),
       resolveForgejoUser: reviewer => reviewAdapter.resolveForgejoUser(reviewer),
     },
     rebase: {
@@ -232,7 +236,7 @@ function composeIntegrationCheckout(): IntegrateWorkflowPorts['checkout'] {
   return {
     stashMainCheckoutIfNeeded: options => conflict.stashMainCheckoutIfNeeded(options),
     restoreMainCheckoutStash: stash => conflict.restoreMainCheckoutStash(stash),
-    maybeDropStashAfterCollision: (restoreResult, rootDir) => conflict.maybeDropStashAfterCollision(restoreResult, rootDir),
+    maybeDropStashAfterCollision: (restoreResult, rootDir, options) => conflict.maybeDropStashAfterCollision(restoreResult, rootDir, options),
     reportStashPopFailure: (slug, restoreResult, options) => conflict.reportStashPopFailure(slug, restoreResult, options),
     prepareNoisePatchForSquash: (rootDir, options) => conflict.prepareNoisePatchForSquash(rootDir, options),
     restoreNoisePatchAfterSquash: (rootDir, patchPath, options) => conflict.restoreNoisePatchAfterSquash(rootDir, patchPath, options),
@@ -248,7 +252,7 @@ function composeIntegrationCheckout(): IntegrateWorkflowPorts['checkout'] {
 function composeIntegrationLanding(configuration: ParallixConfiguration | undefined): IntegrateWorkflowPorts['landing'] {
   return {
     updateGraphifyRepository: rootDir => missionUtils.updateGraphifyKnowledgeGraph({ rootDir, configuration, failureHint: 'Continuing without blocking integration.' }),
-    createAbort: () => new post.IntegrationAbort(),
+    createAbort: reason => new post.IntegrationAbort(reason),
     isAbort: error => error instanceof post.IntegrationAbort,
     classifyHookFailure: output => post.classifyHookFailure(output),
     reportSyncMergedFailure: syncResult => post.reportSyncMergedFailure(syncResult),

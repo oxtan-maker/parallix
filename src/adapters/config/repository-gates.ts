@@ -383,12 +383,12 @@ class PhaseGateExecution {
   }
 
   /** The executor reports how the phase settled, so a failed or cancelled run is observable evidence too. */
-  private completeCoverage(cancelledKeys: string[]): boolean {
+  private async completeCoverage(cancelledKeys: string[]): Promise<boolean> {
     if (!this.state.coverage) { return false; }
     const settled = this.state.cancellation.operatorCancelled ? 'cancelled'
       : this.state.failure.failedGate !== null ? 'failed'
         : this.state.controller.signal.aborted ? 'cancelled' : 'passed';
-    return this.state.coverage.complete(evidenceOutcomes(this.state.gates, this.state.outcomes, this.state.failure.blocked, new Set(cancelledKeys)), settled);
+    return await this.state.coverage.complete(evidenceOutcomes(this.state.gates, this.state.outcomes, this.state.failure.blocked, new Set(cancelledKeys)), settled);
   }
 
   private async executeGates(): Promise<PhaseGateRunResult> {
@@ -410,7 +410,7 @@ class PhaseGateExecution {
     const { all: failures, blocked } = this.state.failure;
     const cancelledKeys = this.cancelledKeys();
     this.summarizeAggregate(cancelledKeys);
-    const proofReusable = this.completeCoverage(cancelledKeys);
+    const proofReusable = await this.completeCoverage(cancelledKeys);
     return {
       ok: failures.length === 0 && !this.state.controller.signal.aborted,
       phase: this.state.phase,

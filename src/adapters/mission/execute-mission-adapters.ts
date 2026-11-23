@@ -47,6 +47,7 @@ import type { MissionLaunchContext } from '../../application/mission-brief-servi
 import { renderLaunchContext } from '../../application/mission-brief-service.js';
 import { liveMissionExecutionContext, type MissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
 import { resolveMissionExecutionContext } from '../git/mission-execution-context.js';
+import { resolveReviewActionLimit } from '../config/product-config.js';
 
 export type { OperatorBlocklistOverlay };
 
@@ -78,6 +79,7 @@ export interface ExecuteMissionRuntime {
   readonly getTaskStatus: typeof getTaskStatus;
   readonly recordActiveStats: (options: NonNullable<Parameters<typeof stats.recordActiveStats>[0]> & { slug: string; rootDir: string; implementer: string }) => void;
   readonly resolveStageTelemetry: (options: NonNullable<Parameters<typeof resolveStageTelemetry>[0]>) => ReturnType<typeof resolveStageTelemetry>;
+  readonly resolveReviewActionLimit: typeof resolveReviewActionLimit;
   /** Individual post-execute mechanisms. The application service owns their ordering. */
   readonly performReviewPreparation: (slug: string, options: { forgejoUser?: string; force?: boolean; executionContext: import('../../application/ports/mission-execution-context.js').LiveMissionExecutionContext }) => ReturnType<typeof performReviewPreparation>;
   /** Binds the review-loop mechanisms; the application review loop sequences them. */
@@ -283,7 +285,13 @@ class AutonomousReviewAdapter implements AutonomousReviewPort {
     const mechanisms = this._runtime.reviewLoopMechanisms(request.slug, { executionContext: live.context }, {
       onAgentLaunched: request.onAgentLaunched, onAutonomousStop: request.onAutonomousStop,
     });
-    await runReviewLoop({ slug: request.slug, implementer: request.implementer, reviewer: request.reviewer, skipReviewPreparation: true }, mechanisms);
+    await runReviewLoop({
+      slug: request.slug,
+      implementer: request.implementer,
+      reviewer: request.reviewer,
+      actionLimit: this._runtime.resolveReviewActionLimit(live.context.missionWorktree),
+      skipReviewPreparation: true,
+    }, mechanisms);
   }
 }
 
@@ -362,6 +370,7 @@ export function createDefaultExecuteMissionRuntime(configuration: ParallixConfig
     getTaskStatus,
     recordActiveStats: options => stats.recordActiveStats({ ...options, configuration }),
     resolveStageTelemetry,
+    resolveReviewActionLimit,
     performReviewPreparation: (slug, options) => performReviewPreparation(slug, { ...options, configuration }),
     reviewLoopMechanisms: (slug, target, bindings) => createReviewLoopPorts(slug, target, { ...bindings, configuration }),
     repairReviewPreparation: (slug, worktree, errorMsg, options) => repairReviewPreparation.default(slug, worktree, errorMsg, { ...options, configuration }),

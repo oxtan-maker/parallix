@@ -117,7 +117,7 @@ describe("Attempt exclusion guard", () => {
   const ADR_0053 = 'docs/adr/0053-operational-persistence-and-authority-boundaries.md';
   const DOMAIN_README = 'src/domain/README.md';
 
-  // Plural retry counters (for example DEFAULT_MAX_ATTEMPTS) are not an Attempt
+  // Plural retry counters (for example RETRY_ATTEMPT_LIMIT) are not an Attempt
   // entity. Identity fields and SQL tables are checked separately below.
   const ATTEMPT = /attempt(?!s(?:\b|_))/i;
 
@@ -289,7 +289,7 @@ describe("Attempt exclusion guard", () => {
   test('SC4 fixture: guard accepts a local retry counter and loop variable', () => {
     assert.deepEqual(
       attemptShapedDeclarations(
-        'const DEFAULT_MAX_ATTEMPTS = 5;\nlet attempts = 0;\nwhile (attempts < DEFAULT_MAX_ATTEMPTS) { attempts += 1; }\n',
+        'const RETRY_ATTEMPT_LIMIT = 5;\nlet attempts = 0;\nwhile (attempts < RETRY_ATTEMPT_LIMIT) { attempts += 1; }\n',
       ),
       [],
       'A local retry counter is not a declared Attempt record and must not be flagged',

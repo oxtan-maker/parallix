@@ -89,11 +89,12 @@ it('public px review withdraws a red round and sends both automated findings to 
   assert.equal(outcome.code, 0, outcome.messages);
   assert.equal(outcome.gateRunStatus, 'failed', `the red-round evidence remains attached to the repaired revision\n${outcome.messages.slice(-5000)}`);
   assert.equal(outcome.withdrawals, 1, 'the failed round withdraws its human request exactly once');
-  assert.deepEqual(outcome.launches, ['review', 'implement'], 'dual failure has exactly one joint repair attempt');
+  assert.deepEqual(outcome.launches, ['review', 'implement'],
+    'dual failure has exactly one immediate joint repair before the configured lifetime boundary');
   assert.equal((outcome.jointRepairPrompt ?? '').includes('Joint automated repair evidence'), true);
   assert.match(outcome.jointRepairPrompt ?? '', /unit: .*test -f fix\.txt.*exit 1/s);
   assert.match(outcome.jointRepairPrompt ?? '', /A1: agent finding/);
-  assert.equal(outcome.mission.status, 'active', 'the repaired change awaits a fresh public review entry');
+  assert.equal(outcome.mission.status, 'review', 'the fifth action hands the repaired change to human attention');
 });
 
 for (const inferred of [false, true]) {

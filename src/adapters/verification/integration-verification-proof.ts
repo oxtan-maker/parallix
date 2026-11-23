@@ -6,6 +6,8 @@ import type { ParallixConfiguration } from '../../application/ports/configuratio
 import type { IntegrationGateEvidenceOutcome, IntegrationTestsActionObservationPort,
   IntegrationVerificationEvidencePort } from '../../application/ports/integration-verification-evidence.js';
 import type { IntegrationRunOwner } from '../../application/ports/integration-verification-evidence.js';
+import type { GateRunReport, GateRunReportGate, GateRunReportPublisher, GateRunReportState } from '../../application/ports/gate-run-report.js';
+import type { MissionId } from '../../domain/mission.js';
 import { loadAdapterConfig } from '../config/product-config.js';
 import { git } from '../git/git.js';
 import { completedRebaseLineage, completedRebaseLineageForCheckout, ensureRebaseCompletionRecorder } from '../git/rebase-completion-recorder.js';
@@ -43,6 +45,8 @@ interface RunRecord {
   run: RunMeta;
   revision: string;
   gates: Gate[];
+  /** The whole configured plan as this run saw it, so a later config edit cannot rewrite its record. */
+  configured: Gate[];
   outcomes: Outcome[];
 }
 interface Pending {
@@ -148,7 +152,9 @@ function beginIntegrationRun(root: string, gates: readonly Gate[], configuration
       revision, run: startedRun(root, gates, configuration, owner),
     };
     writeJson(file, { policy: 'integration-verification-v1', status: 'running', run: pending.run, revision,
-      gates: gates.map(({ key, command }) => ({ key, command })), outcomes: [] } satisfies RunRecord, { mode: 0o600 });
+      gates: gates.map(({ key, command }) => ({ key, command })),
+      configured: pending.configured.map(({ key, command }) => ({ key, command })),
+      outcomes: [] } satisfies RunRecord, { mode: 0o600 });
     return pending;
   } catch {
     // Prior evidence must not survive a run that could not be recorded.
@@ -181,6 +187,7 @@ function finishIntegrationRun(pending: Pending, outcomes: readonly Outcome[], di
     writeJson(pending.file, { policy: 'integration-verification-v1',
       status: disposition, run, revision: pending.revision,
       gates: pending.gates.map(({ key, command }) => ({ key, command })),
+      configured: pending.configured.map(({ key, command }) => ({ key, command })),
       outcomes: [...outcomes] } satisfies RunRecord, { mode: 0o600 });
     return false;
   } catch { return false; }
@@ -199,12 +206,14 @@ export interface IntegrationGateRun {
   readonly finishedAt: string | null;
   readonly revision: string;
   readonly gates: readonly Gate[];
+  /** Every gate configured for this run, whether or not it executed; equals `gates` for records written before this field existed. */
+  readonly configured: readonly Gate[];
   readonly outcomes: readonly Outcome[];
 }
 
 interface StoredRun {
   policy?: unknown; status?: RunStatus; run?: Partial<RunMeta>; revision?: string;
-  coveredCommit?: string; verifiedAt?: string; gates?: Gate[]; outcomes?: Outcome[];
+  coveredCommit?: string; verifiedAt?: string; gates?: Gate[]; configured?: Gate[]; outcomes?: Outcome[];
 }
 function validStatus(status: unknown): status is RunStatus {
   return status === 'running' || status === 'passed' || status === 'failed' || status === 'cancelled';
@@ -219,6 +228,17 @@ function runGates(data: StoredRun, outcomes: Outcome[]): Gate[] {
   const gates = (Array.isArray(data.gates) ? data.gates : []).filter((gate): gate is Gate =>
     !!gate && typeof gate.key === 'string' && typeof gate.command === 'string');
   return gates.length ? gates : outcomes.map(({ key, command }) => ({ key, command }));
+}
+
+/**
+ * The plan the run itself was started against. Reading the current checkout
+ * instead would let a later config edit drop the prior run's keys and credit
+ * gates it never had on the revision it tested.
+ */
+function runConfiguredPlan(data: StoredRun, observed: Gate[]): Gate[] {
+  const configured = (Array.isArray(data.configured) ? data.configured : []).filter((gate): gate is Gate =>
+    !!gate && typeof gate.key === 'string' && typeof gate.command === 'string');
+  return configured.length ? configured : observed;
 }
 function runTimes(data: StoredRun, status: RunStatus) {
   const stored = data.run;
@@ -291,6 +311,7 @@ export function readIntegrationGateRun(root: string, configuration?: ParallixCon
       startedAt, finishedAt,
       revision,
       gates: observedGates,
+      configured: runConfiguredPlan(data, observedGates),
       outcomes,
     };
   } catch (error) { throw new Error('Integration execution evidence is unreadable', { cause: error }); }
@@ -348,12 +369,62 @@ export function readIntegrationVerificationProof(command: string, root: string, 
   } catch { return miss; }
 }
 
+/** The run facts a report is built from: a pending or settled record, or a prior run found unsettled. */
+interface ReportableRun {
+  readonly gateRunId: string | null; readonly revision: string; readonly startedAt: string; readonly finishedAt: string | null;
+  readonly gates: readonly Gate[]; readonly outcomes: readonly Outcome[];
+}
+
+function reportedGate(gate: Gate, outcomes: readonly Outcome[], state: GateRunReportState): GateRunReportGate {
+  const observed = outcomes.find(outcome => outcome.key === gate.key);
+  if (!observed) { return { key: gate.key, outcome: state === 'running' ? 'pending' : 'not-run', exitCode: null, blockedBy: [], diagnostics: null }; }
+  const outcome = observed.result ?? (observed.exitCode === 0 ? 'passed' : 'failed');
+  return { key: gate.key, outcome, exitCode: observed.exitCode, blockedBy: observed.blockedBy ?? [], diagnostics: observed.diagnostics ?? null };
+}
+
+/**
+ * The one provider-neutral report of a gate run: every configured gate with its
+ * own outcome, identified by run id and bound to the tested revision. Configured
+ * gates this run did not execute were validated by earlier evidence and stay
+ * listed as such. A run without an identity cannot be ordered, so it has no report.
+ */
+export function gateRunReport(missionId: MissionId, run: ReportableRun, state: GateRunReportState,
+  plan: readonly Gate[] = run.gates): GateRunReport | null {
+  if (!run.gateRunId) { return null; }
+  const executed = new Set(run.gates.map(gate => gate.key));
+  const listed = [...plan, ...run.gates.filter(gate => !plan.some(planned => planned.key === gate.key))];
+  const gates = listed.map((gate): GateRunReportGate => executed.has(gate.key) ? reportedGate(gate, run.outcomes, state)
+    : { key: gate.key, outcome: 'validated', exitCode: null, blockedBy: [], diagnostics: null });
+  return { missionId, gateRunId: run.gateRunId, revision: run.revision, startedAt: run.startedAt, finishedAt: run.finishedAt, state, gates };
+}
+
+/** Publication is best effort: a lost report is a missing display, never a wrong verdict. */
+function publishReport(publisher: GateRunReportPublisher | undefined, root: string, report: GateRunReport | null): Promise<void> {
+  return publisher && report ? publisher.publish(root, report).catch(() => undefined) : Promise.resolve();
+}
+
+/** A run record still marked running when a new run replaces it never settled: it was interrupted. */
+function interruptedPriorRun(root: string, missionId: MissionId, configuration?: ParallixConfiguration): GateRunReport | null {
+  try {
+    const prior = readIntegrationGateRun(root, configuration);
+    // The prior run is reported against the plan it started on, never the plan this checkout configures now.
+    return prior?.status === 'running' ? gateRunReport(missionId, prior, 'interrupted', prior.configured) : null;
+  } catch { return null; }
+}
+
 /** Bound by CLI composition; the generic gate executor imports only the port. */
 export function createIntegrationVerificationEvidencePort(configuration?: ParallixConfiguration,
   owner: IntegrationRunOwner | null = null,
-  testsAction?: IntegrationTestsActionObservationPort): IntegrationVerificationEvidencePort {
+  testsAction?: IntegrationTestsActionObservationPort,
+  reports?: GateRunReportPublisher): IntegrationVerificationEvidencePort {
   return { start: async (root, gates, context) => {
+    const interrupted = reports ? interruptedPriorRun(root, context.missionId, configuration) : null;
     const pending = beginIntegrationRun(root, gates, configuration, owner);
+    await publishReport(reports, root, interrupted);
+    if (pending) {
+      await publishReport(reports, root, gateRunReport(context.missionId,
+        { ...pending.run, revision: pending.revision, gates: pending.gates, outcomes: [] }, 'running', pending.configured));
+    }
     if (pending && testsAction) {
       await testsAction.observe({ missionId: context.missionId, actualAction: 'tests', revision: pending.revision,
         verdictCorrelation: pending.run.gateRunId, agentRunId: null, gateRunId: pending.run.gateRunId,
@@ -366,7 +437,11 @@ export function createIntegrationVerificationEvidencePort(configuration?: Parall
       if (testsAction && disposition !== 'cancelled') {
         void testsAction.settle({ missionId: context.missionId, gateRunId: pending.run.gateRunId, passed: disposition === 'passed' }).catch(() => undefined);
       }
-      return reusable;
+      if (!reports) { return reusable; }
+      // The settlement is awaited by the executor so a short-lived command still delivers its terminal result.
+      return publishReport(reports, root, gateRunReport(context.missionId,
+        { ...pending.run, finishedAt: new Date().toISOString(), revision: pending.revision, gates: pending.gates, outcomes }, disposition, pending.configured))
+        .then(() => reusable);
     } };
   } };
 }

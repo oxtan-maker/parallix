@@ -4,12 +4,27 @@ import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import type { ReviewStartFacts } from '../../../../src/application/ports/review-round.js';
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { reviewActionStarted } from '../../../../src/application/review-action-history.js';
+import { missionId } from '../../../../src/domain/mission.js';
 
 async function approvedRun(mode: 'off' | 'shadow' | 'pilot') {
+  const slug = `task-2859-${mode}`;
   const observations: ReviewStartFacts[] = [];
   const committed: string[] = [];
+  const actions: ReturnType<typeof reviewActionStarted>[] = [];
   const fake = fakeReviewLoopPorts({
-    slug: `task-2859-${mode}`,
+    slug,
+    actionHistory: {
+      count: async () => actions.length,
+      record: async input => {
+        const replay = actions.find(action => action.action === input.action && action.correlation === input.correlation
+          && action.changeIdentity === input.changeIdentity);
+        if (replay) { return replay; }
+        const record = reviewActionStarted({ repositoryId: 'repo-a', missionId: missionId(slug), ...input }, actions.length + 1);
+        actions.push(record);
+        return record;
+      },
+    },
     stateport: {
       openRound: async next => {
         next.phase = 'reviewing';
@@ -33,9 +48,9 @@ async function approvedRun(mode: 'off' | 'shadow' | 'pilot') {
     } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
   });
-  await runReviewLoop({ slug: `task-2859-${mode}`, implementer: 'codex', reviewer: 'claude', maxAttempts: 1,
+  await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', actionLimit: 40,
     skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
-  return { fake, observations };
+  return { fake, observations, actions };
 }
 
 test('off, shadow and pilot retain identical review actions and state after post-commit observation (TASK-2859.09)', async () => {
@@ -51,6 +66,10 @@ test('off, shadow and pilot retain identical review actions and state after post
   assert.deepEqual(trace(shadow), trace(off));
   assert.deepEqual(trace(pilot), trace(off));
   assert.deepEqual(off.observations, []);
+  for (const run of [off, shadow, pilot]) {
+    assert.deepEqual(run.actions.map(action => [action.actionSequence, action.action]), [[1, 'agent'], [2, 'human']],
+      'policy mode does not change the history-derived lifetime count');
+  }
   for (const run of [shadow, pilot]) {
     assert.deepEqual(run.observations.map(item => item.actualAction), ['agent', 'human']);
     assert.deepEqual(run.observations.map(item => item.verdictCorrelation),
@@ -65,7 +84,7 @@ test('restart replays only the durable human review-start key (TASK-2859.09)', a
   const approved = await approvedRun('shadow');
   const replayed: ReviewStartFacts[] = [];
   Object.assign(approved.fake.ports, { reviewStarts: { observe: async (facts: ReviewStartFacts) => { replayed.push(facts); } } });
-  await runReviewLoop({ slug: 'task-2859-shadow', isContinue: true, maxAttempts: 1, skipReviewPreparation: true }, approved.fake.ports);
+  await runReviewLoop({ slug: 'task-2859-shadow', isContinue: true, actionLimit: 40, skipReviewPreparation: true }, approved.fake.ports);
   assert.deepEqual(replayed.map(item => [item.actualAction, item.verdictCorrelation]),
     [['human', 'review:1:human-verdict']]);
   assert.equal(approved.fake.launches.length, 1);
@@ -80,7 +99,7 @@ test('persisted approval dry-run performs no observation or metadata read (TASK-
     reviewStarts: { observe: async (facts: ReviewStartFacts) => { observations.push(facts); } },
     preReview: { ...approved.fake.ports.preReview, head: () => { heads += 1; return 'head-1'; } },
   });
-  await runReviewLoop({ slug: 'task-2859-shadow', isContinue: true, dryRun: true, maxAttempts: 1,
+  await runReviewLoop({ slug: 'task-2859-shadow', isContinue: true, dryRun: true, actionLimit: 40,
     skipReviewPreparation: true }, approved.fake.ports);
   assert.deepEqual(observations, []);
   assert.equal(heads, 0);
@@ -98,7 +117,7 @@ test('reviewer recovery and escalation launch no additional observed starts (TAS
     } },
     artifacts: { consumeReviewer: async () => ({ consumed: false }) },
   });
-  await runReviewLoop({ slug: 'task-2859-recovery', implementer: 'codex', reviewer: 'claude', maxAttempts: 1,
+  await runReviewLoop({ slug: 'task-2859-recovery', implementer: 'codex', reviewer: 'claude', actionLimit: 40,
     skipReviewPreparation: true }, fake.ports);
   assert.equal(fake.launches.filter(launch => launch.role === 'reviewer').length, 3);
   assert.deepEqual(observations.map(item => item.actualAction), ['agent']);
@@ -114,7 +133,7 @@ test('dry-run and pre-review rebase conflict emit no review-start observation (T
       ...(scenario === 'rebase-conflict' ? { preReview: { rebase: async () => ({ ok: false as const,
         diagnostic: 'Unresolved shared-file rebase conflicts: src/example.ts' }) } } : {}),
     });
-    await runReviewLoop({ slug: `task-2859-${scenario}`, implementer: 'codex', reviewer: 'claude', maxAttempts: 1,
+    await runReviewLoop({ slug: `task-2859-${scenario}`, implementer: 'codex', reviewer: 'claude', actionLimit: 40,
       skipReviewPreparation: true, dryRun: scenario === 'dry-run' }, fake.ports);
     assert.deepEqual(observations, []);
     assert.deepEqual(fake.launches, []);

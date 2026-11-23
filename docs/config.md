@@ -15,8 +15,20 @@ reports the specific issues, prints the built-in defaults it fell back to, and
 exits non-zero. The fallback is whole-file: a configuration with one rejected
 field contributes none of its overrides to the effective configuration, so fix
 the reported issue rather than relying on the rest of the file still applying.
-The `verificationPolicy` block is an exception: an invalid block disables only
-that feature and reports once per checkout in the process; other overrides apply.
+`verificationPolicy` and `reviewActionLimit` are exceptions: an invalid value
+for either falls back only that feature and reports once per checkout in the
+process; other overrides apply.
+
+## Review action limit
+
+`reviewActionLimit` is the lifetime bound for autonomous review-step actions in
+one Mission. It defaults to `40`. Agent review, policy-selected integration
+tests, human-review handoff and repair starts share the same durable count, so a
+restart or policy-mode change does not open a new window. Recording the limit
+action stops its mechanism and routes the Mission to human attention. A valid
+override is a positive safe integer. An invalid override is reported once per
+checkout in the process and falls back to `40` without discarding other valid
+configuration. The review command has no per-invocation limit override.
 
 Sections not marked as closed below accept extra keys, matching the schema.
 An extra key is not an override: only the fields documented here have an
@@ -46,8 +58,9 @@ Operator commands still override and are recorded as overrides. Escalation,
 recovery, repair and a rebase stopped on conflicts make no policy decision. Any
 missing, invalid or mismatched artifact, contradictory or unmodelled history,
 policy error or round plan that cannot be acted on runs the fixed policy and
-records the typed reason. Every policy-selected action counts against the review
-allowance, so a check that fails forever still ends in a human handoff. Change
+records the typed reason. Every policy-selected action counts against the
+lifetime review action limit, so a check that fails forever still ends in a
+human handoff. Change
 the mode only between missions: a mission in flight when the mode changes
 finishes on the fixed policy with a recorded reason; a mission that already has
 recorded policy decisions when pilot begins is never pinned late.
@@ -217,6 +230,10 @@ verification area. When absent, verification is a successful no-op.
 `defaultArea` is an optional string, default `docs`, used when no explicit or
 diff-derived area is available.
 
+Parallix's own repository leaves the shared command unset. Handoff runs the
+mission's declared gates, and the repository's unit suite runs as part of
+`preIntegration` verification.
+
 `px verify`, handoff, and autonomous review share successful active/review
 verification. Backlog task bookkeeping does not invalidate it. Completed rebases,
 including conflicts resolved in a terminal before restarting Parallix, advance
@@ -372,7 +389,18 @@ operator-local `agents.local.json` blocklist takes precedence over a runtime
 block, so `{ "blocked": false }` makes a runtime-blocked family selectable.
 The web board and agent picker show the active block reason and remaining time.
 Recognized Claude 5-hour limits and Codex usage limits use the reported reset
-rounded up to the next hour. A successful launcher presence check does not clear a usage block.
+rounded up to the next hour. For Codex, Parallix chooses the latest reset from
+the exhausted primary and secondary structured windows. When a start-of-turn
+rejection omits those windows from the rollout, Parallix asks the same isolated
+Codex account for its structured rate limits. If that lookup cannot provide an
+exhausted-window reset, the one-hour fallback applies. A successful launcher
+presence check does not clear a usage block.
+
+A structured provider signal for server overload, such as HTTP 529 or another
+5xx failure, blocks the family until exactly five minutes after detection. The
+block is recorded as an ISO timestamp, and a pinned launch refused during the
+block reports the provider as unavailable. Both usage and overload blocks
+require a structured provider signal.
 
 `adapters.agents.maxConcurrentCustom` is an optional positive integer enforced
 across local custom-agent processes that share `PARALLIX_HOME`; its default is
@@ -405,9 +433,13 @@ any other key is a configuration error.
 
 ## Terminal sessions
 
-Interactive mission operations automatically use tmux when it is installed
-and runnable; headless callers and unavailable terminals use pipes. No configuration is needed. A mission keeps one terminal
-across commands, agent roles and retries, including after work stops.
+Mission operations automatically use tmux when it is installed and runnable,
+including review, integration and draft work that Parallix runs in the background
+for the board or an agent; only an explicit `pipe` host, an unavailable terminal or
+a headless foreground command uses pipes. Background executor hosting does not
+require a TTY; foreground hosting and attachment do. No configuration is
+needed. A mission keeps one terminal across commands, agent roles and retries,
+including after work stops.
 
 In `px web`, click a mission card to view its live tmux output. The view
 keeps updating while open, including when the board changes. A stalled read
@@ -742,6 +774,26 @@ handoff with a checkpoint per failed gate and must rerun the complete configured
 plan; existing human-only classifications stop with their evidence and launch
 no agent. Configuring one phase does not require configuring the
 others; unconfigured phases remain gated-off.
+
+With the Forgejo review provider, every `preIntegration` run — concurrent
+review, sequential verification, repair rerun and explicit integration — is
+also shown on the Mission's pull request. The aggregate verdict is a
+`parallix/pre-integration` commit status on the revision the run tested
+(pending while running, then success, failure, or error for an interrupted or
+cancelled run), so only the pull-request head's own run is its verdict. One
+comment per run lists every configured gate by key as passed, failed, blocked,
+cancelled, not run, or validated earlier (a gate an explicit integration
+skipped because earlier evidence covered it), with a bounded,
+credential-scrubbed tail for each failed gate. A run that started earlier never replaces a newer run's status on the
+same revision. On one Parallix host, publications for one revision are
+serialized so two runs reporting at the same time land one after the other; a
+publication that cannot establish that ordering writes nothing. Publications
+from different hosts are not serialized with each other. A run replaced
+before it settled is reported interrupted against the gates configured when
+that run started, so a later configuration change can neither drop its keys nor
+credit it with a gate it never had. When the provider cannot be read completely enough to order
+the run or find its comment, nothing is published. Review decisions and approval withdrawals stay separate from
+this result, and publication failures never change the gate outcome.
 
 `requirePreIntegration` opts the repository into a fail-closed integration
 merge. It defaults to `false`, so an unconfigured repository completes the

@@ -398,7 +398,7 @@ describe("02 pre-review rebase in-process", () => {
       provider: {},
       preReview: { rebase: async () => facts },
     });
-    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', maxAttempts: 1, skipReviewPreparation: true }, fake.ports);
+    await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 40, skipReviewPreparation: true }, fake.ports);
     const logs = [...fake.logs, ...fake.errors];
     const repairs = fake.launches.filter(launch => launch.role === 'implementer');
 

@@ -61,6 +61,7 @@ import { dismissProviderApproval } from './review-adapter.js';
 import { persistedReviewerOutcome } from '../../application/review-loop/reviewer-outcome.js';
 import { recoverReviewPublications } from './review-workflow-posting.js';
 import { reviewStartObservationBinding, type ReviewStartObservationBindings } from './review-start-observation.js';
+import { reviewControllerLock, unavailableActionHistory } from './review-loop-runtime-guards.js';
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
@@ -69,6 +70,7 @@ export interface ReviewLoopBindings extends ReviewStartObservationBindings {
   readonly startAgent?: typeof startAgent;
   readonly integrationRepair?: ReviewLoopPorts['integrationRepair'];
   readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
+  readonly actionHistory?: ReviewLoopPorts['actionHistory'];
   readonly preferredReviewer?: string;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
@@ -98,12 +100,6 @@ export interface ReviewLoopBindings extends ReviewStartObservationBindings {
 
 /** The per-request knobs the mechanisms read. */
 export type ReviewLoopTarget = Pick<StartReviewRound, 'executionContext'> & Partial<Pick<StartReviewRound, 'focus' | 'verbose' | 'pollTimeoutSeconds' | 'missionPath'>>;
-
-/**
- * One Node process can receive overlapping CLI/controller calls for the same
- * worktree; this process-local set keeps one effective loop owner per key.
- */
-const activeReviewControllers = new Set<string>();
 
 /** The explicit --mission override wins over the slug-derived mission location. */
 function resolveEffectiveMissionPath(missionPath: string | undefined, missionDir: string | null, log: (_msg: string) => void): string | null {
@@ -467,11 +463,9 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       head: () => headRevision(worktree),
     },
     ...reviewStartObservationBinding(bindings, log),
+    actionHistory: bindings.actionHistory ?? unavailableActionHistory(),
     output: { emit: event => renderReviewLoopEvent(event, { log, error }), log, error, exit, onAgentLaunched: bindings.onAgentLaunched, onAutonomousStop: bindings.onAutonomousStop },
-    lock: {
-      tryAcquire: () => (activeReviewControllers.has(key) ? false : (activeReviewControllers.add(key), true)),
-      release: () => { activeReviewControllers.delete(key); },
-    },
+    lock: reviewControllerLock(key),
   };
 }
 

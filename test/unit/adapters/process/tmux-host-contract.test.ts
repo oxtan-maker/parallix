@@ -153,7 +153,8 @@ test('prepared host runs the confined command in the pane and keeps credentials 
   assert.ok(pane.includes(shellQuote("it's")));
   assert.ok(pane.includes("printf '%s\\n'"), 'startup PID and identity use separate lines');
   assert.ok(pane.indexOf('command.identity.tmp') < pane.indexOf('exec '), 'identity is recorded before command execution');
-  assert.match(host, /trap 'cleanup TERM; exit 143' TERM/);
+  assert.match(host, /trap 'terminate TERM' TERM/);
+  assert.match(host, /remain-on-exit on/, 'tmux retains the dead pane long enough to read its native status or signal');
   assert.match(host, /pipe-pane/);
   const creation = host.split('\n').find(line => line.includes(' new-window '))!;
   assert.ok(creation.includes('\\; set-option -w'), 'creation and ownership share one tmux command queue');
@@ -252,6 +253,29 @@ test('attach targets one exact session and supports read-only watching (TASK-264
   assert.deepEqual(tmuxAttachArgs('/s.sock', 'execute-claude-a1-x', true), ['-S', '/s.sock', 'attach-session', '-r', '-t', '=execute-claude-a1-x']);
 });
 
+test('headless supervision preserves a numeric 143 and an actual SIGTERM as distinct outcomes (TASK-2861.03)', async context => {
+  const stdinTTY = Object.getOwnPropertyDescriptor(process.stdin, 'isTTY');
+  const stdoutTTY = Object.getOwnPropertyDescriptor(process.stdout, 'isTTY');
+  Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: false });
+  Object.defineProperty(process.stdout, 'isTTY', { configurable: true, value: false });
+  const first = Object.assign(new childProcess.ChildProcess(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+  const second = Object.assign(new childProcess.ChildProcess(), { stdout: new PassThrough(), stderr: new PassThrough(), kill: () => true });
+  const children = [first, second];
+  context.mock.method(childProcess, 'spawn', () => children.shift()!);
+  const launch = { command: 'px', args: [], socketPath: '/tmp/task.sock', sessionName: 'task', windowName: 'active', started: () => true, cleanup: () => {} };
+  try {
+    const numeric = superviseTmuxLaunch(launch);
+    first.emit('close', 143, null);
+    assert.deepEqual(await numeric, { exitCode: 143, signal: null });
+    const signalled = superviseTmuxLaunch(launch);
+    second.emit('close', null, 'SIGTERM');
+    assert.deepEqual(await signalled, { exitCode: null, signal: 'SIGTERM' });
+  } finally {
+    if (stdinTTY) { Object.defineProperty(process.stdin, 'isTTY', stdinTTY); } else { delete (process.stdin as { isTTY?: boolean }).isTTY; }
+    if (stdoutTTY) { Object.defineProperty(process.stdout, 'isTTY', stdoutTTY); } else { delete (process.stdout as { isTTY?: boolean }).isTTY; }
+  }
+});
+
 test('interactive supervision retries an attach that loses the server/window race (TASK-2643)', async context => {
   const originalStdinTty = process.stdin.isTTY;
   const originalStdoutTty = process.stdout.isTTY;
@@ -279,7 +303,7 @@ test('interactive supervision retries an attach that loses the server/window rac
   await new Promise(resolve => setTimeout(resolve, 60));
   secondAttach.emit('exit', 0);
   child.emit('close', 6);
-  assert.equal(await result, 6);
+  assert.deepEqual(await result, { exitCode: 6, signal: null });
   assert.deepEqual(spawned, ['px', 'tmux', 'tmux']);
 });
 
@@ -314,7 +338,7 @@ for (const clientEvent of ['exit', 'error', 'early-exit', 'early-detach']) {
       if (clientEvent !== 'early-exit') { host.emit('close', 0); }
       if (clientEvent !== 'early-detach') { client.emit(clientEvent === 'early-exit' ? 'exit' : clientEvent, clientEvent === 'error' ? new Error('attach failed') : 0); }
       assert.equal(spawn.mock.callCount(), 2, 'an explicit detach must not attach again at command completion');
-      assert.equal(await result, 0);
+      assert.deepEqual(await result, { exitCode: 0, signal: null });
       assert.equal(cleaned, 1);
       assert.deepEqual(clientKills, []);
     } finally {
@@ -431,6 +455,8 @@ test('a presented launch draws the readable view on the pane and relays raw byte
   const files = (launch: TmuxLaunch) => { const scratch = path.dirname(launch.args[0]); return { host: fs.readFileSync(launch.args[0], 'utf8'), pane: fs.readFileSync(path.join(scratch, 'pane.sh'), 'utf8') }; };
   const [before, after] = [files(plain), files(presented)];
   assert.doesNotMatch(before.pane, /presenter/, 'unpresented launches keep the verbatim pane');
+  assert.match(before.pane, /exec sh .*command\.sh/, 'tmux directly observes the command exit instead of a lossy shell status');
+  assert.match(before.host, /pane-died/, 'the native pane status or signal is captured before cleanup');
   assert.match(before.host, /\| tee '[^']*\/transcript' &/, 'an unpresented pane is relayed and teed into the bounded transcript writer');
   assert.match(after.pane, /tee .*raw.* < .*agent\.out.* \| 'px' '--claude-stream-presenter' &/);
   assert.match(after.pane, /wait "\$presenter"/, 'the pane drains the presenter before reporting the exit status');

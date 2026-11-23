@@ -79,7 +79,7 @@ export const COMPLETED_CONTROLS_MAX_CHARS = 900;
 
 /** The single line rendered when no control has a machine record to report. */
 const NO_CONTROLS_LINE =
-  '  - No verification gate result is recorded for this mission, and no repository or mission gate is declared; running a verification command yourself is permitted.';
+  '  - No verification gate result is recorded for this mission, and no repository or mission gate is declared; report the missing evidence and do not execute verification yourself.';
 
 /** @param {string} command */
 function shortCommand(command: string): string {
@@ -164,7 +164,7 @@ export function buildCompletedControlsBlock(missionPath: string, repoRoot?: stri
     const status = record.exitCode === 0 ? 'passed' : 'failed';
     lines.push(`  - Verification gate \`${shortCommand(record.command)}\`: status ${status}, exitCode ${record.exitCode}, recordedAt ${record.recordedAt}.`);
   } else {
-    lines.push('  - No verification gate result is recorded for this mission; re-running a verification command is permitted.');
+    lines.push('  - No verification gate result is recorded for this mission; report the missing evidence and do not execute verification yourself.');
   }
   if (declared.length > 0) {
     lines.push(`  - Mission \`## Gates\` executed by review-preparation: ${declared.map(c => `\`${shortCommand(c)}\``).join(', ')}.`);

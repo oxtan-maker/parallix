@@ -2,6 +2,8 @@ import { agentFamily } from '../../../src/domain/agents.js';
 import { changeRevision } from '../../../src/domain/review.js';
 import { missionId, missionLabels, type Mission } from '../../../src/domain/mission.js';
 import { missionVersion } from '../../../src/application/domain-ports.js';
+import { reviewActionStarted } from '../../../src/application/review-action-history.js';
+import type { ReviewActionStartedInput } from '../../../src/application/ports/review-action-history.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
@@ -178,6 +180,7 @@ describe("Variant B landing", () => {
         }], intervention: null, stageLaunches: [], reviewEvents: [],
       },
     });
+    let reviewActionCount = 0;
     mock.method(composition, 'createMissionApplicationServices', async () => ({
       store: {
         _repoId: 'default',
@@ -200,6 +203,10 @@ describe("Variant B landing", () => {
           storedMission = { ...storedMission, status: 'done', closedAt: '2026-05-15T12:00:00.000Z' };
           return { durableEvidence: [],  status: 'completed' as const };
         },
+      },
+      reviewActions: {
+        countReviewActions: async () => reviewActionCount,
+        recordReviewAction: async (input: ReviewActionStartedInput) => reviewActionStarted(input, ++reviewActionCount),
       },
       nel: {
         recordNel: async () => ({}),

@@ -125,8 +125,6 @@ function RepairBudgetFact({ card }: { card: WebMissionCard }) {
   if (!budget) { return null; }
   const cue = budget.exhausted ? card.reviewRecovery?.action ?? null : null;
   const state = budget.exhausted ? 'spent; the repair budget is exhausted' : 'used';
-  const allowance = card.reviewWindowAllowance;
-  const windowNote = allowance === null || allowance === undefined ? '' : `; Autonomous review window: ${allowance} attempts per review entry`;
   return (
     <p
       data-repair-budget
@@ -135,10 +133,32 @@ function RepairBudgetFact({ card }: { card: WebMissionCard }) {
       data-repair-exhausted={budget.exhausted}
       {...(cue === null ? {} : { 'data-repair-recovery-cue': cue })}
       aria-label={`Retained repair attempts: ${budget.attemptsUsed} of ${budget.maxAttempts} ${state}${cue === null ? '' : `; next decision: ${cue}`}`}
-      title={`repair attempts ${budget.attemptsUsed}/${budget.maxAttempts}${windowNote}${cue === null ? '' : `; next decision: ${cue}`}`}
+      title={`repair attempts ${budget.attemptsUsed}/${budget.maxAttempts}${cue === null ? '' : `; next decision: ${cue}`}`}
       style={{ margin: `0 0 ${SPACE.md}px`, color: budget.exhausted ? C.amber : C.faint, fontSize: TYPE.meta }}
     >
       {`repair attempts${budget.exhausted ? ' spent' : ''} (${budget.attemptsUsed}/${budget.maxAttempts})`}
+    </p>
+  );
+}
+
+/** Server-owned review actions against the configured limit; a limit hit shows only from its stored record. */
+function ReviewActionsFact({ card }: { card: WebMissionCard }) {
+  const facts = card.reviewActions;
+  if (!facts) { return null; }
+  const hit = facts.limitHit;
+  const used = facts.limit === null ? `${facts.used} (limit unknown)` : `${facts.used}/${facts.limit}`;
+  const caption = `Review actions: ${facts.limit === null ? `${facts.used}, limit unknown` : `${facts.used} of ${facts.limit}`}${hit ? `; action limit ${hit.limit} reached at action ${hit.actionSequence}` : ''}`;
+  return (
+    <p
+      data-review-actions
+      data-review-actions-used={facts.used}
+      {...(facts.limit === null ? {} : { 'data-review-actions-limit': facts.limit })}
+      data-review-action-limit-hit={hit !== null}
+      aria-label={caption}
+      title={caption}
+      style={{ margin: `0 0 ${SPACE.md}px`, color: hit ? C.amber : C.faint, fontSize: TYPE.meta }}
+    >
+      {`review actions ${used}${hit ? ` · limit ${hit.limit} reached` : ''}`}
     </p>
   );
 }
@@ -235,6 +255,7 @@ function FlightCard({ card, snapshotRevision, onAction, onSelect, onDragStart, s
 
       <div style={{ padding: SPACE.lg }}>
         <FlightCardCheckpoint card={card} snapshotRevision={snapshotRevision} />
+        <ReviewActionsFact card={card} />
         <RepairBudgetFact card={card} />
         <ReviewProgress card={card} />
         {card.humanReviewDue && (

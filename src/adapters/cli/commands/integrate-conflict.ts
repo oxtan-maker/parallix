@@ -4,11 +4,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { detectRebaseState, git } from '../../git/git.js';
+import { parseUnmergedFiles } from '../../git/unmerged-paths.js';
 import * as fmt from '../../../application/presentation/cli-format.js';
 import { resolveWorktree, getConflictFiles, getPrimaryWorktree, getPrimaryBranch, conventionalWorktreePath, missionBranchName, isMissionArtifact, resolveMissionBaseBranch } from '../../filesystem/mission-utils.js';
 import * as verification from '../../verification/verification.js';
 import { IntegrationAbort, shellQuote } from './integrate-post.js';
 import { integrationStashMarker } from '../../../application/integrate/base-worktree-repair.js';
+import { findResponsibleStash, pausedRebaseGuidance, quoteShellWord, receivingCheckoutLine, stashCleanupGuidance, unresolvedIndexGuidance } from '../../../application/integrate/checkout-recovery-guidance.js';
+import type { IntegrationStash } from '../../../application/ports/integration-records.js';
 import { isLandedSquashMessage, parseCommitMessageRecords } from './landed-squash.js';
 
 export { findExistingSquashCommit, findLandedSquashOnBaseBranch, isLandedSquashMessage, parseCommitMessageRecords } from './landed-squash.js';
@@ -71,7 +74,7 @@ export function restoreNoisePatchAfterSquash(rootDir: string, patchPath: string 
 /** @param {string} rootDir @param {{gitRunner?: GitReader}} opts */
 export function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts: {gitRunner?: GitReader} = {}) {
   const runner = opts.gitRunner || git;
-  const result = runner(['-C', rootDir, 'ls-files', '-u']);
+  const result = runner(['-C', rootDir, 'ls-files', '-u', '-z']);
   if (result.status !== 0) {
     return {
       ok: false,
@@ -80,18 +83,9 @@ export function getUnresolvedIndexConflicts(rootDir = getPrimaryWorktree(), opts
     };
   }
 
-  const files = Array.from(new Set(
-    result.stdout
-      .split('\n')
-      .map((line: string) => line.trim())
-      .filter(Boolean)
-      .map((line: string) => line.split('\t')[1])
-      .filter(Boolean)
-  ));
-
   return {
     ok: true,
-    files
+    files: parseUnmergedFiles(result.stdout)
   };
 }
 
@@ -117,12 +111,58 @@ export function parseStashPopCollisionFiles(output = '') {
     .map(line => line.replace(/\s+already exists, no checkout$/i, ''));
 }
 
+/** The stash entry proven responsible by object identity and marker, or null when ownership is unknown. */
+function responsibleStash(runner: GitReader, rootDir: string, expected: {objectId?: string; marker?: string}) {
+  if (!expected.marker) { return null; }
+  const list = runner(['-C', rootDir, 'stash', 'list', '--format=%gd%x00%H%x00%gs']);
+  return list.status === 0 ? findResponsibleStash(list.stdout, { objectId: expected.objectId, marker: expected.marker }) : null;
+}
+
+function reportReadableStashRestoreFailure({
+  rootDir,
+  indexConflictFiles,
+  collisionFiles,
+  stash,
+  detectRebaseStateFn,
+  report
+}: {
+  rootDir: string;
+  indexConflictFiles: string[];
+  collisionFiles: string[];
+  stash: ReturnType<typeof responsibleStash>;
+  detectRebaseStateFn: typeof detectRebaseState;
+  report: (line: string) => void;
+}) {
+  if (indexConflictFiles.length > 0) {
+    report('Stash restore failure type: merge-conflict (unmerged index entries)');
+    indexConflictFiles.forEach((file: string) => report(`Collision file: ${file}`));
+    const rebaseMetadata = Boolean(detectRebaseStateFn(rootDir).rebaseDir);
+    unresolvedIndexGuidance(rootDir, indexConflictFiles, { rebaseMetadata }).forEach(report);
+    if (rebaseMetadata) { pausedRebaseGuidance(rootDir).forEach(report); }
+  } else {
+    report('Stash restore failure type: file-collision');
+    collisionFiles.forEach((file: string) => report(`Collision file: ${file}`));
+    report('Move each colliding file aside only after confirming it holds the landed content:');
+    collisionFiles.forEach((file: string) => {
+      report(`  mv -- ${quoteShellWord(path.join(rootDir, file))} ${quoteShellWord(path.join(rootDir, `${file}.pre-stash-pop`))}`);
+    });
+    if (collisionFiles.length === 0) { report(`Inspect the stash-pop output below and the paths it names in ${rootDir}.`); }
+    if (stash) {
+      report('Then restore the verified stash:');
+      report(`  git -C ${quoteShellWord(rootDir)} stash pop --index ${quoteShellWord(stash.ref)}`);
+    }
+  }
+  stashCleanupGuidance(rootDir, stash).forEach(report);
+}
+
 /**
+ * Report a failed stash restore after landing. Landing is claimed only from the
+ * verified HEAD message and the stash only from its recorded object and marker.
  * @param {string} slug
  * @param {{stdout: string, stderr: string, status: number}} restoreResult
- * @param {{rootDir?: string, gitRunner?: GitReader, getUnresolvedIndexConflictsFn?: typeof getUnresolvedIndexConflicts}} opts
+ * @param {{rootDir?: string, stash?: IntegrationStash, gitRunner?: GitReader, getUnresolvedIndexConflictsFn?: typeof getUnresolvedIndexConflicts}} opts
  */
-export function reportStashPopFailure(slug: string, restoreResult: Pick<ReturnType<typeof git>, 'stdout' | 'stderr'>, opts: {rootDir?: string, gitRunner?: GitReader, getUnresolvedIndexConflictsFn?: typeof getUnresolvedIndexConflicts} = {}) {
+export function reportStashPopFailure(slug: string, restoreResult: Pick<ReturnType<typeof git>, 'stdout' | 'stderr'>, opts: {rootDir?: string, stash?: IntegrationStash, gitRunner?: GitReader, getUnresolvedIndexConflictsFn?: typeof getUnresolvedIndexConflicts, detectRebaseStateFn?: typeof detectRebaseState} = {}) {
   const output = [restoreResult.stdout, restoreResult.stderr].filter(Boolean).join('\n').trim();
   const runner = opts.gitRunner || git;
   const rootDir = opts.rootDir || getPrimaryWorktree();
@@ -137,46 +177,41 @@ export function reportStashPopFailure(slug: string, restoreResult: Pick<ReturnTy
   const integrationLanded = headRecords.some(record => isLandedSquashMessage(record.message, slug, rootDir));
   const indexConflicts = (opts.getUnresolvedIndexConflictsFn || getUnresolvedIndexConflicts)(rootDir);
   const collisionFiles = parseStashPopCollisionFiles(output);
+  const stash = responsibleStash(runner, rootDir, { objectId: opts.stash?.objectId, marker: integrationStashMarker(slug) });
+  const report = (line: string) => fmt.log.fail(`  ${line}`);
 
   fmt.log.fail('[RESTORE] Could not restore the temporarily stashed local integration checkout changes.');
+  report(receivingCheckoutLine({ baseWorktree: rootDir, baseBranch: runner(['-C', rootDir, 'symbolic-ref', '--quiet', '--short', 'HEAD']).stdout.trim() || '(detached HEAD)' }));
   if (integrationLanded) {
-    fmt.log.fail(`  Integration commit landed: ${headLine}`);
+    report(`Integration commit landed: ${headLine}`);
   } else {
-    fmt.log.fail(`  Integration landing not confirmed by HEAD: ${headLine}`);
+    report(`Integration landing not confirmed by HEAD: ${headLine}`);
   }
 
-  if (indexConflicts.ok && indexConflicts.files.length > 0) {
-    fmt.log.fail('  Stash restore failure type: merge-conflict (unmerged index entries)');
-    indexConflicts.files.forEach((file: string) => fmt.log.fail(`  Collision file: ${file}`));
-    fmt.log.fail('  Recovery steps:');
-    fmt.log.fail(`    1. cd ${rootDir}`);
-    indexConflicts.files.forEach((file: string) => {
-      fmt.log.fail(`    2. Resolve ${file}, then run git add "${file}" or git rm "${file}"`);
-    });
-    fmt.log.fail('    3. git status --short');
-    fmt.log.fail('    4. git stash drop');
-  } else {
-    fmt.log.fail('  Stash restore failure type: file-collision');
-    if (collisionFiles.length > 0) {
-      collisionFiles.forEach((file: string) => fmt.log.fail(`  Collision file: ${file}`));
-    }
-    fmt.log.fail('  Recovery steps:');
-    fmt.log.fail(`    1. git -C ${rootDir} stash show --name-only stash@{0}`);
-    if (collisionFiles.length > 0) {
-      collisionFiles.forEach((file: string) => {
-        fmt.log.fail(`    2. mv ${path.join(rootDir, file)} ${path.join(rootDir, `${file}.pre-stash-pop`)}`);
-      });
-      fmt.log.fail(`    3. git -C ${rootDir} stash pop`);
-    } else {
-      fmt.log.fail(`    2. Inspect the latest stash-pop output and move or remove the colliding files in ${rootDir}`);
-      fmt.log.fail(`    3. git -C ${rootDir} stash pop`);
-    }
+  if (!indexConflicts.ok) {
+    // Unresolved index state is unknown, so only read-only inspection is offered.
+    report(`Stash restore failure type: index-unreadable (${indexConflicts.error || 'unknown error'})`);
+    report('Inspect without changing anything; no recovery command is suggested until the index can be read:');
+    report(`  git -C ${quoteShellWord(rootDir)} status --short`);
+    report(`  git -C ${quoteShellWord(rootDir)} stash list`);
+    appendRawOutput(output);
+    return;
   }
+  reportReadableStashRestoreFailure({
+    rootDir,
+    indexConflictFiles: indexConflicts.files,
+    collisionFiles,
+    stash,
+    detectRebaseStateFn: opts.detectRebaseStateFn || detectRebaseState,
+    report
+  });
+  appendRawOutput(output);
+}
 
-  if (output) {
-    fmt.log.fail('  Raw stash pop output:');
-    output.split('\n').forEach((line: string) => fmt.log.fail(`    ${line}`));
-  }
+function appendRawOutput(output: string) {
+  if (!output) { return; }
+  fmt.log.fail('  Raw stash pop output:');
+  output.split('\n').forEach((line: string) => fmt.log.fail(`    ${line}`));
 }
 
 /** @param {string} taskFilePath @param {string} slug @param{{rootDir?: string}} options */
@@ -191,6 +226,20 @@ export function rewriteWorktreePaths(taskFilePath: string, slug: string, options
   if (before !== updated) {
     fs.writeFileSync(taskFilePath, updated, 'utf8');
   }
+}
+
+function currentStashObject(runner: GitReader, rootDir: string): string | undefined {
+  const top = runner(['-C', rootDir, 'rev-parse', '--verify', '-q', 'refs/stash']);
+  const objectId = top.status === 0 ? top.stdout.trim() : '';
+  return objectId || undefined;
+}
+
+/** Object id created by this push, only when it is new and its subject carries this run's marker. */
+function verifiedStashObject(runner: GitReader, rootDir: string, marker: string, previousObjectId?: string): {objectId?: string} {
+  const objectId = currentStashObject(runner, rootDir);
+  if (!objectId || objectId === previousObjectId) { return {}; }
+  const subject = runner(['-C', rootDir, 'log', '-1', '--format=%s', 'refs/stash']);
+  return subject.status === 0 && subject.stdout.trim().endsWith(marker) ? { objectId } : {};
 }
 
 /** @param{{slug: string, dirtyEntries?: string[], rootDir?: string, gitRunner?: GitReader}} params */
@@ -208,6 +257,7 @@ export function stashMainCheckoutIfNeeded({
   // sweep matches against this exact string, so the push and the sweep can't
   // disagree on the identifier.
   const message = integrationStashMarker(slug);
+  const previousObjectId = currentStashObject(gitRunner, rootDir);
   fmt.log.info(`[STASH] Stashing unrelated local integration checkout changes before integration: ${message}`);
   const result = gitRunner([
     '-C',
@@ -227,19 +277,30 @@ export function stashMainCheckoutIfNeeded({
   return {
     created: true,
     message,
-    rootDir
+    rootDir,
+    ...verifiedStashObject(gitRunner, rootDir, message, previousObjectId)
   };
 }
 
-/** @param{{message?: string, rootDir?: string, gitRunner?: GitReader}} params */
-export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree(), gitRunner = git }: {message?: string, rootDir?: string, gitRunner?: GitReader}) {
+/**
+ * Restore only the recorded integration stash: its reference is re-resolved by object identity and
+ * marker, so an unrelated stash pushed above it is never applied or deleted. Without a verified
+ * owner nothing is popped and every stash is retained for the failure report.
+ * @param{{message?: string, objectId?: string, rootDir?: string, gitRunner?: GitReader}} params
+ */
+export function restoreMainCheckoutStash({ message, objectId, rootDir = getPrimaryWorktree(), gitRunner = git }: {message?: string, objectId?: string, rootDir?: string, gitRunner?: GitReader}) {
   fmt.log.info(`[RESTORE] Restoring temporarily stashed local integration checkout changes: ${message}`);
+  const list = gitRunner(['-C', rootDir, 'stash', 'list', '--format=%gd%x00%H%x00%gs'], { cwd: rootDir });
+  const owned = list.status === 0 && message ? findResponsibleStash(list.stdout, { objectId, marker: message }) : null;
+  if (!owned) {
+    return { status: 1, signal: null, stdout: '', stderr: 'Integration stash identity could not be verified; no stash was applied and every stash was retained.' };
+  }
   // Use --index for safer restore semantics: git attempts to reinstage the index
   // changes from the stash alongside the working-tree changes. Collisions are
   // left as merge conflicts rather than silently overwriting files.
   // Pass cwd explicitly so spawnSync does not inherit the process cwd, which may have been
   // deleted by worktree cleanup earlier in the same integrate run.
-  return gitRunner(['-C', rootDir, 'stash', 'pop', '--index'], { cwd: rootDir });
+  return gitRunner(['-C', rootDir, 'stash', 'pop', '--index', owned.ref], { cwd: rootDir });
 }
 
 /**
@@ -247,9 +308,10 @@ export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree
  * dropping the temporary stash. The outcome is benign when it is a pure
  * file-collision: a stashed *untracked* file could not be restored because it
  * now already exists on disk (it was committed by the landed squash merge, so
- * it is tracked and its content is intact). When the stash pop instead left
- * unmerged index entries, or a colliding file is missing from disk, data may
- * still be at stake and the caller must surface the failure instead.
+ * it is tracked and its content is intact). Nothing is dropped unless the
+ * recorded stash identity and at least one such collision are proven; an index
+ * that cannot be scanned, unmerged entries, a missing colliding file or an
+ * unidentified stash leave data at stake and the caller must surface the failure.
  *
  * @returns {{ok: true, ref: string} | null} a drop token when safe to drop,
  *   or null when the failure needs a human.
@@ -257,14 +319,14 @@ export function restoreMainCheckoutStash({ message, rootDir = getPrimaryWorktree
 export function maybeDropStashAfterCollision(
   restoreResult: {stdout: string, stderr: string, status: number | null},
   rootDir: string,
-  opts: {gitRunner?: GitReader} = {}
+  opts: {gitRunner?: GitReader, expectedObjectId?: string, marker?: string} = {}
 ): {ok: true, ref: string} | null {
   const runner = opts.gitRunner || git;
   const output = [restoreResult.stdout, restoreResult.stderr].filter(Boolean).join('\n');
 
   // Unmerged index entries mean a real merge conflict that needs resolution.
   const conflicts = getUnresolvedIndexConflicts(rootDir, {gitRunner: runner});
-  if (conflicts.ok && conflicts.files.length > 0) {
+  if (!conflicts.ok || conflicts.files.length > 0) {
     return null;
   }
 
@@ -273,15 +335,23 @@ export function maybeDropStashAfterCollision(
   // missing would mean the stash could not be recovered at all.
   const collisionFiles = parseStashPopCollisionFiles(output);
   const missing = collisionFiles.filter((file: string) => !fs.existsSync(path.join(rootDir, file)));
-  if (missing.length > 0) {
+  // An arbitrary failure with no parsed collision proves nothing benign, so the stash is kept.
+  if (collisionFiles.length === 0 || missing.length > 0) {
     return null;
   }
 
-  const drop = runner(['-C', rootDir, 'stash', 'drop', 'stash@{0}']);
+  // Resolve the recorded object and marker to its current ref, then guard that same ref again
+  // immediately before dropping it so a shifted reference cannot delete an unrelated stash.
+  const owned = responsibleStash(runner, rootDir, { objectId: opts.expectedObjectId, marker: opts.marker });
+  if (!owned || runner(['-C', rootDir, 'rev-parse', '--verify', '-q', owned.ref]).stdout.trim() !== owned.objectId) {
+    return null;
+  }
+
+  const drop = runner(['-C', rootDir, 'stash', 'drop', owned.ref]);
   if (drop.status !== 0) {
     return null;
   }
-  return { ok: true, ref: 'stash@{0}' };
+  return { ok: true, ref: owned.ref };
 }
 
 /**

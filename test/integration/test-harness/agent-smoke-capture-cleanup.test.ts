@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import { tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
+import { activeCustomCapacityCount, tryAcquireCustomCapacity } from '../../../src/adapters/agents/custom-capacity.js';
 import { clearCustomAdmissionStateCache } from '../../../src/adapters/sqlite/custom-admission-state.js';
 const originalOpenSync = fs.openSync;
 const originalTmpdir = os.tmpdir;
@@ -132,6 +132,170 @@ test('real-agent smoke selection is final before launch and a custom failure nev
   assert.equal(selections, 1);
   assert.deepEqual(launches, ['custom']);
   assert.equal(launches.includes('codex'), false);
+});
+
+const KUB2_MODEL = '/models/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf';
+
+function writeKub2PiHome(root: string) {
+  const agentHome = path.join(root, '.pi', 'agent');
+  fs.mkdirSync(agentHome, { recursive: true });
+  // Pi writes trailing commas; the route must tolerate them.
+  fs.writeFileSync(path.join(agentHome, 'models.json'),
+    `{"providers": {"gemma-kub2": {"baseUrl": "http://kub2:8080/v1/", "apiKey": "dummy-key", "models": [{"id": ${JSON.stringify(KUB2_MODEL)},},],},},}`);
+  return agentHome;
+}
+
+test('real-agent smoke prefers a reachable kub2 pi route before admission and Codex (PX-0076)', async () => {
+  let admissionProbes = 0;
+  let codexChecks = 0;
+  const selection = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    resolveKub2Route: async () => ({ provider: 'gemma-kub2', model: KUB2_MODEL }),
+    acquireCustomCapacity: async () => { admissionProbes += 1; return null; },
+    codexEligible: () => { codexChecks += 1; return true; },
+  }));
+  assert.deepEqual(selection, {
+    agent: 'custom', runner: 'pi', model: KUB2_MODEL, reasoningEffort: null,
+    piProvider: 'gemma-kub2', reason: 'kub2-pi',
+  });
+  assert.equal(admissionProbes, 0, 'kub2 route must not call production custom admission');
+  assert.equal(codexChecks, 0, 'kub2 route must not inspect Codex');
+
+  const explicit = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    explicitAgent: 'codex', explicitModel: 'gpt-6-luna',
+    resolveKub2Route: async () => ({ provider: 'gemma-kub2', model: KUB2_MODEL }),
+  }));
+  assert.equal(explicit.reason, 'explicit-override');
+
+  const explicitCustom = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    explicitAgent: 'custom', configuredCustomRunner: 'opencode',
+    resolveKub2Route: async () => ({ provider: 'gemma-kub2', model: KUB2_MODEL }),
+  }));
+  assert.deepEqual(explicitCustom, {
+    agent: 'custom', runner: 'opencode', model: 'local/custom-model', reasoningEffort: null,
+    reason: 'explicit-override',
+  });
+});
+
+test('real-agent smoke kub2 route resolves from pi models with a no-inference GET check (PX-0076)', async () => {
+  const home = fs.mkdtempSync(path.join(originalTmpdir(), 'px-0076-pi-'));
+  try {
+    const agentHome = writeKub2PiHome(home);
+    const requests: { url: string; method: string }[] = [];
+    const reachable = (async (url: string, init?: RequestInit) => {
+      requests.push({ url: String(url), method: init?.method ?? 'GET' });
+      return new Response('{}', { status: 200 });
+    }) as typeof fetch;
+    assert.deepEqual(await smokeHelpers.resolveKub2SmokeRoute(agentHome, reachable),
+      { provider: 'gemma-kub2', model: KUB2_MODEL });
+    assert.deepEqual(requests, [{ url: 'http://kub2:8080/v1/models', method: 'GET' }]);
+
+    const refused = (async () => { throw new Error('ECONNREFUSED'); }) as typeof fetch;
+    assert.equal(await smokeHelpers.resolveKub2SmokeRoute(agentHome, refused), null);
+    const unhealthy = (async () => new Response('', { status: 503 })) as typeof fetch;
+    assert.equal(await smokeHelpers.resolveKub2SmokeRoute(agentHome, unhealthy), null);
+    assert.equal(await smokeHelpers.resolveKub2SmokeRoute(path.join(home, 'absent'), reachable), null);
+
+    fs.writeFileSync(path.join(agentHome, 'models.json'), '{"providers": {"vllm": {"baseUrl": "http://kub:8080/v1", "models": [{"id": "x"}]}}}');
+    assert.equal(await smokeHelpers.resolveKub2SmokeRoute(agentHome, reachable), null);
+    assert.equal(requests.length, 1, 'a missing models file or provider must not issue a request');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('real-agent smoke falls through to the unchanged order when kub2 is absent (PX-0076)', async () => {
+  const absent = { resolveKub2Route: async () => null };
+  const saturated = await smokeHelpers.selectRealAgentSmoke(selectionOptions(absent));
+  assert.equal(saturated.reason, 'custom-saturated-codex');
+  assert.equal(saturated.agent, 'codex');
+  const admitted = await smokeHelpers.selectRealAgentSmoke(selectionOptions({
+    ...absent, acquireCustomCapacity: async () => ({ release() {} }),
+  }));
+  assert.deepEqual(admitted, {
+    agent: 'custom', runner: 'pi', model: 'local/custom-model', reasoningEffort: null, reason: 'custom-admitted',
+  });
+  const blocked = await smokeHelpers.selectRealAgentSmoke(selectionOptions({ ...absent, codexBlocked: () => true }));
+  assert.equal(blocked.reason, 'custom-saturated-codex-unavailable');
+});
+
+test('kub2 smoke route owns a two-slot disposable lease pool independent of production admission (PX-0076)', async () => {
+  const root = fs.mkdtempSync(path.join(originalTmpdir(), 'px-0076-kub2-admission-'));
+  const productionPolicy = path.join(root, 'production-policy');
+  fs.mkdirSync(productionPolicy);
+  fs.writeFileSync(path.join(productionPolicy, 'workflow.config.json'), JSON.stringify({
+    adapters: { agents: { maxConcurrentCustom: 1 } },
+  }));
+  const productionHome = path.join(root, 'production-admission');
+  const base: NodeJS.ProcessEnv = { ...process.env, PARALLIX_HOME: path.join(root, 'operator') };
+  delete base.PARALLIX_E2E_CUSTOM_ADMISSION_HOME;
+  const productionEnvironment = {
+    ...base, PARALLIX_CUSTOM_ADMISSION_HOME: productionHome, PARALLIX_CUSTOM_ADMISSION_REPOSITORY: productionPolicy,
+  };
+  const kub2Environment: NodeJS.ProcessEnv = { ...base };
+  const { admissionHome, policyRoot } = smokeHelpers.configureKub2SmokeAdmission(kub2Environment, root, 'test');
+  const held: Awaited<ReturnType<typeof tryAcquireCustomCapacity>>[] = [];
+  try {
+    assert.notEqual(admissionHome, productionHome);
+    assert.equal(kub2Environment.PARALLIX_CUSTOM_ADMISSION_HOME, admissionHome);
+    assert.equal(kub2Environment.PARALLIX_CUSTOM_ADMISSION_REPOSITORY, policyRoot);
+    const configuration = resolveConfiguration(kub2Environment);
+    held.push(await tryAcquireCustomCapacity(policyRoot, configuration));
+    held.push(await tryAcquireCustomCapacity(policyRoot, configuration));
+    assert.ok(held[0] && held[1], 'two concurrent smoke processes must each acquire a lease');
+    assert.equal(await tryAcquireCustomCapacity(policyRoot, configuration), null, 'a third must be refused');
+    assert.equal(await activeCustomCapacityCount(configuration), 2);
+
+    // Production admission keeps its own pool and capacity: its slot is still free.
+    const production = resolveConfiguration(productionEnvironment);
+    assert.equal(await activeCustomCapacityCount(production), 0, 'no lease row in production admission state');
+    const productionSlot = await tryAcquireCustomCapacity(productionPolicy, production);
+    held.push(productionSlot);
+    assert.ok(productionSlot, 'kub2 leases must not occupy the production custom slot');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(productionPolicy, 'workflow.config.json'), 'utf8')).adapters.agents.maxConcurrentCustom, 1);
+  } finally {
+    for (const reservation of held) reservation?.release();
+    await clearCustomAdmissionStateCache();
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('kub2 smoke fixture pins pi provider and model with isolated credentials and no family retry (PX-0076)', async () => {
+  const home = fs.mkdtempSync(path.join(originalTmpdir(), 'px-0076-fixture-'));
+  const originalHomedir = os.homedir;
+  let fixture: ReturnType<typeof smokeHelpers.setupRepository> | undefined;
+  try {
+    const agentHome = writeKub2PiHome(home);
+    fs.writeFileSync(path.join(agentHome, 'settings.json'), JSON.stringify({
+      defaultProvider: 'vllm', defaultModel: 'operator-default', packages: ['x'], skills: ['y'],
+    }));
+    fs.writeFileSync(path.join(agentHome, 'auth.json'), 'operator-credential');
+    os.homedir = () => home;
+    fixture = smokeHelpers.setupRepository({
+      slug: 'task-9002', title: 'Pinned', runner: 'pi', model: KUB2_MODEL, piProvider: 'gemma-kub2',
+      runnerCommandPath: process.execPath,
+    });
+    const settings = JSON.parse(fs.readFileSync(path.join(fixture.piAgentHome, 'settings.json'), 'utf8'));
+    assert.equal(settings.defaultProvider, 'gemma-kub2');
+    assert.equal(settings.defaultModel, KUB2_MODEL);
+    assert.deepEqual([settings.packages, settings.skills], [[], []]);
+    assert.notEqual(fixture.piAgentHome, agentHome);
+    fs.writeFileSync(path.join(fixture.piAgentHome, 'auth.json'), 'fixture-credential');
+    assert.equal(fs.readFileSync(path.join(agentHome, 'auth.json'), 'utf8'), 'operator-credential');
+    assert.equal(JSON.parse(fs.readFileSync(path.join(agentHome, 'settings.json'), 'utf8')).defaultProvider, 'vllm');
+
+    const launches: string[] = [];
+    await assert.rejects(smokeHelpers.executeRealAgentSmoke(
+      async () => smokeHelpers.selectRealAgentSmoke(selectionOptions({
+        resolveKub2Route: async () => ({ provider: 'gemma-kub2', model: KUB2_MODEL }),
+      })),
+      async selection => { launches.push(selection.reason); throw new Error('kub2 lifecycle failed'); },
+    ), /kub2 lifecycle failed/);
+    assert.deepEqual(launches, ['kub2-pi'], 'a kub2 failure must not retry on another family');
+  } finally {
+    os.homedir = originalHomedir;
+    if (fixture) fs.rmSync(fixture.tmpRoot, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('smoke state snapshots read only agent configuration, never the operator database', (t) => {

@@ -6,12 +6,11 @@ import { tryClassifyReview } from '../review-classification/classify-review.js';
  * the outcome into the next step — approval stops the loop, anything else moves
  * the round to fixing.
  */
-import { integrationRepairReviewBrief, latestIntegrationRepair } from '../integration-repair-review.js';
-import { missionId } from '../../domain/mission.js';
+import { missionIntegrationRepairReviewBrief } from '../integration-repair-review.js';
 import { DEFAULT_REBOUND_ATTEMPTS, rebound } from '../rebound-kernel.js';
 import { isArtifactInfraFailure, isPollTimeout, POLL_TIMEOUT, type ReviewerArtifactFacts } from '../ports/review-round.js';
 import { pinReviewBaseline } from './pin-baseline.js';
-import { emitReviewerProgress, establishReviewerPolicy, launchFailureAllowsReplacement, nextOutstandingReviewer, reconcileReroutedReviewer, recordedApprovalReady, recordedPendingApproval, recordObservedApproval, replaceFailedReviewer } from './reviewer-policy.js';
+import { emitReviewerProgress, establishReviewerPolicy, launchFailureAllowsReplacement, nextOutstandingReviewer, reconcileReroutedReviewer, recordedApprovalReady, recordObservedApproval, replaceFailedReviewer } from './reviewer-policy.js';
 import { runDeclaredPreReviewGate, runPreReviewRebase } from './pre-review.js';
 import { testsPreferredAfterSetup } from './policy-action.js';
 import { adoptLaunchedAgent, elapsedSince, reboundCollaborators, stopIfControllerSuperseded, type LoopContext, type ReviewRound, type RoundStep } from './round.js';
@@ -21,6 +20,7 @@ import { applyReviewerArtifacts, incompleteReviewerDiagnostic, missingReviewerAr
 import { applyReviewerOutcome, beginHumanTurn, persistedReviewerOutcome } from './reviewer-outcome.js';
 import { observeAgentReviewStart } from './review-start-observation.js';
 import { startConcurrentPolicyRound } from './concurrent-policy-round.js';
+import { admitReviewerLaunch, completedReviewerOutput, stopForVerdictBlock } from './reviewer-admission.js';
 
 type ReviewOutcome = { outcome: 'stop' | 'replan' | 'approved' } | { reviewState: unknown };
 /** Re-evaluate separation only at a judgment boundary, using the actual roles. */
@@ -34,7 +34,6 @@ function routeCollidingReviewer(context: LoopContext): boolean {
     implementer: identities.implementer,
     isContinue: true,
     persisted: state,
-    maxAttempts: context.maxAttempts,
     dryRun: context.dryRun,
     providerEnabled: Boolean(context.ports.provider),
     slug: context.slug,
@@ -46,14 +45,6 @@ function routeCollidingReviewer(context: LoopContext): boolean {
   identities.reviewer = selected.reviewer;
   state.reviewer = selected.reviewer;
   return true;
-}
-
-/** The recorded integration repair the reviewer is told about. */
-async function integrationRepairBrief(context: LoopContext): Promise<string> {
-  const store = context.ports.missionStore;
-  if (!store) { return ''; }
-  const loaded = await store.load(missionId(context.slug));
-  return loaded.kind === 'found' ? integrationRepairReviewBrief(latestIntegrationRepair(loaded.mission)) : '';
 }
 
 /** A continuation re-enters its first round with a check for an existing review. */
@@ -82,23 +73,10 @@ function dryRunReviewerPrompt(context: LoopContext, round: ReviewRound): void {
   context.emit({ kind: 'reviewer-dry-run-prompt', prompt: context.ports.agents.dryRunPrompt('reviewer', round.promptFacts()) });
 }
 
-/** A workflow rejection cannot be repaired by waiting for provider output. */
-async function stopForVerdictBlock(context: LoopContext): Promise<boolean> {
-  const block = await context.ports.state.verdictBlock?.();
-  if (!block) { return false; }
-  context.ports.output.error(block.diagnostic);
-  context.exit(1);
-  return true;
-}
-
-/** Launch the reviewer (skipped for an autonomous local round); `replaced` means another selected reviewer takes over. */
 async function launchReviewer(context: LoopContext, round: ReviewRound): Promise<RoundStep | 'replaced' | 'approved'> {
   const { ports, identities } = context;
-  if (await stopForVerdictBlock(context)) { return 'stop'; }
-  if (identities.reviewer === 'autonomous' && !ports.provider) {
-    context.emit({ kind: 'autonomous-reviewer', attempt: round.attempt });
-    return null;
-  }
+  const admission = await admitReviewerLaunch(context, round);
+  if (admission !== 'launch') { return admission === 'autonomous' ? null : 'stop'; }
   context.emit({ kind: 'reviewer-launching', attempt: round.attempt, reviewer: identities.reviewer });
   let launch;
   try {
@@ -162,18 +140,11 @@ async function recordReviewerLaunch(
   return null;
 }
 
-/**
- * Consume the reviewer's output. Incomplete output is relaunched through one
- * rebound occurrence; an infrastructure failure or a spent budget escalates.
- * An exited reviewer with no output enters the same bounded artifact recovery.
- */
+/** Consume completed output or enter bounded artifact recovery. */
 async function consumeReviewerOutput(context: LoopContext, round: ReviewRound): Promise<{ step: RoundStep; reviewState?: unknown }> {
   const { ports, state, identities } = context;
-  const persisted = await ports.state.read();
-  const persistedOutcome = persistedReviewerOutcome(state, persisted);
-  if (persistedOutcome) { return { step: null, reviewState: persistedOutcome }; }
-  if (await recordedPendingApproval(context, round)) { return { step: null, reviewState: 'APPROVED' }; }
-  if (await stopForVerdictBlock(context)) { return { step: 'stop' }; }
+  const completed = await completedReviewerOutput(context, round);
+  if (completed) { return completed; }
   let artifacts = await ports.artifacts.consumeReviewer(identities.reviewer, state, round.reviewerLaunch);
   let reviewState: unknown = null;
   const diagnostic = incompleteReviewerDiagnostic(context, round, artifacts);
@@ -342,9 +313,9 @@ async function openReviewerRound(context: LoopContext): Promise<boolean> {
 /** Run the reviewing half; the outcome the implementer answers, or 'stop'. */
 export async function runReviewerPhase(context: LoopContext, round: ReviewRound, dismissedApproval = false): Promise<ReviewOutcome> {
   const { state } = context;
-  round.integrationRepair = await integrationRepairBrief(context);
+  round.integrationRepair = await missionIntegrationRepairReviewBrief(context.ports.missionStore, context.slug);
   if (state.phase === 'approved') {
-    await beginHumanTurn(context);
+    await beginHumanTurn(context, round);
     return { outcome: 'stop' };
   }
   if (state.phase !== 'reviewing') { return { reviewState: await resumeFixingPhaseReview(context, round) }; }
@@ -407,7 +378,7 @@ async function runFreshReviewer(context: LoopContext, round: ReviewRound): Promi
   // Record the round's reviewer requirement before anything can decide it, so a
   // classifier verdict is measured against the same authority the reviewers answer (PX-0046.03).
   await establishReviewerPolicy(context, round);
-  round.integrationRepair = await integrationRepairBrief(context);
+  round.integrationRepair = await missionIntegrationRepairReviewBrief(context.ports.missionStore, context.slug);
   const cycleStarted = context.ports.classification?.clock();
   const classified = await tryClassifyReview(context, round, cycleStarted);
   if (classified === 'stop') { return { action: 'return', value: { outcome: 'stop' } }; }

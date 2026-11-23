@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { DISK_TEMP_FALLBACK } from '../../src/adapters/process/bulk-storage.js';
 import type { TempRootRecoveryReport } from '../../src/adapters/verification/temp-root-registry.js';
+import { retireFixtureCheckoutTmpdir } from './test-tmpdir.js';
 
 function cleanupRunnerTempRoots(manifestDir: string) {
   try {
@@ -15,7 +16,12 @@ function cleanupRunnerTempRoots(manifestDir: string) {
         if (Array.isArray(recorded)) { recorded.forEach(root => roots.add(root)); }
       } catch (_) {}
     }
-    for (const root of roots) { try { fs.rmSync(root, { recursive: true, force: true }); } catch (_) {} }
+    for (const root of roots) {
+      try {
+        retireFixtureCheckoutTmpdir(root);
+        fs.rmSync(root, { recursive: true, force: true });
+      } catch (_) {}
+    }
     fs.rmSync(manifestDir, { recursive: true, force: true });
   } catch (_) {}
 }

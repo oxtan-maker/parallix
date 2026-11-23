@@ -158,5 +158,6 @@ export async function resolveBounceImplementer(
 /** Print the blocking diagnostic and return the abort signal for the caller to throw. */
 export function abortWith(landing: IntegrateLandingPort, ...messages: string[]): Error {
   messages.forEach(message => fmt.log.fail(message));
-  return landing.createAbort();
+  // The reason travels with the abort so the failure footer can name the blocker instead of an unknown cause.
+  return landing.createAbort(messages.map(message => message.trim()).filter(Boolean).join(' ') || undefined);
 }

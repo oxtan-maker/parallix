@@ -17,6 +17,7 @@ import { continueReviewClearsIntervention, continueReviewInvalidatesBlocker, clo
 import { reviewOperation, reviewOperationRequiresMutationContext } from '../../domain/review-command-policy.js';
 import { liveMissionExecutionContext, type MissionExecutionContextResolution } from '../../application/ports/mission-execution-context.js';
 import { resolveMissionExecutionContext } from '../git/mission-execution-context.js';
+import { resolveReviewActionLimit } from '../config/product-config.js';
 
 /** Command dispatch awaits completion and forwards failures; receipts are owned by each command. */
 type ReviewCommandObserver<Handler extends (...args: never[]) => unknown> = (...args: Parameters<Handler>) => unknown;
@@ -97,16 +98,15 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
       throw stopped;
     };
     try {
-      await this.roundUseCase(context, helperExit).enter({ ...this.roundRequest(context), rawMaxAttempts: flagValue(context.args, '--max-attempts') });
+      await this.roundUseCase(context, helperExit).enter(this.roundRequest(context));
     } catch (error) {
       if (error !== stopped) { throw error; }
     }
   }
-  private roundRequest(context: ReviewMutationWorkflowContext): Omit<StartReviewRound, 'maxAttempts' | 'isContinue'> {
+  private roundRequest(context: ReviewMutationWorkflowContext): Omit<StartReviewRound, 'isContinue'> {
     const poll = flagValue(context.args, '--poll-timeout-seconds');
-    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, executionContext: context.executionContext, operatorInvocation: context.options.operatorInvocation === true };
+    return { slug: context.slug, implementer: flagValue(context.args, '--implementer') ?? undefined, reviewer: flagValue(context.args, '--reviewer') ?? undefined, focus: flagValue(context.args, '--focus') ?? 'all', actionLimit: resolveReviewActionLimit(context.executionContext.missionWorktree), dryRun: context.args.includes('--dry-run'), reset: context.args.includes('--reset'), verbose: context.args.includes('--verbose'), pollTimeoutSeconds: poll ? Number.parseInt(poll, 10) : null, executionContext: context.executionContext, operatorInvocation: context.options.operatorInvocation === true };
   }
-  private invalidMaxAttempts(raw: string): void { const o = this._defaults; (o.error || fmt.log.plainError)(fmt.status('FAIL', `--max-attempts requires a positive integer (got "${raw}").`)); (o.exit || process.exit)(1); }
   private roundUseCase(context: ReviewMutationWorkflowContext, helperExit?: (_code: number) => never): ReviewRoundUseCase {
     const o = context.options as typeof this._defaults;
     const helperOptions = { ...o, executionContext: context.executionContext, exit: helperExit ?? o.exit, runFn: o.run };
@@ -130,7 +130,6 @@ export class ReviewWorkflowAdapter implements ReviewWorkflowPort {
         const observers = context.options as ReviewLoopObservers;
         return o.reviewLoopMechanisms(request, { log: observers.log, error: observers.error, exit: observers.exit || process.exit, onAgentLaunched: observers.onAgentLaunched, onAutonomousStop: observers.onAutonomousStop });
       },
-      invalidMaxAttempts: raw => this.invalidMaxAttempts(raw),
       missingReviewAggregate: slug => {
         (o.error || fmt.log.plainError)(fmt.status('FAIL', `Mission ${slug} is unknown or has no valid Review aggregate; load a known Mission before review.`));
         (o.exit || process.exit)(1);

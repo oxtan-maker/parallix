@@ -334,6 +334,43 @@ per target, and preserves existing provenance by default; inspect `px provenance
 --help` before deliberately replacing previously recorded investigations. Back
 up the operator database before a historical apply.
 
+## Recovering a conflicted integration checkout
+
+`px integrate` refuses to start while the receiving checkout has unmerged index
+entries or a paused rebase, and names the checkout and branch it resolved. The
+two states are reported separately. A rebase is reported only when Git's rebase
+metadata exists; unmerged entries alone are reported as unresolved index state,
+because they do not show whether a rebase, a failed stash restore or something
+else produced them. A checkout blocked this way is not also warned that its
+dirty files will be stashed.
+
+For unresolved index state, the output lists the paths (shell-quoted), read-only
+commands to inspect `git status --short` and the index stages, and the staging
+command for each path. Edit each file so it keeps the intended content from both
+sides with no conflict markers, then stage it. Removing a path is shown only as
+a deliberate alternative. Preflight and post-landing restore diagnostics both
+inspect Git's rebase metadata before classifying this state. For a genuine paused
+rebase, `--continue`, `--abort` and `--skip` are listed with what each one
+discards. Parallix runs none of these commands. Once the blockers are cleared,
+retry with `px integrate <slug> --dry-run`.
+
+When the squash landed but restoring the temporarily stashed checkout changes
+conflicted, the report confirms the landing from HEAD and names the one stash
+Parallix created, identified by reference, object and marker. Verify that
+everything in it is present in the checkout, then use the guarded command shown,
+which refuses to drop if the reference now names a different object. If the
+stash cannot be matched, every stash is kept and only `git stash list` is
+suggested. Parallix restores only that stash, found again by object and marker, so an
+unrelated stash above it is never applied; with no verified owner nothing is
+restored. If the restore applied all tracked changes and failed only because a
+stashed untracked path is already present from the landed commit, Parallix
+re-resolves and revalidates the responsible stash's current reference before
+removing it; an unrelated stash above it remains untouched. No bare
+`git stash drop` is recommended. Path commands use `--literal-pathspecs`, so a
+file named like pathspec magic names only itself. If the index cannot be read,
+only read-only inspection is suggested. A failed integration's closing summary
+states the blocker as its cause and the retry command as the next step.
+
 ## Correcting an unfounded review approval
 
 An operator may withdraw the current approval when they determine that it was
@@ -669,8 +706,10 @@ failures still return to the implementer and rerun the failing prerequisite
 before independent review resumes.
 
 If the review loop escalates to a human, run `px review` from the mission
-worktree to resume its persisted review. This clears the recorded stop and grants another
-review attempt, including when the previous round limit was exhausted. After
+worktree to resume its persisted review after resolving the stated stop. This
+does not reset the durable lifetime action count. When the configured review
+action limit is reached, autonomous review remains stopped until the operator
+handles the human turn or deliberately changes the repository-owned limit. After
 approval, run `px integrate <slug>` to continue integration. Repair budgets and
 mandatory gates still apply; a failed gate never counts as approval. An interrupted
 repair resumes the implementer even with unfinished checkpoints. Checkpoint

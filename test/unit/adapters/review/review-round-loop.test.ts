@@ -479,7 +479,7 @@ it('polled changes and resolution advance through their owners to round two (TAS
       } : null;
       fake.ports.humanFeedback.acknowledge = async () => { acknowledged = true; };
     }
-    await runReviewLoop({ slug: String(MISSION), isContinue: true, maxAttempts: human ? 3 : 2 }, fake.ports);
+    await runReviewLoop({ slug: String(MISSION), isContinue: true, actionLimit: 40 }, fake.ports);
     if (human) {
       assert.equal(acknowledged, true, `${scenario}: ${[...fake.errors, ...fake.logs].join('\n')}`);
       assert.equal(store.mission().status, 'integration', fake.errors.join('\n'));
@@ -524,7 +524,7 @@ it('provider polling preserves the judged revision and submission time after HEA
     } },
     preReview: { head: () => 'unreviewed-B' },
   });
-  await runReviewLoop({ slug: String(MISSION), isContinue: true, maxAttempts: 1 }, fake.ports);
+  await runReviewLoop({ slug: String(MISSION), isContinue: true, actionLimit: 40 }, fake.ports);
   assert.deepEqual(fake.exits, [], fake.errors.join('\n'));
   const review = store.mission().review!;
   const decision = currentReviewRound(review).decision;

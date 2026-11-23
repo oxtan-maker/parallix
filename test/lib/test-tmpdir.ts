@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { selectDiskBackedDirectory, DISK_TEMP_FALLBACK } from '../../src/adapters/process/bulk-storage.js';
-import { ensureCheckoutCache } from '../../src/adapters/verification/checkout-cache.js';
+import { checkoutCacheIdentity, ensureCheckoutCache, retireCheckoutCache } from '../../src/adapters/verification/checkout-cache.js';
 import { processStartIdentity } from '../../src/adapters/process/process-liveness.js';
 
 export function checkoutTestTmpdir(
@@ -31,6 +31,21 @@ export function checkoutTestTmpdir(
     ...(checkoutLifecycle === undefined ? {} : { checkoutLifecycle }),
     ...(children === undefined ? {} : { children }),
   });
+}
+
+/**
+ * Retire a cache owned by a direct disposable fixture checkout.
+ *
+ * Linked worktrees have an independent checkout Git directory and a shared
+ * repository Git directory. Their caches belong to the real checkout
+ * lifecycle and must stay warm until production worktree cleanup retires
+ * them. Fixture owners call this before removing the checkout so the durable
+ * identity is still available for the cache adapter's safety check.
+ */
+export function retireFixtureCheckoutTmpdir(executionRoot: string, base: string = os.tmpdir()): boolean {
+  const identity = checkoutCacheIdentity(executionRoot);
+  if (identity.checkoutGitDir !== null && identity.checkoutGitDir !== identity.repositoryGitDir) { return false; }
+  return retireCheckoutCache(executionRoot, base);
 }
 
 /**

@@ -8,15 +8,16 @@
 
 ## Context
 
-The operator requires tmux to behave like running Parallix in a terminal:
-everything belonging to a mission shares its terminal, keyed by its Mission
-ID. The board's mission view shows that mission's workflow history, including
-when the mission is stopped and its worktree is gone.
+Operators need one place to observe and re-enter all work belonging to a
+mission, including Parallix commands, agents, verification and retries. A
+terminal scoped to an individual agent attempt is too narrow, while treating a
+terminal as workflow state would give process infrastructure authority it does
+not own.
 
-A terminal limited to individual agent attempts omits Parallix command output
-and verification work. The mission command needs a shared terminal while run
-identity remains the attribution key for captured evidence. Headless callers
-need unchanged stdin, stdout, stderr and exit-status contracts.
+The terminal may outlive an operation or its worktree. Retained run history
+must also survive those boundaries, without making terminal scrollback the
+durable evidence source. Headless callers must keep their stdin, output and
+exit-status contracts.
 
 ## Options considered
 
@@ -24,144 +25,68 @@ need unchanged stdin, stdout, stderr and exit-status contracts.
 |---|---|---|---|---|
 | Keep one session per agent attempt | Agent output only; changes across retries and roles | Removed on exit | Wrong lifetime and scope | Reject |
 | Group agent windows in a persistent mission session | Still omits Parallix and non-agent work | Available | Preserves the wrong hosting boundary | Reject |
-| Run the mission's Parallix command in a persistent mission terminal | Parallix, agents and command children share the terminal | Available | Requires command-entry hosting and explicit exit/status handling | **Accept** |
+| Run the mission's Parallix operation in a persistent mission terminal | Parallix and its descendants share one console | Available | Requires explicit process and evidence boundaries | **Accept** |
 
 ## Decision
 
-Use one persistent tmux session per repository and mission. Its logical
-identity uses the existing RepositoryId and canonical MissionId, kept
-losslessly by the domain (dots and hyphens included), independent of role,
-provider, attempt and lifecycle lane. Native socket keys are adapter encodings,
-not another domain repository or terminal entity. Uppercase CLI aliases are normalized at input boundaries
-only. Retain repository-scoped private socket isolation so identical Mission IDs
-in different repositories cannot collide.
+Use one persistent terminal session per repository and mission. Repository and
+canonical Mission identity define the logical terminal; native socket and
+session names are adapter details. Repository-scoped private sockets prevent
+identical Mission IDs in different repositories from colliding.
 
-Family availability remains governed by agent availability and block policy;
-assignment remains the Mission assignee. CurrentWork and MissionActivity own
-workflow activity and distinguish published work from coordinator-process
-evidence. Coordinator transcripts correlate with the existing CurrentWork
-operation ID, carry no agent family or attempt, and reuse the segmented history
-store. Individual invocations retain AgentRunIdentity and RunRecord. An open
-capture or live coordinator does not prove an agent is executing: execution
-observations correlate to a specific run and preserve unknown results.
+Host the mission's Parallix operation in that terminal so its agents and other
+children inherit the same host. Host selection and attachment are separate:
+foreground operations host only with an interactive TTY, while Parallix-owned
+background executors follow the terminal policy without a caller TTY.
+Attachment also requires an interactive TTY. Inherited work must not create
+another mission host. Concurrent operations use separate windows in the same
+session.
 
-An application-owned mission terminal capability resolves a Mission ID to the
-resources it owns: its live terminal and its retained history. Launch, attach,
-capture, history, retirement, cleanup, the web host and board actions use it;
-only the tmux adapter derives native handles. Session and socket names encode
-`.` as `_`, which is injective because canonical Mission IDs never contain `_`,
-and equals the token earlier releases used, so existing sessions keep resolving
-without being renamed. One bounded compatibility resolver attributes history
-recorded under that earlier token by the record's own Mission and repository;
-anything it cannot attribute, and any session on the Mission's socket that does
-not carry its name, is reported and never attached to, closed, moved or deleted.
+Automatic selection uses the terminal host when it is available and falls back
+to pipes when a launch cannot start. Explicit host and unavailable-tool
+policies apply to every hosting-eligible launch, including Parallix-owned
+background executors. A command that started is never replayed as a fallback.
+Hosting remains a process-adapter concern wired by composition; application and
+domain code do not depend on tmux.
 
-Run the mission's Parallix command inside that terminal, as an operator would
-run it from a shell. Interactive CLI callers attach automatically so their
-input reaches the operation. Host only when stdin and stdout are TTYs;
-headless callers keep the pipe path, including stdin and separate stdout/stderr.
-The CLI command registry explicitly allows active, review, integrate, recover
-and verify hosting. Queries and structured Mission writes retain caller-side output
-contracts; when invoked within mission work they inherit its terminal. Agents, fallback and resume attempts, review, recovery,
-verification and other command children inherit that terminal. Inherited agent
-spawns do not create another host. An interactive standalone agent launch without
-an outer command terminal may use its own operation window in this same mission
-session; this is the fallback for TUI actions and other unhosted callers.
-Concurrent mission operations may use separate windows within the same mission
-session; they must not inject commands into an occupied terminal or create
-another mission session. PX-0046 review runs use separately labelled streams;
-the family, attempt and run ID remain stable across interactive output,
-redirected output and retained history. ADR 0037 owns their policy and ADR 0053
-their durable state; terminal and browser renderers do not derive quorum rules.
+An operation owns its window and process tree, not the mission terminal.
+Completion or cancellation closes that operation window while leaving an idle
+console for inspection and later commands. Cleanup and worktree retirement may
+close an idle terminal, but terminal state neither proves workflow activity nor
+controls mission lifecycle.
 
-When an operation finishes or is stopped, close its operation window. Keep
-one console shell in the mission worktree for inspection, reconnection and later
-commands. Cancellation terminates the owned operation and its children, not
-the mission terminal. Restart reconciliation distinguishes an idle terminal
-from an unsupervised operation; a session's existence is never proof of active
-mission work. Explicit terminal cleanup removes the session independently of
-evidence retention and mission workflow state. Worktree cleanup retires the
-terminal: close an idle session immediately, or after its owned operations drain.
-Terminal retirement is best effort with a warning on failure; it cannot prevent
-administrative closure of a landed mission or change a completed command's status.
+Retain attributed history for both mission operations and individual agent
+runs in the repository's canonical state, outside the Mission worktree. The
+terminal transcript supports console replay but is not durable evidence. The
+mission view may combine retained history with current terminal output, and it
+must report unavailable or ambiguous live state rather than silently treating
+it as absent.
 
-Attach resolves the mission terminal directly, including while idle. Run selectors apply to retained history, not terminal attachment; an active
-run record is not a prerequisite for attaching to a stopped mission.
-The console must retain the operator-state locations needed to resolve the same
-mission socket on re-entry while excluding operation credentials.
-The web mission view reads retained history through the capability, appends
-current output incrementally and reports typed states (starting, live, ended,
-capture-only, missing, probe failed or timed out, ambiguous). A failed probe is
-reported beside retained history, never as absence. A live pane is an optional
-view that never replaces history.
-
-Detect tmux automatically: use it when installed and runnable, otherwise use
-the pipe path without requiring configuration or reporting an ordinary missing
-optional tool as an operator problem. An unusable socket path or launch failure
-before command start also falls back under auto; a command that started is never
-replayed as fallback. Explicit pipe/tmux overrides remain available; the fail
-policy applies only to an explicit tmux override. Command hosting belongs to the CLI/process adapters and is wired by composition; application
-and domain code must not acquire tmux dependencies. Re-entry must prevent
-recursive hosting and preserve the command's exit status for its caller.
-
-Keep the existing launch supervisor, confinement, retry budgets and workflow
-authority. Wrap agent commands with confinement inside the mission terminal;
-agents must not gain access to its private control socket. Hosting the outer
-command must not bypass supervision or turn tmux into a lifecycle authority.
-
-Retain per-run durable capture and bounded retrieval under the existing
-evidence ownership, access, retention and redaction contract. Each mission
-operation (the whole hosted or in-process command) is its own attributed record
-beside the agent runs it launched. History is stored per repository and Mission
-under the canonical repository root, not in the Mission worktree, so worktree
-removal and host restart keep it; worktree-local history from earlier releases
-moves to the repository store before the worktree is removed. The private
-terminal transcript serves the console's display-only replay and is never
-exposed as history. Scrollback and rendered screens are not durable evidence.
+Keep workflow authority, verification, retry, confinement and evidence
+redaction outside the terminal adapter. Agents do not receive the terminal's
+private control socket. The retained console is an operator shell with a
+minimal environment and must not inherit operation credentials.
 
 ## Relationship to existing decisions
 
-- ADR 0051 retains the dependency direction and application-owned workflow
-  ports. Terminal hosting is a concrete process mechanism wired by composition;
-  it does not replace a use case with a CLI subprocess in TUI or web adapters.
-- ADR 0053 retains Mission and current-work persistence authority. A tmux
-  session or its transport files cannot become a second mission database.
-- ADR 0048 retains fail-closed gates, cancellation boundaries and exact-revision
-  evidence. Terminal output and process exit are not workflow completion proof.
-- ADRs 0054 and 0055 retain shared guarded board commands and typed browser
-  transport. Future terminal viewing must not move lifecycle policy to tmux,
-  browser state or terminal text parsing.
-- ADR 0057 retains verification tiers. Real tmux and confinement checks remain
-  local integration boundaries; unit checks use doubles.
+- ADR 0051 retains dependency direction and application-owned workflow ports.
+- ADR 0053 retains Mission and current-work persistence authority.
+- ADR 0048 retains fail-closed verification and exact-revision evidence.
+- ADRs 0037 and 0053 retain review policy and durable review state; terminal
+  presentation does not derive quorum or lifecycle decisions.
 
 ## Consequences
 
-The CLI entry supplies its executable and arguments explicitly through
-composition. Terminal hosting does not depend on the child-command wrapper or
-`PARALLIX_CLI_COMMAND`; installed, source and native CLI invocations use the same
-mission-hosting path.
+The terminal follows a mission across agents, roles, retries and stopped work.
+Web and board consumers address it by Mission identity rather than reconstructing
+adapter handles or attempt-specific sessions.
 
-The terminal follows the mission across agents, roles, retries and stopped
-work. Web and board consumers pass the Mission ID and never reconstruct a
-socket, session or attempt-specific terminal.
+Persistent consoles consume resources until cleanup or retirement. Parallel
+operations require isolated windows and per-operation status, cancellation and
+ownership. A private socket limits who can attach, but does not make the idle
+operator shell a confined agent environment.
 
-Persistent shells consume resources until explicitly cleaned up. Worktree
-removal must account for the retained terminal. Multiple simultaneous commands
-need isolated windows and per-operation status, cancellation and ownership.
-The idle console is an unconfined operator shell. It starts from a minimal
-operator environment rather than the operation's exported credentials. A `px`
-command uses a short-lived operator Bash child to resolve provider settings, so
-credentials never become console or tmux-server environment values. Owner-only
-sockets limit who can attach; evidence redaction does not confine this shell.
-The console uses `/bin/sh -i`; its private tmux server starts with an empty
-configuration rather than loading the operator's tmux configuration.
-
-Restart cleanup signals the recorded command before removing its window, but
-cannot guarantee descendant cleanup if process identity is stale or a child
-has escaped the existing supervisor. Window removal alone is not proof that
-every detached descendant exited.
-
-Moving hosting outward risks recursive CLI invocation, lost exit statuses and
-incorrect signal propagation; these require focused command-host and real tmux
-boundary checks before rollout. Linux/macOS tmux availability remains an
-operator dependency; pipe launches retain their existing behavior.
+Moving hosting around the outer operation risks recursive invocation, lost exit
+status and incorrect signal propagation. The process boundary must preserve
+those contracts, and pipe launches retain their existing behavior when the
+terminal host is not selected.

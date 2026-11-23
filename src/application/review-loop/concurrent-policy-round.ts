@@ -3,6 +3,7 @@ import { currentReviewRound } from '../../domain/review.js';
 import type { PolicyTestsOutcome } from '../ports/verification-policy.js';
 import { observeHumanReviewStart } from './review-start-observation.js';
 import type { LoopContext, ReviewRound } from './round.js';
+import { ReviewActionLimitReached, startReviewAction } from './action-limit.js';
 
 export type ConcurrentAgentVerdict = 'passed' | 'failed' | 'stopped';
 export type ConcurrentRoundSettlement = 'continue' | 'joint-repair' | 'repair-routed' | 'stop' | null;
@@ -39,7 +40,12 @@ export async function startConcurrentPolicyRound(context: LoopContext, round: Re
   context.selectionFailure ??= selected.failure;
   if (!selected.plan) { return false; }
 
-  await observeHumanReviewStart(context, round);
+  if (!await observeHumanReviewStart(context, round)) {
+    throw new ReviewActionLimitReached(context.actionLimit);
+  }
+  if (!await startReviewAction(context, 'tests', `tests:${revision}:concurrent:${round.attempt}`, revision)) {
+    throw new ReviewActionLimitReached(context.actionLimit);
+  }
   let settleAgent = (_verdict: ConcurrentAgentVerdict) => {};
   const agentVerdict = new Promise<ConcurrentAgentVerdict>(resolve => { settleAgent = resolve; });
   let withdrawal: Promise<boolean> | null = null;

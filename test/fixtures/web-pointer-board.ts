@@ -106,7 +106,7 @@ export async function pointerBoard(onCommand?: (request: WebCommandRequest) => P
       try { await onCommand?.(command); }
       catch (error) { res.writeHead(500); res.end(JSON.stringify({error: String(error)})); return; }
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({kind: 'command-result', transportVersion: 4, status: 'completed', value: null, error: null, durableEvidence: []})); return;
+      res.end(JSON.stringify({kind: 'command-result', transportVersion: 5, status: 'completed', value: null, error: null, durableEvidence: []})); return;
     }
     res.setHeader('content-type', req.url === '/board.js' ? 'text/javascript' : req.url === '/board.css' ? 'text/css' : 'text/html');
     res.end(req.url === '/board.js' ? js : req.url === '/board.css' ? css : '<link rel="stylesheet" href="/board.css"><div id="root"></div><script src="/board.js"></script>');

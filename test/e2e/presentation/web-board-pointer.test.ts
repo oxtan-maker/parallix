@@ -91,10 +91,17 @@ async function clickCommand(control: Locator) {
   // Running-work projections label pending actions "working", not "starting".
   const response = page.waitForResponse((result) => result.request().method() === 'POST');
   await clickAt(control);
-  await response;
+  const result = await response;
+  const payload = await result.json() as { transportVersion?: unknown; status?: unknown };
+  assert.deepEqual([payload.transportVersion, payload.status], [5, 'completed'],
+    'the disposable host returns the supported successful command contract');
   await page.waitForFunction(() => !document.querySelector(
     '[data-board-card] button[aria-label*="starting"], [data-board-card] button[aria-label*="working"]',
   ));
+  const outcomes = await page.locator('footer [role="status"]').allInnerTexts();
+  assert.ok(outcomes.length > 0, 'the accepted command publishes its completed response');
+  assert.doesNotMatch(outcomes.join('\n'), /invalid command result|unsupported transport version/,
+    'the browser validates the successful response instead of taking the incompatible-client branch');
 }
 
 function commandFields(request: unknown) {
@@ -285,7 +292,7 @@ test('checkpoint indicators stay below terminal and edit dialogs with usable evi
     ? { runId: operation.runId, stream: 'stdout', from: 0, to: 27, text: 'Checkpoint terminal output\n', hasEarlier: false, atEnd: true, running: false, gaps: [] } satisfies HistoryPage
     : { missionId: mission.id, state: 'ended', probe: { kind: 'absent' }, operations: [operation], unattributed: [], notices: [] } satisfies HistoryOverview }));
   await page.route('**/api/commands', route => route.fulfill({ json: {
-    kind: 'command-result', transportVersion: 4, status: 'completed', error: null, durableEvidence: [],
+    kind: 'command-result', transportVersion: 5, status: 'completed', error: null, durableEvidence: [],
     value: { missionId: mission.id, version: 1, title: mission.title, description: '', context: '', labels: [], successCriteria: ['visible'], successCriterionIds: ['sc-1'], dependencies: [] },
   } }));
   try {

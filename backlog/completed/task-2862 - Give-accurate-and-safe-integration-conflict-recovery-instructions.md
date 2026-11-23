@@ -1,8 +1,8 @@
 ---
 id: TASK-2862
 title: Give accurate and safe integration conflict recovery instructions
-status: backlog
-assignee: []
+status: done
+assignee: [codex]
 created_date: '2026-11-17 14:53'
 labels:
   - bug

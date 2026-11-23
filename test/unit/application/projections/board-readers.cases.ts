@@ -191,6 +191,32 @@ test('BoardProjectionBuilder projects the review loaded by its review adapter', 
   assert.equal(projection.attentionQueue[0].card.reviewRound, 2);
 });
 
+test('BoardProjectionBuilder projects review actions from one stored-record read and keeps unreadable history unknown (TASK-2859.21)', async () => {
+  const mission = (missionId: string) => fixtureMission(missionId, { id: id1, repositoryId: repo, title: missionId, labels: missionLabels(['bug']), status: 'review' as const, closedAt: null, assignee: agentFamily('codex'), checkpoints: [], review: null, netEngineeringLines: null });
+  const missions = [mission('task-0001'), { ...mission('task-0002'), id: missionId('task-0002') }];
+  const record = (missionId: string, actionSequence: number, limit: number) => ({
+    schemaVersion: 1 as const, repositoryId: 'repo-board', missionId: missionId as never,
+    changeIdentity: 'rev', action: 'agent' as const, correlation: `c${actionSequence}`,
+    actionSequence, configuredLimit: limit, idempotencyKey: `k${missionId}${actionSequence}`, recordedAt: '2026-11-23T10:00:00.000Z',
+    failureReason: actionSequence >= limit ? { version: 1, code: 'review-action-limit', source: 'lifecycle' as const } : null,
+  });
+  const build = (reviewActions?: { readonly limit: number | null; loadActions(): Promise<readonly ReturnType<typeof record>[]> }) => new BoardProjectionBuilder(
+    makeMissionAdapter(missions), makeReviewAdapter(), makeGateAdapter(), makeAgentAdapter(), makeGitAdapter(), makeOperationLogAdapter(),
+    reviewActions ? { reviewActions } : undefined).build();
+  let reads = 0;
+  const cards = (await build({ limit: 3, loadActions: async () => { reads += 1; return [record('task-0001', 1, 3), record('task-0001', 2, 3), record('task-0001', 3, 3)]; } }))
+    .stages.flatMap(stage => stage.cards);
+  assert.equal(reads, 1, 'one stored-record read serves every card');
+  const byId = new Map(cards.map(card => [card.id, card.reviewActions]));
+  assert.deepEqual(byId.get(missionId('task-0001')), { used: 3, limit: 3, limitHit: { actionSequence: 3, limit: 3, recordedAt: '2026-11-23T10:00:00.000Z' } });
+  assert.deepEqual(byId.get(missionId('task-0002')), { used: 0, limit: 3, limitHit: null }, 'a readable history without actions is zero');
+  const atCount = (await build({ limit: 2, loadActions: async () => [{ ...record('task-0001', 2, 2), failureReason: null }] })).stages.flatMap(stage => stage.cards);
+  assert.equal(atCount[0].reviewActions?.limitHit, null, 'a count at the limit is not a recorded hit');
+  const unreadable = (await build({ limit: 3, loadActions: async () => { throw new Error('history unreadable'); } })).stages.flatMap(stage => stage.cards);
+  assert.ok(unreadable.every(card => card.reviewActions === null), 'an unreadable history is unknown, never zero');
+  assert.ok((await build()).stages.flatMap(stage => stage.cards).every(card => card.reviewActions === null), 'no read adapter leaves actions unknown');
+});
+
 test('BoardProjectionBuilder preserves populated reviews and projects a human turn from one batch read (TASK-2859.15)', async () => {
   const ids = ['task-2401-none', 'task-2401-progress', 'task-2401-changes', 'task-2401-approved'].map(missionId);
   const subject = (id: typeof ids[number], revision: string, pullRequest = false) => ({

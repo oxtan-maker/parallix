@@ -1,8 +1,10 @@
 # Agent terminal sessions and run history
 
-Interactive mission operations automatically use tmux when it is installed
-and runnable. Headless callers keep pipes. Owned workflow output combines stdout and
-stderr in one coordinator transcript in the order observed. Each mission has a persistent terminal keyed by its Mission ID
+Foreground mission operations use tmux only from an interactive terminal.
+Parallix-owned background workflow executors follow the selected host without a
+caller TTY; other headless callers keep pipes. Owned workflow output combines
+stdout and stderr in one coordinator transcript in the order observed. Each
+mission has a persistent terminal keyed by its Mission ID
 (`task-1234`, `task-2622.18`, `px-0042`, …), kept exactly as recorded; an
 uppercase alias such as `TASK-2622.18` is accepted on the command line. Parallix
 commands and their agents share that terminal across roles, retries and
@@ -39,7 +41,10 @@ replacement.
 
 Review recovery separates two operator decisions. Stopping workflow execution
 settles owned processes and effects; acknowledging a Review contract stop such
-as `MAX_ATTEMPTS` permits a new review attempt window. `px status <slug>`,
+as an unavailable reviewer permits the persisted review to resume. The lifetime
+review action count is reconstructed from operational history and is not reset
+by acknowledgment or restart; reaching its configured limit routes the Mission
+to human attention. `px status <slug>`,
 `px review <slug> --status` and the board show one shared recovery action from
 the recorded workflow operation, Review intervention and liveness probes. Live
 work requires Stop and settlement confirmation. Once no workflow operation is
