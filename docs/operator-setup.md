@@ -634,10 +634,14 @@ Historical mechanical-restoration provenance remains readable independently of
 later repair assessments. That label describes old decisions only; retention
 preserves the original approval and issues no restoration approval.
 
-An agent's child CLI can record its assigned evidence and review verdict, but
-cannot start or resume a review workflow under inherited authority. It returns
-to the parent workflow, which owns review preparation and reviewer launch. This prevents a
-nested review from leaving a stop behind for the parent's later review preparation.
+Every agent launch is marked as an agent launch, whether or not a workflow
+operation started it. An agent's child CLI can record its assigned evidence and
+review verdict and read status, but `px review --submit`, `px review --enter`,
+`px integrate` and `px active` are refused under that marker, even when no
+workflow operation owns the launch. It returns to the parent workflow, which
+owns review preparation and reviewer launch. This prevents a nested review from
+leaving a stop behind for the parent's later review preparation. A verdict
+recorded from an agent-marked process always carries reviewer authority.
 
 `px active --reviewer <family>` makes that family the preferred first reviewer,
 not an exclusive pin. If it cannot complete because its launcher or provider is

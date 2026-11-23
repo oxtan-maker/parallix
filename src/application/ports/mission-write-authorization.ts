@@ -5,7 +5,8 @@ export type WorkflowOwnerRead = (_id: string) => Promise<WorkflowOperation | nul
 
 /** Composition installs the process owner's authorization before workflow effects. */
 export interface MissionWriteAuthorization {
-  readonly operationId: string;
+  /** Null when the agent launch carried no workflow operation to fence against. */
+  readonly operationId: string | null;
   readonly generation?: number;
   readonly start?: import('../execution-start-service.js').ExecutionStart;
   /** Child CLI writes are fenced by the parent, without inheriting control of it. */

@@ -311,6 +311,9 @@ async function assembleLaunch(state: StartAgentLoopState, deps: StartAgentLoopDe
   // context reaches the shared process seam through every family launcher.
   const { effectiveProfile, nativeSandbox } = launchConfinement(state, deps);
 
+  // Every launch is marked so the agent CLI is fenced even when the launching
+  // process holds no workflow operation.
+  agentEnv['PARALLIX_AGENT_LAUNCH'] = '1';
   if (deps.configuration.runtime.workflowOperation) {
     Object.assign(agentEnv, { PARALLIX_WORKFLOW_OPERATION: deps.configuration.runtime.workflowOperation, PARALLIX_WORKFLOW_GENERATION: String(deps.configuration.runtime.workflowGeneration) });
   }

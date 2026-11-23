@@ -3,5 +3,6 @@ export function verificationEnvironment(inherited: NodeJS.ProcessEnv): NodeJS.Pr
   const env = { ...inherited };
   delete env['PARALLIX_WORKFLOW_OPERATION'];
   delete env['PARALLIX_WORKFLOW_GENERATION'];
+  delete env['PARALLIX_AGENT_LAUNCH'];
   return env;
 }

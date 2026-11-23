@@ -83,6 +83,7 @@ export function resolveConfiguration(source: Source): ParallixConfiguration {
     runtime: Object.freeze({
       gitAdmissionMarkers: gitAdmissionMarkers(e('PARALLIX_GIT_ADMISSION')),
       workflowOperation: e('PARALLIX_WORKFLOW_OPERATION'), workflowGeneration: positiveInteger(e('PARALLIX_WORKFLOW_GENERATION')),
+      agentLaunch: e('PARALLIX_AGENT_LAUNCH') === '1',
       resourceBoundary: e('PARALLIX_RESOURCE_BOUNDARY'),
       gitIdentity: resolveGitIdentity(source),
       ci: Boolean(e('CI')), noTui: e('PARALLIX_NO_TUI') === '1', debug: Boolean(e('DEBUG')),

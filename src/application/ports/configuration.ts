@@ -85,6 +85,8 @@ export interface RuntimeConfiguration {
   readonly gateOwner?: string;
   readonly workflowOperation?: string;
   readonly workflowGeneration?: number | null;
+  /** Set by every agent launch, with or without a workflow operation. */
+  readonly agentLaunch?: boolean;
   /** Enclosing supervised process-tree boundary, resolved once by composition. */
   readonly resourceBoundary?: string;
   readonly gitIdentity: { readonly authorName: string; readonly authorEmail: string; readonly committerName: string; readonly committerEmail: string };

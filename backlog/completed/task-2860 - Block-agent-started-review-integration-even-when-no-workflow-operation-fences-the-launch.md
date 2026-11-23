@@ -3,8 +3,8 @@ id: TASK-2860
 title: >-
   Block agent-started review/integration even when no workflow operation fences
   the launch
-status: backlog
-assignee: []
+status: done
+assignee: [claude]
 created_date: '2026-11-17 11:49'
 labels:
   - bug

@@ -445,3 +445,29 @@ test('saturated custom returns to waiting when every alternative fails instead o
   assert.deepEqual(f.launched, ['codex', 'custom'], 'custom launches after the alternative failed, not pool exhaustion');
   assert.ok(f.logs.some(line => /saturated; switching/.test(line)));
 });
+
+test('every agent launch carries the agent-launch marker with or without a workflow operation (TASK-2860)', async () => {
+  const worktree = registeredMkdtemp('agent-launch-marker-');
+  setBubblewrapProbeForTest(() => true);
+  try {
+    const seen: NodeJS.ProcessEnv[] = [];
+    for (const extra of [{}, { PARALLIX_WORKFLOW_OPERATION: 'op-1', PARALLIX_WORKFLOW_GENERATION: '2' }]) {
+      await startAgent('execute', {
+        configuration: resolveConfiguration({ ...extra }), worktree, prompt: 'work', agent: 'claude', pinnedAgent: true,
+        isAgentBlockedFn: () => false, assertAgentSupportedFn: () => {}, resolveAgentModelFn: () => null,
+        detectLimitHitFn: () => null, log: () => {},
+        launchAgentFn: input => {
+          seen.push(input.env!);
+          return { invocation: { command: 'claude', args: [] }, result: { status: 0, stdout: '', stderr: '' } };
+        },
+      });
+    }
+    assert.equal(seen[0]!.PARALLIX_AGENT_LAUNCH, '1');
+    assert.equal(seen[0]!.PARALLIX_WORKFLOW_OPERATION, undefined, 'no operation is invented for an unfenced launch');
+    assert.equal(seen[1]!.PARALLIX_AGENT_LAUNCH, '1');
+    assert.equal(seen[1]!.PARALLIX_WORKFLOW_OPERATION, 'op-1');
+  } finally {
+    setBubblewrapProbeForTest(null);
+    fs.rmSync(worktree, { recursive: true, force: true });
+  }
+});

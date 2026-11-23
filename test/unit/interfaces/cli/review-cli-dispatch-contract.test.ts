@@ -426,6 +426,25 @@ describe("review board characterization", { concurrency: false }, () => {
     assert.deepEqual(calls, ['submitReview', 'submit'], "the coordinator still owns automatic review preparation");
   });
 
+  test('an agent launch without a workflow operation cannot start or resume review (TASK-2860)', async t => {
+    t.after(() => configureMissionWriteAuthorization(null));
+    inheritWorkflowAuthorization(resolveConfiguration({ PARALLIX_AGENT_LAUNCH: '1' }), null);
+    const calls: Operation[] = [];
+    const port = workflow(calls);
+    let preflights = 0;
+    const command = new ReviewCommandUseCase({ ...port, preflight: async (...args: Parameters<typeof port.preflight>) => {
+      preflights++;
+      return port.preflight(...args);
+    } });
+    for (const entryArgs of [['--submit'], ['--enter'], []]) {
+      await assert.rejects(() => command.execute(['task-2428', ...entryArgs]), /parent workflow.*review preparation, review and integration/i);
+    }
+    assert.equal(preflights, 0, 'the review workflow preflight is never reached');
+    assert.deepEqual(calls, []);
+    await command.execute(['task-2428', '--submit-review', 'approve']);
+    assert.deepEqual(calls, ['submitReview']);
+  });
+
   test('task-2428 characterization: review:act-on-findings CLI rejects retired artifact consumption', async () => {
     assert.throws(() => parseReviewCliRequest(['task-2428', '--consume-artifacts']), /Unknown flag/);
   });

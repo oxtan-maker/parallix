@@ -10,7 +10,13 @@ import type { WorkflowOperationStore } from '../application/ports/workflow-opera
 export function inheritWorkflowAuthorization(configuration: ParallixConfiguration, store: Pick<WorkflowOperationStore, 'get'> | null): void {
   const id = configuration.runtime.workflowOperation;
   const generation = configuration.runtime.workflowGeneration;
-  if (!id || hasMissionWriteAuthorization()) { return; }
+  if (hasMissionWriteAuthorization()) { return; }
+  if (!id) {
+    // An agent launched outside any workflow operation has no owner to fence
+    // against, but it still may not run lifecycle control.
+    if (configuration.runtime.agentLaunch) { configureMissionWriteAuthorization({ operationId: null, inherited: true, assert: async () => {} }); }
+    return;
+  }
   if (!store || !generation) { throw new Error('Inherited workflow authority is unavailable'); }
   configureMissionWriteAuthorization({ operationId: id, generation, inherited: true, assert: async (mission, read) => {
     const operation = await (read ?? store.get.bind(store))(id);

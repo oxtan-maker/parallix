@@ -43,7 +43,7 @@ process.env.HOME = makeTempDir('parallix-test-user-home-');
 process.env.NPM_CONFIG_CACHE = makeTempDir('parallix-test-npm-cache-');
 // A test graph owns isolated state, never the invoking workflow's write fence
 // or live terminal. Fixtures opt into their own ownership after bootstrap.
-for (const key of ['PARALLIX_GATE_OWNER', 'PARALLIX_CUSTOM_ADMISSION_REPOSITORY', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE']) {
+for (const key of ['PARALLIX_GATE_OWNER', 'PARALLIX_CUSTOM_ADMISSION_REPOSITORY', 'PARALLIX_WORKFLOW_OPERATION', 'PARALLIX_WORKFLOW_GENERATION', 'PARALLIX_AGENT_LAUNCH', 'PARALLIX_MISSION_TERMINAL', 'PARALLIX_MISSION_SOCKET', 'PARALLIX_OPERATION_CAPTURE']) {
   delete process.env[key];
 }
 // Unit tests must never discover an operator's live Forgejo installation or

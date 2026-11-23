@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { Command } from '../interfaces/cli/runtime.js';
 import type { ProductionApplicationServices } from './application-services.js';
-import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
+import { assertWorkflowControl, hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
 import { inferSlug } from '../adapters/filesystem/mission-utils.js';
 import type { BoardCommandRequest } from '../application/controller/board-command.js';
 
@@ -67,6 +67,9 @@ async function dispatchOwnedCli(command: 'draft' | 'review' | 'rebase' | 'integr
   cancellation: { requested: boolean; stopOwnedWorkflow: boolean }, operatorReview: boolean): Promise<void> {
   const controller = graph.presentationCapabilities?.commandController;
   if (!controller) { throw new Error('Workflow admission is unavailable'); }
+  // The opened graph binds inherited authority; an agent launch must not start
+  // review preparation or integration through the controller either.
+  if (command === 'review' || command === 'integrate') { assertWorkflowControl(); }
   const kind = workflowKind(command);
   const request: BoardCommandRequest = { operationId: randomUUID(), missionId: slug, kind,
     capabilities: new Set([kind]), cancellation, operatorInvocation: operatorReview && command === 'review', invocation: { command, args, interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY) } };

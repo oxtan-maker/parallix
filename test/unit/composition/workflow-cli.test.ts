@@ -435,3 +435,21 @@ test('public integration wrapper continues its admitted owner without readmissio
   try { await registry.integrate(['task-test']); assert.equal(integrations, 1); assert.equal(opened, 0); }
   finally { configureMissionWriteAuthorization(null); }
 });
+
+test('an agent-marked launch cannot start review preparation or integration through the workflow owner (TASK-2860)', async t => {
+  t.after(() => configureMissionWriteAuthorization(null));
+  const dispatched: BoardCommandRequest[] = [];
+  const registry = { review: async () => {}, integrate: async () => {} } as Record<string, Command>;
+  const graph = { presentationCapabilities: { commandController: { dispatch: async (request: BoardCommandRequest) => {
+    dispatched.push(request); return completed({});
+  } } }, operatorState: { close: async () => {} } } as unknown as ProductionApplicationServices;
+  // Opening the graph binds the operation-less inherited authority of an agent launch.
+  ownWorkflowCli(registry, async () => {
+    configureMissionWriteAuthorization({ operationId: null, inherited: true, assert: async () => {} });
+    return graph;
+  });
+  await assert.rejects(async () => registry.review(['task-test']), /parent workflow owns/);
+  configureMissionWriteAuthorization(null);
+  await assert.rejects(async () => registry.integrate(['task-test']), /parent workflow owns/);
+  assert.deepEqual(dispatched, []);
+});

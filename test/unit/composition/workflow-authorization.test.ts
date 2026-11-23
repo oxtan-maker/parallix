@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bindInheritedWorkflowAuthorization, inheritWorkflowAuthorization } from '../../../src/composition/workflow-authorization.js';
 import { resolveConfiguration } from '../../../src/composition/config.js';
-import { authorizeMissionWrite, authorizedOperationId, configureMissionWriteAuthorization, hasMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
+import { assertWorkflowControl, authorizeMissionWrite, authorizedOperationId, bindReturnIdentity, inheritedMissionWrite, configureMissionWriteAuthorization, hasMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import { fixtureMission } from '../../fixtures/mission-builders.js';
 import type { WorkflowOperation } from '../../../src/domain/workflow-operation.js';
 import { WorkflowOwnershipError } from '../../../src/domain/workflow-operation.js';
@@ -65,5 +65,27 @@ test('workflow operations can explicitly opt out of inherited authority (TASK-27
     bindInheritedWorkflowAuthorization(configuration, false, null, null);
     assert.equal(hasMissionWriteAuthorization(), false);
     assert.throws(() => bindInheritedWorkflowAuthorization(configuration, undefined, null, null), /unavailable/);
+  } finally { configureMissionWriteAuthorization(null); }
+});
+
+test('an agent launch without a workflow operation binds operation-less inherited authority (TASK-2860)', async () => {
+  try {
+    inheritWorkflowAuthorization(resolveConfiguration({}), null);
+    assert.equal(hasMissionWriteAuthorization(), false, 'an operator process stays unfenced');
+    inheritWorkflowAuthorization(resolveConfiguration({ PARALLIX_AGENT_LAUNCH: '1' }), null);
+    assert.equal(inheritedMissionWrite(), true);
+    assert.equal(authorizedOperationId(), null);
+    assert.deepEqual(bindReturnIdentity('agent-review'), { stage: 'agent-review', operationId: null, operationGeneration: null });
+    await authorizeMissionWrite('task-any');
+    assert.throws(() => assertWorkflowControl(), /parent workflow owns execution/);
+  } finally { configureMissionWriteAuthorization(null); }
+});
+
+test('a verdict from an agent-marked process without a workflow operation carries reviewer authority (TASK-2860)', () => {
+  const configuration = resolveConfiguration({ PARALLIX_AGENT_LAUNCH: '1' });
+  try {
+    assert.equal(reviewVerbPorts({ rootDir: process.cwd(), configuration: resolveConfiguration({}), operatorInvocation: true }).verdictAuthority, 'operator');
+    inheritWorkflowAuthorization(configuration, null);
+    assert.equal(reviewVerbPorts({ rootDir: process.cwd(), configuration, operatorInvocation: true }).verdictAuthority, 'reviewer');
   } finally { configureMissionWriteAuthorization(null); }
 });
