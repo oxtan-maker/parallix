@@ -345,6 +345,8 @@ class PhaseGateExecution {
 
   reportDashboard(): void {
     if (this.state.dashboard) {
+      // Leave the alternate screen first so the summary lands in the normal screen with autowrap restored.
+      this.state.dashboard.close();
       this.state.log(`Repository gates (${this.state.phase}): ${this.state.cancellation.operatorCancelled ? 'cancelled' : this.state.failure.failedGate ? 'failed' : 'passed'}; ${this.state.executed}/${this.state.gates.length} completed in ${((Date.now() - this.state.phaseStarted) / 1000).toFixed(1)}s.`);
       for (const gate of this.state.gates) { this.state.log(this.dashboardLine(gate)); }
       if (!this.state.cancellation.operatorCancelled) { for (const failed of this.state.failure.all) { renderGateOutput(this.state.phase, failed, this.state.error); } }
