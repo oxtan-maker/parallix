@@ -47,12 +47,14 @@ Verify that repeated or overlapping delivery, including recovery after an acknow
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 While pre-integration verification runs alongside agent review, the Forgejo PR shows that verification is pending for the revision being tested. The same PR-visible result settles from the recorded gate run and distinguishes passed, failed and interrupted or cancelled runs.
-- [ ] #2 When integration-ci and integration-local pass but static analysis and Sonar fail, the PR shows one failed integration-tests result and identifies both failed gates with actionable details when available. The agent approvals remain independently visible.
-- [ ] #3 A rerun can update the result for the same revision. Duplicate publication does not create duplicate entries, a late result from an older run cannot supersede a newer run, and a prior revision result cannot appear as the current PR head verdict.
-- [ ] #4 Retain a focused red-to-green reproduction in the owning suite and manually verify a failed concurrent run followed by a passing repair run on a disposable Forgejo PR.
+- [ ] #1 A PR shows one aggregate pre-integration result for the tested revision. A running or pending result settles from the authoritative run to passed or failed or interrupted or cancelled. The same contract covers concurrent review and sequential integration including repair reruns.
+- [ ] #2 The PR identifies every configured gate that failed in a run. It names static analysis and Sonar and the exact integration suite where they fail. It includes a concise safe diagnostic or evidence link when available. Blocked and cancelled checks remain distinguishable from failed checks.
+- [ ] #3 A late result from an older run cannot supersede a newer run. An earlier revision result cannot appear as the current PR head verdict. Review decisions and approval-withdrawal notices remain independently attributable.
+- [ ] #4 Initial and recovery publishers produce one Forgejo entry per logical report or review event even if delivery overlaps or the provider accepted a write before its acknowledgement was lost. Preserve distinct reviewer and round events. Reject or reconcile a noncanonical revision instead of publishing the same disposition again.
 - [ ] #5 Retain focused red-to-green reproductions in existing owning suites for missing gate detail and duplicate delivery. Manually verify on a disposable Forgejo PR that a failed concurrent run is visible once with the actual failed gate names and that a passing repair run is attributed to its own revision.
 <!-- AC:END -->
+
+
 
 
 
