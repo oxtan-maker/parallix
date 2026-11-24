@@ -1,5 +1,4 @@
-import { continuePendingIntegrationRepair } from './integrate/repair-resumption.js';
-import { failureReason, failureReasonFromCause } from '../domain/failure-reason.js';
+import { failureReasonFromCause } from '../domain/failure-reason.js';
 import type { ReboundReason } from '../domain/rebound-policy.js';
 import type { WorkflowReturnStage } from '../domain/board-event.js';
 import { beginReviewPreparation, recordReviewPreparationFailure } from "./review-submission-service.js";
@@ -11,8 +10,6 @@ import type { ApplicationOutcome, Cancellation, Capability, DurableEvidence } fr
 import { failure, rejected } from './contracts.js';
 import { MissionLifecycleService, type MissionTransitionResult } from './mission-lifecycle-service.js';
 import { missionId, isMissionSlugCandidate } from '../domain/mission.js';
-import { integrationRepairNeedsReview } from '../domain/integration-repair-policy.js';
-import { fixedVerificationNextAction } from './verification-policy/fixed-next-action.js';
 import type {
   AgentLaunchOutcome,
   AgentLaunchPlan,
@@ -99,9 +96,6 @@ export class ExecuteMissionService {
     let agentStarted = false;
     try {
       await this.prepareOperatorResume(request);
-      const resumed = await this.resumeIntegrationRepair(request);
-      if (resumed && 'reviewRequired' in resumed) { return await this.reviewChangedRepair(request, resumed.reviewRequired); }
-      if (resumed) { return resumed; }
       const selectedAgent = await this.resolveAgent(request);
       if (!selectedAgent) { throw new Error('Could not select an execute agent.'); }
       activation = await this.synchronizeLifecycle(request.slug, selectedAgent, request.operationId);
@@ -153,13 +147,6 @@ export class ExecuteMissionService {
       slug: request.slug,
       worktree: prepared.worktree,
       agent,
-      continueIntegrationRepair: async () => {
-        const resumed = await this.resumeIntegrationRepair(request);
-        // A changed repair already opened its fresh round; review preparation submits it next.
-        if (!resumed || 'reviewRequired' in resumed) { return null; }
-        if (resumed.status !== 'completed') { preparationFailure = resumed.error?.message ?? 'Integration repair retention stopped'; await reviewPublisher.onAutonomousStop(preparationFailure); }
-        return resumed.status === 'completed';
-      },
       beginReviewPreparation: async () => { await beginReviewPreparation(request.slug, { store: this._ports.missionTransitions, lifecycle: new MissionLifecycleService(this._ports.missionTransitions) }); },
       prepareImplementationRepair: (diagnostic: string, reason: ReboundReason,
         returnStage: WorkflowReturnStage) => recordReviewPreparationFailure(request.slug, diagnostic, {
@@ -195,55 +182,6 @@ export class ExecuteMissionService {
       throw error;
     }
     if (!reviewed || preparationFailure) { throw new Error(preparationFailure ?? "Review preparation and review failed"); }
-  }
-
-  /** Pending retained approval is settled by the shared continuation before any launch or review entry. */
-  private async resumeIntegrationRepair(request: ExecuteMissionRequest): Promise<ApplicationOutcome<ExecuteMissionResult> | { readonly reviewRequired: string | null } | null> {
-    const next = await continuePendingIntegrationRepair(request.slug, this._ports.missionTransitions, this._ports.integrationRepair);
-    switch (next.kind) {
-      case 'not-pending': return null;
-      case 'review-required': return { reviewRequired: next.implementer };
-      case 'unavailable':
-        return failure('unavailable', 'Integration repair certification is unavailable; resume with px integrate before review submission.', [], failureReason('approval-retention-pending', 'lifecycle'));
-      case 'retained':
-        this._ports.output.log(`Original approval retained for ${request.slug}; human px integrate ${request.slug} is required to land.`);
-        return { status: 'completed', value: { agent: next.implementer ?? 'workflow' }, durableEvidence: [{ id: `${request.slug}:approval-retention`, source: 'mission-store', detail: 'Existing integration repair certification and approval retention completed; no agent launched' }] };
-      case 'landed':
-        this._ports.output.log(`Integration repair for ${request.slug} already landed; no review, launch or px integrate is owed.`);
-        return { status: 'completed', value: { agent: next.implementer ?? 'workflow' }, durableEvidence: [{ id: `${request.slug}:integration-repair-landed`, source: 'mission-store', detail: 'The Mission already landed; the repair obligation is closed and no agent launched' }] };
-      case 'blocked':
-        return failure('validation', `Integration repair retention remains unproven; resume certification with px integrate ${request.slug}.`, [], failureReason('approval-retention-pending', 'lifecycle', { outcome: 'blocked' }));
-    }
-  }
-
-  /**
-   * A changed repair withdrew the stale approval; the committed repair needs a
-   * fresh review by the implementer the continuation reports, never the family
-   * this execute call happened to request.
-   */
-  private async reviewChangedRepair(request: ExecuteMissionRequest, implementer: string | null): Promise<ApplicationOutcome<ExecuteMissionResult>> {
-    const evidence: DurableEvidence[] = [{ id: `${request.slug}:approval-retention`, source: 'mission-store',
-      detail: 'Integration repair changed the approved patch; the original approval was withdrawn and no execute agent launched' }];
-    if (request.cancellation?.requested) { return failure('cancelled', 'cancelled after integration repair assessment; re-query task state', evidence); }
-    if (!implementer) {
-      return failure('validation', `Integration repair changed the approved patch but no implementer is recorded; resume px review ${request.slug}.`,
-        evidence, failureReason('state-machine', 'lifecycle', { operation: 'review-changed-integration-repair' }));
-    }
-    const loaded = await this._ports.missionTransitions.load(missionId(request.slug));
-    const next = loaded.kind === 'found' ? fixedVerificationNextAction({ mission: loaded.mission }) : null;
-    const reviewEntry = loaded.kind === 'found' && integrationRepairNeedsReview(loaded.mission)
-      && (next?.kind === 'agent-review' || next?.kind === 'repair');
-    if (!reviewEntry) {
-      return failure('validation', `Integration repair for ${request.slug} did not return to a fixed review-entry action.`,
-        evidence, failureReason('state-machine', 'lifecycle', {
-          operation: 'review-changed-integration-repair', nextAction: next?.kind ?? 'mission-unavailable',
-        }));
-    }
-    const prepared = await this.resolveWorkspace(request.slug);
-    if (typeof prepared === 'string') { throw new WorkspaceRefusal(prepared); }
-    await this.review(request, prepared, implementer);
-    await this.endWork(request);
-    return { status: 'completed', value: { agent: implementer }, durableEvidence: evidence };
   }
 
   private async resolveAgent(request: ExecuteMissionRequest): Promise<string | null | undefined> {

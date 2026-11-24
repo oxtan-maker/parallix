@@ -86,7 +86,7 @@ export function makeCard(overrides: Partial<MissionCard> = {}): MissionCard {
     ...cardOverrides,
   };
   return { ...card, verificationFacts: verificationFacts ?? { status: card.status,
-    reviewPhase: card.reviewPhase, pendingRepair: false, reviewRequired: false, humanIntervention: false,
+    reviewPhase: card.reviewPhase, checkpointRepairPending: false, humanIntervention: false,
     ownedAction: false, humanOnlyReason: null } };
 }
 

@@ -1,19 +1,14 @@
 import { StructuredFailure, failureReason } from '../../domain/failure-reason.js';
-import { effectiveRepairObligations, isRetainedGateRepair } from '../../domain/repair-coverage.js';
-import type { RetainedRepairPort } from '../ports/review-round.js';
 import { createIntegrationRebase } from './rebase.js';
-import { integrationRepairCertified, isLegacyScalarRepair, verifyRestartedRepair } from './repair-certification.js';
-import {
-  integrationGateWithdrawals, integrationRepairNeedsReview, pendingIntegrationApproval,
-} from '../../domain/integration-repair-policy.js';
+import { integrationRepairCertified, verifyRestartedRepair } from './repair-certification.js';
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { retentionEvidenceMatches } from '../../domain/integration-approval-retention.js';
 import { repairCheckpointFailure, repairContractFailure } from '../repair-checkpoint-service.js';
 import {
-  backlogMirrorOwnership, missionId, type BacklogMirrorOwnership, type Mission,
+  backlogMirrorOwnership, missionId, type BacklogMirrorOwnership,
 } from '../../domain/mission.js';
-import type { MissionStore } from '../domain-ports.js';
-import { decidedRevisionOf, type ReviewRound } from '../../domain/review.js';
-import type { IntegrationMissionServices, IntegrationRepairContinuationPort } from '../ports/integration-records.js';
+import type { ReviewRound } from '../../domain/review.js';
+import type { IntegrationMissionServices } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
 import type { LiveMissionExecutionContext, MissionExecutionContext } from '../ports/mission-execution-context.js';
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
@@ -22,107 +17,6 @@ import { IntegrationStopsForHuman, reviewBeforeIntegration } from './review-befo
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { abortWith, projectBacklogTransition } from './support.js';
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
-
-/** What review and execute must do next about a pending retained approval. */
-export type PendingRepairContinuation =
-  | { readonly kind: 'not-pending' }
-  | { readonly kind: 'preview'; readonly implementer: Mission['assignee'] }
-  | { readonly kind: 'unavailable' | 'retained' | 'blocked' | 'landed'; readonly implementer: Mission['assignee'] }
-  /** withdrawnRevision is null when no round recorded a decided revision; callers must not invent one. */
-  | { readonly kind: 'review-required'; readonly implementer: Mission['assignee']; readonly withdrawnRevision: string | null };
-
-/**
- * Pending approval retention is settled before any generic repair, preparation
- * or launch. A preview observes without certifying; `none` means authoritative
- * state is no longer pending, so the caller continues exactly as a restart would.
- */
-export async function continuePendingIntegrationRepair(slug: string, store: Pick<MissionStore, 'load'>,
-  continuation: IntegrationRepairContinuationPort | undefined): Promise<Exclude<PendingRepairContinuation, { kind: 'preview' }>>;
-export async function continuePendingIntegrationRepair(slug: string, store: Pick<MissionStore, 'load'>,
-  continuation: IntegrationRepairContinuationPort | undefined, mode: 'resume' | 'preview'): Promise<PendingRepairContinuation>;
-export async function continuePendingIntegrationRepair(slug: string, store: Pick<MissionStore, 'load'>,
-  continuation: IntegrationRepairContinuationPort | undefined, mode: 'resume' | 'preview' = 'resume'): Promise<PendingRepairContinuation> {
-  const loaded = await store.load(missionId(slug));
-  if (loaded.kind === 'found') {
-    const action = fixedVerificationNextAction({ mission: loaded.mission });
-    if (action.kind === 'human-handoff' && action.reason === 'recorded-blocker') {
-      const diagnostic = repairContractFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria)
-        ?? 'Invalid locked contract requires human review.';
-      throw new StructuredFailure(diagnostic, failureReason('mission-contract-incomplete', 'verification'));
-    }
-    if (action.kind !== 'repair') { return { kind: 'not-pending' }; }
-  }
-  const pending = loaded.kind === 'found' ? pendingIntegrationApproval(loaded.mission) : null;
-  if (loaded.kind !== 'found' || !pending) { return { kind: 'not-pending' }; }
-  const implementer = loaded.mission.assignee;
-  if (mode === 'preview') { return { kind: 'preview', implementer }; }
-  if (!continuation) { return { kind: 'unavailable', implementer }; }
-  const outcome = await continuation.resume(slug);
-  // The continuation reloads and mutates authoritative state, so the pre-continuation snapshot
-  // classifies nothing and supplies no metadata once it returns (PX-0041.02).
-  const reloaded = await store.load(missionId(slug));
-  return continuationRoute(outcome, reloaded.kind === 'found' ? reloaded.mission : null, pending, reloaded.kind === 'found' ? reloaded.mission.assignee : implementer);
-}
-
-type ContinuationOutcome = Awaited<ReturnType<IntegrationRepairContinuationPort['resume']>>;
-type SettledRepairRoute = Exclude<PendingRepairContinuation, { kind: 'preview' }>;
-
-/**
- * What the repair became is decided by the post-effect Mission, not by this caller's own outcome.
- * `blocked` names only this caller's failed CAS: a competing controller's durable settlement turns
- * that loss into what actually happened, while a concurrent save that records neither leaves the
- * obligation unproven and fails closed, as TASK-2824 pins.
- */
-function continuationRoute(outcome: ContinuationOutcome, after: Mission | null, before: ReviewRound,
-  implementer: Mission['assignee']): SettledRepairRoute {
-  // Retention revoked the judgment and opened an undecided round for the changed code.
-  if (outcome === 'changed') { return { kind: 'review-required', implementer, withdrawnRevision: withdrawnApprovalRevision(after, before) }; }
-  if (!after) { return outcome === 'blocked' ? { kind: 'blocked', implementer } : { kind: 'not-pending' }; }
-  const settled = settledRepairRoute(after, before, implementer);
-  if (outcome === 'none') { return settled; }
-  if (outcome === 'blocked') { return competingSettlementRecorded(after) ? settled : { kind: 'blocked', implementer }; }
-  // A concurrent landing between the continuation's retention and this reload is authoritative:
-  // the repair is already landed, so a second px integrate is not owed (PX-0041.02).
-  return settled.kind === 'landed' ? settled : { kind: 'retained', implementer };
-}
-
-/**
- * Another controller may have settled the repair while this caller certified, so the post-effect
- * state decides between an idempotent handoff, a fresh review, an unproven obligation or nothing.
- */
-function settledRepairRoute(after: Mission | null, before: ReviewRound, implementer: Mission['assignee']): SettledRepairRoute {
-  if (!after) { return { kind: 'not-pending' }; }
-  if (pendingIntegrationApproval(after)) { return { kind: 'blocked', implementer }; }
-  if (integrationRepairNeedsReview(after)) {
-    return { kind: 'review-required', implementer, withdrawnRevision: withdrawnApprovalRevision(after, before) };
-  }
-  // A landed Mission owes nothing: no handoff, no second px integrate, no launch.
-  if (after.status === 'done') { return { kind: 'landed', implementer }; }
-  // Leaving the repair lane unlanded means retention settled the obligation; that is an idempotent
-  // handoff to the operator, never a blocker and never a fresh agent launch.
-  return after.status === 'integration' ? { kind: 'retained', implementer } : { kind: 'not-pending' };
-}
-
-/**
- * A lost CAS is an idempotent handoff only when the competing controller recorded a durable
- * settlement: it retained the approval, or it revoked that approval for changed repair code and
- * opened the fresh review this caller must now answer. A concurrent save recording neither - a
- * newer independent judgment, a moved branch - leaves the obligation unproven.
- */
-function competingSettlementRecorded(mission: Mission): boolean {
-  return mission.review?.rounds.at(-1)?.integrationRepairAssessment?.outcome === 'retained' || integrationRepairNeedsReview(mission);
-}
-
-/**
- * The post-effect review fact names the withdrawn approval; the pre-continuation round is only a
- * fallback. A legacy withdrawal may legitimately lack a decided revision, and that uncertainty
- * stays null instead of becoming a provider revision the review would dismiss with.
- */
-function withdrawnApprovalRevision(after: Mission | null, before: ReviewRound): string | null {
-  const withdrawn = after ? integrationGateWithdrawals(after).at(-1) : undefined;
-  const revision = decidedRevisionOf(withdrawn) ?? decidedRevisionOf(before);
-  return revision === null ? null : String(revision);
-}
 
 interface RepairExecution {
   slug: string; services: IntegrationMissionServices; ports: IntegrateWorkflowPorts;
@@ -141,9 +35,9 @@ export async function resumePendingIntegrationRepair(slug: string, services: Int
 }
 
 /** Shared continuation only certifies and assesses; it has no landing or review launch path. */
-export async function certifyPendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
+async function certifyPendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
   ports: IntegrateWorkflowPorts, context: MissionExecutionContext,
-  verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }, exact?: RetainedRepairPort) {
+  verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }) {
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
   const action = fixedVerificationNextAction({ mission: loaded.mission });
@@ -152,7 +46,6 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
       ?? 'Invalid locked contract requires human review.';
     throw new StructuredFailure(diagnostic, failureReason('mission-contract-incomplete', 'verification'));
   }
-  if (action.kind !== 'repair') { return null; }
   const pending = pendingIntegrationApproval(loaded.mission);
   if (!pending) { return null; }
   const failure = repairCheckpointFailure(loaded.mission.checkpoints, loaded.mission.declaredGates, loaded.mission.successCriteria);
@@ -163,38 +56,10 @@ export async function certifyPendingIntegrationRepair(slug: string, services: In
   if (!worktree) { throw abortWith(ports.landing, 'Integration repair checkout is unavailable.'); }
   const execution = await resolveRepairExecution(slug, services, ports, pending, verification, context, worktree,
     backlogMirrorOwnership(loaded.mission));
-  if (exact) { await verifyExactRepairEvidence(exact, loaded.mission, execution); }
   const gatesPassed = await ensureRepairVerification(execution);
   const outcome = await retainIntegrationApproval({ slug, services, evidence: execution.evidence,
     candidate: { revision: execution.revision, baseline: execution.baseline }, worktree, head: () => committedRepairHead(execution) });
   return { execution, outcome, gatesPassed };
-}
-
-async function verifyExactRepairEvidence(exact: RetainedRepairPort, mission: Mission,
-  execution: RepairExecution): Promise<void> {
-  const { slug, services, worktree } = execution;
-  const outstanding = effectiveRepairObligations(mission.checkpoints, mission.declaredGates, mission.successCriteria, worktree);
-  // Workflow labels have no retained capture and are no command to run; only real gates are read.
-  const commands = [...new Set(outstanding.map(checkpoint => checkpoint.repair!.command).filter(isRetainedGateRepair))];
-  // Read immutable original diagnostics for every distinct failed command
-  // before consuming either the exact verifier or the configured phase rerun.
-  for (const command of commands) {
-    const retained = await exact.read(command).catch(cause => {
-      const detail = cause instanceof Error ? `: ${cause.message}` : '';
-      throw new StructuredFailure(`Original repair evidence is unavailable${detail}`, failureReason('incomplete-evidence', 'verification'), cause);
-    });
-    if (retained.evidence.command !== command || retained.evidence.cwd !== worktree
-      || retained.evidence.exitCode === 0 || !retained.evidence.captureComplete) {
-      throw new StructuredFailure('Original repair evidence is incomplete or mismatched', failureReason('incomplete-evidence', 'verification'));
-    }
-  }
-  // Same unfiltered set as verifyRestartedRepair, so both owners agree on scalar versus collection.
-  const command = isLegacyScalarRepair(outstanding) ? commands[0] : undefined;
-  if (!command) { return; }
-  await verifyRestartedRepair({ slug, services, worktree, revision: execution.revision,
-    gates: [{ key: 'repair', command, order: 1 }], head: () => committedRepairHead(execution),
-    run: async () => { throw new Error('Exact verification owns this check'); },
-    exact: () => exact.verify(command, worktree) });
 }
 
 async function resolveRepairExecution(slug: string, services: IntegrationMissionServices, ports: IntegrateWorkflowPorts,

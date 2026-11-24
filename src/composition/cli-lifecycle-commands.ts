@@ -1,6 +1,4 @@
-import { integrationRepairContinuation } from './integration-repair-continuation.js';
 import { createBootstrapGitBindings } from './git-admission.js';
-import { SqliteIntegrationValidationReader } from '../adapters/sqlite/integration-validation-reader.js';
 import { bindReviewOperatorResume } from './review-operator-resume.js';
 import { commandInvocation } from './command-invocation.js';
 import { hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
@@ -73,11 +71,6 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         reviewerSessionPort,
       );
       const reviewLiveness = createReviewLivenessReader(services, rootDir, configuration);
-      const integrationRepairPolicy = services.operatorState.db && services.operatorState.repositories
-        ? createTestsActionPolicyFactory(configuration, {
-          db: services.operatorState.db, store: mission.store, history: mission.operationalHistory,
-          lifecycle: services.operatorState.repositories.boardLaneEvents, repositoryId: mission.repositoryId,
-        }) : undefined;
       const ownedOperation = configuration.runtime.workflowOperation && services.operatorState.db
         ? await new SqliteWorkflowOperationStore(services.operatorState.db, mission.repositoryId).get(configuration.runtime.workflowOperation) : null;
       const adapter = createReviewWorkflowAdapter({
@@ -107,8 +100,6 @@ export function createLifecycleCommands(context: CliCommandContext): Record<stri
         }, {
           ...observers,
           configuration,
-          integrationRepair: integrationRepairContinuation(mission, configuration, rootDir, integrationRepairPolicy),
-          integrationValidation: async slug => services.operatorState.db ? new SqliteIntegrationValidationReader(services.operatorState.db).read(slug) : null,
           classification: createReviewClassification(request.slug, request.executionContext.missionWorktree, configuration.decision, configuration),
           performReviewPreparationFn: performReviewPreparationWithMissionServices(missionServicesFn, configuration),
         }, { mission, operatorState: services.operatorState, sessionMarker: reviewerSessionPort }),

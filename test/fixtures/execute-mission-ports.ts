@@ -87,7 +87,6 @@ export function makeExecutePorts(overrides: ExecuteOverrides = {}) {
     output: { log() {}, error() {}, command(value: string) { return value; }, formatSlug(value: string) { return value; }, formatAgent(value: string) { return value; } },
   };
   const ports: ExecuteMissionPorts = {
-    ...(overrides.integrationRepair?.resume ? { integrationRepair: { resume: overrides.integrationRepair.resume } } : {}),
     workspace: mergeFixturePort(base.workspace, overrides.workspace),
     agentExecution: mergeFixturePort(base.agentExecution, overrides.agentExecution),
     missionTransitions: mergeFixturePort(base.missionTransitions, overrides.missionTransitions),

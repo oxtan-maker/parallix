@@ -1,4 +1,3 @@
-import { StructuredFailure, failureReason, recognizedFailureReason } from '../../domain/failure-reason.js';
 import type { VerifyResult } from '../rebound-kernel.js';
 import { missionId, type Mission } from '../../domain/mission.js';
 import { effectiveRepairObligations, isRetainedGateRepair } from '../../domain/repair-coverage.js';
@@ -18,7 +17,6 @@ export function integrationRepairCertified(mission: Mission, worktree?: string):
 export async function verifyRestartedRepair(input: {
   slug: string; services: IntegrationMissionServices; worktree: string; revision: string;
   gates: readonly IntegrationGateDefinition[]; head(): string | null; run(): Promise<IntegrationGateRunResult>;
-  exact?: () => Promise<VerifyResult>;
 }): Promise<boolean> {
   const loaded = await input.services.store.load(missionId(input.slug));
   if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
@@ -46,13 +44,9 @@ export async function verifyRestartedRepair(input: {
 async function verifyPinnedRepair(input: Parameters<typeof verifyRestartedRepair>[0], commands: readonly string[], version: number,
   collectionBased: boolean): Promise<VerifyResult> {
   const command = commands[0] ?? '';
-  // The retained exact-command adapter exists only for persisted scalar repairs.
-  // Gate-keyed repairs always use the configured phase rerun as one collection.
-  const exact = collectionBased ? undefined : input.exact;
-  const result = exact ? await exact() : await input.run();
+  const result = await input.run();
   const latest = await input.services.store.load(missionId(input.slug));
   const unchanged = latest.kind === 'found' && latest.version === version && input.head() === input.revision;
-  if (exact) { return exactRepairResult(result as VerifyResult, command, input.worktree, unchanged); }
   return phaseRepairResult(input, result as IntegrationGateRunResult, commands, command, unchanged, collectionBased);
 }
 
@@ -70,13 +64,4 @@ function phaseRepairResult(input: Parameters<typeof verifyRestartedRepair>[0], p
 /** Compatibility boundary for persisted pre-gate-key integration repairs. */
 export function isLegacyScalarRepair(obligations: readonly CheckpointData[]): boolean {
   return obligations.length === 1 && !obligations[0].repair?.gateKey;
-}
-
-function exactRepairResult(result: VerifyResult, command: string, worktree: string, unchanged: boolean): VerifyResult {
-  const receipt = result.exactExecution;
-  const complete = receipt?.command === command && receipt.worktree === worktree && receipt.exitCode === 0;
-  if (result.ok && complete && unchanged) { return { ...result, command }; }
-  const prior = result.reason && 'failureReason' in result.reason ? recognizedFailureReason(result.reason.failureReason) : null;
-  const code = !unchanged ? 'state-machine' : result.ok ? 'incomplete-evidence' : 'gate-failed';
-  throw new StructuredFailure(result.diagnostic?.trim() || `Exact repair verification failed: ${command}`, prior ?? failureReason(code, 'verification'));
 }

@@ -282,7 +282,7 @@ test('board lanes are mission statuses, never a vocabulary of their own', () => 
 
 test('attention and WIP projections reflect blockers, gates, and lanes', () => {
   const base = { id, repositoryId: repo, title: 'x', labels: missionLabels(['user_value']), lane: 'active' as const, status: 'active' as const, rawStatus: 'active', closed: false, agent: null, checkpoint: null, checkpointDescription: null, checkpointEvidence: [], nextActionText: null, gate: 'passed' as const, pullRequest: null, reviewApproved: false, reviewRound: null, reviewPhase: null, reviewDisposition: null, reviewHistory: [], currentWork: null, blockingReason: null, humanReviewDue: null, flags: [], commands: [],
-    verificationFacts: { status: 'active' as const, reviewPhase: null, pendingRepair: false, reviewRequired: false,
+    verificationFacts: { status: 'active' as const, reviewPhase: null, checkpointRepairPending: false,
       humanIntervention: false, ownedAction: false, humanOnlyReason: null } };
   const blocked = { ...base, blockingReason: 'human decision' };
   const failed = { ...base, gate: 'failed' as const };

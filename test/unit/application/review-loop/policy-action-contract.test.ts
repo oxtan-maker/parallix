@@ -69,7 +69,6 @@ test('a selected tests action runs before the agent round and returns control to
   assert.equal(fake.current()?.phase, 'approved');
   assert.deepEqual(calls.select[0], { missionId: SLUG, revision: 'head-1' });
 });
-
 test('other selections and a refused selection leave the fixed round in charge (TASK-2859.19)', async () => {
   for (const selection of ['agent', 'human', null] as const) {
     const { actions, calls } = scripted([selection], () => passed);
@@ -125,19 +124,6 @@ test('every non-pass tests exit returns to a typed human handoff, never a silent
   }
 });
 
-test('a failed tests action selected again returns to policy without entering repair (TASK-2867.05)', async () => {
-  const outcomes: PolicyTestsOutcome[] = [
-    { kind: 'completed', verdict: 'failed', retryWithoutRepair: true },
-    { kind: 'completed', verdict: 'passed' },
-  ];
-  const base = scripted(['tests', 'tests', 'agent'], () => outcomes.shift() ?? passed);
-  const { fake, run } = loop(base.actions, reviewing(), 4);
-  await run();
-  assert.equal(base.calls.tests, 2, 'the failed action spent one attempt and the policy dispatched its re-run');
-  assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer'],
-    'the passing re-run returned to the selected agent check without an implementer repair');
-  assert.equal(fake.current()?.phase, 'approved');
-});
 test('a restart after an interrupted tests action rederives the next action from recorded history (TASK-2859.19)', async () => {
   const interrupted = scripted(['tests'], () => ({ kind: 'human-handoff', reason: 'interrupted', detail: 'killed mid-run' }));
   const first = loop(interrupted.actions);
@@ -816,17 +802,4 @@ test('a check that fails after the agent approval is repaired once, then the app
   assert.deepEqual(order.filter(entry => entry === 'human'), ['human'], 'one human turn');
   assert.deepEqual(order.filter(entry => entry === 'mirror-approved'), ['mirror-approved']);
   assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer']);
-});
-
-test('a post-approval failed test selected again re-runs before the human turn without repair (TASK-2867.05)', async () => {
-  const outcomes: PolicyTestsOutcome[] = [
-    { kind: 'completed', verdict: 'failed', retryWithoutRepair: true },
-    { kind: 'completed', verdict: 'passed' },
-  ];
-  const base = scripted(['agent', 'agent', 'tests', 'tests', 'human'], () => outcomes.shift() ?? passed);
-  const { fake, run } = repairing(['APPROVED'], base);
-  await run(5);
-  assert.equal(base.calls.tests, 2, 'the approved candidate re-ran the same failed check once');
-  assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer'], 'no implementer repair or second reviewer launched');
-  assert.deepEqual(fake.mirrors.filter(lane => lane === 'approved'), ['approved'], 'the human turn began once after the pass');
 });

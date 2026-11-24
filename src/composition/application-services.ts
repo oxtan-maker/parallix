@@ -1,5 +1,4 @@
 import { createWorkflowReturnReader } from '../adapters/review/review-statistics-evidence.js';
-import { integrationRepairContinuation } from './integration-repair-continuation.js';
 import { findLandedSquashOnBaseBranch } from '../adapters/cli/commands/landed-squash.js';
 import { SqliteExecutionActivityStore } from '../adapters/sqlite/execution-activity-store.js';
 import { bindInheritedWorkflowAuthorization } from './workflow-authorization.js';
@@ -291,8 +290,6 @@ export async function createProductionApplicationServices(
     : await createMissionApplicationServices(rootDir, {
       configuration: options.configuration, inheritWorkflowAuthorization: options.inheritWorkflowAuthorization,
     });
-  const integrationRepairPolicy = createMissionTestsActionPolicy(options.configuration, mission, operatorState);
-
   // Build a SessionMarkerPort from the shared database connection so that
   // startAgent reuses the composition root's SQLite handle instead of opening
   // a second independent connection (avoids "database is locked" contention
@@ -323,7 +320,6 @@ export async function createProductionApplicationServices(
     reviewLoopMechanisms: (reviewSlug: string, target: ReviewLoopTarget, bindings: ReviewLoopBindings = {}) => createPersistentReviewLoopPorts(reviewSlug, target, {
       ...bindings,
       configuration: options.configuration,
-      integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir, integrationRepairPolicy),
       classification: createReviewClassification(reviewSlug, target.executionContext.missionWorktree, options.configuration.decision, options.configuration),
       performReviewPreparationFn: reviewPreparationWithMissionServices!,
     }, { mission, operatorState, sessionMarker: sessionMarkerPort }),
@@ -334,9 +330,7 @@ export async function createProductionApplicationServices(
     operatorBlocklist: operatorState.blocklist,
     sessionMarkerPort,
   }, executeRuntime);
-  const executePorts: ExecuteMissionPorts = { ...mechanisms, ...(mission ? {
-    integrationRepair: integrationRepairContinuation(mission, options.configuration, rootDir, integrationRepairPolicy),
-  } : {}) };
+  const executePorts: ExecuteMissionPorts = mechanisms;
   // One publisher per process. The recorder appends to the same operational
   // history the board reads, so there is no second execution activity projection.
   const currentWork = bindCurrentWork(operatorState, rootDir, options.configuration);

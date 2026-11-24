@@ -259,8 +259,6 @@ export interface ExecuteOperatorOutputPort {
  * read-revision write and no adapter can choose a transition.
  */
 export interface ExecuteMissionPorts {
-  readonly integrationRepair?: import('./integration-records.js').IntegrationRepairContinuationPort;
-
   readonly workspace: MissionWorkspacePort;
   readonly agentExecution: AgentExecutionPort;
   readonly missionTransitions: MissionTransitionStore;

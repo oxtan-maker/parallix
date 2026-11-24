@@ -86,7 +86,7 @@ describe('BoardShell component renders with mocked BoardProjection', () => {
     humanReviewDue: null,
     flags: [],
     commands: [],
-    verificationFacts: { status: 'active', reviewPhase: null, pendingRepair: false, reviewRequired: false,
+    verificationFacts: { status: 'active', reviewPhase: null, checkpointRepairPending: false,
       humanIntervention: false, ownedAction: false, humanOnlyReason: null },
   };
 

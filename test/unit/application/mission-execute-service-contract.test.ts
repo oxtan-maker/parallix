@@ -12,8 +12,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { ExecuteMissionService } from '../../../src/application/execute-mission-service.js';
-import type { ExecuteMissionPorts } from '../../../src/application/ports/execute-mission.js';
-
 // Unit coverage for the ExecuteMission use case against in-memory mechanism
 // ports. This is the port-level counterpart of
 // test/unit/adapters/mission/mission-execute-adapter-contract.test.ts (Execute Mission characterization section), which drives the same workflow
@@ -114,8 +112,8 @@ test("execute mission use case activates before launch, then records telemetry a
     .execute(request());
   assert.equal(outcome.status, 'completed');
   assert.deepEqual(calls, [
-    'load', 'load', 'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
-    'launch:codex', 'load', 'safety', 'telemetry:codex', 'load', 'load', 'load', 'synchronize', 'checkpoints', "review-preparation:codex",
+    'load', 'load', 'load', 'synchronize', 'preflight:task-1', 'worktree:task-1', 'task:task-1', 'prepare',
+    'launch:codex', 'load', 'safety', 'telemetry:codex', 'load', 'load', 'synchronize', 'checkpoints', "review-preparation:codex",
   ]);
   assert.deepEqual(events.map((event) => event.sequence), [1, 2, 3]);
   assert.deepEqual(work.filter((entry) => entry.phase === 'review'), [

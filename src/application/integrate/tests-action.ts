@@ -10,7 +10,7 @@
  * gate-run record and routes a red run through the rebound kernel), and returns
  * control to the next-action owner or a typed human hand-off.
  */
-import { missionId } from '../../domain/mission.js';
+import { missionId, type Mission } from '../../domain/mission.js';
 import type { ParallixConfiguration } from '../ports/configuration.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts, IntegrationGateRoute, IntegrationGateRunRecord } from '../ports/integrate-workflow.js';
@@ -22,6 +22,7 @@ import { IntegrationStopsForHuman } from './review-before-integration.js';
 import { integrationSeams } from '../integrate-entry.js';
 import type { IntegrateOptions } from '../integrate-workflow.js';
 import { passingIntegrationReceiptApplies } from '../../domain/integration-validation-policy.js';
+import { agentReviewCoversRevision } from '../approval-coverage.js';
 
 export interface TestsActionRequest {
   readonly slug: string;
@@ -72,7 +73,8 @@ type GateStepDecision =
   | { readonly kind: 'repair-refused'; readonly detail: string }
   | { readonly kind: 'stopped'; readonly detail: string };
 
-type TestsEvidenceFacts = { readonly testsConfigured?: boolean | null; readonly testsCurrent?: boolean | null };
+type TestsEvidenceFacts = { readonly agentReviewCurrent?: boolean | null;
+  readonly testsConfigured?: boolean | null; readonly testsCurrent?: boolean | null };
 
 export interface TestsActionDependencies {
   buildIntegrationContext(_slug: string, _options: IntegrationContextOptions): Promise<IntegrationContext>;
@@ -165,19 +167,24 @@ function readGateRun(ports: IntegrateWorkflowPorts, checkout: string): Integrati
   try { return ports.gates.readGateRun?.(checkout) ?? null; } catch { return null; }
 }
 
-async function nextAction(services: IntegrationMissionServices, slug: string, policySelection?: 'tests') {
+async function nextAction(ports: IntegrateWorkflowPorts, services: IntegrationMissionServices, slug: string,
+  context: IntegrationContext, policySelection?: 'tests') {
   const loaded = await services.store.load(missionId(slug));
   return loaded.kind === 'found' ? fixedVerificationNextAction({ mission: loaded.mission,
-    policySelection: policySelection ?? null }) : null;
+    ...evidenceFacts(ports, slug, context, loaded.mission), policySelection: policySelection ?? null }) : null;
 }
 
 /** Exact-current evidence the fixed sequence needs in the landing lane; unreadable head stays unknown. */
-function evidenceFacts(ports: IntegrateWorkflowPorts, slug: string, context: IntegrationContext): TestsEvidenceFacts {
+function evidenceFacts(ports: IntegrateWorkflowPorts, slug: string, context: IntegrationContext,
+  mission: Pick<Mission, 'review'>): TestsEvidenceFacts {
   const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree: context.baseWorktree });
   const tree = ports.gates.captureFinalIntegrationTree(checkout);
   const configured = ports.gates.loadPhaseGates(checkout, 'preIntegration');
-  return { testsConfigured: configured.length > 0,
-    testsCurrent: tree.ok && tree.commit ? completeCurrentTestsPass(readGateRun(ports, checkout), tree.commit, configured) : null };
+  const head = tree.ok ? tree.commit ?? null : null;
+  return { agentReviewCurrent: tree.ok ? agentReviewCoversRevision(mission.review, head,
+    ports.gates.approvalCoverage?.(checkout, mission.review) ?? null) : null,
+    testsConfigured: configured.length > 0,
+    testsCurrent: head ? completeCurrentTestsPass(readGateRun(ports, checkout), head, configured) : null };
 }
 
 async function rebaseTestsAction(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
@@ -200,6 +207,7 @@ async function runTestsActionGates(ports: IntegrateWorkflowPorts, dependencies: 
   let redRun: IntegrationGateRunRecord | null = null;
   let routed = false;
   let retrySelected = false;
+  const jointRepair = request.jointRepair;
   const seams: IntegrateSeams = { ...request.seams, routeIntegrationGateFailureFn: async failure => {
     routed = true;
     redRun = readGateRun(ports, checkout);
@@ -212,11 +220,9 @@ async function runTestsActionGates(ports: IntegrateWorkflowPorts, dependencies: 
     await dependencies.runRequiredLocalGates({ slug: request.slug, context, missionLoad, missionServices: services,
       dryRun: true, noIntegrationGates: false, realAgent: request.realAgent ?? null,
       realAgentModel: request.realAgentModel ?? null, seams, configuration: request.configuration,
-      ...(request.jointRepair || request.stillSelected ? { retryFailedTestsWithoutRepair: async revision => {
+      ...(jointRepair ? { retryFailedTestsWithoutRepair: async revision => {
         redRun = readGateRun(ports, checkout);
-        retrySelected = request.jointRepair
-          ? await request.jointRepair(revision)
-          : await request.stillSelected!(revision);
+        retrySelected = await jointRepair(revision);
         return retrySelected;
       } } : {}) });
   } catch (error) {
@@ -263,7 +269,7 @@ async function prepareTestsAction(ports: IntegrateWorkflowPorts, dependencies: T
   if (resolved && 'handoff' in resolved) { return { outcome: resolved.handoff }; }
   if (needsEvidence && resolved) {
     selected = fixedVerificationNextAction({ mission: loaded.mission,
-      ...evidenceFacts(ports, request.slug, resolved.context) });
+      ...evidenceFacts(ports, request.slug, resolved.context, loaded.mission) });
   }
   if (selected.kind !== 'tests' || !resolved) {
     return { outcome: { kind: 'not-selected', next: selected } };
@@ -293,11 +299,11 @@ export function createTestsActionExecutor(ports: IntegrateWorkflowPorts, depende
     const previous = readGateRun(ports, checkout);
     if (completeCurrentTestsPass(previous, tested, ports.gates.loadPhaseGates(checkout, 'preIntegration'))) {
       return { kind: 'completed', verdict: 'passed', evidence: evidenceOf(previous), recorded: true, repairRoute: null,
-        next: await nextAction(services, slug) };
+        next: await nextAction(ports, services, slug, context) };
     }
     const decision = await runTestsActionGates(ports, dependencies, request, context, services, checkout);
     return await settle(slug, decision, readGateRun(ports, checkout), tested, previous,
-      selection => nextAction(services, slug, selection));
+      selection => nextAction(ports, services, slug, context, selection));
   }
 
   /** Run one policy-selected tests action under the mission's exclusive integration claim. */

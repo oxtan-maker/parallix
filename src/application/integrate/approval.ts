@@ -16,6 +16,7 @@ import { completeCurrentTestsPass } from './tests-action.js';
 import { abortWith } from './support.js';
 import { missionId } from '../../domain/mission.js';
 import { actionLimitDetail } from '../review-loop/action-limit.js';
+import { agentReviewCoversRevision } from '../approval-coverage.js';
 
 export interface RecoveryDecision {
   established: boolean;
@@ -221,15 +222,6 @@ interface FailedIntegrationShortcutEvidence {
 
 type IntegrationShortcutEvidence = CapturedIntegrationShortcutEvidence | FailedIntegrationShortcutEvidence;
 
-function agentApprovalCoversHead(mission: Extract<MissionLoadResult, { kind: 'found' }>['mission'],
-  checkout: string, head: string | null, ports: IntegrateWorkflowPorts): boolean {
-  if (head === null || !mission.review?.rounds.length) { return false; }
-  const round = currentReviewRound(mission.review);
-  if (round.decision?.kind !== 'approved') { return false; }
-  if (round.decision.revision === head) { return true; }
-  return ports.gates.approvalCoverage?.(checkout, mission.review)?.kind === 'covers';
-}
-
 type AgentReviewCurrency = { readonly ok: true; readonly checkout: string; readonly head: string | null; readonly agentReviewCurrent: boolean }
   | FailedIntegrationShortcutEvidence;
 
@@ -242,7 +234,8 @@ function agentReviewCurrency(context: IntegrationContext,
     return { ok: false, error: tree.error ?? `Unable to capture the finalized integration tree at ${checkout}` };
   }
   const head = tree.commit ?? null;
-  return { ok: true, checkout, head, agentReviewCurrent: agentApprovalCoversHead(mission, checkout, head, ports) };
+  return { ok: true, checkout, head, agentReviewCurrent: agentReviewCoversRevision(mission.review, head,
+    ports.gates.approvalCoverage?.(checkout, mission.review) ?? null) };
 }
 
 function integrationShortcutEvidence(context: IntegrationContext,

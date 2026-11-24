@@ -43,6 +43,7 @@ import { missionId } from '../../../src/domain/mission.js';
 import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from '../../fixtures/mission-builders.js';
 import { agentFamily } from '../../../src/domain/agents.js';
 import { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, currentReviewRound, changeRevision, ConfiguredReviewerEligibility, reviewFindingId, reviewStatus, revokeApprovedDecision, type Review } from '../../../src/domain/review.js';
+import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../../../src/application/verification-policy/fixed-next-action.js';
 
 const SLUG = 'task-2492-gate-bounce';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
@@ -82,6 +83,7 @@ interface Scenario {
   route: 'fixed' | 'exhausted' | 'mainline' | 'limit-reached' | 'stranded';
   repairs?: number;
   dryRun?: boolean;
+  unchangedRepair?: boolean;
 }
 
 async function runIntegrate(scenario: Scenario) {
@@ -107,6 +109,7 @@ async function runIntegrate(scenario: Scenario) {
   const seamLaunches: string[] = [];
   const logs: string[] = [];
   const captured: IntegrationGateFailureRequest[] = [];
+  const nextActions: FixedVerificationNextAction[] = [];
 
   mock.method(process.stdout, 'write', (chunk: string | Uint8Array) => {
     logs.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
@@ -191,6 +194,11 @@ async function runIntegrate(scenario: Scenario) {
       const pending = services.store.mission();
       assert.equal(reviewStatus(pending.review!), 'approved', 'a red gate preserves the original judgment during repair');
       assert.equal(currentReviewRound(pending.review!).integrationRepairAssessment?.outcome, 'pending');
+      if (scenario.unchangedRepair) {
+        nextActions.push(fixedVerificationNextAction({ mission: pending,
+          agentReviewCurrent: true, testsConfigured: true, testsCurrent: true }));
+        return { route: 'blocked', rebounds: captured.length };
+      }
       // This routing seam represents a changed patch: the retention owner
       // withdraws the judgment before returning revision-changed to the CLI.
       const review = revokeApprovedDecision(pending.review!, currentReviewRound(pending.review!).number, {
@@ -243,7 +251,7 @@ async function runIntegrate(scenario: Scenario) {
     fs.rmSync(root, { recursive: true, force: true });
   }
   const mission = services.store.mission();
-  return { error, exitCode, launches, seamLaunches, logs, captured, gateRuns, reviews, mission,
+  return { error, exitCode, launches, seamLaunches, logs, captured, gateRuns, reviews, mission, nextActions,
     laneEvents: services.store.events.map(event => `${event.from}>${event.to}:${event.trigger}`),
     statistics: reviewStatistics(mission.review).total };
 }
@@ -291,6 +299,16 @@ test('TASK-2620: after repair and re-approval integration stops in the integrati
     'the landing-gate return and the deterministic re-review return remain distinct (TASK-2859.11)');
   assert.ok(result.mission.review!.rounds[0].decision?.kind === 'approved' && result.mission.review!.rounds[0].decision.revocation);
   assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
+});
+
+test('TASK-2872.01: an unchanged repair with a green rerun advances from current checks', async () => {
+  const result = await runIntegrate({ route: 'fixed', repairs: 1, unchangedRepair: true });
+  assert.equal(result.captured.length, 1, 'the red tests verdict enters the rebound-owned repair once');
+  assert.equal(result.gateRuns, 1, 'the tests action owns the failed run; the routing seam represents its green rerun');
+  assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'fixture-revision',
+    'the repair left the approved revision unchanged');
+  assert.deepEqual(result.nextActions, [{ kind: 'human-review', reason: 'integrate-shortcut-eligible' }],
+    'current agent review and a green rerun advance to the human turn instead of legacy repair or blocked routing');
 });
 
 test('PX-0031: dry-run repair re-verifies and re-reviews a changed candidate without landing', async () => {

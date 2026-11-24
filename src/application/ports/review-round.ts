@@ -426,8 +426,6 @@ export interface ReviewControllerLock {
  * ------------------------------------------------------------------ */
 
 export interface ReviewLoopPorts {
-  readonly integrationRepair?: import('./integration-records.js').IntegrationRepairContinuationPort;
-  readonly integrationApprovalEvidence?: import('./integration-approval-evidence.js').IntegrationApprovalEvidencePort;
   readonly retainedRepair?: RetainedRepairPort;
   readonly branch: string;
   /** The mission worktree, quoted in repair prompts. */

@@ -47,7 +47,7 @@ export async function continueVerdictThroughActionOwner(context: CliCommandConte
     await context.commands().active([slug], { operatorInvocation: false });
     return;
   }
-  if (action.kind === 'agent-review' || (action.kind === 'repair' && action.reason === 'repair-pending')) {
+  if (action.kind === 'agent-review' || (action.kind === 'repair' && action.reason === 'checkpoint-repair-pending')) {
     await context.commands().review([slug], { operatorInvocation: false });
   }
 }

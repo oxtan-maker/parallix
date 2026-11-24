@@ -75,6 +75,15 @@ export function recordedApprovalCoverage(review: Review | null): ApprovalCoverag
   return coverage?.kind === 'stale' ? coverage : null;
 }
 
+/** Whether the current approved agent review covers this exact candidate revision. */
+export function agentReviewCoversRevision(review: Review | null, revision: string | null,
+  observed: ApprovalCoverage | null): boolean {
+  if (revision === null || !review?.rounds.length) { return false; }
+  const decision = currentReviewRound(review).decision;
+  return decision?.kind === 'approved'
+    && (String(decision.revision) === revision || observed?.kind === 'covers');
+}
+
 /** The staleness already reported for the effective approval, as an operator sentence, or null. */
 export function reportedApprovalStaleness(review: Review | null): string | null {
   const coverage = recordedApprovalCoverage(review);

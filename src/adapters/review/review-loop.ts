@@ -1,5 +1,5 @@
 import { invalidateApprovedPrReview, recoverApprovalWithdrawal } from './integration-approval-invalidation.js';
-import { createHumanWithdrawalFence, createIntegrationApprovalEvidence } from './integration-approval-evidence.js';
+import { createHumanWithdrawalFence } from './integration-approval-evidence.js';
 import { createReviewObservationRecorder } from './review-observation-recording.js';
 import { providerReviewObservation, providerReviewChanges, providerResolution } from './review-provider-observations.js';
 import { reviewVerdictBlock } from '../../application/review-verdict-readiness.js';
@@ -68,8 +68,6 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 /** The production review authority a composition root binds for one loop. */
 export interface ReviewLoopBindings extends ReviewStartObservationBindings {
   readonly startAgent?: typeof startAgent;
-  readonly integrationRepair?: ReviewLoopPorts['integrationRepair'];
-  readonly integrationValidation?: import('../../application/ports/integration-approval-evidence.js').IntegrationApprovalEvidencePort['validation'];
   readonly actionHistory?: ReviewLoopPorts['actionHistory'];
   readonly preferredReviewer?: string;
   readonly configuration?: ParallixConfiguration;
@@ -388,8 +386,6 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
     branch,
     worktree,
     classification: bindings.classification,
-    integrationRepair: bindings.integrationRepair,
-    integrationApprovalEvidence: createIntegrationApprovalEvidence(worktree, bindings.integrationValidation ?? (async () => null), bindings.configuration, { providerEnabled: bindings.isProviderEnabled ?? isProviderEnabled, fetchComments: bindings.getComments ?? getComments, tokenFor: bindings.readToken ?? readToken, ...(withdrawalFence ? { isHumanReviewWithdrawn: withdrawalFence } : {}) }),
     polling: { intervalMs: resolvePollIntervalMs(bindings.configuration), timeoutMs: resolvePollTimeoutMs(target.pollTimeoutSeconds || 0, bindings.configuration) },
     missionStore,
     retainedRepair: missionStore ? retainedRepairPort(slug, worktree, missionStore, bindings.configuration) : undefined,

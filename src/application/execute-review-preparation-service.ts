@@ -30,7 +30,6 @@ export interface ExecuteReviewPreparationRequest {
   /** Explicit automatic-review family; carried unchanged through review preparation retries. */
   readonly reviewer?: string;
   readonly taskFile: string | null;
-  readonly continueIntegrationRepair?: () => Promise<boolean | null>;
   readonly beginReviewPreparation?: () => Promise<void>;
   readonly prepareImplementationRepair?: (_diagnostic: string, _reason: ReboundReason,
     _returnStage: WorkflowReturnStage) => Promise<void>;
@@ -73,8 +72,6 @@ export class ExecuteReviewPreparationService {
 
   async run(request: ExecuteReviewPreparationRequest): Promise<boolean> {
     request = this.trackImplementer(request);
-    const resumed = await request.continueIntegrationRepair?.();
-    if (resumed !== undefined && resumed !== null) { return resumed; }
     await request.beginReviewPreparation?.();
     if (!await this.ensureCheckpointEvidence(request)) { return false; }
 

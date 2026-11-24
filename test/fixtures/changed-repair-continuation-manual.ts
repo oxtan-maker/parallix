@@ -16,6 +16,7 @@ import { setCommandPathProbe, setLauncherHealthProbe, setWorkflowLaunchPort } fr
 import { configureMissionWriteAuthorization } from '../../src/application/ports/mission-write-authorization.js';
 import type { ReviewStartDecision } from '../../src/application/ports/verification-policy.js';
 import { REVIEW_START_DECISION_EVENT } from '../../src/application/verification-policy/review-start-decision.js';
+import { fixedVerificationNextAction } from '../../src/application/verification-policy/fixed-next-action.js';
 import { run } from '../../src/composition/create-cli.js';
 import { recordApproval } from '../../src/adapters/review/review-round.js';
 import { reviewerResultAttribution } from '../../src/adapters/review/reviewer-result-attribution.js';
@@ -26,12 +27,13 @@ const equivalent = process.argv.includes('--equivalent');
 const failingCheck = process.argv.includes('--failing-check');
 // The retained review resume scenario runs in its own disposable home before the approved-continuation scenario.
 const resumeScenario = equivalent && process.argv.includes('--resume-scenario');
-const undecidedReview = process.argv.includes('--policy-tests-repair') || resumeScenario;
+const policyTestsActive = process.argv.includes('--policy-tests-active');
+const undecidedReview = process.argv.includes('--policy-tests-repair') || policyTestsActive || resumeScenario;
 const aggregateMode = process.argv.includes('--aggregate-review') || process.argv.includes('--aggregate-execute');
 const aggregateExecute = process.argv.includes('--aggregate-execute');
 const reviewStartPolicy = process.argv.includes('--review-start-policy');
 const parallelReviewers = process.argv.includes('--parallel-reviewers');
-const policyTestsRepair = process.argv.includes('--policy-tests-repair');
+const policyTestsRepair = process.argv.includes('--policy-tests-repair') || policyTestsActive;
 const policyTestsBlocked = policyTestsRepair && process.argv.includes('--policy-tests-blocked');
 const reviewFamilies = parallelReviewers ? ['custom', 'claude'] : ['custom'];
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-changed-repair-manual-'));
@@ -64,6 +66,7 @@ try {
   fs.mkdirSync(path.join(repo, 'config'), { recursive: true });
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'manual-repair', targetUser: 'probe' },
+    ...(policyTestsRepair ? { reviewActionLimit: 2 } : {}),
     ...(policyTestsRepair ? { verificationPolicy: { mode: 'pilot', artifact: 'policy.json' } }
       : reviewStartPolicy ? { verificationPolicy: { mode: 'shadow', artifact: 'missing-policy.json' } } : {}), adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
@@ -114,8 +117,10 @@ try {
   });
   const approved = fixtureMission(slug, { repositoryId: services.repositoryId, status: 'integration', assignee: agentFamily('codex'), review,
     labels: missionLabels(['ai_sdlc']),
+    predictedNelBucket: 'Small',
     brief: { goal: 'Review repaired behavior', why: 'Avoid historical approval replay', scope: 'deliverable.txt', outOfScope: ['Landing'] },
-    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands : policyTestsRepair ? [gateCommand] : resumeScenario ? [exactCommand] : [':'],
+    successCriteria: ['The deliverable is repaired'], completedSuccessCriteria: [0], declaredGates: aggregateMode ? aggregateCommands
+      : policyTestsActive ? [':'] : policyTestsRepair ? [gateCommand] : resumeScenario ? [exactCommand] : [':'],
     checkpoints: [{ missionId: missionId(slug), name: 'CP-1', goalCheck: [{ criterion: 'The deliverable is repaired', evidence: 'deliverable.txt:1', recordedRound: 1 }], nextActionText: 'Independent review',
       recording: { recordedAt: '2026-10-02T09:00:00Z', recordedRound: 1, missionRevision: 2 },
       ...(undecidedReview ? {} : {
@@ -127,7 +132,7 @@ try {
       command: aggregateMode ? aggregateCommands[0] : policyTestsRepair ? gateCommand : ':' }, occurredAt: '2026-10-01T10:00:00Z' });
   // The pilot rehearsal starts from an unblocked review turn: no pending repair may shadow the policy decision.
   const seededMission = undecidedReview ? approved : active;
-  await services.store.save({ ...seededMission, status: undecidedReview ? 'review' : equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
+  await services.store.save({ ...seededMission, status: policyTestsActive ? 'active' : undecidedReview ? 'review' : equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
     ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
   if (policyTestsRepair) {
     // The pilot joins every retained rebase observation to its admitted workflow operation; without one the
@@ -306,11 +311,16 @@ try {
     // CP-2 rehearsal: a pilot policy selects the tests action, its configured gate is red,
     // the repair owner takes the failure, and the loop stops at one typed boundary.
     const launches: Array<{ role: string | null; worktree: string; promptHead: string }> = [];
+    let ordinaryExecuteLaunches = 0;
     setCommandPathProbe(() => '/disposable-review-or-repair-actor');
     setLauncherHealthProbe(() => ({ ok: true }));
     setWorkflowLaunchPort(input => ({
       invocation: { command: 'disposable-review-or-repair-actor', args: [], options: { cwd: input.worktree } },
       resultPromise: (async () => {
+        if (policyTestsActive && /Mode: execute after lock\./.test(input.prompt)) {
+          ordinaryExecuteLaunches++;
+          return { status: 0, stdout: '', stderr: '' };
+        }
         launches.push({ role: input.role ?? null, worktree: input.worktree, promptHead: input.prompt.slice(0, 60).replace(/\s+/g, ' ') });
         if (/Mode: review\./.test(input.prompt)) {
           assert.equal(await run(['verdict', 'approve', '--actor', 'custom'], { baseCwd: input.worktree }), 0);
@@ -330,9 +340,10 @@ try {
         return { status: 0, stdout: '', stderr: '' };
       })(),
     }));
-    console.log(`COMMAND: px review ${slug} --reviewer custom`);
-    // A direct operator command overrides the policy, so the rehearsal runs the workflow invocation the pilot governs.
-    const code = await run(['review', slug, '--reviewer', 'custom'], { baseCwd: worktree, operatorInvocation: false });
+    const command = policyTestsActive ? ['active', slug, '--reviewer', 'custom'] : ['review', slug, '--reviewer', 'custom'];
+    console.log(`COMMAND: px ${command.join(' ')}`);
+    // Exercise the public workflow invocation while leaving pilot policy enabled.
+    const code = await run(command, { baseCwd: worktree, operatorInvocation: false });
     const result = await services.store.load(missionId(slug));
     assert.equal(result.kind, 'found');
     if (result.kind !== 'found') { throw new Error('missing disposable mission'); }
@@ -363,20 +374,37 @@ try {
       assert.equal(currentReviewRound(result.mission.review!).decision, null, 'a blocked check records no verdict');
       assert.deepEqual(actions, ['tests'], 'the typed stop runs no further action');
     } else {
-      // The evidenced repair re-runs the same check green, the loop re-enters, and review finishes at its typed handoff.
-      assert.equal(code, 0);
+      // The evidenced repair re-runs the same check green. The bounded next action then exposes
+      // the fixed next action without allowing another policy-selected gate run.
+      assert.equal(code, policyTestsActive ? 1 : 0,
+        'px active surfaces the deliberate action-limit handoff while px review returns after recording it');
       assert.equal(repair.verified, true, 'fresh evidence plus a green rerun verifies the repair');
       assert.equal(repair.attemptsUsed, 1);
       assert.ok(repair.maxAttempts !== undefined && (repair.attemptsUsed ?? 0) <= repair.maxAttempts);
-      assert.equal(result.mission.status, 'integration', 'the approved review hands off to integration without landing');
-      assert.equal(currentReviewRound(result.mission.review!).decision?.kind, 'approved');
-      assert.deepEqual(actions.slice(-2), ['agent', 'human'], 'the loop still runs the reviewer round and the human turn');
-      assert.ok(decisions.filter(decision => decision.actualAction === 'tests').length >= 2,
-        'the repaired check is re-selected after the repair, not trusted from the previous run');
+      assert.equal(currentReviewRound(result.mission.review!).decision, null, 'the test repair fabricates no agent or human review');
+      assert.deepEqual(actions, ['tests', 'tests'], 'the bounded restart records its selection before stopping at the action limit');
+      assert.equal(launches.length, 1, 'one rebound repair is the only repair or review launch');
     }
+    const guardedNextAction = fixedVerificationNextAction({ mission: result.mission });
+    assert.deepEqual(guardedNextAction, { kind: 'human-handoff', reason: 'human-intervention' });
+    const verificationNextAction = fixedVerificationNextAction({
+      status: result.mission.status,
+      reviewPhase: currentReviewRound(result.mission.review!).phase,
+      checkpointRepairPending: false,
+      humanIntervention: false,
+      ownedAction: false,
+      humanOnlyReason: null,
+      agentReviewCurrent: false,
+      testsCurrent: true,
+      testsConfigured: true,
+      policySelection: null,
+    });
+    assert.deepEqual(verificationNextAction, { kind: 'agent-review', reason: 'review-unfinished' });
     console.log(JSON.stringify({ observation: policyTestsBlocked ? 'pilot tests action blocked repair' : 'pilot tests action failure and repair',
+      publicCommand: policyTestsActive ? 'px active' : 'px review', ordinaryExecuteLaunches,
       code, launches, lane: result.mission.status, round: currentReviewRound(result.mission.review!).number,
       decision: currentReviewRound(result.mission.review!).decision?.kind ?? null,
+      guardedNextAction, verificationNextAction,
       gateRun: gateRun && { status: gateRun.status, revision: gateRun.revision, gateRunId: gateRun.gateRunId,
         outcomes: gateRun.outcomes.map(outcome => ({ key: outcome.key, exitCode: outcome.exitCode })) },
       repair: { gateKey: repair.gateKey, command: repair.command, attempt: repair.attempt, attemptsUsed: repair.attemptsUsed,

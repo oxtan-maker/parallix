@@ -59,7 +59,7 @@ function makeCard(
     blockingReason: opts.blockingReason ?? null,
     humanReviewDue: null,
     flags: [],
-    verificationFacts: { status: lane, reviewPhase: null, pendingRepair: false, reviewRequired: false,
+    verificationFacts: { status: lane, reviewPhase: null, checkpointRepairPending: false,
       humanIntervention: false, ownedAction: false, humanOnlyReason: null },
     commands: [{ command: lane === 'integration' ? 'integrate' : lane === 'review' ? 'review' : 'active', enabled: true, reason: null }],
   };

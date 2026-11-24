@@ -52,24 +52,22 @@ function reviewFor(phase: ReviewPhase, pending: boolean): NonNullable<Mission['r
 }
 
 test('fixed next-action owner resolves every reachable state to action, wait, or typed handoff (TASK-2859.12)', () => {
-  const decide = (status: MissionStatus, reviewPhase: ReviewPhase | null, pendingRepair: boolean,
-    ownedAction = false, humanOnlyReason: string | null = null, reviewRequired = false) => fixedVerificationNextAction({
-    status, reviewPhase, pendingRepair, reviewRequired, ownedAction, humanOnlyReason, humanIntervention: false,
+  const decide = (status: MissionStatus, reviewPhase: ReviewPhase | null,
+    ownedAction = false, humanOnlyReason: string | null = null) => fixedVerificationNextAction({
+    status, reviewPhase, checkpointRepairPending: false, ownedAction, humanOnlyReason, humanIntervention: false,
   });
   const rows = [
-    ['ordinary-active', decide('active', null, false).kind, 'agent-review'],
-    ['active-with-undecided-round', decide('active', 'reviewing', false).kind, 'agent-review'],
-    ['approved-but-repair-pending', decide('active', 'approved', true).kind, 'repair'],
-    ['retained-gate-repair-precedes-rereview', decide('review', 'reviewing', true, false, null, true).kind, 'repair'],
-    ['withdrawn-approval-needs-review', decide('review', 'reviewing', false, false, null, true).kind, 'agent-review'],
-    ['review-awaiting-verdict', decide('review', 'reviewing', false).kind, 'agent-review'],
-    ['review-fixing', decide('review', 'fixing', false).kind, 'repair'],
-    ['live-review', decide('review', 'reviewing', false, true).kind, 'wait'],
-    ['covered-integration', decide('integration', 'approved', false).kind, 'integration-handoff'],
-    ['active-approved-still-needs-review-entry', decide('active', 'approved', false).kind, 'agent-review'],
-    ['pending-approval-needs-agent-rereview', decide('review', 'pending-approval', false).kind, 'agent-review'],
-    ['review-approved-reaches-human-handoff', decide('review', 'approved', false).kind, 'human-review'],
-    ['operator-review-blocker', decide('review', 'pending-approval', false, false, 'operator').kind, 'human-handoff'],
+    ['ordinary-active', decide('active', null).kind, 'agent-review'],
+    ['active-with-undecided-round', decide('active', 'reviewing').kind, 'agent-review'],
+    ['active-approved-still-needs-current-facts', decide('active', 'approved').kind, 'agent-review'],
+    ['withdrawn-approval-needs-review', decide('review', 'reviewing').kind, 'agent-review'],
+    ['review-awaiting-verdict', decide('review', 'reviewing').kind, 'agent-review'],
+    ['review-fixing', decide('review', 'fixing').kind, 'repair'],
+    ['live-review', decide('review', 'reviewing', true).kind, 'wait'],
+    ['covered-integration', decide('integration', 'approved').kind, 'integration-handoff'],
+    ['pending-approval-needs-agent-rereview', decide('review', 'pending-approval').kind, 'agent-review'],
+    ['review-approved-reaches-human-handoff', decide('review', 'approved').kind, 'human-review'],
+    ['operator-review-blocker', decide('review', 'pending-approval', false, 'operator').kind, 'human-handoff'],
   ] as const;
   for (const [name, actual, expected] of rows) { assert.equal(actual, expected, name); }
 
@@ -142,14 +140,12 @@ test('fixed next-action owner resolves every reachable state to action, wait, or
 
 test('a policy selection or known-missing tests in the landing lane reach the tests action; unknown evidence never does (TASK-2859.14, TASK-2859.17)', () => {
   const decide = (status: MissionStatus, reviewPhase: ReviewPhase | null, extra: Partial<Parameters<typeof fixedVerificationNextAction>[0]> = {}) =>
-    fixedVerificationNextAction({ status, reviewPhase, pendingRepair: false, reviewRequired: false, ownedAction: false,
+    fixedVerificationNextAction({ status, reviewPhase, checkpointRepairPending: false, ownedAction: false,
       humanOnlyReason: null, humanIntervention: false, ...extra } as Parameters<typeof fixedVerificationNextAction>[0]);
   for (const status of MISSION_STATUSES) for (const reviewPhase of [null, ...REVIEW_PHASES]) {
-    for (const pendingRepair of [false, true]) for (const reviewRequired of [false, true]) {
-      for (const policySelection of [undefined, null] as const) for (const testsCurrent of [undefined, null, true] as const) {
-        assert.notEqual(decide(status, reviewPhase, { pendingRepair, reviewRequired, policySelection, testsConfigured: true, testsCurrent }).kind, 'tests',
-          `${status}/${reviewPhase ?? 'none'}/repair=${pendingRepair}/review=${reviewRequired}/selection=${policySelection}/current=${testsCurrent}`);
-      }
+    for (const policySelection of [undefined, null] as const) for (const testsCurrent of [undefined, null, true] as const) {
+      assert.notEqual(decide(status, reviewPhase, { policySelection, testsConfigured: true, testsCurrent }).kind, 'tests',
+        `${status}/${reviewPhase ?? 'none'}/selection=${policySelection}/current=${testsCurrent}`);
     }
   }
   // The fixed sequence (decisions 5 and 7): only an approved candidate in the landing lane, with tests positively
@@ -161,8 +157,8 @@ test('a policy selection or known-missing tests in the landing lane reach the te
   }
   assert.deepEqual(decide('integration', 'approved', { testsConfigured: true, testsCurrent: false }),
     { kind: 'tests', reason: 'tests-not-current' });
-  assert.deepEqual(decide('integration', 'approved', { testsConfigured: true, testsCurrent: false, pendingRepair: true }),
-    { kind: 'repair', reason: 'repair-pending' }, 'a pending repair precedes the fixed tests action');
+  assert.deepEqual(decide('integration', 'approved', { agentReviewCurrent: false, testsConfigured: true, testsCurrent: true }),
+    { kind: 'agent-review', reason: 'review-unfinished' }, 'a changed revision invalidates the earlier agent review');
   assert.deepEqual(decide('integration', 'approved', { testsConfigured: true, testsCurrent: false, ownedAction: true }),
     { kind: 'wait', reason: 'action-owned' });
   const selected = { policySelection: 'tests' as const };
@@ -171,8 +167,8 @@ test('a policy selection or known-missing tests in the landing lane reach the te
     ['review-approved-before-human', decide('review', 'approved', selected), { kind: 'tests', reason: 'policy-selected' }],
     ['active-without-review', decide('active', null, selected), { kind: 'tests', reason: 'policy-selected' }],
     ['fixing-repairs-first', decide('review', 'fixing', selected), { kind: 'repair', reason: 'findings-pending' }],
-    ['pending-repair-first', decide('active', 'approved', { ...selected, pendingRepair: true }), { kind: 'repair', reason: 'repair-pending' }],
-    ['withdrawn-approval-reviews-first', decide('review', 'reviewing', { ...selected, reviewRequired: true }), { kind: 'agent-review', reason: 'review-unfinished' }],
+    ['unchanged-repair-current-checks', decide('active', 'approved', { agentReviewCurrent: true, testsCurrent: true }), { kind: 'human-review', reason: 'integrate-shortcut-eligible' }],
+    ['changed-repair-reviews-first', decide('active', 'approved', { agentReviewCurrent: false, testsCurrent: true }), { kind: 'agent-review', reason: 'review-unfinished' }],
     ['integration-lane-after-agent-approval-still-owes-selected-tests (PX-0074.01)', decide('integration', 'approved', selected), { kind: 'tests', reason: 'policy-selected' }],
     ['integration-lane-never-tests-while-fixing', decide('integration', 'fixing', selected), { kind: 'integration-handoff', reason: 'fixed-sequence-complete' }],
     ['owned-action-waits', decide('review', 'reviewing', { ...selected, ownedAction: true }), { kind: 'wait', reason: 'action-owned' }],
@@ -231,7 +227,7 @@ test('fixed owner limits historical repair debt to the lifecycle stage that can 
     { kind: 'integration-handoff', reason: 'fixed-sequence-complete' });
   const legacyCard = projectMissionCard(legacyMission, { latestGate: 'passed', reviewApproval: null,
     currentWork: null, blockingReason: null, flags: [] });
-  assert.equal(legacyCard.verificationFacts.pendingRepair, false, 'board and workflow consume the same repair fact');
+  assert.equal('pendingRepair' in legacyCard.verificationFacts, false, 'legacy repair storage is not a next-action verification fact');
   assert.equal(attentionAction(legacyCard, attentionReason(legacyCard))?.kind, 'integrate:merge');
   assert.doesNotThrow(() => assertRecoveredIntegrationHandoff(
     { kind: 'found', mission: legacyMission, version: missionVersion(1) }, ports.landing, 'task-legacy-workflow-repair'));
@@ -252,7 +248,8 @@ test('fixed owner limits historical repair debt to the lifecycle stage that can 
 
   const preparation = fixtureMission('task-preparation-gate-repair', { status: 'review', review: reviewFor('reviewing', false),
     reviewPreparationPending: true, checkpoints: [{ ...target, missionId: missionId('task-preparation-gate-repair') }] });
-  assert.deepEqual(fixedVerificationNextAction({ mission: preparation }), { kind: 'repair', reason: 'repair-pending' });
+  assert.deepEqual(fixedVerificationNextAction({ mission: preparation }), { kind: 'repair', reason: 'checkpoint-repair-pending' },
+    'recorded checkpoint recovery remains with its repair owner without becoming a verification pass');
   const preparationCard = projectMissionCard(preparation, { latestGate: 'failed', reviewApproval: null,
     currentWork: null, blockingReason: null, flags: [] });
   assert.equal(attentionAction(preparationCard, attentionReason(preparationCard))?.kind, 'review:submit',
@@ -918,6 +915,7 @@ test('each lane a passing order passes through yields one next action, and only 
   type Step = readonly [lane: string, mission: Mission, facts: Partial<Parameters<typeof fixedVerificationNextAction>[0]>, expected: string];
   const reviewing = fixtureMission(slug, { status: 'review', review: reviewFor('reviewing', false) });
   const agentApproved = fixtureMission(slug, { status: 'review', review: approvedReview(slug) });
+  const repairing = { ...agentApproved, status: 'active' as const, closedAt: null };
   const landing = { ...agentApproved, status: 'integration' as const, closedAt: null };
   const selected = { policySelection: 'tests' as const };
   const testsOwed = { testsConfigured: true, testsCurrent: false };
@@ -927,6 +925,8 @@ test('each lane a passing order passes through yields one next action, and only 
     ['review/approved', agentApproved, {}, 'human-review:agent-review-approved'],
     ['review/approved tests selected', agentApproved, selected, 'tests:policy-selected'],
     ['review/approved tests passed', agentApproved, { agentReviewCurrent: true, testsCurrent: true }, 'human-review:integrate-shortcut-eligible'],
+    ['active/approved unchanged repair tests passed', repairing, { agentReviewCurrent: true, testsCurrent: true }, 'human-review:integrate-shortcut-eligible'],
+    ['active/approved changed repair tests passed', repairing, { agentReviewCurrent: false, testsCurrent: true }, 'agent-review'],
     ['integration/approved', landing, {}, 'integration-handoff'],
     ['integration/approved tests owed', landing, testsOwed, 'tests:tests-not-current'],
     ['integration/approved tests passed', landing, { testsConfigured: true, testsCurrent: true }, 'integration-handoff'],
@@ -941,7 +941,7 @@ test('each lane a passing order passes through yields one next action, and only 
   // After the human verdict the round decision stands: no agent review is owed again on the same change, whatever the evidence says.
   for (const testsConfigured of [undefined, null, true, false] as const) for (const testsCurrent of [undefined, null, true, false] as const) {
     for (const agentReviewCurrent of [undefined, null, true, false] as const) {
-      assert.notEqual(fixedVerificationNextAction({ mission: landing, testsConfigured, testsCurrent, agentReviewCurrent }).kind, 'agent-review',
+      assert.equal(fixedVerificationNextAction({ mission: landing, testsConfigured, testsCurrent, agentReviewCurrent }).kind === 'agent-review', agentReviewCurrent === false,
         `integration/approved ${testsConfigured}/${testsCurrent}/${agentReviewCurrent}`);
     }
   }

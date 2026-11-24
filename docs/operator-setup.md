@@ -619,10 +619,13 @@ the same authorized rerun of the complete configured integration plan must pass
 before all checkpoints from that execution are certified together, live or after
 `px integrate` restarts. Retrying or restarting the same tested revision reuses
 the incident-and-gate checkpoints.
-`px review <slug>` and `px active <slug>` also resume the authorized exact check,
-repair certification and pending patch assessment before review preparation.
-This includes an approved mission already in review with preparation pending;
-continuation preserves its approval without launching an agent to escape routing.
+`px review <slug>` and `px active <slug>` choose their next verification step
+from the current revision's agent review, test receipt and human review. They do
+not resume integration repair certification or pending patch assessment. When
+tests are the missing step, the tests action owns gate execution; a red verdict
+enters one repair through the rebound path, and the green rerun is evaluated
+again from those three current facts. `px integrate <slug>` remains the command
+that resumes integration-owned repair certification.
 Evidence you already recorded for the identical failure (same gate attempt, worktree,
 failure revision and failure evidence) is kept on resume and goes to the exact check
 before any implementer launch; only a passing check certifies it, and a failing

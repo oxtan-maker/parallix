@@ -1,4 +1,3 @@
-import { currentIntegrationRepair } from '../../domain/integration-repair-policy.js';
 import type { Mission, MissionStatus } from '../../domain/mission.js';
 import { effectiveRepairObligations, isRetainedGateRepair, retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
 import { currentReviewRound, reviewStatus } from '../../domain/review.js';
@@ -8,8 +7,8 @@ import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 export interface FixedVerificationNextActionFacts {
   readonly status: MissionStatus;
   readonly reviewPhase: ReviewPhase | null;
-  readonly pendingRepair: boolean;
-  readonly reviewRequired: boolean;
+  /** Recorded checkpoint recovery owned by the existing repair path; never a verification pass. */
+  readonly checkpointRepairPending: boolean;
   readonly humanIntervention: boolean;
   readonly ownedAction: boolean;
   readonly humanOnlyReason: string | null;
@@ -28,7 +27,7 @@ export interface FixedVerificationNextActionFacts {
 
 export type FixedVerificationNextAction =
   | { readonly kind: 'agent-review'; readonly reason: 'review-unfinished' }
-  | { readonly kind: 'repair'; readonly reason: 'repair-pending' | 'findings-pending' }
+  | { readonly kind: 'repair'; readonly reason: 'checkpoint-repair-pending' | 'findings-pending' }
   | { readonly kind: 'human-review'; readonly reason: 'agent-review-approved' | 'integrate-shortcut-eligible' }
   | { readonly kind: 'tests'; readonly reason: 'policy-selected' | 'tests-not-current' }
   | { readonly kind: 'integration-handoff'; readonly reason: 'fixed-sequence-complete' }
@@ -53,15 +52,15 @@ export type FixedVerificationNextActionInput = FixedVerificationNextActionFacts 
   readonly policySelection?: 'tests' | null;
 };
 
-function retainedGateRepairPending(mission: Mission): boolean {
-  if (!retainedGateRepairIsActionable(mission)) { return false; }
-  const obligations = effectiveRepairObligations(mission.checkpoints ?? [], mission.declaredGates, mission.successCriteria);
-  return obligations.some(checkpoint => isRetainedGateRepair(checkpoint.repair!.command));
-}
-
 function humanOnlyRepairReason(mission: Mission): string | null {
   const blocker = mission.checkpoints?.find(checkpoint => checkpoint.repair?.blocker)?.repair?.blocker;
   return blocker?.authorityReason ?? null;
+}
+
+function checkpointRepairPending(mission: Mission): boolean {
+  if (!retainedGateRepairIsActionable(mission)) { return false; }
+  return effectiveRepairObligations(mission.checkpoints ?? [], mission.declaredGates, mission.successCriteria)
+    .some(checkpoint => isRetainedGateRepair(checkpoint.repair!.command));
 }
 
 /**
@@ -77,12 +76,10 @@ function policySelectedTests(facts: FixedVerificationNextActionFacts): boolean {
 export function fixedVerificationFacts(input: FixedVerificationNextActionInput): FixedVerificationNextActionFacts {
   if (!('mission' in input)) { return input; }
   const review = input.mission.review;
-  const integrationRepair = currentIntegrationRepair(input.mission);
   return {
     status: input.mission.status,
     reviewPhase: review ? currentReviewRound(review).phase : null,
-    pendingRepair: integrationRepair?.kind === 'approval-retention' || retainedGateRepairPending(input.mission),
-    reviewRequired: integrationRepair?.kind === 'review-required',
+    checkpointRepairPending: checkpointRepairPending(input.mission),
     humanIntervention: review ? reviewStatus(review) === 'human-intervention' : false,
     ownedAction: input.ownedAction ?? false,
     humanOnlyReason: input.humanOnlyReason ?? humanOnlyRepairReason(input.mission),
@@ -99,10 +96,16 @@ function fixedVerificationPriorityAction(facts: FixedVerificationNextActionFacts
   if (facts.humanIntervention) { return { kind: 'human-handoff', reason: 'human-intervention' }; }
   if (facts.status === 'done') { return { kind: 'wait', reason: 'complete' }; }
   if (facts.status === 'backlog' || facts.status === 'refined') { return { kind: 'wait', reason: 'not-verifying' }; }
-  if (facts.pendingRepair) { return { kind: 'repair', reason: 'repair-pending' }; }
-  if (facts.reviewRequired) { return { kind: 'agent-review', reason: 'review-unfinished' }; }
+  if (facts.checkpointRepairPending) { return { kind: 'repair', reason: 'checkpoint-repair-pending' }; }
   if (policySelectedTests(facts)) { return { kind: 'tests', reason: 'policy-selected' }; }
   return null;
+}
+
+function integrationNextAction(facts: FixedVerificationNextActionFacts): FixedVerificationNextAction {
+  if (facts.agentReviewCurrent === false) { return { kind: 'agent-review', reason: 'review-unfinished' }; }
+  return facts.testsConfigured === true && facts.testsCurrent === false
+    ? { kind: 'tests', reason: 'tests-not-current' }
+    : { kind: 'integration-handoff', reason: 'fixed-sequence-complete' };
 }
 
 /**
@@ -121,15 +124,14 @@ export function fixedVerificationNextAction(input: FixedVerificationNextActionIn
   const facts = fixedVerificationFacts(input);
   const priority = fixedVerificationPriorityAction(facts);
   if (priority) { return priority; }
-  if (facts.status === 'integration') {
-    return facts.testsConfigured === true && facts.testsCurrent === false
-      ? { kind: 'tests', reason: 'tests-not-current' }
-      : { kind: 'integration-handoff', reason: 'fixed-sequence-complete' };
-  }
+  if (facts.status === 'integration') { return integrationNextAction(facts); }
   if (facts.reviewPhase === 'fixing') { return { kind: 'repair', reason: 'findings-pending' }; }
+  if ((facts.status === 'active' || facts.status === 'review') && facts.reviewPhase === 'approved'
+    && facts.agentReviewCurrent === true && facts.testsCurrent === true) {
+    return { kind: 'human-review', reason: 'integrate-shortcut-eligible' };
+  }
   if (facts.status === 'review' && facts.reviewPhase === 'approved') {
-    return { kind: 'human-review', reason: facts.agentReviewCurrent === true && facts.testsCurrent === true
-      ? 'integrate-shortcut-eligible' : 'agent-review-approved' };
+    return { kind: 'human-review', reason: 'agent-review-approved' };
   }
   return { kind: 'agent-review', reason: 'review-unfinished' };
 }

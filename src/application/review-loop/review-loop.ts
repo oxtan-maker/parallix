@@ -1,5 +1,4 @@
 import { integrationRepairNeedsReview } from '../../domain/integration-repair-policy.js';
-import { resumeIntegrationAssessment } from './integration-assessment.js';
 /**
  * The application-owned autonomous review loop.
  *
@@ -275,7 +274,6 @@ async function routeVerificationAction(request: ReviewLoopRequest, start: Start,
   const next = await currentVerificationAction(start.slug, ports);
   const repairEntry = next?.kind === 'repair'
     || (next?.kind === 'human-handoff' && next.reason === 'recorded-blocker');
-  if (repairEntry && await resumeIntegrationAssessment(start, ports)) { return true; }
   if (repairEntry && await resumePendingRepair(request, start, persisted, implementer, ports)) { return true; }
   if (next?.kind !== 'human-handoff') { return false; }
   ports.output.error(`Review entry for ${start.slug} requires human intervention.`);
@@ -342,7 +340,7 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
       await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, ports, restarted);
       return;
     }
-    if (tests === 'ran' || tests === 'retry') { continue; }
+    if (tests === 'ran') { continue; }
     const outcome = await runRound(context, attempt);
     // Policy evaluation and re-planning are not review-step actions.
     if (outcome === 'replan') { continue; }
@@ -374,7 +372,6 @@ async function settleApproval(context: LoopContext, request: ReviewLoopRequest, 
       await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, context.ports, restarted);
       return;
     }
-    if (tests === 'retry') { continue; }
     if (tests === 'stop' && context.actionCount >= context.actionLimit) { return; }
     await beginHumanTurn(context);
     return;

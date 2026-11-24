@@ -1,8 +1,6 @@
 import { OperationalHistoryService } from '../application/services/operational-history-service.js';
 import { SqliteOperationalHistoryRepository } from '../adapters/sqlite/operational-history-repository.js';
 import { MissionIntegrationService } from '../application/mission-integration-service.js';
-import { integrationRepairContinuation } from './integration-repair-continuation.js';
-import { createTestsActionPolicyFactory } from './review-start-observation.js';
 import { createBootstrapGitBindings } from './git-admission.js';
 import type { DraftAdapterDependencies } from '../adapters/cli/commands/draft-adapter-types.js';
 import type { GitReader } from '../adapters/git/worktree.js';
@@ -204,11 +202,6 @@ function createBoardReviewPreparationWorkflow(
     checkpoints: new MissionCheckpointService(store, checkpointEvidenceReferences()),
     nel: new MissionNelService(store),
   };
-  const integrationRepairPolicy = database && missionServices.operationalHistory
-    ? createTestsActionPolicyFactory(configuration, {
-      db: database, store, history: missionServices.operationalHistory,
-      lifecycle: persistence.laneEvents, repositoryId,
-    }) : undefined;
   const reviewReviewPreparation = async (slug: string, options: Parameters<typeof performReviewPreparation>[1]): Promise<Record<string, unknown>> =>
     ({ ...await performReviewPreparation(slug, { recoverGateFailure: true, ...options, configuration, missionServicesFn: async () => missionServices }) });
   return {
@@ -242,8 +235,7 @@ function createBoardReviewPreparationWorkflow(
         missionUnavailable: (_mission, reason) => { throw new Error(`Mission authority is unavailable for ${slug}: ${reason}`); },
         reviewRecoveryRefused: (_mission, reason) => { throw new Error(`Review recovery refused for ${slug}: ${reason}`); },
         mechanisms: () => createPersistentReviewLoopPorts(slug, { executionContext: live.context }, {
-          integrationRepair: integrationRepairContinuation(missionServices, configuration, worktree,
-            integrationRepairPolicy), configuration,
+          configuration,
           preferredReviewer: agent, performReviewPreparationFn: reviewReviewPreparation, exit,
           classification: createReviewClassification(slug, worktree, configuration.decision, configuration),
         }, {

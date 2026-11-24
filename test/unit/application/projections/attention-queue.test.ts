@@ -16,9 +16,9 @@ import path from 'node:path';
 import test, { describe } from 'node:test';
 import type { MissionStore } from '../../../../src/application/domain-ports.js';
 import type { BoardProjection } from '../../../../src/application/projections/board.js';
-import { attentionAction, attentionReason, buildBoardMetrics, buildBoardProjection } from '../../../../src/application/projections/board.js';
+import { buildBoardMetrics, buildBoardProjection } from '../../../../src/application/projections/board.js';
 import { type BoardLane, type MissionCard } from '../../../../src/application/projections/mission-board.js';
-import { EXECUTION_ACTIVITY_EVENT_TYPE, executionActivityToEntry, type ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
+import type { ExecutionActivity } from '../../../../src/application/recording/execution-activity-recorder.js';
 import { composeBoardProjection } from '../../../../src/composition/board-projection.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import type { Mission, MissionId, MissionStatus } from '../../../../src/domain/mission.js';
@@ -222,7 +222,7 @@ describe("Attention queue ranking and sources —", () => {
       reviewRound: null, reviewPhase: null, reviewDisposition: null, reviewHistory: [],
       currentWork: opts.currentWork ?? null, blockingReason: opts.blockingReason ?? null,
       humanReviewDue: null,
-      verificationFacts: { status: lane, reviewPhase: null, pendingRepair: false, reviewRequired: false,
+      verificationFacts: { status: lane, reviewPhase: null, checkpointRepairPending: false,
         humanIntervention: false, ownedAction: false, humanOnlyReason: null },
       flags: [], commands: opts.commands ?? [{ command: lane === 'integration' ? 'integrate' : lane === 'review' ? 'review' : 'active', enabled: true, reason: null }],
     };
@@ -347,21 +347,6 @@ describe("Attention queue ranking and sources —", () => {
     })]);
     assert.equal(projection.attentionQueue.length, 1);
     assert.equal(projection.attentionQueue[0]?.action?.kind, 'review:submit');
-  });
-
-  test('pending repair uses the eligible review entry instead of dropping attention (TASK-2859.12)', () => {
-    const base = makeCard('task-retained-repair', 'review', {
-      commands: [
-        { command: 'active', enabled: false, reason: 'review lane' },
-        { command: 'review', enabled: true, reason: null },
-      ],
-    });
-    const card = { ...base, verificationFacts: { ...base.verificationFacts, pendingRepair: true } };
-    const queue = project([card]).attentionQueue;
-    assert.equal(queue.length, 1);
-    assert.deepEqual(queue[0]?.action, { kind: 'review:submit', display: 'px review task-retained-repair' });
-    const unavailable = project([{ ...card, commands: card.commands.map(command => ({ ...command, enabled: false })) }]).attentionQueue;
-    assert.deepEqual(unavailable[0]?.action, { kind: 'manual', display: 'px lead task-retained-repair --once' });
   });
 
   const diagnostics = [

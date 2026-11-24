@@ -443,10 +443,10 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.status, 'completed');
     assert.deepEqual(outcome.value, { agent: 'codex' });
     assert.deepEqual(calls, [
-      'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt',
+      'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt',
       'launch-record:codex', 'load', 'safety',
       'telemetry', 'stats:codex',
-      'load', 'load', 'load', 'synchronize',
+      'load', 'load', 'synchronize',
       "review-preparation:task-1:/worktree:codex",
     ]);
     assert.equal(outcome.durableEvidence.length, 2);
@@ -624,7 +624,7 @@ describe('Execute Mission characterization', () => {
     assert.equal(outcome.error.kind, 'execution');
     assert.equal(outcome.error.message, 'Execute agent (codex) exited with status 23.');
     assert.deepEqual(calls, [
-      'load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt', 'launch-record:codex', 'load',
+      'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'task', 'checkpoint', 'config', 'load', 'prompt', 'launch-record:codex', 'load',
     ]);
   });
 
@@ -690,7 +690,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'execute preflight failed');
-    assert.deepEqual(calls, ['load', 'load', 'load', 'load', 'synchronize', 'preflight', 'load', 'load', 'synchronize']);
+    assert.deepEqual(calls, ['load', 'load', 'load', 'synchronize', 'preflight', 'load', 'load', 'synchronize']);
   });
 
   // ---------------------------------------------------------------------------
@@ -706,7 +706,7 @@ describe('Execute Mission characterization', () => {
     assert.ok(outcome.error != null);
     assert.equal(outcome.error.kind, 'validation');
     assert.equal(outcome.error.message, 'dedicated execute worktree is required');
-    assert.deepEqual(calls, ['load', 'load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'load', 'load', 'synchronize']);
+    assert.deepEqual(calls, ['load', 'load', 'load', 'synchronize', 'preflight', 'worktree', 'load', 'load', 'synchronize']);
   });
 
   // ---------------------------------------------------------------------------
