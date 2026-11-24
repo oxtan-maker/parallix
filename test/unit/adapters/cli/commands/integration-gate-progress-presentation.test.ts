@@ -59,7 +59,7 @@ test('TASK-2578: parallel pre-integration fallback renders live start and comple
   }
 });
 
-test('TASK-2578: px integrate renders parallel gate progress after rebase and pre-commit', async () => {
+test('TASK-2872.02: px integrate rebases but emits no gate progress when recorded tests are missing', async () => {
   const root = registeredMkdtemp('task-2578-integrate-');
   const slug = 'task-2578';
   const logs: string[] = [];
@@ -143,13 +143,14 @@ test('TASK-2578: px integrate renders parallel gate progress after rebase and pr
   try {
     await integrate([slug], { missionServicesFn: composition.createMissionApplicationServices });
     const rendered = logs.join('\n');
-    assert.ok(rebased.value, `px integrate rebases before running gates:\n${rendered}`);
-    assert.equal(preCommitRuns, 1, 'px integrate runs the pre-commit boundary before gates');
+    assert.ok(rebased.value, `px integrate rebases before reading recorded tests:\n${rendered}`);
+    assert.equal(preCommitRuns, 1, 'px integrate retains the pre-commit boundary before readiness');
     for (const key of ['rebase-visible', 'pre-commit-visible']) {
-      assert.match(rendered, new RegExp(`${key} started`));
-      assert.match(rendered, new RegExp(`${key} passed`));
+      assert.doesNotMatch(rendered, new RegExp(`${key} started`));
+      assert.doesNotMatch(rendered, new RegExp(`${key} passed`));
     }
-    assert.equal(status, 'done', rendered);
+    assert.match(rendered, /needs current passing tests.*px integrate never runs them/);
+    assert.equal(status, 'integration', 'missing test facts must stop before landing');
   } finally {
     mock.reset();
     fs.rmSync(root, { recursive: true, force: true });

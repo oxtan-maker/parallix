@@ -26,7 +26,7 @@ import { DEFAULT_REBOUNDS_PER_ROUND, ReviewRound, stopIfControllerSuperseded, ty
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import { retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
 import { abortConcurrentPolicyRound, settleConcurrentPolicyRound, type ConcurrentAgentVerdict } from './concurrent-policy-round.js';
-import { isReviewActionLimitReached, loadReviewActionCount } from './action-limit.js';
+import { effectiveReviewActionLimit, isReviewActionLimitReached, loadReviewActionCount } from './action-limit.js';
 import { DEFAULT_REVIEW_ACTION_LIMIT } from '../ports/review-action-history.js';
 
 type Output = Pick<LoopContext, 'emit' | 'exit'>;
@@ -243,7 +243,7 @@ async function runAutomatedReview(context: LoopContext, round: ReviewRound,
 /** One round: the reviewing half, then the implementer's answer to it. */
 async function runRound(context: LoopContext, attempt: number): Promise<RoundResult> {
   if (await stopIfControllerSuperseded(context, `round ${attempt}`)) { return 'stop'; }
-  context.emit({ kind: 'round-started', attempt: attempt, actionLimit: context.actionLimit });
+  context.emit({ kind: 'round-started', attempt: attempt, actionLimit: effectiveReviewActionLimit(context) });
   if (attempt > context.state.round) { context.state.advanceRound(); }
   const round = new ReviewRound(attempt, context);
   const humanFeedback = await reconciledHumanFeedback(context);
@@ -314,6 +314,7 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
   const state = await startState(persisted, identities, prepared.pullRequest, start.dryRun, ports, out);
   const context: LoopContext = {
     ...out, ...start, ports, state, identities, actionLimit, actionCount: 0,
+    ...(request.effectiveActionLimit === undefined ? {} : { effectiveActionLimit: request.effectiveActionLimit }),
     operatorInvocation: request.operatorInvocation ?? false,
     ...loopSettings(request),
     initialRound: state.round,
@@ -327,8 +328,9 @@ async function runOwnedReviewLoop(request: ReviewLoopRequest, ports: ReviewLoopP
     },
   };
   if (!await loadReviewActionCount(context)) { return; }
-  context.emit({ kind: 'review-started', slug, implementer, reviewer: identities.reviewer, branch: ports.branch, focus: context.focus, actionLimit, intervalMs: ports.polling.intervalMs, timeoutMs: ports.polling.timeoutMs, verbose: start.verbose, dryRun: start.dryRun });
-  await runReviewRounds(context, request, restarted);
+  const effectiveActionLimit = effectiveReviewActionLimit(context);
+  context.emit({ kind: 'review-started', slug, implementer, reviewer: identities.reviewer, branch: ports.branch, focus: context.focus, actionLimit: effectiveActionLimit, intervalMs: ports.polling.intervalMs, timeoutMs: ports.polling.timeoutMs, verbose: start.verbose, dryRun: start.dryRun });
+  await runReviewRounds(context, { ...request, effectiveActionLimit }, restarted);
 }
 
 async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest, restarted: boolean): Promise<void> {
@@ -367,12 +369,13 @@ async function runReviewRounds(context: LoopContext, request: ReviewLoopRequest,
 /** Return an approved round to the next-action owner before opening its human turn. */
 async function settleApproval(context: LoopContext, request: ReviewLoopRequest, restarted: boolean): Promise<void> {
   for (;;) {
-    const tests = await runPolicyTestsAction(context);
+    // An approval this loop just recorded schedules no fixed tests (TASK-2859.17); only the policy chooses again.
+    const tests = await runPolicyTestsAction(context, true);
     if (tests === 'repaired') {
       await runOwnedReviewLoop({ ...request, isContinue: true, reset: false }, context.ports, restarted);
       return;
     }
-    if (tests === 'stop' && context.actionCount >= context.actionLimit) { return; }
+    if (tests === 'stop' && context.actionCount >= effectiveReviewActionLimit(context)) { return; }
     await beginHumanTurn(context);
     return;
   }

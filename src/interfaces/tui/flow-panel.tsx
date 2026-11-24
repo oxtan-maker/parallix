@@ -8,6 +8,7 @@ import type {
   LaneMetricSeries,
   MetricSeries,
 } from '../../application/projections/board.js';
+import { flowRebaseContinuationCount, type FlowGraphEdge } from '../../application/projections/flow-graph.js';
 import { useTerminalDimensions } from './board-layout.js';
 
 /** FLOW switches to one label/value row per datum below this width. */
@@ -115,6 +116,37 @@ function CohortRows({ metrics }: { readonly metrics: BoardMetrics }): React.Reac
   );
 }
 
+function branch(edge: FlowGraphEdge | undefined): string {
+  const percentage = edge?.percentage === null || edge?.percentage === undefined ? 'share unavailable' : `${edge.percentage}%`;
+  return `${percentage} · ${edge?.count ?? 0}`;
+}
+
+/** Render the shared FLOW graph's retained verification facts without reclassifying them in the terminal. */
+function VerificationRoundRows({ flow }: { readonly flow: BoardMetrics['flow'] }): React.ReactElement | null {
+  if (!flow) { return null; }
+  const graph = flow.current.graph, summary = graph.verification;
+  const edge = (kind: FlowGraphEdge['kind'], stage: FlowGraphEdge['stage'] = null) =>
+    graph.edges.find(item => item.kind === kind && item.stage === stage);
+  const requestEdge = (to: FlowGraphEdge['to']) => graph.edges.find(item => item.kind === 'concurrent-request' && item.to === to);
+  const tests = requestEdge('integration-tests');
+  const request = (to: FlowGraphEdge['to']) => requestEdge(to)?.count ?? 0;
+  const human = (kind: FlowGraphEdge['kind']) => branch(edge(kind));
+  const rebase = graph.nodes.find(node => node.id === 'rebase');
+  const pre = flowRebaseContinuationCount(graph, 'pre-review-rebase');
+  const integration = flowRebaseContinuationCount(graph, 'integration-rebase');
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold>CONFIGURED PARALLEL VERIFICATION</Text>
+      <Text>{`Policy: ${summary.configured?.kind ?? 'unobserved'}${summary.configured?.kind === 'fixed' ? ` (${summary.configured.fallbackReason ?? 'reason unavailable'})` : ''} · ${summary.concurrentRounds}/${summary.observedRounds} retained rounds concurrent · ${summary.joinedRounds} automated joins`}</Text>
+      <Text>{`Requests: tests ${request('integration-tests')} · agent ${request('agent-review')} · human ${request('human-review')} (concurrent counts, not exclusive shares; coverage ${tests?.observedMissions ?? 0}/${tests?.population ?? summary.population})`}</Text>
+      <Text>{`Automated repair: gate ${branch(edge('gate-repair'))} · agent ${branch(edge('agent-repair'))} · joint ${branch(edge('joint-repair'))}`}</Text>
+      <Text>{`Human at join: ready ${human('human-ready')} · later ${human('human-wait')} · pending ${human('human-pending')} · withdrawn ${human('human-withdrawn')} · timing unavailable ${human('timing-unavailable')}`}</Text>
+      <Text>{`Rebase: one shared node · ${rebase?.count ?? 0} runs · pre-review continuation ${pre} · integration continuation ${integration}`}</Text>
+      <Text dimColor>{`Execution evidence: pilot ${summary.executions.pilot} · fallback ${summary.executions.fallback} · shadow ${summary.executions.shadow} · unobserved ${summary.executions.unobserved} · historical ${summary.executions.historical} · same-revision test reruns ${summary.sameRevisionTestReruns}`}</Text>
+    </Box>
+  );
+}
+
 /**
  * Read-only FLOW presentation. Values, fallbacks, and the narrative are
  * supplied by BoardMetrics; this component only selects a terminal layout and
@@ -174,6 +206,7 @@ export function FlowPanel({ metrics, columns }: { readonly metrics: BoardMetrics
         </Box>
       </Box>
       <CohortRows metrics={metrics} />
+      <VerificationRoundRows flow={metrics.flow} />
       <Box flexDirection="column">
         {renderVerificationStatistics(metrics.verification).map((line, index) => <Text key={index}>{line}</Text>)}
       </Box>

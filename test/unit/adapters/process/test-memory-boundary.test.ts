@@ -122,7 +122,7 @@ test('every supported npm and gate entrypoint reaches the contained runner with 
   const scripts = (JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts: Record<string, string> }).scripts;
   const runnerScripts = Object.entries(scripts).filter(([, command]) => command.includes('test/run-default-tests.ts'));
   assert.deepEqual(runnerScripts.map(([name]) => name).sort(), [
-    'test', 'test:integration:ci:all:prebuilt', 'test:integration:ci:prebuilt', 'test:integration:local', 'test:integration:local:prebuilt', 'test:integration:prebuilt',
+    'test', 'test:integration:ci:all:prebuilt', 'test:integration:ci:prebuilt', 'test:integration:local', 'test:integration:local:prebuilt', 'test:integration:prebuilt', 'test:lifecycle',
   ]);
   for (const [name, command] of runnerScripts) {
     const args = command.split('test/run-default-tests.ts')[1].trim().split(/\s+/).filter(Boolean);

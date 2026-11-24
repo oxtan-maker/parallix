@@ -24,9 +24,6 @@ import { inMemoryOperationalHistory } from '../../fixtures/operational-history.j
 import { fixtureMission, inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { cleanupRunnerTempRoots } from '../../lib/test-runner-temp-roots.js';
 import { checkoutTestTmpdir, retireFixtureCheckoutTmpdir } from '../../lib/test-tmpdir.js';
-import { ensureCheckoutCache, readCheckoutCacheOwner } from '../../../src/adapters/verification/checkout-cache.js';
-import { recoverRecordedTempRoots } from '../../../src/adapters/verification/temp-root-registry.js';
-import { probeProcessLiveness, processStartIdentity } from '../../../src/adapters/process/process-liveness.js';
 
 const testRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const fixtureUrl = (file: string) => pathToFileURL(path.join(testRoot, 'fixtures', file)).href;
@@ -125,13 +122,11 @@ function assertReclaimed(roots: readonly string[]) {
 }
 
 interface StandInRunner {
-  readonly checkout: ReturnType<typeof caseRoot>;
   readonly cache: Promise<string>;
   readonly exited: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
-  kill(_signal: NodeJS.Signals): void;
 }
 
-function startStandInRunner(t: TestContext, mode: 'success' | 'failure' | 'hang', cacheBase: string): StandInRunner {
+function startStandInRunner(t: TestContext, mode: 'success' | 'failure', cacheBase: string): StandInRunner {
   const checkout = caseRoot(`lifetime-stand-in-${mode}-`);
   const report = path.join(checkout.root, 'cache.txt');
   fs.mkdirSync(path.join(checkout.root, 'test', 'lib'), { recursive: true });
@@ -142,8 +137,7 @@ function startStandInRunner(t: TestContext, mode: 'success' | 'failure' | 'hang'
     "import fs from 'node:fs';",
     "if (process.env.NODE_V8_COVERAGE) throw new Error('synthetic cache fixture inherited raw coverage');",
     `fs.writeFileSync(${JSON.stringify(report)}, process.env.PARALLIX_TEST_FIXTURE_TMPDIR ?? '');`,
-    mode === 'failure' ? 'process.exitCode = 1;'
-      : mode === 'hang' ? 'setInterval(() => {}, 1_000);' : 'process.exitCode = 0;',
+    mode === 'failure' ? 'process.exitCode = 1;' : 'process.exitCode = 0;',
   ].join('\n'));
   const runner = spawn(process.execPath, ['--import', 'tsx', path.join(testRoot, 'run-default-tests.ts')], {
     cwd: path.dirname(testRoot),
@@ -152,7 +146,6 @@ function startStandInRunner(t: TestContext, mode: 'success' | 'failure' | 'hang'
       TMPDIR: cacheBase,
       PARALLIX_EXECUTION_ROOT: checkout.root,
       PARALLIX_FAST_UNIT: '1',
-      PARALLIX_TEST_DISPOSABLE_STANDIN: '1',
       GITHUB_ACTIONS: 'true',
     }),
   });
@@ -177,7 +170,7 @@ function startStandInRunner(t: TestContext, mode: 'success' | 'failure' | 'hang'
     await exited;
     checkout.dispose();
   });
-  return { checkout, cache, exited, kill: signal => runner.kill(signal) };
+  return { cache, exited };
 }
 
 test('TASK-2622.04: builders return independent case-owned state', () => {
@@ -271,7 +264,7 @@ test('TASK-2622.04: after a SIGKILL watchdog kill the runner manifest sweep recl
 });
 
 for (const mode of ['success', 'failure'] as const) {
-  test(`TASK-2853: a disposable stand-in runner cache retires after ${mode}`, async (t) => {
+  test(`TASK-2865.02: a no-Git stand-in runner cache retires after ${mode}`, async (t) => {
     const scratch = caseRoot('lifetime-runner-cache-');
     t.after(() => scratch.dispose());
     const cacheBase = path.join(scratch.root, 'cache');
@@ -280,60 +273,11 @@ for (const mode of ['success', 'failure'] as const) {
     const cache = await runner.cache;
     assert.equal(fs.existsSync(cache), true, `${mode} runner publishes its active cache`);
     assert.deepEqual(await runner.exited, { code: mode === 'success' ? 0 : 1, signal: null });
-    assert.equal(fs.existsSync(cache), false, `${mode} runner retires its disposable cache`);
+    assert.equal(fs.existsSync(cache), false, `${mode} runner retires its no-Git cache`);
   });
 }
 
-test('TASK-2853: a SIGKILLed disposable stand-in cache is reclaimed after its consumers die', async (t) => {
-  const scratch = caseRoot('lifetime-runner-cache-');
-  t.after(() => scratch.dispose());
-  const cacheBase = path.join(scratch.root, 'cache');
-  fs.mkdirSync(cacheBase);
-  const forced = startStandInRunner(t, 'hang', cacheBase);
-  const abandonedCache = await forced.cache;
-  let owner = readCheckoutCacheOwner(abandonedCache);
-  for (let attempt = 0; attempt < 100 && (owner?.owner.children?.length ?? 0) === 0; attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 10));
-    owner = readCheckoutCacheOwner(abandonedCache);
-  }
-  assert.ok(owner, 'the cache retains its durable runner owner before forced termination');
-  const children = owner.owner.children ?? [];
-  assert.equal(children.length, 1, 'the cache durably records its suite consumer before forced termination');
-  forced.kill('SIGKILL');
-  assert.equal((await forced.exited).signal, 'SIGKILL');
-  for (const child of children) {
-    try { process.kill(process.platform === 'win32' ? child.pid : -child.pid, 'SIGKILL'); } catch (_) {}
-  }
-  const processes = [owner.owner, ...children];
-  for (let attempt = 0; attempt < 200
-    && processes.some(identity => probeProcessLiveness(identity.pid, identity.startId) !== false); attempt++) {
-    await new Promise(resolve => setTimeout(resolve, 10));
-  }
-  assert.ok(processes.every(identity => probeProcessLiveness(identity.pid, identity.startId) === false),
-    'the forced runner and its suite consumers are confirmed dead before recovery');
-  forced.checkout.dispose();
-
-  const activeControl = caseRoot('lifetime-runner-active-control-');
-  t.after(() => activeControl.dispose());
-  const controlCache = ensureCheckoutCache(activeControl.root, cacheBase, {
-    pid: process.pid,
-    startId: processStartIdentity(process.pid),
-    checkoutLifecycle: 'disposable-stand-in',
-  });
-  const unrelated = path.join(cacheBase, 'manual-evidence');
-  fs.mkdirSync(unrelated);
-  const report = recoverRecordedTempRoots({
-    manifestDir: path.join(scratch.root, 'recovery-manifests'),
-    legacyCoverageBases: [cacheBase],
-    ownerLiveness: probeProcessLiveness,
-  });
-  assert.ok(report.reclaimed.includes(abandonedCache));
-  assert.equal(fs.existsSync(abandonedCache), false, 'the next supported pass reclaims the forced run cache');
-  assert.equal(fs.existsSync(controlCache), true, 'an active control cache survives');
-  assert.equal(fs.existsSync(unrelated), true, 'unrelated temporary data survives');
-});
-
-test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and disposable cache', async (t) => {
+test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and no-Git cache', async (t) => {
   // A stand-in checkout whose fast unit entry point reports the scratch root
   // the runner handed it, then hangs until the runner's signal forwarding
   // terminates the suite process group.
@@ -368,7 +312,6 @@ test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and di
       PARALLIX_FAST_UNIT: '1',
       PARALLIX_TEST_COVERAGE: '1',
       PARALLIX_TEST_NODE: testNode,
-      PARALLIX_TEST_DISPOSABLE_STANDIN: '1',
       // Skips the native CPU meter so the stand-in needs no C compiler.
       GITHUB_ACTIONS: 'true',
     },
@@ -410,5 +353,5 @@ test('TASK-2622.04: a signalled covered fast-unit run removes its scratch and di
   assert.deepEqual(await exited, { code: 143, signal: null },
     `the runner must translate the forwarded SIGTERM into exit 143 (runner stderr: ${stderr.slice(-600) || '<none>'})`);
   assert.equal(fs.existsSync(scratch), false, 'the terminated runner must remove its fast-unit scratch root');
-  assert.equal(fs.existsSync(cache), false, 'the terminated runner must retire its disposable checkout cache');
+  assert.equal(fs.existsSync(cache), false, 'the terminated runner must retire its no-Git checkout cache');
 });

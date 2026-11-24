@@ -76,12 +76,20 @@ function sharedFlowSection(selection: ReturnType<typeof selectStatsReport>, verb
         renderRate(flow.sendBacks.agent), renderRate(flow.sendBacks.human), largest
           ? `${largest.step}/${largest.actor}${largest.model ? `/${largest.model}` : ''}/${largest.state} ${formatDuration(largest.totalMs)} (${(largest.share * 100).toFixed(1)}%)`
           : 'n/a (no elapsed observations)']]),
+      verificationRoundLine(flow.graph.verification),
       ...flow.time.rows.map(row => `${row.step}/${row.actor}${row.model ? `/${row.model}` : ''}/${row.state}: total ${formatDuration(row.totalMs)}, mean ${formatDuration(row.meanMs)}, p90 ${formatDuration(row.p90Ms)}, n=${row.n}`),
       ...(verbose ? [...flow.defects.map(diagnostic => `FLOW diagnostic: ${diagnostic}`), ...rebaseStageLines(flow.rebaseStages)]
         : hiddenDebuggingLine(flow.defects.length, flow.rebaseStages.visible.length + flow.rebaseStages.omitted))];
   };
   return [...period('Current week', selection.flowStatistics.current),
     ...period('Previous week', selection.flowStatistics.previous)];
+}
+
+function verificationRoundLine(summary: import('../../../application/projections/flow-graph.js').FlowVerificationSummary): string {
+  const configured = summary.configured?.kind === 'fixed'
+    ? `fixed (${summary.configured.fallbackReason ?? 'reason unavailable'})`
+    : summary.configured?.kind ?? 'unobserved';
+  return `Parallel verification: configured ${configured}; executions pilot=${summary.executions.pilot}, fallback=${summary.executions.fallback}, shadow=${summary.executions.shadow}, unobserved=${summary.executions.unobserved}, historical=${summary.executions.historical}; rounds ${summary.concurrentRounds}/${summary.observedRounds} concurrent, ${summary.joinedRounds} joined; human-at-join ready=${summary.human.ready}, later=${summary.human.later}, pending=${summary.human.pending}, withdrawn=${summary.human.withdrawn}, timing-unavailable=${summary.human['timing-unavailable']}; repairs gate=${summary.repairs.gate}, agent=${summary.repairs.agent}, joint=${summary.repairs.joint}; same-revision test reruns=${summary.sameRevisionTestReruns}; population=${summary.population}.`;
 }
 
 function hiddenDebuggingLine(diagnostics: number, rebaseStages: number): string[] {

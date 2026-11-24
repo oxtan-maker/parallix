@@ -10,6 +10,7 @@ import { flowGraph, flowReturnSource, type FlowGraph, type FlowLaneId } from './
 import type { ReviewStatistics } from '../services/review-statistics.js';
 import { isRebaseObservationStage } from '../ports/rebase-workflow.js';
 import { selectFlowRebaseStageDetails } from '../presentation/flow-rebase-stage-details.js';
+import type { FlowConfiguredPolicy, FlowVerificationRound } from './flow-verification-round.js';
 
 export type { FlowEdgeKind, FlowGraph, FlowGraphEdge, FlowGraphNode, FlowLaneId, FlowNodeId } from './flow-graph.js';
 
@@ -38,6 +39,8 @@ export interface FlowMissionFacts {
   readonly agentLaunches: readonly { readonly runId: string; readonly startedAt: string;
     readonly family: string | null; readonly model: string | null }[];
   readonly observedDisqualifiers: readonly string[] | null;
+  readonly verificationPolicy?: FlowConfiguredPolicy | null;
+  readonly verificationRounds?: readonly FlowVerificationRound[];
   /** Named upstream exclusions that make this measured subset incomplete. */
   readonly diagnostics: readonly ObservationDiagnostic[];
   /** Durable producer boundary and this mission's earliest retained telemetry classify missing return stages. */

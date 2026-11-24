@@ -311,10 +311,10 @@ export async function closeLandedIntegrationOrAbort(slug: string, landedCommit: 
 
 /**
  * Runs the repo-configured pre-commit hook (adapters.integrate.preCommitCommand)
- * in the mission worktree after the integration rebase and before the
- * integration gates. Tracked files the hook modifies are committed onto the
- * mission branch, so the gates verify them and the squash lands them inside the
- * mission's single commit. A repo with no hook configured is a silent no-op.
+ * after the integration rebase and commits its tracked changes before
+ * recorded-tests admission, so the squash includes them. Integration starts no
+ * gate here; its receipt reader decides whether the resulting candidate is
+ * still covered. A repo with no hook configured is a silent no-op.
  */
 export function runPreCommitHookOrAbort(slug: string, {
   missionWorktree,

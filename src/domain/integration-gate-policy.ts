@@ -1,8 +1,7 @@
-/** Gate outcomes are ordered; a plan or validated skip never claims execution. */
+/** Gate outcomes are ordered; a plan never claims execution. */
 export function integrationGateDisposition(facts: {
-  skippedAll: boolean; skipped?: boolean; required: boolean; ok: boolean; cancelled?: boolean;
-}): 'validated' | 'mandatory-missing' | 'unconfigured' | 'passed' | 'cancelled' | 'recover' {
-  if (facts.skippedAll) { return 'validated'; }
+  skipped?: boolean; required: boolean; ok: boolean; cancelled?: boolean;
+}): 'mandatory-missing' | 'unconfigured' | 'passed' | 'cancelled' | 'recover' {
   if (facts.skipped) { return facts.required ? 'mandatory-missing' : 'unconfigured'; }
   if (facts.ok) { return 'passed'; }
   return facts.cancelled ? 'cancelled' : 'recover';

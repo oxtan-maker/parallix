@@ -37,10 +37,10 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
   }
   /**
    * Rebase the mission onto its resolved local primary/parent (ADR 0043) before
-   * integration gates run and before the probe merge, so gates and the merge see
-   * the actual merge base. Reuses the shared `px rebase` workflow so integration
-   * never re-implements base-branch resolution, conflict classification, or the
-   * agent-assisted conflict path.
+   * recorded-tests admission and the probe merge, so both evaluate the candidate
+   * on its actual merge base. Reuses the shared `px rebase` workflow so
+   * integration never re-implements base-branch resolution, conflict
+   * classification, or the agent-assisted conflict path.
    *
    * The shared workflow is a terminal command: it signals completion by calling
    * `port.exit()`. Integration must continue past a clean rebase, so this wraps
@@ -67,7 +67,7 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
       // from this process's cwd or an adapter default.
       executionContext,
       // Do not terminate the process: a clean rebase (exit 0) must let integrate
-      // continue to the gates; only a dead-end (exit 1) aborts.
+      // continue to recorded-tests admission; only a dead-end (exit 1) aborts.
       exitFn: (code: number) => { rebaseExitCode = code; },
     });
     // Observe the actual mission checkout, including in the success
@@ -83,7 +83,8 @@ export function createIntegrationRebase({ missionPaths, rebase, landing, git: gi
     // with the rebase still in progress. Treat anything other than 0 as a dead
     // end, then confirm the rebase actually finished: no rebase state reported by
     // the rebase-state owner and the resolved primary branch is an ancestor of the
-    // mission HEAD. Only then announce the rebase and continue to the gates (F1 / task-2506).
+    // mission HEAD. Only then announce the rebase and continue to recorded-tests
+    // admission (F1 / task-2506).
     if (rebaseExitCode !== 0) {
       throw abortWith(landing, `Integration-time rebase dead-ended with exit code ${rebaseExitCode}.`);
     }

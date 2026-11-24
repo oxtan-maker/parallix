@@ -10,7 +10,7 @@ import type { IntegrationTestsActionObservationPort } from '../../application/po
 /** Review-loop bindings derived from the two existing application ports. */
 export type ReviewStartObservationBindings = {
   readonly reviewStartPolicy?: Omit<ReviewStartPolicyPorts, 'diagnostic'>;
-  /** Composed only in pilot mode; the loop acts on its choices. */
+  /** Composed with the active policy; the loop acts on usable choices. */
   readonly policyActions?: PolicyActionPort;
 };
 

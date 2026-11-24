@@ -565,7 +565,7 @@ lib/core/nels.js`;
   assert.deepEqual(plan.changedAreas, ['lib']);
 });
 
-test('getIntegrationGatePlan includes workflow e2e gate for lib-touching mission', () => {
+test('getIntegrationGatePlan includes workflow lifecycle gate for lib-touching mission', () => {
   const config = {
     gates: {
       lib: { command: './scripts/verify-local.sh static-analysis', order: 1, run_last: false },
@@ -593,7 +593,7 @@ lib/core/nels.js`;
   assert.deepEqual(plan.gates.map(g => g.key), ['lib', 'workflow']);
 });
 
-test('getIntegrationGatePlan includes workflow e2e gate for workflow-owned repo surfaces', () => {
+test('getIntegrationGatePlan includes workflow lifecycle gate for workflow-owned repo surfaces', () => {
   const config = {
     gates: {
       workflow: { command: 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts', order: 50, run_last: true }
@@ -628,10 +628,20 @@ test('repo integration config keeps workflow gate on the targeted mission-lifecy
   const workflow = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, '..', '..', '..', 'workflow.config.json'), 'utf8'));
   const preIntegration = workflow.adapters.gates.preIntegration;
 
-  assert.equal(
-    config?.gates?.workflow?.command,
-    'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts'
-  );
+  const canonicalWorkflow = preIntegration.filter((gate: { key: string; }) => gate.key === 'workflow');
+  assert.equal(canonicalWorkflow.length, 1, 'canonical scheduling selects the workflow gate exactly once');
+  assert.equal(config?.gates?.workflow?.command, 'npm run test:lifecycle');
+  assert.equal(config.gates.workflow.run_last, false, 'legacy scheduling must not defer workflow to run_last');
+  assert.equal(canonicalWorkflow[0].command, 'npm run test:lifecycle');
+  assert.deepEqual(canonicalWorkflow[0].after, ['build']);
+  assert.equal(canonicalWorkflow[0].resource, undefined, 'canonical workflow must not hold the shared test resource');
+  const canonicalGate = (key: string) => preIntegration.find((gate: { key: string; }) => gate.key === key);
+  assert.deepEqual(canonicalGate('coverage-merge')?.after, ['unit', 'integration-ci']);
+  assert.deepEqual(canonicalGate('quality-gate')?.after, ['coverage-merge']);
+  assert.deepEqual(canonicalGate('agent-smoke')?.after, ['build']);
+  assert.equal(canonicalGate('coverage-merge')?.order, 7);
+  assert.equal(canonicalGate('quality-gate')?.order, 10);
+  assert.equal(canonicalGate('agent-smoke')?.order, 9);
   assert.equal(config?.gates?.['coverage-merge']?.command,
     'rm -f coverage/lcov.info && npm run coverage:merge && test -s coverage/lcov.info');
   assert.equal(config?.gates?.['quality-gate']?.command, 'npm run sonar');
@@ -1341,7 +1351,7 @@ test('repo config preserves remaining gate orders (task-1419)', () => {
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
 
   assert.equal(config.gates.workflow.order, 50, 'workflow gate remains order 50');
-  assert.equal(config.gates.workflow.run_last, true, 'workflow gate remains run_last');
+  assert.equal(config.gates.workflow.run_last, false, 'workflow gate can run before legacy run_last E2E gates');
   assert.equal(config.gates['custom-agent-smoke'].order, 51, 'custom-agent-smoke gate remains order 51');
   assert.equal(config.gates['custom-agent-smoke'].run_last, true, 'custom-agent-smoke gate remains run_last');
   assert.equal(config.gates.codeql, undefined, 'CodeQL remains a manual scan');
@@ -1381,11 +1391,12 @@ test('every representative changed-area plan includes the unconditional tier gat
     assert.equal(Boolean(smokeGate), expectsE2E, `${label} custom-agent-smoke selection must remain area-scoped`);
     if (expectsE2E) {
       assert.ok(workflowGate != null);
-      assert.equal(workflowGate.command, 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts');
+      assert.equal(workflowGate.command, 'npm run test:lifecycle');
       assert.ok(smokeGate != null);
       assert.equal(smokeGate.command, 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts');
-      assert.ok(plan.gates.indexOf(tierGates[2]!) < plan.gates.indexOf(workflowGate), `${label} integration-local runs before workflow E2E`);
-      assert.ok(plan.gates.indexOf(workflowGate) < plan.gates.indexOf(smokeGate), `${label} workflow E2E remains before smoke E2E`);
+      assert.equal(plan.gates.filter(gate => gate.key === 'workflow').length, 1, `${label} workflow lifecycle gate executes exactly once`);
+      assert.ok(plan.gates.indexOf(tierGates[2]!) < plan.gates.indexOf(workflowGate), `${label} integration-local runs before workflow lifecycle`);
+      assert.ok(plan.gates.indexOf(workflowGate) < plan.gates.indexOf(smokeGate), `${label} workflow lifecycle remains before smoke E2E`);
     }
   }
 });
@@ -1404,11 +1415,11 @@ test('getIntegrationGatePlan with repo config selects build for lib changes (tas
   assert.ok(keys.includes('build'), 'build gate should be selected for lib changes');
   assert.ok(keys.includes('workflow'), 'workflow gate should be selected for lib changes (special case)');
   assert.ok(keys.includes('custom-agent-smoke'), 'custom-agent-smoke should be selected for lib changes (special case)');
-  // Verify ordering: build before run-last gates.
+  // Verify ordering: the build precedes both E2E gates.
   const buildIdx = keys.indexOf('build');
   const wfIdx = keys.indexOf('workflow');
   const casIdx = keys.indexOf('custom-agent-smoke');
-  assert.ok(buildIdx < wfIdx, 'build (order 2) should come before workflow (run_last)');
+  assert.ok(buildIdx < wfIdx, 'build (order 2) should come before workflow (order 50)');
   assert.ok(wfIdx < casIdx, 'workflow (order 50) should come before custom-agent-smoke (order 51)');
 });
 

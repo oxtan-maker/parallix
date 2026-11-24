@@ -24,11 +24,18 @@ process; other overrides apply.
 `reviewActionLimit` is the lifetime bound for autonomous review-step actions in
 one Mission. It defaults to `40`. Agent review, policy-selected integration
 tests, human-review handoff and repair starts share the same durable count, so a
-restart or policy-mode change does not open a new window. Recording the limit
-action stops its mechanism and routes the Mission to human attention. A valid
-override is a positive safe integer. An invalid override is reported once per
-checkout in the process and falls back to `40` without discarding other valid
-configuration. The review command has no per-invocation limit override.
+restart or artifact configuration change does not open a new window. Recording
+the limit action stops its mechanism and routes the Mission to human attention.
+A direct, action-taking operator `px review` invocation fixes an effective
+ceiling after reading the durable count. When necessary, that ceiling is raised
+just enough to leave five runnable actions plus the later non-runnable boundary
+record; a larger existing allowance is preserved. Internal restarts keep the
+same ceiling, so they cannot renew it. Autonomous review, `--dry-run`, `--status`
+and other read-only review commands receive no additional allowance, and the
+durable lifetime count is never reset.
+A valid override is a positive safe integer. An invalid override is reported
+once per checkout in the process and falls back to `40` without discarding other
+valid configuration. The review command has no per-invocation limit override.
 
 Sections not marked as closed below accept extra keys, matching the schema.
 An extra key is not an override: only the fields documented here have an
@@ -36,13 +43,11 @@ effect.
 
 ## Verification policy
 
-`verificationPolicy.mode` accepts `off` (default), `shadow` or `pilot`.
-Off or an absent block performs no policy artifact or history reads, writes or
-queries. Shadow and pilot require a non-empty `verificationPolicy.artifact`
-path, relative to the checkout or absolute. Shadow only observes: review and
-integration run the fixed sequence. In pilot mode every mission is pinned at
-review entry to the mode and artifact hash it entered under, and the policy
-encodes the round plan as well as action vectors. The pinned time policy starts
+The verification policy is always active. A non-empty
+`verificationPolicy.artifact` path, relative to the checkout or absolute,
+selects its artifact. At review entry, every Mission is pinned to the artifact
+hash it entered under, and the policy encodes the round plan as well as action
+vectors. The pinned policy starts
 agent review and integration tests concurrently and records the human request
 for the same revision before either automated verdict arrives. It waits for
 both automated verdicts. When both pass, the current human verdict remains the
@@ -60,11 +65,8 @@ missing, invalid or mismatched artifact, contradictory or unmodelled history,
 policy error or round plan that cannot be acted on runs the fixed policy and
 records the typed reason. Every policy-selected action counts against the
 lifetime review action limit, so a check that fails forever still ends in a
-human handoff. Change
-the mode only between missions: a mission in flight when the mode changes
-finishes on the fixed policy with a recorded reason; a mission that already has
-recorded policy decisions when pilot begins is never pinned late.
-When enabled, `px status <mission>` reports the ordered policy history or its typed fixed-policy fallback reason.
+human handoff. `px status <mission>` reports the ordered policy history or its
+typed fixed-policy fallback reason.
 Its integration-tests line says `passed` only for a current durable gate run covering the current change (the newest result wins when a gate both failed and passed) and `failed` for a current failure; with no run or receipt it says `unobserved`, and evidence that no longer covers the current verification inputs says `not current`.
 Agent-review, human-review and non-empty integration-test starts append
 observational policy decisions. Observation failures never change review or
@@ -77,8 +79,8 @@ unmodelled work, such as a revision identity mismatch, approval revocation or
 an ambiguous repair, resets the history as `unmodelled-change`. Approval passes are
 retained only when the recorded approval coverage still covers the change, and
 landing-gate failures appear as a failed tests verdict followed by a completed
-repair when that repair addresses exactly the failed check. In pilot mode, the
-pinned artifact can instead make a same-revision test re-run available by
+repair when that repair addresses exactly the failed check. The pinned artifact
+can instead make a same-revision test re-run available by
 carrying a tests action vector and selecting tests again after the failed
 verdict. That re-run uses the same gate owner and spends the same bounded review
 allowance; there is no configuration parameter or flake-rate threshold that
@@ -265,9 +267,10 @@ verification command and maps **every** check it performs to required
 The repository owner is responsible for complete, accurate coverage: gate names
 or arbitrary integration commands alone prove no relationship to `all`.
 Every configured integration gate must pass, with all named coverage gates
-present, against unchanged clean inputs. A successful complete
-`px integrate <slug> --dry-run`, or the review step's automatic tests, can establish reusable evidence when
-`integrationCoverage` is configured. Without that optional mapping, the same
+present, against unchanged clean inputs. A successful, complete run from the
+review step's tests action can establish reusable evidence when
+`integrationCoverage` is configured; `px integrate` only reads that record and
+starts no gate. Without that optional mapping, the same
 complete green execution remains successful and visible as gate-run evidence,
 but cannot prove verification-command coverage or be reused by `px verify`.
 A partial, failed, cancelled or malformed run cannot establish success. Review,
@@ -628,12 +631,17 @@ base checkout and receives `INTEGRATE_HOOK_SLUG`,
 integration.
 
 - `adapters.integrate.preCommitCommand` runs in the mission worktree after the
-  mission is rebased onto its base branch and before the integration gates.
-  Tracked files it modifies are committed onto the mission branch, so the gates
-  verify them and they land inside the mission's squash commit. Use it for
-  repository metadata that must land with the mission, such as a version bump,
-  so each mission lands as exactly one commit. Make it idempotent: a retried
-  integration runs it again. A dry run does not run it.
+  mission is rebased onto its base branch and before recorded-tests admission.
+  Tracked files it modifies are committed onto the mission branch and land
+  inside the mission's squash commit. `px integrate` does not run gates after
+  the hook: it re-reads the tests action's recorded receipt for the resulting
+  candidate and refuses when the receipt is no longer current. The narrowly
+  tagged patch-version allocation is verification-neutral under the recorded
+  equivalence rule; any other substantive hook change requires a fresh tests
+  action before integration can continue. Use the hook for repository metadata
+  that must land with the mission, such as a version bump, so each mission lands
+  as exactly one commit. Make it idempotent: a retried integration runs it
+  again. A dry run does not run it.
 - `adapters.integrate.postIntegrateCommand` runs once after a successful
   non-dry-run integration. The landed commit is already final at this point, so
   the command must not commit.
@@ -766,24 +774,26 @@ submitted. The Mission has already entered review. This operator-owned key and
 the `PARALLIX_PHASE=handoff` gate context retain their configured meaning.
 `preReview` gates run when a review is submitted with the `approve` outcome —
 that is, before the `review` → integration transition, not before the review
-itself. `preIntegration` gates run before the integration merge. They also
-execute for `px integrate <slug> --dry-run` against the finalized mission
-checkout, using the same runner and evidence identity while stopping before
-every landing effect. Repairable failures enter one retained integration repair
+itself. `preIntegration` gates run through the tests action that `px review` and
+`px active` enter for an approved candidate, or that a verification policy
+selects; `px integrate` never starts them. Integration admits and lands only
+from the current recorded passing run and refuses naming tests when that run is
+missing or stale, including after a rebase or base advance. `px integrate <slug>
+--dry-run` reports that readiness from recorded facts and runs no gate.
+Repairable failures of a tests-action run enter one retained integration repair
 handoff with a checkpoint per failed gate and must rerun the complete configured
 plan; existing human-only classifications stop with their evidence and launch
 no agent. Configuring one phase does not require configuring the
 others; unconfigured phases remain gated-off.
 
 With the Forgejo review provider, every `preIntegration` run — concurrent
-review, sequential verification, repair rerun and explicit integration — is
+review, sequential verification and repair rerun — is
 also shown on the Mission's pull request. The aggregate verdict is a
 `parallix/pre-integration` commit status on the revision the run tested
 (pending while running, then success, failure, or error for an interrupted or
 cancelled run), so only the pull-request head's own run is its verdict. One
 comment per run lists every configured gate by key as passed, failed, blocked,
-cancelled, not run, or validated earlier (a gate an explicit integration
-skipped because earlier evidence covered it), with a bounded,
+cancelled, or not run, with a bounded,
 credential-scrubbed tail for each failed gate. A run that started earlier never replaces a newer run's status on the
 same revision. On one Parallix host, publications for one revision are
 serialized so two runs reporting at the same time land one after the other; a
@@ -812,8 +822,9 @@ checks the required mission artifacts and evidence, rebases on the primary
 branch, and runs verification plus any declared gates. A failed check keeps the
 mission with the implementer rather than consuming a reviewer round.
 
-Integration requires a recorded reviewer approval, reruns the repository's
-`adapters.gates.preIntegration` commands before merging, and verifies the exact
+Integration requires a recorded reviewer approval and a current recorded passing
+run of the repository's `adapters.gates.preIntegration` commands (recorded by
+the tests action; `px integrate` never runs them), and verifies the exact
 resulting tree. These built-in lifecycle controls remain in force alongside the
 configurable gates above.
 
@@ -1055,7 +1066,6 @@ if retries are exhausted, the output gives the recovery command.
 | `PARALLIX_TERMINAL_RETURN_DIR` | path | unset | directory | Repository root to return to from a mission terminal. |
 | `PARALLIX_TERMINAL_STATE_DIR` | path | derived | directory | Terminal state root override. |
 | `PARALLIX_TERMINAL_TRANSCRIPT_DIR` | path | derived | disk-backed directory | Private bulk transcript root override; unsafe destinations fail with guidance. |
-| `PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS` | flag | unset | `1` | Test-only: permits `--no-integration-gates`. |
 | `PARALLIX_TEST_NO_FORGEJO` | flag | unset | `1` | Test-only: Forgejo reported unavailable. |
 | `PATH` | path list | OS | standard | Executable lookup. |
 | `PI_BIN` | path | `PATH` lookup | executable | Pi binary override. |

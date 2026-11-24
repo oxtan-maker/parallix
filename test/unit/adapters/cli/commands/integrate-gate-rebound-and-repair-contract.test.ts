@@ -126,7 +126,7 @@ describe("rebound active mission context", () => {
     await runRequiredLocalGates({
       slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState }),
       missionLoad: { kind: 'found', mission: fixtureMission(slug, { repositoryId: fixtureRepositoryId('repo') }), version: missionVersion(1) }, missionServices: integrationServices({ store: missionStore, lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }),
-      dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+      realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
         applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => assertFallbackContext(options, '/fixture/mission'),
@@ -161,7 +161,7 @@ describe("rebound active mission context", () => {
     await assert.rejects(runRequiredLocalGates({
       slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState: staleSnapshot }),
       missionLoad: await store.load(), missionServices: integrationServices({ store, lifecycle }),
-      dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+      realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({ agent: 'claude', result: { status: 0 } }), transitionTaskFn: () => true,
         applyAgentFallbackFn: options => {
@@ -198,7 +198,7 @@ describe("rebound active mission context", () => {
     await runRequiredLocalGates({
       slug, context: integrationContext({ baseWorktree: '/base', taskAssignee: 'claude', branch: `mission/${slug}`, approval: { ok: true }, configuredReviewer: null, task: taskResolution, reviewState: snapshot }),
       missionLoad: { kind: 'found', mission: fixtureMission(slug, { repositoryId: fixtureRepositoryId('repo') }), version: missionVersion(1) }, missionServices: integrationServices({ store, lifecycle: { transition: async () => ({ durableEvidence: [],  status: 'completed' as const }) } }),
-      dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+      realAgent: null, realAgentModel: null,
       seams: { startAgentFn: async () => ({ agent: 'codex', result: { status: 0 } }), transitionTaskFn: () => true,
         applyAgentFallbackFn: (options: IntegrationAgentFallbackOptions) => { assert.strictEqual(options.state, snapshot); return 'codex'; },
         routeIntegrationGateFailureFn: async (options: IntegrationGateFailureRequest) => { assert.ok(options.applyAgentFallbackFn);
@@ -572,7 +572,7 @@ describe("review preparation and push-gate regressions", () => {
     return {
       slug: 'task-2547', context: integrationContext({ baseWorktree: '/repo', area: 'all', branch: 'mission/task-2547' }),
       missionLoad: { kind: 'found', mission: fixtureMission('task-2547'), version: missionVersion(1) }, missionServices: integrationServices(),
-      dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+      realAgent: null, realAgentModel: null,
       seams: {
         startAgentFn: async () => ({}), transitionTaskFn: () => true, applyAgentFallbackFn: async () => 'claude',
         routeIntegrationGateFailureFn: async () => REVISION_CHANGED,
@@ -706,7 +706,7 @@ describe("integration repair", () => {
       const result = await step.runRequiredLocalGates({
         slug, context: integrationContext({ taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}`, approval: { ok: true } }),
         missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
-        dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+        realAgent: null, realAgentModel: null,
         seams: {
           applyAgentFallbackFn: async () => implementer,
           transitionTaskFn: async (_slug: string, status: string) => { taskTransitions.push(status); return true; },
@@ -758,7 +758,7 @@ describe("integration repair", () => {
       await assert.rejects(step.runRequiredLocalGates({
         slug, context: integrationContext({ taskAssignee: implementer, baseWorktree: '/fixture', area: 'all', branch: `mission/${slug}`, baseBranch: 'main' }),
         missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
-        dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+        realAgent: null, realAgentModel: null,
         seams: {
           applyAgentFallbackFn: async () => implementer,
           transitionTaskFn: async () => true,
@@ -909,7 +909,7 @@ describe("integration repair", () => {
         await assert.rejects(step.runRequiredLocalGates({
           slug, context: integrationContext({ taskAssignee: implementer, area: 'all', baseWorktree: '/fixture' }),
           missionLoad: await fixture.store.load(), missionServices: integrationServices(fixture),
-          dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+          realAgent: null, realAgentModel: null,
           seams: {
             transitionTaskFn: async () => true, startAgentFn: async () => { throw new Error('no launch'); },
             applyAgentFallbackFn: async () => implementer,

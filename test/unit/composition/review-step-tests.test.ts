@@ -3,6 +3,7 @@ import test from 'node:test';
 import { mockModule, installModuleMocks, importFresh } from '../../lib/module-mock.js';
 import { DEFAULT_CONFIGURATION } from '../../../src/application/ports/configuration.js';
 import * as fmt from '../../../src/application/presentation/cli-format.js';
+import type { VerificationActionPolicyFactory } from '../../../src/application/ports/verification-policy.js';
 import type { ProductionApplicationServices } from '../../../src/composition/application-services.js';
 
 const workflow = mockModule<typeof import('../../../src/application/integrate-workflow.js')>(
@@ -28,7 +29,7 @@ test('the human-turn composition supplies policy services and reports a reused p
   const store = {};
   const history = {};
   const lifecycle = {};
-  const policy = () => undefined;
+  const policy = (() => ({} as ReturnType<VerificationActionPolicyFactory>)) satisfies VerificationActionPolicyFactory;
   const services = {
     mission: { store, operationalHistory: history, repositoryId: 'repository-1' },
     operatorState: { db: {}, repositories: { boardLaneEvents: lifecycle } },

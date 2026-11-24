@@ -20,7 +20,7 @@ export interface IntegrationVerificationEvidencePort {
   } | null>;
 }
 
-/** Optional shadow observer, composed only while verification policy is active. */
+/** Optional verification observer composed at the action-start boundary. */
 export interface IntegrationTestsActionObservationPort {
   observe(_facts: TestsActionStartFacts): Promise<void>;
   /** The verdict of the gate run an observed tests start began; a cancelled run reaches none and is never settled. */

@@ -4,6 +4,7 @@ import type { IntegrationMissionServices, IntegrationMissionServicesFactory } fr
 import { repositoryId } from '../../src/domain/repository.js';
 import { fixtureMission } from '../fixtures/mission-builders.js';
 import { reviewActionStarted } from '../../src/application/review-action-history.js';
+import type { ReviewActionStarted } from '../../src/application/ports/review-action-history.js';
 
 type Overrides = Omit<Partial<IntegrationMissionServices>, 'store' | 'lifecycle' | 'integration'> & {
   store?: Partial<MissionStore>;
@@ -25,12 +26,21 @@ function completeIntegration(integration: Partial<IntegrationMissionServices['in
 
 /** Each fixture supplies its observed state and explicitly opts into writes. */
 export function integrationServices(overrides: Overrides = {}): IntegrationMissionServices {
-  let reviewActionCount = 0;
+  const starts: ReviewActionStarted[] = [];
   return {
     ...overrides,
     reviewActions: overrides.reviewActions === undefined ? {
-      countReviewActions: async () => reviewActionCount,
-      recordReviewAction: async input => reviewActionStarted(input, ++reviewActionCount),
+      countReviewActions: async () => starts.length,
+      // Mirrors the durable owner (OperationalHistoryService.recordReviewAction): a replay of the
+      // same (action, correlation, changeIdentity) returns its existing start, never a new one.
+      recordReviewAction: async input => {
+        const existing = starts.find(action => action.action === input.action
+          && action.correlation === input.correlation && action.changeIdentity === input.changeIdentity);
+        if (existing) { return existing; }
+        const started = reviewActionStarted(input, starts.length + 1);
+        starts.push(started);
+        return started;
+      },
     } : overrides.reviewActions,
     store: completeStore(overrides.store) ? overrides.store : {
       async load(id) {

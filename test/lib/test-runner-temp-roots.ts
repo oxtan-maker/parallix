@@ -2,28 +2,40 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DISK_TEMP_FALLBACK } from '../../src/adapters/process/bulk-storage.js';
+import { checkoutCacheIdentity, retireCheckoutCache } from '../../src/adapters/verification/checkout-cache.js';
 import type { TempRootRecoveryReport } from '../../src/adapters/verification/temp-root-registry.js';
 import { retireFixtureCheckoutTmpdir } from './test-tmpdir.js';
 
-function cleanupRunnerTempRoots(manifestDir: string) {
+function cleanupRunnerTempRoots(manifestDir: string, checkout?: {
+  readonly executionRoot: string;
+  readonly checkoutCacheBases: readonly string[];
+}) {
   try {
-    if (!fs.existsSync(manifestDir)) { return; }
-    const roots = new Set<string>();
-    for (const entry of fs.readdirSync(manifestDir)) {
-      if (!entry.endsWith('.json')) { continue; }
-      try {
-        const recorded = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
-        if (Array.isArray(recorded)) { recorded.forEach(root => roots.add(root)); }
-      } catch (_) {}
+    if (fs.existsSync(manifestDir)) {
+      const roots = new Set<string>();
+      for (const entry of fs.readdirSync(manifestDir)) {
+        if (!entry.endsWith('.json')) { continue; }
+        try {
+          const recorded = JSON.parse(fs.readFileSync(path.join(manifestDir, entry), 'utf8'));
+          if (Array.isArray(recorded)) { recorded.forEach(root => roots.add(root)); }
+        } catch (_) {}
+      }
+      for (const root of roots) {
+        try {
+          retireFixtureCheckoutTmpdir(root);
+          fs.rmSync(root, { recursive: true, force: true });
+        } catch (_) {}
+      }
+      fs.rmSync(manifestDir, { recursive: true, force: true });
     }
-    for (const root of roots) {
-      try {
-        retireFixtureCheckoutTmpdir(root);
-        fs.rmSync(root, { recursive: true, force: true });
-      } catch (_) {}
-    }
-    fs.rmSync(manifestDir, { recursive: true, force: true });
   } catch (_) {}
+  if (checkout === undefined) { return; }
+  // A no-Git execution root is a disposable runner stand-in. Real checkouts,
+  // including linked worktrees, keep their isolated cache until checkout
+  // retirement owns it.
+  const identity = checkoutCacheIdentity(checkout.executionRoot);
+  if (identity.checkoutGitDir !== null || identity.repositoryGitDir !== null) { return; }
+  for (const base of checkout.checkoutCacheBases) { retireCheckoutCache(identity.checkoutPath, base); }
 }
 
 /**

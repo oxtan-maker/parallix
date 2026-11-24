@@ -17,6 +17,21 @@ import { makeAttentionItem, makeCard, makeProjection, emptyMetrics } from './boa
 const MINUTE = 60_000;
 type Return = { readonly kind: 'repair' | 'agent' | 'human' | 'integration' };
 
+export const configuredParallelVerification = {
+  kind: 'artifact' as const,
+  artifactSha256: 'fixture-artifact',
+  roundPlan: {
+    rule: 'all-then-last' as const,
+    repairMode: 'joint' as const,
+    stages: [
+      { request: ['agent', 'tests', 'human'] as const, waitFor: ['agent', 'tests'] as const,
+        repair: ['agent', 'tests'] as const, withdrawOnFailure: ['human'] as const },
+      { request: [] as const, waitFor: ['human'] as const, repair: ['human'] as const, withdrawOnFailure: [] as const },
+    ],
+  },
+  fallbackReason: null,
+};
+
 /** Spread `total` items over `slots` buckets, earliest buckets first, at least `floor` each. */
 function spread(total: number, slots: number, floor = 0): number[] {
   const values = Array.from({ length: slots }, () => floor);
@@ -35,6 +50,7 @@ function review(mission: string, returns: readonly Return[], agentRounds: number
     rate: eligible === 0 ? { state: 'no-eligible-population' as const, value: null } : { state: 'measured' as const, value: numerator / eligible } });
   const episode = (actor: 'agent' | 'human', index: number) => ({ identity: `${mission}:${actor}:${index}`, actor,
     stage: actor === 'agent' ? 'agent-review' as const : 'human-review' as const,
+    decision: index < (actor === 'agent' ? agentReturns : humanReturns) ? 'changes-requested' as const : 'approved' as const,
     startedAt: '2026-10-30T10:00:00.000Z', endedAt: '2026-10-30T10:30:00.000Z', revision: null, sender: actor === 'agent' ? 'Agent C' : 'operator' });
   return { implementer: 'Agent B', total: returns.length, byImplementer: returns.length ? { 'Agent B': returns.length } : {},
     returns: returns.map((item, index) => { const { cause, actor, stage } = origin(item, index);
@@ -74,7 +90,8 @@ function dwell(index: number): FlowMissionFacts['laneDwellMs'] {
 
 function gateRuns(mission: number, declared: number, declaredFailed: number, integration: number, integrationFailed: number): FlowGateRun[] {
   const runs = (phase: string, total: number, failed: number) => Array.from({ length: total }, (_, index) => ({
-    id: `m${mission}:${phase}:${index}`, phase, result: index < failed ? 'failed' as const : 'passed' as const }));
+    id: `m${mission}:${phase}:${index}`, phase, result: index < failed ? 'failed' as const : 'passed' as const,
+    operationId: null, requestedAt: '2026-11-01T00:00:00Z', finishedAt: '2026-11-01T00:01:00Z' }));
   return [...runs('handoff', declared, declaredFailed), ...runs('integration', integration, integrationFailed)];
 }
 

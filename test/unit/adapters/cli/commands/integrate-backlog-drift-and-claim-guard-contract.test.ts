@@ -21,6 +21,8 @@ import type { Mission } from '../../../../../src/domain/mission.js';
 // module must be declared after the modules it depends on (merged from every section below).
 mockModule('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
 mockModule('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
+mockModule('../../../../../src/adapters/config/repository-gates.js', import.meta.url);
+mockModule('../../../../../src/adapters/cli/commands/integrate-gates.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
 mockModule('../../../../../src/adapters/git/git.js', import.meta.url);
 mockModule('../../../../../src/adapters/backlog/backlog.js', import.meta.url);
@@ -57,6 +59,8 @@ describe("backlog drift retry", () => {
   const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const __mm1 = mockModule<typeof import('../../../../../src/composition/application-services.js')>('../../../../../src/composition/application-services.js', import.meta.url);
   const executionContextModule = mockModule<typeof import('../../../../../src/adapters/git/mission-execution-context.js')>('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
+  const repositoryGates = mockModule<typeof import('../../../../../src/adapters/config/repository-gates.js')>('../../../../../src/adapters/config/repository-gates.js', import.meta.url);
+  const integrateGates = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate-gates.js')>('../../../../../src/adapters/cli/commands/integrate-gates.js', import.meta.url);
 
   const { areAllBacklogOnlyConflicts } = areAllBacklogOnlyConflictsModule;
 
@@ -391,6 +395,9 @@ describe("backlog drift retry", () => {
   }
 
   function setupBaseMocks(gitMockFn: { (args: string|string[]): { status: number; stdout: string; stderr: string; }; (args: string|string[]): { status: number; stdout: string; stderr: string; }; (args: string|string[]): { status: number; stdout: string; stderr: string; }; (args: string|string[]): { status: number; stdout: string; stderr: string; }; }) {
+    mock.method(repositoryGates, 'loadPhaseGates', () => []);
+    mock.method(repositoryGates, 'loadRequirePreIntegration', () => false);
+    mock.method(integrateGates, 'captureFinalIntegrationTree', () => ({ ok: true, commit: 'deadbeef' }));
     mock.method(backlogCjs, 'getTaskClassification', () => 'ai_sdlc');
     mock.method(missionUtilsCjs, 'getPrimaryBranch', () => 'main');
     mock.method(missionUtilsCjs, 'inferSlug', (s: Parameters<(typeof missionUtilsCjs)["inferSlug"]>[0]) => s || TEST_SLUG);
@@ -468,7 +475,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG], { configuration: resolveConfiguration(environment), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     mock.reset();
@@ -500,7 +507,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG], { configuration: resolveConfiguration(environment), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     mock.reset();
@@ -541,7 +548,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG], { configuration: resolveConfiguration(environment), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     mock.reset();
@@ -585,7 +592,7 @@ describe("backlog drift retry", () => {
     mock.method(process, 'exit', () => {});
     const integrate = loadIntegrate();
 
-    await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ ...environment, PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: compositionCjs.createMissionApplicationServices });
+    await integrate([TEST_SLUG], { configuration: resolveConfiguration(environment), missionServicesFn: compositionCjs.createMissionApplicationServices });
 
     console.log = originalLog;
     console.error = originalError;

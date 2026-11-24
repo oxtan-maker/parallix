@@ -2,7 +2,6 @@ import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflo
 import { fixtureMission as completeMissionFixture } from '../../fixtures/mission-builders.js';
 import { integrationContext } from '../../fixtures/integration-context.js';
 import { missionExecutionContext } from '../../fixtures/mission-execution-context.js';
-import { resolveConfiguration } from '../../../src/composition/config.js';
 // Historical regression provenance: TASK-2500.
 // Behavior-owned suite (TASK-2622.09): integration mode capability dispatch (local, github-publish,
 // github-pr), mode reporting in config, the recorded-brief contract, the Mission integration
@@ -510,10 +509,7 @@ describe("integrate mode dispatch", () => {
     mock.method(process, 'exit', (code?: number) => { exitCode = code; });
 
     try {
-      await integrate.default([SLUG, '--no-integration-gates'], {
-        configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }),
-        missionServicesFn: async () => services,
-      });
+      await integrate.default([SLUG], { missionServicesFn: async () => services });
     } catch {
       // fall through; assertions below inspect exitCode/logs/gitCalls
     } finally {

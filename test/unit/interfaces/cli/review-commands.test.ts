@@ -264,7 +264,7 @@ test('review passes the repository action limit through to the review loop (TASK
   assert.equal(exits.at(-1), 3);
 });
 
-test('review carries the existing operator-invocation fact into the loop (TASK-2859.09 F5)', async () => {
+test('action-taking review distinguishes direct operator and autonomous entry before allowance derivation (TASK-2859.09 F5, TASK-2873)', async () => {
   for (const operatorInvocation of [false, true]) {
     const received: { value: ObservedLoop | null } = { value: null };
     await review(['task-2859'], {
@@ -275,6 +275,8 @@ test('review carries the existing operator-invocation fact into the loop (TASK-2
       reviewLoopMechanisms: (request, observers) => { received.value = { ...request, ...observers }; return declinedLoop(); },
     });
     assert.equal(received.value?.operatorInvocation, operatorInvocation);
+    assert.equal(Object.hasOwn(received.value ?? {}, 'effectiveActionLimit'), false,
+      'the action-limit owner derives the allowance only after reading durable history');
   }
 });
 
@@ -521,7 +523,7 @@ test('composition grants review acknowledgment only to a direct operator invocat
 });
 
 for (const providerEnabled of [true, false]) {
-  test(`explicit status preserves provider PR inspection when enabled=${providerEnabled} (TASK-2810)`, async () => {
+  test(`explicit status preserves provider PR inspection without action-limit admission when enabled=${providerEnabled} (TASK-2810, TASK-2873)`, async () => {
     const logs: string[] = [];
     let providerReads = 0;
     await review(['task-status', '--status'], {
@@ -536,6 +538,7 @@ for (const providerEnabled of [true, false]) {
         return { exists: false, raw: 'no PR found' };
       },
       log: message => logs.push(message),
+      operatorInvocation: true,
       reviewLoopMechanisms: () => { throw new Error('status must not enter review'); },
     });
     assert.equal(providerReads, providerEnabled ? 1 : 0);

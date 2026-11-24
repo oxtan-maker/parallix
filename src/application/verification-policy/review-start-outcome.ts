@@ -209,20 +209,29 @@ export async function settleReviewStartOutcomes(missionId: MissionId, ports: Rev
   await settleWithin(ports, deadlineMs, 'review-start outcome settlement', async () => {
     const facts = await ports.readOutcomeFacts(missionId);
     await ports.writer.settleReviewStartOutcomes(missionId, (start, later, all) => {
-      const outcome = settledReviewStartOutcome(start, facts, later, all);
+      // The Mission slug is not repository-unique, and these facts are this repository's: never settle a foreign start.
+      if (ownedByOtherRepository(start, ports)) { return null; }
+      // Another repository's later or concurrent starts neither end, replace nor bound this repository's starts.
+      const own = (starts: readonly ReviewStartDecision[]) => starts.filter(item => !ownedByOtherRepository(item, ports));
+      const ownLater = own(later);
+      const outcome = settledReviewStartOutcome(start, facts, ownLater, own(all));
       if (outcome === null) { return null; }
-      if (outcome.verdictSource === null && !startEnded(start, facts, later)) { return null; }
+      if (outcome.verdictSource === null && !startEnded(start, facts, ownLater)) { return null; }
       // The rebuttal verdict is the round's settled decision: wait for it rather than freeze an unknown.
       if (outcome.rebuttal !== null && awaitsDecision(start, facts)) { return null; }
-      return outcome;
+      return { ...outcome, repositoryId: start.repositoryId };
     });
   });
 }
 
+function ownedByOtherRepository(start: ReviewStartDecision, ports: Pick<ReviewStartPolicyPorts, 'repositoryId'>): boolean {
+  return ports.repositoryId !== undefined && start.repositoryId !== undefined && start.repositoryId !== ports.repositoryId;
+}
+
 /** An integration tests action has no review round: its outcome is the verdict of the gate run it started, matched by gate run id. */
 function testsOutcome(start: ReviewStartDecision, passed: boolean): ReviewStartOutcomeInput {
-  return { startKey: start.idempotencyKey, missionId: start.missionId, changeIdentity: start.changeIdentity, actualAction: 'tests',
-    runDurationMs: null, reviewMs: null, humanWaitMs: null, findingCount: null, verdictSource: null, passed, rebuttal: null };
+  return { startKey: start.idempotencyKey, repositoryId: start.repositoryId, missionId: start.missionId,
+    changeIdentity: start.changeIdentity, actualAction: 'tests', runDurationMs: null, reviewMs: null, humanWaitMs: null, findingCount: null, verdictSource: null, passed, rebuttal: null };
 }
 
 /**
@@ -233,7 +242,8 @@ export async function settleTestsStartOutcome(missionId: MissionId, gateRunId: s
   ports: ReviewStartPolicyPorts, deadlineMs: number): Promise<void> {
   await settleWithin(ports, deadlineMs, 'tests outcome settlement', async () => {
     await ports.writer.settleReviewStartOutcomes(missionId, start =>
-      start.actualAction === 'tests' && start.gateRunId === gateRunId ? testsOutcome(start, passed) : null);
+      start.actualAction === 'tests' && start.gateRunId === gateRunId && !ownedByOtherRepository(start, ports)
+        ? testsOutcome(start, passed) : null);
   });
 }
 

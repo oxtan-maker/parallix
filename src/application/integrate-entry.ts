@@ -90,7 +90,7 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
     let exitCode = 0;
     let failureReason: string | null = null;
     try {
-      request = parseIntegrateArgs(args, options.configuration);
+      request = parseIntegrateArgs(args);
     } catch (error) {
       fmt.log.fail((error as Error).message);
       exitFn(1);
@@ -104,7 +104,7 @@ export async function runIntegrateEntry(args: string[], options: IntegrateOption
       return;
     }
     if (!slug) {
-      fmt.log.fail('Usage: px integrate [<slug>] [--dry-run] [--no-integration-gates]');
+      fmt.log.fail('Usage: px integrate [<slug>] [--dry-run]');
       exitFn(1);
       return;
     }

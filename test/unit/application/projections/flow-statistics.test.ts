@@ -12,17 +12,8 @@ import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 import { MAX_RUNS_PER_MISSION, type RunRecord } from '../../../../src/application/run-history-types.js';
-
-function flowFact(overrides: Partial<FlowMissionFacts> & Pick<FlowMissionFacts, 'missionId' | 'reviewStatistics'>): FlowMissionFacts {
-  return { repositoryId: 'repo', closedAt: '2026-11-03T12:00:00Z', implementer: 'codex',
-    laneDwellMs: null, diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null,
-    gateRuns: [], rebaseRuns: [], rebaseStages: [
-      { stage: 'direct-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not requested', outcomes: [] },
-      { stage: 'pre-review-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not configured', outcomes: [] },
-      { stage: 'integration-rebase', state: 'inapplicable', operationId: null, sourceId: null, reason: 'not configured', outcomes: [] },
-    ], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 },
-    actualAgentLaunches: 1, agentLaunches: [], observedDisqualifiers: [], ...overrides };
-}
+import './flow-verification-rounds.cases.js';
+import { approvalSubmission, approvalTransition, flowFact, FLOW_POLICY_PLAN, policyStart, policyOutcome, policyHistory, completed, retainedRound, measuredGate } from '../../../fixtures/flow-policy-rounds.js';
 
 function runRecord(runId: string, captureKind: 'agent' | 'coordinator', family: 'codex' | 'parallix',
   model: string | null, attempt: number, mission = 'launch-identity'): RunRecord {
@@ -182,7 +173,7 @@ test('a conflict-only rebase is interrupted and retains the conflict sequence (P
     revisionBefore: 'a', revisionAfter: null, conflicts: ['shared.ts'], occurredAt: '2026-11-04T11:40:30Z' }] as const;
   const mission = observedFlowMissions({ repositoryId: 'repo', lifecycle, operations: [operation] }, null, [], conflicts)[0]!;
   assert.deepEqual(mission.rebaseRuns, [{ id: 'conflict-run', operationId: 'conflicted-rebase',
-    stage: 'direct-rebase', outcomes: ['conflict'] }]);
+    operationCommand: 'rebase:run', stage: 'direct-rebase', outcomes: ['conflict'] }]);
   assert.deepEqual(mission.rebaseStages.find(value => value.stage === 'direct-rebase'), {
     stage: 'direct-rebase', state: 'interrupted', operationId: 'conflicted-rebase', sourceId: 'conflict-source',
     reason: 'owning workflow settled interrupted without a retained terminal rebase outcome', outcomes: ['conflict'],
@@ -227,8 +218,8 @@ test('missing applicable rebase observations are diagnostics rather than observe
       message: '1 unreadable workflow operation row excluded from FLOW statistics', recovery: 'inspect retained workflow operation rows' }],
     ownership: [{ step: 'implement', actor: 'codex', model: 'gpt-6.1-sol', state: 'working', durationMs: 3_600_000 }] });
   const result = flowStatistics([fact], weeklyDecisionWindows('2026-11-03', 'UTC')).current;
-  assert.deepEqual(result.graph.nodes.find(node => node.id === 'integration-rebase'),
-    { id: 'integration-rebase', lane: 'parallix', count: 0, rework: null, observedMissions: 0, population: 1 });
+  assert.equal(result.graph.nodes.find(node => node.id === 'rebase')?.count, 1);
+  assert.equal(result.graph.nodes.find(node => node.id === 'rebase')?.observedMissions, 1);
   assert.equal(result.observation.complete, 0);
   assert.ok(result.defects.includes('1 unreadable workflow operation row excluded from FLOW statistics; inspect retained workflow operation rows'));
   assert.deepEqual(result.rebaseStages.visible.filter(stage => stage.state === 'absent')
@@ -617,7 +608,7 @@ test('a pre-review rebase repair return is drawn exactly once (PX-0055.01)', () 
     observedDisqualifiers: [], reviewStatistics: observedReview });
   const graph = flowStatistics([fact], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
   const returnsToImplement = graph.edges.filter(edge => edge.to === 'implement' && edge.kind !== 'flow');
-  assert.equal(graph.edges.find(edge => edge.id === 'pre-review-rebase->implement:workflow-return')?.count, 1);
+  assert.equal(graph.edges.find(edge => edge.id === 'rebase->implement:workflow-return')?.count, 1);
   assert.equal(returnsToImplement.reduce((sum, edge) => sum + edge.count, 0), 1,
     'the typed return must leave its retained source once, without also becoming an unrecorded return');
 });
@@ -650,4 +641,280 @@ test('elapsed classifications survive both windows and every family while absent
   ]);
   assert.equal(result.families[0]?.current.stateDwell.find(row => row.state === 'backlog')?.n, 0,
     'a DB-owned wave child with no backlog entry has no applicable dwell observation, not a measured zero');
+});
+
+test('retained pilot evidence projects the configured fork, automated join, and human answer order (PX-0066)', () => {
+  const history = [...retainedRound('answer-ready', 3), ...retainedRound('answer-later', 10),
+    ...retainedRound('operator-approved', null), approvalSubmission('operator-approved', '2026-11-03T10:20:00Z')];
+  const observed = verificationStatistics({ repositoryId: 'repo', history, operations: [],
+    lifecycle: [...['answer-ready', 'answer-later', 'operator-approved'].map(completed),
+      approvalTransition('operator-approved', '2026-11-03T10:20:30Z')], flowPolicy: {
+      kind: 'artifact', artifactSha256: 'artifact-new', roundPlan: FLOW_POLICY_PLAN, fallbackReason: null,
+    } });
+  const facts = observed.flowMissions.map(item => flowFact({ ...item, missionId: item.missionId,
+    reviewStatistics: reviewStatistics(null),
+    window: { startedAt: '2026-11-03T09:00:00Z', finishedAt: '2026-11-03T12:00:00Z' } }));
+  const graph = flowStatistics(facts, weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+
+  assert.equal(graph.verification.configured?.artifactSha256, 'artifact-new');
+  assert.deepEqual(graph.verification.executions, { pilot: 3, fallback: 0, shadow: 0, unobserved: 0, historical: 0 });
+  assert.equal(graph.verification.concurrentRounds, 3);
+  assert.equal(graph.edges.find(edge => edge.id === 'declared-gates->integration-tests:concurrent-request')?.count, 3);
+  assert.equal(graph.edges.find(edge => edge.id === 'declared-gates->agent-review:concurrent-request')?.share, null,
+    'concurrent request counts are not exclusive fork shares');
+  assert.equal(graph.edges.find(edge => edge.id === 'declared-gates->human-review:concurrent-request')?.count, 3);
+  assert.equal(graph.edges.find(edge => edge.kind === 'human-ready')?.count, 1);
+  assert.equal(graph.edges.find(edge => edge.kind === 'human-wait')?.count, 2, 'a later rejection and a later operator approval');
+  assert.equal(graph.verification.pilotApprovedMissions, 1, 'only the retained approval submission counts; operator rejections and landing alone do not');
+  assert.equal(graph.edges.find(edge => edge.kind === 'operator-land')?.count, 3);
+});
+
+test('pilot concurrency ignores racing start write order and diagnoses a missing tests start (PX-0066 F1)', () => {
+  const racing = retainedRound('write-race', null).map(row => {
+    if (row.eventType !== 'verification.review-start-decision') { return row; }
+    const value = JSON.parse(row.eventData) as ReturnType<typeof policyStart>;
+    const actionSequence = value.actualAction === 'agent' ? 2 : value.actualAction === 'tests' ? 3 : value.actionSequence;
+    return policyHistory(row.eventType, { ...value, actionSequence });
+  });
+  const missing = retainedRound('missing-tests-start', null).filter(row => {
+    const value = JSON.parse(row.eventData) as { actualAction?: string };
+    return value.actualAction !== 'tests';
+  });
+  const observed = verificationStatistics({ repositoryId: 'repo', history: [...racing, ...missing], operations: [],
+    lifecycle: [completed('write-race'), completed('missing-tests-start')] });
+  const race = observed.flowMissions.find(item => item.missionId === 'write-race')!;
+  const absent = observed.flowMissions.find(item => item.missionId === 'missing-tests-start')!;
+  assert.equal(race.verificationRounds[0]?.concurrent, true, 'write order does not decide concurrency');
+  assert.equal(absent.verificationRounds[0]?.concurrent, false);
+  assert.equal(absent.verificationRounds[0]?.execution, 'unobserved', 'a lost tests start is not a fixed-policy fallback');
+  assert.ok(absent.diagnostics.some(item => item.message.includes('no retained tests start')), 'lost tests start is diagnosed');
+});
+
+test('legacy shadow fallback remains an observed mutually-exclusive execution cohort (PX-0066 round 15 F1-F2)', () => {
+  const legacyShadow = (start: ReturnType<typeof policyStart>) => ({ ...start,
+    configuredMode: 'shadow', effectiveMode: 'fixed' });
+  const agent = legacyShadow(policyStart('shadow-round', 'agent', 1, '2026-11-03T10:00:00Z'));
+  const human = legacyShadow(policyStart('shadow-round', 'human', 2, '2026-11-03T10:01:00Z'));
+  const observed = verificationStatistics({ repositoryId: 'repo', history: [
+    policyHistory('verification.review-start-decision', agent),
+    policyHistory('verification.review-start-decision', human),
+    policyHistory('verification.review-start-outcome', policyOutcome(agent, '2026-11-03T10:05:00Z', true)),
+  ], operations: [], lifecycle: [completed('shadow-round'), completed('historical')] });
+  const facts = observed.flowMissions.map(item => flowFact({ ...item, missionId: item.missionId,
+    reviewStatistics: reviewStatistics(null) }));
+  const graph = flowStatistics(facts, weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.deepEqual(graph.verification.executions, { pilot: 0, fallback: 0, shadow: 1, unobserved: 0, historical: 1 });
+  assert.equal(Object.values(graph.verification.executions).reduce((sum, count) => sum + count, 0), 2,
+    'each delivered mission belongs to one execution cohort');
+  assert.equal(graph.verification.observedRounds, 1);
+  assert.deepEqual(graph.verification.human,
+    { ready: 0, later: 0, pending: 0, withdrawn: 0, 'timing-unavailable': 0 },
+    'unjoined shadow handoffs do not enter the human-at-join denominator');
+});
+
+test('production gate batches join concurrent rounds by operation and time, not unrelated run ids (PX-0066 F3)', () => {
+  const observed = verificationStatistics({ repositoryId: 'repo', history: retainedRound('pilot-passed', null),
+    operations: [], lifecycle: [completed('pilot-passed')] });
+  const episode = (identity: string) => ({ identity, actor: 'agent' as const, stage: 'agent-review' as const,
+    startedAt: '2026-11-03T10:00:00Z', endedAt: '2026-11-03T10:05:00Z', revision: 'head', sender: 'codex' });
+  const pilotReview = reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [],
+    reviewEpisodes: [episode('review:1')] });
+  const legacyReview = reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [],
+    reviewEpisodes: [{ ...episode('legacy-agent'), decision: 'approved' }] });
+  const pilot = flowFact({ ...observed.flowMissions[0]!, missionId: 'pilot-passed', reviewStatistics: pilotReview,
+    gateRuns: [
+      measuredGate('pilot-declared-batch', 'review', 'passed', 'pilot-passed-operation',
+        '2026-11-03T09:58:00Z', '2026-11-03T09:59:00Z'),
+      measuredGate('pilot-measurement-batch', 'integration', 'passed', 'pilot-passed-operation',
+        '2026-11-03T10:03:00Z', '2026-11-03T10:04:00Z'),
+      measuredGate('pilot-landing-batch', 'integration', 'passed', 'pilot-land', '2026-11-03T11:00:00Z', '2026-11-03T11:02:00Z'),
+    ], rebaseRuns: [
+      { id: 'landing-check', operationId: 'pilot-land', operationCommand: 'integrate:merge', stage: 'integration-rebase', outcomes: ['no-op'] },
+    ] });
+  const legacy = flowFact({ missionId: 'legacy-passed', reviewStatistics: legacyReview,
+    gateRuns: [measuredGate('legacy-declared', 'review', 'passed', null, '2026-11-03T09:58:00Z', '2026-11-03T09:59:00Z'),
+      measuredGate('legacy-integration', 'integration', 'passed', null, '2026-11-03T10:03:00Z', '2026-11-03T10:04:00Z')] });
+  const graph = flowStatistics([pilot, legacy], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.equal(graph.edges.find(edge => edge.id === 'declared-gates->agent-review:flow')?.count, 1);
+  assert.equal(graph.edges.find(edge => edge.id === 'agent-review->human-review:flow')?.count, 1);
+  assert.equal(graph.edges.find(edge => edge.kind === 'tests-passed')?.count, 1,
+    'only the legacy pass appears on the sequential tests path');
+  assert.equal(graph.edges.find(edge => edge.kind === 'operator-land')?.count, 2,
+    'landing counts use delivered missions even when a prior human approval was unobserved');
+  assert.equal(graph.edges.some(edge => edge.from === 'integration-tests' && edge.to === 'landed'), false);
+  assert.notEqual(pilot.gateRuns[1]!.id, pilot.verificationRounds?.[0]!.requests.tests!.gateRunId);
+  const comparison = flowStatistics([pilot, { ...legacy, closedAt: '2026-10-25T12:00:00Z' }],
+    weeklyDecisionWindows('2026-11-03', 'UTC'));
+  const current = comparison.current.graph;
+  assert.equal(current.edges.find(edge => edge.kind === 'tests-passed')?.count, 0);
+  assert.equal(current.edges.find(edge => edge.id === 'declared-gates->agent-review:flow')?.count, 0);
+  assert.equal(current.edges.find(edge => edge.id === 'agent-review->human-review:flow')?.count, 0);
+  assert.equal(current.edges.some(edge => edge.stage === 'integration-rebase' && edge.to === 'integration-tests'), false);
+  assert.equal(current.nodes.find(node => node.id === 'integration-tests')?.count, 2, 'the landing batch is still counted');
+  assert.equal(comparison.previous.graph.edges.find(edge => edge.kind === 'tests-passed')?.count, 1);
+  const rebased = flowStatistics([{ ...pilot, rebaseRuns: [{ ...pilot.rebaseRuns[0]!, outcomes: ['clean'] }] }],
+    weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.equal(rebased.edges.find(edge => edge.kind === 'landing-rebase')?.count, 1);
+});
+
+test('exclusive legacy siblings share one denominator beside non-exclusive concurrent requests (PX-0066 F6)', () => {
+  const observed = verificationStatistics({ repositoryId: 'repo', history: retainedRound('parallel-branches', null),
+    operations: [], lifecycle: [completed('parallel-branches')] });
+  const pilot = flowFact({ ...observed.flowMissions[0]!, missionId: 'parallel-branches',
+    reviewStatistics: reviewStatistics(null), gateRuns: [] });
+  const episode = (identity: string) => ({ identity, actor: 'agent' as const, stage: 'agent-review' as const,
+    startedAt: '2026-11-03T10:00:00Z', endedAt: '2026-11-03T10:05:00Z', revision: 'head', sender: 'codex' });
+  const legacyReview = reviewStatistics(null, { equivalentSubmissions: {}, reviewEpisodes: [
+    { ...episode('legacy-pass'), decision: 'approved' }, { ...episode('legacy-return'), decision: 'changes-requested' }],
+    workflowReturns: [
+      { identity: 'declared-return', author: 'codex', at: '2026-11-03T10:10:00Z', source: 'rebound',
+        origin: { actor: 'workflow', stage: 'workflow', decisionIdentity: 'declared-return', revision: 'head', sender: 'codex', cause: 'repair' } },
+      { identity: 'integration-return', author: 'codex', at: '2026-11-03T10:11:00Z', source: 'rebound',
+        origin: { actor: 'workflow', stage: 'integration-gates', decisionIdentity: 'integration-return', revision: 'head', sender: 'codex' } },
+      { identity: 'agent-return', author: 'codex', at: '2026-11-03T10:12:00Z', source: 'judgment',
+        origin: { actor: 'agent', stage: 'agent-review', decisionIdentity: 'agent-return', revision: 'head', sender: 'custom' } },
+    ] });
+  const legacy = flowFact({ missionId: 'legacy-branches', reviewStatistics: legacyReview, gateRuns: [
+    measuredGate('declared-pass', 'review', 'passed', null, '2026-11-03T09:00:00Z', '2026-11-03T09:01:00Z'),
+    measuredGate('declared-fail', 'review', 'failed', null, '2026-11-03T09:02:00Z', '2026-11-03T09:03:00Z'),
+    measuredGate('integration-pass', 'integration', 'passed', null, '2026-11-03T11:00:00Z', '2026-11-03T11:01:00Z'),
+    measuredGate('integration-fail', 'integration', 'failed', null, '2026-11-03T11:02:00Z', '2026-11-03T11:03:00Z'),
+  ] });
+  const graph = flowStatistics([pilot, legacy], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  const percentage = (id: string) => graph.edges.find(edge => edge.id === id)?.percentage;
+  assert.deepEqual([percentage('declared-gates->agent-review:flow'), percentage('declared-gates->implement:gate-failed')], [50, 50]);
+  assert.deepEqual([percentage('integration-tests->human-verdict:tests-passed'), percentage('integration-tests->implement:gate-failed')], [50, 50]);
+  assert.deepEqual([percentage('agent-review->human-review:flow'), percentage('agent-review->implement:agent-findings')], [50, 50]);
+  assert.deepEqual(['declared-gates->implement:gate-failed', 'agent-review->implement:agent-findings',
+    'integration-tests->implement:gate-failed'].map(id => graph.edges.find(edge => edge.id === id)?.observedMissions),
+  [1, 1, 1], 'each exclusive gate and review family carries its observed mission population');
+  assert.equal(graph.nodes.find(node => node.id === 'agent-review')?.count, 3,
+    'one concurrent request plus two exclusive legacy episodes are distinct node observations');
+});
+
+test('legacy human lifecycle stays on the human request without retained pilot rounds (PX-0066 F9)', () => {
+  const episode = (identity: string, minute: string) => ({ identity, actor: 'human' as const,
+    stage: 'human-review' as const, startedAt: `2026-11-03T10:${minute}:00Z`,
+    endedAt: `2026-11-03T10:${minute}:30Z`, revision: 'head', sender: 'operator' });
+  const review = reviewStatistics(null, { equivalentSubmissions: {},
+    reviewEpisodes: [episode('human-pass', '00'), episode('human-return', '05')], workflowReturns: [{
+      identity: 'human-return', author: 'codex', at: '2026-11-03T10:05:30Z', source: 'judgment',
+      origin: { actor: 'human', stage: 'human-review', decisionIdentity: 'human-return', revision: 'head',
+        sender: 'operator' },
+    }] });
+  const graph = flowStatistics([flowFact({ missionId: 'legacy-human', reviewStatistics: review,
+    rebaseRuns: [{ id: 'integration-rebase', operationId: 'integrate', stage: 'integration-rebase',
+      outcomes: ['no-op'] }] })], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.equal(graph.nodes.find(node => node.id === 'human-review')?.count, 2);
+  assert.equal(graph.nodes.find(node => node.id === 'human-verdict')?.count, 0,
+    'the pilot-only verdict node does not claim legacy human episodes');
+  assert.equal(graph.edges.find(edge => edge.id === 'human-review->implement:human-changes')?.count, 1);
+  assert.equal(graph.edges.find(edge => edge.id === 'human-verdict->rebase:flow:integration-rebase')?.count, 1);
+  assert.equal(graph.edges.some(edge => edge.from === 'human-review' && edge.to === 'rebase'), false);
+  assert.equal(graph.edges.some(edge => edge.from === 'human-verdict' && edge.kind === 'human-changes'), false);
+});
+
+test('mixed-round missions place each non-repair typed return exactly once (PX-0066 F7)', () => {
+  const mission = 'mixed-round-return';
+  const laterAgent = policyStart(mission, 'agent', 4, '2026-11-03T11:00:00Z', { execution: 'fallback', round: 2 });
+  const laterHuman = policyStart(mission, 'human', 5, '2026-11-03T11:01:00Z', { execution: 'fallback', round: 2 });
+  const history = [...retainedRound(mission, null), policyHistory('verification.review-start-decision', laterAgent),
+    policyHistory('verification.review-start-decision', laterHuman),
+    policyHistory('verification.review-start-outcome', policyOutcome(laterAgent, '2026-11-03T11:05:00Z', false))];
+  const observed = verificationStatistics({ repositoryId: 'repo', history, operations: [], lifecycle: [completed(mission)] });
+  const episode = (round: number) => ({ identity: `review:${round}`, actor: 'agent' as const, stage: 'agent-review' as const,
+    startedAt: `2026-11-03T${round === 1 ? '10' : '11'}:00:00Z`, endedAt: `2026-11-03T${round === 1 ? '10' : '11'}:05:00Z`,
+    revision: 'head', sender: 'custom' });
+  const review = reviewStatistics(null, { equivalentSubmissions: {}, reviewEpisodes: [episode(1), episode(2)], workflowReturns: [{
+    identity: 'later-agent-return', author: 'codex', at: '2026-11-03T11:05:00Z', source: 'judgment',
+    origin: { actor: 'agent', stage: 'agent-review', decisionIdentity: 'review:2', revision: 'head', sender: 'custom' },
+  }] });
+  const graph = flowStatistics([flowFact({ ...observed.flowMissions[0]!, missionId: mission, reviewStatistics: review })],
+    weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.equal(graph.edges.find(edge => edge.kind === 'agent-findings')?.count, 1);
+  assert.equal(graph.edges.filter(edge => edge.to === 'implement' && edge.kind !== 'flow')
+    .reduce((sum, edge) => sum + edge.count, 0), 1);
+  assert.equal(graph.nodes.find(node => node.id === 'implement')?.rework, 1);
+});
+
+test('dual automated failure needs recorded withdrawal and counts one observed joint return (PX-0066)', () => {
+  const history = retainedRound('joint-failure', null, [false, false], { withdraw: true });
+  const observed = verificationStatistics({ repositoryId: 'repo', history, operations: [], lifecycle: [completed('joint-failure')] });
+  const joinedReview = reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [{
+    identity: 'joint-return', author: 'codex', at: '2026-11-03T10:08:00Z', source: 'repair',
+    origin: { actor: 'workflow', stage: 'integration-gates', decisionIdentity: 'joint-return', revision: 'head',
+      sender: 'codex', cause: 'integration-gate-failure' },
+  }] });
+  const fact = flowFact({ ...observed.flowMissions[0]!, missionId: 'joint-failure', reviewStatistics: joinedReview,
+    window: { startedAt: '2026-11-03T09:00:00Z', finishedAt: '2026-11-03T12:00:00Z' } });
+  const graph = flowStatistics([fact], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+
+  assert.deepEqual(graph.verification.repairs, { gate: 0, agent: 0, joint: 1 });
+  assert.equal(graph.edges.find(edge => edge.kind === 'joint-repair')?.count, 1);
+  assert.equal(graph.edges.find(edge => edge.kind === 'human-withdrawn')?.count, 1);
+  assert.equal(graph.verification.pilotApprovedMissions, 0,
+    'withdrawn or automated-failure rounds never receive approval credit');
+  const implementationReturns = graph.edges.filter(edge => edge.to === 'implement' && edge.kind !== 'flow');
+  assert.equal(implementationReturns.reduce((sum, edge) => sum + edge.count, 0), 1,
+    'the dual failure owns one joined return rather than a return per failed check');
+});
+
+test('a withdrawal from another repository cannot cancel this repository human request (PX-0066 F5)', () => {
+  const history = retainedRound('repository-withdrawal', null, [false, false], { withdraw: true }).map(row => {
+    if (row.eventType !== 'verification.human-review-withdrawal') { return row; }
+    return policyHistory(row.eventType, { ...JSON.parse(row.eventData), repositoryId: 'other-repository' });
+  });
+  const observed = verificationStatistics({ repositoryId: 'repo', history, operations: [],
+    lifecycle: [completed('repository-withdrawal')] });
+  const graph = flowStatistics([flowFact({ ...observed.flowMissions[0]!, missionId: 'repository-withdrawal',
+    reviewStatistics: reviewStatistics(null) })], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.equal(graph.edges.find(edge => edge.kind === 'human-withdrawn')?.count, 0);
+  assert.equal(graph.edges.find(edge => edge.kind === 'human-pending')?.count, 1);
+});
+
+test('round evidence separates pinned transient failures from fixed fallback (PX-0066 round 16 F1)', () => {
+  const contradictory = retainedRound('contradictory-pins', null).map(row => row.eventType === 'verification.review-start-decision'
+    ? policyHistory(row.eventType, { ...JSON.parse(row.eventData), artifactSha256: row.eventData.includes('"actualAction":"human"') ? 'artifact-a' : 'artifact-b' }) : row);
+  const history = [...retainedRound('old-pilot', null),
+    ...retainedRound('missing-timing', null, [true, true], { humanOutcomeWithoutTiming: true }),
+    ...retainedRound('fallback', null, [true, true], { execution: 'fallback' }),
+    ...retainedRound('pinned-transient', 3, [true, true], { execution: 'fallback', artifact: 'retained-pin' }),
+    ...retainedRound('pinned-fallback', null, [true, true], { execution: 'fallback', artifact: 'retained-pin', concurrent: false }), ...contradictory,
+    ...retainedRound('no-tests-start', null).filter(row => !row.eventData.includes('"actualAction":"tests"')),
+    ...retainedRound('no-outcome', null).filter(row => row.eventType !== 'verification.review-start-outcome')];
+  const observed = verificationStatistics({ repositoryId: 'repo', history, operations: [],
+    lifecycle: ['old-pilot', 'missing-timing', 'fallback', 'pinned-transient', 'pinned-fallback',
+      'contradictory-pins', 'no-tests-start', 'no-outcome'].map(completed), flowPolicy: {
+      kind: 'artifact', artifactSha256: 'different-current-artifact', roundPlan: FLOW_POLICY_PLAN, fallbackReason: null } });
+  assert.ok(observed.flowMissions.find(item => item.missionId === 'pinned-transient')?.diagnostics
+    .some(item => item.message.includes('history-unavailable')), 'action-level policy failures remain diagnostic');
+  const facts = observed.flowMissions.map(item => flowFact({ ...item, reviewStatistics: reviewStatistics(null),
+    window: { startedAt: '2026-11-03T09:00:00Z', finishedAt: '2026-11-03T12:00:00Z' } }));
+  const graph = flowStatistics(facts, weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+
+  assert.deepEqual(graph.verification.executions, { pilot: 3, fallback: 2, shadow: 0, unobserved: 3, historical: 0 },
+    'missing tests start or automated outcome is unobserved, never a fixed fallback');
+  assert.deepEqual(graph.verification.human,
+    { ready: 1, later: 0, pending: 1, withdrawn: 0, 'timing-unavailable': 1 },
+    'stats and FLOW use only joined pilot rounds for human-at-join counts');
+  assert.equal(graph.verification.concurrentRounds, 3, 'a transient start failure does not erase observed pilot concurrency');
+  assert.equal(graph.edges.find(edge => edge.kind === 'human-pending')?.count, 1,
+    'a retained start without a human outcome remains the same pending request');
+  assert.equal(graph.edges.find(edge => edge.kind === 'timing-unavailable')?.count, 1,
+    'a retained human outcome without timing cannot place the answer at the join');
+});
+
+test('one rebase node retains both stage continuations and all conflict semantics (PX-0066)', () => {
+  const fact = flowFact({ missionId: 'two-stage-rebase', reviewStatistics: reviewStatisticsObservation('codex', 0),
+    rebaseRuns: [
+      { id: 'pre', operationId: 'review', stage: 'pre-review-rebase', outcomes: ['conflict', 'resolved'] },
+      { id: 'integration', operationId: 'integrate', stage: 'integration-rebase', outcomes: ['no-op'] },
+    ] });
+  const graph = flowStatistics([fact], weeklyDecisionWindows('2026-11-03', 'UTC')).current.graph;
+  assert.equal(graph.nodes.filter(node => node.id === 'rebase').length, 1);
+  assert.equal(graph.nodes.find(node => node.id === 'rebase')?.count, 2);
+  assert.ok(graph.edges.some(edge => edge.stage === 'pre-review-rebase' && edge.kind === 'rebase-conflict'));
+  assert.ok(graph.edges.some(edge => edge.stage === 'integration-rebase' && edge.kind === 'clean'));
+  assert.ok(graph.edges.some(edge => edge.stage === 'pre-review-rebase' && edge.from === 'rebase-resolve'
+    && edge.to === 'declared-gates'));
 });

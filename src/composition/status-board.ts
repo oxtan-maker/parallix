@@ -42,12 +42,12 @@ export async function createStatusReadBoard(
     db, store: mission.store, history: mission.operationalHistory,
     lifecycle: repositories.boardLaneEvents, repositoryId: mission.repositoryId,
   });
-  const verificationHistoryFn = policyReaders ? async (slug: string): Promise<StatusMissionData['verificationHistory']> => {
+  const verificationHistoryFn = async (slug: string): Promise<StatusMissionData['verificationHistory']> => {
     const artifact = policyReaders.loadPolicy();
-    if (artifact.mode === 'fixed') { return { fallback: artifact.reason }; }
+    if (artifact.kind === 'fixed') { return { fallback: artifact.reason }; }
     const result = await policyReaders.readHistoryFor(slug);
     return result.ok ? { entries: result.entries, tests: result.tests } : { fallback: `${result.failure.kind}: ${result.failure.message}` };
-  } : undefined;
+  };
   return createStatusBoardFor({ mission, presentationCapabilities: { boardProjection: builder } }, verificationHistoryFn);
 }
 

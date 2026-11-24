@@ -861,7 +861,7 @@ test('root status renders uncertain worktree authority without stale or cleanup 
   assert.doesNotMatch(output, /Stale worktree:|Cleanup:|recover-landed/);
 });
 
-test('status renders the ordered verification-policy history, a fixed-policy fallback, and nothing when off (TASK-2859.07)', async () => {
+test('status renders ordered verification-policy history, a fixed fallback, and nothing when its reader is unavailable (TASK-2859.07)', async () => {
   const mission = fixtureMission('task-policy', { checkpoints: [] });
   const render = async (verificationHistoryFn?: () => Promise<never>) => { const lines: string[] = [];
     const board = createStatusBoardAdapter({ buildProjectionFn: async () => ({ async buildMissionCard() { return null; } } as any),

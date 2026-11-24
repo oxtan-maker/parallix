@@ -38,7 +38,7 @@ const policyTestsBlocked = policyTestsRepair && process.argv.includes('--policy-
 const reviewFamilies = parallelReviewers ? ['custom', 'claude'] : ['custom'];
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-changed-repair-manual-'));
 const exactCommand = `test -f ${temporary}/allow-check`;
-// The pilot rehearsal's integration gate stays red until the launched repair actor writes this marker.
+// The policy rehearsal's integration gate stays red until the launched repair actor writes this marker.
 const gateCommand = `test -f ${temporary}/gate-green`;
 const gateKey = 'integration-ci';
 /** A SYNTHETIC beta_1 > 0 artifact whose value vectors make `tests` the best permitted action on the prior state. */
@@ -67,8 +67,8 @@ try {
   fs.mkdirSync(path.join(repo, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(repo, 'workflow.config.json'), JSON.stringify({ product: { name: 'manual-repair', targetUser: 'probe' },
     ...(policyTestsRepair ? { reviewActionLimit: 2 } : {}),
-    ...(policyTestsRepair ? { verificationPolicy: { mode: 'pilot', artifact: 'policy.json' } }
-      : reviewStartPolicy ? { verificationPolicy: { mode: 'shadow', artifact: 'missing-policy.json' } } : {}), adapters: {
+    ...(policyTestsRepair ? { verificationPolicy: { artifact: 'policy.json' } }
+      : reviewStartPolicy ? { verificationPolicy: { artifact: 'missing-policy.json' } } : {}), adapters: {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom', claude: 'stub/claude' } },
     missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
@@ -109,7 +109,7 @@ try {
   configureMissionWriteAuthorization({ operationId: 'disposable-manual-review', ...(policyTestsRepair ? { generation: 1 } : {}),
     async assert(id) { assert.equal(id, slug); } });
   const eligibility = ConfiguredReviewerEligibility.fromReviewStep({ eligible: reviewFamilies.map(agentFamily), strategy: 'random' });
-  // The pilot rehearsal opens an undecided review turn on the current revision, so the policy owns the next action.
+  // The policy rehearsal opens an undecided review turn on the current revision, so the policy owns the next action.
   const startedReview = startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
     revision: changeRevision(undecidedReview ? repairedRevision : approvedRevision), baseline: changeRevision(baseline) }, agentFamily('custom'), agentFamily('codex'), '2026-10-01T08:00:00Z', eligibility);
   const review = undecidedReview ? startedReview : applyReviewerCommand(startedReview, {
@@ -130,17 +130,17 @@ try {
   const active = decideMission(approved, { type: 'rebound-to-active', agent: agentFamily('codex'),
     cause: { kind: 'integration-gate-failure', gate: aggregateMode ? 'static-analysis' : policyTestsRepair ? gateKey : 'unit',
       command: aggregateMode ? aggregateCommands[0] : policyTestsRepair ? gateCommand : ':' }, occurredAt: '2026-10-01T10:00:00Z' });
-  // The pilot rehearsal starts from an unblocked review turn: no pending repair may shadow the policy decision.
+  // The policy rehearsal starts from an unblocked review turn: no pending repair may precede its decision.
   const seededMission = undecidedReview ? approved : active;
   await services.store.save({ ...seededMission, status: policyTestsActive ? 'active' : undecidedReview ? 'review' : equivalent || aggregateMode && !aggregateExecute ? 'review' : lane,
     ...(equivalent ? { reviewPreparationPending: true } : {}), closedAt: null }, null);
   if (policyTestsRepair) {
-    // The pilot joins every retained rebase observation to its admitted workflow operation; without one the
+    // The policy joins every retained rebase observation to its admitted workflow operation; without one the
     // history reader reports unmodelled history and the decision falls back to the fixed sequence.
     const { SqliteWorkflowOperationStore } = await import('../../src/adapters/sqlite/workflow-operation-store.js');
     const { db } = await initOperatorState({ homeDir: process.env.PARALLIX_HOME });
     await new SqliteWorkflowOperationStore(db, services.repositoryId).insert({ id: 'disposable-manual-review', repositoryId: services.repositoryId,
-      missionId: missionId(slug), requestKey: 'disposable-pilot-rehearsal', command: 'review:submit', generation: 1, phase: 'completed',
+      missionId: missionId(slug), requestKey: 'disposable-policy-rehearsal', command: 'review:submit', generation: 1, phase: 'completed',
       providerStarted: false, agent: null, reviewer: 'custom', originalStatus: 'review', previousAssignee: null, owner: null,
       createdAt: '2026-10-01T08:00:00Z', updatedAt: '2026-10-01T08:00:00Z', reason: null });
   }
@@ -308,7 +308,7 @@ try {
       lane: after.mission.status, verified: after.mission.checkpoints.at(-1)?.repair?.verified, launches,
       originalDecisionPreserved: true, originalFailurePreserved: true, exactCommand }));
   } else if (policyTestsRepair) {
-    // CP-2 rehearsal: a pilot policy selects the tests action, its configured gate is red,
+    // CP-2 rehearsal: the policy selects the tests action, its configured gate is red,
     // the repair owner takes the failure, and the loop stops at one typed boundary.
     const launches: Array<{ role: string | null; worktree: string; promptHead: string }> = [];
     let ordinaryExecuteLaunches = 0;
@@ -342,7 +342,7 @@ try {
     }));
     const command = policyTestsActive ? ['active', slug, '--reviewer', 'custom'] : ['review', slug, '--reviewer', 'custom'];
     console.log(`COMMAND: px ${command.join(' ')}`);
-    // Exercise the public workflow invocation while leaving pilot policy enabled.
+    // Exercise the public workflow invocation while leaving policy evaluation enabled.
     const code = await run(command, { baseCwd: worktree, operatorInvocation: false });
     const result = await services.store.load(missionId(slug));
     assert.equal(result.kind, 'found');
@@ -354,9 +354,9 @@ try {
       .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision).sort((left, right) => left.actionSequence - right.actionSequence);
     const actions = decisions.map(decision => decision.actualAction);
     const repair = repairs[0];
-    // Dispatch: the pilot's own recommendation is what ran, and each run is joined to a durable gate run.
+    // Dispatch: the policy's own recommendation is what ran, and each run is joined to a durable gate run.
     assert.deepEqual(decisions.filter(decision => decision.actualAction === 'tests')
-      .every(decision => decision.recommendedAction === 'tests' && decision.effectiveMode === 'pilot' && decision.gateRunId !== null), true);
+      .every(decision => decision.recommendedAction === 'tests' && decision.gateRunId !== null), true);
     assert.equal(actions[0], 'tests', 'the policy-selected tests action is the first action the loop takes');
     assert.ok(gateRun?.outcomes.some(outcome => outcome.key === gateKey), 'the tests action leaves a durable gate outcome');
     // Repair ownership: the failed check opens one repair checkpoint and the implementer, not the reviewer, is launched for it.
@@ -400,7 +400,7 @@ try {
       policySelection: null,
     });
     assert.deepEqual(verificationNextAction, { kind: 'agent-review', reason: 'review-unfinished' });
-    console.log(JSON.stringify({ observation: policyTestsBlocked ? 'pilot tests action blocked repair' : 'pilot tests action failure and repair',
+    console.log(JSON.stringify({ observation: policyTestsBlocked ? 'policy tests action blocked repair' : 'policy tests action failure and repair',
       publicCommand: policyTestsActive ? 'px active' : 'px review', ordinaryExecuteLaunches,
       code, launches, lane: result.mission.status, round: currentReviewRound(result.mission.review!).number,
       decision: currentReviewRound(result.mission.review!).decision?.kind ?? null,
@@ -411,7 +411,7 @@ try {
         maxAttempts: repair.maxAttempts, evidenceRecorded: repair.evidenceRecorded, verified: repair.verified,
         failureRevision: repair.occurrence?.failureRevision ?? null, failureEvidenceId: repair.occurrence?.failureEvidenceId ?? null },
       decisions: decisions.map(decision => ({ actual: decision.actualAction, recommended: decision.recommendedAction,
-        mode: decision.effectiveMode, gateRunId: decision.gateRunId, failure: decision.failureReason?.kind ?? null,
+        gateRunId: decision.gateRunId, failure: decision.failureReason?.kind ?? null,
         sequence: decision.actionSequence, verdictCorrelation: decision.verdictCorrelation })),
       syntheticBeta1: 0.25,
       head: git(worktree, 'rev-parse', 'HEAD'), baseHead: git(repo, 'rev-parse', 'HEAD'), baseline,
@@ -477,36 +477,32 @@ try {
   assert.equal(git(repo, 'rev-parse', 'HEAD'), baseline, 'human integration never ran');
   const decisions = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
     .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision).sort((left, right) => left.actionSequence - right.actionSequence);
-  if (reviewStartPolicy) {
-    assert.deepEqual(decisions.map(decision => decision.actualAction),
-      parallelReviewers ? ['tests', 'agent', 'agent', 'human'] : ['tests', 'agent', 'human'],
-      'the fixed sequence runs its integration check before the reviewer round');
-    assert.deepEqual(decisions.map(decision => decision.failureReason?.kind), decisions.map(() => 'artifact-missing'));
-    const testsRows = decisions.filter(decision => decision.actualAction === 'tests');
-    assert.equal(testsRows.length, 1, 'the fixed-sequence check runs once per review entry');
-    assert.ok(testsRows.every(tests => tests.gateRunId !== null && tests.recommendedAction === null),
-      'a shadow-mode check row keeps its durable gate run and gets no recommendation');
-    assert.deepEqual(testsRows.map(tests => tests.verdictCorrelation), testsRows.map(tests => tests.gateRunId),
-      'a check row is joined to its gate run, never to a verdict');
-    assert.deepEqual(decisions.filter(decision => decision.actualAction !== 'tests').map(decision => decision.verdictCorrelation), parallelReviewers
-      ? ['review:2:agent:custom-verdict', 'review:2:agent:claude-verdict', 'review:2:human-verdict']
-      : ['review:2:agent:custom-verdict', 'review:2:human-verdict']);
-    assert.deepEqual(decisions.map(decision => decision.actionSequence), parallelReviewers ? [1, 2, 3, 4] : [1, 2, 3]);
-    assert.ok(decisions.filter(decision => decision.actualAction === 'agent').every(decision => decision.agentRunId),
-      'each agent review row retains its available run link');
-    assert.equal(decisions.at(-1)?.agentRunId, null);
-    const keys = decisions.map(decision => decision.idempotencyKey);
-    assert.equal(await run(['review', slug, '--reviewer', 'custom'], { baseCwd: worktree }), 0);
-    const replay = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
-      .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision);
-    assert.deepEqual(replay.map(decision => decision.idempotencyKey), keys, 'public restart must not duplicate start rows');
-    assert.equal(reviewerLaunches, parallelReviewers ? 2 : 1, 'public restart must not relaunch an accepted reviewer');
-  } else {
-    assert.deepEqual(decisions, [], 'absent policy must append no review-start rows');
-  }
+  assert.deepEqual(decisions.map(decision => decision.actualAction),
+    parallelReviewers ? ['tests', 'agent', 'agent', 'human'] : ['tests', 'agent', 'human'],
+    'the fixed sequence runs its integration check before the reviewer round');
+  assert.deepEqual(decisions.map(decision => decision.failureReason?.kind), decisions.map(() => 'artifact-missing'));
+  const testsRows = decisions.filter(decision => decision.actualAction === 'tests');
+  assert.equal(testsRows.length, 1, 'the fixed-sequence check runs once per review entry');
+  assert.ok(testsRows.every(tests => tests.gateRunId !== null && tests.recommendedAction === null),
+    'a fixed-fallback check row keeps its durable gate run and gets no recommendation');
+  assert.deepEqual(testsRows.map(tests => tests.verdictCorrelation), testsRows.map(tests => tests.gateRunId),
+    'a check row is joined to its gate run, never to a verdict');
+  assert.deepEqual(decisions.filter(decision => decision.actualAction !== 'tests').map(decision => decision.verdictCorrelation), parallelReviewers
+    ? ['review:2:agent:custom-verdict', 'review:2:agent:claude-verdict', 'review:2:human-verdict']
+    : ['review:2:agent:custom-verdict', 'review:2:human-verdict']);
+  assert.deepEqual(decisions.map(decision => decision.actionSequence), parallelReviewers ? [1, 2, 3, 4] : [1, 2, 3]);
+  assert.ok(decisions.filter(decision => decision.actualAction === 'agent').every(decision => decision.agentRunId),
+    'each agent review row retains its available run link');
+  assert.equal(decisions.at(-1)?.agentRunId, null);
+  const keys = decisions.map(decision => decision.idempotencyKey);
+  assert.equal(await run(['review', slug, '--reviewer', 'custom'], { baseCwd: worktree }), 0);
+  const replay = (await services.operationalHistory.loadAllByTypeForMission(REVIEW_START_DECISION_EVENT, missionId(slug)))
+    .map(entry => JSON.parse(entry.eventData) as ReviewStartDecision);
+  assert.deepEqual(replay.map(decision => decision.idempotencyKey), keys, 'public restart must not duplicate start rows');
+  assert.equal(reviewerLaunches, parallelReviewers ? 2 : 1, 'public restart must not relaunch an accepted reviewer');
   console.log(JSON.stringify({ observation: 'fresh decision persisted', approvedRevision, repairedRevision,
     decisionRevision: current.decision?.revision, round: current.number, lane: result.mission.status, reviewerLaunches,
-    policyMode: reviewStartPolicy ? 'shadow' : 'off', reviewStartDecisions: decisions,
+    policyArtifact: reviewStartPolicy ? 'configured-missing' : 'absent', reviewStartDecisions: decisions,
     boundaries: parallelReviewers
       ? 'canonical public px review CLI; real Git, SQLite, preparation, prompts and patch comparison; injected deterministic reviewer launches and approval writes only'
       : 'canonical public px review/verdict CLI; real Git, SQLite, preparation, prompts and patch comparison; injected deterministic reviewer launch only' }));

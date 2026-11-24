@@ -96,7 +96,6 @@ export interface RuntimeConfiguration {
   readonly noColor: OptionalString;
   readonly forceColor: OptionalString;
   readonly term: OptionalString;
-  readonly integrationGateBypass: boolean;
   readonly credentialRedactor: OptionalString;
   readonly verifyArea: OptionalString;
   readonly primaryWorktree: OptionalString;
@@ -222,7 +221,6 @@ export const DEFAULT_CONFIGURATION: ParallixConfiguration = {
     noColor: undefined,
     forceColor: undefined,
     term: undefined,
-    integrationGateBypass: false,
     credentialRedactor: undefined,
     verifyArea: undefined,
     primaryWorktree: undefined,

@@ -280,36 +280,16 @@ test('final integration gate identity rejects a dirty or wrong selected root bef
   assert.deepEqual(final, { ok: true, rootDir: path.resolve(root), commit: 'commit-final', tree: 'tree-final' });
 });
 
-test('px integrate rejects the normal integration-gate bypass (task-2300)', () => {
-  const prior = process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS;
-  delete process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS;
-  try {
-    assert.throws(() => parseIntegrateArgs(['task-2300', '--no-integration-gates']), /final integration gates are mandatory/);
-  } finally {
-    if (prior === undefined) delete process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS;
-    else process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = prior;
-  }
+test('px integrate rejects the removed integration-gate skip option as unknown (TASK-2872.02)', () => {
+  assert.throws(() => parseIntegrateArgs(['task-2300', '--no-integration-gates']), /Unknown integrate option: --no-integration-gates/);
 });
 
-test('px integrate parses the paired Codex real-agent override without placing values in a command string', () => {
-  const parsed = parseIntegrateArgs(['task-2269', '--real-agent', 'codex', '--real-agent-model', 'gpt-6-luna']);
-  assert.deepEqual(parsed, {
-    explicitSlug: 'task-2269', dryRun: false, noIntegrationGates: false, noGate: false, recoverLanded: false,
-    realAgent: 'codex', realAgentModel: 'gpt-6-luna'
+test('px integrate parses its public flags and rejects the removed real-agent pair as unknown (TASK-2872.02)', () => {
+  assert.deepEqual(parseIntegrateArgs(['task-2269', '--dry-run']), {
+    explicitSlug: 'task-2269', dryRun: true, noGate: false, recoverLanded: false,
   });
-});
-
-test('px integrate rejects malformed real-agent options before preflight or gate execution', () => {
-  const malformedCases: Array<[string[], RegExp]> = [
-    [['task-2269', '--real-agent', 'codex'], /must be supplied together/],
-    [['task-2269', '--real-agent'], /requires a value/],
-    [['task-2269', '--real-agent', 'codex', '--real-agent', 'codex', '--real-agent-model', 'gpt-6-luna'], /only once/],
-    [['task-2269', '--real-agent', 'claude', '--real-agent-model', 'gpt-6-luna'], /Unsupported real agent/],
-    [['task-2269', '--real-agent', 'codex', '--real-agent-model', 'not-gpt'], /Unsupported Codex real-agent model/],
-    [['task-2269', '--not-real'], /Unknown integrate option/]
-  ];
-  for (const [args, message] of malformedCases) {
-    assert.throws(() => parseIntegrateArgs(args), message);
+  for (const args of [['task-2269', '--real-agent', 'codex', '--real-agent-model', 'gpt-6-luna'], ['task-2269', '--real-agent-model', 'gpt-6-luna'], ['task-2269', '--not-real']]) {
+    assert.throws(() => parseIntegrateArgs(args), /Unknown integrate option: --/);
   }
 });
 
@@ -1113,7 +1093,7 @@ test('runPreCommitHookOrAbort creates no commit when the hook changes nothing (t
   assert.equal(gitCalls.filter(args => args.includes('commit')).length, 0);
 });
 
-test('runPreCommitHookOrAbort aborts before the integration gates when the hook fails (task-2510)', () => {
+test('runPreCommitHookOrAbort aborts integration when the hook fails (task-2510)', () => {
   const errors: unknown[] = [];
   const originalError = console.error;
   console.error = (message: unknown) => errors.push(message);

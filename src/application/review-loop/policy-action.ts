@@ -1,3 +1,4 @@
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { missionId } from '../../domain/mission.js';
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 import type { PolicyTestsOutcome } from '../ports/verification-policy.js';
@@ -16,7 +17,7 @@ export type PolicyTestsStep = 'none' | 'ran' | 'repaired' | 'stop';
 export const TESTS_ACTION_HANDOFF = 'TESTS_ACTION';
 
 /**
- * Run the integration tests when the pilot policy selects them.
+ * Run the integration tests when the active policy selects them.
  *
  * Only the fixed sequence's own review actions are open to a policy choice:
  * repairs, recorded blockers, human intervention, owned actions and a rebase
@@ -24,11 +25,14 @@ export const TESTS_ACTION_HANDOFF = 'TESTS_ACTION';
  * review and the human turn stay with the loop's existing round, which the
  * fixed policy would also run.
  */
-export async function runPolicyTestsAction(context: LoopContext): Promise<PolicyTestsStep> {
+export async function runPolicyTestsAction(context: LoopContext, afterRound = false): Promise<PolicyTestsStep> {
   const { ports, slug } = context;
   const actions = ports.policyActions;
-  // A direct operator command overrides the policy: the round runs what was asked and the start record marks the override.
-  if (!actions || context.policyDisabled || context.operatorInvocation || !await decisionIsOpen(context)) { return 'none'; }
+  // A direct operator command overrides the policy: the round runs what was asked and the start record marks the
+  // override. Without a policy decision the fixed sequence still owes the recorded run integrate admits, so it
+  // enters its tests action for an approved candidate whatever the configured policy mode.
+  if (!actions || context.policyDisabled || context.operatorInvocation) { return afterRound ? 'none' : runFixedTestsAction(context); }
+  if (!await decisionIsOpen(context)) { return 'none'; }
   const revision = ports.preReview.head();
   if (!revision) { return 'none'; }
   if (await humanCorrectionPending(context)) { return 'none'; }
@@ -37,17 +41,51 @@ export async function runPolicyTestsAction(context: LoopContext): Promise<Policy
   const selection = await actions.select({ missionId: missionId(slug), revision });
   context.selectionFailure ??= selection.failure;
   context.selectedAction = selection.action;
-  if (selection.action !== 'tests') { return 'none'; }
+  if (selection.action === 'tests') {
+    if (!await startReviewAction(context, 'tests', `tests:${revision}:${context.actionCount + 1}`, revision)) { return 'stop'; }
+    const reselect = async (head: string) => {
+      const again = await actions.select({ missionId: missionId(slug), revision: head });
+      context.selectionFailure ??= again.failure;
+      return again.action === 'tests';
+    };
+    // The policy run is this loop's tests action; the fixed fallback must not ask for a second one.
+    context.fixedTestsRan = true;
+    const outcome = await actions.runTests(reselect);
+    // The tests took time: an empty reading is stale, while unconsumed feedback must still reach the round.
+    if (context.reconciledFeedback === null) { context.reconciledFeedback = undefined; }
+    return await settleTestsAction(context, outcome);
+  }
+  // A positive non-tests choice is the policy's decision and stays in charge. A null selection names no
+  // check, so it is no decision: the fixed sequence keeps charge and still owes the recorded run integrate admits.
+  if (selection.action !== null) { return 'none'; }
+  return afterRound ? 'none' : runFixedTestsAction(context);
+}
+
+/**
+ * Wherever no policy decision applies (no pilot, or a direct operator command under one) the fixed sequence
+ * owns the tests action when `px review` or `px active` is entered on an already-approved candidate: the operator-typed command records the run that `px integrate` later
+ * admits, because integrate starts no gate (TASK-2872.02 SC2). An approval the same loop just recorded
+ * schedules no tests (TASK-2859.17), so the post-round settle never reaches here. The tests-action owner
+ * re-reads its own evidence facts and declines when a current run already exists; the loop-level flag
+ * keeps that decline from costing a second review-step action.
+ */
+async function runFixedTestsAction(context: LoopContext): Promise<PolicyTestsStep> {
+  const { ports, slug } = context;
+  const entry = ports.fixedTestsAction;
+  if (!entry || context.dryRun || context.fixedTestsRan || !ports.missionStore) { return 'none'; }
+  const revision = ports.preReview.head();
+  if (!revision || await humanCorrectionPending(context)) { return 'none'; }
+  const loaded = await ports.missionStore.load(missionId(slug));
+  if (loaded.kind !== 'found') { return 'none'; }
+  const fixed = fixedVerificationNextAction({ mission: loaded.mission });
+  // The run is offered for an approved candidate: the integration lane's handoff, the review lane's human
+  // turn, or a `tests` the fixed sequence already names. Unfinished review and repair work stays with the round.
+  // An interrupted approval-retention repair waits on the same recorded run, so it is offered one too.
+  if (fixed.kind !== 'integration-handoff' && fixed.kind !== 'human-review' && fixed.kind !== 'tests'
+    && !pendingIntegrationApproval(loaded.mission)) { return 'none'; }
   if (!await startReviewAction(context, 'tests', `tests:${revision}:${context.actionCount + 1}`, revision)) { return 'stop'; }
-  const reselect = async (head: string) => {
-    const again = await actions.select({ missionId: missionId(slug), revision: head });
-    context.selectionFailure ??= again.failure;
-    return again.action === 'tests';
-  };
-  const outcome = await actions.runTests(reselect);
-  // The tests took time: an empty reading is stale, while unconsumed feedback must still reach the round.
-  if (context.reconciledFeedback === null) { context.reconciledFeedback = undefined; }
-  return await settleTestsAction(context, outcome);
+  context.fixedTestsRan = true;
+  return await settleTestsAction(context, await entry.runTests(), 'fixed');
 }
 
 /** Human feedback is read once and handed to the next round, so a policy action never consumes it. */
@@ -75,12 +113,12 @@ async function decisionIsOpen(context: LoopContext): Promise<boolean> {
   return fixed.kind === 'agent-review' || fixed.kind === 'human-review' || fixed.kind === 'integration-handoff';
 }
 
-async function settleTestsAction(context: LoopContext, outcome: PolicyTestsOutcome): Promise<PolicyTestsStep> {
+async function settleTestsAction(context: LoopContext, outcome: PolicyTestsOutcome, source: 'policy' | 'fixed' = 'policy'): Promise<PolicyTestsStep> {
   const { ports, slug } = context;
   switch (outcome.kind) {
     case 'not-selected': return 'none';
     case 'completed':
-      ports.output.log(`Policy-selected integration tests ${outcome.verdict} for ${slug}.`);
+      ports.output.log(`${source === 'policy' ? 'Policy-selected ' : ''}Integration tests ${outcome.verdict} for ${slug}.`);
       if (outcome.verdict === 'passed') { return 'ran'; }
       if (outcome.verdict === 'failed') { return 'repaired'; }
       await context.escalateToHumanReview(`${TESTS_ACTION_HANDOFF}_CANCELLED`);

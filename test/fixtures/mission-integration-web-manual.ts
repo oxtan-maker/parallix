@@ -6,7 +6,7 @@ import path from 'node:path';
 import { execFileSync, fork } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { chromium } from 'playwright-core';
-import { resolveProcessConfiguration } from '../../src/composition/config.js';
+import { resolveConfiguration, resolveProcessConfiguration } from '../../src/composition/config.js';
 import { createProductionApplicationServices } from '../../src/composition/application-services.js';
 import { composeWorkflowOperations, runWorkflowWorker } from '../../src/composition/workflow-operations.js';
 import { createWebHost } from '../../src/interfaces/web/host.js';
@@ -19,6 +19,7 @@ import { resolveCanonicalRepositoryId } from '../../src/adapters/git/repository-
 import { applyReviewerCommand, startReview, changeRevision, ConfiguredReviewerEligibility } from '../../src/domain/review.js';
 import { missionId, missionLabels } from '../../src/domain/mission.js';
 import { agentFamily } from '../../src/domain/agents.js';
+import { createIntegrationVerificationEvidencePort } from '../../src/adapters/verification/integration-verification-proof.js';
 async function until(check: () => Promise<boolean>, description: string, timeout: number) {
   const deadline = Date.now() + timeout;
   while (!await check()) {
@@ -39,7 +40,11 @@ if (process.argv[2]?.startsWith('--workflow-')) {
   const graph = await createProductionApplicationServices(root, undefined, { configuration });
   const owned = await composeWorkflowOperations(root, configuration, graph.presentationCapabilities!.commandController,
     path.join(process.env.PARALLIX_HOME!, 'parallix.db'), async () => 'codex', cli, false);
-  const host = createWebHost({ assets: loadWebAssets(process.argv[3]), commandDispatcher: () => owned.service });
+  const host = createWebHost({
+    assets: loadWebAssets(process.argv[3]),
+    buildProjection: () => graph.presentationCapabilities!.boardProjection.build(),
+    commandDispatcher: () => owned.service,
+  });
   process.send?.({ ...await host.start(), cwd: process.cwd() });
   process.on('message', () => process.send?.({ cwd: process.cwd() }));
   process.once('disconnect', () => { void (async () => { await host.close(); await owned.close(); await graph.operatorState.close(); })(); });
@@ -49,6 +54,8 @@ if (process.argv[2]?.startsWith('--workflow-')) {
   const home = path.join(parent, 'operator');
   const slug = 'task-97779';
   const worktree = `${root}-${slug}`;
+  const gateMarker = path.join(parent, 'integration-started-a-gate');
+  const gate = { key: 'manual-proof', command: `touch ${gateMarker}`, order: 0 };
   const database = new SqliteDatabaseAdapter();
   let child: ReturnType<typeof fork> | undefined;
   let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
@@ -56,7 +63,7 @@ if (process.argv[2]?.startsWith('--workflow-')) {
     fs.mkdirSync(root); fs.mkdirSync(home);
     git(root, 'init', '-q', '-b', 'main');
     git(root, 'config', 'user.name', 'Disposable Operator'); git(root, 'config', 'user.email', 'operator@example.invalid');
-    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' }, terminal: { host: 'pipe', whenUnavailable: 'fallback' }, verification: { command: 'git diff --check', defaultArea: 'all' } } }));
+    fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'none' }, terminal: { host: 'pipe', whenUnavailable: 'fallback' }, verification: { command: 'git diff --check', defaultArea: 'all', integrationCoverage: { command: 'git diff --check', checks: { all: [gate.key] } } }, gates: { preIntegration: [gate] } } }));
     fs.writeFileSync(path.join(root, 'README.md'), 'Disposable integration repository\n');
     git(root, 'add', '.'); git(root, 'commit', '-qm', 'base');
     for (const remote of ['origin', 'review']) {
@@ -65,19 +72,24 @@ if (process.argv[2]?.startsWith('--workflow-')) {
     }
     git(root, 'worktree', 'add', '-qb', `mission/${slug}`, worktree);
     fs.mkdirSync(path.join(worktree, 'backlog/tasks'), { recursive: true });
-    fs.writeFileSync(path.join(worktree, `backlog/tasks/${slug} - Disposable.md`), `---\nid: TASK-97779\ntitle: Disposable\nstatus: approved\nlabels: [user_value]\n---\n`);
+    fs.writeFileSync(path.join(worktree, `backlog/tasks/${slug} - Disposable.md`), `---\nid: TASK-97779\ntitle: Disposable\nstatus: review\nlabels: [user_value]\n---\n`);
     fs.writeFileSync(path.join(worktree, 'payload.txt'), 'landed from the web\n');
     git(worktree, 'add', '.'); git(worktree, 'commit', '-qm', 'feat: disposable web payload');
     const revision = git(worktree, 'rev-parse', 'HEAD');
+    const verificationConfiguration = resolveConfiguration({ ...process.env, PARALLIX_HOME: home, PRIMARY_WORKTREE: root });
+    const recorded = await createIntegrationVerificationEvidencePort(verificationConfiguration).start(worktree, [gate], {
+      missionId: missionId(slug), operatorInvocation: false,
+    });
+    assert.ok(recorded); recorded.complete([{ ...gate, exitCode: 0 }], 'passed');
     const reviewer = agentFamily('claude');
     const review = applyReviewerCommand(startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
       revision: changeRevision(revision) }, reviewer, agentFamily('codex'), new Date().toISOString(),
       ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' })),
-    { type: 'approve', decidedAt: new Date().toISOString(), comment: null, source: { kind: 'local' } });
+    { type: 'approve', revision: changeRevision(revision), decidedAt: new Date().toISOString(), comment: null, source: { kind: 'local' } });
     await database.open({ path: path.join(home, 'parallix.db') });
     await new SqliteMigrationRunner(database).applyPending(loadDefaultMigrations());
     const store = new SqliteMissionStore(database);
-    await store.save(fixtureMission(slug, { repositoryId: resolveCanonicalRepositoryId(root), status: 'integration', labels: missionLabels(['user_value']), assignee: agentFamily('codex'),
+    await store.save(fixtureMission(slug, { repositoryId: resolveCanonicalRepositoryId(root), status: 'review', labels: missionLabels(['user_value']), assignee: agentFamily('codex'),
       brief: { goal: 'Land disposable payload', why: 'Observe public web integration', scope: 'payload', outOfScope: ['operator state'] }, review }), null);
     child = fork(source, ['--host', path.resolve('build/web')], { cwd: root, execArgv: ['--import', tsx],
       env: { PATH: process.env.PATH, HOME: parent, PARALLIX_HOME: home, PRIMARY_WORKTREE: root, PARALLIX_NO_TUI: '1', DEBUG: '1' }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
@@ -89,7 +101,7 @@ if (process.argv[2]?.startsWith('--workflow-')) {
     const admitted = await page.evaluate(async missionId => {
       const csrf = document.querySelector<HTMLMetaElement>('meta[name="px-csrf"]')!.content;
       const response = await fetch('/api/commands', { method: 'POST', headers: { 'content-type': 'application/json', 'x-px-csrf': csrf },
-        body: JSON.stringify({ kind: 'integrate:merge', missionId, missionStatusAtRequest: 'integration', requestKey: crypto.randomUUID() }) });
+        body: JSON.stringify({ kind: 'integrate:merge', missionId, missionStatusAtRequest: 'review', requestKey: crypto.randomUUID() }) });
       return { status: response.status, body: await response.json() };
     }, slug);
     console.log('ADMISSION', JSON.stringify(admitted)); assert.equal(admitted.status, 202);
@@ -99,13 +111,56 @@ if (process.argv[2]?.startsWith('--workflow-')) {
       return ['completed', 'failed', 'blocked', 'stopped'].includes(operation.phase);
     }, 'local web landing', 60_000);
     console.log('OUTCOME', JSON.stringify(operation!));
+    if (operation!.phase !== 'completed') {
+      const history = execFileSync(process.execPath, [path.resolve('build/px.mjs'), 'history', slug, 'search', slug], { cwd: root, encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: parent, PARALLIX_HOME: home, PRIMARY_WORKTREE: root, PARALLIX_NO_TUI: '1' } });
+      console.error(history);
+    }
     assert.equal(operation!.phase, 'completed');
     const after = await new Promise<{ cwd: string }>(resolve => { child!.once('message', message => resolve(message as never)); child!.send('cwd'); });
     assert.equal(after.cwd, info.cwd);
     assert.equal(fs.readFileSync(path.join(root, 'payload.txt'), 'utf8'), 'landed from the web\n');
     const loaded = await store.load(missionId(slug)); assert.equal(loaded.kind, 'found');
     if (loaded.kind === 'found') { assert.equal(loaded.mission.status, 'done'); assert.ok(loaded.mission.closedAt); }
-    console.log(JSON.stringify({ result: 'PASS', hostBranch: git(root, 'branch', '--show-current'), cwdBefore: info.cwd, cwdAfter: after.cwd, landedCommit: git(root, 'rev-parse', 'HEAD'), payload: 'landed from the web', closed: true, missionWorktreeRemoved: !fs.existsSync(worktree), remotes: ['disposable origin', 'disposable review'], interface: 'Chromium authenticated POST /api/commands and GET operation outcome', limitation: 'Local mode; no real Forgejo or paid models' }));
+    const actionRows = await database.query<{ event_data: string }>(
+      "SELECT event_data FROM operational_history WHERE event_type = 'review.action-started'",
+    );
+    const humanActions = actionRows.map(row => JSON.parse(row.event_data) as { missionId?: string; action?: string })
+      .filter(row => row.missionId === slug && row.action === 'human');
+    assert.equal(humanActions.length, 1, 'the web integration records one human approval action');
+    assert.equal(fs.existsSync(gateMarker), false, 'web integration consumes the recorded tests without starting the configured gate');
+
+    const consoleSlug = 'task-97780';
+    const consoleWorktree = `${root}-${consoleSlug}`;
+    git(root, 'worktree', 'add', '-qb', `mission/${consoleSlug}`, consoleWorktree);
+    fs.mkdirSync(path.join(consoleWorktree, 'backlog/tasks'), { recursive: true });
+    fs.writeFileSync(path.join(consoleWorktree, `backlog/tasks/${consoleSlug} - Disposable.md`), `---\nid: TASK-97780\ntitle: Console disposable\nstatus: review\nlabels: [user_value]\n---\n`);
+    fs.writeFileSync(path.join(consoleWorktree, 'console-payload.txt'), 'landed from the console\n');
+    git(consoleWorktree, 'add', '.'); git(consoleWorktree, 'commit', '-qm', 'feat: disposable console payload');
+    const consoleRevision = git(consoleWorktree, 'rev-parse', 'HEAD');
+    const consoleRun = await createIntegrationVerificationEvidencePort(verificationConfiguration).start(consoleWorktree, [gate], {
+      missionId: missionId(consoleSlug), operatorInvocation: false,
+    });
+    assert.ok(consoleRun); consoleRun.complete([{ ...gate, exitCode: 0 }], 'passed');
+    const consoleReview = applyReviewerCommand(startReview({ change: { kind: 'local-branch', sourceBranch: `mission/${consoleSlug}`, targetBranch: 'main' },
+      revision: changeRevision(consoleRevision) }, reviewer, agentFamily('codex'), new Date().toISOString(),
+      ConfiguredReviewerEligibility.fromReviewStep({ eligible: [reviewer], strategy: 'random' })),
+    { type: 'approve', revision: changeRevision(consoleRevision), decidedAt: new Date().toISOString(), comment: null, source: { kind: 'local' } });
+    await store.save(fixtureMission(consoleSlug, { repositoryId: resolveCanonicalRepositoryId(root), status: 'review', labels: missionLabels(['user_value']), assignee: agentFamily('codex'),
+      brief: { goal: 'Land disposable console payload', why: 'Observe public console integration', scope: 'payload', outOfScope: ['operator state'] }, review: consoleReview }), null);
+    execFileSync(process.execPath, [path.resolve('build/px.mjs'), 'integrate', consoleSlug], { cwd: root, encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: parent, PARALLIX_HOME: home, PRIMARY_WORKTREE: root, PARALLIX_NO_TUI: '1' } });
+    const consoleLoaded = await store.load(missionId(consoleSlug)); assert.equal(consoleLoaded.kind, 'found');
+    if (consoleLoaded.kind === 'found') { assert.equal(consoleLoaded.mission.status, 'done'); assert.ok(consoleLoaded.mission.closedAt); }
+    const allActions = await database.query<{ event_data: string }>(
+      "SELECT event_data FROM operational_history WHERE event_type = 'review.action-started'",
+    );
+    const consoleHumanActions = allActions.map(row => JSON.parse(row.event_data) as { missionId?: string; action?: string })
+      .filter(row => row.missionId === consoleSlug && row.action === 'human');
+    assert.equal(consoleHumanActions.length, 1, 'the console integration records one human approval action');
+    assert.equal(fs.existsSync(gateMarker), false, 'console integration consumes the recorded tests without starting the configured gate');
+    assert.equal(fs.readFileSync(path.join(root, 'console-payload.txt'), 'utf8'), 'landed from the console\n');
+    console.log(JSON.stringify({ result: 'PASS', hostBranch: git(root, 'branch', '--show-current'), cwdBefore: info.cwd, cwdAfter: after.cwd, landedCommit: git(root, 'rev-parse', 'HEAD'), web: { payload: 'landed from the web', closed: true, humanApprovalActions: humanActions.length, gateStarts: 0, missionWorktreeRemoved: !fs.existsSync(worktree) }, console: { payload: 'landed from the console', closed: true, humanApprovalActions: consoleHumanActions.length, gateStarts: 0, missionWorktreeRemoved: !fs.existsSync(consoleWorktree) }, remotes: ['disposable origin', 'disposable review'], interface: 'Chromium authenticated POST plus public px integrate command', limitation: 'Local mode; no real Forgejo or paid models' }));
   } finally {
     await browser?.close(); child?.disconnect();
     if (child && child.exitCode === null) { await new Promise<void>(resolve => { const timer = setTimeout(() => { child!.kill('SIGKILL'); resolve(); }, 5000); child!.once('exit', () => { clearTimeout(timer); resolve(); }); }); }

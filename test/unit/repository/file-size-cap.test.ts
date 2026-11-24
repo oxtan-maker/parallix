@@ -111,7 +111,6 @@ const TEST_EXCEPTIONS: readonly string[] = [
   'test/integration/agents/agents.test.ts',
   'test/integration/backlog/backlog.test.ts',
   'test/integration/cli/draft.test.ts',
-  'test/e2e/lifecycle/mission-lifecycle.test.ts',
   'test/e2e/agents/real-agent-smoke.test.ts',
   'test/integration/forgejo/forgejo.test.ts',
   'test/integration/mission/review-preparation.test.ts',

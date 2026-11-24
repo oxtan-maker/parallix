@@ -3,7 +3,6 @@ import { agentFamily } from '../../../../../src/domain/agents.js';
 import { fixtureMission, approvedReview as fixtureApprovedReview } from '../../../../fixtures/mission-builders.js';
 import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
 import { changeRevision } from '../../../../../src/domain/review.js';
-import { resolveConfiguration } from '../../../../../src/composition/config.js';
 // Historical regression provenance: TASK-1039, TASK-2243, TASK-2520, TASK-2506.
 // Behavior-owned suite (TASK-2622.09): `px integrate` orchestration over injected Git, Backlog, Forgejo,
 // verification and stats ports — argument/preflight/gate stops (task-1039), probe-merge abort without
@@ -17,6 +16,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mockModule, installModuleMocks } from '../../../../lib/module-mock.js';
 import { mkdtemp as registeredMkdtemp } from '../../../../helpers/temp-dir.js';
+import { behindPrimaryDryRunGitDouble, behindPrimaryGitDouble, recordedGateRun } from '../../../../helpers/integrate-git-doubles.js';
 
 // Declaration order is load-bearing: installModuleMocks relinks modules in this order, so a
 // module must be declared after the modules it depends on (merged from every section below).
@@ -26,6 +26,7 @@ mockModule('../../../../../src/adapters/backlog/backlog.js', import.meta.url);
 mockModule('../../../../../src/adapters/forgejo/forgejo.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
 mockModule('../../../../../src/adapters/verification/verification.js', import.meta.url);
+mockModule('../../../../../src/adapters/verification/integration-verification-proof.js', import.meta.url);
 mockModule('../../../../../src/composition/application-services.js', import.meta.url);
 mockModule('../../../../../src/adapters/cli/commands/integrate-conflict.js', import.meta.url);
 mockModule('../../../../../src/adapters/git/mission-execution-context.js', import.meta.url);
@@ -43,6 +44,7 @@ describe("integrate orchestration and gates", () => {
   const forgejoModule = mockModule<typeof import('../../../../../src/adapters/forgejo/forgejo.js')>('../../../../../src/adapters/forgejo/forgejo.js', import.meta.url);
   const statsModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const verificationModule = mockModule<typeof import('../../../../../src/adapters/verification/verification.js')>('../../../../../src/adapters/verification/verification.js', import.meta.url);
+  const integrationProofModule = mockModule<typeof import('../../../../../src/adapters/verification/integration-verification-proof.js')>('../../../../../src/adapters/verification/integration-verification-proof.js', import.meta.url);
   const __mm1 = mockModule<typeof import('../../../../../src/composition/application-services.js')>('../../../../../src/composition/application-services.js', import.meta.url);
   const __mm2 = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
   // TASK-2457: observe the generic gate runner so the integration-phase gate can
@@ -175,7 +177,7 @@ describe("integrate orchestration and gates", () => {
     mock.method(git, 'getCurrentBranch', () => 'wrong-branch');
     const exits: Array<{ code: number; reason?: string | null }> = [];
     const exitFn = (code: number, reason?: string | null) => { exits.push({ code, reason }); };
-    await loadIntegrate()([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices, exitFn }).catch(() => {});
+    await loadIntegrate()([TEST_SLUG], { missionServicesFn: composition.createMissionApplicationServices, exitFn }).catch(() => {});
     cleanup();
     assert.match(exits.at(-1)?.reason ?? '', /Integration preflight failed\. Blocked by .*px integrate .* --dry-run/);
   });
@@ -189,7 +191,7 @@ describe("integrate orchestration and gates", () => {
     console.error = (msg) => { if (msg && msg.includes('Integration preflight failed')) errorLogged = true; };
 
     try {
-      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG], { missionServicesFn: composition.createMissionApplicationServices });
     } catch {
       // Expected to throw
     }
@@ -201,19 +203,24 @@ describe("integrate orchestration and gates", () => {
 
   test('integrate dry-run mode', async (t) => {
     setupMocks();
+    mock.method(integrateGatesModule, 'captureFinalIntegrationTree', () => ({ ok: true, commit: 'abc123' }));
     const integrate = loadIntegrate();
     const originalLog = console.log;
+    const originalError = console.error;
     let logLogged = false;
-    console.log = (msg) => { if (msg && msg.includes('Dry run complete')) logLogged = true; };
+    const messages: string[] = [];
+    console.log = (msg) => { messages.push(String(msg)); if (msg && msg.includes('Dry run complete')) logLogged = true; };
+    console.error = (msg) => { messages.push(String(msg)); };
 
     try {
-      await integrate([TEST_SLUG, '--dry-run', '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG, '--dry-run'], { missionServicesFn: composition.createMissionApplicationServices });
     } catch {
       // Expected to throw
     }
-    assert.ok(logLogged);
+    assert.ok(logLogged, messages.join('\n'));
 
     console.log = originalLog;
+    console.error = originalError;
     cleanup();
   });
 
@@ -318,7 +325,7 @@ describe("integrate orchestration and gates", () => {
       const integrate = loadIntegrate();
       let errorLogged = false;
       const originalError = console.error;
-      console.error = (msg) => { if (msg && msg.includes('Integration gates are mandatory')) errorLogged = true; };
+      console.error = (msg) => { if (msg && msg.includes('Integration tests are mandatory')) errorLogged = true; };
 
       let result = null;
       try {
@@ -367,14 +374,14 @@ describe("integrate orchestration and gates", () => {
       let proceedingLogged = false;
       const originalError = console.error;
       const originalLog = console.log;
-      console.error = (msg) => { if (msg && msg.includes('Integration gates are mandatory')) mandatoryLogged = true; };
-      console.log = (msg) => { if (msg && msg.includes('proceeding without a lifecycle gate')) proceedingLogged = true; };
+      console.error = (msg) => { if (msg && msg.includes('Integration tests are mandatory')) mandatoryLogged = true; };
+      console.log = (msg) => { if (msg && msg.includes('no pre-integration tests configured')) proceedingLogged = true; };
 
       try {
-        await integrate([TEST_SLUG], { missionServicesFn: composition.createMissionApplicationServices, exitFn: () => {} });
+        await integrate([TEST_SLUG, '--dry-run'], { missionServicesFn: composition.createMissionApplicationServices, exitFn: () => {} });
       } catch {
-        // The unconfigured consumer proceeds past the gate block; whatever the
-        // downstream mock surface does, it must never be the mandatory abort.
+        // The unconfigured consumer proceeds through non-mutating readiness;
+        // whatever the downstream mock surface does, it must never be the mandatory abort.
       } finally {
         console.error = originalError;
         console.log = originalLog;
@@ -388,10 +395,9 @@ describe("integrate orchestration and gates", () => {
     }
   });
 
-  // TASK-2457 wiring: a failing pre-integration gate aborts integrate before the
-  // merge. The runner is observed through the facade so we assert the phase and
-  // checkout it ran from; the real merge never happens.
-  test('integrate aborts before merge when a pre-integration gate fails', async (t) => {
+  // TASK-2457 wiring after TASK-2872.02: a failed recorded tests run aborts
+  // integrate before merge without invoking the gate runner or repair router.
+  test('integrate aborts before merge when the recorded pre-integration tests failed', async (t) => {
     setupMocks();
     const checkout = registeredMkdtemp('px-integ-gate-');
     try {
@@ -409,13 +415,10 @@ describe("integrate orchestration and gates", () => {
         if (cmd.includes('rebase')) return { signal: null,  status: 0, stdout: '', stderr: '' };
         return { signal: null,  status: 0, stdout: 'main', stderr: '' };
       });
-      let seenPhase: { value: "review" | "handoff" | "integration" | null } = { value: null };
-      let seenCheckout: { value: string | null } = { value: null };
-      mock.method(repositoryGatesModule, 'runPhaseGates', async (phase: Parameters<(typeof repositoryGatesModule)["runPhaseGates"]>[0], opts: Parameters<(typeof repositoryGatesModule)["runPhaseGates"]>[1]) => {
-        seenPhase.value = phase;
-        seenCheckout.value = opts.checkoutPath;
-        return { ok: false as const, phase, executed: 1, skipped: false, failedGate: { key: 'smoke', command: 'exit 1', exitCode: 1, stdout: '', stderr: 'fail' }, error: 'pre-integration gate failed' };
-      });
+      let gateStarts = 0;
+      mock.method(repositoryGatesModule, 'runPhaseGates', async () => { gateStarts++; return assert.fail('integrate must not start gates'); });
+      mock.method(integrationProofModule, 'readIntegrationGateRun', () => recordedGateRun(
+        [{ key: 'smoke', command: 'exit 1' }], { id: 'failed-run', revision: 'abc123', status: 'failed' }));
 
       const integrate = loadIntegrate();
       let result = null;
@@ -444,10 +447,53 @@ describe("integrate orchestration and gates", () => {
         // integrate() converts a gate abort into a non-zero exit code, not a throw.
       }
       assert.ok(result && result.exitCode === 1, 'integration aborts when the pre-integration gate fails');
-      assert.equal(seenPhase.value, 'integration');
-      assert.equal(seenCheckout.value, checkout);
-      assert.ok(routed, 'the failed gate must reach the rebound handler');
-      assert.deepEqual(mergeCalls, [], 'a failed rebound must stop before any merge');
+      assert.equal(gateStarts, 0, 'integrate reads the failed receipt without starting a gate');
+      assert.equal(routed, false, 'recorded test refusal does not launch integration-gate repair');
+      assert.deepEqual(mergeCalls, [], 'a failed recorded run must stop before any merge');
+    } finally {
+      fs.rmSync(checkout, { recursive: true, force: true });
+      cleanup();
+    }
+  });
+
+  // TASK-2872.02: integrate only reads recorded tests; it never starts a gate process.
+  test('integrate with tests not current refuses naming tests and starts no gate process (TASK-2872.02)', async (t) => {
+    setupMocks();
+    const checkout = registeredMkdtemp('px-integ-no-gates-');
+    try {
+      fs.writeFileSync(
+        path.join(checkout, 'workflow.config.json'),
+        JSON.stringify({ adapters: { gates: { preIntegration: [{ key: 'smoke', command: 'exit 0', order: 0 }] } } }),
+      );
+      mock.method(integrateGatesModule, 'resolveIntegrationVerificationWorktree', () => checkout);
+      mock.method(missionUtils, 'resolveWorktree', () => checkout);
+      mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+        const cmd = Array.isArray(args) ? args.join(' ') : String(args);
+        if (cmd.includes('status')) return { signal: null, status: 0, stdout: '', stderr: '' };
+        if (cmd.includes('rev-parse')) return { signal: null, status: 0, stdout: 'abc123', stderr: '' };
+        if (cmd.includes('rebase')) return { signal: null, status: 0, stdout: '', stderr: '' };
+        return { signal: null, status: 0, stdout: 'main', stderr: '' };
+      });
+      const gateStarts: string[] = [];
+      mock.method(repositoryGatesModule, 'runPhaseGates', async (phase: Parameters<(typeof repositoryGatesModule)["runPhaseGates"]>[0]) => {
+        gateStarts.push(phase);
+        return { ok: true as const, phase, executed: 1, skipped: false, failedGate: null, error: null };
+      });
+      const mergeCalls: string[] = [];
+      const gitRunner = git.git;
+      mock.method(git, 'git', (args: Parameters<(typeof git)["git"]>[0]) => {
+        if (args[0] === 'merge') mergeCalls.push(args.join(' '));
+        return gitRunner(args);
+      });
+
+      const exits: Array<{ code: number; reason?: string | null }> = [];
+      await loadIntegrate()([TEST_SLUG], { missionServicesFn: composition.createMissionApplicationServices,
+        exitFn: (code: number, reason?: string | null) => { exits.push({ code, reason }); } }).catch(() => {});
+
+      assert.deepEqual(gateStarts, [], 'integrate must not start a gate process');
+      assert.deepEqual(mergeCalls, [], 'a refusal must precede any landing effect');
+      assert.equal(exits.at(-1)?.code, 1);
+      assert.match(exits.at(-1)?.reason ?? '', /tests/i);
     } finally {
       fs.rmSync(checkout, { recursive: true, force: true });
       cleanup();
@@ -576,7 +622,7 @@ describe("probe abort without promotion", () => {
       }));
 
       const integrate = loadIntegrate();
-      await integrate([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration({ PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1' }), missionServicesFn: composition.createMissionApplicationServices });
+      await integrate([TEST_SLUG], { missionServicesFn: composition.createMissionApplicationServices });
 
       assert.deepEqual(exitCodes, [1], 'integration must reject the unsafe checkout with a nonzero result');
       assert.ok(errors.some((message) => message.includes('Dry-run merge could not be aborted cleanly')));
@@ -719,13 +765,9 @@ describe("resume landing closeout", () => {
 
 // ---- task-2506 behind-primary integrate (consolidated from test/task-2506-integrate-rebase.test.ts, TASK-2622.09) ----
 describe("behind-primary integrate", () => {
-  // TASK-2506 regression: `px integrate` must rebase the mission onto its
-  // primary/parent branch before the probe merge and gates. Before the fix the
-  // probe merge dead-ends with "Rebase the mission branch before integrating";
-  // after the fix the shared rebase workflow runs first, the probe merge is
-  // clean, and the mission lands. Hermetic: git, backlog, forgejo, stats,
-  // verification and mission services are all injected doubles, so no worktree,
-  // real Forgejo, or agent is touched.
+  // TASK-2506 regression: rebase precedes the probe merge; TASK-2872.02 adds
+  // that integration re-reads recorded tests afterward without starting gates.
+  // All Git, review, verification and lifecycle boundaries are injected.
 
   const git = mockModule<typeof import('../../../../../src/adapters/git/git.js')>('../../../../../src/adapters/git/git.js', import.meta.url);
   const missionUtils = mockModule<typeof import('../../../../../src/adapters/filesystem/mission-utils.js')>('../../../../../src/adapters/filesystem/mission-utils.js', import.meta.url);
@@ -733,6 +775,7 @@ describe("behind-primary integrate", () => {
   const forgejo = mockModule<typeof import('../../../../../src/adapters/forgejo/forgejo.js')>('../../../../../src/adapters/forgejo/forgejo.js', import.meta.url);
   const stats = mockModule<typeof import('../../../../../src/adapters/cli/commands/stats.js')>('../../../../../src/adapters/cli/commands/stats.js', import.meta.url);
   const verification = mockModule<typeof import('../../../../../src/adapters/verification/verification.js')>('../../../../../src/adapters/verification/verification.js', import.meta.url);
+  const integrationProof = mockModule<typeof import('../../../../../src/adapters/verification/integration-verification-proof.js')>('../../../../../src/adapters/verification/integration-verification-proof.js', import.meta.url);
   const composition = mockModule<typeof import('../../../../../src/composition/application-services.js')>('../../../../../src/composition/application-services.js', import.meta.url);
   const integrateModule = mockModule<typeof import('../../../../../src/adapters/cli/commands/integrate.js')>('../../../../../src/adapters/cli/commands/integrate.js', import.meta.url);
   const repositoryGates = mockModule<typeof import('../../../../../src/adapters/config/repository-gates.js')>('../../../../../src/adapters/config/repository-gates.js', import.meta.url);
@@ -744,49 +787,9 @@ describe("behind-primary integrate", () => {
   const BRANCH = `mission/${SLUG}`;
   const ROOT = registeredMkdtemp('parallix-task-2506-');
 
-  /**
-   * Stateful git double: the probe merge conflicts only until the integration
-   * rebase has run, so the test is red before the fix (probe merge dead-ends)
-   * and green after (rebase clears the conflict, probe merge is clean). The
-   * rebase subcommand is matched as an exact arg element so the slug is never
-   * confused with a rebase invocation.
-   */
   function installGitDoubles(rebased: { value: boolean }, unreadableApproval = false) {
     mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
-    mock.method(git, 'git', (args: string[]) => {
-      if (unreadableApproval && args.includes('cat-file')) { return { signal: null,  status: 1, stdout: '', stderr: 'missing approved commit' }; }
-      if (args.includes('rebase')) {
-        if (args.includes('--show-current') || args.includes('--continue')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-        rebased.value = true;
-        return { signal: null,  status: 0, stdout: '', stderr: '' };
-      }
-      const joined = args.join(' ');
-      if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      // Plain merge-base: the primary is an ancestor of the mission after the
-      // rebase, so it resolves to the same sha rev-parse returns.
-      if (joined.includes('merge-base')) { return { signal: null,  status: 0, stdout: 'landed-sha', stderr: '' }; }
-      if (args.includes('rev-parse')) { return { signal: null,  status: 0, stdout: 'landed-sha', stderr: '' }; }
-      if (args.includes('show')) { return { signal: null,  status: 0, stdout: '2026-05-15T12:00:00+00:00', stderr: '' }; }
-      if (joined.includes('merge') && joined.includes('--no-commit')) {
-        return rebased.value
-          ? { status: 0, stdout: '', stderr: '' }
-          : { status: 1, stdout: 'CONFLICT (content): Merge conflict in src/app.ts\n', stderr: '' };
-      }
-      if (joined.includes('merge') && joined.includes('--abort')) {
-        return rebased.value
-          ? { status: 0, stdout: '', stderr: '' }
-          : { status: 1, stdout: 'fatal: There is no merge to abort\n', stderr: '' };
-      }
-      if (joined.includes('merge') && joined.includes('--squash')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('commit')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('diff') && joined.includes('--cached')) { return { signal: null,  status: 0, stdout: 'src/app.ts\n', stderr: '' }; }
-      if (joined.includes('...')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('symbolic-ref')) { return { signal: null,  status: 0, stdout: `mission/${SLUG}`, stderr: '' }; }
-      if (joined.includes('ls-files')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('status')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('branch')) { return { signal: null,  status: 0, stdout: 'main\n', stderr: '' }; }
-      return { signal: null,  status: 0, stdout: '', stderr: '' };
-    });
+    mock.method(git, 'git', behindPrimaryGitDouble(SLUG, rebased, unreadableApproval));
   }
 
   /** Install every injected double shared by the task-2506 integrate tests. */
@@ -850,10 +853,8 @@ describe("behind-primary integrate", () => {
     installGitDoubles(rebased);
 
     fs.mkdirSync(path.join(ROOT, 'backlog', 'tasks'), { recursive: true });
-    // A real preIntegration gate that writes a marker file when it runs. This is
-    // the evidence F3 requires: the gate actually executes (not skipped via
-    // --no-integration-gates) against the rebased branch, so the marker proves a
-    // gate ran after the rebase and before the probe merge.
+    // The tests action already recorded a current run. Integrate may rebase and
+    // consume carried/current evidence, but must not execute the configured command.
     const markerPath = path.join(ROOT, 'gate-ran.txt');
     fs.writeFileSync(path.join(ROOT, 'workflow.config.json'), JSON.stringify({
       adapters: {
@@ -861,6 +862,12 @@ describe("behind-primary integrate", () => {
         gates: { preIntegration: [{ key: 'marker', order: 0, command: `echo ran > ${markerPath}` }] },
       },
     }));
+    let receiptReads = 0;
+    mock.method(integrationProof, 'readIntegrationGateRun', () => {
+      receiptReads++;
+      return recordedGateRun([{ key: 'marker', command: `echo ran > ${markerPath}` }],
+        { id: 'carried-run', revision: 'landed-sha' });
+    });
 
     const { logs, getStatus } = installHarness();
 
@@ -869,10 +876,8 @@ describe("behind-primary integrate", () => {
 
       // The integration rebase must have run before the probe merge.
       assert.ok(rebased.value, 'px integrate must rebase the mission onto the primary branch before the probe merge');
-      // A configured preIntegration gate must have executed against the rebased
-      // branch (F3): the marker only exists when the gate ran, which happens after
-      // the rebase and before the probe merge in the integrate() flow.
-      assert.ok(fs.existsSync(markerPath), 'a configured integration gate must run against the rebased branch');
+      assert.ok(receiptReads >= 1, 'integration reads the recorded tests after rebasing');
+      assert.equal(fs.existsSync(markerPath), false, 'integration must not execute the configured gate command');
       // The mission must land end to end: the conflict-free probe merge only
       // succeeds once the rebase has applied the primary's ahead commit.
       assert.equal(getStatus(), 'done');
@@ -884,7 +889,7 @@ describe("behind-primary integrate", () => {
 
   for (const movement of ['during gates', 'before landing'] as const) {
   test(`integration reconciles base movement ${movement} without operator retry (TASK-2630, TASK-2750 F6)`, async () => {
-    const state = { baseAdvanced: false, rebaseRuns: 0, gateRuns: 0, postGatePredictions: 0 };
+    const state = { baseAdvanced: false, rebaseRuns: 0, receiptReads: 0, gateRuns: 0, postReceiptPredictions: 0 };
     mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
     mock.method(git, 'git', (args: string[]) => {
       const joined = args.join(' ');
@@ -895,7 +900,7 @@ describe("behind-primary integrate", () => {
       if (args.includes('rebase')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
       if (joined.includes('merge-base') && joined.includes('--is-ancestor')) { return { signal: null, status: 0, stdout: '', stderr: '' }; }
       if (joined.includes('merge-base')) {
-        if (movement === 'before landing' && state.gateRuns === 1 && ++state.postGatePredictions === 2) { state.baseAdvanced = true; }
+        if (movement === 'before landing' && state.receiptReads === 1 && ++state.postReceiptPredictions === 2) { state.baseAdvanced = true; }
         return { signal: null, status: 0, stdout: state.baseAdvanced ? (state.rebaseRuns >= 2 ? 'base-after-gates' : 'base-before-gates') : 'base-current', stderr: '' }; }
       if (args.includes('rev-parse') && args.includes(BRANCH)) { return { signal: null, status: 0, stdout: state.baseAdvanced ? 'mission-before-rerebase' : 'mission-current', stderr: '' }; }
       if (args.includes('rev-parse')) { return { signal: null, status: 0, stdout: state.baseAdvanced ? 'base-after-gates' : 'base-current', stderr: '' }; }
@@ -905,15 +910,21 @@ describe("behind-primary integrate", () => {
     fs.mkdirSync(path.join(ROOT, 'backlog', 'tasks'), { recursive: true });
     fs.writeFileSync(path.join(ROOT, 'workflow.config.json'), JSON.stringify({ adapters: { verification: { command: 'true' }, gates: { preIntegration: [{ key: 'gate', order: 0, command: 'true' }] } } }));
     const { getStatus, logs } = installHarness();
+    mock.method(integrationProof, 'readIntegrationGateRun', () => {
+      state.receiptReads++;
+      if (state.receiptReads === 1 && movement === 'during gates') { state.baseAdvanced = true; }
+      return recordedGateRun([{ key: 'gate', command: 'true' }], { id: `recorded-${state.receiptReads}`,
+        revision: state.rebaseRuns >= 2 ? 'mission-after-rerebase' : 'mission-current' });
+    });
     mock.method(repositoryGates, 'runPhaseGates', async () => {
       state.gateRuns++;
-      if (state.gateRuns === 1 && movement === 'during gates') { state.baseAdvanced = true; }
-      return { ok: true, executed: 1, skipped: false, failedGate: null, error: null };
+      return assert.fail('integrate must not start gates while reconciling base movement');
     });
     try {
       await integrate([SLUG], { missionServicesFn: composition.createMissionApplicationServices });
       assert.equal(state.rebaseRuns, 2, 'main movement after gates triggers a second rebase');
-      assert.equal(state.gateRuns, 2, 'gates rerun against the rebased candidate');
+      assert.equal(state.receiptReads, 2, 'recorded tests are re-read against the rebased candidate');
+      assert.equal(state.gateRuns, 0, 'base movement never starts a gate');
       assert.equal(getStatus(), 'done', logs.join('\n'));
     } finally {
       mock.reset();
@@ -942,21 +953,9 @@ describe("behind-primary integrate", () => {
     }
   });
 
-  // A `git` double for the dry-run test: the primary advanced on an unrelated
-  // change (merge-base != baseSha) so a rebase is required and clean (merge-tree
-  // exits 0), with a benign result for every other command.
   function installDryRunGitDoubles(calls: string[][]) {
     mock.method(git, 'getCurrentBranch', () => `mission/${SLUG}`);
-    mock.method(git, 'git', (args: string[]) => {
-      calls.push(args.slice());
-      const joined = args.join(' ');
-      if (joined.includes('rev-parse') && joined.includes(BRANCH)) { return { signal: null,  status: 0, stdout: 'mission-sha', stderr: '' }; }
-      if (joined.includes('rev-parse')) { return { signal: null,  status: 0, stdout: 'base-sha', stderr: '' }; }
-      if (joined.includes('merge-base')) { return { signal: null,  status: 0, stdout: 'other-sha', stderr: '' }; }
-      if (joined.includes('merge-tree')) { return { signal: null,  status: 0, stdout: '', stderr: '' }; }
-      if (joined.includes('branch')) { return { signal: null,  status: 0, stdout: 'main\n', stderr: '' }; }
-      return { signal: null,  status: 0, stdout: '', stderr: '' };
-    });
+    mock.method(git, 'git', behindPrimaryDryRunGitDouble(SLUG, calls));
   }
 
   test('px integrate --dry-run reports a needed rebase and mutates nothing (task-2506)', async () => {

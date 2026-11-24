@@ -46,25 +46,27 @@ test('config reports malformed JSON as fallback defaults and exits non-zero', as
 test('config keeps policy failures non-blocking and reports the fallback (TASK-2859.06)', async () => {
   await withTempDir(async root => {
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
-      product: { name: 'Preserved' }, verificationPolicy: { mode: 'shadow', artifact: 'missing.json' },
+      product: { name: 'Preserved' }, verificationPolicy: { artifact: 'missing.json' },
     }));
     const result = await runConfig(root);
     assert.equal(result.exitCode, null);
     assert.deepEqual(result.errors, []);
-    assert.match(result.logs.join('\n'), /Verification policy: fixed \(missing\)/);
+    assert.match(result.logs.join('\n'), /Verification policy artifact: unusable \(missing\); fixed policy active/);
     assert.match(result.logs.join('\n'), /Preserved/);
   });
 });
 
-test('config reports the configured pilot mode with the pinned artifact hash (TASK-2859.24)', async () => {
+test('config reports a usable policy artifact with the pinned hash and no policy mode (TASK-2872.04)', async () => {
   await withTempDir(async root => {
     const artifact = syntheticPolicyArtifactV2();
     fs.writeFileSync(path.join(root, 'policy.json'), JSON.stringify(artifact));
     fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
-      product: { name: 'Preserved' }, verificationPolicy: { mode: 'pilot', artifact: 'policy.json' },
+      product: { name: 'Preserved' }, verificationPolicy: { mode: 'off', artifact: 'policy.json' },
     }));
     const result = await runConfig(root);
-    assert.match(result.logs.join('\n'), /Verification policy: pilot \([0-9a-f]{64}\)/);
+    const output = result.logs.join('\n');
+    assert.match(output, /Verification policy artifact: usable \([0-9a-f]{64}\)/);
+    assert.doesNotMatch(output, /"verificationPolicy"\s*:\s*\{[^}]*"mode"/s);
   });
 });
 

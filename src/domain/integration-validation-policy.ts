@@ -52,15 +52,6 @@ export function isBookkeepingPath(filePath: string): boolean {
 export const isVerificationBookkeeping = (file: string): boolean =>
   file.startsWith('backlog/tasks/') || file.startsWith('backlog/completed/');
 
-/**
- * The paths that differ between the validated commit and the finalized commit,
- * as reported through the gates port. `ok: false` covers every git failure,
- * including an unreachable validated commit.
- */
-export type ValidatedCommitDiff =
-  | { readonly ok: true; readonly paths: readonly string[] }
-  | { readonly ok: false; readonly error?: string };
-
 /** One completed Git rebase: the pre-rebase HEAD and the rebased HEAD. */
 export interface CompletedRebaseStep {
   readonly from: string;
@@ -105,44 +96,4 @@ export function passingIntegrationReceiptApplies(
   return configured.every(gate =>
     receipt.gates.filter(ran => ran.key === gate.key && ran.command === gate.command).length === 1
     && receipt.outcomes.filter(outcome => outcome.key === gate.key && outcome.command === gate.command && outcome.exitCode === 0).length === 1);
-}
-
-/**
- * True when the marker authorizes a skip: it exists, its whitelist is
- * non-empty, and the validated commit still covers the finalized commit — it
- * is the same commit, the two trees differ only in bookkeeping paths
- * (TASK-2646), or completed rebases carry the validated commit to it. Any
- * other movement, including an edit outside a completed rebase, falls back to
- * the full suite.
- */
-export function validationSkipApplies(
-  marker: IntegrationValidationMarker | null,
-  finalizedCommit: string | null | undefined,
-  diffFromValidated: ValidatedCommitDiff | null = null,
-  lineage: CompletedRebaseLineage | null = null,
-): boolean {
-  if (!marker || marker.hooks.length === 0) { return false; }
-  if (!finalizedCommit) { return false; }
-  if (marker.sha === finalizedCommit) { return true; }
-  if (diffFromValidated?.ok && diffFromValidated.paths.every(isBookkeepingPath)) { return true; }
-  return Boolean(lineage?.length);
-}
-
-/**
- * Partition the configured gate keys into the whitelisted hooks to skip and the
- * remaining hooks to actually run. Keys not present in the whitelist always run
- * (they were never validated); keys in the whitelist are skipped.
- */
-export function partitionGatesForSkip(
-  configuredKeys: readonly string[],
-  marker: IntegrationValidationMarker,
-): { skip: readonly string[]; run: readonly string[] } {
-  const whitelist = new Set(marker.hooks);
-  const run: string[] = [];
-  for (const key of configuredKeys) {
-    if (whitelist.has(key)) { continue; }
-    run.push(key);
-  }
-  const skip = configuredKeys.filter(key => whitelist.has(key));
-  return { skip, run };
 }

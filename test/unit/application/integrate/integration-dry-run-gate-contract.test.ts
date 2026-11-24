@@ -12,7 +12,7 @@ import { verificationHistoryRecord, type VerificationHistoryEntry } from '../../
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { missionId, type Mission } from '../../../../src/domain/mission.js';
 import { repositoryId } from '../../../../src/domain/repository.js';
-import { changeRevision } from '../../../../src/domain/review.js';
+import { changeRevision, currentReviewRound, replaceCurrentRound } from '../../../../src/domain/review.js';
 import { integrationContext } from '../../../fixtures/integration-context.js';
 import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import { approvedReview, fixtureMission, pendingReview } from '../../../fixtures/mission-builders.js';
@@ -49,7 +49,6 @@ async function fixture(result: IntegrationGateRunResult, configured = gates) {
   let targetBranch: string | undefined;
   const unsuccessful: unknown[] = [];
   const services = integrationServices({ operationalHistory: {
-    loadLatestByTypeForMission: async () => null,
     recordIntegrationValidation: async input => { unsuccessful.push(input); },
   } });
   const missionLoad = await services.store.load(missionId('px-dry-run'));
@@ -67,7 +66,7 @@ async function fixture(result: IntegrationGateRunResult, configured = gates) {
   }));
   const request: GateStepRequest = {
     slug: 'px-dry-run', context: integrationContext({ slug: 'px-dry-run' }), missionLoad, missionServices: services,
-    dryRun: true, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+    realAgent: null, realAgentModel: null,
     seams: {
       routeIntegrationGateFailureFn: async input => { repairRoutes++; repairRequests.push(input); return { route: 'human-only', diagnostic: 'fixture stop' }; },
       startAgentFn: async () => { throw new Error('fixture route must own launches'); },
@@ -83,7 +82,7 @@ async function quiet<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); } finally { setLogger(previous); }
 }
 
-test('integration dry-run executes the complete selected plan through the live runner (PX-0031)', async () => {
+test('gate step executes the complete selected plan through the live runner (PX-0031)', async () => {
   const { step, request, observations } = await fixture(receipt());
   assert.equal(await quiet(() => step.runRequiredLocalGates(request)), '2 integration gate(s) passed');
   assert.equal(observations().runnerDryRun, false);
@@ -91,7 +90,7 @@ test('integration dry-run executes the complete selected plan through the live r
   assert.equal(observations().repairRoutes, 0);
 });
 
-test('integration dry-run routes a repairable red receipt with exact failure evidence (PX-0031)', async () => {
+test('gate step routes a repairable red receipt with exact failure evidence (PX-0031)', async () => {
   const failedGate = { ...gates[0], exitCode: 7, stdout: 'bounded stdout', stderr: 'bounded stderr' };
   const { step, request, observations } = await fixture(receipt({ ok: false, executed: 1, failedGate, outcomes: [failedGate], error: 'red gate' }));
   await assert.rejects(quiet(() => step.runRequiredLocalGates(request)), { name: 'IntegrationAbort' });
@@ -117,7 +116,7 @@ for (const [scenario, result] of [
   ['partial', receipt({ executed: 1, outcomes: [{ ...gates[0], exitCode: 0, stdout: '', stderr: '' }] })],
   ['malformed', { ok: true }],
 ] as const) {
-  test(`integration dry-run rejects ${scenario} execution without repair or landing (PX-0031)`, async () => {
+  test(`gate step rejects ${scenario} execution without repair or landing (PX-0031)`, async () => {
     const { step, request, observations } = await fixture(result);
     await assert.rejects(quiet(() => step.runRequiredLocalGates(request)), { name: 'IntegrationAbort' });
     assert.equal(observations().runnerDryRun, false);
@@ -126,14 +125,14 @@ for (const [scenario, result] of [
   });
 }
 
-test('integration dry-run accepts a complete green receipt when optional reusable proof is unavailable (PX-0031)', async () => {
+test('gate step accepts a complete green receipt when optional reusable proof is unavailable (PX-0031)', async () => {
   const { step, request, observations } = await fixture(receipt({ proofReusable: false }));
   assert.equal(await quiet(() => step.runRequiredLocalGates(request)), '2 integration gate(s) passed');
   assert.equal(observations().repairRoutes, 0);
   assert.deepEqual(observations().unsuccessful, [], 'a green execution must not create failed validation history');
 });
 
-test('integration dry-run fails closed when mandatory preIntegration is missing (PX-0031)', async () => {
+test('gate step fails closed when mandatory preIntegration is missing (PX-0031)', async () => {
   const { step, request, observations } = await fixture(receipt({ ok: true, executed: 0, skipped: true, outcomes: [] }), []);
   await assert.rejects(quiet(() => step.runRequiredLocalGates(request)), { name: 'IntegrationAbort' });
   assert.equal(observations().repairRoutes, 0);
@@ -220,8 +219,7 @@ async function testsAction(options: { status?: Mission['status']; review?: Missi
   const unsuccessful: unknown[] = [];
   const services = integrationServices({
     store: { load: async id => ({ kind: 'found', mission: { ...mission, id }, version: missionVersion(1) }) },
-    operationalHistory: { loadLatestByTypeForMission: async () => null,
-      recordIntegrationValidation: async input => {
+    operationalHistory: { recordIntegrationValidation: async input => {
         if (options.validationWriteFails) { throw new Error('operator database unavailable'); }
         unsuccessful.push(input);
       } },
@@ -362,9 +360,9 @@ test('a synthetic policy re-selection cannot bypass repair after a red verdict (
   assert.ok(parsed.ok);
   let evaluations = 0;
   const selectionPorts: ReviewStartPolicyPorts = {
-    configuration: { mode: 'pilot', artifact: 'synthetic.json' }, repositoryId: repositoryId('test-repo'),
+    configuration: { artifact: 'synthetic.json' }, repositoryId: repositoryId('test-repo'),
     targetBranch: 'main', operationId: null,
-    loadPolicy: () => ({ mode: 'shadow', hash: 'synthetic-hash', artifact: parsed.artifact }),
+    loadPolicy: () => ({ kind: 'artifact', hash: 'synthetic-hash', artifact: parsed.artifact }),
     readHistory: async () => {
       const entries: VerificationHistoryEntry[] = evaluations++ === 0 ? []
         : [{ kind: 'verdict', check: 'tests', passed: false }];
@@ -429,6 +427,22 @@ test('the fixed sequence runs missing tests for an approved landing candidate: r
   assert.equal(fixture.mission().status, 'integration', 'no approval, lane change or landing was recorded');
   assert.deepEqual(fixture.received.runner?.gates, gates, 'the complete configured plan ran');
   assert.equal(fixture.received.runner?.slug, 'px-tests-action');
+});
+
+// TASK-2872.02 SC2: repair certification reads only a recorded run and integrate starts none, so an
+// interrupted approval-retention repair without a receipt is owed the same action from review and active.
+test('the fixed sequence runs missing tests for an interrupted approval-retention repair in the active lane (TASK-2872.02)', async () => {
+  const base = approvedReview('px-tests-action');
+  const current = currentReviewRound(base);
+  const review = { ...base, rounds: replaceCurrentRound(base, { ...current, integrationRepairAssessment: {
+    assessedAt: '2026-11-17T10:01:00Z', approvedRevision: current.subject.revision, candidateRevision: current.subject.revision,
+    failedGate: 'unit', outcome: 'pending' as const, repair: { startedAt: '2026-11-17T10:00:30Z',
+      cause: { kind: 'integration-gate-failure' as const, gate: 'unit' } } } }) };
+  const fixture = await testsAction({ status: 'active', review, selection: null, approvedHead: 'f'.repeat(40) });
+  const outcome = await fixture.run();
+  assert.deepEqual(fixture.calls, ['rebase', 'gates', 'release'], 'the retained repair gets its recorded run without a landing step');
+  assert.equal(outcome.kind === 'completed' && outcome.verdict, 'passed');
+  assert.equal(fixture.mission().status, 'active', 'the tests action fabricates no lane change');
 });
 
 test('the fixed sequence routes a red landing-candidate run through the rebound kernel (TASK-2859.17)', async () => {

@@ -1,13 +1,13 @@
-// The pilot's policy-selected integration tests inside the existing review loop (TASK-2859.19).
+// Policy-selected integration tests inside the existing review loop (TASK-2859.19).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
 import type { PolicyActionPort, PolicyTestsOutcome } from '../../../../src/application/ports/verification-policy.js';
 import { missionVersion } from '../../../../src/application/domain-ports.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import { changeRevision, ConfiguredReviewerEligibility, currentReviewRound, startReview } from '../../../../src/domain/review.js';
+import { changeRevision, ConfiguredReviewerEligibility, currentReviewRound, replaceCurrentRound, startReview } from '../../../../src/domain/review.js';
 import type { Mission } from '../../../../src/domain/mission.js';
-import { fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
+import { approvedReview, fixtureMission, inMemoryTransitionStore } from '../../../fixtures/mission-builders.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { createReviewObservationRecorder } from '../../../../src/adapters/review/review-observation-recording.js';
 import { assertReviewStatePersisted, readReviewState, writeReviewState } from '../../../../src/adapters/review/review-state.js';
@@ -35,6 +35,11 @@ function storeFor(mission: Mission) {
 }
 
 function reviewing(): Mission { return fixtureMission(SLUG, { status: 'review', assignee: agentFamily('codex'), review: repeatReview() }); }
+
+/** An agent-approved candidate still in the review lane: landing admits only a recorded run (TASK-2872.02). */
+function approvedCandidate(): Mission {
+  return fixtureMission(SLUG, { status: 'review', assignee: agentFamily('codex'), review: approvedReview(SLUG) });
+}
 
 function scripted(selections: Array<'agent' | 'human' | 'tests' | null>, outcome: () => PolicyTestsOutcome,
   rebaseInProgress = () => false) {
@@ -264,6 +269,72 @@ test('an approved agent round returns to the policy, which dispatches the select
   assert.equal(starts.find(start => start.actualAction === 'tests')?.gateRunId, 'gate-1', 'a gate run was recorded for the tests action');
   assert.equal(fake.current()?.phase, 'approved');
   assert.equal(fake.current()?.disposition, 'APPROVED', 'the agent approval stays the only verdict; none is fabricated for the human');
+});
+
+// TASK-2872.02 SC2: with no policy pilot, entering review on an approved candidate records the run px integrate admits.
+async function fixedSequenceLoop(operatorInvocation: boolean, options: { dryRun?: boolean; actionLimit?: number; pilot?: PolicyActionPort } = {}) {
+  const order: string[] = [];
+  const calls = { tests: 0 };
+  const state = new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' });
+  state.transitionTo('approved');
+  state.disposition = 'APPROVED';
+  const fake = fakeReviewLoopPorts({
+    slug: SLUG, missionStore: storeFor(approvedCandidate()), state, ...(options.pilot ? { policyActions: options.pilot } : {}),
+    fixedTestsAction: { runTests: async () => { calls.tests += 1; order.push('tests'); return passed; } },
+    agents: { launch: async launch => { await launch.onStarted?.({ agent: launch.agent, runId: 'run-1' }); return { agent: launch.agent, result: { status: 0 } }; } },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
+    task: { mirrorApproved: async () => { order.push('mirror-approved'); } },
+  });
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: options.actionLimit ?? 4,
+    skipReviewPreparation: true, operatorInvocation, ...(options.dryRun ? { dryRun: true } : {}) }, fake.ports);
+  return { fake, order, calls };
+}
+
+test('the fixed sequence records the landing-candidate tests action once, for an operator-typed review too (TASK-2872.02 SC2)', async () => {
+  for (const operatorInvocation of [false, true]) {
+    const run = await fixedSequenceLoop(operatorInvocation);
+    assert.deepEqual(run.order, ['tests', 'mirror-approved'], `operatorInvocation=${operatorInvocation}: the run lands between approval and the human turn`);
+    assert.equal(run.calls.tests, 1, 'the fixed sequence dispatches the tests action exactly once per loop');
+    assert.equal(run.fake.current()?.phase, 'approved');
+    assert.match(run.fake.logs.join('\n'), /Integration tests passed for task-policy-action\./);
+    assert.doesNotMatch(run.fake.logs.join('\n'), /Policy-selected/, 'no policy selected this action');
+  }
+});
+
+test('the fixed sequence routes an interrupted approval-retention repair without a receipt to the tests action (TASK-2872.02 SC2)', async () => {
+  const base = approvedReview(SLUG);
+  const current = currentReviewRound(base);
+  const review = { ...base, rounds: replaceCurrentRound(base, { ...current, integrationRepairAssessment: {
+    assessedAt: '2026-11-17T10:01:00Z', approvedRevision: current.subject.revision, candidateRevision: current.subject.revision,
+    failedGate: 'unit', outcome: 'pending' as const, repair: { startedAt: '2026-11-17T10:00:30Z',
+      cause: { kind: 'integration-gate-failure' as const, gate: 'unit' } } } }) };
+  const state = new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' });
+  state.transitionTo('approved');
+  state.disposition = 'APPROVED';
+  let tests = 0;
+  const fake = fakeReviewLoopPorts({
+    slug: SLUG, missionStore: storeFor(fixtureMission(SLUG, { status: 'active', assignee: agentFamily('codex'), review })), state,
+    fixedTestsAction: { runTests: async () => { tests += 1; return passed; } },
+    artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
+  });
+  await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 4, skipReviewPreparation: true,
+    operatorInvocation: true }, fake.ports);
+  assert.equal(tests, 1, 'review and active record the run that repair certification reads');
+});
+
+test('a direct operator review under a policy pilot still records the landing-candidate tests once (TASK-2872.02 SC2)', async () => {
+  const pilot = scripted(['human'], () => { throw new Error('the pilot owns no decision for an operator-typed command'); });
+  const operator = await fixedSequenceLoop(true, { pilot: pilot.actions });
+  assert.equal(operator.calls.tests, 1, 'the operator-typed review runs the tests action integrate admits');
+  assert.equal(pilot.calls.tests, 0, 'the pilot ran nothing');
+  assert.deepEqual(pilot.calls.select, [], 'the pilot made no selection for the override');
+  const autonomous = await fixedSequenceLoop(false, { pilot: scripted(['human'], () => passed).actions });
+  assert.equal(autonomous.calls.tests, 0, 'an autonomous pilot loop keeps the policy as the only chooser');
+});
+
+test('a dry run records no fixed tests action and a longer loop still records only one (TASK-2872.02 SC4)', async () => {
+  assert.equal((await fixedSequenceLoop(false, { dryRun: true, actionLimit: 8 })).calls.tests, 0, 'a dry run records no evidence');
+  assert.equal((await fixedSequenceLoop(false, { actionLimit: 8 })).calls.tests, 1, 'the loop never dispatches the fixed tests action twice');
 });
 
 test('after approval a completed policy action is not repeated on restart (PX-0074.01)', async () => {
@@ -656,12 +727,12 @@ const parsedPolicyArtifact = parsedPolicy.artifact;
 function realPolicyPorts(overrides: Partial<ReviewStartPolicyPorts> = {}) {
   const records: ReviewStartDecisionInput[] = [];
   const ports: ReviewStartPolicyPorts = {
-    configuration: { mode: 'pilot', artifact: 'policy.json' }, repositoryId: repositoryId('repository-1'), targetBranch: 'main',
-    operationId: 'operation-1', loadPolicy: () => ({ mode: 'shadow', hash: 'pinned-hash', artifact: parsedPolicyArtifact }),
+    configuration: { artifact: 'policy.json' }, repositoryId: repositoryId('repository-1'), targetBranch: 'main',
+    operationId: 'operation-1', loadPolicy: () => ({ kind: 'artifact', hash: 'pinned-hash', artifact: parsedPolicyArtifact }),
     readHistory: async () => ({ ok: true, entries: [], record: { passed: [], failed: [] }, tests: 'unobserved' }),
     identity: { branchHead: () => 'head-1', changeIdentity: () => 'patch-1', onlyBookkeepingSince: () => false },
     writer: { recordReviewStartDecision: async input => { records.push(input); return true; },
-      resolveReviewEntryPin: async input => input.configuredMode === 'pilot' ? reviewEntryPin(input) : null,
+      resolveReviewEntryPin: async input => reviewEntryPin(input),
       settleReviewStartOutcomes: async () => 0 },
     readOutcomeFacts: async () => ({ review: null, runs: [] }),
     diagnostic: () => {}, ...overrides,
@@ -684,8 +755,8 @@ async function runWithRealPolicy(policy: ReturnType<typeof realPolicyPorts>, ope
 
 test('policy fallbacks are recorded with their typed reason and the fixed sequence still completes (PX-0074.03)', async () => {
   const cases: Array<[string, Partial<ReviewStartPolicyPorts>]> = [
-    ['mode-changed-in-flight', { writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => null, settleReviewStartOutcomes: async () => 0 } }],
-    ['artifact-missing', { loadPolicy: () => ({ mode: 'fixed', reason: 'missing' }) }],
+    ['writer-failure', { writer: { recordReviewStartDecision: async () => true, resolveReviewEntryPin: async () => { throw new Error('pin unavailable'); }, settleReviewStartOutcomes: async () => 0 } }],
+    ['artifact-missing', { loadPolicy: () => ({ kind: 'fixed', reason: 'missing' }) }],
     ['history-unavailable', { readHistory: async () => ({ ok: false, failure: { kind: 'unavailable', message: 'gone' } }) }],
   ];
   for (const [kind, overrides] of cases) {
@@ -696,7 +767,6 @@ test('policy fallbacks are recorded with their typed reason and the fixed sequen
     assert.equal(fake.current()?.phase, 'approved', `${kind}: the fixed sequence ran to approval`);
     assert.deepEqual(fake.launches.map(launch => launch.role), ['reviewer'], kind);
     const agentStart = records.find(record => record.actualAction === 'agent');
-    assert.equal(agentStart?.effectiveMode, 'fixed', kind);
     assert.equal(agentStart?.failureReason?.kind, kind);
     assert.equal(agentStart?.recommendedAction, null);
     assert.equal(records.find(record => record.actualAction === 'human')?.failureReason?.kind, kind, `${kind}: the human turn carries it too`);
@@ -704,17 +774,17 @@ test('policy fallbacks are recorded with their typed reason and the fixed sequen
 });
 
 test('an explicit operator override of the recommendation is recorded and the requested action runs (PX-0074.03)', async () => {
-  const shadow = realPolicyPorts({ configuration: { mode: 'shadow', artifact: 'policy.json' } });
+  const active = realPolicyPorts({ configuration: { artifact: 'policy.json' } });
   const overridden = await (async () => {
     const fake = fakeReviewLoopPorts({ slug: SLUG, missionStore: storeFor(reviewing()),
       state: new ReviewState(SLUG, { reviewer: 'claude', implementer: 'codex' }),
-      reviewStarts: { observe: async facts => { await observePolicyReviewStart(facts, shadow.ports); } },
+      reviewStarts: { observe: async facts => { await observePolicyReviewStart(facts, active.ports); } },
       agents: { launch: async launch => { await launch.onStarted?.({ agent: launch.agent, runId: 'run-1' }); return { agent: launch.agent, result: { status: 0 } }; } },
       artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) } });
     await runReviewLoop({ slug: SLUG, implementer: 'codex', reviewer: 'claude', actionLimit: 3, skipReviewPreparation: true, operatorInvocation: true }, fake.ports);
     return fake;
   })();
-  const agentRow = shadow.records.find(record => record.actualAction === 'agent');
+  const agentRow = active.records.find(record => record.actualAction === 'agent');
   assert.equal(agentRow?.recommendedAction, 'tests', 'the policy recommended another check');
   assert.equal(agentRow?.operatorOverride, true, 'the operator asked for the agent review instead');
   assert.deepEqual(overridden.launches.map(launch => launch.role), ['reviewer'], 'the requested action ran');

@@ -101,11 +101,12 @@ test('default test runner routes registered integration tests out of the default
   assert.equal(pkg.scripts['test:integration:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration');
 });
 
+for (const suiteName of ['e2e/agents/real-agent-smoke.test.ts', 'e2e/lifecycle/mission-lifecycle.test.ts']) {
 for (const github of [false, true]) {
-  test(`focused real-agent smoke ${github ? 'suspends hosted CPU hooks' : 'uses waited-child CPU accounting'} (TASK-2739)`, () => {
+  test(`focused ${suiteName} ${github ? 'suspends hosted CPU hooks' : 'uses waited-child CPU accounting'} (TASK-2739)`, () => {
     const previous = process.env.GITHUB_ACTIONS;
     withGitHubActions(github, () => {
-      const suite = path.join(REPO_ROOT, 'test/e2e/agents/real-agent-smoke.test.ts');
+      const suite = path.join(REPO_ROOT, 'test', suiteName);
       const plan = buildTestRunPlan({ executionRoot: REPO_ROOT,
         requestedArgs: [suite],
         probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true });
@@ -116,9 +117,15 @@ for (const github of [false, true]) {
       assert.equal(plan.nodeArgs.some(arg => arg.endsWith('/integration-cpu-hook.mjs')), !github);
       assert.ok(!plan.nodeArgs.some(arg => arg.endsWith('/cpu-test-hook.mjs')));
       assert.ok(plan.nodeArgs.some(arg => arg.endsWith('/bootstrap-e2e-parallix-home.ts')));
+      if (suiteName.includes('mission-lifecycle')) {
+        assert.throws(() => buildTestRunPlan({ executionRoot: REPO_ROOT,
+          requestedArgs: [suite, suite], probeNodeVersion: () => 'v24.15.0', probeTestConcurrency: () => true }),
+        /selected twice/, 'the workflow lifecycle suite cannot be scheduled twice in one guarded run');
+      }
     });
     assert.equal(process.env.GITHUB_ACTIONS, previous);
   });
+}
 }
 
 test('default test runner selects a Node version that supports node:test', () => {
@@ -383,6 +390,10 @@ test('CPU profiles name live integration owners and new cases retain a finite fa
     assert.deepEqual(Object.keys(policy.integrationCases[profile]).filter(file => !integration.has(file)), [],
       'Remove stale CPU profile entries when behavior ownership changes.');
   }
+  assert.ok(policy.integrationCases.plain['e2e/lifecycle/mission-lifecycle.test.ts'] <= 3_500,
+    'the workflow lifecycle keeps a finite plain per-case CPU ceiling no greater than 3500 ms');
+  assert.ok(policy.integrationCases.covered['e2e/lifecycle/mission-lifecycle.test.ts'] > 0,
+    'the workflow lifecycle keeps a finite covered per-case CPU ceiling');
   assert.ok(policy.integrationCases.defaultMs <= 1_000,
     'New integration cases must begin with a finite CPU ceiling; expensive contracts require a measured profile.');
   assert.ok(policy.unitSuites.plain < 650_000 && policy.unitSuites.covered < 900_000

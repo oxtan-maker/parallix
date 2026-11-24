@@ -60,7 +60,7 @@ assert.ok(statsFlow, 'px stats shared FLOW projection unavailable');
 for (const [period, board, stats] of [['current', flow.current, statsFlow.current], ['previous', flow.previous, statsFlow.previous]] as const) {
   assert.deepEqual({ rework: board.extraAgentLaunches.reworkJobs, agent: board.sendBacks.agent, human: board.sendBacks.human },
     { rework: stats.extraAgentLaunches.reworkJobs, agent: stats.sendBacks.agent, human: stats.sendBacks.human }, `${period} board FLOW differs from px stats`);
-  for (const gate of ['declared-gates', 'integration-gates'] as const) {
+  for (const gate of ['declared-gates', 'integration-tests'] as const) {
     const outgoing = board.graph.edges.filter(edge => edge.from === gate);
     const displayed = outgoing.flatMap(edge => edge.percentage === null ? [] : [edge.percentage]);
     if (displayed.length > 0 && outgoing.some(edge => edge.share !== null && edge.share > 0)) {
@@ -70,10 +70,10 @@ for (const [period, board, stats] of [['current', flow.current, statsFlow.curren
     const returned = outgoing.find(edge => edge.kind === 'gate-failed')!;
     if (node.observedMissions === 0 && returned.count > 0) { assert.equal(returned.share, null, `${period} ${gate} invents a return rate`); }
   }
-  for (const resolve of ['pre-review-resolve', 'integration-resolve'] as const) {
-    const outgoing = board.graph.edges.filter(edge => edge.from === resolve);
+  for (const stage of ['pre-review-rebase', 'integration-rebase'] as const) {
+    const outgoing = board.graph.edges.filter(edge => edge.from === 'rebase-resolve' && edge.stage === stage);
     if (outgoing.some(edge => edge.count > 0)) {
-      assert.equal(outgoing.reduce((sum, edge) => sum + (edge.percentage ?? 0), 0), 100, `${period} ${resolve} displayed outcomes do not total 100%`);
+      assert.equal(outgoing.reduce((sum, edge) => sum + (edge.percentage ?? 0), 0), 100, `${period} ${stage} displayed outcomes do not total 100%`);
     }
   }
   const returnArrows = board.graph.edges.filter(edge => edge.to === 'implement' && edge.kind !== 'flow');
@@ -112,8 +112,8 @@ db.close();
 assert.equal(recovered.length, flow.current.completedMissions);
 assert.ok(recovered.some(mission => mission.id === 'task-2845'), 'rebase outcome fixture task-2845 missing');
 assert.equal(flow.current.graph.nodes.some(node => node.id === 'implement'), true);
-assert.equal(flow.current.graph.edges.some(edge => edge.from === 'pre-review-rebase'
-  && edge.to === 'pre-review-resolve' && edge.kind === 'rebase-conflict'), true);
+assert.equal(flow.current.graph.edges.some(edge => edge.from === 'rebase' && edge.to === 'rebase-resolve'
+  && edge.stage === 'pre-review-rebase' && edge.kind === 'rebase-conflict'), true);
 if (process.env.FLOW_REQUIRE_CONFLICT === '1') {
   assert.ok(flow.current.graph.edges.some(edge => edge.kind === 'rebase-conflict' && edge.count > 0),
     'disposable conflict scenario did not reach the mounted FLOW projection');
@@ -209,7 +209,7 @@ try {
   await wide.getByRole('button', { name: 'Flow', exact: true }).click();
   await wide.locator('[data-flow-view]').waitFor();
   const inspectWideGeometry = () => wide.locator('[data-flow-region="graph"]').evaluate(root => {
-    const returnId = 'integration-gates->implement:gate-failed';
+    const returnId = 'integration-tests->implement:gate-failed';
     const group = root.querySelector<SVGGElement>(`[data-flow-edge="${returnId}"]`)!;
     const line = group.querySelector<SVGPolylineElement>('polyline')!, svg = line.ownerSVGElement!;
     const returnLabelElement = root.querySelector<HTMLElement>(`[data-flow-edge-label="${returnId}"]`)!, returnLabel = returnLabelElement.getBoundingClientRect();
@@ -224,7 +224,7 @@ try {
     const elements = [...root.querySelectorAll<HTMLElement>('[data-flow-node], [data-flow-edge-label], [data-flow-edge-suffix]')]
       .flatMap(element => { const id = element.getAttribute('data-flow-node') ?? element.getAttribute('data-flow-edge-label')
           ?? element.getAttribute('data-flow-edge-suffix');
-        if (id === 'implement' || id === 'integration-gates' || id === null) { return []; }
+        if (id === 'implement' || id === 'integration-tests' || id === null) { return []; }
         const value = element.getBoundingClientRect();
         return [{ id, x: value.left, y: value.top, right: value.right, bottom: value.bottom }]; });
     const routes = [...root.querySelectorAll<SVGGElement>('[data-flow-edge]')].flatMap(edgeGroup => {

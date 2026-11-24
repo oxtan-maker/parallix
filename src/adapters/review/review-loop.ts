@@ -69,6 +69,8 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 export interface ReviewLoopBindings extends ReviewStartObservationBindings {
   readonly startAgent?: typeof startAgent;
   readonly actionHistory?: ReviewLoopPorts['actionHistory'];
+  /** The fixed sequence's integration tests action, bound by the composition root (TASK-2872.02 SC2). */
+  readonly fixedTestsAction?: ReviewLoopPorts['fixedTestsAction'];
   readonly preferredReviewer?: string;
   readonly configuration?: ParallixConfiguration;
   readonly rebaseWorkflowOptions?: Pick<import('../rebase/rebase-workflow-adapter.js').RebaseCommandOptions, 'createPrFn' | 'readTokenFn' | 'resolveForgejoUserFn'>;
@@ -459,6 +461,7 @@ export function createReviewLoopPorts(slug: string, target: ReviewLoopTarget, bi
       head: () => headRevision(worktree),
     },
     ...reviewStartObservationBinding(bindings, log),
+    ...(bindings.fixedTestsAction ? { fixedTestsAction: bindings.fixedTestsAction } : {}),
     actionHistory: bindings.actionHistory ?? unavailableActionHistory(),
     output: { emit: event => renderReviewLoopEvent(event, { log, error }), log, error, exit, onAgentLaunched: bindings.onAgentLaunched, onAutonomousStop: bindings.onAutonomousStop },
     lock: reviewControllerLock(key),

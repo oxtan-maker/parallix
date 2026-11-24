@@ -7,7 +7,7 @@ import { createMissionTerminalCapability } from './mission-terminal-capability.j
 import { createVerificationPolicyReaders,
   type VerificationPolicyReaderServices } from './verification-policy-readers.js';
 
-/** Existing composition services needed only when review-start policy is enabled. */
+/** Existing composition services needed by review-start policy evaluation. */
 export type ReviewStartObservationServices = VerificationPolicyReaderServices;
 
 /** The stored review rounds and retained run records an outcome is settled from; an unreadable source throws rather than reads empty. */
@@ -27,9 +27,8 @@ function createVerificationActionPolicyPorts(
   slug: string,
   configuration: ParallixConfiguration,
   services: ReviewStartObservationServices,
-): Omit<ReviewStartPolicyPorts, 'diagnostic'> | undefined {
+): Omit<ReviewStartPolicyPorts, 'diagnostic'> {
   const readers = createVerificationPolicyReaders(rootDir, configuration, services);
-  if (!readers) { return undefined; }
   return {
     configuration: readers.configuration,
     repositoryId: services.repositoryId,
@@ -43,13 +42,13 @@ function createVerificationActionPolicyPorts(
   };
 }
 
-/** Off returns before constructing any artifact, history, Git, gate or operation reader. */
+/** Compose artifact, history, Git, gate and operation readers for every review start. */
 export function createReviewStartPolicyPorts(
   executionContext: Pick<LiveMissionExecutionContext, 'missionWorktree' | 'baseBranch'>,
   slug: string,
   configuration: ParallixConfiguration,
   services: ReviewStartObservationServices,
-): Omit<ReviewStartPolicyPorts, 'diagnostic'> | undefined {
+): Omit<ReviewStartPolicyPorts, 'diagnostic'> {
   return createVerificationActionPolicyPorts(executionContext.missionWorktree, executionContext.baseBranch,
     slug, configuration, services);
 }

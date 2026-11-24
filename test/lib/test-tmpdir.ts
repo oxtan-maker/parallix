@@ -20,16 +20,10 @@ import { processStartIdentity } from '../../src/adapters/process/process-livenes
 export function checkoutTestTmpdir(
   executionRoot: string,
   base: string = os.tmpdir(),
-  { checkoutLifecycle, children }: {
-    checkoutLifecycle?: 'disposable-stand-in';
-    children?: readonly { readonly pid: number; readonly startId: string | null }[];
-  } = {},
 ): string {
   return ensureCheckoutCache(executionRoot, base, {
     pid: process.pid,
     startId: processStartIdentity(process.pid),
-    ...(checkoutLifecycle === undefined ? {} : { checkoutLifecycle }),
-    ...(children === undefined ? {} : { children }),
   });
 }
 

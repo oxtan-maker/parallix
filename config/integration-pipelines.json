@@ -43,9 +43,9 @@
       "always": true
     },
     "workflow": {
-      "command": "node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts",
+      "command": "npm run test:lifecycle",
       "order": 50,
-      "run_last": true
+      "run_last": false
     },
     "browser-e2e": {
       "command": "npm run test:browser-e2e",

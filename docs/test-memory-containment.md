@@ -118,24 +118,22 @@ the linked checkout and the creating process. Normal mission closeout retires
 the matching cache through the same worktree-cleanup boundary; active checkout
 caches remain available.
 
-A fixture that deliberately runs the public runner against a disposable,
-no-Git stand-in can set `PARALLIX_TEST_DISPOSABLE_STANDIN=1`. This explicit
-marker transfers the sibling cache to that runner lifecycle; the durable record
-also names its suite process. Success, failure and handled signals retire the
-cache during normal runner cleanup. After an unhandled kill, the next recovery
-pass may reclaim it only after the stand-in is gone and every recorded process
-is confirmed dead. An absent checkout or incomplete Git identity without this
-marker grants no cleanup authority.
+A public runner started against a no-Git stand-in owns that stand-in's sibling
+cache for the runner lifetime. Success, failure and handled signals retire the
+cache during normal runner cleanup, without a marker or a later recovery pass.
+If the runner is killed before cleanup, the fixture that created the stand-in
+owns its cache as part of fixture teardown. Real Git checkouts keep their warm,
+isolated caches until their checkout owner retires them.
 
 After an interrupted closeout, the existing recovery pass considers only
-marked checkout-cache roots with the exact managed name and location. It
-removes one only when the directory is owned by the current user, neither the
-root nor its ownership record is a symlink, and all recorded processes are
-dead. A real linked worktree additionally requires repository confirmation that
-the checkout was retired; a disposable stand-in requires the explicit runner
-marker and an absent checkout. Missing or conflicting proof leaves the cache
-untouched and reports it as unresolved. Recovery does not age-delete unmarked
-cache-shaped directories or scan unrelated temporary data.
+checkout-cache roots with the exact managed name and location. It removes a
+real linked-worktree cache only when the directory is owned by the current user,
+neither the root nor its ownership record is a symlink, its process owner is
+dead, and the repository confirms that the checkout was retired. A no-Git cache
+has no linked-worktree retirement proof and is never recovered through this
+path. Missing or conflicting proof leaves the cache untouched and reports it as
+unresolved. Recovery does not age-delete cache-shaped directories or scan
+unrelated temporary data.
 
 ## What is not contained
 

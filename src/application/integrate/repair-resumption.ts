@@ -1,43 +1,70 @@
 import { StructuredFailure, failureReason } from '../../domain/failure-reason.js';
 import { createIntegrationRebase } from './rebase.js';
 import { integrationRepairCertified, verifyRestartedRepair } from './repair-certification.js';
-import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
+import { currentIntegrationRepair, pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { retentionEvidenceMatches } from '../../domain/integration-approval-retention.js';
 import { repairCheckpointFailure, repairContractFailure } from '../repair-checkpoint-service.js';
 import {
   backlogMirrorOwnership, missionId, type BacklogMirrorOwnership,
 } from '../../domain/mission.js';
+import type { MissionLoadResult } from '../domain-ports.js';
 import type { ReviewRound } from '../../domain/review.js';
-import type { IntegrationMissionServices } from '../ports/integration-records.js';
-import type { IntegrateWorkflowPorts } from '../ports/integrate-workflow.js';
+import type { IntegrationGateDefinition, IntegrationMissionServices } from '../ports/integration-records.js';
+import type { IntegrateWorkflowPorts, IntegrationGateRunResult } from '../ports/integrate-workflow.js';
+import { completeCurrentTestsPass } from './tests-action.js';
 import type { LiveMissionExecutionContext, MissionExecutionContext } from '../ports/mission-execution-context.js';
 import type { IntegrationApprovalEvidencePort } from '../ports/integration-approval-evidence.js';
 import { carriedRetentionValidation, retainIntegrationApproval, type RetentionOutcome } from './approval-retention.js';
 import { IntegrationStopsForHuman, reviewBeforeIntegration } from './review-before-integration.js';
-import type { GateStepRequest, IntegrateSeams } from './gates.js';
+import type { IntegrateSeams } from './gates.js';
 import { abortWith, projectBacklogTransition } from './support.js';
 import { fixedVerificationNextAction } from '../verification-policy/fixed-next-action.js';
 
 interface RepairExecution {
   slug: string; services: IntegrationMissionServices; ports: IntegrateWorkflowPorts;
   executionContext: LiveMissionExecutionContext;
-  verification: Pick<GateStepRequest, 'realAgent' | 'realAgentModel'> & { dryRun?: boolean };
   pending: ReviewRound; worktree: string; evidence: IntegrationApprovalEvidencePort; revision: string; baseline: string;
   mirrorOwnership: BacklogMirrorOwnership;
 }
 
+/** What a shared certification answers: nothing pending, the tests action's receipt is owed, or a retention verdict. */
+type IntegrationRepairCertification =
+  | { readonly kind: 'tests-required'; readonly execution: RepairExecution }
+  | { readonly kind: 'assessed'; readonly execution: RepairExecution; readonly outcome: RetentionOutcome; readonly gatesPassed: boolean };
+
 /** Restart verifies the same durable incident; it cannot use generic approval recovery. */
 export async function resumePendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
-  ports: IntegrateWorkflowPorts, execution: MissionExecutionContext, seams: IntegrateSeams, verification: RepairExecution['verification']): Promise<void> {
-  const result = await certifyPendingIntegrationRepair(slug, services, ports, execution, verification);
+  ports: IntegrateWorkflowPorts, execution: MissionExecutionContext, seams: IntegrateSeams): Promise<void> {
+  const result = await certifyPendingIntegrationRepair(slug, services, ports, execution);
   if (!result) { return; }
+  // Integration owns no gate execution, so a repair still waiting on the tests action's
+  // recorded run stops here naming the receipt; review and active route it to that action.
+  if (result.kind === 'tests-required') {
+    throw abortWith(ports.landing, `Integration repair for ${slug} cannot be certified: no current passing tests are recorded for revision ${result.execution.revision}; px integrate never runs them. Run px review ${slug} so the tests action records them, then retry.`);
+  }
   return finishResumedRepair(result.execution, result.outcome, result.gatesPassed, seams);
+}
+
+/** Integrate previews pending repair without writes; a real entry certifies it from recorded tests. */
+export async function resumeOrPreviewPendingIntegrationRepair(slug: string, existing: MissionLoadResult,
+  services: IntegrationMissionServices, ports: IntegrateWorkflowPorts, execution: MissionExecutionContext,
+  seams: IntegrateSeams, dryRun: boolean): Promise<MissionLoadResult> {
+  if (dryRun) {
+    // A preview reports readiness only: it neither certifies a retained approval nor runs the
+    // review a review-required repair would otherwise enter here.
+    const repair = existing.kind === 'found' ? currentIntegrationRepair(existing.mission) : null;
+    if (repair) {
+      throw abortWith(ports.landing, `Mission ${slug} has an integration repair pending; --dry-run does not resume it. Run px integrate ${slug} to certify it from the recorded tests.`);
+    }
+    return existing;
+  }
+  await resumePendingIntegrationRepair(slug, services, ports, execution, seams);
+  return services.store.load(missionId(slug));
 }
 
 /** Shared continuation only certifies and assesses; it has no landing or review launch path. */
 async function certifyPendingIntegrationRepair(slug: string, services: IntegrationMissionServices,
-  ports: IntegrateWorkflowPorts, context: MissionExecutionContext,
-  verification: RepairExecution['verification'] = { realAgent: null, realAgentModel: null }) {
+  ports: IntegrateWorkflowPorts, context: MissionExecutionContext): Promise<IntegrationRepairCertification | null> {
   const loaded = await services.store.load(missionId(slug));
   if (loaded.kind !== 'found') { throw new Error('Integration repair mission is unavailable'); }
   const action = fixedVerificationNextAction({ mission: loaded.mission });
@@ -54,16 +81,17 @@ async function certifyPendingIntegrationRepair(slug: string, services: Integrati
   // rebases onto the receiving base from that same resolution.
   const worktree = context.missionWorktree;
   if (!worktree) { throw abortWith(ports.landing, 'Integration repair checkout is unavailable.'); }
-  const execution = await resolveRepairExecution(slug, services, ports, pending, verification, context, worktree,
+  const execution = await resolveRepairExecution(slug, services, ports, pending, context, worktree,
     backlogMirrorOwnership(loaded.mission));
-  const gatesPassed = await ensureRepairVerification(execution);
+  const verification = await ensureRepairVerification(execution);
+  if (verification === 'tests-required') { return { kind: 'tests-required', execution }; }
   const outcome = await retainIntegrationApproval({ slug, services, evidence: execution.evidence,
     candidate: { revision: execution.revision, baseline: execution.baseline }, worktree, head: () => committedRepairHead(execution) });
-  return { execution, outcome, gatesPassed };
+  return { kind: 'assessed', execution, outcome, gatesPassed: verification };
 }
 
 async function resolveRepairExecution(slug: string, services: IntegrationMissionServices, ports: IntegrateWorkflowPorts,
-  pending: ReviewRound, verification: RepairExecution['verification'], context: MissionExecutionContext, worktree: string,
+  pending: ReviewRound, context: MissionExecutionContext, worktree: string,
   mirrorOwnership: BacklogMirrorOwnership): Promise<RepairExecution> {
   const evidence = ports.gates.approvalEvidence?.(worktree);
   if (!evidence) { throw abortWith(ports.landing, 'Integration repair evidence is unavailable. Aborting before merge.'); }
@@ -74,10 +102,6 @@ async function resolveRepairExecution(slug: string, services: IntegrationMission
   const rebase = createIntegrationRebase(ports);
   const target = { baseWorktree, baseBranch: base, git: ports.git.git };
   const prediction = rebase.predictIntegrationRebase(slug, target);
-  if (prediction.needed && verification.dryRun) {
-    const conflict = prediction.wouldConflict ? ' and would conflict' : '';
-    throw abortWith(ports.landing, `Integration repair requires a rebase onto ${base}${conflict}; dry-run did not mutate the mission branch. Run px integrate ${slug} to resume repair and rebase before verification.`);
-  }
   if (prediction.needed) {
     await rebase.runIntegrationRebase(slug, {
       ...target,
@@ -91,7 +115,7 @@ async function resolveRepairExecution(slug: string, services: IntegrationMission
     || ports.git.git(['-C', worktree, 'merge-base', '--is-ancestor', baseline, tree.commit]).status !== 0) {
     throw abortWith(ports.landing, 'Integration repair baseline is not established; resume rebase before integration.');
   }
-  return { slug, services, ports, executionContext: { ...context, missionWorktree: worktree }, verification,
+  return { slug, services, ports, executionContext: { ...context, missionWorktree: worktree },
     pending, worktree, evidence, revision: tree.commit, baseline, mirrorOwnership };
 }
 
@@ -100,7 +124,21 @@ function committedRepairHead({ ports, worktree }: RepairExecution): string | nul
   return current.ok ? current.commit ?? null : null;
 }
 
-async function ensureRepairVerification(execution: RepairExecution): Promise<boolean> {
+/**
+ * The recorded passing run for the candidate, shaped as the phase result certification consumes.
+ * It applies the same equivalent-input policy as landing admission, so a run carried across a
+ * completed rebase certifies the repair instead of stranding it (TASK-2872.02).
+ */
+function recordedTestsRun(ports: IntegrateWorkflowPorts, worktree: string, revision: string,
+  gates: readonly IntegrationGateDefinition[]): IntegrationGateRunResult | null {
+  let run: ReturnType<NonNullable<IntegrateWorkflowPorts['gates']['readGateRun']>> = null;
+  try { run = ports.gates.readGateRun?.(worktree) ?? null; } catch { return null; }
+  if (!completeCurrentTestsPass(run, revision, gates, 'equivalent')) { return null; }
+  return { ok: true, phase: 'integration', executed: gates.length,
+    outcomes: run.outcomes.map(outcome => ({ key: outcome.key, command: outcome.command, exitCode: outcome.exitCode, stdout: '', stderr: '' })) };
+}
+
+async function ensureRepairVerification(execution: RepairExecution): Promise<boolean | 'tests-required'> {
   const { slug, evidence, pending, revision, ports, worktree, services, baseline } = execution;
   // Rebase may have changed durable obligations; reload before reusing any gate marker.
   const loaded = await services.store.load(missionId(slug));
@@ -114,10 +152,12 @@ async function ensureRepairVerification(execution: RepairExecution): Promise<boo
     ...(validation ? { validation } : { validation: undefined }) }, slug, baseline)) { return true; }
   const gates = ports.gates.loadPhaseGates(worktree, 'preIntegration');
   if (!gates.length) { throw abortWith(ports.landing, 'No integration evidence can establish approval retention.'); }
+  // Repair certification never starts a gate: the tests action owns execution, so the
+  // recorded run for this exact revision is the only evidence the certification reads.
+  const recorded = recordedTestsRun(ports, worktree, revision, gates);
+  if (!recorded) { return 'tests-required'; }
   const passed = await verifyRestartedRepair({ slug, services, worktree, revision, gates, head: () => committedRepairHead(execution),
-    run: () => ports.gates.runPhaseGates('integration', { slug, checkoutPath: worktree,
-      targetBranch: execution.executionContext.baseBranch, gates,
-      realAgent: execution.verification.realAgent, realAgentModel: execution.verification.realAgentModel }) });
+    run: async () => recorded });
   if (committedRepairHead(execution) !== revision) { throw abortWith(ports.landing, 'Integration repair changed during verification.'); }
   await services.operationalHistory?.recordIntegrationValidation({ missionId: slug, sha: revision,
     hooks: gates.map(g => g.key), baseline, ...(!passed ? { failed: true } : {}) });

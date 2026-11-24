@@ -383,7 +383,7 @@ function gateRequest(route: IntegrationGateRoute, reReviewFn?: () => Promise<boo
     slug: 'task-x', context: integrationContext({ baseWorktree: '/repo', area: 'all', branch: 'mission/task-x' }),
     missionServices: integrationServices(),
     missionLoad: { kind: 'found', mission: fixtureMission('task-x', { repositoryId: repositoryId('parallix') }), version: missionVersion(1) },
-    dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+    realAgent: null, realAgentModel: null,
     seams: {
       startAgentFn: async () => { throw new Error('Unexpected transition'); }, transitionTaskFn: () => true, applyAgentFallbackFn: async () => 'codex',
       routeIntegrationGateFailureFn: async () => route,

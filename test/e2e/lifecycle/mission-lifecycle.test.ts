@@ -9,15 +9,15 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { run } from '../../../src/composition/create-cli.js';
 import { configureMissionWriteAuthorization } from '../../../src/application/ports/mission-write-authorization.js';
 import '../../fixtures/e2e-lifecycle-fake-agent-preload.js';
 
 function runCommand(command: string, args: readonly string[], options: Omit<childProcess.SpawnSyncOptionsWithStringEncoding, 'encoding'> = {}) {
-  assert.notEqual(command, 'codex', 'mocked lifecycle E2E must not launch an agent executable');
-  assert.notEqual(command, 'opencode', 'mocked lifecycle E2E must not launch an agent executable');
+  assert.notEqual(command, 'codex', 'lifecycle test must not launch an agent executable');
+  assert.notEqual(command, 'opencode', 'lifecycle test must not launch an agent executable');
   const result = childProcess.spawnSync(command, args, {
     encoding: 'utf8',
     ...options
@@ -58,144 +58,14 @@ function maybeCommandPath(command: string) {
   return null;
 }
 
-function writeExecutable(filePath: string, content: string|NodeJS.ArrayBufferView<ArrayBufferLike>) {
+function writeExecutable(filePath: string, content: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, content, 'utf8');
   fs.chmodSync(filePath, 0o755);
 }
 
-function lifecycleStubSource() {
-  // The stub is written to an extensionless file on the fixture PATH, so Node
-  // loads it as CommonJS. Its own `require` calls are part of the generated
-  // script and are unrelated to this file's module system.
-  return `#!${process.execPath}
-const fs = require('node:fs');
-const path = require('node:path');
-
-// TASK-2521.03: activation refuses a mission whose contract draft never
-// finished, so a drafting agent records it through \`px\` — the same commands the
-// draft prompt names. The harness passes the CLI entry in the environment
-// because this stub runs as a bare executable on the fixture PATH.
-function px(args) {
-  const entry = process.env.PARALLIX_E2E_PX_ENTRY;
-  const loader = process.env.PARALLIX_E2E_PX_LOADER;
-  if (!entry || !loader) { return null; }
-  const run = require('node:child_process').spawnSync(
-    process.execPath, ['--import', loader, entry].concat(args),
-    { cwd: process.cwd(), encoding: 'utf8' }
-  );
-  return run.status === 0 ? (run.stdout || '') : null;
-}
-
-function missionVersion(missionSlug) {
-  const out = px(['status', missionSlug, '--json']);
-  if (!out) { return null; }
-  try { return String(JSON.parse(out).version); } catch (_) { return null; }
-}
-
-function recordMissionContract(missionSlug) {
-  let v = missionVersion(missionSlug);
-  if (v === null) { return; }
-  px(['goal', 'set', '--slug', missionSlug,
-    '--goal', 'Exercise the real lifecycle with a deterministic stub agent',
-    '--why', 'Protect the workflow surface from regression drift',
-    '--expected-version', v]);
-  v = missionVersion(missionSlug);
-  if (v !== null) {
-    px(['scope', 'set', '--slug', missionSlug,
-      '--scope', 'Run draft, active, review and integrate through the real CLI',
-      '--out-of-scope', 'Real model execution',
-      '--expected-version', v]);
-  }
-  v = missionVersion(missionSlug);
-  if (v !== null) {
-    px(['gate', 'add', '--slug', missionSlug, '--command', 'node -e ""',
-      '--expected-version', v]);
-  }
-  v = missionVersion(missionSlug);
-  if (v !== null) {
-    px(['criterion', 'add', '--slug', missionSlug, '--text', 'The lifecycle reaches integration through the real CLI',
-      '--expected-version', v]);
-  }
-  for (const [name, text] of [['CP-1', 'Execute the stub deliverable'], ['CP-2', 'Ready the mission for review']]) {
-    v = missionVersion(missionSlug);
-    if (v !== null) { px(['checkpoint', 'plan', '--slug', missionSlug, '--name', name, '--text', text, '--expected-version', v]); }
-  }
-  v = missionVersion(missionSlug);
-  if (v !== null) {
-    px(['nel', 'set', '--slug', missionSlug, '--predicted', 'Small', '--expected-version', v]);
-  }
-}
-function writeFile(filePath, content) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content, 'utf8');
-}
-
-function read(filePath) {
-  return fs.existsSync(filePath) ? fs.readFileSync(filePath, 'utf8') : '';
-}
-
-function match(prompt, regex) {
-  const found = prompt.match(regex);
-  return found ? found[1].trim() : null;
-}
-
-const prompt = process.argv[process.argv.length - 1] || '';
-const slug = match(prompt, /^(?:Mission s|S)lug:\\s*((?:task-[a-z0-9-]+|px-\\d+))/im)
-  || match(prompt, /^Mission:\\s*((?:task-[a-z0-9-]+|px-\\d+))/im)
-  || match(prompt, /^Mode: act-on-review\\. Branch:\\s*mission\\/((?:task-[a-z0-9-]+|px-\\d+))/im)
-  || match(prompt, /^Mode: review\\. .*?Mission:\\s+.*?((?:task-[a-z0-9-]+|px-\\d+))/im)
-  || 'task-unknown';
-// Typed missions record the contract through px; the directory holds only
-// optional mission-local artifacts.
-const missionBaseDir = (() => {
-  try {
-    const cfg = JSON.parse(read(path.join(process.cwd(), 'workflow.config.json')) || '{}');
-    return (cfg.adapters && cfg.adapters.missions && cfg.adapters.missions.baseDir) || 'missions';
-  } catch (_) { return 'missions'; }
-})();
-const missionDir = match(prompt, /^Mission dir:\\s*(.+)$/m)
-  || path.join(process.cwd(), missionBaseDir, slug);
-
-if (process.argv.includes('--help')) {
-  process.stdout.write('stub opencode help\\n');
-  process.exit(0);
-}
-
-if (/^Mode: draft\\./m.test(prompt)) {
-  recordMissionContract(slug);
-  writeFile(path.join(missionDir, 'milestone-1.md'), '# Milestone 1\\n\\nTyped contract recorded.\\n');
-}
-
-if (/^Mode: execute after lock\\./m.test(prompt)) {
-  writeFile(path.join(process.cwd(), 'deliverable.txt'), 'stub execute output\\n');
-  for (const [name, criterion, next] of [
-    ['CP-1', 'Execute artifacts committed', 'Run review.'],
-    ['CP-2', 'The lifecycle reaches integration through the real CLI', 'Approve the mission in review.'],
-  ]) {
-    const version = missionVersion(slug);
-    if (version !== null) {
-      px(['checkpoint', 'record', '--slug', slug, '--name', name,
-        '--criterion', criterion, '--evidence', 'deliverable.txt:1',
-        '--next', next, '--expected-version', version]);
-    }
-  }
-  const completionVersion = missionVersion(slug);
-  if (completionVersion !== null) {
-    px(['mission', 'mark-complete', '--slug', slug, '--all', '--expected-version', completionVersion]);
-  }
-}
-
-if (/^Mode: review\\./m.test(prompt)) {
-  const v = missionVersion(slug);
-  if (v !== null) {
-    px(['verdict', 'approve', '--slug', slug, '--actor', 'custom', '--expected-version', v,
-      '--comment', 'No blocking findings. The lifecycle artifacts are present and consistent.']);
-  }
-}
-
-process.stdout.write('{"sessionID":"ses_stubbed_opencode"}\\n');
-`;
+function postIntegrateHookMarkerPath(repoRoot: string) {
+  return path.join(path.dirname(repoRoot), 'post-integrate-hook.log');
 }
 
 function createTask(repoRoot: string, slug: string, title: string) {
@@ -221,23 +91,7 @@ function createTask(repoRoot: string, slug: string, title: string) {
   return taskPath;
 }
 
-function postIntegrateHookMarkerPath(repoRoot: string) {
-  return path.join(repoRoot, 'post-integrate-hook.log');
-}
-
-function writePostIntegrateHookScript(repoRoot: string) {
-  const scriptPath = path.join(repoRoot, 'scripts', 'e2e-post-integrate-hook.sh');
-  const markerPath = postIntegrateHookMarkerPath(repoRoot);
-  writeExecutable(scriptPath, [
-    '#!/usr/bin/env bash',
-    'set -euo pipefail',
-    `printf 'slug=%s base_worktree=%s base_branch=%s variant=%s\\n' "$INTEGRATE_HOOK_SLUG" "$INTEGRATE_HOOK_BASE_WORKTREE" "$INTEGRATE_HOOK_BASE_BRANCH" "$INTEGRATE_HOOK_VARIANT" >> ${JSON.stringify(markerPath)}`,
-    ''
-  ].join('\n'));
-  return scriptPath;
-}
-
-function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook = false }: { slug: string; title: string; postIntegrateHook?: boolean; preCommitHook?: boolean }) {
+function setupRepository({ slug, title }: { slug: string; title: string }) {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
   const repoRoot = path.join(tmpRoot, 'repo');
   const binDir = path.join(repoRoot, 'bin');
@@ -258,12 +112,21 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
   // Git mutation admission uses the real kernel lease and its execution shell.
   fs.symlinkSync(commandDir('flock'), path.join(binDir, 'flock'));
   fs.symlinkSync(commandDir('sh'), path.join(binDir, 'sh'));
-  const graphifyPath = maybeCommandPath('graphify');
-  if (graphifyPath) {
-    fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
-  }
+  const postIntegrateScript = path.join(repoRoot, 'scripts', 'e2e-post-integrate-hook.sh');
+  writeExecutable(postIntegrateScript, [
+    '#!/usr/bin/env bash',
+    'set -euo pipefail',
+    `printf 'slug=%s base_worktree=%s base_branch=%s variant=%s\\n' "$INTEGRATE_HOOK_SLUG" "$INTEGRATE_HOOK_BASE_WORKTREE" "$INTEGRATE_HOOK_BASE_BRANCH" "$INTEGRATE_HOOK_VARIANT" >> ${JSON.stringify(postIntegrateHookMarkerPath(repoRoot))}`,
+    ''
+  ].join('\n'));
+  const preCommitScript = path.join(repoRoot, 'scripts', 'e2e-pre-commit-hook.sh');
+  // The hook change has to stay verification-neutral: integrate admits the tests run recorded by the
+  // review step, and the gate adapter only carries a run across a tagged patch-version bump of a
+  // release manifest (TASK-2872.02). A bump of an arbitrary file would strand the mission.
+  fs.writeFileSync(path.join(repoRoot, 'package.json'), `${JSON.stringify({ name: 'e2e-probe', version: '1.0.0' }, null, 2)}\n`, 'utf8');
+  const bumpedManifest = JSON.stringify({ name: 'e2e-probe', version: '1.0.1' }, null, 2);
+  writeExecutable(preCommitScript, ['#!/usr/bin/env bash', 'set -euo pipefail', `printf '%s\\n' '${bumpedManifest}' > package.json`, ''].join('\n'));
 
-  const integrate: { postIntegrateCommand?: string; preCommitCommand?: string } = {};
   const adapters = {
     tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
     agents: { models: { custom: 'stub/custom' } },
@@ -273,20 +136,11 @@ function setupRepository({ slug, title, postIntegrateHook = false, preCommitHook
     } },
     gates: { preIntegration: [{ key: 'lifecycle-gate', command: ':', order: 1 }] },
     review: { provider: 'none', tmpDir: reviewTmpDir },
-    integrate
+    integrate: {
+      postIntegrateCommand: `./${path.relative(repoRoot, postIntegrateScript)}`,
+      preCommitCommand: `./${path.relative(repoRoot, preCommitScript)}`,
+    },
   };
-
-  if (postIntegrateHook) {
-    const scriptPath = writePostIntegrateHookScript(repoRoot);
-    adapters.integrate = { postIntegrateCommand: `./${path.relative(repoRoot, scriptPath)}` };
-  }
-
-  if (preCommitHook) {
-    fs.writeFileSync(path.join(repoRoot, 'version.txt'), '1.0.0\n', 'utf8');
-    const scriptPath = path.join(repoRoot, 'scripts', 'e2e-pre-commit-hook.sh');
-    writeExecutable(scriptPath, ['#!/usr/bin/env bash', 'set -euo pipefail', 'echo 1.0.1 > version.txt', ''].join('\n'));
-    adapters.integrate = { preCommitCommand: `./${path.relative(repoRoot, scriptPath)}` };
-  }
 
   fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
     product: {
@@ -389,6 +243,35 @@ async function runWorkflow(repoRoot: string, env: NodeJS.ProcessEnv, args: strin
     }
     Object.assign(process.env, Object.fromEntries(previous));
   }
+}
+
+/**
+ * The tests-action turn under the recorded-facts contract (TASK-2872.02 SC2): `px review` on the
+ * approved candidate runs the configured integration gates and records the run; `px integrate`
+ * admits that record and starts no gate.
+ */
+async function runIntegrationTestsTurn(rootDir: string, env: NodeJS.ProcessEnv, slug: string,
+  options: { allowFailure?: boolean } = {}) {
+  return runWorkflow(rootDir, env, ['review', slug], 60000, options);
+}
+
+/**
+ * px-0050.01: two independent failures, one passing gate and one dependent of a failed prerequisite,
+ * committed in the mission worktree so the tests action reads them from the reviewed head.
+ */
+function installFailingIntegrationGates(worktree: string, slug: string, markers: string) {
+  const worktreeConfigPath = path.join(worktree, 'workflow.config.json');
+  const worktreeConfig = JSON.parse(fs.readFileSync(worktreeConfigPath, 'utf8'));
+  fs.mkdirSync(markers, { recursive: true });
+  worktreeConfig.adapters.gates = { preIntegration: [
+    { key: 'failing-gate', command: `: > ${markers}/failing; printf first-defect >&2; exit 7`, order: 1 },
+    { key: 'second-failing-gate', command: `: > ${markers}/second; printf second-defect >&2; exit 3`, order: 2 },
+    { key: 'passing-gate', command: `: > ${markers}/passing`, order: 3 },
+    { key: 'dependent-gate', command: `: > ${markers}/dependent`, order: 4, after: ['failing-gate'] },
+  ] };
+  fs.writeFileSync(worktreeConfigPath, JSON.stringify(worktreeConfig, null, 2));
+  runGit(worktree, ['add', '--', 'workflow.config.json']);
+  runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);
 }
 
 function worktreePathFor(repoRoot: string, slug: string) {
@@ -550,617 +433,230 @@ function countTaskIds(rootDir: string, id: string) {
   return count;
 }
 
+function discoverAdhocSlug(repoRoot: string) {
+  const parent = path.dirname(repoRoot);
+  const prefix = `${path.basename(repoRoot)}-px-`;
+  const worktree = fs.readdirSync(parent).find(name => name.startsWith(prefix));
+  return worktree ? worktree.slice(path.basename(repoRoot).length + 1) : null;
+}
+
+async function statusOutputFor(slug: string, rootDir: string, env: NodeJS.ProcessEnv) {
+  const result = await runWorkflow(rootDir, env, ['status', slug]);
+  return `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
+}
+
+function postIntegrateHookLines(repoRoot: string) {
+  const marker = postIntegrateHookMarkerPath(repoRoot);
+  return fs.existsSync(marker)
+    ? fs.readFileSync(marker, 'utf8').trim().split('\n').filter(Boolean)
+    : [];
+}
+
 interface LifecycleSummary {
   slug: string; repoRoot: string; worktree: string;
-  draft: { taskStatus: string | null; missionId: string; missionHasBaseBranch: boolean } | null;
-  active: { taskStatus: string | null; checkpointFiles: string[]; milestoneFiles: string[]; reviewState: { phase: string; disposition: string | null }; taskIdCount: number } | null;
+  draft: { taskStatus: string | null; missionId: string } | null;
+  active: { checkpointFiles: string[]; milestoneFiles: string[]; reviewState: { phase: string; disposition: string | null }; taskIdCount: number } | null;
   integrate: {
-    gateFailed?: boolean; exitCode?: number; worktreeStillExists?: boolean; gateOutput?: string; gateMarkers?: string[];
-    rootTaskStatus?: string | null; worktreeExistsAfter?: boolean;
+    backlogStatus?: string | null; worktreeExistsAfter?: boolean;
     closeout?: { mission: Record<string, import('node:sqlite').SQLOutputValue> | undefined; measurements: Record<string, import('node:sqlite').SQLOutputValue> | undefined };
     mainHeadBefore?: string; mainHeadAfter?: string; featureHeadAfter?: string;
-    postIntegrateHookLines?: string[]; landedSubject?: string; landedBody?: string; landedFiles?: string[]; versionAtMain?: string;
+    hookLines?: string[]; landedSubject?: string; landedBody?: string; landedFiles?: string[]; versionAtFeature?: string;
   } | null;
 }
 
-async function runScenario({ launchFromFeatureBranch = false, integrate = true, postIntegrateHook = false, preCommitHook = false, failIntegrationGate = false }) {
-  const slug = launchFromFeatureBranch ? 'task-2001' : 'task-2002';
-  const title = launchFromFeatureBranch ? 'Feature Branch Lifecycle' : 'Primary Branch Lifecycle';
-  const repo = setupRepository({ slug, title, postIntegrateHook, preCommitHook });
+async function runScenario(t: TestContext) {
+  const backlogSlug = 'task-2001';
+  const repo = setupRepository({ slug: backlogSlug, title: 'Completed Backlog Intake' });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
-  const worktree = worktreePathFor(repo.repoRoot, slug);
-  const summary: LifecycleSummary = {
-    slug,
-    repoRoot: repo.repoRoot,
-    worktree,
-    draft: null,
-    active: null,
-    integrate: null
-  };
-
-  if (!shouldKeepTmp() || process.env.PARALLIX_E2E_CLEANUP_MARKER) {
-    watchInterruptedFixture(repo.tmpRoot, repo.repoRoot, worktree);
-  }
+  let slug = '';
+  let worktree = '';
+  let mainHeadBefore = '';
+  let adhocMirror: string | null = null;
+  const summary: LifecycleSummary = { slug, repoRoot: repo.repoRoot, worktree, draft: null, active: null, integrate: null };
 
   try {
-    const mainHeadBefore = runGit(repo.repoRoot, ['rev-parse', 'HEAD']);
-
-    if (launchFromFeatureBranch) {
+    await t.test('free-text draft records a feature-base contract beside completed Backlog intake', async () => {
+      const backlogTask = taskFileIn(repo.repoRoot, backlogSlug);
+      assert.ok(backlogTask);
+      const completedTask = path.join(repo.repoRoot, 'backlog', 'completed', path.basename(backlogTask));
+      fs.writeFileSync(backlogTask, fs.readFileSync(backlogTask, 'utf8').replace('status: backlog', 'status: done'));
+      fs.renameSync(backlogTask, completedTask);
+      runGit(repo.repoRoot, ['add', '-A']);
+      runGit(repo.repoRoot, ['commit', '-m', 'test: seed completed Backlog intake']);
+      mainHeadBefore = runGit(repo.repoRoot, ['rev-parse', 'HEAD']);
       runGit(repo.repoRoot, ['checkout', '-b', 'feature/e2e-base']);
-    }
 
-    await runWorkflow(repo.repoRoot, env, ['draft', slug, '--agent', 'custom']);
+      await runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
+      slug = discoverAdhocSlug(repo.repoRoot) ?? '';
+      assert.match(slug, /^px-\d+$/, 'free-text intake must allocate a DB-owned identity');
+      worktree = worktreePathFor(repo.repoRoot, slug);
+      summary.slug = slug;
+      summary.worktree = worktree;
+      assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
+      if (!shouldKeepTmp() || process.env.PARALLIX_E2E_CLEANUP_MARKER) {
+        watchInterruptedFixture(repo.tmpRoot, repo.repoRoot, worktree);
+      }
+      pauseAfterWorktreeFixture(repo, worktree);
+      adhocMirror = taskFileIn(worktree, slug);
+      assert.ok(adhocMirror, 'draft should create a best-effort Backlog mirror in the adhoc worktree');
+      assert.equal(taskStatus(adhocMirror), 'refined');
+      assert.notEqual(worktree, worktreePathFor(repo.repoRoot, backlogSlug), 'Backlog and adhoc identities have distinct conventional worktree paths');
+      assert.equal(taskStatus(completedTask), 'done', 'adhoc draft must not clobber the completed Backlog intake');
+      assert.equal(fs.existsSync(missionPath(worktree, slug)), false, 'typed draft must not generate MISSION.md');
+      const recordedBase = runGit(repo.repoRoot, ['config', '--get', `branch.mission/${slug}.parallixBase`]);
+      assert.equal(recordedBase, 'feature/e2e-base');
+      const missionId = /^id:\s*([^\r\n]+)/m.exec(fs.readFileSync(adhocMirror, 'utf8'))?.[1]?.trim();
+      assert.equal(missionId?.toLowerCase(), slug, 'adhoc mirror must retain the DB-owned identity');
+      summary.draft = { taskStatus: taskStatus(adhocMirror), missionId: missionId! };
+    });
 
-    assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
-    pauseAfterWorktreeFixture(repo, worktree);
-    const worktreeTask = taskFileIn(worktree, slug);
-    assert.ok(worktreeTask, 'draft should bootstrap the backlog task into the worktree');
-    assert.equal(taskStatus(worktreeTask), 'refined');
-
-    assert.equal(fs.existsSync(missionPath(worktree, slug)), false, 'typed draft must not generate MISSION.md');
-    const recordedBase = runGit(repo.repoRoot, ['config', '--get', `branch.mission/${slug}.parallixBase`]);
-    assert.equal(recordedBase, launchFromFeatureBranch ? 'feature/e2e-base' : 'main');
-    const missionId = /^id:\s*([^\r\n]+)/m.exec(fs.readFileSync(worktreeTask, 'utf8'))?.[1]?.trim();
-
-    assert.ok(missionId, 'draft must retain a Backlog task identity');
-    summary.draft = {
-      taskStatus: taskStatus(worktreeTask),
-      missionId,
-      missionHasBaseBranch: recordedBase !== 'main'
-    };
-
-    await runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
-
-    const state = await reviewState(worktree, slug, env);
-    summary.active = {
-      taskStatus: taskStatus(worktreeTask),
-      checkpointFiles: checkpointFiles(worktree, slug),
-      milestoneFiles: fs.readdirSync(missionDir(worktree, slug))
-        .filter(name => name.startsWith('milestone-') && name.endsWith('.md'))
-        .sort(),
-      reviewState: {
-        phase: state.phase,
-        disposition: state.disposition
-      },
-      taskIdCount: countTaskIds(worktree, summary.draft.missionId)
-    };
-
-    if (!integrate) {
-      return summary;
-    }
-
-    if (failIntegrationGate) {
-      // px integrate --dry-run reads repository gates from the mission worktree, so adding
-      // a failing gate only here — after handoff/review used the passing base
-      // config — makes integrate abort before any success seam can invoke the
-      // post-integrate hook.
-      const worktreeConfigPath = path.join(worktree, 'workflow.config.json');
-      const worktreeConfig = JSON.parse(fs.readFileSync(worktreeConfigPath, 'utf8'));
-      // px-0050.01: two independent failures, one passing gate and one dependent of a failed prerequisite.
-      const markers = path.join(repo.tmpRoot, 'gate-markers');
-      fs.mkdirSync(markers, { recursive: true });
-      worktreeConfig.adapters.gates = { preIntegration: [
-        { key: 'failing-gate', command: `: > ${markers}/failing; printf first-defect >&2; exit 7`, order: 1 },
-        { key: 'second-failing-gate', command: `: > ${markers}/second; printf second-defect >&2; exit 3`, order: 2 },
-        { key: 'passing-gate', command: `: > ${markers}/passing`, order: 3 },
-        { key: 'dependent-gate', command: `: > ${markers}/dependent`, order: 4, after: ['failing-gate'] },
-      ] };
-      fs.writeFileSync(worktreeConfigPath, JSON.stringify(worktreeConfig, null, 2));
-      runGit(worktree, ['add', '--', 'workflow.config.json']);
-      runGit(worktree, ['commit', '-m', `test(${slug}): install failing integration gate`]);
-
-      const gateResult = await runWorkflow(worktree, env, ['integrate', slug, '--dry-run'], 60000, { allowFailure: true });
-      summary.integrate = {
-        gateOutput: `${gateResult.stdout}\n${gateResult.stderr}`,
-        gateMarkers: fs.readdirSync(markers).sort(),
-        gateFailed: true,
-        exitCode: gateResult.status,
-        worktreeStillExists: fs.existsSync(worktree),
-        postIntegrateHookLines: fs.existsSync(postIntegrateHookMarkerPath(repo.repoRoot))
-          ? fs.readFileSync(postIntegrateHookMarkerPath(repo.repoRoot), 'utf8').trim().split('\n').filter(Boolean)
-          : []
+    await t.test('DB-owned active and review stay authoritative after mirror deletion', async () => {
+      assert.ok(adhocMirror);
+      fs.rmSync(adhocMirror);
+      assert.equal(fs.existsSync(adhocMirror), false, 'active must not depend on the best-effort Backlog mirror');
+      await runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
+      assert.match(await statusOutputFor(slug, worktree, env), new RegExp(slug, 'i'), 'status must resolve the DB-owned identity after mirror deletion');
+      const state = await reviewState(worktree, slug, env);
+      summary.active = {
+        checkpointFiles: checkpointFiles(worktree, slug),
+        milestoneFiles: fs.readdirSync(missionDir(worktree, slug)).filter(name => name.startsWith('milestone-') && name.endsWith('.md')).sort(),
+        reviewState: { phase: state.phase, disposition: state.disposition },
+        taskIdCount: countTaskIds(worktree, summary.draft!.missionId),
       };
-      return summary;
-    }
+    });
 
-    await runWorkflow(worktree, env, ['integrate', slug, '--dry-run'], 60000, { invokeFromTarget: true });
-    await runWorkflow(worktree, env, ['integrate', slug], 60000, { invokeFromTarget: true });
+    await t.test('integrate lands hook output inside the feature-base squash and closes out', async () => {
+      const mainBeforeDryRun = runGit(repo.repoRoot, ['rev-parse', 'main']);
+      const featureBeforeDryRun = runGit(repo.repoRoot, ['rev-parse', 'feature/e2e-base']);
+      // TASK-2872.02 SC2: the review step's tests action is the only owner that starts the
+      // configured gates; integrate admits its record.
+      await runIntegrationTestsTurn(worktree, env, slug);
+      await runWorkflow(worktree, env, ['integrate', slug, '--dry-run'], 60000, { invokeFromTarget: true });
+      assert.ok(fs.existsSync(worktree), 'passing dry-run must preserve the mission worktree');
+      assert.equal(runGit(repo.repoRoot, ['rev-parse', 'main']), mainBeforeDryRun, 'passing dry-run must not advance main');
+      assert.equal(runGit(repo.repoRoot, ['rev-parse', 'feature/e2e-base']), featureBeforeDryRun, 'passing dry-run must not advance the feature base');
+      await runWorkflow(worktree, env, ['integrate', slug], 60000, { invokeFromTarget: true });
 
-    const rootTask = taskFileIn(repo.repoRoot, slug);
-    assert.ok(rootTask, 'integrate should leave the task in the base checkout');
-    assert.equal(taskStatus(rootTask), 'done');
-    assert.ok(!fs.existsSync(worktree), 'integrate should clean up the mission worktree');
-
-    const authority = new DatabaseSync(path.join(repo.stateHome, 'parallix.db'), { readOnly: true });
-    const closeout = {
-      mission: authority.prepare('SELECT status, closed_at FROM missions WHERE id = ?').get(slug),
-      measurements: authority.prepare("SELECT COUNT(*) AS total FROM usage_statistics WHERE mission = ? AND stage = 'default'").get(slug),
-    };
-    authority.close();
-
-    const mainHeadAfter = runGit(repo.repoRoot, ['rev-parse', 'main']);
-    if (launchFromFeatureBranch) {
+      const backlogTask = taskFileIn(repo.repoRoot, backlogSlug);
+      assert.ok(backlogTask, 'integration must preserve the completed Backlog intake');
+      assert.equal(taskStatus(backlogTask), 'done');
+      assert.ok(!fs.existsSync(worktree), 'integration must clean up the adhoc worktree');
+      const authority = new DatabaseSync(path.join(repo.stateHome, 'parallix.db'), { readOnly: true });
+      const closeout = {
+        mission: authority.prepare('SELECT status, closed_at FROM missions WHERE id = ?').get(slug),
+        measurements: authority.prepare("SELECT COUNT(*) AS total FROM usage_statistics WHERE mission = ? AND stage = 'default'").get(slug),
+      };
+      authority.close();
+      const mainHeadAfter = runGit(repo.repoRoot, ['rev-parse', 'main']);
       const featureHeadAfter = runGit(repo.repoRoot, ['rev-parse', 'feature/e2e-base']);
       assert.equal(mainHeadAfter, mainHeadBefore, 'main must remain unchanged for feature-branch missions');
       assert.notEqual(featureHeadAfter, mainHeadBefore, 'feature base branch should receive the landed squash commit');
-    } else {
-      assert.notEqual(mainHeadAfter, mainHeadBefore, 'main should advance after integrating a primary-branch mission');
-    }
-
-    summary.integrate = {
-      rootTaskStatus: taskStatus(rootTask),
-      worktreeExistsAfter: fs.existsSync(worktree),
-      closeout,
-      mainHeadBefore,
-      mainHeadAfter
-    };
-    if (launchFromFeatureBranch) {
-      summary.integrate.featureHeadAfter = runGit(repo.repoRoot, ['rev-parse', 'feature/e2e-base']);
-    }
-
-    if (postIntegrateHook) {
-      const markerPath = postIntegrateHookMarkerPath(repo.repoRoot);
-      summary.integrate.postIntegrateHookLines = fs.existsSync(markerPath)
-        ? fs.readFileSync(markerPath, 'utf8').trim().split('\n').filter(Boolean)
-        : [];
-    }
-
-    if (preCommitHook) {
-      summary.integrate.landedSubject = runGit(repo.repoRoot, ['log', '-1', '--format=%s', 'main']);
-      summary.integrate.landedBody = runGit(repo.repoRoot, ['log', '-1', '--format=%b', 'main']);
-      summary.integrate.landedFiles = runGit(repo.repoRoot, ['show', '--name-only', '--format=', 'main']).split('\n').filter(Boolean);
-      summary.integrate.versionAtMain = runGit(repo.repoRoot, ['show', 'main:version.txt']);
-    }
+      const hookLines = postIntegrateHookLines(repo.repoRoot);
+      assert.equal(hookLines.length, 1, 'post-integrate hook must run exactly once');
+      assert.match(hookLines[0], new RegExp(`^slug=${slug} base_worktree=\\S+ base_branch=feature/e2e-base variant=variant-b$`));
+      const landedSubject = runGit(repo.repoRoot, ['log', '-1', '--format=%s', 'feature/e2e-base']);
+      const landedBody = runGit(repo.repoRoot, ['log', '-1', '--format=%b', 'feature/e2e-base']);
+      const landedFiles = runGit(repo.repoRoot, ['show', '--name-only', '--format=', 'feature/e2e-base']).split('\n').filter(Boolean);
+      const versionAtFeature = JSON.parse(runGit(repo.repoRoot, ['show', 'feature/e2e-base:package.json'])).version;
+      assert.match(landedSubject, /fix hello world greeting/i);
+      assert.ok(landedBody.split('\n').includes(`Task: ${slug}`));
+      assert.ok(landedFiles.includes('package.json'), 'pre-commit hook output must land inside the squash commit');
+      assert.equal(versionAtFeature, '1.0.1');
+      summary.integrate = { ...summary.integrate, backlogStatus: taskStatus(backlogTask), worktreeExistsAfter: fs.existsSync(worktree), closeout, mainHeadBefore, mainHeadAfter, featureHeadAfter, hookLines, landedSubject, landedBody, landedFiles, versionAtFeature };
+    });
 
     return summary;
   } finally {
     if (!shouldKeepTmp()) {
       fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
-      fs.rmSync(worktree, { recursive: true, force: true });
+      if (worktree) { fs.rmSync(worktree, { recursive: true, force: true }); }
     }
   }
 }
 
 /**
- * Discover the adhoc slug a free-text draft materialized. The draft writes the
- * mission under the mission worktree's `missions/` dir; the worktree is the
- * sibling of the base repo named `<repo>-<slug>` (the configured worktree
- * pattern). The adhoc identity is the non-`task-` mission dir.
+ * TASK-2872.02 SC1/SC2: gate execution belongs to the tests action, not to integrate. A red
+ * recorded run keeps integrate refusing with the tests named, no gate started and no landing effect.
  */
-function discoverAdhocSlug(repoRoot: string) {
-  const parent = path.dirname(repoRoot);
-  const base = path.basename(repoRoot);
-  if (!fs.existsSync(parent)) {return null;}
-  const siblings = fs.readdirSync(parent).filter((d) => d.startsWith(base + '-') && d !== base);
-  for (const sibling of siblings) {
-    const missionsDir = path.join(parent, sibling, 'missions');
-    if (!fs.existsSync(missionsDir)) {continue;}
-    const adhoc = fs.readdirSync(missionsDir)
-      .filter((d) => !d.startsWith('.'))
-      .find((d) => !d.startsWith('task-'));
-    if (adhoc) {return adhoc;}
-  }
-  return null;
-}
-
-/**
- * Adhoc-only fixture: a repository with no `backlog/` directory at all. This is
- * intake case (2) from task-2468. Without a backlog dir, `px draft` of a
- * free-text prompt must still materialize a DB-owned `px-<NNNN>`
- * mission and reach the lifecycle.
- */
-function setupAdhocRepository({ title }: { title: string }) {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-e2e-'));
-  const repoRoot = path.join(tmpRoot, 'repo');
-  const binDir = path.join(repoRoot, 'bin');
-  const stateHome = path.join(tmpRoot, 'parallix-home');
-  const reviewTmpDir = path.join(tmpRoot, 'review-artifacts');
-
-  // No backlog/ directory: the defining trait of the adhoc-only intake.
-  fs.mkdirSync(path.join(repoRoot, 'config'), { recursive: true });
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.mkdirSync(reviewTmpDir, { recursive: true });
-
-  fs.symlinkSync('/usr/bin/node', path.join(binDir, 'node'));
-  fs.symlinkSync(commandDir('git'), path.join(binDir, 'git'));
-  fs.symlinkSync(commandDir('bash'), path.join(binDir, 'bash'));
-  fs.symlinkSync(commandDir('id'), path.join(binDir, 'id'));
-  // Keep adhoc intake on the same production Git admission path as Backlog.
-  fs.symlinkSync(commandDir('flock'), path.join(binDir, 'flock'));
-  fs.symlinkSync(commandDir('sh'), path.join(binDir, 'sh'));
-  const graphifyPath = maybeCommandPath('graphify');
-  if (graphifyPath) {
-    fs.symlinkSync(graphifyPath, path.join(binDir, 'graphify'));
-  }
-
-  const integrate: { postIntegrateCommand?: string; preCommitCommand?: string } = {};
-  const adapters = {
-    tasks: { provider: 'backlog-md', storage: 'backlog', stateMap: 'config/state-map.json' },
-    agents: { models: { custom: 'stub/custom' } },
-    missions: { baseDir: 'missions', branchPrefix: 'mission/', worktreePattern: '../<repo>-<slug>' },
-    verification: { command: ':', defaultArea: 'all', integrationCoverage: {
-      command: ':', checks: { lifecycle: ['lifecycle-gate'] },
-    } },
-    gates: { preIntegration: [{ key: 'lifecycle-gate', command: ':', order: 1 }] },
-    review: { provider: 'none', tmpDir: reviewTmpDir },
-    integrate,
-  };
-
-  fs.writeFileSync(path.join(repoRoot, 'workflow.config.json'), JSON.stringify({
-    product: { name: 'e2e-probe', targetUser: 'tests' },
-    adapters,
-  }, null, 2));
-
-  fs.writeFileSync(path.join(repoRoot, 'config', 'state-map.json'), JSON.stringify({
-    ready: 'refined',
-    approved: 'ready-for-integration',
-  }, null, 2));
-
-  fs.writeFileSync(path.join(repoRoot, 'README.md'), '# E2E Probe\n', 'utf8');
-
-  runGit(repoRoot, ['init']);
-  runGit(repoRoot, ['checkout', '-b', 'main']);
-  runGit(repoRoot, ['config', 'user.email', 'test@example.com']);
-  runGit(repoRoot, ['config', 'user.name', 'Parallix E2E']);
-  runGit(repoRoot, ['add', '.']);
-  runGit(repoRoot, ['commit', '-m', 'initial test repo']);
-
-  return { tmpRoot, repoRoot, binDir, stateHome, reviewTmpDir };
-}
-
-/**
- * Adhoc-only lifecycle: draft a free-text prompt, then drive the real CLI
- * through `active` and `review`. This is the regression net for the README's
- * free-text first-value path and proves the DB-owned adhoc identity flows the
- * full lifecycle without a Backlog task file.
- */
-/**
- * Run `px status` for a slug and return the normalized (ANSI-stripped) output.
- * Read-only: the authority for review-loop state is the operator database, so
- * status must resolve the DB-owned adhoc identity without a Backlog task file.
- */
-async function statusOutputFor(slug: string, rootDir: string, env: { FORCE_COLOR: string; FORGEJO_USER: string; PRIMARY_WORKTREE: string; PARALLIX_HOME: string; PARALLIX_NO_BUBBLEWRAP: string; PATH: string; }) {
-  const result = await runWorkflow(rootDir, env, ['status', slug]);
-  return `${result.stdout}${result.stderr}`.replace(/\x1B\[[0-9;]*m/g, '');
-}
-
-/**
- * Locate the best-effort Backlog mirror the draft minted for a DB-owned adhoc
- * identity under the worktree's `backlog/tasks/` dir. Returns the first task
- * file found, or null when the mirror is absent.
- */
-function findMirroredTaskFile(worktree: string, slug: string) {
-  const tasksDir = path.join(worktree, 'backlog', 'tasks');
-  if (!fs.existsSync(tasksDir)) {return null;}
-  const entries = fs.readdirSync(tasksDir).filter(f => f.endsWith('.md'));
-  return entries.length > 0 ? path.join(tasksDir, entries[0]) : null;
-}
-
-async function runAdhocScenario() {
-  const title = 'fix hello world greeting';
-  const repo = setupAdhocRepository({ title });
+async function runGateFailureScenario() {
+  const slug = 'task-2003';
+  const repo = setupRepository({ slug, title: 'Recorded Gate Failure Refusal' });
   const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
-
-  if (!shouldKeepTmp() || process.env.PARALLIX_E2E_CLEANUP_MARKER) {
-    // No worktree pre-known for adhoc (slug is discovered after draft); the
-    // interrupted-fixture watcher is a backlog-scenario concern.
-  }
-
+  let worktree = '';
   try {
-    await runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
-
-    const slug = discoverAdhocSlug(repo.repoRoot);
-    assert.ok(slug, 'draft must materialize an adhoc mission under missions/');
-    assert.match(slug, /^px-\d+$/i, 'adhoc identity must be the DB-owned px-<NNNN> form');
-
-    const worktree = worktreePathFor(repo.repoRoot, slug);
-    assert.ok(fs.existsSync(worktree), `expected mission worktree at ${worktree}`);
-
-    // F1 (task-2468 round 2): delete the best-effort Backlog mirror immediately
-    // after draft — before `px active` — and prove the DB-authoritative lifecycle
-    // still drives active → review → integrate. When the mirror is gone, the
-    // execute path must not be mirror-gated: `px active` must still record the
-    // authoritative MissionLifecycleService.activate() transition and reach an
-    // approved review, and `px integrate` must still complete.
-    const mirrorBeforeActive = findMirroredTaskFile(worktree, slug);
-    if (mirrorBeforeActive) {
-      fs.rmSync(mirrorBeforeActive, { force: true });
-      assert.ok(!fs.existsSync(mirrorBeforeActive), 'the mirrored task file was removed before active');
-    }
-
-    // The red line on the parent commit: the `task-` prefix guard refuses this
-    // with "slug must begin with task-". Green once the DB-owned adhoc identity
-    // and shared-validator guard land.
+    // This case owns the tests-action/integrate boundary. The sibling lifecycle case owns
+    // free-text intake, so use the fixture's existing Backlog identity here and avoid paying
+    // for a second unrelated ad-hoc intake path inside the 3.5 s integration CPU budget.
+    await runWorkflow(repo.repoRoot, env, ['draft', slug, '--agent', 'custom']);
+    worktree = worktreePathFor(repo.repoRoot, slug);
+    const markers = path.join(repo.tmpRoot, 'gate-markers');
+    // Agent approval covers the head it reviewed, so the failing gate is part of that head: a commit
+    // made after approval would make the review non-current and the tests action would decline.
+    installFailingIntegrationGates(worktree, slug, markers);
     await runWorkflow(worktree, env, ['active', slug, '--implementer', 'custom']);
-
-    // F3 (task-2468): `px status` must resolve the DB-owned adhoc identity from
-    // the operator database, not a Backlog task file. A `task-`-shaped
-    // assumption would fail to recognize the namespace here.
-    const statusOutput = await statusOutputFor(slug, worktree, env);
-    assert.match(statusOutput, /px-\d+/i, 'px status must resolve the DB-owned adhoc identity');
-
-    // F4 (task-2468): the Backlog task file is a best-effort one-way mirror for
-    // a DB-owned adhoc identity. Delete it mid-mission and prove the operator
-    // database still resolves the identity — `px status` reads lifecycle state
-    // from the DB store, not the mirror. A reintroduced unguarded task-file
-    // read on the status/active path throws here exactly as the old
-    // missing-file read did.
-    const mirror = findMirroredTaskFile(worktree, slug);
-    if (mirror) {
-      fs.rmSync(mirror, { force: true });
-      assert.ok(!fs.existsSync(mirror), 'the mirrored task file was removed before status');
-    }
-    const statusAfterDeletion = await statusOutputFor(slug, worktree, env);
-    assert.match(statusAfterDeletion, /px-\d+/i, 'px status must still resolve the DB-owned adhoc identity after the mirror is deleted');
-
-    // `px review --status` reads lifecycle state from DB authority, not the
-    // (best-effort) Backlog mirror. A missing review state fails here exactly as
-    // the old missing-file read did.
-    const state = await reviewState(worktree, slug, env);
-    assert.equal(state.phase, 'approved', 'adhoc mission should reach an approved review phase after a deleted mirror');
-
-    // F1 (task-2468 round 2): `px integrate` must complete for a DB-owned adhoc
-    // identity whose mirror was deleted before active. This drives the full
-    // lifecycle end to end with no Backlog task file. The execute harness normally
-    // commits its output; preserve the boundary if a fixture leaves work behind.
-    if (runGit(worktree, ['status', '--porcelain'])) {
-      runGit(worktree, ['add', '-A']);
-      runGit(worktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
-    }
-    await runWorkflow(worktree, env, ['integrate', slug, '--dry-run']);
-    await runWorkflow(worktree, env, ['integrate', slug]);
-
-    return { slug, worktree, reviewPhase: state.phase };
-  } finally {
-    if (!shouldKeepTmp()) {
-      fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
-    }
-  }
-}
-
-/**
- * Mixed-repository lifecycle: one repo that carries a real Backlog task AND
- * supports a DB-owned adhoc free-text draft (task-2468 round 3). This proves
- * both intake cases complete in the same repository without cross-intake
- * identity, lifecycle, or mirror interference.
- *
- * The Backlog task-2002 drives the full draft → active → review → integrate →
- * done lifecycle. The free-text draft materializes a DB-owned
- * px-<NNNN> that drives draft → active → review (approved) in the
- * same repo. Assertions confirm distinct slugs/worktrees, that the Backlog
- * task reaches `done`, that the adhoc mirror lives in the adhoc worktree and
- * never clobbers the base repo's Backlog task, and that the Backlog task still
- * resolves after the adhoc draft.
- */
-async function runMixedScenario() {
-  const title = 'Primary Branch Lifecycle';
-  const repo = setupRepository({ slug: 'task-2002', title });
-  const env = workflowEnv(repo.binDir, repo.stateHome, repo.repoRoot);
-
-  try {
-    // --- Backlog intake: full lifecycle to done ---
-    await runWorkflow(repo.repoRoot, env, ['draft', 'task-2002', '--agent', 'custom']);
-    assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'draft should create the Backlog task in the base repo');
-
-    const backlogWorktree = worktreePathFor(repo.repoRoot, 'task-2002');
-    assert.ok(fs.existsSync(backlogWorktree), `expected Backlog mission worktree at ${backlogWorktree}`);
-
-    await runWorkflow(backlogWorktree, env, ['active', 'task-2002', '--implementer', 'custom']);
-    const backlogState = await reviewState(repo.repoRoot, 'task-2002', env);
-    assert.equal(backlogState.phase, 'approved', 'Backlog task should reach an approved review');
-
-    // Integrate the Backlog task: squash into main, mark done, delete worktree.
-    if (runGit(backlogWorktree, ['status', '--porcelain'])) {
-      runGit(backlogWorktree, ['add', '-A']);
-      runGit(backlogWorktree, ['commit', '-m', 'task-2002: capture execute artifacts']);
-    }
-    await runWorkflow(backlogWorktree, env, ['integrate', 'task-2002', '--dry-run']);
-    await runWorkflow(backlogWorktree, env, ['integrate', 'task-2002']);
-    const rootTask = taskFileIn(repo.repoRoot, 'task-2002');
-    assert.ok(rootTask, 'integrate should leave the Backlog task in the base repo');
-    assert.equal(taskStatus(rootTask), 'done', 'Backlog task should be done after integrate');
-    assert.ok(!fs.existsSync(backlogWorktree), 'integrate should clean up the Backlog worktree');
-
-    // --- Adhoc intake: draft in the SAME repo, prove it works alongside ---
-    await runWorkflow(repo.repoRoot, env, ['draft', 'fix hello world greeting', '--agent', 'custom']);
-    const adhocSlug = discoverAdhocSlug(repo.repoRoot);
-    assert.ok(adhocSlug, 'adhoc draft must materialize under missions/');
-    assert.match(adhocSlug, /^px-\d+$/i, 'adhoc identity must be DB-owned');
-    assert.notEqual(adhocSlug, 'task-2002', 'adhoc and Backlog identities must be distinct');
-
-    const adhocWorktree = worktreePathFor(repo.repoRoot, adhocSlug);
-    assert.ok(fs.existsSync(adhocWorktree), `expected adhoc mission worktree at ${adhocWorktree}`);
-    assert.notEqual(adhocWorktree, backlogWorktree, 'adhoc and Backlog worktrees must be distinct');
-
-    // The adhoc mirror lives in the adhoc worktree, not the base repo's Backlog.
-    // The base repo's Backlog task must survive the adhoc draft untouched.
-    assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'base repo Backlog task must survive the adhoc draft');
-
-    await runWorkflow(adhocWorktree, env, ['active', adhocSlug, '--implementer', 'custom']);
-    const adhocState = await reviewState(repo.repoRoot, adhocSlug, env);
-    assert.equal(adhocState.phase, 'approved', 'adhoc mission should reach an approved review');
-
-    // Complete the adhoc half of the mixed scenario: integrate the DB-owned
-    // adhoc identity through the real CLI, proving it completes the full
-    // lifecycle end to end without a Backlog task file.
-    if (runGit(adhocWorktree, ['status', '--porcelain'])) {
-      runGit(adhocWorktree, ['add', '-A']);
-      runGit(adhocWorktree, ['commit', '-m', 'adhoc: capture execute artifacts before integrate']);
-    }
-    await runWorkflow(adhocWorktree, env, ['integrate', adhocSlug, '--dry-run']);
-    await runWorkflow(adhocWorktree, env, ['integrate', adhocSlug]);
-    assert.ok(!fs.existsSync(adhocWorktree), 'integrate should clean up the adhoc worktree');
-
-    // The Backlog task must still resolve after the adhoc draft (no mirror
-    // clobbering across intake). The DB-owned adhoc identity never appears in
-    // the base repo's Backlog task storage.
-    assert.ok(taskFileIn(repo.repoRoot, 'task-2002'), 'Backlog task must still resolve after the adhoc draft');
-
+    const testsRun = await runIntegrationTestsTurn(worktree, env, slug, { allowFailure: true });
+    const testsMarkers = fs.readdirSync(markers).sort();
+    const mainHeadBefore = runGit(repo.repoRoot, ['rev-parse', 'main']);
+    const integrate = await runWorkflow(worktree, env, ['integrate', slug], 60000, { allowFailure: true, invokeFromTarget: true });
     return {
-      backlogSlug: 'task-2002',
-      backlogStatus: 'done',
-      adhocSlug,
-      adhocReviewPhase: adhocState.phase,
-      adhocStatus: 'integrated',
+      slug,
+      exitCode: integrate.status,
+      testsOutput: `${testsRun.stdout}\n${testsRun.stderr}`,
+      integrateOutput: `${integrate.stdout}\n${integrate.stderr}`,
+      testsMarkers,
+      integrateMarkers: fs.readdirSync(markers).sort(),
+      hookLines: postIntegrateHookLines(repo.repoRoot),
+      worktreeExists: fs.existsSync(worktree),
+      mainHeadBefore,
+      mainHeadAfter: runGit(repo.repoRoot, ['rev-parse', 'main']),
     };
   } finally {
     if (!shouldKeepTmp()) {
       fs.rmSync(repo.tmpRoot, { recursive: true, force: true });
+      if (worktree) { fs.rmSync(worktree, { recursive: true, force: true }); }
     }
   }
 }
 
-if (process.argv[2] === '--scenario') {
-  const payload = JSON.parse(Buffer.from(process.argv[3], 'base64').toString('utf8'));
-  const summary = await runScenario(payload);
-  process.stdout.write(JSON.stringify(summary));
-  process.exit(0);
-}
+test('the tests action records the gate run and integrate refuses it without starting a gate (px-0050.01, TASK-2872.02)', async () => {
+  const result = await runGateFailureScenario();
+  assert.equal(result.slug, 'task-2003');
+  // px-0050.01: the tests action runs every independent gate to completion, blocks the dependent of
+  // a failed prerequisite and reports each failure.
+  assert.deepEqual(result.testsMarkers, ['failing', 'passing', 'second'], 'the tests action ran every independent gate and blocked the dependent one');
+  assert.match(result.testsOutput, /first-defect/);
+  assert.match(result.testsOutput, /second-defect/);
+  assert.match(result.testsOutput, /2 failed, 1 blocked, 0 cancelled/);
+  assert.match(result.testsOutput, /dependent-gate blocked by failing-gate/);
+  assert.notEqual(result.exitCode, 0, 'a red recorded run must not admit integration');
+  assert.match(result.integrateOutput, /\[FAIL\]/);
+  assert.doesNotMatch(result.integrateOutput, /Repository gate \(integration\): /, 'px integrate must not start an integration gate');
+  assert.deepEqual(result.integrateMarkers, result.testsMarkers, 'px integrate started no additional gate');
+  assert.deepEqual(result.hookLines, [], 'the post-integrate hook must not run after the recorded gate failure');
+  assert.ok(result.worktreeExists, 'a refused integration must preserve the mission worktree');
+  assert.equal(result.mainHeadAfter, result.mainHeadBefore, 'a refused integration must not advance main');
+});
 
-test('feature-branch lifecycle drafts from the recorded base and integrates back into that feature branch', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: true, integrate: true });
-  assert.ok(summary.draft != null);
+test('feature-branch lifecycle drafts, activates, reviews and integrates through the public CLI', async t => {
+  const summary = await runScenario(t);
+  assert.match(summary.slug, /^px-\d+$/);
+  assert.ok(summary.draft);
   assert.equal(summary.draft.taskStatus, 'refined');
-  assert.ok(summary.draft != null);
-  assert.equal(summary.draft.missionHasBaseBranch, true);
-  assert.ok(summary.active != null);
-  assert.equal(summary.active.taskStatus, 'ready-for-integration');
-  assert.ok(summary.active != null);
+  assert.equal(summary.draft.missionId.toLowerCase(), summary.slug);
+  assert.ok(summary.active);
   assert.equal(summary.active.reviewState.phase, 'approved');
-  assert.ok(summary.active != null);
   assert.equal(summary.active.reviewState.disposition, 'APPROVED');
-  assert.ok(summary.active != null);
-  assert.deepEqual(summary.active.checkpointFiles, []);
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.rootTaskStatus, 'done');
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.worktreeExistsAfter, false);
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
-  assert.ok(summary.integrate != null);
-  assert.notEqual(summary.integrate.featureHeadAfter, summary.integrate.mainHeadBefore);
-});
-
-test('primary-branch lifecycle integrates cleanly to main and marks the task done', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true });
-  assert.ok(summary.draft != null);
-  assert.equal(summary.draft.taskStatus, 'refined');
-  assert.ok(summary.draft != null);
-  assert.equal(summary.draft.missionHasBaseBranch, false);
-  assert.ok(summary.active != null);
-  assert.equal(summary.active.taskStatus, 'ready-for-integration');
-  assert.ok(summary.active != null);
-  assert.deepEqual(summary.active.checkpointFiles, []);
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.rootTaskStatus, 'done');
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.worktreeExistsAfter, false);
-  assert.ok(summary.integrate != null);
-  assert.notEqual(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
-});
-
-test('closeout records integration stats and keeps the completed task record', async () => {
-  const summary = await runScenario({});
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.rootTaskStatus, 'done');
-  assert.ok(summary.integrate != null);
-  assert.ok(summary.integrate.closeout);
-  assert.equal(summary.integrate.closeout.mission?.status, 'done');
-  assert.ok(summary.integrate != null);
-  assert.ok(summary.integrate.closeout.mission?.closed_at);
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.closeout.measurements?.total, 1);
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.worktreeExistsAfter, false);
-});
-
-test('configured post-integrate hook runs exactly once with slug/base-worktree/base-branch/variant env vars (SC2/SC3)', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true });
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.rootTaskStatus, 'done');
-  assert.ok(summary.integrate != null);
-  assert.ok(summary.integrate.postIntegrateHookLines);
-  assert.equal(summary.integrate.postIntegrateHookLines.length, 1, 'hook must run exactly once for a successful integrate');
-  assert.ok(summary.integrate != null);
-  assert.match(
-    summary.integrate.postIntegrateHookLines[0],
-    /^slug=task-2002 base_worktree=\S+ base_branch=main variant=variant-b$/
-  );
-});
-
-test('pre-commit hook changes land inside the mission squash commit, not a follow-up commit (task-2510)', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, preCommitHook: true });
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.rootTaskStatus, 'done');
-  // TASK-2595: the landed subject is the recorded mission title, and the body
-  // records the mission task reference — main history reads like the mission.
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.landedSubject, 'Primary Branch Lifecycle', 'main tip subject must be the recorded mission title');
-  assert.ok(summary.integrate != null);
-  assert.ok(summary.integrate.landedBody);
-  assert.ok(
-    summary.integrate.landedBody.split('\n').includes('Task: task-2002'),
-    `main tip body must record the mission task reference; body was ${JSON.stringify(summary.integrate.landedBody)}`,
-  );
-  assert.ok(summary.integrate != null);
-  assert.ok(summary.integrate.landedFiles);
-  assert.ok(summary.integrate.landedFiles.includes('version.txt'), `landed commit must carry the hook change: ${summary.integrate.landedFiles.join(', ')}`);
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.versionAtMain, '1.0.1');
-});
-
-test('a failed integration gate aborts before the post-integrate hook can run (SC4)', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.gateFailed, true);
-  assert.ok(summary.integrate != null);
-  assert.notEqual(summary.integrate.exitCode, 0);
-  assert.ok(summary.integrate != null);
-  assert.ok(summary.integrate.postIntegrateHookLines);
-  assert.deepEqual(summary.integrate.postIntegrateHookLines, []);
-});
-
-test('integrate finishes every independent gate, blocks failed-prerequisite dependents and reports each failure (px-0050.01)', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: true, failIntegrationGate: true });
-  assert.deepEqual(summary.integrate?.gateMarkers, ['failing', 'passing', 'second'], 'independent gates ran; the dependent of the failed prerequisite did not');
-  const output = summary.integrate?.gateOutput ?? '';
-  assert.match(output, /first-defect/);
-  assert.match(output, /second-defect/);
-  assert.match(output, /2 failed, 1 blocked, 0 cancelled/);
-  assert.match(output, /dependent-gate blocked by failing-gate/);
-});
-
-test('a repo with no post-integrate hook configured runs px integrate with unchanged behavior (SC1)', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: false, integrate: true, postIntegrateHook: false });
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.rootTaskStatus, 'done');
-  assert.ok(summary.integrate != null);
-  assert.equal(summary.integrate.postIntegrateHookLines, undefined);
-});
-
-test('artifact-focused run keeps the typed contract file-free while preserving the Backlog mirror', async () => {
-  const summary = await runScenario({ launchFromFeatureBranch: true, integrate: false });
-  assert.ok(summary.draft != null);
-  assert.ok(summary.draft.missionId, 'Backlog task should retain its id');
-  assert.ok(summary.active != null);
-  assert.equal(summary.active.taskIdCount, 1, 'mission id should map to exactly one backlog task in the test repo');
-  assert.ok(summary.active != null);
+  assert.equal(summary.active.taskIdCount, 0, 'the deleted adhoc mirror must not be recreated');
   assert.deepEqual(summary.active.milestoneFiles, ['milestone-1.md']);
-  assert.ok(summary.active != null);
   assert.deepEqual(summary.active.checkpointFiles, []);
-});
-
-test('adhoc-only intake: a free-text draft reaches an approved review with a DB-owned adhoc identity', async () => {
-  const summary = await runAdhocScenario();
-  assert.match(summary.slug, /^px-\d+$/i, 'the materialized identity must be the DB-owned adhoc form');
-  assert.equal(summary.reviewPhase, 'approved', 'DB-authoritative review read must resolve the adhoc mission');
-});
-
-test('mixed intake: a Backlog task and a DB-owned adhoc mission both complete in one repository', async () => {
-  const summary = await runMixedScenario();
-  assert.equal(summary.backlogSlug, 'task-2002', 'the Backlog intake must run a task-<slug> mission');
-  assert.equal(summary.backlogStatus, 'done', 'the Backlog intake must integrate to done');
-  assert.match(summary.adhocSlug, /^px-\d+$/i, 'the adhoc intake must materialize a DB-owned identity');
-  assert.equal(summary.adhocReviewPhase, 'approved', 'the DB-owned adhoc intake must reach an approved review');
-  assert.equal(summary.adhocStatus, 'integrated', 'the DB-owned adhoc intake must complete its lifecycle through px integrate');
+  assert.ok(summary.integrate);
+  assert.equal(summary.integrate.backlogStatus, 'done');
+  assert.equal(summary.integrate.worktreeExistsAfter, false);
+  assert.equal(summary.integrate.mainHeadAfter, summary.integrate.mainHeadBefore);
+  assert.notEqual(summary.integrate.featureHeadAfter, summary.integrate.mainHeadBefore);
+  assert.equal(summary.integrate.closeout?.mission?.status, 'done');
+  assert.ok(summary.integrate.closeout?.mission?.closed_at);
+  assert.equal(summary.integrate.closeout?.measurements?.total, 1);
+  assert.equal(summary.integrate.hookLines?.length, 1);
+  assert.equal(summary.integrate.versionAtFeature, '1.0.1');
 });

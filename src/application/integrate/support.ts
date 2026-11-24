@@ -1,5 +1,3 @@
-import type { ParallixConfiguration } from "../ports/configuration.js";
-import { DEFAULT_CONFIGURATION } from "../ports/configuration.js";
 /**
  * Shared support for the integrate workflow modules: the public
  * flag contract, task-path containment, bounce implementer resolution, and the
@@ -15,64 +13,28 @@ import type { BacklogMirrorOwnership } from '../../domain/mission.js';
 
 export const VARIANT_B_AUTOMATION_SUMMARY = 'Variant B automation: Backlog task closeout, worktree-path rewrite, squash commit with hook-enforced validation, Forgejo sync-merged, and mission worktree cleanup.';
 
-const REAL_AGENT_OPTION = '--real-agent';
-const REAL_AGENT_MODEL_OPTION = '--real-agent-model';
-const INTEGRATE_VALUE_OPTIONS = new Set([REAL_AGENT_OPTION, REAL_AGENT_MODEL_OPTION]);
-const CODEX_REAL_AGENT_MODEL = 'gpt-6-luna';
-const INTEGRATE_BOOLEAN_OPTIONS: ReadonlyMap<string, 'dryRun' | 'noIntegrationGates' | 'noGate' | 'recoverLanded'> = new Map([['--dry-run', 'dryRun'], ['--no-integration-gates', 'noIntegrationGates'], ['--no-gate', 'noGate'], ['--recover-landed', 'recoverLanded']]);
+const INTEGRATE_BOOLEAN_OPTIONS: ReadonlyMap<string, 'dryRun' | 'noGate' | 'recoverLanded'> = new Map([['--dry-run', 'dryRun'], ['--no-gate', 'noGate'], ['--recover-landed', 'recoverLanded']]);
 
 export interface IntegrateRequest {
   readonly explicitSlug?: string;
   readonly dryRun: boolean;
-  readonly noIntegrationGates: boolean;
   readonly noGate: boolean;
   readonly recoverLanded: boolean;
-  readonly realAgent: string | null;
-  readonly realAgentModel: string | null;
 }
 
-function parseIntegrateValueOption(arg: string, value: string | undefined, state: { realAgent: string | null; realAgentModel: string | null }): boolean {
-  if (!INTEGRATE_VALUE_OPTIONS.has(arg)) { return false; }
-  if (!value || value.startsWith('--')) { throw new Error(`${arg} requires a value.`); }
-  if (arg === REAL_AGENT_OPTION) {
-    if (state.realAgent !== null) { throw new Error('--real-agent may be supplied only once.'); }
-    state.realAgent = value;
-  } else {
-    if (state.realAgentModel !== null) { throw new Error('--real-agent-model may be supplied only once.'); }
-    state.realAgentModel = value;
-  }
-  return true;
-}
-
-/** Parse only the public integrate flags before any preflight or gate work. */
-export function parseIntegrateArgs(args: string[], configuration: ParallixConfiguration = DEFAULT_CONFIGURATION): IntegrateRequest {
+/** Parse only the public integrate flags before any preflight work. */
+export function parseIntegrateArgs(args: string[]): IntegrateRequest {
   const params: string[] = [];
-  const state = { dryRun: false, noIntegrationGates: false, noGate: false, recoverLanded: false, realAgent: null as string | null, realAgentModel: null as string | null };
+  const state = { dryRun: false, noGate: false, recoverLanded: false };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (parseIntegrateValueOption(arg, args[index + 1], state)) {
-      index += 1;
-      continue;
-    }
     const booleanOption = INTEGRATE_BOOLEAN_OPTIONS.get(arg);
     if (booleanOption) { state[booleanOption] = true; continue; }
     if (arg.startsWith('--')) {throw new Error(`Unknown integrate option: ${arg}`);}
     params.push(arg);
   }
 
-  if ((state.realAgent === null) !== (state.realAgentModel === null)) {
-    throw new Error('--real-agent and --real-agent-model must be supplied together.');
-  }
-  if (state.realAgent !== null && state.realAgent !== 'codex') {
-    throw new Error(`Unsupported real agent "${state.realAgent}". Supported value: codex.`);
-  }
-  if (state.realAgent === 'codex' && state.realAgentModel !== CODEX_REAL_AGENT_MODEL) {
-    throw new Error(`Unsupported Codex real-agent model "${state.realAgentModel}". Supported value: ${CODEX_REAL_AGENT_MODEL}.`);
-  }
-  if (state.noIntegrationGates && !configuration.runtime.integrationGateBypass) {
-    throw new Error('--no-integration-gates is rejected: final integration gates are mandatory.');
-  }
   return { explicitSlug: params[0], ...state };
 }
 

@@ -96,7 +96,7 @@ export interface StatusMissionData {
    * and the board cannot report different facts about the same round (TASK-2846).
    */
   readonly reviewHistory: readonly ReviewRoundSummary[];
-  /** Ordered verification-policy history; absent unless verificationPolicy is enabled. A fallback names the fixed-policy reason. */
+  /** Ordered verification-policy history; a fallback names the fixed-policy reason. */
   readonly verificationHistory?: { readonly fallback: string } | {
     readonly entries: readonly import('../verification-policy/belief.js').VerificationHistoryEntry[]; readonly tests: import('../verification-policy/history-adapter.js').IntegrationTestsState;
   };

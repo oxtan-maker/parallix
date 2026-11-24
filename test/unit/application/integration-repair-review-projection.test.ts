@@ -270,31 +270,16 @@ test('repair facts and history name decided code and retain unknown legacy heads
   assert.equal(projectReviewHistory(legacy)[0].decidedRevision, null);
 });
 
-import { inMemoryTransitionStore } from '../../fixtures/mission-builders.js';
 import { integrationServices } from '../../helpers/stub-integration-services.js';
-import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { decideMission } from '../../../src/domain/mission-workflow.js';
 import { retainIntegrationApproval } from '../../../src/application/integrate/approval-retention.js';
 import { pendingIntegrationApproval } from '../../../src/domain/integration-repair-policy.js';
 import { parseIntegrationRepairAssessment } from '../../../src/domain/integration-repair-record.js';
 import type { IntegrationApprovalEvidencePort } from '../../../src/application/ports/integration-approval-evidence.js';
+import { integrationRetentionScenario } from '../../helpers/integration-retention-scenario.js';
 
 function retentionScenario() {
-  const original = approvedNoRepair();
-  const current = currentReviewRound(original);
-  const review = { ...original, rounds: replaceCurrentRound(original, { ...current, subject: { ...current.subject, baseline: changeRevision('base') } }) };
-  const approved = mission('integration', review);
-  const active = decideMission(approved, { type: 'rebound-to-active', agent: IMPLEMENTER,
-    cause: { kind: 'integration-gate-failure', gate: 'unit', command: 'npm test', log: 'broken' }, occurredAt: '2026-09-20T11:05:00Z' });
-  const store = inMemoryTransitionStore(active);
-  const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store) });
-  const evidence: IntegrationApprovalEvidencePort = {
-    reconcileHumanFeedback: async () => true, samePatch: async () => true, now: () => '2026-09-20T12:00:00Z',
-    validation: async () => ({ missionId: 'task-2620', sha: 'candidate', baseline: 'base', hooks: ['unit'],
-      createdAt: '2026-09-20T11:10:00Z', reference: 'operational_history:1' }),
-  };
-  const input = { slug: 'task-2620', services, evidence, candidate: { revision: 'candidate', baseline: 'base' }, head: () => 'candidate' };
-  return { approved, active, store, services, evidence, input };
+  return integrationRetentionScenario(mission('integration', approvedNoRepair()), IMPLEMENTER);
 }
 
 test('gate failure retains original judgment while pending repair blocks recovery (TASK-2820)', async () => {
@@ -391,9 +376,10 @@ for (const fault of ['missing', 'failed', 'other-mission', 'other-gate', 'old', 
 import { resumePendingIntegrationRepair } from '../../../src/application/integrate/repair-resumption.js';
 import { stubIntegrateWorkflowPorts } from '../../helpers/stub-integrate-workflow-ports.js';
 import { integrationBounceSeams } from '../../helpers/integration-bounce-seams.js';
+import { recordedGateRun } from '../../helpers/integrate-git-doubles.js';
 
 for (const fault of ['missing', 'other-baseline', 'missing-baseline'] as const) {
-  test(`restart reruns ${fault} evidence with the operator agent selection and stops before landing (TASK-2820)`, async () => {
+  test(`restart certifies ${fault} evidence from the recorded tests, starts no gate and stops before landing (TASK-2820, TASK-2872.02)`, async () => {
     const s = retentionScenario();
     const marker = (await s.evidence.validation('task-2620'))!;
     s.evidence.validation = async () => fault === 'missing' ? null
@@ -405,20 +391,17 @@ for (const fault of ['missing', 'other-baseline', 'missing-baseline'] as const) 
         resolveBaseWorktree: () => '/fixture', missionBranchName: () => 'mission/task-2620' },
       git: { git: () => ({ status: 0, stdout: 'base', stderr: '' }) },
       gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
-        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async (_phase, options) => {
-          assert.equal(options.realAgent, 'codex'); assert.equal(options.realAgentModel, 'operator-model');
-          assert.equal(options.targetBranch, 'main', 'resumed repair preserves policy identity target'); runs++;
-          return { ok: true };
-        } },
+        loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }],
+        readGateRun: () => recordedGateRun([{ key: 'unit', command: 'verify' }]),
+        runPhaseGates: async () => { runs++; return { ok: true }; } },
     });
     const services = { ...s.services, operationalHistory: {
-      loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async () => { s.evidence.validation = async () => marker; },
+      recordIntegrationValidation: async () => { s.evidence.validation = async () => marker; },
     } };
     const seams = { ...integrationBounceSeams({ transitionTaskFn: () => { mirrors++; } }),
       routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair launch'); } };
-    await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports, missionExecutionContext({ missionId: 'task-2620' }), seams,
-      { realAgent: 'codex', realAgentModel: 'operator-model' }), { name: 'IntegrationStopsForHuman' });
-    assert.equal(runs, 1); assert.equal(mirrors, 1); assert.equal(s.store.mission().status, 'integration');
+    await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports, missionExecutionContext({ missionId: 'task-2620' }), seams), { name: 'IntegrationStopsForHuman' });
+    assert.equal(runs, 0, 'certification reads the recorded run and starts no gate'); assert.equal(mirrors, 1); assert.equal(s.store.mission().status, 'integration');
   });
 }
 
@@ -452,12 +435,11 @@ test('restart resumes rebased validated repair without rerunning its gates (PX-0
     gates: { approvalEvidence: () => s.evidence, captureFinalIntegrationTree: () => ({ ok: true, commit: 'candidate' }),
       loadPhaseGates: () => [{ key: 'unit', command: 'verify', order: 1 }], runPhaseGates: async () => { runs++; return { ok: true }; } },
   });
-  const services = { ...s.services, operationalHistory: { loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async () => { recorded++; } } };
+  const services = { ...s.services, operationalHistory: { recordIntegrationValidation: async () => { recorded++; } } };
   const seams = { ...integrationBounceSeams({ transitionTaskFn: () => { mirrors++; } }),
     routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair launch'); } };
   await assert.rejects(resumePendingIntegrationRepair('task-2620', services, ports,
-    missionExecutionContext({ missionId: 'task-2620' }), seams,
-    { realAgent: null, realAgentModel: null }), { name: 'IntegrationStopsForHuman' });
+    missionExecutionContext({ missionId: 'task-2620' }), seams), { name: 'IntegrationStopsForHuman' });
   assert.deepEqual({ runs, recorded, mirrors }, { runs: 0, recorded: 0, mirrors: 1 }, 'reuse is neither a gate execution nor a new validation record');
   assert.equal(s.store.mission().status, 'integration');
 });
@@ -504,8 +486,7 @@ for (const fault of ['missing-evidence', 'blocker'] as const) {
         authorizedGates: [], authorizedCriteria: [], attempt: 1, verified: false, evidenceRecorded: fault !== 'missing-evidence',
         ...(fault === 'blocker' ? { blocker: { command: 'verify', diagnostic: 'locked contract needs correction', authorityReason: 'operator owns the contract', proposedCorrection: 'operator corrects the contract' } } : {}) } }] });
     const seams = { ...integrationBounceSeams(), routeIntegrationGateFailureFn: async () => { throw new Error('unexpected repair'); } };
-    await assert.rejects(resumePendingIntegrationRepair('task-2620', s.services, stubIntegrateWorkflowPorts(), missionExecutionContext({ missionId: 'task-2620' }), seams,
-      { realAgent: null, realAgentModel: null }), fault === 'blocker' ? /locked contract/ : /checkpoint evidence is missing/);
+    await assert.rejects(resumePendingIntegrationRepair('task-2620', s.services, stubIntegrateWorkflowPorts(), missionExecutionContext({ missionId: 'task-2620' }), seams), fault === 'blocker' ? /locked contract/ : /checkpoint evidence is missing/);
     assert.equal(s.store.events.length, 0);
   });
 }
@@ -543,7 +524,7 @@ test('live repair compares and records the candidate baseline when the base adva
     return candidate.baseline === 'base';
   };
   const services = integrationServices({ ...s.services, operationalHistory: {
-    loadLatestByTypeForMission: async () => null, recordIntegrationValidation: async input => {
+    recordIntegrationValidation: async input => {
       if (input.failed) { return; }
       recordedBaseline = input.baseline;
       validation = { ...input, baseline: input.baseline ?? null, createdAt: new Date().toISOString(), reference: 'history:1' };
@@ -566,7 +547,7 @@ test('live repair compares and records the candidate baseline when the base adva
   const step = createIntegrationGateStep(ports);
   await assert.rejects(step.runRequiredLocalGates({ slug: 'task-2620', missionLoad: await s.store.load(), missionServices: services,
     context: integrationContext({ slug: 'task-2620', taskAssignee: IMPLEMENTER, missionHeadSha: head, baseBranch: 'main' }),
-    dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+    realAgent: null, realAgentModel: null,
     seams: { ...integrationBounceSeams({ transitionTaskFn: () => true }),
       reReviewFn: async () => { throw new Error('Equivalent repair must not enter re-review'); },
       routeIntegrationGateFailureFn: options => routeIntegrationGateFailure({ ...options, captureFinalTreeFn: capture, runPhaseGatesFn: runGates,
@@ -595,7 +576,6 @@ test('production repair with lifecycle-only approval stops for fresh review inst
   t.mock.method(log, 'fail', (message: string) => { messages.push(message); });
   const markers: { hooks: readonly string[]; failed?: boolean }[] = [];
   const services = integrationServices({ ...s.services, operationalHistory: {
-    loadLatestByTypeForMission: async () => null,
     recordIntegrationValidation: async marker => { markers.push(marker); },
   } });
   const ports = stubIntegrateWorkflowPorts({
@@ -611,7 +591,7 @@ test('production repair with lifecycle-only approval stops for fresh review inst
   await assert.rejects(createIntegrationGateStep(ports).runRequiredLocalGates({ slug: 'task-2620',
     missionLoad: await s.store.load(), missionServices: services,
     context: integrationContext({ slug: 'task-2620', taskAssignee: IMPLEMENTER }),
-    dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+    realAgent: null, realAgentModel: null,
     seams: { ...integrationBounceSeams({ transitionTaskFn: () => true }),
       routeIntegrationGateFailureFn: async options => {
         await options.reactivateMissionFn!('task-2620');

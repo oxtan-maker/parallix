@@ -9,7 +9,7 @@ import { webAnalytics } from '../../../fixtures/web-projection.js';
 import { makeProjection } from '../../../fixtures/board-projection.js';
 
 const reactGlobal: typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean } = globalThis;
-export async function renderBoard(options: { readonly board: WebBoardSnapshot; readonly analytics?: WebBoardAnalytics | (() => WebBoardAnalytics); readonly detail?: WebMissionDetail; readonly result?: unknown; readonly refresh?: () => Promise<void>; readonly respond?: () => Promise<Response> }) {
+export async function renderBoard(options: { readonly board: WebBoardSnapshot; readonly analytics?: WebBoardAnalytics | (() => WebBoardAnalytics | Promise<WebBoardAnalytics>); readonly detail?: WebMissionDetail; readonly result?: unknown; readonly refresh?: () => Promise<void>; readonly respond?: () => Promise<Response> }) {
   const window = new Window();
   const previous = { window: globalThis.window, document: globalThis.document, fetch: globalThis.fetch, IS_REACT_ACT_ENVIRONMENT: reactGlobal.IS_REACT_ACT_ENVIRONMENT, requestAnimationFrame: globalThis.requestAnimationFrame };
   Object.assign(globalThis, { window, document: window.document });
@@ -26,7 +26,7 @@ export async function renderBoard(options: { readonly board: WebBoardSnapshot; r
     if (path === '/api/board/analytics') {
       analyticsReads += 1;
       const served = typeof options.analytics === 'function' ? options.analytics() : options.analytics;
-      return json(served ?? webAnalytics(makeProjection()));
+      return json((await served) ?? webAnalytics(makeProjection()));
     }
     calls.push(init!);
     if (path.endsWith('/detail') && options.detail !== undefined) { return json(options.detail); }

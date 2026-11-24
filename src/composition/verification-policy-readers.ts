@@ -1,6 +1,6 @@
 import type { MissionStore } from '../application/domain-ports.js';
 import type { ParallixConfiguration } from '../application/ports/configuration.js';
-import type { ActiveVerificationPolicyConfiguration, ReviewStartPolicyPorts } from '../application/ports/verification-policy.js';
+import type { ReviewStartPolicyPorts } from '../application/ports/verification-policy.js';
 import type { OperationalHistoryService } from '../application/services/operational-history-service.js';
 import { readVerificationHistory, type PolicyHistoryPorts } from '../application/verification-policy/history-adapter.js';
 import { missionId } from '../domain/mission.js';
@@ -31,10 +31,8 @@ export function createVerificationPolicyReaders(
   services: VerificationPolicyReaderServices,
 ): Pick<ReviewStartPolicyPorts, 'configuration' | 'loadPolicy' | 'identity'> & {
   readonly readHistoryFor: (_slug: string, _signal?: AbortSignal) => ReturnType<ReviewStartPolicyPorts['readHistory']>;
-} | undefined {
-  const configured = loadEffectiveConfig(rootDir).verificationPolicy;
-  if (configured.mode === 'off') { return undefined; }
-  const policy: ActiveVerificationPolicyConfiguration = { ...configured, mode: configured.mode };
+} {
+  const policy = loadEffectiveConfig(rootDir).verificationPolicy;
   const identity = createGitChangeIdentity(rootDir, undefined, { snapshotBranchHeads: true });
   const operations = new SqliteWorkflowOperationStore(services.db, services.repositoryId);
   const readHistoryFor = async (slug: string, _signal?: AbortSignal) => {

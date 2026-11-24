@@ -9,9 +9,9 @@ import { createReviewStartFailureDiagnostics } from '../adapters/review/review-s
 import { detectRebaseState } from '../adapters/git/git.js';
 
 /**
- * The pilot's choices for one review loop. Shadow and off return nothing, so the
- * fixed policy runs with no policy work; tests run through the integrate
- * workflow's own claim, rebase and gate owners.
+ * The policy's choices for one review loop. An unusable input returns no choice,
+ * so the fixed policy stays in charge; tests run through the integrate workflow's
+ * own claim, rebase and gate owners.
  */
 export function createPolicyActionPort(input: {
   readonly slug: string;
@@ -20,8 +20,7 @@ export function createPolicyActionPort(input: {
   readonly policy: Omit<ReviewStartPolicyPorts, 'diagnostic'>;
   readonly policyFactory: VerificationActionPolicyFactory;
   readonly missionServices: IntegrationMissionServices;
-}): PolicyActionPort | undefined {
-  if (input.policy.configuration.mode !== 'pilot') { return undefined; }
+}): PolicyActionPort {
   const diagnostic = createReviewStartFailureDiagnostics(fmt.log.plain);
   return {
     select: facts => selectPolicyAction(facts, { ...input.policy, diagnostic }),
@@ -51,7 +50,8 @@ export function createPolicyActionPort(input: {
       if (changeIdentity === null || !input.policy.writer.recordHumanReviewWithdrawal) {
         throw new Error('the concurrent human request cannot be fenced without its durable change identity');
       }
-      return await input.policy.writer.recordHumanReviewWithdrawal({ missionId: facts.missionId, changeIdentity,
+      return await input.policy.writer.recordHumanReviewWithdrawal({ missionId: facts.missionId,
+        repositoryId: input.policy.repositoryId, changeIdentity,
         round: facts.round, reason: 'automated-failure' });
     },
     rebaseInProgress: () => detectRebaseState(input.executionContext.missionWorktree).inProgress,

@@ -7,8 +7,8 @@ import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { reviewActionStarted } from '../../../../src/application/review-action-history.js';
 import { missionId } from '../../../../src/domain/mission.js';
 
-async function approvedRun(mode: 'off' | 'shadow' | 'pilot') {
-  const slug = `task-2859-${mode}`;
+async function approvedRun() {
+  const slug = 'task-2859-active-policy';
   const observations: ReviewStartFacts[] = [];
   const committed: string[] = [];
   const actions: ReturnType<typeof reviewActionStarted>[] = [];
@@ -38,12 +38,12 @@ async function approvedRun(mode: 'off' | 'shadow' | 'pilot') {
         return 'recorded';
       },
     },
-    ...(mode === 'off' ? {} : { reviewStarts: { observe: async facts => {
+    reviewStarts: { observe: async facts => {
       assert.ok(committed.includes(facts.actualAction), 'the start boundary must commit before observation');
       observations.push(facts);
-    } } }),
+    } },
     agents: { launch: async launch => {
-      await launch.onStarted?.({ agent: launch.agent, runId: `run-${mode}` });
+      await launch.onStarted?.({ agent: launch.agent, runId: 'run-active-policy' });
       return { agent: launch.agent, result: { status: 0 } };
     } },
     artifacts: { consumeReviewer: async () => ({ consumed: true, ok: true as const, reviewState: 'APPROVED' }) },
@@ -53,38 +53,23 @@ async function approvedRun(mode: 'off' | 'shadow' | 'pilot') {
   return { fake, observations, actions };
 }
 
-test('off, shadow and pilot retain identical review actions and state after post-commit observation (TASK-2859.09)', async () => {
-  const off = await approvedRun('off');
-  const shadow = await approvedRun('shadow');
-  const pilot = await approvedRun('pilot');
-  const trace = (run: typeof off) => ({
-    launches: run.fake.launches.map(item => [item.role, item.agent]),
-    state: { phase: run.fake.current()?.phase, disposition: run.fake.current()?.disposition,
-      round: run.fake.current()?.round, implementer: run.fake.current()?.implementer, reviewer: run.fake.current()?.reviewer },
-    mirrors: run.fake.mirrors,
-  });
-  assert.deepEqual(trace(shadow), trace(off));
-  assert.deepEqual(trace(pilot), trace(off));
-  assert.deepEqual(off.observations, []);
-  for (const run of [off, shadow, pilot]) {
-    assert.deepEqual(run.actions.map(action => [action.actionSequence, action.action]), [[1, 'agent'], [2, 'human']],
-      'policy mode does not change the history-derived lifetime count');
-  }
-  for (const run of [shadow, pilot]) {
-    assert.deepEqual(run.observations.map(item => item.actualAction), ['agent', 'human']);
-    assert.deepEqual(run.observations.map(item => item.verdictCorrelation),
-      ['review:1:agent:claude-verdict', 'review:1:human-verdict']);
-    assert.equal(run.observations[0]?.agentRunId, `run-${run === shadow ? 'shadow' : 'pilot'}`);
-    assert.equal(run.observations[1]?.agentRunId, null);
-    assert.ok(run.observations.every(item => item.operatorInvocation));
-  }
+test('active policy observes both durable review starts without changing review actions (TASK-2859.09)', async () => {
+  const run = await approvedRun();
+  assert.deepEqual(run.actions.map(action => [action.actionSequence, action.action]), [[1, 'agent'], [2, 'human']]);
+  assert.deepEqual(run.observations.map(item => item.actualAction), ['agent', 'human']);
+  assert.deepEqual(run.observations.map(item => item.verdictCorrelation),
+    ['review:1:agent:claude-verdict', 'review:1:human-verdict']);
+  assert.equal(run.observations[0]?.agentRunId, 'run-active-policy');
+  assert.equal(run.observations[1]?.agentRunId, null);
+  assert.ok(run.observations.every(item => item.operatorInvocation));
+  assert.equal(run.fake.current()?.phase, 'approved');
 });
 
 test('restart replays only the durable human review-start key (TASK-2859.09)', async () => {
-  const approved = await approvedRun('shadow');
+  const approved = await approvedRun();
   const replayed: ReviewStartFacts[] = [];
   Object.assign(approved.fake.ports, { reviewStarts: { observe: async (facts: ReviewStartFacts) => { replayed.push(facts); } } });
-  await runReviewLoop({ slug: 'task-2859-shadow', isContinue: true, actionLimit: 40, skipReviewPreparation: true }, approved.fake.ports);
+  await runReviewLoop({ slug: 'task-2859-active-policy', isContinue: true, actionLimit: 40, skipReviewPreparation: true }, approved.fake.ports);
   assert.deepEqual(replayed.map(item => [item.actualAction, item.verdictCorrelation]),
     [['human', 'review:1:human-verdict']]);
   assert.equal(approved.fake.launches.length, 1);
@@ -92,14 +77,14 @@ test('restart replays only the durable human review-start key (TASK-2859.09)', a
 });
 
 test('persisted approval dry-run performs no observation or metadata read (TASK-2859.09 F1)', async () => {
-  const approved = await approvedRun('shadow');
+  const approved = await approvedRun();
   const observations: ReviewStartFacts[] = [];
   let heads = 0;
   Object.assign(approved.fake.ports, {
     reviewStarts: { observe: async (facts: ReviewStartFacts) => { observations.push(facts); } },
     preReview: { ...approved.fake.ports.preReview, head: () => { heads += 1; return 'head-1'; } },
   });
-  await runReviewLoop({ slug: 'task-2859-shadow', isContinue: true, dryRun: true, actionLimit: 40,
+  await runReviewLoop({ slug: 'task-2859-active-policy', isContinue: true, dryRun: true, actionLimit: 40,
     skipReviewPreparation: true }, approved.fake.ports);
   assert.deepEqual(observations, []);
   assert.equal(heads, 0);

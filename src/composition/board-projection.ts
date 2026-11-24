@@ -2,7 +2,7 @@ import { createHumanReviewEpisodeReader, createMissionCohortMetadataReader, crea
 import { SqliteWorkflowOperationStore, workflowOperationCollectionDefects } from '../adapters/sqlite/workflow-operation-store.js';
 import { createMissionTerminalCapability } from './mission-terminal-capability.js';
 import { retainedRepositoryRunRecords } from '../adapters/filesystem/run-history-store.js';
-import { retainedFlowRunRecords } from './verification-statistics.js';
+import { configuredVerificationProjectionPolicy, retainedFlowRunRecords } from './verification-statistics.js';
 import { failedExecution, type ProviderExecutionReader } from '../application/projections/provider-execution.js';
 import { DEFAULT_CONFIGURATION } from '../application/ports/configuration.js';
 import type { AgentFamily } from '../domain/agents.js';
@@ -88,7 +88,8 @@ export interface BoardProjectionCompositionDeps {
 /** Event families one projection build shares across every analytical reader. */
 export const BOARD_ANALYTICS_HISTORY_TYPES = [
   'mission.current-work', 'verification.attempt', 'flow.rebase', 'lead.operator-judgment',
-  'stats.recovery.evidence',
+  'stats.recovery.evidence', 'verification.review-start-decision', 'verification.review-start-outcome',
+  'verification.human-review-withdrawal', REVIEW_ACTION_STARTED_EVENT,
 ] as const;
 
 /**
@@ -331,9 +332,11 @@ async function boardVerificationInput(deps: {
     deps.metricsSession.historyRepo.findReboundRepairs?.() ?? [],
   ]);
   const operations = operationHistory.operations;
+  const policy = configuredVerificationProjectionPolicy(deps.rootDir);
   const flowMissions = flowRunMissions ?? requestedMissions
     ?? new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)]);
   return { repositoryId: deps.repositoryId, history, operations, lifecycle, reboundRepairs,
+    policyValues: policy.values, flowPolicy: policy.flow,
     runs: retainedRepositoryRunRecords(deps.rootDir),
     flowRuns: retainedFlowRunRecords(deps.missionTerminal(), flowMissions),
     repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };

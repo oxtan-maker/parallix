@@ -14,18 +14,18 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Let a precomputed POMDP policy choose the next verification action of a mission inside the review step, instead of the fixed sequence (agent review, human review, integration gates). Then collect enough missions to test whether this reduces verification and repair cost. This parent groups the work. Execute the numbered children rather than activating the umbrella as an implementation mission.
+This implementation wave introduced an offline-solved verification policy alongside the fixed agent review, human review and integration-gate sequence. TASK-2859.24 activated the operator-run pilot. PX-0073 owns experiment design and evaluation of the v0.13 time-parallel policy.
 
-Model and method: *Verification, Rework, and Scheduling in Parallix* v0.11, committed as `../parallix-research/research/verification-pomdp/parallix_stochastic_model_v11.tex` (the "model document"; every § reference in this wave means a section of that file). In short:
+The original implementation used *Verification, Rework, and Scheduling in Parallix* v0.11. The following contracts describe that wave. For the current artifact and evaluation model, see the v0.13 recalculation in the private research workspace. In the original wave,
 - the policy is solved offline with SARSOP and stored as a versioned artifact: vectors tagged with actions, plus the model matrices;
 - at runtime Parallix derives each mission's belief from its recorded verdicts and picks the next action;
 - no solver runs inside Parallix.
 
-Research simulations predict substantially lower verification and repair cost per change. The estimates have known issues, so this wave tests the hypothesis; it does not assume it. The wave makes **no assumption about which orderings the policy will choose**. It must support every order of agent review, integration tests and human review.
+The original wave supports every order of agent review, integration tests and human review.
 
 ## Reference documents (read from the repository; nothing in this wave depends on files outside it)
 
-- **Model document:** `../parallix-research/research/verification-pomdp/parallix_stochastic_model_v11.tex`, LaTeX source, readable as text. Section map: §1 provenance and notation; §2 problem and observed facts (the current fixed sequence); §3 the model (3.1 symbols, 3.2 states, 3.3 actions, 3.4 transition matrices, 3.5 observation probabilities, 3.6 costs, 3.7 Parallix's rules as restrictions on the policy, 3.8 objective); §4 belief, filter and dynamic programming; §5 saving relative to the current policy (validation, optimism, confirmation); §6 what must be estimated (6.1 definitions, 6.2 quantities E1–E10, 6.3 where verdicts come from, 6.4 deliverables, 6.5 records to flag); §7 implementation (7.1 discounted form and ρ, 7.2 the 27-state solver form and Table 3, 7.3 pipeline, 7.4 software, 7.5 test runs, which only demonstrate the method and are not estimates or targets, 7.6 solver limitations); §8 limits and open work; appendix A revision history.
+- **Original model document.** Read `../parallix-research/research/verification-pomdp/parallix_stochastic_model_v11.tex` at `13537a5c2^`. Section references in the implementation history use that version.
 - **Existing research pipeline:** `../parallix-research/research/verification-pomdp/` (`README.md` describes its commands). The working solver and supplied parameter file are authoritative for artifact generation. The LaTeX is supporting context; a discrepancy, including in §7.2, is reported rather than resolved by changing the working model to match the text.
 - **Wave contract:** this file. The artifact contract, the shared hard rules, guardrails W1–W20 and the 24 corner cases below are authoritative; a child's scope cites them by identifier, and the text lives here.
 - **Repository rules:** `AGENTS.md`, `docs/doc-standards.md`, ADR 0047 (sizing), ADR 0057 (verification tiers), ADR 0055 (web transport contract) and the domain-architecture guards.
@@ -42,11 +42,11 @@ These change architectural behavior and are decided by the operator; children im
 5. **The PX-lead early integration test and the opportunistic integration dry-run (prevalidation) are removed.** The policy becomes the single owner of when verification actions run.
 6. **The review-window budget is replaced by an action limit:** after X = 40 actions in the review step, the mission stops and is handed to the human for manual intervention. This covers the long tail.
 7. **The fixed sequence stays available** as the fallback, expressed as a fixed policy inside the same generalized review step, not as a second implementation.
-8. **Manual pilot, no sentinels, no arm assignment (2026-11-19).** After slice 19 the operator turns pilot mode on by hand and runs the 15 missions one after another. There is no policy-versus-sentinel arm assignment (slice 18 is rolled back) and no sentinel missions. Slices 20 and 21 run with the pilot on and are samples 1 and 2 of the 15. Slice 23 (evaluation report command) is cancelled: slice 22 statistics and the px-0060 estimation research are the evaluation basis.
+8. **Operator-run pilot (2026-11-19).** Work proceeds under normal prioritization after TASK-2859.24. The sentinel design from slice 18 was rolled back and the report command in slice 23 was cancelled. PX-0073 owns the prospective experiment and uses recorded pilot observations for feasibility and retrospective analysis.
 
-## How to draft this parent
+## Original wave split
 
-The parent is a planning container and is Large by construction. The drafting agent records it, then runs `px split` into exactly the slices of the wave plan below, in this order, with the stated prerequisites as `--child-depends-on` positions. Slice n becomes TASK-2859.n; do not merge slices and do not add a prerequisite chain beyond the listed ones. Each child's scope and out-of-scope copy the shared hard rules and every W-rule the slice lists (the guardrails below are the contract, not background reading). Each slice is predicted Small or Medium. If the drafting agent's honest estimate for a slice is Large, split that slice again at a boundary named in its description; never raise a bucket, never record Large on a child, and never fold slices together to reduce the count. Where a slice says **operator gate**, its first checkpoint writes the design into the checkpoint evidence and the mission stops for the operator's written approval before any production edit.
+This parent records the wave already split into TASK-2859.n. The plan below preserves the original prerequisites and child contracts. A slice marked **operator gate** required a checkpoint with the design and written operator approval before production edits.
 
 Size basis, for the drafter only: ADR 0047 (net engineering lines: insertions plus deletions in code and tests, excluding docs and backlog). The estimates below are the wave author's, made before drafting; the draft estimate replaces them. Medium is 81–235. Sizing and splitting are completed per mission during drafting. Do not copy NEL limits into child execution contracts, success criteria, checkpoints or review requirements. Implementers and reviewers do not enforce NEL; readable code and behavioral verification take precedence over the estimate.
 
@@ -75,11 +75,11 @@ Stages: A offline policy artifact, B pure policy module, C shadow mode, D genera
 | 17 | Fixed policy runs tests in the review step; remove early integration and dry-run | 14, 16 | 220 |
 | 18 | Rolled back: arm assignment and sentinels dropped (decision 8) | none | 0 |
 | 19 | Policy-chosen actions for every mission in pilot mode, fallbacks and finite termination | 17 | 230 |
-| 20 | Action counter and the 40-action limit with hand-off (pilot sample 1) | 19 | 200 |
-| 21 | Replace the review-window budget in every consumer (pilot sample 2) | 20 | 220 |
+| 20 | Action counter and the 40-action limit with hand-off | 19 | 200 |
+| 21 | Replace the review-window budget in every consumer | 20 | 220 |
 | 22 | Statistics for calibration and the pilot comparison | none | 220 |
 | 23 | Cancelled: evaluation report command dropped (decision 8) | none | 0 |
-| 24 | Run the manual 15-mission pilot (slices 20 and 21 are samples 1 and 2) and evaluate it | 19, 22 | 0 (operational) |
+| 24 | Activate the operator-run pilot and record the cutover | 19, 22 | 0 (operational) |
 
 Slices 1–2 and 3–5 run in parallel; 22 can run any time. Shadow mode (slices 6–10) should be integrated and switched on as early as possible: it produces calibration samples from every mission with no behavior change.
 
@@ -137,33 +137,23 @@ Parent decisions 1–5 and 7 are implemented here, in slices small enough that e
 
 ### Stage E: action limit
 
-**Slice 20: Action counter and limit (operator gate).** Run this mission with pilot mode on; it is pilot sample 1 (decision 8), still under the review-window budget. Checkpoint 1 lists, with file and symbol citations, every consumer of the review-window budget (today `AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS` and `DEFAULT_MAX_ATTEMPTS`; revalidate; the starting list from the tree is the review loop, the mission board projection, the web transport projection, shape checks and types, and the web flight column), says for each whether it moves to the counter, is removed or keeps its meaning, and defines what counts as an action: each agent review round, integration test run, human review and repair counts once; declared-gate preparation and rebases do not. Implementation: the counter is derived from recorded history (a restart at action 38 resumes the count) and the 40th action stops the mission and hands it to the human through the existing escalation path with a typed reason "action limit (N) reached" (corner case 13, W15); 40 by default, configurable in the existing configuration owner following its conventions for invalid values; the limit applies to every mission in every mode. Both budgets exist in parallel only inside this slice's checkpoint analysis, never in the code that lands.
+**Slice 20: Action counter and limit (operator gate).** Checkpoint 1 lists, with file and symbol citations, every consumer of the review-window budget (today `AUTONOMOUS_REVIEW_WINDOW_ATTEMPTS` and `DEFAULT_MAX_ATTEMPTS`; revalidate; the starting list from the tree is the review loop, the mission board projection, the web transport projection, shape checks and types, and the web flight column), says for each whether it moves to the counter, is removed or keeps its meaning, and defines what counts as an action: each agent review round, integration test run, human review and repair counts once; declared-gate preparation and rebases do not. Implementation: the counter is derived from recorded history (a restart at action 38 resumes the count) and the 40th action stops the mission and hands it to the human through the existing escalation path with a typed reason "action limit (N) reached" (corner case 13, W15); 40 by default, configurable in the existing configuration owner following its conventions for invalid values; the limit applies to every mission in every mode. Both budgets exist in parallel only inside this slice's checkpoint analysis, never in the code that lands.
 
-**Slice 21: Replace the review-window budget.** Run this mission with pilot mode on; it is pilot sample 2 (decision 8). Move every consumer to the counter and delete the review-window budget and its now-unused tests. The web transport contract (ADR 0055, transport version, shape checks, types, flight column) changes together with its server projection in this one slice, with the shape-check tests updated and version skew considered; statistics and displays show actions against the limit, and limit hits are recorded explicitly, never inferred. No budget survives in parallel.
+**Slice 21: Replace the review-window budget.** Move every consumer to the counter and delete the review-window budget and its now-unused tests. The web transport contract (ADR 0055, transport version, shape checks, types, flight column) changes together with its server projection in this one slice, with the shape-check tests updated and version skew considered; statistics and displays show actions against the limit, and limit hits are recorded explicitly, never inferred. No budget survives in parallel.
 
 ### Stage F: reporting (read-only)
 
 **Slice 22: Statistics for calibration and comparison.** Pure research tooling under `../parallix-research/research/verification-pomdp/`: per-check calibration in at most 5 bins with counts and mean absolute error in percentage points; one-sided Welch test on log cost at 90% significance; a rank test; effect size with a confidence interval; unknown values excluded from means and never imputed as 0. Cases: synthetic records with known probabilities reproduce the known error; a synthetic pair with a known effect gives the expected direction and significance; unknown cost fields are excluded and listed.
 
-**Slice 23: Cancelled (decision 8).** The evaluation report command is not built. Slice 22 statistics and the px-0060 estimation research (`../parallix-research/px-0060`) are the evaluation basis. Cost reconstruction limits found on the 2026-11-19 snapshot before the cancellation: agent `cost_usd` fully recorded for 44 of 98 missions closed since 2026-11-04 (unknown stays unknown and is counted), active human time has no measured record (count times the assumed per-action constant), cancelled and abandoned missions are not a status.
+**Slice 23: Cancelled (decision 8).** The evaluation report command was cancelled. Keep slice 22 statistics and px-0060 research available to PX-0073.
 
 ### Stage G: pilot
 
-**Slice 24: Run the pilot and evaluate it (operational, no code).** Before activation: generate the artifact from the operator's current best parameters and record its hash; run slice 22 statistics on shadow records; the operator reads the calibration and the px-0060 estimation research (model against history, with the stated differences) and decides in writing whether the model is close enough to start; no numeric tolerance is fixed in advance, and the decision and its reasons are recorded; the operator records numeric abort thresholds for merge rate, manual interventions and human review load before activation. Activate mode `pilot` (the next 15 completed missions, run by hand one after another; slices 20 and 21 are the first two), recording the activation commit and time. While running: review fallbacks, overrides, limit hits and records daily; run slice 22 statistics at 5 and 10 completed missions; the operator decides an abort. Bugs found are fixed in separate bug-labeled missions with red-to-green reproductions, never inside this task; a fix that changes policy behavior restarts the count. After 15 completed missions set the mode back to `shadow`, run the final statistics and write `docs/research/verification-ordering-pilot-2026-11.md` following `docs/doc-standards.md`, with the pre-registered criteria verbatim, each criterion's result, calibration, history stability, exclusions, and a one-sentence verdict (supported, not supported or inconclusive). No production code changes; the pre-registered criteria are not changed after activation, deviations are reported as deviations; the operator database is touched only by the switched-on pilot itself.
+**Slice 24.** TASK-2859.24 activated the original pilot. The current time-parallel artifact was pinned under TASK-2867.08.
 
-## Pre-registered evaluation (do not change after the pilot starts)
+## Experiment ownership
 
-- Design:
-  - the next 15 completed missions, run by hand, run the policy;
-  - the control is recent history: completed missions from the 2–3 weeks before activation, with the same agent and model versions and the same Parallix fixes.
-- Primary outcome: verification and repair cost per mission in money (assumed cost units, the same formula and prices for both groups). Secondary outcomes: wall time per mission; actions and repairs per mission; missions reaching the action limit.
-- Hypothesis (the only one this pilot tests): the POMDP policy selects verification actions better than the fixed sequence, meaning lower verification and repair cost per mission. Test: one-sided, 90% significance, Welch test on log cost, with a rank test as a robustness check. The hypothesis is supported if the policy arm's cost is significantly lower; not supported if it is not; inconclusive only when the data cannot answer (fewer than 15 completed missions, or no usable control window). No minimum effect size is pre-set; the effect size and its confidence interval are reported.
-- Model fit (reported, not a gate): the slice 22 statistics and the px-0060 estimation research state, with intervals, how far the model's predicted pass probabilities (shadow-mode calibration) and its fixed-sequence actions, repairs and cost per mission are from the observed values. The operator decides in writing whether to start the pilot after reading it; no tolerance is pre-set.
-- History stability (reported, not a gate): the two halves of the control window are compared on the same outcomes and the difference is reported with the verdict, so a drifting baseline is visible.
-- Known confounders:
-  - history used the review-window budget, the pilot uses the action limit. Missions reaching either limit are reported separately; pilot samples 1 and 2 (slices 20 and 21) run under the review-window budget and are reported separately;
-  - history ran integration gates once at landing; a pilot-mode mission may run the integration tests as an action and again at landing when no gate evidence covers the landing candidate (corner case 16). Both runs are priced by the same formula and the number of landing re-runs is reported per arm.
-- Abort: the operator stops the pilot if merge rate, manual interventions or human review load are clearly worse than in the control window. "Clearly worse" is made numeric by the operator in slice 24 **before activation**, never afterwards.
+PX-0073 owns the evaluation protocol, from auditing historical and pilot evidence through designing and implementing the prospective sequential comparison. The earlier 15-mission cost comparison is superseded. The operator continues the current pilot and records external blocks for the evaluation.
 
 ## Artifact contract (single definition for slices 1–6)
 
@@ -260,7 +250,7 @@ Source: the repository's bug history. Each rule names the failure class it preve
 15. Switch changed mid-mission: the operator changes the switch only between missions; a mission in flight finishes on the fixed policy; recorded [slices 6, 9, 19].
 16. A passing integration-test action reused at landing: only when existing gate-evidence coverage proves it covers the landing candidate after the final rebase; otherwise the gates run again and the cost is counted [slices 14, 17].
 17. Board, cards, commands and flow projections: show truthfully whose turn it is and which action is next; no projection assumes the fixed order [slices 15].
-18. Cancelled or abandoned missions: excluded from the primary outcome but counted and reported [slice 24].
+18. Cancelled or abandoned missions remain in the evidence. PX-0073 defines their treatment in the experiment.
 19. Belief numerics: rows sum to 1, no underflow to all zeros, deterministic results for identical histories [slices 4, 5].
 20. A failed check whose repair has not completed yet (including a repair interrupted by a restart): the history is "repair pending", the repair is not a policy decision, and the belief is only updated when the repair completes [slices 4, 7, 12].
 21. A repair that addresses the findings of more than one check, or a check run on a revision other than the current one: outside the model; recorded as an unmodelled code change, never mapped to the nearest modelled repair [slices 8].
@@ -271,7 +261,7 @@ Source: the repository's bug history. Each rule names the failure class it preve
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All slices are done, and the pilot report (slice 24, TASK-2859.24) states the pre-registered outcome, calibration, model fit, history stability and any abort decision with evidence.
+- [ ] #1 Applicable wave slices are complete and TASK-2859.24 recorded pilot activation. PX-0073 owns the evaluation.
 - [ ] #2 With the switch off, mission behavior and statistics equal today's, except the removals of decision 5, and the fixed policy inside the generalized review step reproduces today's sequence (verified against the golden traces of W2).
 - [ ] #3 Every corner case above is covered by a named test or a recorded manual exercise in its owner slice.
 - [ ] #4 After each slice was integrated, `main` ran missions unchanged with the switch off (W1); no repair mission was needed to continue the wave.

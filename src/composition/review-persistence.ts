@@ -11,6 +11,7 @@ import { createReviewLoopPorts, type ReviewLoopBindings, type ReviewLoopTarget }
 import { bindReviewPersistence, reviewLoopBindings } from '../adapters/review/review-persistence.js';
 import { createReviewStartPolicyPorts, createTestsActionPolicyFactory, type ReviewStartObservationServices } from './review-start-observation.js';
 import { createPolicyActionPort } from './review-policy-actions.js';
+import { runReviewStepTests } from '../adapters/cli/commands/integrate.js';
 import { missionId } from '../domain/mission.js';
 
 export { bindReviewPersistence, reviewLoopBindings };
@@ -21,7 +22,7 @@ export interface ReviewPersistenceAuthorities {
     readonly lifecycle: MissionLifecycleService;
     readonly operationalHistory: OperationalHistoryService | null;
     readonly repositoryId: RepositoryId;
-    /** Needed only to run a pilot-selected integration test through the integrate workflow. */
+    /** Needed only to run a policy-selected integration test through the integrate workflow. */
     readonly integration: IntegrationMissionServices['integration'];
   };
   readonly operatorState: {
@@ -51,6 +52,15 @@ export function createPersistentReviewLoopPorts(
     configuration: bindings.configuration, policy, missionServices: { store: mission.store, lifecycle: mission.lifecycle,
       integration: mission.integration, operationalHistory: mission.operationalHistory },
     policyFactory: createTestsActionPolicyFactory(bindings.configuration, services) }) : undefined;
+  // The fixed sequence owns a tests action whenever no policy decision applies (no pilot, or a direct operator
+  // command under a pilot): review and active record the integration run that px integrate later admits
+  // (TASK-2872.02 SC2). The tests-action owner decides from its own evidence facts whether a run is still needed.
+  const fixedTestsAction = services ? { runTests: () => runReviewStepTests(slug, {
+    configuration: bindings.configuration, executionRoot: target.executionContext.missionWorktree,
+    missionServicesFn: async (): Promise<IntegrationMissionServices> => ({ store: mission.store, lifecycle: mission.lifecycle,
+      integration: mission.integration, operationalHistory: mission.operationalHistory }),
+    verificationActionPolicy: createTestsActionPolicyFactory(bindings.configuration, services),
+  }) } : undefined;
   const actionHistory: ReviewActionHistoryPort = mission.operationalHistory ? {
     count: () => mission.operationalHistory!.countReviewActions(slug, mission.repositoryId),
     record: input => mission.operationalHistory!.recordReviewAction({
@@ -65,6 +75,7 @@ export function createPersistentReviewLoopPorts(
     ...persistence,
     ...(policy ? { reviewStartPolicy: policy } : {}),
     ...(policyActions ? { policyActions } : {}),
+    ...(fixedTestsAction ? { fixedTestsAction } : {}),
     actionHistory,
   });
   return ports;

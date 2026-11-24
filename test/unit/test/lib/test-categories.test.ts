@@ -129,7 +129,8 @@ test('the verification tiers have stable npm commands', () => {
   assert.equal(pkg.scripts['test:integration:local'], 'FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
   assert.equal(pkg.scripts['test:integration:local:prebuilt'], 'PARALLIX_PREBUILT_PACK=1 FORCE_COLOR=0 tsx test/run-default-tests.ts --integration-local');
   assert.equal(pkg.scripts['test:agent-e2e'], 'node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts');
-  assert.equal(pkg.scripts['test:lifecycle-e2e'], 'node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts');
+  assert.equal(pkg.scripts['test:lifecycle'], 'PARALLIX_INTEGRATION_SUITE_CPU_BUDGET_MS=12000 PARALLIX_SUITE_HANG_TIMEOUT_MS=25000 FORCE_COLOR=0 tsx test/run-default-tests.ts test/e2e/lifecycle/mission-lifecycle.test.ts');
+  assert.equal(pkg.scripts['test:lifecycle-e2e'], 'npm run test:lifecycle', 'legacy mission gate remains a compatibility alias');
   // The GitHub-safe aggregate covers build, typecheck, hermetic unit tests, the
   // deterministic integration subset, and portable package/bundle validation.
   const ciAggregate = String(pkg.scripts['test:ci']);

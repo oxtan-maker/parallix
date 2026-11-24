@@ -9,9 +9,9 @@ import { forgejoApiFixture } from '../../../fixtures/forgejo-api.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getLatestReviewDecision } from '../../../../src/adapters/forgejo/forgejo.js';
-import { admitIntegrationApproval, approveEligibleIntegrationShortcut, evaluateTaskStatusForIntegration, recoveryEstablishesApproval, requireCurrentAgentReviewForHumanApproval } from '../../../../src/application/integrate/approval.js';
+import { admitIntegrationApproval, approveEligibleIntegrationShortcut, evaluateTaskStatusForIntegration, previewIntegrationShortcut, recoveryEstablishesApproval, requireCurrentAgentReviewForHumanApproval } from '../../../../src/application/integrate/approval.js';
 import { recoverMissionForIntegration } from '../../../../src/adapters/cli/commands/integrate.js';
-import { changeRevision, reviewApprovalOwed } from '../../../../src/domain/review.js';
+import { applyReviewerCommand, changeRevision, currentReviewRound, reviewApprovalOwed, revokeApprovedDecision } from '../../../../src/domain/review.js';
 import { stubIntegrateWorkflowPorts, type IntegrateWorkflowPortOverrides } from '../../../helpers/stub-integrate-workflow-ports.js';
 import { MissionLifecycleService } from '../../../../src/application/mission-lifecycle-service.js';
 import { recordApproval } from '../../../../src/adapters/review/review-round.js';
@@ -170,7 +170,12 @@ function reviewActionLedger(initial = 0) {
     records,
     reviewActions: {
       countReviewActions: async () => count,
+      // Mirrors the durable owner (OperationalHistoryService.recordReviewAction): the same
+      // (action, correlation, changeIdentity) replays its existing start.
       recordReviewAction: async (input: ReviewActionStartedInput) => {
+        const existing = records.find(record => record.action === input.action
+          && record.correlation === input.correlation && record.changeIdentity === input.changeIdentity);
+        if (existing) { return existing; }
         const record = reviewActionStarted(input, ++count);
         records.push(record);
         return record;
@@ -281,6 +286,90 @@ test('shortcut submits the exact tested revision and provider refusal leaves no 
   assert.equal(submittedRevision, shortcutHead);
   assert.equal((await store.load(initial.id)).mission.status, 'review');
   assert.equal(store.events.length, 0, 'provider failure cannot leave local approval authority');
+});
+
+// TASK-2872.02 SC3: the shortcut's human approval is one durable action per reviewed revision, so a
+// retry after the provider refused the submission replays that action and lands, rather than
+// spending a second human action on the same approval.
+test('retry after a provider refusal replays the one shortcut human action and lands (TASK-2872.02 SC3)', async () => {
+  const initial = shortcutMission('task-2872-shortcut-retry');
+  const store = inMemoryTransitionStore(initial);
+  const ledger = reviewActionLedger();
+  const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store),
+    reviewActions: ledger.reviewActions });
+  let submissions = 0;
+  const ports = shortcutPorts({ review: { submitApproval: async (slug, _message, options) => {
+    submissions++;
+    if (submissions === 1) { return { ok: false, diagnostic: 'missing Forgejo token or pull request' }; }
+    const result = await recordApproval(slug, { comment: 'Integrated by human', revision: options.revision,
+      decidedAt: '2026-11-19T11:00:00Z', source: { kind: 'local' } },
+    { missionStore: options.missionServices.store, lifecycleService: options.missionServices.lifecycle });
+    return result.outcome === 'failed' ? { ok: false, diagnostic: result.diagnostic } : { ok: true };
+  } } });
+  const approval = { ok: true as const, reviewerApproved: false };
+  const sequences = () => ledger.records.map(record => [record.actionSequence, record.action]);
+
+  await assert.rejects(
+    approveEligibleIntegrationShortcut(
+      integrationContext({ slug: 'task-2872-shortcut-retry', missionStatus: 'review', missionReview: initial.review, approval }),
+      await store.load(initial.id), services, ports),
+    /integration aborted/);
+  assert.equal((await store.load(initial.id)).mission.status, 'review', 'the refused attempt lands nothing');
+  assert.deepEqual(sequences(), [[1, 'human']], 'the refused attempt starts one human action');
+
+  const reloaded = await store.load(initial.id);
+  await approveEligibleIntegrationShortcut(
+    integrationContext({ slug: 'task-2872-shortcut-retry', missionStatus: 'review', missionReview: reloaded.mission.review, approval }),
+    reloaded, services, ports);
+  assert.equal((await store.load(initial.id)).mission.status, 'integration', 'the retry lands the mission');
+  assert.deepEqual(sequences(), [[1, 'human']], 'the retry replays that action instead of recording a second one');
+  assert.equal(ledger.records[0]!.correlation, `integrate-shortcut:1:${shortcutHead}:${shortcutHead}`,
+    'the correlation names the approval cycle for the reviewed revision, not the attempt number');
+  assert.equal(store.events.length, 1, 'the retry commits one lifecycle transition');
+});
+
+// TASK-2872.02 F4: the replay key carries the decision cycle, so an operator revocation that opens a
+// later round on an unchanged revision spends its own human action instead of replaying the old one.
+test('a revoked approval re-approved on the same revision records a fresh shortcut human action (TASK-2872.02 SC3)', async () => {
+  const slug = 'task-2872-shortcut-revoked';
+  const initial = shortcutMission(slug);
+  const store = inMemoryTransitionStore(initial);
+  const ledger = reviewActionLedger();
+  const services = integrationServices({ store, lifecycle: new MissionLifecycleService(store), reviewActions: ledger.reviewActions });
+  const approval = { ok: true as const, reviewerApproved: false };
+
+  // Cycle 1 spends its human action; the provider refuses the submission, so nothing lands.
+  await assert.rejects(approveEligibleIntegrationShortcut(
+    integrationContext({ slug, missionStatus: 'review', missionReview: initial.review, approval }),
+    await store.load(initial.id), services,
+    shortcutPorts({ review: { submitApproval: async () => ({ ok: false, diagnostic: 'missing Forgejo token or pull request' }) } }),
+  ), /integration aborted/);
+  assert.deepEqual(ledger.records.map(record => [record.actionSequence, record.action]),
+    [[1, 'human']], 'the refused cycle starts one human action');
+
+  // The operator stands that approval down, which opens round 2, and a fresh agent approval covers
+  // the very same revision; the next shortcut is a new decision cycle on an unchanged change.
+  const loaded = await store.load(initial.id);
+  const reApproved = applyReviewerCommand(revokeApprovedDecision(loaded.mission.review!, 1, {
+    reason: 'operator withdrew the shortcut approval', revokedBy: 'magnus', revokedAt: '2026-11-19T12:00:00Z',
+  }), { type: 'approve', revision: changeRevision(shortcutHead), decidedAt: '2026-11-19T12:30:00Z',
+    comment: null, source: { kind: 'provider', provider: 'forgejo' } });
+  assert.equal(currentReviewRound(reApproved).number, 2, 'revocation opened a new decision cycle');
+  await store.save({ ...loaded.mission, review: reApproved }, loaded.version);
+
+  await approveEligibleIntegrationShortcut(integrationContext({ slug, missionStatus: 'review', missionReview: reApproved, approval }),
+    await store.load(initial.id), services, shortcutPorts({ review: { submitApproval: async (submitted, _message, options) => {
+      const result = await recordApproval(submitted, { comment: 'Integrated by human', revision: options.revision,
+        decidedAt: '2026-11-19T13:00:00Z', source: { kind: 'local' } },
+      { missionStore: options.missionServices.store, lifecycleService: options.missionServices.lifecycle });
+      return result.outcome === 'failed' ? { ok: false, diagnostic: result.diagnostic } : { ok: true };
+    } } }));
+
+  assert.equal((await store.load(initial.id)).mission.status, 'integration', 'the new cycle lands');
+  assert.deepEqual(ledger.records.map(record => [record.actionSequence, record.correlation]), [
+    [1, `integrate-shortcut:1:${shortcutHead}:${shortcutHead}`],
+    [2, `integrate-shortcut:2:${shortcutHead}:${shortcutHead}`],
+  ], 'the new cycle records its own human action instead of replaying the withdrawn one');
 });
 
 test('recognised post-review bookkeeping preserves shortcut approval coverage (TASK-2859.16 repair)', async () => {
@@ -460,7 +549,10 @@ async function admission(entry: 'ordinary' | 'shortcut' | 'dry-run' | 'real', in
     try {
       if (entry === 'ordinary') { await requireCurrentAgentReviewForHumanApproval(context, loaded, services, ports); }
       else if (entry === 'shortcut') { await approveEligibleIntegrationShortcut(context, loaded, services, ports); }
-      else { await admitIntegrationApproval(context, loaded, services, ports, { dryRun: entry === 'dry-run' }); }
+      else {
+        await admitIntegrationApproval(context, loaded, services, ports, { dryRun: entry === 'dry-run' });
+        if (entry === 'dry-run') { previewIntegrationShortcut({ dryRun: true, context, missionLoad: loaded, ports }); }
+      }
     } catch { refused = true; }
   } finally { console.error = original; }
   return { refused, reason: errors.join('\n'), submissions, events: store.events.length, status: (await store.load(initial.id)).mission.status };
@@ -513,4 +605,23 @@ test('the integrate dry-run predicts the same human-approval refusal and records
     'a dry run cannot record the human approval the shortcut entry owns');
   const acceptedRealRun = await admission('real', current);
   assert.deepEqual([acceptedRealRun.refused, acceptedRealRun.submissions, acceptedRealRun.events, acceptedRealRun.status], [false, 1, 1, 'integration']);
+});
+
+// TASK-2872.02 SC4: with no standing human approval the dry-run previews the shortcut's read-only eligibility too, so a
+// stale agent review or missing tests is refused with the real run's reason instead of reported ready.
+test('the integrate dry-run refuses a shortcut the real run refuses and records nothing (TASK-2872.02 SC4)', async () => {
+  const stale = shortcutMissionAtDecision('task-2872-02-shortcut-stale', 'b'.repeat(40));
+  const current = shortcutMission('task-2872-02-shortcut-current');
+  for (const [name, mission, gates, expected] of [
+    ['stale agent review', stale, {}, /agent review does not approve the current revision/],
+    ['missing tests', current, { readGateRun: () => null }, /no complete current passing integration-test action/]] as const) {
+    const dryRun = await admission('dry-run', mission, { gates });
+    const realRun = await admission('real', mission, { gates });
+    for (const [mode, result] of [['dry-run', dryRun], ['real', realRun]] as const) {
+      assert.equal(result.refused, true, `${name}: ${mode} refuses`);
+      assert.match(result.reason, expected, `${name}: ${mode}`);
+      assert.deepEqual([result.submissions, result.events, result.status], [0, 0, 'review'], `${name}: ${mode} records no approval`);
+    }
+    assert.equal(dryRun.reason, realRun.reason, `${name}: the preview names the real run's refusal`);
+  }
 });

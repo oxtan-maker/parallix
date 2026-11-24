@@ -43,13 +43,14 @@ import { reviewStatistics, type ReviewStatistics } from '../../../../src/applica
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
 import { flowElapsedOwnership } from '../../../../src/application/projections/flow-elapsed-ownership.js';
 import { flowStatistics, type FlowMissionFacts } from '../../../../src/application/projections/flow-statistics.js';
-import { EMPTY_FLOW_MISSION_OBSERVATION } from '../../../../src/application/projections/flow-mission-facts.js';
+import { EMPTY_FLOW_MISSION_OBSERVATION, type FlowGateRun } from '../../../../src/application/projections/flow-mission-facts.js';
 import { VERIFICATION_MEASUREMENT_EVENT, type VerificationMeasurement } from '../../../../src/application/ports/verification-observation.js';
 import { renderVerificationStatistics } from '../../../../src/application/presentation/verification-statistics.js';
 import { controlledVerificationComparisons } from '../../../../src/application/projections/verification-profile-comparison.js';
 import type { RunRecord } from '../../../../src/application/run-history-types.js';
 import type { WorkflowOperation } from '../../../../src/domain/workflow-operation.js';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+const gateRun = (id: string, phase: string, result: FlowGateRun['result']): FlowGateRun => ({ id, phase, result, operationId: null, requestedAt: '2026-11-03T10:00:00Z', finishedAt: result === 'running' ? null : '2026-11-03T10:01:00Z' });
 function workflowOperation(overrides: Partial<WorkflowOperation> = {}): WorkflowOperation {
   return { id: 'op', repositoryId: repositoryId('repo'), missionId: fixtureMissionId('px-1'), requestKey: 'request',
     command: 'active:execute', generation: 1, phase: 'completed', providerStarted: true,
@@ -69,8 +70,8 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
     return { repositoryId: 'repo', missionId: mission, closedAt, implementer: 'codex',
       diagramNodeIds: [`${mission}:implement`, `${mission}:review`], diagramEdgeIds: [`${mission}:implement->review`],
       window: { startedAt: new Date(Date.parse(closedAt) - 30).toISOString(), finishedAt: closedAt },
-      gateRuns: [{ id: `${mission}:declared`, phase: 'handoff', result: human ? 'failed' : 'passed' },
-        { id: `${mission}:integration`, phase: 'integration', result: 'passed' }],
+      gateRuns: [gateRun(`${mission}:declared`, 'handoff', human ? 'failed' : 'passed'),
+        gateRun(`${mission}:integration`, 'integration', 'passed')],
       rebaseRuns: [{ id: `${mission}:pre`, operationId: `${mission}:pre-operation`, stage: 'pre-review-rebase', outcomes: human ? ['conflict', 'resolved'] : ['clean'] },
         { id: `${mission}:integration`, operationId: `${mission}:integration-operation`, stage: 'integration-rebase', outcomes: ['clean'] }],
       rebaseStages: [], diagnostics: [], lead: { queued: human ? 1 : 0, recoveries: human ? 1 : 0, escalations: 0 },
@@ -90,7 +91,8 @@ test('shared FLOW projection keeps completion windows, actor rates and typed tim
   assert.deepEqual(result.current.time.rows.map(row => [row.step, row.state, row.totalMs, row.meanMs, row.p90Ms, row.n]), [ ['human-review', 'held', 40, 20, 20, 2], ['implement', 'working', 20, 10, 10, 2], ]);
   assert.equal(result.current.time.rows.find(row => row.step === 'implement')?.model, 'gpt-6.1-sol');
   assert.deepEqual(result.current.time.largestHolder, { step: 'human-review', actor: 'human', model: null, state: 'held', totalMs: 40, share: 2 / 3 });
-  assert.equal(result.current.graph.nodes.find(node => node.id === 'pre-review-rebase')?.count, 2);
+  assert.equal(result.current.graph.nodes.find(node => node.id === 'rebase')?.count, 4,
+    'one rebase node aggregates both retained stages without losing either run');
   assert.equal(result.current.graph.edges.find(edge => edge.kind === 'rebase-conflict')?.count, 1);
   assert.deepEqual(result.current.stateDwell.find(row => row.state === 'active'), { state: 'active', medianMs: 20, p90Ms: 30, n: 2 });
   assert.deepEqual(result.families.map(cohort => [cohort.family, cohort.current.completedMissions]), [['codex', 2]]);
@@ -101,7 +103,7 @@ test('gate shares keep one run population while return arrows reconcile to rewor
   const windows = weeklyDecisionWindows('2026-11-03', 'UTC');
   const fact = (mission: string, observed: boolean): FlowMissionFacts => ({ repositoryId: 'repo', missionId: mission,
     closedAt: '2026-11-03T12:00:00Z', implementer: 'codex', laneDwellMs: null, diagramNodeIds: [], diagramEdgeIds: [], ownership: [], window: null,
-    gateRuns: observed ? [{ id: 'passed', phase: 'handoff', result: 'passed' }, { id: 'failed', phase: 'handoff', result: 'failed' }] : [],
+    gateRuns: observed ? [gateRun('passed', 'handoff', 'passed'), gateRun('failed', 'handoff', 'failed')] : [],
     rebaseRuns: [], rebaseStages: [], diagnostics: [], lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [], observedDisqualifiers: null,
     reviewStatistics: reviewStatistics(null, { equivalentSubmissions: {}, workflowReturns: [1, ...(observed ? [2] : [])].map(sequence => ({
       identity: `repair:${mission}:${sequence}`, author: 'codex', at: '2026-11-03T11:00:00Z', source: 'repair' })) }) });
@@ -114,15 +116,16 @@ test('gate shares keep one run population while return arrows reconcile to rewor
   const unobserved = flowStatistics([fact('unobserved-only', false)], windows).current.graph,
     unobservedGateReturn = unobserved.edges.find(edge => edge.id === 'declared-gates->implement:gate-failed')!;
   assert.deepEqual([unobservedGateReturn.count, unobservedGateReturn.share, unobserved.edges.find(edge => edge.id === 'unrecorded->implement:workflow-return')?.count], [1, null, 0], 'typed returns remain visible without a settled-run denominator');
-  const unevenRuns = [...Array.from({ length: 91 }, (_, id) => ({ id: `pass-${id}`, phase: 'handoff', result: 'passed' as const })),
-    ...Array.from({ length: 4 }, (_, id) => ({ id: `fail-${id}`, phase: 'handoff', result: 'failed' as const })),
-    { id: 'running', phase: 'handoff', result: 'running' as const }];
+  const unevenRuns = [...Array.from({ length: 91 }, (_, id) => gateRun(`pass-${id}`, 'handoff', 'passed')),
+    ...Array.from({ length: 4 }, (_, id) => gateRun(`fail-${id}`, 'handoff', 'failed')),
+    gateRun('running', 'handoff', 'running')];
   const uneven = flowStatistics([{ ...fact('uneven', true), gateRuns: unevenRuns }], windows).current.graph.edges
-    .filter(edge => edge.from === 'declared-gates');
+    .filter(edge => edge.from === 'declared-gates' && ['flow', 'gate-failed'].includes(edge.kind));
   assert.deepEqual(uneven.map(edge => [edge.share, edge.percentage]), [[91 / 95, 96], [4 / 95, 4]], 'only terminal siblings divide the displayed 100%');
   const resolving = flowStatistics([{ ...fact('resolve', false), rebaseRuns:
     [{ id: 'repeat', operationId: 'repeat-operation', stage: 'pre-review-rebase', outcomes: ['conflict', 'conflict', 'resolved'] },
-      { id: 'failed', operationId: 'failed-operation', stage: 'pre-review-rebase', outcomes: ['conflict', 'failed'] }] }], windows).current.graph.edges.filter(edge => edge.from === 'pre-review-resolve');
+      { id: 'failed', operationId: 'failed-operation', stage: 'pre-review-rebase', outcomes: ['conflict', 'failed'] }] }], windows).current.graph.edges
+    .filter(edge => edge.from === 'rebase-resolve' && edge.stage === 'pre-review-rebase');
   assert.deepEqual(resolving.map(edge => [edge.count, edge.percentage]), [[1, 34], [1, 33], [1, 33]], 'Resolve siblings divide one displayed 100%');
 });
 test('live Review observations survive absent telemetry and ignore archived scalar counts (TASK-2818)', async () => {
@@ -163,7 +166,6 @@ test('fully observed repair chain reports a measured cross-batch dependency path
     { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'running', at: 20 }, { id: 'review-1', dependencies: ['repair-1'], phase: 're-review', state: 'ended', at: 25 },
   ].map(value => ({ eventType: 'mission.current-work', createdAt: instant(value.at), eventData: JSON.stringify({ repositoryId: 'repo', missionId: 'px-1', operationId: 'op', sourceId: value.id, operationGeneration: 1, revision: 'rev', dependencies: value.dependencies, phase: value.phase, state: value.state, }) })));
   const operation = workflowOperation({ updatedAt: instant(35) });
-
   const report = verificationStatistics({ repositoryId: 'repo', history, operations: [operation], lifecycle: [] });
   const measured = report as typeof report & { dependencyPath?: { durationMs: number; nodeIds: readonly string[] } };
   assert.equal(report.criticalPathMs, 35);
@@ -984,7 +986,6 @@ async function parityFlows(entries: readonly BoardLaneEventEntry[]) {
     { mode: 'weekly', today: PARITY_CLOCK }).flowStatistics;
   return [metrics.flow, cli] as const;
 }
-
 test('PX-0061: CLI selection and board metrics report identical FlowStatistics for the same outcomes', async () => {
   const [boardFlow, cliFlow] = await parityFlows([PARITY_DONE]);
   assert.ok(boardFlow && cliFlow, 'both readers report FLOW for the same completed cohort');

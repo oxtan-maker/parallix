@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { runReviewLoop } from '../../../../src/application/review-loop/review-loop.js';
+import { effectiveReviewActionLimit, loadReviewActionCount, startReviewAction } from '../../../../src/application/review-loop/action-limit.js';
 import { reviewActionStarted } from '../../../../src/application/review-action-history.js';
 import { OperationalHistoryService } from '../../../../src/application/services/operational-history-service.js';
 import type { IdempotentOperationalHistoryRepository, OperationalHistoryEntry } from '../../../../src/application/ports/operation-history.js';
 import type { ReviewActionHistoryPort, ReviewActionStarted } from '../../../../src/application/ports/review-action-history.js';
 import { missionId } from '../../../../src/domain/mission.js';
 import { agentFamily } from '../../../../src/domain/agents.js';
-import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
+import { fakeLoopContext, fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { fixtureMission } from '../../../fixtures/mission-builders.js';
 import { repeatReview } from '../../../fixtures/repeat-review.js';
 import { ReviewState } from '../../../../src/adapters/review/review-state.js';
@@ -99,6 +100,94 @@ test('a stored action from before repository identity retains its lifetime seque
   const next = await service.recordReviewAction({ repositoryId: 'repo-a', missionId: missionId('px-0042'),
     changeIdentity: 'sha', action: 'agent', correlation: 'current', configuredLimit: 40 });
   assert.deepEqual([next.repositoryId, next.actionSequence], ['repo-a', 2]);
+});
+
+test('an operator continuation at an exhausted limit runs five mechanisms before the boundary handoff (TASK-2873)', async () => {
+  const slug = 'task-operator-action-limit';
+  const ledger = actionHistory(slug, 40);
+  const approved = new ReviewState(slug, { reviewer: 'claude', implementer: 'codex', phase: 'approved',
+    disposition: 'APPROVED' });
+  const fake = fakeReviewLoopPorts({ slug, state: approved, actionHistory: ledger.history });
+  const context = fakeLoopContext(fake, { slug, state: approved, operatorInvocation: true, actionLimit: 40 });
+  const mechanisms: number[] = [];
+
+  assert.equal(await loadReviewActionCount(context), true, 'the direct operator invocation reaches its approved continuation');
+  for (let attempt = 1; attempt <= 6; attempt++) {
+    if (await startReviewAction(context, 'human', `integration-continuation:${attempt}`, 'approved-sha')) {
+      mechanisms.push(attempt);
+    }
+  }
+
+  assert.deepEqual(mechanisms, [1, 2, 3, 4, 5]);
+  assert.deepEqual(ledger.records.map(record => record.actionSequence), [41, 42, 43, 44, 45, 46]);
+  assert.deepEqual(fake.stops, ['action limit 46 reached']);
+  assert.equal(ledger.records.at(-1)?.failureReason?.code, 'review-action-limit');
+});
+
+test('operator headroom tops up zero through four runnable actions and preserves larger allowances (TASK-2873)', async () => {
+  for (const [initial, expectedLimit] of [[39, 45], [38, 44], [37, 43], [36, 42], [35, 41], [34, 40], [33, 40]]) {
+    const slug = `task-operator-headroom-${initial}`;
+    const ledger = actionHistory(slug, initial);
+    const fake = fakeReviewLoopPorts({ slug, actionHistory: ledger.history });
+    const context = fakeLoopContext(fake, { slug, operatorInvocation: true, actionLimit: 40 });
+
+    assert.equal(await loadReviewActionCount(context), true);
+    assert.equal(effectiveReviewActionLimit(context), expectedLimit,
+      `durable count ${initial} must retain at least five runnable actions without shrinking the configured ceiling`);
+  }
+});
+
+test('an internal restart carries one fixed allowance without renewing it or the durable ledger (TASK-2873)', async () => {
+  const slug = 'task-fixed-operator-allowance';
+  const ledger = actionHistory(slug, 40);
+  const firstFake = fakeReviewLoopPorts({ slug, actionHistory: ledger.history });
+  const first = fakeLoopContext(firstFake, { slug, operatorInvocation: true, actionLimit: 40 });
+  assert.equal(await loadReviewActionCount(first), true);
+  assert.equal(effectiveReviewActionLimit(first), 46);
+  assert.equal(await startReviewAction(first, 'agent', 'same-action', 'sha'), true);
+  assert.equal(await startReviewAction(first, 'agent', 'same-action', 'sha'), true);
+  assert.equal(ledger.count(), 41, 'an idempotent replay does not allocate another durable action');
+
+  const restartedFake = fakeReviewLoopPorts({ slug, actionHistory: ledger.history });
+  const restarted = fakeLoopContext(restartedFake, { slug, operatorInvocation: true, actionLimit: 40,
+    effectiveActionLimit: effectiveReviewActionLimit(first) });
+  assert.equal(await loadReviewActionCount(restarted), true);
+  const mechanisms: number[] = [];
+  for (let attempt = 42; attempt <= 46; attempt++) {
+    if (await startReviewAction(restarted, 'repair', `restart:${attempt}`, 'sha')) { mechanisms.push(attempt); }
+  }
+
+  assert.deepEqual(mechanisms, [42, 43, 44, 45]);
+  assert.equal(effectiveReviewActionLimit(restarted), 46, 'restart must not derive a fresh ceiling from count 41');
+  assert.equal(ledger.count(), 46);
+  assert.deepEqual(restartedFake.stops, ['action limit 46 reached']);
+});
+
+test('the review-loop request restores the fixed ceiling instead of granting a restart allowance (TASK-2873)', async () => {
+  const slug = 'task-propagated-operator-allowance';
+  const ledger = actionHistory(slug, 46);
+  const approved = new ReviewState(slug, { reviewer: 'claude', implementer: 'codex', phase: 'approved',
+    disposition: 'APPROVED' });
+  const fake = fakeReviewLoopPorts({ slug, state: approved, actionHistory: ledger.history });
+
+  await runReviewLoop({ slug, implementer: 'codex', reviewer: 'claude', operatorInvocation: true,
+    actionLimit: 40, effectiveActionLimit: 46, skipReviewPreparation: true }, fake.ports);
+
+  assert.equal(ledger.count(), 46);
+  assert.deepEqual(ledger.records, []);
+  assert.deepEqual(fake.stops, ['action limit 46 reached']);
+});
+
+test('autonomous entry receives no operator allowance at an exhausted durable count (TASK-2873)', async () => {
+  const slug = 'task-autonomous-exhausted';
+  const ledger = actionHistory(slug, 40);
+  const fake = fakeReviewLoopPorts({ slug, actionHistory: ledger.history });
+  const context = fakeLoopContext(fake, { slug, operatorInvocation: false, actionLimit: 40 });
+
+  assert.equal(await loadReviewActionCount(context), false);
+  assert.equal(effectiveReviewActionLimit(context), 40);
+  assert.equal(ledger.count(), 40);
+  assert.deepEqual(fake.stops, ['action limit 40 reached']);
 });
 
 test('restart at action 38 resumes at 38 and action 40 enters human attention without another launch (TASK-2859.20)', async () => {

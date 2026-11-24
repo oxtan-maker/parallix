@@ -22,7 +22,8 @@ export function createHumanWithdrawalFence(slug: string, policy?: Omit<ReviewSta
   if (!policy?.writer.isHumanReviewWithdrawn) { return undefined; }
   return async (_mission: string, round: number, revision: string) => {
     const changeIdentity = policy.identity.changeIdentity(revision, policy.targetBranch);
-    return changeIdentity !== null && await policy.writer.isHumanReviewWithdrawn!({ missionId: missionId(slug), changeIdentity, round });
+    return changeIdentity !== null && await policy.writer.isHumanReviewWithdrawn!({ missionId: missionId(slug),
+      repositoryId: policy.repositoryId, changeIdentity, round });
   };
 }
 

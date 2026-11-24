@@ -552,7 +552,6 @@ const executionContext = mockModule<typeof import('../../../src/adapters/git/mis
   const UNRELATED_DIRTY_FILE = 'notes/unrelated-dirty.md';
 
   function setup() {
-    process.env.PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS = '1';
     fs.mkdirSync(FAKE_ROOT, { recursive: true });
     fs.writeFileSync(path.join(FAKE_ROOT, 'workflow.config.json'), JSON.stringify({ adapters: { review: { provider: 'forgejo' }, verification: { command: 'true' } } }));
     mock.method(missionUtils, 'inferSlug', () => TEST_SLUG);
@@ -627,7 +626,7 @@ const executionContext = mockModule<typeof import('../../../src/adapters/git/mis
     });
 
     try {
-      await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
+      await integrateModule.default([TEST_SLUG], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
       assert.deepEqual(boardCommitPaths, [], 'Reorder tasks in review must not carry mission payload files');
       assert.ok(squashCommitArgs.includes('--only'));
       assert.ok(squashCommitArgs.includes(MISSION_PAYLOAD));
@@ -657,7 +656,7 @@ const executionContext = mockModule<typeof import('../../../src/adapters/git/mis
       return { signal: null,  status: 0, stdout: '', stderr: '' };
     });
     try {
-      await integrateModule.default([TEST_SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
+      await integrateModule.default([TEST_SLUG], { configuration: resolveConfiguration(process.env), missionServicesFn: composition.createMissionApplicationServices });
       return [...logs, ...errors].join('\n');
     } finally {
       console.log = originalLog;

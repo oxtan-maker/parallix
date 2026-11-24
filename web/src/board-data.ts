@@ -6,8 +6,10 @@ import { useCallback, useEffect, useState } from 'react';
  * renders: the current workflow snapshot (`GET /api/board`), the historical
  * analytics family (`GET /api/board/analytics`) and the on-demand mission
  * detail. Every failure the contract distinguishes stays a distinct state —
- * a transport-rejected payload never degrades into "no data", and a previously
- * fetched family is never shown as current (ADR 0054, ADR 0055, TASK-2854.04).
+ * a transport-rejected payload never degrades into "no data". A retained
+ * workflow snapshot is never shown as current once its refresh fails (ADR 0054,
+ * ADR 0055); a retained historical analytics read stays exactly as the host
+ * reported it until the newest read settles (TASK-2854.04, TASK-2859.17).
  *
  * No caching, no retry, no polling: `board-sync.ts` decides when to read the
  * workflow family, and each call performs exactly one read.
@@ -141,37 +143,26 @@ export function workflowObservationKey(freshness: WebProjectionFreshness): strin
 /**
  * One analytics state machine: read on mount, re-observe on demand and whenever
  * the workflow observation moves, never assume fresh. `observed` is the
- * `workflowObservationKey` the board currently shows; the board fingerprint
- * includes the historical evidence, so a new observation means the retained
- * analytics may be out of date. Until the new read answers, a retained value is shown stale.
+ * `workflowObservationKey` the board currently shows; a new key means the
+ * retained analytics may be out of date, so they are read again. While that
+ * routine read is pending the last validated read stays as it was: a fresh
+ * value is not flagged stale without evidence, and a host-reported stale or
+ * unavailable read keeps its own state until the replacement settles. Only the
+ * newest read may settle; a manual re-observe shows its own pending state.
  */
 export function useBoardAnalytics(observed: string | null): { readonly state: AnalyticsState; readonly reobserve: () => void } {
-  // Each read remembers the observation it answered, so a newer observation is
-  // recognised during render and never presents the retained read as current.
-  const [read, setRead] = useState<{ readonly state: AnalyticsState; readonly answered: string | null }>({ state: { kind: 'loading' }, answered: observed });
+  const [state, setState] = useState<AnalyticsState>({ kind: 'loading' });
   const [observation, setObservation] = useState(0);
   useEffect(() => {
     let live = true;
-    void loadAnalytics().then(result => { if (live) { setRead({ state: result, answered: observed }); } });
+    void loadAnalytics().then(result => { if (live) { setState(result); } });
     return () => { live = false; };
   }, [observation, observed]);
   const reobserve = useCallback(() => {
-    setRead(current => ({ state: { kind: 'loading' }, answered: current.answered }));
+    setState({ kind: 'loading' });
     setObservation(value => value + 1);
   }, []);
-  return { reobserve, state: presentAnalyticsRead(read, observed) };
-}
-
-/**
- * What a retained read may claim for the observation now shown: a fresh value
- * that answered an older observation is stale until its replacement settles.
- * Derived during render, so no commit ever shows it as current.
- */
-export function presentAnalyticsRead(read: { readonly state: AnalyticsState; readonly answered: string | null }, observed: string | null): AnalyticsState {
-  const { state } = read;
-  if (read.answered === observed || state.kind !== 'ready' || state.analytics.freshness.state !== 'fresh') { return state; }
-  return { kind: 'ready', analytics: { ...state.analytics, freshness: { ...state.analytics.freshness,
-    state: 'stale', reason: 'historical analytics are being re-observed after the board changed' } } };
+  return { reobserve, state };
 }
 
 /** Explain why deferred facts do not describe the rendered board projection. */

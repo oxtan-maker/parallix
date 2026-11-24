@@ -18,6 +18,7 @@ import type { ReboundRepairHistoryEntry } from '../application/ports/operation-h
 import type { RunRecord } from '../application/run-history-types.js';
 import { REVIEW_ACTION_STARTED_EVENT } from '../application/ports/review-action-history.js';
 import { createMissionStore } from './mission-persistence.js';
+import type { FlowConfiguredPolicy } from '../application/projections/flow-verification-round.js';
 
 /**
  * The per-Mission retained runs behind the FLOW projection: the compatibility
@@ -35,11 +36,21 @@ export function retainedFlowRunRecords(terminal: MissionTerminalCapability, miss
 }
 
 /** The configured policy artifact's saving inputs; unknown (null) when no artifact is configured or it cannot be read. */
-function configuredPolicyValues(root: string): PolicyModelValues | null {
+export function configuredVerificationProjectionPolicy(root: string): {
+  readonly values: PolicyModelValues | null;
+  readonly flow: FlowConfiguredPolicy;
+} {
   try {
-    const loaded = createPolicyArtifactLoader(root, loadEffectiveConfig(root).verificationPolicy)();
-    return loaded.mode === 'shadow' ? loaded.artifact.predicted : null;
-  } catch { return null; }
+    const configuration = loadEffectiveConfig(root).verificationPolicy;
+    const loaded = createPolicyArtifactLoader(root, configuration)();
+    return loaded.kind === 'artifact'
+      ? { values: loaded.artifact.predicted,
+        flow: { kind: 'artifact', artifactSha256: loaded.hash, roundPlan: loaded.artifact.roundPlan, fallbackReason: null } }
+      : { values: null, flow: { kind: 'fixed', artifactSha256: null, roundPlan: null, fallbackReason: loaded.reason } };
+  } catch {
+    return { values: null,
+      flow: { kind: 'fixed', artifactSha256: null, roundPlan: null, fallbackReason: 'unavailable' } };
+  }
 }
 
 /** All consumers read the same repository-scoped facts and pure calculation. */
@@ -69,8 +80,9 @@ export function createVerificationStatisticsReader(root: string, configuration?:
     // One worktree listing serves every Mission; resolving each Mission through its own Git calls made this read scale with history.
     const topology = snapshotWorktreeTopology({ cwd: root });
     const flowMissions = flowRunMissions ?? new Set([...operations.map(value => value.missionId), ...lifecycle.map(value => value.missionId)]);
+    const policy = configuredVerificationProjectionPolicy(root);
     return { repositoryId, history, operations, lifecycle, reboundRepairs,
-      runs: retainedRepositoryRunRecords(root), policyValues: configuredPolicyValues(root),
+      runs: retainedRepositoryRunRecords(root), policyValues: policy.values, flowPolicy: policy.flow,
       flowRuns: retainedFlowRunRecords(createMissionTerminalCapability(root, configuration ?? DEFAULT_CONFIGURATION, mission => topology.resolveWorktree(mission)), flowMissions),
       repositoryDiagnostics: workflowOperationCollectionDefects(operationHistory.unreadableRowCount) };
   });

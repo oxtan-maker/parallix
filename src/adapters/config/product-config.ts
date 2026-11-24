@@ -26,7 +26,7 @@ const REQUIRED_ADAPTER_KEYS = ['tasks', 'missions', 'verification', 'review', 'a
 export const SUPPORTED_TASK_PROVIDERS = ['backlog-md'] as const;
 
 const DEFAULT_CONFIG = Object.freeze({
-  verificationPolicy: { mode: 'off' } as VerificationPolicyConfiguration,
+  verificationPolicy: {} as VerificationPolicyConfiguration,
   reviewActionLimit: DEFAULT_REVIEW_ACTION_LIMIT,
   product: {
     name: 'Workflow',

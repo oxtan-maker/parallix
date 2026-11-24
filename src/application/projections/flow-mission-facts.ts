@@ -12,6 +12,7 @@ import type { FlowElapsedOwnership, FlowOwnershipRow, FlowOwnershipSegment } fro
 import { firstByKey, groupByKey } from './population-index.js';
 import type { RebaseMeasurement, RebaseObservationCutovers } from './verification-observation-reader.js';
 import type { ObservationDiagnostic } from './verification-diagnostic.js';
+import type { FlowConfiguredPolicy, FlowVerificationRound } from './flow-verification-round.js';
 
 export type FlowRebaseStage = RebaseObservationStage;
 export const FLOW_REBASE_STAGE_STATES = ['measured', 'absent', 'running', 'interrupted',
@@ -21,13 +22,18 @@ export type FlowRebaseStageState = typeof FLOW_REBASE_STAGE_STATES[number];
 /** One gate batch with at least one execution, settled by its worst executed result. */
 export interface FlowGateRun {
   readonly id: string;
+  /** Workflow authority shared by the integration run and its policy start; null when unavailable or contradictory. */
+  readonly operationId: string | null;
   readonly phase: string;
+  readonly requestedAt: string;
+  readonly finishedAt: string | null;
   readonly result: 'passed' | 'failed' | 'running';
 }
 /** One rebase identity with its settled outcomes in attempt order; `running` publications are not outcomes. */
 export interface FlowRebaseRun {
   readonly id: string;
   readonly operationId: string;
+  readonly operationCommand?: WorkflowOperation['command'];
   readonly stage: RebaseMeasurement['stage'];
   readonly outcomes: readonly RetainedRebaseOutcome[];
 }
@@ -81,6 +87,8 @@ export interface ObservedFlowMission {
   readonly agentLaunches: readonly { readonly runId: string; readonly startedAt: string;
     readonly family: string | null; readonly model: string | null }[];
   readonly observedDisqualifiers: readonly string[] | null;
+  readonly verificationPolicy: FlowConfiguredPolicy | null;
+  readonly verificationRounds: readonly FlowVerificationRound[];
   readonly returnProvenanceCutover: string | null;
   readonly diagnostics: readonly ObservationDiagnostic[];
 }
@@ -90,6 +98,7 @@ export const EMPTY_FLOW_MISSION_OBSERVATION: Omit<ObservedFlowMission, 'missionI
   rebaseStages: [], diagnostics: [],
   lead: { queued: 0, recoveries: 0, escalations: 0 }, actualAgentLaunches: null, agentLaunches: [],
   observedDisqualifiers: null, agentLaunchesLowerBound: false,
+  verificationPolicy: null, verificationRounds: [],
   returnProvenanceCutover: null,
 };
 
@@ -123,6 +132,7 @@ export function flowMissionFact(input: {
     lead: observation.lead, diagnostics: observation.diagnostics,
     actualAgentLaunches: observation.actualAgentLaunches, agentLaunchesLowerBound: observation.agentLaunchesLowerBound,
     agentLaunches: observation.agentLaunches, observedDisqualifiers: observation.observedDisqualifiers,
+    verificationPolicy: observation.verificationPolicy, verificationRounds: observation.verificationRounds,
     returnProvenanceCutover: observation.returnProvenanceCutover,
     returnProvenanceStartedAt: input.returnProvenanceStartedAt,
     reviewStatistics: input.reviewStatistics ?? reviewStatistics(null),
@@ -136,14 +146,17 @@ export function observedFlowMissions(input: { readonly repositoryId: string;
   readonly reboundRepairs?: readonly ReboundRepairHistoryEntry[] },
 ownership: FlowElapsedOwnership | null, attempts: readonly VerificationMeasurement[],
 rebases: readonly RebaseMeasurement[], firstRebaseObservedAt = firstRebaseObservations(rebases),
-diagnostics: readonly ObservationDiagnostic[] = [], missions?: ReadonlySet<string>): ObservedFlowMission[] {
+diagnostics: readonly ObservationDiagnostic[] = [], missions?: ReadonlySet<string>,
+verificationRounds: ReadonlyMap<string, readonly FlowVerificationRound[]> = new Map(),
+verificationPolicy: FlowConfiguredPolicy | null = null): ObservedFlowMission[] {
   const returnProvenanceCutover = input.returnProvenanceCutover
     ?? firstReturnProvenanceObservation(input.lifecycle, input.repositoryId, input.reboundRepairs);
   const completed = input.lifecycle.filter(event => event.repositoryId === input.repositoryId && event.toStatus === 'done'
     && (!missions || missions.has(event.missionId)));
   const scope = flowMissionScope(input, ownership, attempts, rebases, diagnostics);
   return [...new Set(completed.map(event => event.missionId))]
-    .map(missionId => observedFlowMission({ ...input, returnProvenanceCutover }, scope, firstRebaseObservedAt, missionId));
+    .map(missionId => ({ ...observedFlowMission({ ...input, returnProvenanceCutover }, scope, firstRebaseObservedAt, missionId),
+      verificationPolicy, verificationRounds: verificationRounds.get(missionId) ?? [] }));
 }
 
 /**
@@ -196,7 +209,8 @@ firstRebaseObservedAt: RebaseObservationCutovers, missionId: string): ObservedFl
   const agentRuns = retainedRuns?.filter(run => runCaptureKind(run) === 'agent');
   const scopedAttempts = scope.attempts.get(missionId) ?? [];
   const scopedRebases = scope.rebases.get(missionId) ?? [];
-  const retainedRebaseRuns = rebaseRuns(scopedRebases);
+  const operations = scope.operations.get(missionId) ?? [];
+  const retainedRebaseRuns = rebaseRuns(scopedRebases, operations);
   const launches = launchFacts(agentRuns, retainedRuns);
   const scopedDiagnostics = [
     ...(scope.diagnostics.get(missionId) ?? []).filter(diagnostic => diagnostic.repositoryId === input.repositoryId),
@@ -204,8 +218,9 @@ firstRebaseObservedAt: RebaseObservationCutovers, missionId: string): ObservedFl
   ];
   return { missionId, diagramNodeIds: missionOwnership.nodeIds, diagramEdgeIds: missionOwnership.edgeIds,
     ownership: missionOwnership.rows, diagnostics: scopedDiagnostics,
+    verificationPolicy: null, verificationRounds: [],
     window: missionOwnership.window, gateRuns: gateRuns(scopedAttempts), rebaseRuns: retainedRebaseRuns,
-    rebaseStages: rebaseStageFacts(scope.operations.get(missionId) ?? [], missionId, scopedRebases,
+    rebaseStages: rebaseStageFacts(operations, missionId, scopedRebases,
       retainedRebaseRuns, firstRebaseObservedAt, scopedDiagnostics),
     lead: leadEpisodes(missionOwnership.segments), actualAgentLaunches: launches.count,
     agentLaunchesLowerBound: launches.lowerBound,
@@ -375,17 +390,25 @@ function gateRuns(attempts: readonly VerificationMeasurement[]): FlowGateRun[] {
   for (const attempt of attempts) { batches.set(attempt.batchId, [...(batches.get(attempt.batchId) ?? []), attempt]); }
   return [...batches].flatMap(([id, rows]) => {
     const executed = rows.filter(row => row.result !== 'reused');
-    return executed.length === 0 ? [] : [{ id, phase: executed[0]!.phase,
+    const operationIds = new Set(executed.map(row => row.operationId));
+    const requestedAt = executed.map(row => row.requestedAt).sort(compareCodeUnits)[0];
+    const finished = executed.flatMap(row => row.finishedAt ? [row.finishedAt] : []).sort(compareCodeUnits);
+    return executed.length === 0 ? [] : [{ id,
+      operationId: operationIds.size === 1 ? executed[0]!.operationId : null,
+      phase: executed[0]!.phase, requestedAt: requestedAt!,
+      finishedAt: finished.length === executed.length ? finished.at(-1)! : null,
       result: executed.some(row => row.result === 'running') ? 'running' as const
         : executed.some(row => row.result === 'failed' || row.result === 'interrupted') ? 'failed' as const : 'passed' as const }];
   })
     .sort((a, b) => compareCodeUnits(a.id, b.id));
 }
 
-function rebaseRuns(rebases: readonly RebaseMeasurement[]): FlowRebaseRun[] {
+function rebaseRuns(rebases: readonly RebaseMeasurement[], operations: readonly WorkflowOperation[]): FlowRebaseRun[] {
   const runs = new Map<string, RebaseMeasurement[]>();
+  const commands = new Map(operations.map(operation => [operation.id, operation.command]));
   for (const rebase of rebases) { runs.set(rebase.id, [...(runs.get(rebase.id) ?? []), rebase]); }
   return [...runs].map(([id, rows]) => ({ id, operationId: rows[0]!.operationId!, stage: rows[0]!.stage,
+    operationCommand: commands.get(rows[0]!.operationId!),
     outcomes: [...rows].sort((a, b) => a.attempt - b.attempt || compareCodeUnits(a.occurredAt, b.occurredAt))
       .flatMap(row => isRetainedRebaseOutcome(row.outcome) ? [row.outcome] : []),
     firstObservedAt: rows.map(row => row.occurredAt).sort(compareCodeUnits)[0]! }))

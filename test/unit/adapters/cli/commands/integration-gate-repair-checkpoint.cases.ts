@@ -41,7 +41,7 @@ export function integrationGateCheckpointCases(route: typeof routeIntegrationGat
         slug, context: integrationContext({ slug, taskAssignee, approval: { ok: true, providerDisabled: true } }),
         missionLoad: { kind: 'found', mission: fixtureMission(slug, { assignee: agentFamily('custom') }), version: missionVersion(1) },
         missionServices: integrationServices({ store, lifecycle: new MissionLifecycleService(store) }),
-        dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+        realAgent: null, realAgentModel: null,
         seams: {
           selectAgentFn: () => { selections++; return 'custom'; },
           transitionTaskFn: () => true,

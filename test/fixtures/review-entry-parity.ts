@@ -53,7 +53,9 @@ async function openState(scenario: ParityScenario, fixture: RepairFixture, store
 
 export async function parityCase(scenario: ParityScenario, entry: 'cli' | 'board', t: TestContext): Promise<ParityOutcome> {
   const pending = scenario === 'interrupted-pending-review' || scenario === 'human-intervention';
-  const fixture = await openRepairFixture({ slug: 'task-entry-parity', state: pending ? 'undecided-review' : 'approved-integration' });
+  const fixture = await openRepairFixture({ slug: 'task-entry-parity', state: pending ? 'undecided-review' : 'approved-integration',
+    // An already-approved candidate is offered its tests action on entry (TASK-2872.02); a passing gate keeps that case about the approval.
+    ...(scenario === 'already-approved' ? { gateCommand: 'true' } : {}) });
   const priorConfinement = process.env.PARALLIX_NO_BUBBLEWRAP;
   process.env.PARALLIX_NO_BUBBLEWRAP = '1';
   const messages: string[] = [];
@@ -111,7 +113,7 @@ export async function concurrentPolicyCase(t: TestContext, dualFailure = false):
   const artifact = fs.readFileSync(path.resolve('config/verification-policy/time-policy.json'), 'utf8');
   const gate = `mkdir -p .workflow; touch .workflow/tests-started; i=0; while test ! -f .workflow/agent-started; do i=$((i+1)); test "$i" -lt 500 || exit 9; sleep 0.01; done; ${dualFailure ? 'test -f fix.txt' : 'touch .workflow/tests-passed'}`;
   const fixture = await openRepairFixture({ slug: 'task-concurrent-policy', state: 'undecided-review', gateCommand: gate,
-    verificationPolicy: { mode: 'pilot', artifact: 'config/time-policy.json', content: artifact } });
+    verificationPolicy: { artifact: 'config/time-policy.json', content: artifact } });
   if (dualFailure) {
     const configPath = path.join(fixture.worktree, 'workflow.config.json');
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Record<string, unknown>;

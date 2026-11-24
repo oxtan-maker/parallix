@@ -61,32 +61,32 @@ function withConfig(config: unknown | null, run: (_root: string) => void): void 
   });
 }
 
-test('policy loader pins canonical identity across replacement and keeps pilot in shadow (TASK-2859.06)', () => {
+test('policy loader pins canonical identity across artifact replacement (TASK-2859.06)', () => {
   let reads = 0;
   let input = JSON.stringify(fixture());
-  const load = createPolicyArtifactLoader('/repo', { mode: 'pilot', artifact: 'policy.json' }, file => {
+  const load = createPolicyArtifactLoader('/repo', { artifact: 'policy.json' }, file => {
     assert.equal(file, '/repo/policy.json'); reads++; return input;
   });
-  const first = load(); assert.equal(first.mode, 'shadow');
-  assert.ok(first.mode === 'shadow');
+  const first = load(); assert.equal(first.kind, 'artifact');
+  assert.ok(first.kind === 'artifact');
   assert.equal(first.hash, 'fb9dc25d53580d4b49f3590ffc9f6c890a5a441da9090960145df306132c7291');
   const reordered = JSON.stringify(Object.fromEntries(Object.entries(fixture()).reverse()), null, 2);
-  assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: '/policy.json' }, () => reordered)(), first);
+  assert.deepEqual(createPolicyArtifactLoader('/repo', { artifact: '/policy.json' }, () => reordered)(), first);
   input = JSON.stringify({ ...fixture(), solverVersion: 'replacement' });
   assert.deepEqual(load(first.hash), first); assert.equal(reads, 1);
-  assert.deepEqual(load('other-pin'), { mode: 'fixed', reason: 'hash-mismatch' });
-  assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => input)(first.hash),
-    { mode: 'fixed', reason: 'hash-mismatch' });
+  assert.deepEqual(load('other-pin'), { kind: 'fixed', reason: 'hash-mismatch' });
+  assert.deepEqual(createPolicyArtifactLoader('/repo', { artifact: 'policy.json' }, () => input)(first.hash),
+    { kind: 'fixed', reason: 'hash-mismatch' });
 });
 
-test('repository pilot pins the recalculated time-objective contract-v2 artifact (TASK-2867.08)', () => {
+test('repository pins the recalculated time-objective contract-v2 artifact (TASK-2867.08)', () => {
   const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'workflow.config.json'), 'utf8')) as {
-    verificationPolicy: { mode: 'pilot'; artifact: string };
+    verificationPolicy: { artifact: string };
   };
   assert.deepEqual(config.verificationPolicy,
-    { mode: 'pilot', artifact: 'config/verification-policy/time-policy.json' });
+    { artifact: 'config/verification-policy/time-policy.json' });
   const loaded = createPolicyArtifactLoader(repoRoot, config.verificationPolicy)();
-  assert.ok(loaded.mode === 'shadow');
+  assert.ok(loaded.kind === 'artifact');
   assert.deepEqual([loaded.hash, loaded.artifact.schemaVersion, loaded.artifact.objective,
     loaded.artifact.parameterHash, loaded.artifact.solverVersion], [
     '1609517f1330bf2b7cb727f73faf7adc52d4316bde079df03b1899fdaece866d', 2, 'time',
@@ -94,47 +94,54 @@ test('repository pilot pins the recalculated time-objective contract-v2 artifact
   ]);
 });
 
-test('policy loader off does no I/O and failures return typed fixed-policy reasons (TASK-2859.06)', () => {
-  assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'off', artifact: 'ignored' }, () => { throw Error('off read'); })(), { mode: 'off' });
+test('policy loader failures return typed fixed-policy reasons (TASK-2859.06)', () => {
+  assert.deepEqual(createPolicyArtifactLoader('/repo', {}, () => { throw Error('unexpected read'); })(), { kind: 'fixed', reason: 'missing' });
   for (const [code, reason] of [['ENOENT', 'missing'], ['EACCES', 'unreadable']]) {
-    assert.deepEqual(createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => { throw { code }; })(),
-      { mode: 'fixed', reason });
+    assert.deepEqual(createPolicyArtifactLoader('/repo', { artifact: 'policy.json' }, () => { throw { code }; })(),
+      { kind: 'fixed', reason });
   }
-  const invalid = createPolicyArtifactLoader('/repo', { mode: 'shadow', artifact: 'policy.json' }, () => '{}')();
-  assert.ok(invalid.mode === 'fixed' && invalid.reason === 'invalid' && invalid.rejection?.code === 'missing-field');
-  const v1 = createPolicyArtifactLoader('/repo', { mode: 'pilot', artifact: 'policy.json' },
+  const invalid = createPolicyArtifactLoader('/repo', { artifact: 'policy.json' }, () => '{}')();
+  assert.ok(invalid.kind === 'fixed' && invalid.reason === 'invalid' && invalid.rejection?.code === 'missing-field');
+  const v1 = createPolicyArtifactLoader('/repo', { artifact: 'policy.json' },
     () => JSON.stringify({ ...fixture(), schemaVersion: 1 }))();
-  assert.ok(v1.mode === 'fixed' && v1.reason === 'invalid' && v1.rejection?.code === 'schema-version');
+  assert.ok(v1.kind === 'fixed' && v1.reason === 'invalid' && v1.rejection?.code === 'schema-version');
 });
 
 test('policy loader returns a typed fixed result when an ignored field is too deeply nested to hash (TASK-2867.01)', () => {
   const body = JSON.stringify(fixture());
   const input = `${body.slice(0, -1)},"extra":${'['.repeat(20_000)}${']'.repeat(20_000)}}`;
   assert.ok(parsePolicyArtifact(input).ok, 'the parser ignores unknown fields');
-  for (const mode of ['shadow', 'pilot'] as const) {
-    const result = createPolicyArtifactLoader('/repo', { mode, artifact: 'policy.json' }, () => input)();
-    assert.ok(result.mode === 'fixed' && result.reason === 'invalid' && result.rejection?.code === 'unreadable', mode);
-  }
+  const result = createPolicyArtifactLoader('/repo', { artifact: 'policy.json' }, () => input)();
+  assert.ok(result.kind === 'fixed' && result.reason === 'invalid' && result.rejection?.code === 'unreadable');
 });
 
-test('verificationPolicy invalid block disables only itself and reports once (TASK-2859.06)', () => {
-  for (const block of [null, [], 'shadow', { mode: 'unknown' }, { mode: 'shadow' }, { artifact: 4 }, { mode: 'pilot', artifact: ' ' }]) {
+test('verificationPolicy invalid block falls back only itself and reports once (TASK-2859.06)', () => {
+  for (const block of [null, [], 'shadow', { artifact: 4 }, { artifact: ' ' }]) {
     withConfig({ product: { name: 'Kept' }, verificationPolicy: block }, root => {
       const report = mock.method(console, 'error', () => {});
       try {
         assert.deepEqual(validateWorkflowConfig({ verificationPolicy: block }), []);
         assert.equal(loadEffectiveConfig(root).product.name, 'Kept');
-        assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode: 'off' });
+        assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, {});
         assert.equal(report.mock.callCount(), 1);
       } finally { report.mock.restore(); }
     });
   }
-  for (const mode of ['off', 'shadow', 'pilot']) {
+  for (const mode of ['off', 'shadow', 'pilot', 'retired-value']) {
     withConfig({ verificationPolicy: { mode, artifact: 'policy.json' } }, root => {
-      assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode, artifact: 'policy.json' });
+      assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { artifact: 'policy.json' });
     });
   }
-  withConfig(null, root => assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { mode: 'off' }));
+  withConfig(null, root => assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, {}));
+});
+
+test('absent policy config and a legacy off key keep unconditional evaluation active (TASK-2872.04)', () => {
+  withConfig(null, root => assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, {}));
+  withConfig({ verificationPolicy: { mode: 'off', artifact: 'policy.json' } }, root => {
+    assert.deepEqual(loadEffectiveConfig(root).verificationPolicy, { artifact: 'policy.json' });
+  });
+  const policyProperties = JSON.parse(fs.readFileSync(schemaPath, 'utf8')).properties.verificationPolicy.properties;
+  assert.equal('mode' in policyProperties, false, 'the public schema exposes only artifact configuration');
 });
 
 test('review action limit defaults to 40 and accepts a positive safe-integer override (TASK-2859.20)', () => {

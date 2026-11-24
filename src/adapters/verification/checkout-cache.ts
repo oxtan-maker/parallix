@@ -20,10 +20,6 @@ export interface CheckoutCacheOwner extends CheckoutCacheIdentity {
   readonly owner: {
     readonly pid: number;
     readonly startId: string | null;
-    /** Explicit authority for a test runner to end this no-Git checkout's cache lifetime. */
-    readonly checkoutLifecycle?: 'disposable-stand-in';
-    /** Suite processes that can still be consuming the cache after runner termination. */
-    readonly children?: readonly { readonly pid: number; readonly startId: string | null }[];
   };
 }
 
@@ -80,7 +76,7 @@ function ownedDirectory(directory: string): boolean {
 function ownerRecord(identity: CheckoutCacheIdentity, cacheRoot: string, owner: CheckoutCacheOwner['owner']): CheckoutCacheOwner {
   return {
     kind: 'parallix-checkout-cache', version: 1, cacheRoot: path.resolve(cacheRoot), ...identity,
-    owner,
+    owner: { pid: owner.pid, startId: owner.startId },
   };
 }
 
@@ -102,20 +98,13 @@ function isProcessIdentity(value: unknown): value is { readonly pid: number; rea
   return Number.isSafeInteger(identity.pid) && (identity.pid ?? 0) > 0 && isNullableString(identity.startId);
 }
 
-function isProcessOwner(value: unknown): value is CheckoutCacheOwner['owner'] {
-  if (!isProcessIdentity(value)) { return false; }
-  const owner = value as Partial<CheckoutCacheOwner['owner']>;
-  return (owner.children === undefined || (Array.isArray(owner.children) && owner.children.every(isProcessIdentity)))
-    && (owner.checkoutLifecycle === undefined || owner.checkoutLifecycle === 'disposable-stand-in');
-}
-
 export function isCheckoutCacheOwner(value: unknown): value is CheckoutCacheOwner {
   if (typeof value !== 'object' || value === null) { return false; }
   const owner = value as Partial<CheckoutCacheOwner>;
   return owner.kind === 'parallix-checkout-cache' && owner.version === 1
     && typeof owner.cacheRoot === 'string' && typeof owner.checkoutPath === 'string'
     && isNullableString(owner.checkoutGitDir) && isNullableString(owner.repositoryGitDir)
-    && isProcessOwner(owner.owner);
+    && isProcessIdentity(owner.owner);
 }
 
 function readOwner(cacheRoot: string): CheckoutCacheOwner | null {

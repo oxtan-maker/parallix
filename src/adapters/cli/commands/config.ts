@@ -23,8 +23,8 @@ function wantsConfigWrite(args: string[]): boolean {
   return args.includes('--write');
 }
 
-function describePolicy(configuredMode: 'off' | 'shadow' | 'pilot', policy: Exclude<PolicyLoadResult, { mode: 'off' }>): string {
-  return policy.mode === 'shadow' ? `${configuredMode} (${policy.hash})` : `fixed (${policy.reason})`;
+function describePolicy(policy: PolicyLoadResult): string {
+  return policy.kind === 'artifact' ? `usable (${policy.hash})` : `unusable (${policy.reason}); fixed policy active`;
 }
 
 async function config(_args: string[] = [], opts: ConfigOptions = {}) {
@@ -84,9 +84,7 @@ async function config(_args: string[] = [], opts: ConfigOptions = {}) {
 
   const effective = loadEffectiveConfig(rootDir);
   const policy = createPolicyArtifactLoader(rootDir, effective.verificationPolicy)();
-  if (policy.mode !== 'off') {
-    logFn(`Verification policy: ${describePolicy(effective.verificationPolicy.mode, policy)}`);
-  }
+  logFn(`Verification policy artifact: ${describePolicy(policy)}`);
   logFn(JSON.stringify(effective, null, 2));
 }
 

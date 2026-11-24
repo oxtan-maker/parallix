@@ -57,6 +57,10 @@ test('web FLOW transport carries shared verification wording without recalculati
   assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, verification: [4] } }).ok, false);
   assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: [] } }).ok, false);
   assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: {
+    ...flow, current: { ...flow.current, graph: { ...flow.current.graph,
+      verification: { ...flow.current.graph.verification, concurrentRounds: 'two' } } },
+  } } } as unknown).ok, false, 'malformed shared verification facts are rejected at the web boundary');
+  assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: {
     ...flow, current: { ...flow.current, firstPassYield: { ...flow.current.firstPassYield, value: '100%' } },
   } } } as unknown).ok, false);
   assert.equal(validateWebBoardAnalytics({ ...output, metrics: { ...output.metrics, flow: {

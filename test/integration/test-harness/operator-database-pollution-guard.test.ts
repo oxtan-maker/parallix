@@ -4,8 +4,8 @@
 // default gains mission, board_lane_events, or session_markers rows during
 // the run, and stays silent when it does not.
 //
-// The probe runs the real e2e preload chain (package.json script import flags
-// for test:lifecycle-e2e) against a scratch database pointed at by PARALLIX_HOME,
+// The probe runs the real local-boundary preload chain (package.json script
+// import flags for test:lifecycle) against a scratch database pointed at by PARALLIX_HOME,
 // so the guard under test is the one production test entries actually load.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,18 +15,25 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { buildTestRunPlan } from '../../lib/test-run-plan.js';
 
 const executionRoot = path.resolve(
   process.env.PARALLIX_EXECUTION_ROOT || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..')
 );
 const packageJson = JSON.parse(fs.readFileSync(path.join(executionRoot, 'package.json'), 'utf8'));
 
-function e2eImportFlags(scriptName: string): string[] {
-  const tokens = String(packageJson.scripts?.[scriptName]).trim().split(/\s+/);
+function entryImportFlags(scriptName: string): string[] {
+  assert.equal(typeof packageJson.scripts?.[scriptName], 'string', `package.json script ${scriptName} is missing`);
+  const tokens = scriptName === 'test:lifecycle'
+    ? buildTestRunPlan({
+      executionRoot,
+      requestedArgs: ['test/e2e/lifecycle/mission-lifecycle.test.ts'],
+    }).nodeArgs
+    : String(packageJson.scripts[scriptName]).trim().split(/\s+/).slice(1);
   const flags: string[] = [];
-  for (let i = 1; i < tokens.length; i++) {
+  for (let i = 0; i < tokens.length; i++) {
     if (tokens[i] === '--import') { flags.push('--import', tokens[i + 1]); i++; }
-    else if (!tokens[i].startsWith('-')) { break; }
+    else if (tokens[i] === '--test' || !tokens[i].startsWith('-')) { break; }
   }
   return flags;
 }
@@ -62,7 +69,7 @@ function makeScratchDb(): string {
 function runProbe(dbPath: string, probeCode: string): { status: number; stderr: string } {
   const result = spawnSync(
     process.execPath,
-    [...e2eImportFlags('test:lifecycle-e2e'), '--input-type=module', '-e', probeCode],
+    [...entryImportFlags('test:lifecycle'), '--input-type=module', '-e', probeCode],
     {
       encoding: 'utf8',
       cwd: executionRoot,
@@ -78,14 +85,14 @@ function runProbe(dbPath: string, probeCode: string): { status: number; stderr: 
 }
 
 /**
- * Run the e2e preload chain with the operator default database living under a
+ * Run the local-boundary preload chain with the operator default database living under a
  * scratch HOME (PARALLIX_HOME removed), so the armed guard watches the shared
  * default database — the one a concurrent operator px session would write.
  */
 function runSharedDefaultProbe(scratchHome: string, probeCode: string): { status: number; stderr: string } {
   const result = spawnSync(
     process.execPath,
-    [...e2eImportFlags('test:lifecycle-e2e'), '--input-type=module', '-e', probeCode],
+    [...entryImportFlags('test:lifecycle'), '--input-type=module', '-e', probeCode],
     {
       encoding: 'utf8',
       cwd: executionRoot,

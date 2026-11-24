@@ -21,7 +21,7 @@ import type { SessionLaunchPolicy } from '../../domain/session.js';
 import type { AgentLaunchResult } from './agent-launch-result.js';
 import type { ReviewOperatorResumeAssessment } from '../review-recovery.js';
 import type { LiveMissionExecutionContext } from './mission-execution-context.js';
-import type { PolicyActionPort, ReviewStartFacts } from './verification-policy.js';
+import type { PolicyActionPort, PolicyTestsOutcome, ReviewStartFacts } from './verification-policy.js';
 import type { ReviewActionHistoryPort } from './review-action-history.js';
 export type { ReviewStartFacts } from './verification-policy.js';
 
@@ -443,11 +443,17 @@ export interface ReviewLoopPorts {
   readonly agents: ReviewAgentPort;
   readonly artifacts: ReviewArtifactPort;
   readonly preReview: PreReviewPort;
-  /** Absent when verificationPolicy is off, preserving zero policy work. */
+  /** Absent only when policy services cannot be composed. */
   readonly reviewStarts?: ReviewStartObservationPort;
-  /** Absent unless verificationPolicy.mode is pilot; shadow and off run the fixed policy. */
+  /** Active policy choices; unusable evaluation leaves the fixed policy in charge. */
   readonly policyActions?: PolicyActionPort;
-  /** Durable lifetime counter, independent of verification-policy mode. */
+  /**
+   * The integration tests action for the fixed sequence, absent when no mission services can run
+   * it. The tests-action owner decides from its own evidence facts whether a run is still needed,
+   * so review and active can record integration tests without a policy pilot (TASK-2872.02 SC2).
+   */
+  readonly fixedTestsAction?: { runTests(): Promise<PolicyTestsOutcome> };
+  /** Durable lifetime counter, independent of verification-policy evaluation. */
   readonly actionHistory: ReviewActionHistoryPort;
   readonly output: ReviewLoopOutput;
   readonly lock: ReviewControllerLock;
@@ -463,6 +469,8 @@ export interface ReviewLoopRequest {
   readonly reviewer?: string;
   readonly focus?: string;
   readonly actionLimit?: number;
+  /** Internal invocation state carried through review-loop restarts. */
+  readonly effectiveActionLimit?: number;
   readonly reboundsPerRound?: number;
   readonly dryRun?: boolean;
   readonly reset?: boolean;

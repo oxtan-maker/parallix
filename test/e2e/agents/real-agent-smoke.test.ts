@@ -910,7 +910,12 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
     if ((recorded.checkpoints ?? []).length === 0) { missing.push('checkpoint plan'); }
     if ((recorded.declaredGates ?? []).length === 0) { missing.push('gates'); }
     if (!recorded.predictedNelBucket) { missing.push('predicted NEL bucket'); }
-    if (!helloWorld.test(`${recorded.brief?.goal ?? ''} ${recorded.brief?.scope ?? ''}`)) { missing.push('hello-world'); }
+    const recordedIntent = [
+      recorded.brief?.goal,
+      recorded.brief?.scope,
+      ...(recorded.successCriteria ?? []),
+    ].filter(Boolean).join(' ');
+    if (!helloWorld.test(recordedIntent)) { missing.push('hello-world'); }
     assert.deepEqual(
       missing,
       [],
@@ -1099,11 +1104,15 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
       `[parallix-workflow-failure] recorded checkpoint Goal Check rows must cover every success criterion; uncovered: ${uncovered.join(', ')}`
     );
 
-    // Phase 3: Record the human turn's integration-test action, then integrate
-    // through the real CLI rail. Agent work is complete at this point, so no
-    // further model session is needed. The final invocation still bypasses
-    // recursive gates, but the approval shortcut must first see a complete
-    // current pass from the fixture's fast pre-integration plan.
+    // Phase 3: Record the integration tests, then integrate through the real CLI rail. `px review`
+    // on the approved candidate runs the tests action for the fixture's fast pre-integration plan;
+    // px integrate admits that record and starts no gate of its own (TASK-2872.02).
+    const testsTurn = await runWorkflowAllowFail(worktree, env, ['review', slug], RUN_TIMEOUT_MS);
+    assert.equal(
+      testsTurn.status,
+      0,
+      `[parallix-workflow-failure] px review ${slug} (integration tests turn) failed (status=${testsTurn.status}):\nstdout:\n${testsTurn.stdout}\nstderr:\n${testsTurn.stderr}`
+    );
     const dryRunResult = await runWorkflowAllowFail(
       worktree,
       env,
@@ -1117,15 +1126,8 @@ async function runRealAgentSmoke(selection: RealAgentSmokeSelection) {
     );
     const integrateResult = await runWorkflowAllowFail(
       worktree,
-      // The smoke fixture must not recursively run the final integration
-      // gates (which would launch this same real-agent gate again). Keep the
-      // production fail-closed default intact; authorize this one disposable
-      // fixture invocation through the explicit test-only escape hatch.
-      {
-        ...env,
-        PARALLIX_TEST_ALLOW_INTEGRATION_GATE_BYPASS: '1'
-      },
-      ['integrate', slug, '--no-integration-gates'],
+      env,
+      ['integrate', slug],
       RUN_TIMEOUT_MS
     );
     assert.equal(

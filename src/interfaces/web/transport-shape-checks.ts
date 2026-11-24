@@ -1,6 +1,6 @@
 import { checkExecution } from './transport-execution.js';
 import { FLOW_REBASE_STAGE_STATES } from '../../application/projections/flow-mission-facts.js';
-import type { FlowCohortStatistics, FlowGraph, FlowGraphEdge, FlowGraphNode, FlowLaneTime, FlowRate, FlowStatistics, FlowTimeTableRow, FlowWindowStatistics } from '../../application/projections/flow-statistics.js';
+import type { FlowCohortStatistics, FlowLaneTime, FlowRate, FlowStatistics, FlowTimeTableRow, FlowWindowStatistics } from '../../application/projections/flow-statistics.js';
 import { isRetainedRebaseOutcome, REBASE_OBSERVATION_STAGES } from '../../application/ports/rebase-workflow.js';
 /**
  * Web transport shape checks: validate each nested wire DTO (cards, work,
@@ -10,6 +10,7 @@ import { isRetainedRebaseOutcome, REBASE_OBSERVATION_STAGES } from '../../applic
 import { LANES, GATES, ACTION_STATES, CERTAINTIES, ATTENTION_REASONS, COMMAND_KINDS, isPlainObject, checkKeys, checkString, checkNullableString, checkBoolean, checkFiniteNumber, checkNullableFiniteNumber, checkEnum, checkStringArray, checkOptString, checkDuration } from './transport-validation-primitives.js';
 import { checkReviewProgress } from './review-progress-shape.js';
 import { checkReviewActions } from './review-actions-shape.js';
+import { checkFlowGraph } from './flow-transport-shape.js';
 
 
 export function checkCommandAction(object: unknown, path: string, problems: string[]): void {
@@ -331,11 +332,6 @@ function checkFlowRate(value: unknown, path: string, problems: string[]): void {
 }
 
 const FLOW_LANES = ['refine-agent', 'implement-agent', 'parallix', 'review-agent', 'lead', 'human', 'external', 'main'];
-const FLOW_NODES = ['refine', 'implement', 'pre-review-rebase', 'pre-review-resolve', 'declared-gates', 'agent-review',
-  'human-review', 'integration-rebase', 'integration-resolve', 'integration-gates', 'landed', 'lead'];
-const FLOW_EDGE_KINDS = ['flow', 'clean', 'gate-failed', 'agent-findings', 'human-changes', 'rebase-conflict',
-  'rebase-repeat', 'rebase-failed', 'workflow-return', 'lead-escalation'];
-
 /** Key inventory checked against its wire DTO: every key of T must be named and no other name may appear, so a new
  * type field or a renamed one fails the build instead of drifting past the validator at runtime. */
 type KeyInventory<T> = { readonly [K in keyof T]-?: unknown };
@@ -348,25 +344,6 @@ function checkObjects(value: unknown, path: string, problems: string[], check: (
   if (!Array.isArray(value)) { problems.push(`${path} must be an array`); return; }
   value.forEach((item, index) => {
     if (!isPlainObject(item)) { problems.push(`${path}[${index}] must be an object`); } else { check(item, `${path}[${index}]`); }
-  });
-}
-
-function checkFlowGraph(value: unknown, path: string, problems: string[]): void {
-  if (!isPlainObject(value)) { problems.push(`${path} must be an object`); return; }
-  checkKeysOf<FlowGraph>(value, path, problems, { nodes: null, edges: null });
-  checkObjects(value.nodes, `${path}.nodes`, problems, (node, nodePath) => {
-    checkKeysOf<FlowGraphNode>(node, nodePath, problems, { id: null, lane: null, count: null, rework: null, observedMissions: null, population: null });
-    checkEnum(node, 'id', FLOW_NODES, nodePath, problems); checkEnum(node, 'lane', FLOW_LANES, nodePath, problems);
-    for (const key of ['count', 'observedMissions', 'population']) { checkFiniteNumber(node, key, nodePath, problems); }
-    checkNullableFiniteNumber(node, 'rework', nodePath, problems);
-  });
-  checkObjects(value.edges, `${path}.edges`, problems, (edge, edgePath) => {
-    checkKeysOf<FlowGraphEdge>(edge, edgePath, problems, { id: null, from: null, to: null, kind: null, count: null, share: null, percentage: null });
-    checkString(edge, 'id', edgePath, problems);
-    if (edge.from !== null) { checkEnum(edge, 'from', FLOW_NODES, edgePath, problems); }
-    checkEnum(edge, 'to', FLOW_NODES, edgePath, problems); checkEnum(edge, 'kind', FLOW_EDGE_KINDS, edgePath, problems);
-    checkFiniteNumber(edge, 'count', edgePath, problems); checkNullableFiniteNumber(edge, 'share', edgePath, problems);
-    checkNullableFiniteNumber(edge, 'percentage', edgePath, problems);
   });
 }
 

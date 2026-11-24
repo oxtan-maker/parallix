@@ -249,7 +249,7 @@ async function runIntegrate(scenario: Scenario) {
   let graphs: string[] = [];
   let baseGraphDirExists = false;
   try {
-    await integrate.default([SLUG, '--no-integration-gates'], { configuration, missionServicesFn: async () => services });
+    await integrate.default([SLUG], { configuration, missionServicesFn: async () => services });
   } catch (e) {
     error = e as Error;
   } finally {

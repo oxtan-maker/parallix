@@ -78,6 +78,8 @@ const MISSION_CANCELLER_MODULE = 'src/adapters/sqlite/mission-canceller.ts';
 const CONTRACT_MODULES = new Set([
   // Read-only verification cost projection and its lane-history wiring.
   'src/application/projections/verification-statistics.ts',
+  // Read-only FLOW verification-round projection; reads lane history only.
+  'src/application/projections/flow-verification-round.ts',
   'src/composition/verification-statistics.ts',
   RECORDER_MODULE,
   DOMAIN_MODULE,

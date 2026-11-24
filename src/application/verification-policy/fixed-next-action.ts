@@ -1,5 +1,6 @@
 import type { Mission, MissionStatus } from '../../domain/mission.js';
 import { effectiveRepairObligations, isRetainedGateRepair, retainedGateRepairIsActionable } from '../../domain/repair-coverage.js';
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { currentReviewRound, reviewStatus } from '../../domain/review.js';
 import type { ReviewPhase } from '../../domain/review-phase-policy.js';
 
@@ -12,6 +13,8 @@ export interface FixedVerificationNextActionFacts {
   readonly humanIntervention: boolean;
   readonly ownedAction: boolean;
   readonly humanOnlyReason: string | null;
+  /** An interrupted approval-retention repair waits for a recorded run before it can be certified. */
+  readonly approvalRetentionPending?: boolean;
   /** Exact-current evidence supplied by integrate; absent readers preserve unknown. */
   readonly agentReviewCurrent?: boolean | null;
   /** Exact-current complete integration-test evidence supplied by integrate. */
@@ -83,6 +86,7 @@ export function fixedVerificationFacts(input: FixedVerificationNextActionInput):
     humanIntervention: review ? reviewStatus(review) === 'human-intervention' : false,
     ownedAction: input.ownedAction ?? false,
     humanOnlyReason: input.humanOnlyReason ?? humanOnlyRepairReason(input.mission),
+    approvalRetentionPending: pendingIntegrationApproval(input.mission) !== null,
     agentReviewCurrent: input.agentReviewCurrent ?? null,
     testsCurrent: input.testsCurrent ?? null,
     testsConfigured: input.testsConfigured ?? null,
@@ -108,6 +112,26 @@ function integrationNextAction(facts: FixedVerificationNextActionFacts): FixedVe
     : { kind: 'integration-handoff', reason: 'fixed-sequence-complete' };
 }
 
+/** What an approved candidate in the active or review lane owes before a human lands it; null leaves it with agent review. */
+function approvedCandidateAction(facts: FixedVerificationNextActionFacts): FixedVerificationNextAction | null {
+  if (facts.approvalRetentionPending === true && facts.testsConfigured === true && facts.testsCurrent === false) {
+    // Retention certifies from the recorded run and integration never starts one, so the tests action
+    // owns it. The original approval is what retention assesses, so agent-review currency is not asked.
+    return { kind: 'tests', reason: 'tests-not-current' };
+  }
+  if ((facts.status === 'active' || facts.status === 'review') && facts.reviewPhase === 'approved'
+    && facts.agentReviewCurrent === true && facts.testsCurrent === true) {
+    return { kind: 'human-review', reason: 'integrate-shortcut-eligible' };
+  }
+  if (facts.status !== 'review' || facts.reviewPhase !== 'approved') { return null; }
+  // The human turn waits on a current recorded run, so the fixed sequence schedules the tests action
+  // before it hands the landing to a person (TASK-2872.02 SC2). Unknown evidence stays a human handoff.
+  if (facts.agentReviewCurrent !== false && facts.testsConfigured === true && facts.testsCurrent === false) {
+    return { kind: 'tests', reason: 'tests-not-current' };
+  }
+  return { kind: 'human-review', reason: 'agent-review-approved' };
+}
+
 /**
  * The sole application-layer fixed-sequence decision.
  *
@@ -118,7 +142,9 @@ function integrationNextAction(facts: FixedVerificationNextActionFacts): FixedVe
  * integration lane holds the candidate, but only when the readers positively
  * know tests are configured and not current; unknown evidence never schedules a
  * run. A policy selection also reaches `tests` for a review or active mission
- * whose round is not fixing (TASK-2859.14, TASK-2859.17).
+ * whose round is not fixing (TASK-2859.14, TASK-2859.17). An approved
+ * review in the review lane schedules the same run before the human turn, since
+ * landing admits only a current recorded pass (TASK-2872.02 SC2).
  */
 export function fixedVerificationNextAction(input: FixedVerificationNextActionInput): FixedVerificationNextAction {
   const facts = fixedVerificationFacts(input);
@@ -126,14 +152,7 @@ export function fixedVerificationNextAction(input: FixedVerificationNextActionIn
   if (priority) { return priority; }
   if (facts.status === 'integration') { return integrationNextAction(facts); }
   if (facts.reviewPhase === 'fixing') { return { kind: 'repair', reason: 'findings-pending' }; }
-  if ((facts.status === 'active' || facts.status === 'review') && facts.reviewPhase === 'approved'
-    && facts.agentReviewCurrent === true && facts.testsCurrent === true) {
-    return { kind: 'human-review', reason: 'integrate-shortcut-eligible' };
-  }
-  if (facts.status === 'review' && facts.reviewPhase === 'approved') {
-    return { kind: 'human-review', reason: 'agent-review-approved' };
-  }
-  return { kind: 'agent-review', reason: 'review-unfinished' };
+  return approvedCandidateAction(facts) ?? { kind: 'agent-review', reason: 'review-unfinished' };
 }
 
 /** Project a human turn only from the next-action owner's typed result. */

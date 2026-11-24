@@ -282,8 +282,8 @@ describe("verify-local integrate gate", () => {
           const suiteIndex = output.indexOf('integration-suite: npm run test:integration');
           const workflowIndex = output.indexOf('workflow: node --test --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/lifecycle/mission-lifecycle.test.ts');
           const smokeIndex = output.indexOf('custom-agent-smoke: node --import tsx --import ./test/bootstrap-e2e-parallix-home.ts test/e2e/agents/real-agent-smoke.test.ts');
-          assert.ok(suiteIndex < workflowIndex, `${label} suite must run before workflow E2E`);
-          assert.ok(workflowIndex < smokeIndex, `${label} workflow E2E must run before smoke`);
+          assert.ok(suiteIndex < workflowIndex, `${label} suite must run before workflow lifecycle`);
+          assert.ok(workflowIndex < smokeIndex, `${label} workflow lifecycle must run before smoke`);
         }
       }));
     } finally {

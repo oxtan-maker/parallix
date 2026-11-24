@@ -56,6 +56,8 @@ export interface ReviewLoopFakeOverrides {
   readonly reviewStarts?: ReviewLoopPorts['reviewStarts'];
   readonly actionHistory?: ReviewLoopPorts['actionHistory'];
   readonly policyActions?: ReviewLoopPorts['policyActions'];
+  /** The fixed-sequence tests action, used when no policy pilot selects one (TASK-2872.02 SC2). */
+  readonly fixedTestsAction?: ReviewLoopPorts['fixedTestsAction'];
 }
 
 export interface ReviewLoopFake {
@@ -182,6 +184,7 @@ export function fakeReviewLoopPorts(overrides: ReviewLoopFakeOverrides = {}): Re
       }),
     },
     ...(overrides.policyActions ? { policyActions: overrides.policyActions } : {}),
+    ...(overrides.fixedTestsAction ? { fixedTestsAction: overrides.fixedTestsAction } : {}),
     output: {
       emit: event => renderReviewLoopEvent(event, ports.output),
       log: message => { logs.push(message); },

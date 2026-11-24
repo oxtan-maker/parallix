@@ -7,7 +7,7 @@ import { createTempRootRegistry, recoverRecordedTempRoots, registerRunnerOwner }
 import { probeProcessLiveness, processStartIdentity } from '../../../../src/adapters/process/process-liveness.js';
 import { cleanupRunnerTempRoots, reportUnresolvedTempRoots, signalExitCode } from '../../../lib/test-runner-temp-roots.js';
 import { mkdtemp as registeredMkdtemp, mkdtempAt } from '../../../helpers/temp-dir.js';
-import { CHECKOUT_CACHE_OWNER_FILE, ensureCheckoutCache } from '../../../../src/adapters/verification/checkout-cache.js';
+import { CHECKOUT_CACHE_OWNER_FILE, ensureCheckoutCache, readCheckoutCacheOwner } from '../../../../src/adapters/verification/checkout-cache.js';
 
 test('recorded dead roots are reclaimed while live and unrecorded roots survive', () => {
   const fixture = registeredMkdtemp('task-2365-');
@@ -45,7 +45,6 @@ test('recorded dead roots are reclaimed while live and unrecorded roots survive'
     fs.rmSync(fixture, { recursive: true, force: true });
   }
 });
-
 test('runner cleanup removes worker roots before forwarding child failure or a handled signal', () => {
   const fixture = registeredMkdtemp('task-2365-');
   const manifests = path.join(fixture, 'test-run-333');
@@ -57,6 +56,31 @@ test('runner cleanup removes worker roots before forwarding child failure or a h
     cleanupRunnerTempRoots(manifests);
     assert.equal(fs.existsSync(root), false, 'runner cleanup removes registered worker root');
     assert.equal(fs.existsSync(manifests), false, 'runner cleanup removes its worker manifest');
+  } finally {
+    fs.rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test('runner lifetime retires its unmarked no-Git checkout cache (TASK-2865.02)', () => {
+  const fixture = registeredMkdtemp('task-2865-runner-cache-');
+  const checkout = path.join(fixture, 'checkout');
+  const cacheBase = path.join(fixture, 'cache');
+  const manifests = path.join(fixture, 'test-run-333');
+  fs.mkdirSync(checkout);
+  fs.mkdirSync(cacheBase);
+  fs.mkdirSync(manifests);
+  try {
+    const cache = ensureCheckoutCache(checkout, cacheBase);
+    fs.writeFileSync(path.join(cache, 'warm-entry'), 'warm');
+    assert.deepEqual(readCheckoutCacheOwner(cache)?.owner, {
+      pid: process.pid,
+      startId: null,
+    }, 'ordinary no-Git runner caches need no disposable-stand-in marker');
+
+    cleanupRunnerTempRoots(manifests, { executionRoot: checkout, checkoutCacheBases: [cacheBase] });
+
+    assert.equal(fs.existsSync(cache), false,
+      'the runner lifetime retires its cache without delegating it to abandoned-root recovery');
   } finally {
     fs.rmSync(fixture, { recursive: true, force: true });
   }
@@ -147,7 +171,6 @@ test('a runner records its start identity before its scratch so a reused PID can
     assert.equal(fs.existsSync(scratch), false, 'a dead owner identity releases it at the next recovery');
   } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
 });
-
 test('legacy coverage scratch is reclaimed only with trusted ownership and confirmed owner absence; the rest is reported (TASK-2816)', () => {
   const fixture = registeredMkdtemp('task-2816-');
   const manifests = path.join(fixture, 'manifests');
@@ -263,9 +286,13 @@ test('abandoned checkout caches require retired checkout and dead durable owner 
     const active = linkedCheckout('active');
     const uncertain = linkedCheckout('uncertain');
     const stillRegistered = linkedCheckout('registered');
+    const noGitCheckout = path.join(fixture, 'no-git');
+    fs.mkdirSync(noGitCheckout);
+    const noGitCache = ensureCheckoutCache(noGitCheckout, base, { pid: 777, startId: 'dead-no-git' });
     retire(abandoned);
     retire(uncertain);
     fs.rmSync(stillRegistered.checkout, { recursive: true, force: true });
+    fs.rmSync(noGitCheckout, { recursive: true, force: true });
 
     const unowned = path.join(base, 'px-tmp-aaaaaaaaaaaa');
     fs.mkdirSync(unowned);
@@ -288,63 +315,18 @@ test('abandoned checkout caches require retired checkout and dead durable owner 
     const report = recoverRecordedTempRoots({ manifestDir: path.join(fixture, 'manifests'), legacyCoverageBases: [base], ownerLiveness: liveness });
 
     assert.equal(fs.existsSync(abandoned.cache), false, 'retired checkout plus dead exact owner authorizes reclamation');
-    for (const candidate of [active.cache, uncertain.cache, stillRegistered.cache, unowned, planted, mismatched.cache]) {
+    for (const candidate of [active.cache, uncertain.cache, stillRegistered.cache, noGitCache, unowned, planted, mismatched.cache]) {
       assert.equal(fs.existsSync(candidate), true, `uncertain or active cache survives: ${candidate}`);
     }
     assert.deepEqual(report.reclaimed, [abandoned.cache]);
     assert.deepEqual(report.unresolved.map(entry => [path.basename(entry.root), entry.reason]).sort(), [
       [path.basename(mismatched.cache), 'checkout-cache path does not match its durable checkout identity'],
+      [path.basename(noGitCache), 'durable linked-checkout identity is incomplete'],
       [path.basename(planted), 'checkout cache is not a non-symlink directory owned by this user'],
       [path.basename(stillRegistered.cache), 'checkout retirement cannot be confirmed'],
       [path.basename(uncertain.cache), 'owner absence cannot be confirmed'],
     ].sort());
     const again = recoverRecordedTempRoots({ manifestDir: path.join(fixture, 'manifests'), legacyCoverageBases: [base], ownerLiveness: liveness });
     assert.equal(again.reclaimed.length, 0, 'recovery is idempotent');
-  } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
-});
-
-test('recovery reclaims an explicitly owned disposable stand-in cache after owner death (TASK-2853)', () => {
-  const fixture = registeredMkdtemp('task-2853-recovery-');
-  const base = path.join(fixture, 'cache');
-  fs.mkdirSync(base);
-  const standIn = (name: string, pid: number, explicit = true, children?: readonly { pid: number; startId: string | null }[]) => {
-    const checkout = path.join(fixture, name);
-    fs.mkdirSync(checkout);
-    const cache = ensureCheckoutCache(checkout, base, {
-      pid, startId: null,
-      ...(explicit ? { checkoutLifecycle: 'disposable-stand-in' as const } : {}),
-      ...(children === undefined ? {} : { children }),
-    });
-    return { checkout, cache };
-  };
-  const abandoned = standIn('abandoned', 101);
-  const live = standIn('live-owner', 102);
-  const uncertain = standIn('uncertain-owner', 103);
-  const active = standIn('active', 104);
-  const unknown = standIn('unknown', 105, false);
-  const childProtected = standIn('live-child', 106, true, [{ pid: 206, startId: 'suite' }]);
-  const unrelated = path.join(base, 'manual-evidence');
-  fs.mkdirSync(unrelated);
-  try {
-    assert.equal(fs.existsSync(path.join(abandoned.checkout, '.git')), false, 'the stand-in has no Git identity');
-    for (const candidate of [abandoned, live, uncertain, unknown, childProtected]) {
-      fs.rmSync(candidate.checkout, { recursive: true, force: true });
-    }
-
-    const report = recoverRecordedTempRoots({
-      manifestDir: path.join(fixture, 'manifests'),
-      legacyCoverageBases: [base],
-      ownerLiveness: pid => pid === 102 || pid === 206 ? true : pid === 103 ? null : false,
-    });
-
-    assert.equal(fs.existsSync(abandoned.cache), false, 'dead explicitly owned stand-in cache must be reclaimed');
-    for (const candidate of [live.cache, uncertain.cache, active.cache, unknown.cache, childProtected.cache, unrelated]) {
-      assert.equal(fs.existsSync(candidate), true, `unproven or active data must survive: ${candidate}`);
-    }
-    assert.deepEqual(report.reclaimed, [abandoned.cache]);
-    assert.deepEqual(report.unresolved.map(entry => [entry.root, entry.reason]).sort(), [
-      [uncertain.cache, 'owner absence cannot be confirmed'],
-      [unknown.cache, 'durable linked-checkout identity is incomplete'],
-    ].sort());
   } finally { fs.rmSync(fixture, { recursive: true, force: true }); }
 });

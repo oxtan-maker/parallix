@@ -48,6 +48,8 @@ export interface ReviewStatistics {
   readonly episodes: readonly ReviewEpisode[];
   readonly sendBacks: Readonly<Record<'agent' | 'human', ReviewSendBackMetric>>;
   readonly source: 'review-aggregate' | 'no-review';
+  /** Typed workflow stop retained by the Review owner; absent on legacy aggregate fixtures. */
+  readonly intervention?: { readonly reason: string; readonly requestedAt: string } | null;
 }
 
 export type ReviewSendingActor = 'agent' | 'human' | 'workflow' | null;
@@ -72,6 +74,7 @@ export interface ReviewEpisode {
   readonly endedAt: string;
   readonly revision: string | null;
   readonly sender: string;
+  readonly decision?: 'approved' | 'changes-requested';
 }
 export interface ReviewSendBackMetric {
   readonly numerator: number | null;
@@ -82,6 +85,11 @@ export interface ReviewSendBackMetric {
 }
 
 const EMPTY_REVIEW_STATISTICS_EVIDENCE: ReviewStatisticsEvidence = { equivalentSubmissions: {} };
+
+function interventionOf(review: Review | null): ReviewStatistics['intervention'] {
+  return review?.intervention
+    ? { reason: review.intervention.reason, requestedAt: review.intervention.requestedAt } : null;
+}
 
 /**
  * One authority for reimplementation rounds. Every distinct return of delivered
@@ -113,12 +121,14 @@ export function reviewStatistics(review: Review | null,
   const episodes = mergeReviewEpisodes(reviewObservedEpisodes, evidence.reviewEpisodes ?? []);
   if (!reviewMeasured && evidence.workflowReturns === undefined) {
     return { implementer, total: null, byImplementer: {}, returns: [], episodes,
+      intervention: interventionOf(review),
       sendBacks: sendBackMetrics([], episodes, false), source: review ? 'review-aggregate' : 'no-review' };
   }
   const byImplementer = countByAuthor(review, returns);
   const observations = [...returns].map(([identity, author]) => ({ identity, author,
     at: times.get(identity) ?? null, origin: origins.get(identity) ?? unknownOrigin }));
   return { implementer, total: returns.size, byImplementer, returns: observations, episodes,
+    intervention: interventionOf(review),
     sendBacks: sendBackMetrics(observations, episodes, true), source: review ? 'review-aggregate' : 'no-review' };
 }
 
@@ -167,6 +177,7 @@ function reviewEpisodes(review: Review | null): ReviewEpisode[] {
       stage,
       startedAt: round.startedAt, endedAt: round.decision.decidedAt,
       revision: round.decision.revision ?? round.subject.revision,
+      ...((round.decision.kind === 'approved' || round.decision.kind === 'changes-requested') ? { decision: round.decision.kind } : {}),
       sender: actor === 'human' && round.decision.kind === 'changes-requested'
         ? round.decision.source?.author ?? 'unknown' : String(round.reviewer) }];
     const revocation = round.decision.kind === 'approved' ? round.decision.revocation : undefined;
@@ -209,7 +220,6 @@ function sendBackMetrics(returns: readonly { origin: ReviewReturnOrigin }[], epi
   return { agent: build('agent'), human: build('human') };
 }
 
-/** Every round implementer is listed; a return nothing can attribute stays under `unknown`, never a guessed agent. */
 function countByAuthor(review: Review | null, returns: ReadonlyMap<string, string | null>): Record<string, number> {
   const byImplementer: Record<string, number> = {};
   for (const round of review?.rounds ?? []) {

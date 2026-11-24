@@ -414,6 +414,10 @@ test('this repository starts every independent check while Sonar waits for cover
       if (key === 'agent-smoke') {
         assert.ok(independent.every(gate => !completed.has(gate.key)), 'smoke starts with all independent checks, without waiting for a completed check (TASK-2807)');
       }
+      if (key === 'workflow') {
+        assert.ok(completed.has('build'), 'workflow starts only after build completes');
+        assert.ok([...active].some(activeKey => activeKey !== 'workflow'), 'workflow overlaps an independent post-build gate');
+      }
       assert.ok(key !== 'quality-gate' || !active.has('coverage-merge'), 'Sonar starts after coverage merge completes');
       setTimeout(() => { active.delete(key); completed.add(key); resolve({ status: 0, stdout: '', stderr: '' }); }, key === 'build' ? 2 : key === 'coverage-merge' ? 5 : 30);
     }),
@@ -427,7 +431,9 @@ test('this repository shares one test slot across test gates and leaves other st
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const gates = loadPhaseGates(repoRoot, 'preIntegration');
   const shared = gates.filter(gate => gate.resource === 'test').map(gate => gate.key).sort();
-  assert.deepEqual(shared, ['browser-e2e', 'integration-ci', 'integration-local', 'unit', 'workflow']);
+  assert.deepEqual(shared, ['browser-e2e', 'integration-ci', 'integration-local', 'unit']);
+  assert.equal(gates.find(gate => gate.key === 'workflow')?.resource, undefined,
+    'the isolated lifecycle gate must not hold the shared test resource');
   assert.equal(gates.some(gate => gate.resource && gate.resource !== 'test'), false);
   assert.equal(resolveGateResources(repoRoot).test, 1);
   assert.equal(resolveVerificationResource(repoRoot), 'test', "review preparation verification and declared gates share the slot");

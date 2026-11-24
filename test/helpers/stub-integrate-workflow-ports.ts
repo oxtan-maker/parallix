@@ -109,7 +109,6 @@ export function stubIntegrateWorkflowPorts(overrides: IntegrateWorkflowPortOverr
       loadRequirePreIntegration: () => { throw new Error('Unexpected integrate boundary: gates.loadRequirePreIntegration'); },
       runPhaseGates: () => { throw new Error('Unexpected integrate boundary: gates.runPhaseGates'); },
       captureFinalIntegrationTree: () => { throw new Error('Unexpected integrate boundary: gates.captureFinalIntegrationTree'); },
-      listChangedPathsBetween: () => { throw new Error('Unexpected integrate boundary: gates.listChangedPathsBetween'); },
       resolveIntegrationVerificationWorktree: () => { throw new Error('Unexpected integrate boundary: gates.resolveIntegrationVerificationWorktree'); },
       isIntendedPayloadAtHead: () => { throw new Error('Unexpected integrate boundary: gates.isIntendedPayloadAtHead'); },
       routeIntegrationGateFailure: () => { throw new Error('Unexpected integrate boundary: gates.routeIntegrationGateFailure'); },

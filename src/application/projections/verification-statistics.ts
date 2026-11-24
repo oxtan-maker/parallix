@@ -16,8 +16,10 @@ import { verificationModelStatistics, type PolicyModelValues, type VerificationM
 import { firstByKey, groupByKey } from './population-index.js';
 import { ActivityCosts, interval, type ActivityEvent, type Interval } from './verification-activity-costs.js';
 import { REVIEW_START_DECISION_EVENT } from '../verification-policy/review-start-decision.js';
+import { HUMAN_REVIEW_WITHDRAWAL_EVENT } from '../verification-policy/review-start-decision.js';
 import { REVIEW_START_OUTCOME_EVENT } from '../verification-policy/review-start-outcome.js';
 import { REVIEW_ACTION_STARTED_EVENT } from '../ports/review-action-history.js';
+import { observedFlowVerificationRounds, type FlowConfiguredPolicy } from './flow-verification-round.js';
 export type { RebaseMeasurement } from './verification-observation-reader.js';
 
 /**
@@ -27,7 +29,7 @@ export type { RebaseMeasurement } from './verification-observation-reader.js';
  */
 export const VERIFICATION_HISTORY_EVENT_TYPES: readonly string[] = [
   'mission.current-work', 'flow.activity', VERIFICATION_MEASUREMENT_EVENT, 'flow.rebase', 'lead.operator-judgment',
-  REVIEW_START_DECISION_EVENT, REVIEW_START_OUTCOME_EVENT, REVIEW_ACTION_STARTED_EVENT,
+  REVIEW_START_DECISION_EVENT, REVIEW_START_OUTCOME_EVENT, HUMAN_REVIEW_WITHDRAWAL_EVENT, REVIEW_ACTION_STARTED_EVENT,
 ];
 export interface VerificationStatisticsInput {
   readonly repositoryId: string;
@@ -43,6 +45,8 @@ export interface VerificationStatisticsInput {
   readonly repositoryDiagnostics?: readonly string[];
   /** Values of the configured policy artifact; absent when none is configured or readable. */
   readonly policyValues?: PolicyModelValues | null;
+  /** Validated current display shape. Retained starts, never this value, classify historical execution. */
+  readonly flowPolicy?: FlowConfiguredPolicy | null;
   /** Reporting windows the model statistics are limited to; absent means every recorded decision. */
   readonly modelWindows?: readonly ReportingWindow[];
 }
@@ -412,6 +416,7 @@ function scopedRunRecords(input: VerificationStatisticsInput, rows: readonly { r
 function modelStatistics(input: VerificationStatisticsInput, missions: ReadonlySet<string> | undefined): VerificationModelStatistics {
   return verificationModelStatistics(input.history, input.repositoryId, input.policyValues, input.modelWindows ? undefined : missions, input.modelWindows);
 }
+const flowPolicy = (input: VerificationStatisticsInput): FlowConfiguredPolicy | null => input.flowPolicy ?? null;
 
 export function verificationStatistics(input: VerificationStatisticsInput, missions?: ReadonlySet<string>, flowMissions = missions): VerificationStatistics {
   const unknowns = new Set<string>(input.repositoryDiagnostics ?? []);
@@ -443,7 +448,10 @@ export function verificationStatistics(input: VerificationStatisticsInput, missi
   const recoveryAttempts = executed.filter(a => execution(a).some(([start, end]) => recoveries.some(([a, b]) => start >= a && end <= b)));
   const comparisons = revisionComparisons(executed), controlled = controlledComparisons(attempts, unknowns);
   const gatesByGate = groupByKey(executed, a => a.gate);
-  const observedFlow = observedFlowMissions(input, ownership, attempts, rebases, observedRebaseCutovers(input), diagnostics, flowMissions);
+  const verificationRounds = observedFlowVerificationRounds(input.history, input.repositoryId, input.lifecycle);
+  diagnostics.push(...verificationRounds.diagnostics);
+  const observedFlow = observedFlowMissions(input, ownership, attempts, rebases, observedRebaseCutovers(input), diagnostics,
+    flowMissions, verificationRounds.byMission, flowPolicy(input));
   const visibleMissionIds = new Set(observedFlow.map(mission => mission.missionId));
   for (const diagnostic of diagnostics.filter(value => !visibleMissionIds.has(value.missionId))) {
     unknowns.add(diagnostic.message);

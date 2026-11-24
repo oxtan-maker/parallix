@@ -14,7 +14,6 @@ import { cpuSupervisor, readCpuReport } from './lib/cpu-supervisor.js';
 import { childCpuUsageModule } from './lib/child-cpu-usage.js';
 import { readCpuBudgetPolicy, suiteCpuBudget } from './lib/test-cpu-policy.mjs';
 import { checkoutTestTmpdir, linkSharedTsxCache } from './lib/test-tmpdir.js';
-import { checkoutCacheIdentity, retireCheckoutCache } from '../src/adapters/verification/checkout-cache.js';
 import { assertValidTestLayout } from './lib/test-layout-validation.js';
 import { MEMORY_BOUNDARY_ENV, MEMORY_LIMIT_ENV, classifyWorkload, formatBreachReport, MEMORY_SCOPE_ENV, resolveMemoryBoundaryPolicy } from '../src/adapters/process/test-memory-policy.js';
 import { assertRunnerHealth, RUNNER_HEALTH_EXIT_STATUS, defaultUserRuntimeDir, forgetScope, scopeCgroupDir, scopeResult, watchScope, wrapInScope } from '../src/adapters/process/test-memory-cgroup.js';
@@ -98,16 +97,9 @@ if (fastUnit && fileTimingProfile) {
 const executedNodeArgs = fastUnit
   ? ['--import', 'tsx', path.join(testRoot, 'run-fast-unit-tests.ts')]
   : suiteNodeArgs;
-const executionIdentity = checkoutCacheIdentity(executionRoot);
-const disposableStandIn = process.env.PARALLIX_TEST_DISPOSABLE_STANDIN === '1'
-  && executionIdentity.checkoutGitDir === null && executionIdentity.repositoryGitDir === null;
 const checkoutCacheBases = new Set<string>();
-let checkoutCacheChildren: readonly { readonly pid: number; readonly startId: string | null }[] = [];
 function runnerCheckoutTmpdir(base?: string): string {
-  const root = checkoutTestTmpdir(executionRoot, base, {
-    ...(disposableStandIn ? { checkoutLifecycle: 'disposable-stand-in' as const } : {}),
-    ...(checkoutCacheChildren.length === 0 ? {} : { children: checkoutCacheChildren }),
-  });
+  const root = checkoutTestTmpdir(executionRoot, base);
   checkoutCacheBases.add(path.dirname(root));
   return root;
 }
@@ -123,8 +115,7 @@ if (coverageEnabled) {
   try {
     coverageBase = checkoutTestTmpdir(executionRoot,
       diskBackedTempBase(process.env.XDG_RUNTIME_DIR, [path.join(executionRoot, 'tmp'),
-        ...(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR ? [process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR] : [])]),
-      disposableStandIn ? { checkoutLifecycle: 'disposable-stand-in' } : {});
+        ...(process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR ? [process.env.PARALLIX_TEST_TRANSCRIPT_TMPDIR] : [])]));
     checkoutCacheBases.add(path.dirname(coverageBase));
   }
   catch (error) {
@@ -251,10 +242,6 @@ const child = spawn(launch.command, launch.args, {
 if (child.pid !== undefined) {
   const childIdentity = { pid: child.pid, startId: processStartIdentity(child.pid) };
   runnerRoots.recordChild(childIdentity);
-  if (disposableStandIn) {
-    checkoutCacheChildren = [childIdentity];
-    for (const base of checkoutCacheBases) { runnerCheckoutTmpdir(base); }
-  }
 }
 let outputBytes = 0;
 child.stdout.on('data', (chunk: Buffer) => {
@@ -310,10 +297,7 @@ process.on('SIGTERM', () => forwardSignal('SIGTERM'));
 // reclaims the worker manifests and the runner-owned fast unit scratch root.
 function cleanupRunnerOwnedRoots() {
   if (launch.unit !== null) { forgetScope(launch.unit); }
-  cleanupRunnerTempRoots(testManifestDir);
-  if (disposableStandIn) {
-    for (const base of checkoutCacheBases) { retireCheckoutCache(executionRoot, base); }
-  }
+  cleanupRunnerTempRoots(testManifestDir, { executionRoot, checkoutCacheBases: [...checkoutCacheBases] });
 }
 
 // Measure elapsed time for the suite-level budget check.

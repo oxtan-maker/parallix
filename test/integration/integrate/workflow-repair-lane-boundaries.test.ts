@@ -210,7 +210,7 @@ test('integration gates stop in the integration lane on a successful re-review a
         slug: SLUG, context: integrationContext({ baseWorktree: fixture.root, taskAssignee: IMPLEMENTER }),
         missionLoad: await fixture.store.load(missionId(SLUG)),
         missionServices: integrationServices({ store: fixture.store, lifecycle: fixture.lifecycle }),
-        dryRun: false, noIntegrationGates: false, realAgent: null, realAgentModel: null,
+        realAgent: null, realAgentModel: null,
         seams: {
           startAgentFn: async () => assert.fail('launch belongs to the injected repair boundary'),
           applyAgentFallbackFn: async () => IMPLEMENTER,

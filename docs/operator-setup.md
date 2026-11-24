@@ -221,8 +221,8 @@ before recovery continues. Human attention is required for an unresolved product
 decision or conflict with the locked mission or gates that the investigation
 cannot resolve from the recorded authority and repository evidence.
 
-`px integrate <slug> --dry-run` uses this same retained repair authority when a
-configured integration gate fails. The retained record carries the exact failed
+A tests-action run (`px review <slug>` or `px active`) uses this same retained
+repair authority when a configured integration gate fails. The retained record carries the exact failed
 command and bounded diagnostics; repair must rerun that check and the complete
 configured integration plan. A changed candidate invalidates the earlier
 approval and resumes independent review. Infrastructure, state-machine and
@@ -520,8 +520,9 @@ the existing review submission path; a missing pull request or token, a stale
 agent or test revision, or a failed provider write stops integration without
 creating local approval authority. With the review provider disabled, the same
 path records one local approval. The refusal names the missing or stale fact;
-use `px review <slug>` to refresh agent review or `px integrate <slug> --dry-run`
-to produce current integration-test evidence, then retry. The shortcut requires
+use `px review <slug>` to refresh agent review and record current integration
+tests, then retry; `px integrate <slug> --dry-run` only reports readiness and
+records no evidence. The shortcut requires
 at least one configured `preIntegration` gate; when none is configured, the
 refusal names that configuration requirement instead of claiming a dry run can
 produce evidence.
@@ -665,13 +666,14 @@ When you record your approval with `px verdict approve` and the candidate sits i
 the integration lane without exact-current integration tests, the review step runs
 them automatically through the existing gate owner: it rebases first, runs the
 configured `preIntegration` gates and records the same gate execution receipt as a live
-integration gate pass, without landing or approving anything. `px lead` no longer
-runs integration gates on its own, and `px integrate <slug> --dry-run` stays a
-human command. A repairable failure enters retained repair and, after green
-re-verification and any required fresh review, returns to the integration lane
-for the human decision. Landing still runs the gates again unless existing gate
-evidence covers the final candidate; the version commit that follows the landing
-rebase normally prevents that reuse.
+integration gate pass, without landing or approving anything. `px review <slug>` on
+an already-approved candidate runs the same tests action. `px lead` runs no
+integration gates on its own. `px integrate <slug>` starts no gate: it lands only
+from a current recorded passing run, refuses naming tests when that run is missing
+or stale after a rebase or base advance, and `--dry-run` only reports readiness
+from the recorded facts. A repairable failure enters retained repair and, after
+green re-verification and any required fresh review, returns to the integration
+lane for the human decision.
 If no original approval round is recorded, retention stays blocked; run
 `px review <slug>` to establish a fresh review before integration.
 Historical mechanical-restoration provenance remains readable independently of

@@ -8,7 +8,7 @@ Related: ADR 0041 (integration pipeline gates), ADR 0047 (NEL budget), task-1268
 
 ## Context
 
-Parallix already has meaningful defenses against agent hallucinations and incomplete work, but they are fragmented across commands and missions rather than expressed as one coherent harness policy. The repo has exact-tree verification proof (task-1335), handoff pre-checks, gatekeeper mandatory-artifact checks (gatekeeper.js), integration-time gates (ADR 0041), and a narrow auto-repair path (repair-handoff.js). It also has open work on shift-left verification (task-1268).
+Parallix already has meaningful defenses against agent hallucinations and incomplete work, but they are fragmented across commands and missions rather than expressed as one coherent harness policy. The repo has recorded verification facts, handoff pre-checks, gatekeeper mandatory-artifact checks, and a narrow auto-repair path. It also has open work on shift-left verification (task-1268).
 
 What it does not yet have is one explicit answer to a repository-level question: **given a failed or incomplete agent handoff, which failure classes should auto-repair, which should auto-send-back to the implementer, and which genuinely require human intervention?**
 
@@ -26,7 +26,7 @@ This decision draws on four prior Parallix artifacts:
 
 2. **Task-1335** (`backlog/completed/task-1335 - Harden-parallix-self-hosting-publish-path...md`): Exact-tree verification proof, implemented and completed. Its exact-commit publication guard was superseded on 2026-10-10: local landing and review-baseline mirroring add no implicit tests; downstream CI owns shared validation, while explicit gates and configured post-squash hooks remain.
 
-3. **ADR 0041** (`docs/adr/0041-integration-pipeline-gates.md`): Integration-time pipeline gates with per-area dispatch, config-driven gate plan, and `--no-integration-gates` escape hatch. Established the pattern of gate execution before squash-merge.
+3. **ADR 0041** (`docs/adr/0041-integration-pipeline-gates.md`): The superseded integration-time pipeline design established per-area dispatch and config-driven gate plans before integration moved to consuming tests-action facts.
 
 4. **ADR 0047** (`docs/adr/0047-per-mission-change-size-budget.md`): NEL budget with observational capture at handoff. Demonstrates the pattern of observational instrumentation without enforcement — a template for what NOT to do when enforcement is needed.
 

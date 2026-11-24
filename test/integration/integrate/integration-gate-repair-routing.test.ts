@@ -1,14 +1,16 @@
 import type { IntegrationGateFailureRequest, IntegrationGateRoute } from '../../../src/application/ports/integrate-workflow.js';
 // ---------------------------------------------------------------------------
-// TASK-2492 — the `px integrate` CLI wires a failed integration gate through
+// TASK-2492 / TASK-2872.02 — the integration tests action (the only owner of gate
+// execution; `px integrate` starts none) wires a failed integration gate through
 // the routing module instead of dead-ending in `IntegrationAbort`.
 //
 // The routing module's four outcomes are covered by
 // `test/unit/application/rebound-kernel-contract.test.ts` with injected seams. This
-// file proves the CLI wiring: that a red `runPhaseGates('integration', …)`
+// file proves the tests-action wiring: that a red `runPhaseGates('integration', …)`
 // result calls `routeIntegrationGateFailure` with the failed gate, the gate
-// error, the configured gate set, a named implementer, and a transition seam,
-// and that only a `fixed` route lets the merge proceed.
+// error, the configured gate set, a named implementer, and a transition seam.
+// Re-review after a repaired candidate is owned by the review loop and its
+// integration suites, not by integrate.
 //
 // Nothing here launches an agent, opens a database, or executes a gate: the
 // routing seam is injected and returns a configurable route, the integration
@@ -38,28 +40,25 @@ await installModuleMocks();
 import { MissionIntegrationService } from '../../../src/application/mission-integration-service.js';
 import { MissionLifecycleService } from '../../../src/application/mission-lifecycle-service.js';
 import { reviewStatistics } from '../../../src/application/services/review-statistics.js';
-import type { Mission, MissionStatus } from '../../../src/domain/mission.js';
-import { missionId } from '../../../src/domain/mission.js';
+import type { MissionStatus } from '../../../src/domain/mission.js';
 import { approvedReview, inMemoryTransitionStore, integrateCommandMission } from '../../fixtures/mission-builders.js';
-import { agentFamily } from '../../../src/domain/agents.js';
-import { applyReviewerCommand, applyImplementerCommand, beginNextReviewRound, currentReviewRound, changeRevision, ConfiguredReviewerEligibility, reviewFindingId, reviewStatus, revokeApprovedDecision, type Review } from '../../../src/domain/review.js';
-import { fixedVerificationNextAction, type FixedVerificationNextAction } from '../../../src/application/verification-policy/fixed-next-action.js';
+import { currentReviewRound, changeRevision, type Review } from '../../../src/domain/review.js';
 
 const SLUG = 'task-2492-gate-bounce';
 const LANDED_SHA = 'a11ced0000000000000000000000000000000001';
 
 function createFakeStore(status: MissionStatus) {
-  const review = status === 'review' ? approvedReview(SLUG) : null;
+  const review = status === 'review' || status === 'integration' ? approvedReview(SLUG) : null;
   const current = review ? currentReviewRound(review) : null;
   const currentRevisionReview: Review | null = review && current ? {
     ...review,
-    rounds: [{ ...current, decision: { ...current.decision!, revision: changeRevision('fixture-revision') } }],
+    rounds: [{ ...current, decision: { ...current.decision!, revision: changeRevision(LANDED_SHA) } }],
   } : review;
   return inMemoryTransitionStore(integrateCommandMission(SLUG, status, currentRevisionReview));
 }
 
 function servicesFor() {
-  const store = createFakeStore('done');
+  const store = createFakeStore('integration');
   return {
     store,
     lifecycle: new MissionLifecycleService(store),
@@ -81,12 +80,9 @@ const FAILED_GATE = {
 interface Scenario {
   /** Route the injected routing seam returns for a red gate. */
   route: 'fixed' | 'exhausted' | 'mainline' | 'limit-reached' | 'stranded';
-  repairs?: number;
-  dryRun?: boolean;
-  unchangedRepair?: boolean;
 }
 
-async function runIntegrate(scenario: Scenario) {
+async function runTestsAction(scenario: Scenario) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'parallix-2492g-'));
   fs.mkdirSync(path.join(root, 'backlog', 'tasks'), { recursive: true });
   fs.writeFileSync(path.join(root, 'workflow.config.json'), JSON.stringify({
@@ -94,22 +90,11 @@ async function runIntegrate(scenario: Scenario) {
   }));
   const taskFile = path.join(root, 'backlog', 'tasks', 'task.md');
   fs.writeFileSync(taskFile, 'status: approved\n');
-  const services = scenario.repairs ? (() => {
-    const store = createFakeStore('review');
-    return { store, lifecycle: new MissionLifecycleService(store), integration: new MissionIntegrationService(store), nel: { recordNel: async () => ({}) } };
-  })() : servicesFor();
-  if (scenario.repairs) {
-    await services.store.save({ ...services.store.mission(), checkpoints: [{ missionId: missionId(SLUG), name: 'CP-1', rawFilename: undefined,
-      firstLine: '', goalCheck: [{ criterion: 'repair', evidence: 'recorded' }], nextActionText: 'review' }] });
-    if (scenario.dryRun) {
-      await services.store.save({ ...services.store.mission(), status: 'integration', rawStatus: 'integration', closedAt: null } as Mission);
-    }
-  }
+  const services = servicesFor();
   const launches: string[] = [];
   const seamLaunches: string[] = [];
   const logs: string[] = [];
   const captured: IntegrationGateFailureRequest[] = [];
-  const nextActions: FixedVerificationNextAction[] = [];
 
   mock.method(process.stdout, 'write', (chunk: string | Uint8Array) => {
     logs.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString());
@@ -142,7 +127,7 @@ async function runIntegrate(scenario: Scenario) {
     if (joined.includes('branch --show-current')) { return ok('main\n'); }
     if (joined.includes('status --porcelain')) { return ok(''); }
     if (args.includes('rev-parse') || args.includes('merge-base')) {
-      const revision = scenario.repairs ? (reviews > 0 ? `repair-${reviews}-resolved` : 'fixture-revision') : LANDED_SHA;
+      const revision = LANDED_SHA;
       return ok(`${revision}\n`);
     }
     if (joined.includes('merge') && joined.includes('--no-commit')) { return ok(''); }
@@ -176,10 +161,8 @@ async function runIntegrate(scenario: Scenario) {
     { key: 'integration-suite', command: FAILED_GATE.command, order: 1 },
   ]);
   mock.method(repositoryGates, 'loadRequirePreIntegration', () => false);
-  let gateRuns = 0;
-  let reviews = 0;
   mock.method(repositoryGates, 'runPhaseGates', async () => ({
-    ok: Boolean(scenario.repairs && ++gateRuns > scenario.repairs),
+    ok: false,
     skipped: false,
     failedGate: FAILED_GATE,
     error: `Repository gate "${FAILED_GATE.key}" exited with code 1 for integration.`,
@@ -187,28 +170,6 @@ async function runIntegrate(scenario: Scenario) {
 
   const routeIntegrationGateFailureFn = mock.fn(async (args: IntegrationGateFailureRequest): Promise<IntegrationGateRoute> => {
     captured.push(args);
-    if (scenario.repairs) {
-      assert.ok(args.reactivateMissionFn);
-      await args.reactivateMissionFn(SLUG);
-      assert.equal(services.store.mission().status, 'active');
-      const pending = services.store.mission();
-      assert.equal(reviewStatus(pending.review!), 'approved', 'a red gate preserves the original judgment during repair');
-      assert.equal(currentReviewRound(pending.review!).integrationRepairAssessment?.outcome, 'pending');
-      if (scenario.unchangedRepair) {
-        nextActions.push(fixedVerificationNextAction({ mission: pending,
-          agentReviewCurrent: true, testsConfigured: true, testsCurrent: true }));
-        return { route: 'blocked', rebounds: captured.length };
-      }
-      // This routing seam represents a changed patch: the retention owner
-      // withdraws the judgment before returning revision-changed to the CLI.
-      const review = revokeApprovedDecision(pending.review!, currentReviewRound(pending.review!).number, {
-        revokedAt: new Date().toISOString(), revokedBy: 'workflow', reason: 'Integration repair changed the approved mission patch.',
-        cause: { kind: 'integration-gate-failure', gate: FAILED_GATE.key, command: FAILED_GATE.command },
-      });
-      await services.store.save({ ...pending, review });
-      assert.equal(reviewStatus(services.store.mission().review!), 'awaiting-review');
-      return { route: 'revision-changed', rebounds: captured.length, repairedRevision: `repair-${captured.length}`, invalidation: { ok: true, dismissed: [], errors: [] } };
-    }
     if (scenario.route === 'fixed') {
       // A recoverable mission-regression route transitions the task back to
       // the implementer and relaunches exactly once.
@@ -221,28 +182,12 @@ async function runIntegrate(scenario: Scenario) {
 
   let error: Error | undefined;
   try {
-    await integrate.default([SLUG, ...(scenario.dryRun ? ['--dry-run'] : [])], {
+    await integrate.runReviewStepTests(SLUG, {
       missionServicesFn: async () => services,
       startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } }; },
       transitionTaskFn: async () => { launches.push('transitioned'); return true; },
       applyAgentFallbackFn: async ({ original }: { original: string }) => original,
       routeIntegrationGateFailureFn: routeIntegrationGateFailureFn,
-      ...(scenario.repairs ? { reReviewFn: async () => {
-        reviews++;
-        // The lifecycle service owns its transition coverage. This CLI-wiring
-        // fixture needs only the state a completed re-review hands back to the
-        // integration restart, so keep the seam in-memory and deterministic.
-        let review = services.store.mission().review!;
-        review = applyReviewerCommand(review, { type: 'request-changes', decidedAt: new Date().toISOString(), comment: null,
-          findings: [{ id: reviewFindingId('F1'), summary: 'finish repair', location: null }] });
-        review = applyImplementerCommand(review, { type: 'submit-resolution', respondedAt: new Date().toISOString(),
-          resultingRevision: changeRevision(`repair-${reviews}-resolved`), resolutions: [{ findingId: reviewFindingId('F1'), kind: 'fixed', evidence: 'fixed' }] });
-        review = beginNextReviewRound(review, agentFamily('claude'), agentFamily('codex'), new Date().toISOString(),
-          ConfiguredReviewerEligibility.fromReviewStep({ eligible: [agentFamily('claude')], strategy: 'random' }));
-        review = applyReviewerCommand(review, { type: 'approve', decidedAt: new Date().toISOString(), comment: null, source: { kind: 'local' } });
-        await services.store.save({ ...services.store.mission(), status: 'integration', closedAt: null, review } as Mission);
-        return true;
-      } } : {}),
     });
   } catch (e) {
     error = e as Error;
@@ -251,7 +196,7 @@ async function runIntegrate(scenario: Scenario) {
     fs.rmSync(root, { recursive: true, force: true });
   }
   const mission = services.store.mission();
-  return { error, exitCode, launches, seamLaunches, logs, captured, gateRuns, reviews, mission, nextActions,
+  return { error, exitCode, launches, seamLaunches, logs, captured, mission,
     laneEvents: services.store.events.map(event => `${event.from}>${event.to}:${event.trigger}`),
     statistics: reviewStatistics(mission.review).total };
 }
@@ -260,7 +205,7 @@ async function runIntegrate(scenario: Scenario) {
 // error, the configured gate set, a named implementer, and a working transition
 // seam. Only a `fixed` route lets the merge proceed.
 test('TASK-2492: a red integration gate routes through the seam with the failed gate and a named implementer', async () => {
-  const result = await runIntegrate({ route: 'fixed' });
+  const result = await runTestsAction({ route: 'fixed' });
   assert.equal(result.captured.length, 1, 'the routing seam is called exactly once on a red gate');
   const args = result.captured[0]!;
   assert.ok(args.failedGate, 'the failed gate is passed through');
@@ -275,48 +220,14 @@ test('TASK-2492: a red integration gate routes through the seam with the failed 
 });
 
 test('TASK-2492: a non-fixed route aborts before merge (IntegrationAbort → exit 1)', async () => {
-  const result = await runIntegrate({ route: 'exhausted' });
+  const result = await runTestsAction({ route: 'exhausted' });
   assert.equal(result.captured.length, 1);
   assert.match(result.logs.join('\n'), /Aborting before merge/, 'a non-fixed route aborts before the merge');
   assert.equal(result.seamLaunches.length, 0, 'the seam did not relaunch for a non-fixed route');
 });
 
 test('TASK-2492: a limit-reached route aborts before merge', async () => {
-  const result = await runIntegrate({ route: 'limit-reached' });
+  const result = await runTestsAction({ route: 'limit-reached' });
   assert.match(result.logs.join('\n'), /Aborting before merge/);
   assert.equal(result.seamLaunches.length, 0);
-});
-
-test('TASK-2620: after repair and re-approval integration stops in the integration lane without landing', async () => {
-  const result = await runIntegrate({ route: 'fixed', repairs: 1 });
-  assert.equal(result.exitCode, 0, result.logs.join('\n'));
-  assert.equal(result.gateRuns, 1, 'integration is not restarted after the re-review');
-  assert.equal(result.reviews, 1);
-  assert.equal(result.mission.status, 'integration', 'the re-approved mission waits for a human to integrate');
-  assert.deepEqual(result.laneEvents, ['review>integration:approve', 'integration>active:rebound-to-active'],
-    'approval entry and landing failure each have one durable event (TASK-2859.11)');
-  assert.equal(result.statistics, 2,
-    'the landing-gate return and the deterministic re-review return remain distinct (TASK-2859.11)');
-  assert.ok(result.mission.review!.rounds[0].decision?.kind === 'approved' && result.mission.review!.rounds[0].decision.revocation);
-  assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
-});
-
-test('TASK-2872.01: an unchanged repair with a green rerun advances from current checks', async () => {
-  const result = await runIntegrate({ route: 'fixed', repairs: 1, unchangedRepair: true });
-  assert.equal(result.captured.length, 1, 'the red tests verdict enters the rebound-owned repair once');
-  assert.equal(result.gateRuns, 1, 'the tests action owns the failed run; the routing seam represents its green rerun');
-  assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'fixture-revision',
-    'the repair left the approved revision unchanged');
-  assert.deepEqual(result.nextActions, [{ kind: 'human-review', reason: 'integrate-shortcut-eligible' }],
-    'current agent review and a green rerun advance to the human turn instead of legacy repair or blocked routing');
-});
-
-test('PX-0031: dry-run repair re-verifies and re-reviews a changed candidate without landing', async () => {
-  const result = await runIntegrate({ route: 'fixed', repairs: 1, dryRun: true });
-  assert.equal(result.exitCode, 0, result.logs.join('\n'));
-  assert.equal(result.captured.length, 1, 'the failed dry-run enters retained integration repair');
-  assert.equal(result.gateRuns, 1, 'the repair verifier owns the full-plan rerun before review');
-  assert.equal(result.reviews, 1, 'a changed repair receives fresh independent review');
-  assert.equal(result.mission.status, 'integration', 'the repaired candidate returns to the human integration lane');
-  assert.equal(currentReviewRound(result.mission.review!).subject.revision, 'repair-1-resolved');
 });

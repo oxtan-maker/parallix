@@ -94,23 +94,6 @@ export class OperationalHistoryService {
     );
   }
 
-  /**
-   * Load the newest operational-history row of a single type for one mission.
-   * Returns null when the mission has no row of that type. Repository errors
-   * propagate so an unreadable history is explicit rather than silently empty.
-   */
-  async loadLatestByTypeForMission(
-    type: string,
-    missionId: string,
-  ): Promise<OperationalHistoryEntry | null> {
-    const findByTypeForMission = this.repository.findByTypeForMission;
-    if (!findByTypeForMission) {
-      throw new Error('operational history repository does not support per-mission lookup');
-    }
-    const entries = await findByTypeForMission.call(this.repository, type, missionId);
-    return entries.length === 0 ? null : entries[entries.length - 1];
-  }
-
   /** Every row of a single type for one mission, oldest first. Repository errors propagate. */
   async loadAllByTypeForMission(type: string, missionId: string): Promise<readonly OperationalHistoryEntry[]> {
     const findByTypeForMission = this.repository.findByTypeForMission;
@@ -139,12 +122,10 @@ export class OperationalHistoryService {
       .find(entry => entry.repositoryId === input.repositoryId) ?? null;
   }
 
-  /** Resolve the one pilot pin; shadow reads an existing pin but never creates one. */
+  /** Resolve the one artifact pin, electing one writer under concurrent entry. */
   async resolveReviewEntryPin(input: ReviewEntryPinInput): Promise<ReviewEntryPin | null> {
     const existing = await this.missionPin(input);
     if (existing) { return existing; }
-    if (input.configuredMode !== 'pilot') { return null; }
-    if ((await this.reviewStartDecisions(input.missionId)).length > 0) { return null; }
     const pin = reviewEntryPin(input);
     // The idempotent append elects one writer; a loser re-reads and adopts the winner's pin.
     if (await this.repository.appendIdempotent({
@@ -166,11 +147,13 @@ export class OperationalHistoryService {
   }
 
   /** Refuse a later human verdict only for the exact request that was cancelled. */
-  async isHumanReviewWithdrawn(input: Pick<HumanReviewWithdrawalInput, 'missionId' | 'changeIdentity' | 'round'>): Promise<boolean> {
+  async isHumanReviewWithdrawn(input: Pick<HumanReviewWithdrawalInput,
+    'missionId' | 'repositoryId' | 'changeIdentity' | 'round'>): Promise<boolean> {
     const rows = await this.loadAllByTypeForMission(HUMAN_REVIEW_WITHDRAWAL_EVENT, input.missionId);
     return rows.some(row => {
-      const withdrawal = JSON.parse(row.eventData) as HumanReviewWithdrawalInput;
-      return withdrawal.changeIdentity === input.changeIdentity && withdrawal.round === input.round;
+      const withdrawal = JSON.parse(row.eventData) as Partial<HumanReviewWithdrawalInput>;
+      return (withdrawal.repositoryId === undefined || withdrawal.repositoryId === input.repositoryId)
+        && withdrawal.changeIdentity === input.changeIdentity && withdrawal.round === input.round;
     });
   }
 

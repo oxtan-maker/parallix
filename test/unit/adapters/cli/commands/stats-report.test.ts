@@ -48,6 +48,7 @@ test('px stats formats the shared typed FLOW projection without recalculating me
     },
   }] });
   assert.match(report, /shared FLOW lifecycle/);
+  assert.match(report, /Parallel verification: configured unobserved; executions pilot=0, fallback=0, shadow=0, unobserved=0, historical=1; rounds 0\/0 concurrent, 0 joined/);
   assert.match(report, /0\/1 complete/);
   assert.match(report, /direct-rebase measured; operation=rebase-op; source=rebase-source; outcomes=no-op/);
   assert.match(report, /pre-review-rebase inapplicable; operation=review-op; source=review-source; outcomes=none; review-provider-disabled/);

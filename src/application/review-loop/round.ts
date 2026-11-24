@@ -16,7 +16,7 @@ import { DEFAULT_REBOUND_ATTEMPTS, type ReboundContext, type ReboundStartAgent }
 import type { PolicyTestsOutcome, ReviewStartFailure } from '../ports/verification-policy.js';
 import type { PolicyRoundPlan } from '../verification-policy/policy-artifact.js';
 import type { HumanReviewFeedback, ProviderApproval, ReviewLoopPorts, ReviewLoopState, ReviewPromptFacts, ReviewRole } from '../ports/review-round.js';
-import { ReviewActionLimitReached, startReviewAction } from './action-limit.js';
+import { effectiveReviewActionLimit, ReviewActionLimitReached, startReviewAction } from './action-limit.js';
 
 /** Default per-round relaunch cap. */
 export const DEFAULT_REBOUNDS_PER_ROUND = 6;
@@ -32,6 +32,8 @@ export interface LoopContext {
   readonly slug: string;
   readonly focus: string;
   readonly actionLimit: number;
+  /** Fixed ceiling for this invocation; absent until durable history establishes it. */
+  effectiveActionLimit?: number;
   /** In-memory mirror of the durable lifetime count; history remains authoritative on restart. */
   actionCount: number;
   readonly reboundsPerRound: number;
@@ -48,6 +50,8 @@ export interface LoopContext {
   selectedAction?: import('../verification-policy/policy-artifact.js').PolicyAction | null;
   /** A transient policy-selection fallback the next observed action start records. */
   selectionFailure?: ReviewStartFailure | null;
+  /** This loop already ran its tests action, policy-selected or fixed; a recorded run is not asked for again. */
+  fixedTestsRan?: boolean;
   /** This private context owns one selected slot in a parallel reviewer batch. */
   readonly parallelReviewer?: boolean;
   readonly state: ReviewLoopState;
@@ -163,7 +167,7 @@ export function reboundCollaborators(context: LoopContext, role: ReviewRole, pro
     const agent = (prompt ? context.identities[role] : launchOptions.agent) as string;
     const admitted = await startReviewAction(context, 'repair',
       `review:${context.state.round}:rebound:${role}:${agent}:${context.actionCount + 1}`);
-    if (!admitted) { throw new ReviewActionLimitReached(context.actionLimit); }
+    if (!admitted) { throw new ReviewActionLimitReached(effectiveReviewActionLimit(context)); }
     return await context.ports.agents.launch({
       role,
       agent,

@@ -1,16 +1,14 @@
 import { buildIntegrationValidationMarker, type IntegrationValidationMarker } from '../../domain/integration-validation-policy.js';
 export * from '../../domain/integration-validation-policy.js';
 /**
- * Durable, sha-keyed marker of the high-level integration test hooks that a
- * mission already ran green, so a later `px integrate` can skip re-running them
- * (TASK-2625).
+ * Durable, sha-keyed marker of the high-level integration test hooks observed
+ * while classifying or certifying an integration repair (TASK-2625).
  *
- * The marker is a whitelist of gate keys keyed on the validating commit SHA. It
- * is recorded by the integration gate step when the suite passes green and read
- * back by the same step on a later run. The decision to skip is decided purely
- * from the marker, the finalized commit under test, and the paths that differ
- * between the two: there is no repo, branch, or mission-slug special-casing
- * anywhere in this module (SC2).
+ * The marker is a whitelist of gate keys keyed on the validating commit SHA.
+ * Repair and review-classification consumers use it as retained validation
+ * evidence. Landing admission does not use it to skip gates: `px integrate`
+ * separately reads the tests action's complete recorded run receipt and starts
+ * no gate (TASK-2872.02).
  *
  * Pure by construction: every export is a pure function over plain data with no
  * filesystem, database, or git dependency, so the whole decision surface is

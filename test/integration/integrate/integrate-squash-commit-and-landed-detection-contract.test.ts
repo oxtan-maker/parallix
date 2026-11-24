@@ -372,7 +372,7 @@ const executionContext = mockModule<typeof import('../../../src/adapters/git/mis
 
     let error: Error | undefined;
     try {
-      await integrate.default([SLUG, '--no-integration-gates'], { configuration: resolveConfiguration(process.env),
+      await integrate.default([SLUG], { configuration: resolveConfiguration(process.env),
         missionServicesFn: async () => services,
         startAgentFn: async () => { launches.push('launched'); return { agent: 'codex', result: { status: 0 } }; },
         transitionTaskFn: async () => true,

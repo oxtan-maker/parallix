@@ -5,7 +5,6 @@ import { stripTerminalControl } from '../application/run-history.js';
 import { parseReviewCliRequest } from '../interfaces/cli/review.js';
 import { parseIntegrateCliRequest } from '../interfaces/cli/integrate.js';
 import { randomUUID } from 'node:crypto';
-import type { ParallixConfiguration } from '../application/ports/configuration.js';
 import type { Command } from '../interfaces/cli/runtime.js';
 import type { ProductionApplicationServices } from './application-services.js';
 import { assertWorkflowControl, hasMissionWriteAuthorization } from '../application/ports/mission-write-authorization.js';
@@ -18,7 +17,7 @@ export function ownWorkflowCli(registry: Record<string, Command>, open: () => Pr
     const original = registry[command];
     registry[command] = async (args: string[], options: Record<string, unknown> = {}) => {
       const reviewRequest = command === 'review' ? parseReviewCliRequest(args) : null;
-      if (command === 'integrate') { parseIntegrateCliRequest(args, options.configuration as ParallixConfiguration | undefined); }
+      if (command === 'integrate') { parseIntegrateCliRequest(args); }
       if (bypassOwnership(command, args)) {
         return original(args, options);
       }

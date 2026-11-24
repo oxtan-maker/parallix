@@ -10,8 +10,9 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { setLogger } from '../../../src/application/presentation/cli-format.js';
 
-async function integrate(slug: string, worktree: string): Promise<number> {
-  return await run(['integrate', slug], {
+// TASK-2872.02: integrate starts no gate, so the review entry's tests action owns the red run, its repair and recertification.
+async function recordTestsAndRepair(slug: string, worktree: string): Promise<number> {
+  return await run(['review', slug], {
     baseCwd: worktree,
     log: () => '',
     error: () => '',
@@ -57,7 +58,7 @@ test('unchanged validated integration repair retains original approval without m
       return { status: 0, stdout: '', stderr: '' };
     })(),
   }));
-  assert.equal(await integrate(fixture.slug, fixture.worktree), 0);
+  assert.equal(await recordTestsAndRepair(fixture.slug, fixture.worktree), 0);
   const mission = await fixture.load();
   assert.equal(repairs, 1); assert.equal(reviews, 0);
   assert.equal(mission.status, 'integration');

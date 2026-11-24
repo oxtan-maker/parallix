@@ -254,7 +254,7 @@ card shows one state:
 
 | State | Meaning |
 |---|---|
-| `running` | the integration gate executor is observed running for the owning workflow attempt, or by a live `px integrate --dry-run` process that owns no workflow operation |
+| `running` | the integration gate executor is observed running for the owning workflow attempt |
 | `passed` | every applicable gate has a passing result that covers the worktree's current inputs |
 | `failed` | a gate failed on the current revision, and no later pass covers the same inputs |
 | `stale` | the only results cover an earlier revision, earlier inputs or uncommitted changes |
@@ -558,6 +558,12 @@ or zero statistics. A prior historical summary stays explicitly stale with its
 own revision, observation time and reason, and an absent summary stays
 unavailable; neither is presented as current. A stale or unavailable historical
 family offers re-observation on its own read without touching the current board.
+When the workflow observation moves, the browser re-reads the historical family
+in the background. A previously validated value and its FLOW view stay as they were
+until the newest read settles, so healthy rechecks do not flash a stale label or
+notice. A host-reported stale or unavailable family keeps its own state while a
+recheck is pending, and a failed or invalid read replaces the value with its reason.
+Only the newest read may settle, and a manual re-observe shows its own pending state.
 Stream errors request a
 coordinated refresh; only a successful read begun after the latest failure can
 clear it. Recovery reads are serial and coalesced. A failed recovery waits for

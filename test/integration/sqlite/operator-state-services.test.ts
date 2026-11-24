@@ -319,7 +319,6 @@ describe('OperationalHistoryService: ordered events and failure handling', () =>
   it('atomically deduplicates a review-start decision after restart (TASK-2859.09)', async () => {
     const input = {
       missionId: missionId('task-2859.09'), repositoryId: repositoryId('repository-1'), changeIdentity: 'patch-123',
-      configuredMode: 'shadow' as const, effectiveMode: 'shadow' as const,
       artifactSha256: null, recommendedAction: null,
       predictedPassProbability: { agent: null, human: null, tests: null },
       actualAction: 'agent' as const, operatorOverride: false,
@@ -345,11 +344,11 @@ describe('OperationalHistoryService: ordered events and failure handling', () =>
     ]);
   });
 
-  it('persists one pilot pin per mission across concurrent SQLite entries (TASK-2859.19)', async () => {
+  it('persists one policy pin per mission across concurrent SQLite entries (TASK-2859.19)', async () => {
     const restarted = new OperationalHistoryService(new SqliteOperationalHistoryRepository(db));
     const input = (slug: string) => ({
       missionId: missionId(slug), repositoryId: repositoryId('repository-1'), changeIdentity: `patch-${slug}`,
-      configuredMode: 'pilot' as const, artifactSha256: 'pinned-hash', failureReason: null,
+      artifactSha256: 'pinned-hash', failureReason: null,
     });
     const [left, right, racing, racer] = await Promise.all([
       service.resolveReviewEntryPin(input('task-concurrent-left')),

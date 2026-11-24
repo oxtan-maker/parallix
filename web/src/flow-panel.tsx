@@ -163,7 +163,7 @@ function FlowControls({ flow, statistics, selected, previous, onSelectFamily, on
     <div style={{ minWidth: 0 }}>
       <h2 style={{ margin: 0, color: FLOW.text, fontSize: FLOW_TYPE.title, fontWeight: 700, lineHeight: '26px' }}>Mission flow</h2>
       <p style={{ margin: '4px 0 0', color: FLOW.muted, fontSize: FLOW_TYPE.meta }}>
-        {flow ? `${flow.completedMissions} missions landed · ${windowText(flow.startDate, flow.endDate)} · every arrow shows how many attempts pass it` : 'no FLOW projection'}
+        {flow ? `${flow.completedMissions} missions landed · ${windowText(flow.startDate, flow.endDate)}` : 'no FLOW projection'}
       </p>
     </div>
     <FlowFilters statistics={statistics} selected={selected} previous={previous}

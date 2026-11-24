@@ -17,7 +17,7 @@ const MISSION = missionId('task-2867.06');
 
 function input(overrides: Partial<ReviewStartDecisionInput> = {}): ReviewStartDecisionInput {
   return { missionId: MISSION, repositoryId: repositoryId('repository-1'), changeIdentity: 'patch-1',
-    configuredMode: 'shadow', effectiveMode: 'shadow', artifactSha256: 'hash', recommendedAction: 'agent',
+    artifactSha256: 'hash', recommendedAction: 'agent',
     predictedPassProbability: { agent: 0.5, human: 0.5, tests: 0.5 }, actualAction: 'agent', operatorOverride: false,
     verdictCorrelation: 'review:1:agent:claude-verdict', agentRunId: 'run-1', gateRunId: null, operationId: null,
     failureReason: null, ...overrides };
@@ -434,4 +434,37 @@ test('a tests start settles the verdict of its own gate run, once, and never ano
   await settleReviewStartOutcomes(MISSION, ports, 250);
   assert.equal(outcomes(entries).length, 1, 'the review settlement leaves tests starts alone');
   assert.deepEqual(failures, []);
+});
+
+test('a start of another repository with the same Mission slug is never settled from these facts (PX-0066 round 23 F1)', async () => {
+  const { entries, repository } = historyRepository();
+  const service = new OperationalHistoryService(repository);
+  const ports = { repositoryId: repositoryId('repository-1'), writer: service, readOutcomeFacts: async () => facts(),
+    diagnostic: () => {} } as unknown as ReviewStartPolicyPorts;
+  await service.recordReviewStartDecision(input({ agentRunId: 'run-1' }));
+  await service.recordReviewStartDecision(input({ repositoryId: repositoryId('repository-2'), agentRunId: 'run-other',
+    verdictCorrelation: 'review:1:agent:codex-verdict' }));
+  await settleReviewStartOutcomes(MISSION, ports, 250);
+  assert.deepEqual(outcomes(entries).map(row => row.repositoryId), [repositoryId('repository-1')],
+    'only this repository start is settled, and its row names its owner');
+});
+
+test('another repository start never bounds or ends a local start while its outcome settles (PX-0066 round 25 F2)', async () => {
+  const human = start({ actualAction: 'human', agentRunId: null, verdictCorrelation: 'review:1:human-verdict' });
+  const foreign = { ...start({ repositoryId: repositoryId('repository-2'), actualAction: 'human', agentRunId: null,
+    verdictCorrelation: 'review:1:human-verdict' }, 2), recordedAt: '2026-10-01T00:00:40Z' };
+  const decided = withDecision(review(), 1, { kind: 'changes-requested', source: { kind: 'operator', author: 'operator' },
+    decidedAt: '2026-10-01T00:02:00Z', comment: null, findings: [] });
+  const written: (ReviewStartOutcome | { startKey: string; humanWaitMs: number | null; verdictSource: string | null; passed?: boolean | null } | null)[] = [];
+  const writer = { settleReviewStartOutcomes: async (_mission: unknown, build: (a: ReviewStartDecision, b: readonly ReviewStartDecision[], c: readonly ReviewStartDecision[]) => unknown) => {
+    const all = [human, foreign];
+    all.forEach((item, index) => written.push(build(item, all.slice(index + 1), all) as never));
+    return 0;
+  } };
+  const ports = { repositoryId: repositoryId('repository-1'), writer, readOutcomeFacts: async () => facts({ review: decided }),
+    diagnostic: () => {} } as unknown as ReviewStartPolicyPorts;
+  await settleReviewStartOutcomes(MISSION, ports, 250);
+  assert.equal(written[1], null, 'the foreign start is never settled here');
+  assert.deepEqual([written[0]?.humanWaitMs, written[0]?.verdictSource, written[0]?.passed], [90_000, 'operator', false],
+    'the local operator rejection keeps its wait although a foreign start followed the handoff');
 });

@@ -6,20 +6,15 @@ import type { PolicyHistory } from '../verification-policy/history-adapter.js';
 import type { PerAction, PolicyAction, PolicyArtifact, PolicyRejection } from '../verification-policy/policy-artifact.js';
 
 export interface VerificationPolicyConfiguration {
-  readonly mode: 'off' | 'shadow' | 'pilot';
   readonly artifact?: string;
 }
-export type ActiveVerificationPolicyConfiguration = VerificationPolicyConfiguration & {
-  readonly mode: Exclude<VerificationPolicyConfiguration['mode'], 'off'>;
-};
 export type PolicyLoadResult =
-  | { readonly mode: 'off' }
-  | { readonly mode: 'shadow'; readonly hash: string; readonly artifact: PolicyArtifact }
-  | { readonly mode: 'fixed'; readonly reason: 'missing' | 'invalid' | 'unreadable' | 'hash-mismatch'; readonly rejection?: PolicyRejection };
+  | { readonly kind: 'artifact'; readonly hash: string; readonly artifact: PolicyArtifact }
+  | { readonly kind: 'fixed'; readonly reason: 'missing' | 'invalid' | 'unreadable' | 'hash-mismatch'; readonly rejection?: PolicyRejection };
 /** One loader per mission entry; callers retain its canonical pin across observations. */
 export type PolicyArtifactLoader = (expectedHash?: string) => PolicyLoadResult;
 
-type ArtifactFailure = Extract<PolicyLoadResult, { mode: 'fixed' }>['reason'];
+type ArtifactFailure = Extract<PolicyLoadResult, { kind: 'fixed' }>['reason'];
 type HistoryFailure = Extract<PolicyHistory, { ok: false }>['failure']['kind'];
 
 /** Observation-specific codes derive policy failures from their canonical owners. */
@@ -28,7 +23,6 @@ export type ReviewStartFailureKind =
   | `history-${HistoryFailure}`
   | `belief-${BeliefFailureKind}`
   | 'no-recommendation'
-  | 'mode-changed-in-flight'
   | 'policy-exception'
   | 'writer-failure'
   | 'observation-timeout';
@@ -43,14 +37,13 @@ export interface ReviewStartFailure {
   readonly message: string;
 }
 
-/** One append-only pilot pin, fixed for the lifetime of a Mission: the mode and artifact it entered review under. */
+/** One append-only artifact pin, fixed for the lifetime of a Mission. */
 export interface ReviewEntryPin {
   readonly schemaVersion: 1;
   readonly idempotencyKey: string;
   readonly missionId: MissionId;
   readonly repositoryId: RepositoryId;
   readonly changeIdentity: string | null;
-  readonly configuredMode: 'pilot';
   readonly actionSequence: 1;
   readonly artifactSha256: string | null;
   readonly failureReason: ReviewStartFailure | null;
@@ -58,9 +51,7 @@ export interface ReviewEntryPin {
 }
 
 export type ReviewEntryPinInput = Pick<ReviewEntryPin,
-  'missionId' | 'repositoryId' | 'changeIdentity' | 'artifactSha256' | 'failureReason'> & {
-  readonly configuredMode: ActiveVerificationPolicyConfiguration['mode'];
-};
+  'missionId' | 'repositoryId' | 'changeIdentity' | 'artifactSha256' | 'failureReason'>;
 
 /** Complete append-only review-start observation. Unknown values are explicit nulls. */
 export interface ReviewStartDecision {
@@ -69,8 +60,6 @@ export interface ReviewStartDecision {
   readonly missionId: MissionId;
   readonly repositoryId: RepositoryId;
   readonly changeIdentity: string | null;
-  readonly configuredMode: Exclude<VerificationPolicyConfiguration['mode'], 'off'>;
-  readonly effectiveMode: Exclude<PolicyLoadResult['mode'], 'off'> | 'pilot';
   readonly artifactSha256: string | null;
   readonly recommendedAction: PolicyAction | null;
   readonly predictedPassProbability: PerAction<number | null>;
@@ -110,6 +99,8 @@ export interface ReviewRebuttalOutcome {
 export interface ReviewStartOutcome {
   readonly schemaVersion: 1;
   readonly idempotencyKey: string;
+  /** Repository that owns the settled start; absent on rows recorded before ownership was kept. */
+  readonly repositoryId?: RepositoryId;
   /** Idempotency key of the review-start decision this settles. */
   readonly startKey: string;
   readonly missionId: MissionId;
@@ -139,12 +130,14 @@ export interface HumanReviewWithdrawal {
   readonly schemaVersion: 1;
   readonly idempotencyKey: string;
   readonly missionId: MissionId;
+  readonly repositoryId: RepositoryId;
   readonly changeIdentity: string;
   readonly round: number;
   readonly reason: 'automated-failure';
   readonly recordedAt: string;
 }
-export type HumanReviewWithdrawalInput = Pick<HumanReviewWithdrawal, 'missionId' | 'changeIdentity' | 'round' | 'reason'>;
+export type HumanReviewWithdrawalInput = Pick<HumanReviewWithdrawal,
+  'missionId' | 'repositoryId' | 'changeIdentity' | 'round' | 'reason'>;
 
 export type ReviewStartOutcomeInput = Omit<ReviewStartOutcome, 'schemaVersion' | 'idempotencyKey' | 'recordedAt'>;
 
@@ -163,7 +156,7 @@ export interface VerificationActionStartFactsBase<Action extends PolicyAction> {
   readonly verdictCorrelation: string;
   readonly agentRunId: string | null;
   readonly operatorInvocation: boolean;
-  /** The reason the pilot's own selection fell back; the start record carries it instead of re-deriving a different one. */
+  /** The reason selection fell back; the start record carries it instead of re-deriving a different one. */
   readonly selectionFailure?: ReviewStartFailure | null;
 }
 
@@ -183,13 +176,13 @@ export type VerificationActionStartFacts = ReviewStartFacts | TestsActionStartFa
 export type ReviewStartDecisionInput = Omit<ReviewStartDecision,
   'schemaVersion' | 'idempotencyKey' | 'recordedAt' | 'actionSequence' | 'sameRevisionRerun'>;
 
-/** Policy mechanisms composed only when verificationPolicy is active. */
+/** Policy mechanisms composed for every verification workflow. */
 export interface ReviewStartPolicyPorts {
-  readonly configuration: ActiveVerificationPolicyConfiguration;
+  readonly configuration: VerificationPolicyConfiguration;
   readonly repositoryId: RepositoryId;
   readonly targetBranch: string;
   readonly operationId: string | null;
-  readonly loadPolicy: (_expectedHash?: string) => Exclude<PolicyLoadResult, { mode: 'off' }>;
+  readonly loadPolicy: PolicyArtifactLoader;
   readonly readHistory: (_signal: AbortSignal) => Promise<PolicyHistory>;
   readonly identity: ChangeIdentityPort;
   readonly writer: {
@@ -201,7 +194,8 @@ export interface ReviewStartPolicyPorts {
     /** Reuse operational history for the cancellation; no persistence schema change is needed. */
     recordHumanReviewWithdrawal?(_input: HumanReviewWithdrawalInput): Promise<boolean>;
     /** Exact round/change cancellation fence used by human-verdict consumers. */
-    isHumanReviewWithdrawn?(_input: Pick<HumanReviewWithdrawalInput, 'missionId' | 'changeIdentity' | 'round'>): Promise<boolean>;
+    isHumanReviewWithdrawn?(_input: Pick<HumanReviewWithdrawalInput,
+      'missionId' | 'repositoryId' | 'changeIdentity' | 'round'>): Promise<boolean>;
   };
   /** The stored review rounds and run records an outcome is settled from; unreadable is a throw, never empty. */
   readonly readOutcomeFacts: (_missionId: MissionId) => Promise<ReviewOutcomeFacts>;
@@ -213,7 +207,7 @@ export type VerificationActionPolicyFactory = (_input: {
   readonly rootDir: string;
   readonly targetBranch: string;
   readonly slug: string;
-}) => Omit<ReviewStartPolicyPorts, 'diagnostic'> | undefined;
+}) => Omit<ReviewStartPolicyPorts, 'diagnostic'>;
 
 /** How a policy-selected integration-test action ended; the executor's own typed outcome. */
 export type PolicyTestsOutcome =
@@ -225,13 +219,13 @@ export type PolicyTestsOutcome =
     readonly repairBrief?: string }
   | { readonly kind: 'human-handoff'; readonly reason: string; readonly detail: string };
 
-/** The pilot's choice: an action to run, or null with the typed reason the fixed policy stays in charge (absent when none applies). */
+/** The policy choice: an action to run, or null with the typed reason the fixed policy stays in charge (absent when none applies). */
 export interface PolicySelection {
   readonly action: PolicyAction | null;
   readonly failure: ReviewStartFailure | null;
 }
 
-/** Pilot-mode choices the loop acts on between rounds; composed only while verificationPolicy.mode is pilot. */
+/** Policy choices the loop acts on between rounds. */
 export interface PolicyActionPort {
   /** The policy's next unfinished check for the current change; null leaves the fixed policy in charge. */
   select(_facts: { readonly missionId: MissionId; readonly revision: string;

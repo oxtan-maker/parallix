@@ -1,6 +1,9 @@
 import type { ReviewStepAction } from '../ports/review-action-history.js';
 import type { LoopContext } from './round.js';
 
+/** A direct operator entry always retains this many runnable mechanisms. */
+export const OPERATOR_RUNNABLE_ACTIONS = 5;
+
 /** Internal control-flow signal: the escalation was already persisted and emitted. */
 export class ReviewActionLimitReached extends Error {
   readonly reviewActionLimitReached = true;
@@ -19,6 +22,11 @@ export function actionLimitDetail(limit: number): string {
   return `action limit ${limit} reached`;
 }
 
+/** The configured ceiling, or the larger ceiling fixed for this operator invocation. */
+export function effectiveReviewActionLimit(context: LoopContext): number {
+  return context.effectiveActionLimit ?? context.actionLimit;
+}
+
 /** Reload the lifetime count at entry; an unavailable history is never treated as zero. */
 export async function loadReviewActionCount(context: LoopContext): Promise<boolean> {
   if (context.dryRun) { return true; }
@@ -28,7 +36,13 @@ export async function loadReviewActionCount(context: LoopContext): Promise<boole
     await context.escalateToHumanReview(`ACTION_HISTORY_UNAVAILABLE: ${error instanceof Error ? error.message : String(error)}`);
     return false;
   }
-  if (context.actionCount < context.actionLimit) { return true; }
+  if (context.effectiveActionLimit === undefined) {
+    // The ceiling record does not run its mechanism, hence the additional boundary slot.
+    context.effectiveActionLimit = context.operatorInvocation
+      ? Math.max(context.actionLimit, context.actionCount + OPERATOR_RUNNABLE_ACTIONS + 1)
+      : context.actionLimit;
+  }
+  if (context.actionCount < effectiveReviewActionLimit(context)) { return true; }
   await stopAtLimit(context, context.actionCount);
   return false;
 }
@@ -41,26 +55,28 @@ export async function loadReviewActionCount(context: LoopContext): Promise<boole
 export async function startReviewAction(context: LoopContext, action: ReviewStepAction,
   correlation: string, changeIdentity = context.ports.preReview.head() ?? 'unknown'): Promise<boolean> {
   if (context.dryRun) { return true; }
-  if (context.actionCount >= context.actionLimit) {
+  const limit = effectiveReviewActionLimit(context);
+  if (context.actionCount >= limit) {
     await stopAtLimit(context, context.actionCount);
     return false;
   }
   try {
     const record = await context.ports.actionHistory.record({
-      action, correlation, changeIdentity, configuredLimit: context.actionLimit,
+      action, correlation, changeIdentity, configuredLimit: limit,
     });
     context.actionCount = Math.max(context.actionCount, record.actionSequence);
   } catch (error) {
     await context.escalateToHumanReview(`ACTION_HISTORY_UNAVAILABLE: ${error instanceof Error ? error.message : String(error)}`);
     return false;
   }
-  if (context.actionCount < context.actionLimit) { return true; }
+  if (context.actionCount < limit) { return true; }
   await stopAtLimit(context, context.actionCount);
   return false;
 }
 
 async function stopAtLimit(context: LoopContext, count: number): Promise<void> {
-  const detail = actionLimitDetail(context.actionLimit);
+  const limit = effectiveReviewActionLimit(context);
+  const detail = actionLimitDetail(limit);
   await context.escalateToHumanReview(detail);
-  context.emit({ kind: 'action-limit-reached', count, limit: context.actionLimit });
+  context.emit({ kind: 'action-limit-reached', count, limit });
 }

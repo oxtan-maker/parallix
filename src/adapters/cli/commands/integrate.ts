@@ -4,6 +4,7 @@ import { initOperatorState } from '../../sqlite/adapter-factory.js';
 import { createIntegrationVerificationEvidencePort, readIntegrationGateRun } from '../../verification/integration-verification-proof.js';
 import { processIdentityForObservation } from '../../process/process-liveness.js';
 import { createGitChangeIdentity } from '../../git/change-identity.js';
+import { resolveCanonicalRepositoryId } from '../../git/repository-identity.js';
 import { missionApprovalCoverage } from '../../../application/approval-coverage.js';
 import type { ParallixConfiguration } from '../../../application/ports/configuration.js';
 import type { VerificationActionPolicyFactory } from '../../../application/ports/verification-policy.js';
@@ -91,14 +92,14 @@ function composeIntegrationGates(configuration: ParallixConfiguration | undefine
           const state = await initOperatorState({ configuration });
           const identity = createGitChangeIdentity(worktree).changeIdentity(revision, missionUtils.getPrimaryBranch(worktree) || 'main');
           return identity !== null && await new OperationalHistoryService(new SqliteOperationalHistoryRepository(state.db))
-            .isHumanReviewWithdrawn({ missionId: missionId(slug), changeIdentity: identity, round });
+            .isHumanReviewWithdrawn({ missionId: missionId(slug), repositoryId: resolveCanonicalRepositoryId(worktree),
+              changeIdentity: identity, round });
         } }),
     invalidateApproval: options => integrationGateRebound.invalidateApprovedPrReview(options),
     loadPhaseGates: (rootDir, phase) => repositoryGates.loadPhaseGates(rootDir, phase),
     loadRequirePreIntegration: rootDir => repositoryGates.loadRequirePreIntegration(rootDir),
     runPhaseGates: (phase, options) => runIntegrationGates(phase, options),
     captureFinalIntegrationTree: rootDir => gates.captureFinalIntegrationTree(rootDir),
-    listChangedPathsBetween: (rootDir, fromCommit, toCommit) => gates.listChangedPathsBetween(rootDir, fromCommit, toCommit),
     resolveIntegrationVerificationWorktree: (slug, options) => gates.resolveIntegrationVerificationWorktree(slug, options),
     isIntendedPayloadAtHead: (rootDir, paths, options) => gates.isIntendedPayloadAtHead(rootDir, paths, options),
     routeIntegrationGateFailure: options => integrationGateRebound.routeIntegrationGateFailure({ ...options, runPhaseGatesFn: runIntegrationGates }),

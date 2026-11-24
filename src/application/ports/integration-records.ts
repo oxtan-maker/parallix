@@ -48,7 +48,7 @@ export interface IntegrationMissionServices {
   store: MissionStore;
   lifecycle: Pick<MissionLifecycleService, 'transition'>;
   integration: Pick<MissionIntegrationService, 'decideIntegration' | 'close'>;
-  operationalHistory?: Pick<OperationalHistoryService, 'loadLatestByTypeForMission' | 'recordIntegrationValidation'> | null;
+  operationalHistory?: Pick<OperationalHistoryService, 'recordIntegrationValidation'> | null;
   /** Durable lifetime review-action owner, bound to the same operational history. */
   reviewActions?: Pick<OperationalHistoryService, 'countReviewActions' | 'recordReviewAction'> | null;
   readStatsMissionFlow?: () => Promise<readonly StatsMissionFlow[] | null>;

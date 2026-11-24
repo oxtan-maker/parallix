@@ -1,5 +1,5 @@
 import { retainedApprovalFeedbackAllowsLanding } from './integrate/approval-retention.js';
-import { resumePendingIntegrationRepair } from './integrate/repair-resumption.js';
+import { resumeOrPreviewPendingIntegrationRepair } from './integrate/repair-resumption.js';
 import { runIntegrateEntry, runReviewStepTestsEntry } from './integrate-entry.js';
 import { reviewBeforeIntegration } from './integrate/review-before-integration.js';
 import type { MissionLoadResult } from './domain-ports.js';
@@ -16,8 +16,7 @@ import { liveMissionExecutionContext } from './ports/mission-execution-context.j
  *
  * This module owns the order of the run: argument parsing, the authoritative
  * Mission load, lifecycle recovery, preflight, the integration-time rebase,
- * the required gates, the readiness view, and dispatch to the integration
- * mode's landing. Each step lives in its own module under `./integrate/`.
+ * recorded tests, readiness, and landing dispatch. Each step lives in its own module under `./integrate/`.
  *
  * Every concrete mechanism is reached through `IntegrateWorkflowPorts`
  * (`./ports/integrate-workflow.js`), which the CLI adapter binds; no adapter
@@ -27,7 +26,7 @@ import * as fmt from './presentation/cli-format.js';
 import { createIntegrationStrategy } from './services/integration-dispatch.js';
 import { backlogMirrorOwnership, missionId } from '../domain/mission.js';
 import { integrationRepairNeedsReview } from './integration-repair-review.js';
-import { admitIntegrationApproval, evaluateTaskStatusForIntegration, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
+import { admitIntegrationApproval, evaluateTaskStatusForIntegration, previewIntegrationShortcut, recoveryEstablishesApproval, resolveAuthoritativeApprovalAt } from './integrate/approval.js';
 import { createIntegrationContextBuilder } from './integrate/context.js';
 import { createIntegrationGateStep, type IntegrateSeams } from './integrate/gates.js';
 import { createGithubPrLanding } from './integrate/github-pr.js';
@@ -48,7 +47,7 @@ import {
 } from './integrate/support.js';
 import type { IntegrateWorkflowPorts } from './ports/integrate-workflow.js';
 import { fixedVerificationNextAction } from './verification-policy/fixed-next-action.js';
-import { createTestsActionExecutor, runPolicyTestsAction, type PolicyTestsActionOptions } from './integrate/tests-action.js';
+import { createTestsActionExecutor, requireCurrentIntegrationTests, runPolicyTestsAction, type PolicyTestsActionOptions } from './integrate/tests-action.js';
 
 /** The injection seams `px integrate` callers and the characterization suites bind. */
 export interface IntegrateOptions extends Partial<IntegrateSeams> {
@@ -84,6 +83,7 @@ function composeIntegrateWorkflowDependencies(ports: IntegrateWorkflowPorts) {
 
   const { printIntegrationPreflight } = createIntegrationPreflight(ports);
 
+  // Only the policy tests action starts gates; integrate itself reads their recorded result.
   const { runRequiredLocalGates } = createIntegrationGateStep(ports);
   const { landThroughGithubPr } = createGithubPrLanding(ports);
 
@@ -197,9 +197,9 @@ class IntegrateWorkflow {
 
   /**
    * Rebase the mission onto its resolved local primary/parent (ADR 0043)
-   * BEFORE any gate runs and before the probe merge, so gates and the merge
-   * see the actual merge base (task-2506). A dry run only reports the need /
-   * conflict and never touches the branch.
+   * before recorded-tests admission and the probe merge, so both evaluate the
+   * candidate on its actual merge base (task-2506). A dry run only reports the
+   * need / conflict and never touches the branch.
    */
   async rebaseForIntegration(slug: string, context: IntegrationContext, dryRun: boolean, missionServicesFn?: IntegrationMissionServicesFactory) {
     const { baseWorktree, baseBranch } = context;
@@ -238,11 +238,11 @@ class IntegrateWorkflow {
         ? new Set<string>()
         : prepareBacklogPayload(this.dependencies.ports, checkout, baseBranch);
       if (removed.size > 0 && git(['-C', checkout, 'commit', '--only', '-m', 'Remove stale completed-task copies before integration', '--', ...removed]).status !== 0) {
-        throw abortWith(this.dependencies.landing, 'Could not commit stale backlog cleanup before integration gates.');
+        throw abortWith(this.dependencies.landing, 'Could not commit stale backlog cleanup before recorded-tests admission.');
       }
       // Repo-owned metadata such as a version bump is committed onto the
       // rebased mission branch here, so it is computed from the current base,
-      // verified by the gates below, and squashed into the one mission commit.
+      // read against the recorded tests below, and squashed into the one mission commit.
       // Amending after landing is not an option: Forgejo sync, closeout, and
       // github-publish all bind to the landed commit SHA.
       this.dependencies.landing.runPreCommitHookOrAbort(slug, {
@@ -262,7 +262,7 @@ class IntegrateWorkflow {
       fmt.log.warn('Rebase onto ' + baseBranch + ' would conflict. Resolve the conflict before integrating (--dry-run did not start a rebase, so `git rebase --abort` does not apply):');
       fmt.log.info(`  ${fmt.command(`px resolve-conflict ${slug}`)}`);
     } else {
-      fmt.log.info(`Rebase required: ${baseBranch} advanced since the mission branch. px integrate rebases before running gates.`);
+      fmt.log.info(`Rebase required: ${baseBranch} advanced since the mission branch. px integrate rebases, then reads the recorded tests.`);
     }
   }
 
@@ -304,11 +304,11 @@ class IntegrateWorkflow {
       if (branchExists || this.dependencies.ports.fileSystem.existsSync(this.dependencies.missionPaths.conventionalWorktreePath(slug))) {
         throw abortWith(this.dependencies.landing, `Mission ${slug} is marked closed but its branch or worktree remains. Preserve any work in the mission worktree, then run px integrate ${slug} --recover-landed to finish closeout.`);
       }
-      fmt.log.info(`Mission ${slug} already integrated as ${landed.slice(0, 12)}; no integration gates or merge rerun.`);
+      fmt.log.info(`Mission ${slug} already integrated as ${landed.slice(0, 12)}; no tests admission or merge rerun.`);
       return 0;
     }
-    await resumePendingIntegrationRepair(slug, missionServices, this.dependencies.ports, execution, seams, request);
-    const repair = await missionServices.store.load(missionId(slug));
+    const repair = await resumeOrPreviewPendingIntegrationRepair(slug, existing, missionServices,
+      this.dependencies.ports, execution, seams, request.dryRun);
     if (repair.kind === 'found' && integrationRepairNeedsReview(repair.mission)) {
       const next = fixedVerificationNextAction({ mission: repair.mission });
       if (next.kind !== 'agent-review' && next.kind !== 'repair') { return null; }
@@ -388,12 +388,11 @@ class IntegrateWorkflow {
     const { failures } = this.dependencies.printIntegrationPreflight(context, { gitFn: this.dependencies.ports.git.git, configuration: options.configuration });
     if (failures.length > 0) { throw abortWith(this.dependencies.landing, `\nIntegration preflight failed. Blocked by ${failures.join(', ')}. Resolve the blockers above, then retry: px integrate ${slug} --dry-run`); }
 
-    // TASK-2625: a resolvable mission HEAD only enables recording the
-    // integration-validation marker. The marker itself is keyed on the commit
-    // the rebound verify rerun ran green against (its finalized `tree.commit`),
-    // and a later integrate looks it up against the post-rebase finalized
-    // commit, which may differ from it only in backlog bookkeeping
-    // (TASK-2646). Absent, no marker is recorded and the full suite runs.
+    previewIntegrationShortcut({ dryRun, context, missionLoad, ports: this.dependencies.ports });
+    // TASK-2625: a resolvable mission HEAD only enables recording the integration-validation marker. It is keyed on
+    // the commit the rebound verify rerun ran green against (its finalized `tree.commit`); a later integrate looks it
+    // up against the post-rebase finalized commit, which may differ only in backlog bookkeeping (TASK-2646). Absent,
+    // no marker is recorded and the full suite runs.
     this.resolveMissionHead(slug, context);
 
     await this.rebaseForIntegration(slug, context, dryRun, missionServicesFn);
@@ -405,16 +404,18 @@ class IntegrateWorkflow {
     // mode refuses the local primary merge / unimplemented steps instead of
     // silently performing them (SC4 / SC6).
     const strategy = createIntegrationStrategy(this.dependencies.ports.productConfig.resolveIntegrationMode(context.baseWorktree));
-    const gateRequest = { slug, context, missionLoad, missionServices, ...request, seams, configuration: options.configuration };
-    let verificationEvidence = await strategy.run('run-required-local-gates', () => this.dependencies.runRequiredLocalGates(gateRequest));
-    // Gates certify a particular landing candidate.  If the primary advanced
-    // while they ran, rebase again and run the complete configured set against
-    // that new candidate; never squash a comparison tree the gates did not see.
+    // Integration never starts a gate. It reads the run the tests action recorded
+    // and refuses, naming tests, when that run does not cover the candidate.
+    const readRecordedTests = () => strategy.run('run-required-local-gates', async () =>
+      requireCurrentIntegrationTests(this.dependencies.ports, slug, context.baseWorktree));
+    let verificationEvidence = await readRecordedTests();
+    // A recorded run certifies a particular landing candidate. If the primary
+    // advanced since, rebase again and re-read it; never squash a comparison
+    // tree the recorded tests did not see.
     if (!dryRun && this.landingNeedsRebase(slug, context)) {
-      fmt.log.info(`${context.baseBranch} advanced while integration gates ran; rebasing and re-running gates on the updated landing candidate.`);
+      fmt.log.info(`${context.baseBranch} advanced; rebasing and re-reading the recorded tests for the updated landing candidate.`);
       await this.rebaseForIntegration(slug, context, false, missionServicesFn);
-      verificationEvidence = await strategy.run('run-required-local-gates', () =>
-        this.dependencies.runRequiredLocalGates(gateRequest));
+      verificationEvidence = await readRecordedTests();
     }
     printIntegrationReadiness(buildIntegrationReadiness(context, { verification: verificationEvidence }, this.dependencies.missionPaths.getPrimaryBranch));
 
@@ -424,13 +425,13 @@ class IntegrateWorkflow {
       return 0;
     }
     // TASK-2517 SC1: an integration-gate rebound bounced the lane back to
-    // `active` to run the implementer. The gates re-ran green, but the lane is
+    // `active` to run the implementer. The recorded tests are current, but the lane is
     // still where the bounce left it, and `decideIntegration` only accepts
     // `integration`. Restore it through the same recovery that owns the
     // authoritative timestamps — before any landing effect, never after.
     const restored = await this.dependencies.recoverMissionForIntegration(context, { missionServices });
     if (restored.status !== 'integration' && restored.status !== 'done') {
-      throw abortWith(this.dependencies.landing, `Mission ${slug} is ${restored.status} after the integration gates; integration requires the integration lane. Aborting before any landing effect.`);
+      throw abortWith(this.dependencies.landing, `Mission ${slug} is ${restored.status} after the recorded-tests check; integration requires the integration lane. Aborting before any landing effect.`);
     }
     await this.requireRetainedApprovalFeedback(slug, context, missionServices);
     if (strategy.mode === 'github-pr') {
@@ -451,8 +452,7 @@ class IntegrateWorkflow {
       // A concurrent landing never forces an operator to restart the command.
       fmt.log.info('The base advanced before landing; reconciling and validating the updated candidate.');
       await this.rebaseForIntegration(slug, context, false, missionServicesFn);
-      await strategy.run('run-required-local-gates', () =>
-        this.dependencies.runRequiredLocalGates(gateRequest));
+      await readRecordedTests();
       await this.dependencies.recoverMissionForIntegration(context, { missionServices });
     }
     throw abortWith(this.dependencies.landing, 'The base kept advancing during three landing attempts; retry when concurrent integration settles.');

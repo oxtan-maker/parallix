@@ -209,6 +209,8 @@ interface CapturedIntegrationShortcutEvidence {
   readonly ok: true;
   readonly head: string | null;
   readonly reviewedRevision: string | null;
+  /** Round carrying the effective agent approval; it names the decision cycle this human approval answers. */
+  readonly approvalRound: number | null;
   readonly agentReviewCurrent: boolean;
   readonly testsConfigured: boolean;
   readonly testsCurrent: boolean;
@@ -245,19 +247,24 @@ function integrationShortcutEvidence(context: IntegrationContext,
   const { checkout, head, agentReviewCurrent } = currency;
   const round = mission.review?.rounds.length ? currentReviewRound(mission.review) : null;
   const reviewedRevision = round?.decision?.kind === 'approved' ? round.decision.revision ?? null : null;
+  const approvalRound = round && round.decision?.kind === 'approved' ? round.number : null;
   const configuredTests = ports.gates.loadPhaseGates(checkout, 'preIntegration');
+  // Landing-side admission reads the same receipt with the same input-identity policy as
+  // requireCurrentIntegrationTests, so a run recorded by the review step's tests action and carried
+  // across the Backlog transition still certifies it (TASK-2872.02).
   const testsCurrent = completeCurrentTestsPass(ports.gates.readGateRun?.(checkout) ?? null, head,
-    configuredTests);
-  return { ok: true, head, reviewedRevision, agentReviewCurrent, testsConfigured: configuredTests.length > 0, testsCurrent,
+    configuredTests, 'equivalent');
+  return { ok: true, head, reviewedRevision, approvalRound, agentReviewCurrent, testsConfigured: configuredTests.length > 0, testsCurrent,
     action: fixedVerificationNextAction({ mission, agentReviewCurrent, testsCurrent }) };
 }
 
 function eligibleIntegrationShortcut(evidence: CapturedIntegrationShortcutEvidence): evidence is CapturedIntegrationShortcutEvidence & {
   head: string;
   reviewedRevision: string;
+  approvalRound: number;
 } {
   return evidence.action.kind === 'human-review' && evidence.action.reason === 'integrate-shortcut-eligible'
-    && evidence.head !== null && evidence.reviewedRevision !== null;
+    && evidence.head !== null && evidence.reviewedRevision !== null && evidence.approvalRound !== null;
 }
 
 async function handOffIntegrationShortcut(context: IntegrationContext, missionServices: IntegrationMissionServices,
@@ -286,7 +293,7 @@ async function handOffIntegrationShortcut(context: IntegrationContext, missionSe
 
 async function startIntegrationShortcutHumanAction(context: IntegrationContext,
   missionServices: IntegrationMissionServices, ports: IntegrateWorkflowPorts,
-  revision: string, reviewedRevision: string, repositoryId: string): Promise<void> {
+  revision: string, reviewedRevision: string, approvalRound: number, repositoryId: string): Promise<void> {
   const history = missionServices.reviewActions;
   const unavailable = (detail: string) => handOffIntegrationShortcut(context, missionServices, ports,
     `ACTION_HISTORY_UNAVAILABLE: ${detail}`, revision, reviewedRevision);
@@ -310,7 +317,13 @@ async function startIntegrationShortcutHumanAction(context: IntegrationContext,
       missionId: missionId(context.slug),
       changeIdentity: revision,
       action: 'human',
-      correlation: `integrate-shortcut:${reviewedRevision}:${revision}:${count + 1}`,
+      // The correlation names the human approval this attempt stands for, not the attempt: the
+      // durable start owner replays on (action, correlation, changeIdentity), so a retry after a
+      // provider refusal or a lost lifecycle transition reuses the one action instead of consuming
+      // a second one (TASK-2872.02 SC3). An attempt counter would make each retry distinct. The
+      // review round is the decision cycle's identity: revoking an approval opens a later round, so
+      // a fresh agent approval on an unchanged revision earns its own human action (TASK-2872.02 F4).
+      correlation: `integrate-shortcut:${approvalRound}:${reviewedRevision}:${revision}`,
       configuredLimit: limit,
     });
   } catch (error) {
@@ -340,11 +353,29 @@ function shortcutRefusal(slug: string, head: string | null, agentReviewCurrent: 
   }
   if (!testsCurrent) {
     if (!testsConfigured) {
-      return `px integrate cannot count as the human approval for ${slug}: no preIntegration gates are configured, so no passing integration-test action can be recorded. Configure at least one preIntegration gate, run px integrate ${slug} --dry-run, then retry.`;
+      return `px integrate cannot count as the human approval for ${slug}: no preIntegration gates are configured, so no passing integration-test action can be recorded. Configure at least one preIntegration gate, run px review ${slug} so the tests action records a passing run, then retry.`;
     }
-    return `px integrate cannot count as the human approval for ${slug}: current revision ${revision} has no complete current passing integration-test action. Run px integrate ${slug} --dry-run to produce current test evidence, then retry.`;
+    // Dry-run only reports readiness from recorded facts; it records no evidence, so it can never be the recovery.
+    return `px integrate cannot count as the human approval for ${slug}: current revision ${revision} has no complete current passing integration-test action. Run px review ${slug} so the tests action records a current run, then retry; px integrate --dry-run only reports readiness and records no evidence.`;
   }
   return `px integrate cannot count as the human approval for ${slug}: fixed verification requires ${action.kind} (${action.reason}). Resolve that action, then retry.`;
+}
+
+/**
+ * The read-only half of the operator shortcut: null when it does not apply (not a review-lane Mission, or a
+ * standing human provider approval already exists), the eligible evidence, or an abort naming the missing fact.
+ * The real run and the dry-run preview share it, so a preview refuses for exactly the reason the run would.
+ */
+function requireEligibleShortcutEvidence(context: IntegrationContext,
+  mission: Extract<MissionLoadResult, { kind: 'found' }>['mission'], ports: IntegrateWorkflowPorts) {
+  if (mission.status !== 'review' || recordedHumanProviderApproval(context.approval)) { return null; }
+  const evidence = integrationShortcutEvidence(context, mission, ports);
+  if (!evidence.ok) { throw abortWith(ports.landing, evidence.error); }
+  if (!eligibleIntegrationShortcut(evidence)) {
+    throw abortWith(ports.landing, shortcutRefusal(context.slug, evidence.head,
+      evidence.agentReviewCurrent, evidence.testsConfigured, evidence.testsCurrent, evidence.action));
+  }
+  return evidence;
 }
 
 /**
@@ -358,17 +389,10 @@ export async function approveEligibleIntegrationShortcut(context: IntegrationCon
   missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, missionServices: IntegrationMissionServices,
   ports: IntegrateWorkflowPorts): Promise<void> {
   const mission = missionLoad.mission;
-  if (mission.status !== 'review' || recordedHumanProviderApproval(context.approval)) { return; }
-  const evidence = integrationShortcutEvidence(context, mission, ports);
-  if (!evidence.ok) {
-    throw abortWith(ports.landing, evidence.error);
-  }
-  if (!eligibleIntegrationShortcut(evidence)) {
-    throw abortWith(ports.landing, shortcutRefusal(context.slug, evidence.head,
-      evidence.agentReviewCurrent, evidence.testsConfigured, evidence.testsCurrent, evidence.action));
-  }
+  const evidence = requireEligibleShortcutEvidence(context, mission, ports);
+  if (!evidence) { return; }
   await startIntegrationShortcutHumanAction(context, missionServices, ports,
-    evidence.head, evidence.reviewedRevision, mission.repositoryId);
+    evidence.head, evidence.reviewedRevision, evidence.approvalRound, mission.repositoryId);
   const submitted = await submitIntegrationShortcutApproval(context, missionServices, ports,
     evidence.head, evidence.reviewedRevision);
   if (!submitted.ok) {
@@ -389,7 +413,8 @@ export async function approveEligibleIntegrationShortcut(context: IntegrationCon
  * integration lane through lifecycle recovery, but it is only one of the three
  * passes. The agent review must still approve the current change, so a missing
  * or stale agent pass is refused before recovery writes any lane change. The
- * integration tests are not read here: the required gates run before landing.
+ * integration tests are not read here: the recorded-tests owner admits the run
+ * later in this flow, and integration never starts a gate.
  */
 export async function requireCurrentAgentReviewForHumanApproval(context: IntegrationContext,
   missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, _missionServices: IntegrationMissionServices,
@@ -405,9 +430,8 @@ export async function requireCurrentAgentReviewForHumanApproval(context: Integra
 
 /**
  * Both admission entries in order: a standing human approval needs the current agent review, otherwise the operator shortcut may record one.
- * The integrate dry run keeps its prediction honest by running the read-only human-approval leg: it writes nothing, so the dry run calls the same
- * admission at the same point and refuses with the same reason the real run gives. The shortcut entry records the human approval, so a dry run
- * stops before it; that combination stays predicted by the status check's warn row.
+ * The integrate dry run keeps its prediction honest by running the read-only human-approval leg here, and the shortcut's eligibility through
+ * `previewIntegrationShortcut` once preflight has reported its blockers. It stops before the shortcut records the human approval, so it writes nothing.
  */
 export async function admitIntegrationApproval(context: IntegrationContext,
   missionLoad: Extract<MissionLoadResult, { kind: 'found' }>, missionServices: IntegrationMissionServices,
@@ -415,4 +439,10 @@ export async function admitIntegrationApproval(context: IntegrationContext,
   await requireCurrentAgentReviewForHumanApproval(context, missionLoad, missionServices, ports);
   if (dryRun) { return; }
   await approveEligibleIntegrationShortcut(context, missionLoad, missionServices, ports);
+}
+
+/** Dry-run preview of the operator shortcut: refuses for the missing fact the real run would, and records nothing. A real run is unaffected. */
+export function previewIntegrationShortcut({ dryRun, context, missionLoad, ports }: { dryRun: boolean; context: IntegrationContext;
+  missionLoad: MissionLoadResult; ports: IntegrateWorkflowPorts }): void {
+  if (dryRun && missionLoad.kind === 'found') { requireEligibleShortcutEvidence(context, missionLoad.mission, ports); }
 }

@@ -121,7 +121,7 @@ export function createStatusBoardAdapter(options: {
     readonly mission: import('../../../domain/mission.js').Mission;
     readonly version: number;
   } | null>;
-  /** Absent when verificationPolicy is off; reads nothing in that case. */
+  /** Reads active verification-policy history or its concrete fixed-policy fallback. */
   readonly verificationHistoryFn?: (_slug: string) => Promise<StatusMissionData['verificationHistory']>;
 }): StatusBoardPort {
   const inferSlugFn = options.inferSlugFn || inferSlug;

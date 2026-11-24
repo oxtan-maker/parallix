@@ -10,6 +10,7 @@ import React from 'react';
 import { renderToString } from 'ink';
 import { FlowPanel } from '../../../../src/interfaces/tui/flow-panel.js';
 import { verificationStatistics } from '../../../../src/application/projections/verification-statistics.js';
+import { configuredParallelVerification, flowReferenceProjection } from '../../../fixtures/flow-reference.js';
 
 const id = missionId('task-flow');
 
@@ -22,6 +23,35 @@ test('FLOW renders shared verification costs and missing-data qualifications (px
   assert.match(output, /retained history/);
   assert.match(output, /OS waited-tree CPU unknown/);
   assert.match(output, /historical work is unavailable, not zero/);
+});
+
+test('FLOW renders the shared configured verification fork, join shares, coverage, and single rebase (PX-0066)', () => {
+  const reference = flowReferenceProjection().metrics.flow!;
+  const graph = reference.current.graph;
+  const edges = graph.edges.map(edge => {
+    if (edge.kind === 'concurrent-request') { return { ...edge, count: 2, observedMissions: 2 }; }
+    if (edge.kind === 'joint-repair') { return { ...edge, count: 1, percentage: 100, observedMissions: 1 }; }
+    if (edge.kind === 'human-ready' || edge.kind === 'human-wait') {
+      return { ...edge, count: 1, percentage: 50, observedMissions: 2 };
+    }
+    return edge;
+  });
+  const flow = { ...reference, current: { ...reference.current, graph: { ...graph, edges, verification: {
+    ...graph.verification,
+    configured: configuredParallelVerification,
+    executions: { pilot: 2, fallback: 1, shadow: 0, unobserved: 0, historical: 21 },
+    observedRounds: 3, concurrentRounds: 2, joinedRounds: 1, sameRevisionTestReruns: 1,
+  } } } };
+  const output = plain(renderToString(React.createElement(FlowPanel, {
+    metrics: { ...populatedMetrics(), flow }, columns: 160,
+  }), { columns: 160 }));
+  assert.match(output, /CONFIGURED PARALLEL VERIFICATION/);
+  assert.match(output, /Policy: artifact · 2\/3 retained rounds concurrent · 1 automated joins/);
+  assert.match(output, /Requests: tests 2 · agent 2 · human 2 \(concurrent counts, not exclusive shares; coverage 2\/24\)/);
+  assert.match(output, /joint 100% · 1/);
+  assert.match(output, /ready 50% · 1 · later 50% · 1/);
+  assert.match(output, /Rebase: one shared node · 83 runs · pre-review continuation 54 · integration continuation 26/);
+  assert.match(output, /pilot 2 · fallback 1 · shadow 0 · unobserved 0 · historical 21 · same-revision test reruns 1/);
 });
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;?]*[ -/]*[@-~]`, 'g');

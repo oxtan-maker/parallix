@@ -11,6 +11,7 @@
  * control to the next-action owner or a typed human hand-off.
  */
 import { missionId, type Mission } from '../../domain/mission.js';
+import { currentReviewRound } from '../../domain/review.js';
 import type { ParallixConfiguration } from '../ports/configuration.js';
 import type { IntegrationMissionServices, IntegrationMissionServicesFactory } from '../ports/integration-records.js';
 import type { IntegrateWorkflowPorts, IntegrationGateRoute, IntegrationGateRunRecord } from '../ports/integrate-workflow.js';
@@ -19,9 +20,11 @@ import { fixedVerificationNextAction, type FixedVerificationNextAction } from '.
 import type { IntegrationContext, IntegrationContextOptions } from './context.js';
 import type { GateStepRequest, IntegrateSeams } from './gates.js';
 import { IntegrationStopsForHuman } from './review-before-integration.js';
+import { abortWith } from './support.js';
 import { integrationSeams } from '../integrate-entry.js';
 import type { IntegrateOptions } from '../integrate-workflow.js';
 import { passingIntegrationReceiptApplies } from '../../domain/integration-validation-policy.js';
+import { pendingIntegrationApproval } from '../../domain/integration-repair-policy.js';
 import { agentReviewCoversRevision } from '../approval-coverage.js';
 
 export interface TestsActionRequest {
@@ -108,16 +111,23 @@ function freshRun(run: IntegrationGateRunRecord | null, head: string | null, pre
  * cancelled, partial, other-plan, unidentified or non-current records rerun.
  */
 export function completeCurrentTestsPass(run: IntegrationGateRunRecord | null, head: string | null,
-  configured: readonly { key: string; command: string }[]): run is IntegrationGateRunRecord {
-  return passingIntegrationReceiptApplies(run, head, configured, 'exact');
+  configured: readonly { key: string; command: string }[],
+  mode: 'exact' | 'equivalent' = 'exact'): run is IntegrationGateRunRecord {
+  return passingIntegrationReceiptApplies(run, head, configured, mode);
 }
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function needsLandingEvidence(request: TestsActionRequest, missionStatus: string): boolean {
-  return request.policySelection === null && missionStatus === 'integration';
+function needsLandingEvidence(request: TestsActionRequest, mission: Mission): boolean {
+  if (request.policySelection !== null) { return false; }
+  // The fixed sequence decides from exact-current evidence, so the run's evidence must be measured
+  // before it can be read: the integration lane always owes it, and the review lane owes it once an
+  // agent approval stands (TASK-2872.02 SC2).
+  if (mission.status === 'integration' || pendingIntegrationApproval(mission)) { return true; }
+  return mission.status === 'review' && mission.review !== null
+    && currentReviewRound(mission.review).phase === 'approved';
 }
 
 function needsResolvedContext(selected: FixedVerificationNextAction, needsEvidence: boolean): boolean {
@@ -167,6 +177,40 @@ function readGateRun(ports: IntegrateWorkflowPorts, checkout: string): Integrati
   try { return ports.gates.readGateRun?.(checkout) ?? null; } catch { return null; }
 }
 
+/**
+ * Integration reads the tests the tests action recorded and never starts a
+ * gate. The recorded run must be a complete passing run of the configured plan
+ * that still covers the candidate: the same head, or inputs the gate adapter
+ * proves equivalent, or completed-rebase lineage. A rebase or base advance that
+ * moved the candidate therefore refuses here, naming tests, until the tests
+ * action records a current run. Returns the readiness row text.
+ */
+export function requireCurrentIntegrationTests(ports: IntegrateWorkflowPorts, slug: string, baseWorktree: string): string {
+  const checkout = ports.gates.resolveIntegrationVerificationWorktree(slug, { baseWorktree });
+  const tree = ports.gates.captureFinalIntegrationTree(checkout);
+  if (!tree.ok) {
+    throw abortWith(ports.landing, `Integration of ${slug} cannot read the candidate to check its tests: ${tree.error}`);
+  }
+  const configured = ports.gates.loadPhaseGates(checkout, 'preIntegration');
+  if (configured.length === 0) {
+    if (ports.gates.loadRequirePreIntegration(checkout)) {
+      throw abortWith(ports.landing,
+        `\nIntegration tests are mandatory for ${slug}: no preIntegration gates are configured in workflow.config.json, but adapters.gates.requirePreIntegration is set. Configure adapters.gates.preIntegration, then run px review ${slug}.`,
+        'Aborting before merge.');
+    }
+    return 'no pre-integration tests configured';
+  }
+  const run = readGateRun(ports, checkout);
+  const latestRunDetail = run
+    ? `the latest recorded run (${run.status}) does not cover revision ${tree.commit ?? 'unknown'}`
+    : 'no run is recorded';
+  if (!completeCurrentTestsPass(run, tree.commit ?? null, configured, 'equivalent')) {
+    throw abortWith(ports.landing,
+      `Integration of ${slug} needs current passing tests: ${latestRunDetail}. px integrate never runs them. Run px review ${slug} so the tests action records a current run, then retry.`);
+  }
+  return `${configured.length} integration test(s) passed in recorded run ${run.gateRunId}`;
+}
+
 async function nextAction(ports: IntegrateWorkflowPorts, services: IntegrationMissionServices, slug: string,
   context: IntegrationContext, policySelection?: 'tests') {
   const loaded = await services.store.load(missionId(slug));
@@ -184,7 +228,7 @@ function evidenceFacts(ports: IntegrateWorkflowPorts, slug: string, context: Int
   return { agentReviewCurrent: tree.ok ? agentReviewCoversRevision(mission.review, head,
     ports.gates.approvalCoverage?.(checkout, mission.review) ?? null) : null,
     testsConfigured: configured.length > 0,
-    testsCurrent: head ? completeCurrentTestsPass(readGateRun(ports, checkout), head, configured) : null };
+    testsCurrent: head ? completeCurrentTestsPass(readGateRun(ports, checkout), head, configured, 'equivalent') : null };
 }
 
 async function rebaseTestsAction(ports: IntegrateWorkflowPorts, dependencies: TestsActionDependencies,
@@ -218,7 +262,7 @@ async function runTestsActionGates(ports: IntegrateWorkflowPorts, dependencies: 
   const missionLoad = await services.store.load(missionId(request.slug));
   try {
     await dependencies.runRequiredLocalGates({ slug: request.slug, context, missionLoad, missionServices: services,
-      dryRun: true, noIntegrationGates: false, realAgent: request.realAgent ?? null,
+      realAgent: request.realAgent ?? null,
       realAgentModel: request.realAgentModel ?? null, seams, configuration: request.configuration,
       ...(jointRepair ? { retryFailedTestsWithoutRepair: async revision => {
         redRun = readGateRun(ports, checkout);
@@ -263,7 +307,7 @@ async function prepareTestsAction(ports: IntegrateWorkflowPorts, dependencies: T
   const loaded = await services.store.load(missionId(request.slug));
   if (loaded.kind !== 'found') { return { outcome: { kind: 'not-selected', next: null } }; }
   let selected = fixedVerificationNextAction({ mission: loaded.mission, policySelection: request.policySelection });
-  const needsEvidence = needsLandingEvidence(request, loaded.mission.status);
+  const needsEvidence = needsLandingEvidence(request, loaded.mission);
   const resolved = needsResolvedContext(selected, needsEvidence)
     ? await resolveTestsContext(ports, dependencies, request, services) : null;
   if (resolved && 'handoff' in resolved) { return { outcome: resolved.handoff }; }

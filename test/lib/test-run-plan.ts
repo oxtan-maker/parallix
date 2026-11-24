@@ -21,9 +21,9 @@ import { selectTierFiles, suiteIdentity, type TierFileSelection } from './test-t
 export { selectTierFiles };
 
 
-/** Suites whose sole or batched selection swaps in the e2e bootstrap preload. */
+/** Suites whose sole or batched selection swaps in the local-boundary bootstrap preload. */
 export const REAL_AGENT_SMOKE_SUITE = 'e2e/agents/real-agent-smoke.test.ts';
-export const LIFECYCLE_E2E_SUITE = 'e2e/lifecycle/mission-lifecycle.test.ts';
+export const LIFECYCLE_SUITE = 'e2e/lifecycle/mission-lifecycle.test.ts';
 export const TUI_PROCESS_CONTRACT_SUITE = 'integration/presentation/presentation-tui.integration.test.ts';
 
 export interface TestRunPlanOptions {
@@ -257,19 +257,19 @@ export function buildTestRunPlan(options: TestRunPlanOptions): TestRunPlan {
   // The consolidated TUI process/PTY contract, when explicitly requested as the
   // sole file, also benefits
   // from running without the bootstrap's temp HOME and curl shim.
-  // Do not preload the full unit-test HOME isolation shim for these e2e runs.
+  // Do not preload the full unit-test HOME isolation shim for these local-boundary runs.
   // TASK-2554: they still get the PARALLIX_HOME-only isolation preload so the
   // test process never resolves the operator's default database.
   // When that contract is batched with other files the bootstrap stays active — the
   // 30 s timeout and marker unlink in the test handle the shim impact.
   const requestedIdentities = requestedPaths.map(file => suiteIdentity(testRoot, file));
   const runsRealAgentSmoke = requestedIdentities.includes(REAL_AGENT_SMOKE_SUITE);
-  const runsLifecycleE2E = requestedIdentities.includes(LIFECYCLE_E2E_SUITE);
+  const runsLifecycle = requestedIdentities.includes(LIFECYCLE_SUITE);
   const runsTuiContractSolo = requestedIdentities.length === 1 && requestedIdentities[0] === TUI_PROCESS_CONTRACT_SUITE;
-  const runsIntegrationE2E = runsRealAgentSmoke || runsLifecycleE2E || runsTuiContractSolo;
-  const e2eBootstrapFile = runsIntegrationE2E ? 'bootstrap-e2e-parallix-home.ts' : 'bootstrap-parallix-home.ts';
+  const runsLocalBoundarySuite = runsRealAgentSmoke || runsLifecycle || runsTuiContractSolo;
+  const boundaryBootstrapFile = runsLocalBoundarySuite ? 'bootstrap-e2e-parallix-home.ts' : 'bootstrap-parallix-home.ts';
   const bootstrapArgs = [
-    '--import', pathToFileURL(path.join(testRoot, e2eBootstrapFile)).href
+    '--import', pathToFileURL(path.join(testRoot, boundaryBootstrapFile)).href
   ];
   // TASK-2288: the source-runtime-alias.js shim is retired. TASK-2328 removed the
   // transpiled compatibility tree as well. Test files now name modules under

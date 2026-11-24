@@ -1,6 +1,10 @@
 # ADR 0041: Integration-time pipeline gates + per-area gate dehallucination
 
-Status: Accepted
+Status: Superseded
+
+Superseded by task-2872.02: integration consumes the current test facts recorded
+by the tests action and never starts gates. The former integration-time execution
+and bypass described below are retained as historical context, not current behavior.
 
 ## Context
 
@@ -140,7 +144,7 @@ Option B (Forgejo Actions) would require runner credentials for docker push and 
 
 - Integration (`node workflow integrate`) wall-time increases by minutes for missions touching multiple areas
 - New config file (`config/integration-pipelines.json`) requires maintenance
-- Agents must learn a new area (`integrate`) and its opt-out flag (`--no-integration-gates`)
+- Agents must learn a new area (`integrate`) and its emergency opt-out
 
 ## Deliverables
 
@@ -148,7 +152,7 @@ Option B (Forgejo Actions) would require runner credentials for docker push and 
 2. **Change detection:** Compute the set of top-level dirs touched by `mission/<slug>` vs the primary branch
 3. **Dispatch in `scripts/verify-local.sh`:** New `gate_integrate()` function and `integrate` area in the case statement
 4. **`node workflow integrate` preflight:** Calls the new `integrate` area as part of `printIntegrationPreflight`
-5. **`--no-integration-gates` flag:** Explicit opt-out for emergencies (Hard Rule #2 preserved)
+5. **Emergency opt-out:** Explicit opt-out for integration-time execution (later removed with that execution path)
 6. **`--dry-run` enhancement:** Prints the resolved gate plan (ordered list) and exits without executing
 7. **Web-gate fix:** Remove the staging e2e check from the local `web` gate
 8. **Tests:** Unit tests in `scripts/test/` for change-detection, ordering, missing/empty config, command failure abort, dry-run

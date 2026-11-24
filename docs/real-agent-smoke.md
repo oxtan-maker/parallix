@@ -159,22 +159,23 @@ proves first-run configuration detection, CI behavior, deterministic timing,
 or provider availability: the rehearsal writes an isolated configuration and
 is observational evidence only.
 
-Also runs as part of `px integrate` (or `./scripts/verify-local.sh integrate`)
-whenever the changed areas include `workflow` or `lib`, alongside the
-`workflow` gate.
+Also runs as part of `./scripts/verify-local.sh integrate` whenever the changed
+areas include `workflow` or `lib`, alongside the `workflow` gate. `px integrate`
+starts no gate; the tests action that `px review` runs executes the configured
+`preIntegration` plan.
 
 ### Self-development Codex override
 
 When this repository cannot use its local custom-agent route, request the
-Codex smoke lifecycle explicitly during integration:
+Codex smoke lifecycle explicitly through the local integration gate script:
 
 ```
-px integrate task-2269 --real-agent codex --real-agent-model gpt-6-luna
+./scripts/verify-local.sh integrate --real-agent codex --real-agent-model gpt-6-luna
 ```
 
-The flags are a required pair. `px integrate` and
-`./scripts/verify-local.sh integrate` reject an incomplete pair, duplicate
-values, unsupported families, and unknown options before gate execution. The
+The flags are a required pair. `./scripts/verify-local.sh integrate` rejects an
+incomplete pair, duplicate values, unsupported families, and unknown options
+before gate execution; `px integrate` rejects both flags as unknown options. The
 values are forwarded as dedicated environment values only to
 `custom-agent-smoke`; they are never concatenated into its shell command.
 Without both flags, the configured `custom-agent-smoke` command remains
