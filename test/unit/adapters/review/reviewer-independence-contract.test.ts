@@ -28,6 +28,7 @@ import { runReviewLoop } from '../../../../src/application/review-loop/review-lo
 import { fakeReviewLoopPorts } from '../../../helpers/review-loop-ports.js';
 import { applyReviewStateToReview } from '../../../../src/adapters/review/review-state-mapping.js';
 import { projectMissionCard } from '../../../../src/application/projections/mission-board.js';
+import { claimReviewPublication } from '../../../../src/adapters/review/review-publication.js';
 
 // Regression provenance: TASK-2339.
 describe("self review forbidden", { concurrency: false }, () => {
@@ -320,7 +321,6 @@ describe("reviewer self review approval owed", { concurrency: false }, () => {
       postReviewFn: () => { throw new Error('self approval must not reach Forgejo'); },
       readReviewStateFn: () => ({ reviewer: 'custom', implementer: 'custom', round: 1, startedAt: singleStartedAt, phase: 'reviewing' }),
       getCommentsFn: async () => [],
-      createEventFn: () => ({ ok: true, path: null }),
       postCommentFn: (_branch, _token, body) => {
         comments.push(body);
         return { ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null };
@@ -400,7 +400,7 @@ for (const { author, reviewer, implementer } of [
     const lifecycle = new MissionLifecycleService(store);
     let posts = 0;
     const result = await consumeReviewerArtifacts(slug, reviewer, {
-      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }), revision: 'head', expectedVersion: 1, providerEnabled: true,
+      executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }), revision: 'head', providerEnabled: true,
       output: { verdict: 'approve', findings: [], comment: 'looks good' }, missionStore: store, lifecycleService: lifecycle,
       readTokenFn: () => `${reviewer}-token`, getPrAuthorFn: () => author, getCommentsFn: async () => [],
       postCommentFn: () => ({ ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }), postReviewFn: () => {
@@ -409,7 +409,7 @@ for (const { author, reviewer, implementer } of [
       },
       readReviewStateFn: async () => new ReviewState(slug, { reviewer, implementer, round: 1, phase: 'reviewing' }),
       writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store }),
-      createEventFn: () => ({ ok: true, path: null }), buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
+      buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
     });
     assert.equal(result.ok, true, result.diagnostic ?? '');
     assert.equal(posts, author === reviewer ? 0 : 1);
@@ -422,6 +422,49 @@ for (const { author, reviewer, implementer } of [
     assert.equal(decision.source.kind, 'provider');
   });
 }
+
+test('a busy approval publication cannot grant local authority before provider acceptance (TASK-2870.02)', async () => {
+  const slug = 'task-2870-busy-approval';
+  const review = startReview({
+    change: { kind: 'local-branch', sourceBranch: `mission/${slug}`, targetBranch: 'main' },
+    revision: changeRevision('head'),
+  }, fixtureAgentFamily('claude'), fixtureAgentFamily('codex'), '2026-11-23T10:00:00Z',
+  ConfiguredReviewerEligibility.fromReviewStep({ eligible: [fixtureAgentFamily('claude')], strategy: 'random' }));
+  const store = inMemoryTransitionStore(fixtureMission(slug, {
+    status: 'review', assignee: fixtureAgentFamily('codex'), review,
+  }));
+  let reads = 0;
+  let reviews = 0;
+  const result = await consumeReviewerArtifacts(slug, 'claude', {
+    executionContext: missionExecutionContext({ missionId: slug, missionWorktree: '/fixture' }),
+    revision: 'head', providerEnabled: true,
+    output: { verdict: 'approve', findings: [], comment: 'looks good' },
+    missionStore: store, lifecycleService: new MissionLifecycleService(store),
+    readTokenFn: () => 'claude-token', getPrAuthorFn: () => 'codex',
+    getCommentsFn: async () => {
+      reads += 1;
+      if (reads === 3) {
+        const claimed = await claimReviewPublication(store, slug, {
+          slug, round: 1, actor: 'claude', revision: 'head',
+          eventType: 'reviewer_outcome', target: 'review',
+        }, 'recovery-publisher');
+        assert.equal(claimed, 'acquired');
+      }
+      return [];
+    },
+    postCommentFn: () => ({ ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }),
+    postReviewFn: () => { reviews += 1; return { ok: true, status: 0, statusCode: 200, stderr: null, data: null, error: null }; },
+    readReviewStateFn: async () => new ReviewState(slug, { reviewer: 'claude', implementer: 'codex', round: 1, phase: 'reviewing' }),
+    writeReviewStateFn: async (_slug, state) => new ReviewState(_slug, state).save('/fixture', { missionStore: store }),
+    buildMetadataFooterFn: () => '', log: () => {}, error: () => {},
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.diagnostic ?? '', /already in progress/);
+  assert.equal(reviews, 0, 'the busy publisher has not accepted the formal review');
+  assert.equal(store.mission().review!.rounds[0]!.decision, null);
+  assert.equal(store.mission().status, 'review');
+});
 
 test('self-author approval cannot leave fixing without a decision (TASK-2821 review P1)', async () => {
   const slug = 'task-2821-illegal-approval';
@@ -440,7 +483,6 @@ test('self-author approval cannot leave fixing without a decision (TASK-2821 rev
     readTokenFn: () => 'fake', getPrAuthorFn: () => 'custom',
     readReviewStateFn: () => readReviewState(slug, '/fixture', store),
     writeReviewStateFn: (_slug, state) => writeReviewState(_slug, state, '/fixture', { missionStore: store }),
-    createEventFn: () => ({ ok: true, path: null }),
     postReviewFn: () => assert.fail('self-author must not POST approval'), log: () => {}, error: () => {},
   });
   assert.equal(rejected.ok, false);

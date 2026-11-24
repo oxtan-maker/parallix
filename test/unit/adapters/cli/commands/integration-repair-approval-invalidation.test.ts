@@ -29,7 +29,7 @@ import { recoverApprovalWithdrawal } from '../../../../../src/adapters/review/in
 import type { GateRunOutcome } from '../../../../../src/adapters/config/repository-gates.js';
 import { approvedReview, fixtureMission, inMemoryTransitionStore } from '../../../../fixtures/mission-builders.js';
 import { missionExecutionContext } from '../../../../fixtures/mission-execution-context.js';
-import { parseReviewPublication } from '../../../../../src/adapters/review/review-publication.js';
+import { claimReviewPublication, parseReviewPublication, reviewPublicationReference } from '../../../../../src/adapters/review/review-publication.js';
 import { changeRevision } from '../../../../../src/domain/review.js';
 import { reboundWithGateRepairEvidence } from '../../../../helpers/gate-repair-rebound.js';
 
@@ -148,9 +148,12 @@ test('a concurrent withdrawal cannot take the fixed route even when the tree is 
 test('TASK-2620: a stale approval is dismissed as parallix; no review is posted as the reviewer', async () => {
   const dismissals: Array<{ branch: string; user: string; token: string; reason: string }> = [];
   const comments: string[] = [];
+  const approved = approvedReview(SLUG);
   const missionStore = inMemoryTransitionStore(fixtureMission(SLUG, {
     status: 'integration',
-    review: approvedReview(SLUG),
+    review: { ...approved, rounds: [{ ...approved.rounds[0], decision: {
+      ...approved.rounds[0].decision!, revision: changeRevision('approved-commit'),
+    } }] as typeof approved.rounds },
   }));
   const invalidate = () => invalidateApprovedPrReview({
     slug: SLUG,
@@ -180,7 +183,7 @@ test('TASK-2620: a stale approval is dismissed as parallix; no review is posted 
 
   assert.deepEqual(result, { ok: true, dismissed: [REVIEWER], errors: [] });
   assert.deepEqual(repeated, { ok: true, dismissed: [], errors: [] });
-  assert.equal(dismissals.length, 2, 'retry rechecks the provider but finds no standing approval to mutate');
+  assert.equal(dismissals.length, 1, 'the completed withdrawal claim prevents a repeated dismissal');
   assert.equal(dismissals[0]!.user, 'parallix', 'Parallix acts as its own login');
   assert.equal(dismissals[0]!.token, 'token-for-parallix', 'never the reviewer\'s token');
   assert.match(dismissals[0]!.reason, /approved-commit/);
@@ -200,6 +203,51 @@ test('TASK-2620: no provider approval means nothing to dismiss', async () => {
     readTokenFn: (() => { throw new Error('must not read a token'); }),
   });
   assert.deepEqual(result, { ok: true, dismissed: [], errors: [] });
+});
+
+test('a busy approval-withdrawal claim fails closed until provider dismissal completes (TASK-2870.02)', async () => {
+  const publication = {
+    slug: SLUG, round: 1, actor: 'parallix', revision: 'fixture-revision',
+    eventType: 'blocked_publication' as const, target: 'comment' as const,
+  };
+  const approved = approvedReview(SLUG);
+  const store = inMemoryTransitionStore(fixtureMission(SLUG, {
+    status: 'integration',
+    review: { ...approved, rounds: [{ ...approved.rounds[0], decision: {
+      ...approved.rounds[0]!.decision!, revision: changeRevision('fixture-revision'),
+    } }] as typeof approved.rounds, reviewEvents: [{
+      position: 0, eventType: 'blocked_publication', roundNumber: 1, phase: 'approved', actor: 'parallix',
+      content: 'withdraw stale approval', disposition: null, verdict: null, itemDispositions: null,
+      blockedReason: null, followUpReference: reviewPublicationReference(publication),
+      createdAt: '2026-11-23T10:00:00.000Z',
+    }] },
+  }));
+  assert.equal(await claimReviewPublication(store, SLUG, publication, 'recovery-publisher'), 'acquired');
+  let dismissals = 0;
+
+  const result = await invalidateApprovedPrReview({
+    slug: SLUG, branch: `mission/${SLUG}`, approval: { ok: true }, summary: 'withdraw stale approval',
+    approvedRevision: 'fixture-revision', missionStore: store,
+    executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/tmp/mission' }),
+    readTokenFn: () => 'parallix-token',
+    dismissFn: () => { dismissals += 1; return { ok: true, dismissed: [REVIEWER], errors: [] }; },
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.errors.join('\n'), /already in progress/);
+  assert.equal(dismissals, 0, 'a competing publisher cannot imply that dismissal succeeded');
+
+  const missingCredentials = await invalidateApprovedPrReview({
+    slug: SLUG, branch: `mission/${SLUG}`, approval: { ok: true }, summary: 'withdraw stale approval',
+    approvedRevision: 'fixture-revision', missionStore: store,
+    executionContext: missionExecutionContext({ missionId: SLUG, missionWorktree: '/tmp/mission' }),
+    readTokenFn: () => null,
+  });
+  assert.equal(missingCredentials.ok, false);
+  assert.match(missingCredentials.errors.join('\n'), /claim is busy/);
+  const durable = parseReviewPublication(store.mission().review?.reviewEvents[0]?.followUpReference);
+  assert.equal(durable?.state, 'publishing');
+  assert.equal(durable?.claim, 'recovery-publisher', 'missing credentials cannot clear a foreign withdrawal claim');
 });
 
 test('missing withdrawal credentials retain a visible failed publication gap (PX-0054.02 F1)', async () => {

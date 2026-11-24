@@ -1,4 +1,5 @@
 import type { IntegrationApproval } from '../../application/ports/integration-records.js';
+import { randomUUID } from 'node:crypto';
 import { dismissStandingApprovals, readToken } from '../forgejo/forgejo.js';
 import { PARALLIX_FORGEJO_USER } from './setup-review-repository.js';
 import type { MissionStore } from '../../application/domain-ports.js';
@@ -6,7 +7,7 @@ import type { LiveMissionExecutionContext } from '../../application/ports/missio
 import { currentIntegrationRepair, integrationGateWithdrawals } from '../../domain/integration-repair-policy.js';
 import { missionId } from '../../domain/mission.js';
 import { createEvent, VALID_EVENT_TYPES } from './review-events.js';
-import { markReviewPublication, parseReviewPublication, reviewPublicationKey, reviewPublicationReference } from './review-publication.js';
+import { claimReviewPublication, governReviewPublication, markReviewPublication, parseReviewPublication, reviewPublicationKey, reviewPublicationReference } from './review-publication.js';
 import { postWorkflowComment } from './review-workflow-posting.js';
 import type { getComments, postComment } from './review-adapter.js';
 
@@ -16,6 +17,17 @@ export interface ApprovalInvalidation {
   /** Logins whose approval Parallix dismissed. */
   dismissed: string[];
   errors: string[];
+}
+
+function settledApprovalClaim(claim: Awaited<ReturnType<typeof claimReviewPublication>>): ApprovalInvalidation | null {
+  if (claim === 'completed') { return { ok: true, dismissed: [], errors: [] }; }
+  if (claim === 'busy') {
+    return { ok: false, dismissed: [], errors: ['Approval withdrawal publication is already in progress.'] };
+  }
+  if (claim === 'missing') {
+    return { ok: false, dismissed: [], errors: ['Approval withdrawal publication obligation disappeared'] };
+  }
+  return null;
 }
 
 type InvalidationOptions = Parameters<typeof invalidateApprovedPrReview>[0];
@@ -62,9 +74,17 @@ async function prepareApprovalWithdrawal(opts: InvalidationOptions, readTokenFn:
   }
   const token = readTokenFn(PARALLIX_FORGEJO_USER, opts.executionContext?.missionWorktree, opts.configuration);
   if (!token) {
-    const diagnostic = `no Forgejo token for ${PARALLIX_FORGEJO_USER}; run px setup-review to create the ${PARALLIX_FORGEJO_USER} user so it can dismiss the standing approval on ${opts.branch}`;
+    let diagnostic = `no Forgejo token for ${PARALLIX_FORGEJO_USER}; run px setup-review to create the ${PARALLIX_FORGEJO_USER} user so it can dismiss the standing approval on ${opts.branch}`;
     if (preRecorded?.ok) {
-      await markReviewPublication(opts.missionStore!, opts.slug, reviewPublicationKey(preRecorded.publication), 'failed', diagnostic);
+      const claimToken = randomUUID();
+      const claim = await claimReviewPublication(opts.missionStore!, opts.slug, preRecorded.publication, claimToken);
+      if (claim === 'acquired') {
+        const recorded = await markReviewPublication(opts.missionStore!, opts.slug,
+          reviewPublicationKey(preRecorded.publication), 'failed', diagnostic, claimToken);
+        if (!recorded) { diagnostic = `${diagnostic}; publication claim changed before failure was recorded`; }
+      } else if (claim !== 'completed') {
+        diagnostic = `${diagnostic}; approval withdrawal publication claim is ${claim}`;
+      }
     }
     return { ok: false, result: { ok: false, dismissed: [], errors: [diagnostic] } };
   }
@@ -106,13 +126,20 @@ export async function invalidateApprovedPrReview(opts: {
   const { token, recorded } = prepared;
   const missionStore = opts.missionStore!;
   const executionContext = opts.executionContext!;
-  const { publication, revision } = recorded;
+  const { revision } = recorded;
+  const binding = await governReviewPublication(missionStore, opts.slug, recorded.publication);
+  if (!binding.ok) { return { ok: false, dismissed: [], errors: [binding.error] }; }
+  const publication = binding.identity;
+  const claimToken = randomUUID();
+  const claim = await claimReviewPublication(missionStore, opts.slug, publication, claimToken);
+  const settled = settledApprovalClaim(claim);
+  if (settled) { return settled; }
   const result = dismissFn(opts.branch, token, opts.summary, {
     forgejoUser: PARALLIX_FORGEJO_USER, expectedRevision: revision, rootDir,
     ...(opts.configuration ? { configuration: opts.configuration } : {}),
   });
   if (!result.ok) {
-    await markReviewPublication(missionStore, opts.slug, reviewPublicationKey(publication), 'failed', result.errors.join('; '));
+    await markReviewPublication(missionStore, opts.slug, reviewPublicationKey(publication), 'failed', result.errors.join('; '), claimToken);
     return { ok: false, dismissed: result.dismissed, errors: result.errors };
   }
   const posted = await postWorkflowComment(opts.slug, opts.summary, {
@@ -124,6 +151,7 @@ export async function invalidateApprovedPrReview(opts: {
     missionStore,
     configuration: opts.configuration,
     publication,
+    publicationClaim: claimToken,
     log: () => {},
     error: () => {},
   });

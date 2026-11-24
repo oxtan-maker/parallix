@@ -20,19 +20,28 @@ export function artifactPublicationRevision(
   enabled: boolean,
   options: { store: unknown; explicit?: string; worktree: string; head: (_worktree: string) => string },
 ): { ok: true; revision: string } | { ok: false; error: string } {
-  if (!enabled) { return { ok: true, revision: '' }; }
-  if (!options.store) { return { ok: false, error: 'Provider publication requires the Mission store.' }; }
-  try { return { ok: true, revision: options.explicit ?? options.head(options.worktree) }; }
-  catch (error) { return { ok: false, error: `Could not resolve publication revision: ${(error as Error).message}` }; }
+  if (enabled && !options.store) { return { ok: false, error: 'Provider publication requires the Mission store.' }; }
+  try {
+    const governed = options.head(options.worktree);
+    if (!governed) { return { ok: false, error: 'Could not resolve publication revision: worktree HEAD is empty.' }; }
+    return { ok: true, revision: governed };
+  } catch (error) {
+    // Isolated/provider-disabled compatibility callers may have no Git checkout.
+    // Production worktrees always resolve HEAD and therefore never trust a
+    // caller-reported revision over the governed checkout.
+    if (!enabled) { return { ok: true, revision: options.explicit ?? '' }; }
+    return { ok: false, error: `Could not resolve publication revision: ${(error as Error).message}` };
+  }
 }
 
 export function reviewerPublicationEventDrafts(params: {
   slug: string; reviewer: string; round: number; phase: ReviewPhase;
   reviewFindings: string; reviewOutcome: string; reviewVerdict: string;
-  providerEnabled: boolean; revision: string; publicationState: ReviewPublicationState;
+  providerEnabled: boolean; revision: string; publicationState: ReviewPublicationState; attempt?: string;
 }): readonly ReviewEventDraft[] {
   const reference = (eventType: 'reviewer_findings' | 'reviewer_outcome', target: 'comment' | 'review') => params.providerEnabled
-    ? reviewPublicationReference({ slug: params.slug, round: params.round, actor: params.reviewer, revision: params.revision, eventType, target }, params.publicationState)
+    ? reviewPublicationReference({ slug: params.slug, round: params.round, actor: params.reviewer, revision: params.revision,
+      ...(params.attempt ? { attempt: params.attempt } : {}), eventType, target }, params.publicationState)
     : null;
   return [{
     eventType: VALID_EVENT_TYPES.REVIEWER_FINDINGS,
@@ -52,7 +61,8 @@ export function reviewerPublicationEventDrafts(params: {
 export async function persistReviewerPublicationEvents(params: {
   slug: string; reviewer: string; round: number | undefined; phase: ReviewPhase | undefined;
   reviewFindings: string; reviewOutcome: string; reviewVerdict: string;
-  createEventFn?: RepoEventFn; executionContext: LiveMissionExecutionContext; log: (_message: string) => void; error: (_message: string) => void;
+  attempt?: string; createEventFn?: RepoEventFn; missionStore?: import('../../application/domain-ports.js').MissionStore | null;
+  executionContext: LiveMissionExecutionContext; log: (_message: string) => void; error: (_message: string) => void;
   verbose: boolean; providerEnabled: boolean; revision: string; publicationState: ReviewPublicationState;
 }): Promise<{ ok: true } | { ok: false; failureReason?: FailureReason; diagnostic: string }> {
   const createEventFn = params.createEventFn ?? createEvent;
@@ -61,13 +71,13 @@ export async function persistReviewerPublicationEvents(params: {
   const findings = await createEventFn(params.slug, VALID_EVENT_TYPES.REVIEWER_FINDINGS, {
     content: findingsDraft!.content, round: findingsDraft!.roundNumber ?? undefined, phase: params.phase, actor: findingsDraft!.actor ?? undefined,
     ...(findingsDraft!.followUpReference ? { followUpReference: findingsDraft!.followUpReference } : {}),
-  }, { executionContext: params.executionContext, skipGit: true, log: params.log, error: params.error });
+  }, { executionContext: params.executionContext, missionStore: params.missionStore, skipGit: true, log: params.log, error: params.error });
   const findingsFailure = eventFailure(findings, 'findings', params.error);
   if (findingsFailure) { return findingsFailure; }
   const outcome = await createEventFn(params.slug, VALID_EVENT_TYPES.REVIEWER_OUTCOME, {
     content: outcomeDraft!.content, round: outcomeDraft!.roundNumber ?? undefined, phase: params.phase, actor: outcomeDraft!.actor ?? undefined, verdict: outcomeDraft!.verdict ?? undefined,
     ...(outcomeDraft!.followUpReference ? { followUpReference: outcomeDraft!.followUpReference } : {}),
-  }, { executionContext: params.executionContext, skipGit: true, log: params.log, error: params.error });
+  }, { executionContext: params.executionContext, missionStore: params.missionStore, skipGit: true, log: params.log, error: params.error });
   const outcomeFailure = eventFailure(outcome, 'outcome', params.error);
   if (outcomeFailure) { return outcomeFailure; }
   if (params.verbose) {

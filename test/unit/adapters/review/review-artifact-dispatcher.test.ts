@@ -33,7 +33,7 @@ test('consumeReviewerArtifacts returns diagnostic when findings are missing', as
   fs.writeFileSync(outcomePath, 'test outcome', 'utf8');
   fs.writeFileSync(verdictPath, 'approve', 'utf8');
 
-  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+  const result = await consumeReviewerArtifacts('test-slug', 'claude', {
     readArtifactFn: (p) => {
       if (p === findingsPath) return null;
       if (p === outcomePath) return 'test outcome';
@@ -65,7 +65,7 @@ test('consumeReviewerArtifacts returns diagnostic when outcome is missing', asyn
   fs.writeFileSync(findingsPath, 'test findings', 'utf8');
   fs.writeFileSync(verdictPath, 'approve', 'utf8');
 
-  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+  const result = await consumeReviewerArtifacts('test-slug', 'claude', {
     readArtifactFn: (p) => {
       if (p === findingsPath) return 'test findings';
       if (p.includes('review-outcome.md')) return null;
@@ -177,15 +177,14 @@ test('consumeReviewerArtifacts retains composed configuration through provider c
     consumers.push(consumer);
   };
 
-  const result = await consumeReviewerArtifacts('test-slug', 'test-reviewer', {
+  const result = await consumeReviewerArtifacts('test-slug', 'claude', {
     executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }),
     providerEnabled: true,
     missionStore,
-    revision: 'review-revision',
+    revision: 'fixture-revision',
     configuration,
     output: { findings: [], comment: 'reviewed', verdict: 'comment' },
     readReviewStateFn: () => ({ round: 1, phase: 'reviewing' }),
-    createEventFn: () => ({ ok: true as const, path: null }),
     readTokenFn: (_user, options) => { observe('token', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return 'token'; },
     getCommentsFn: async (_branch, _token, options) => { observe('comments', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return []; },
     postCommentFn: (_branch, _token, _message, options) => { observe('comment', options?.configuration); return { data: null, status: null, statusCode: null, stderr: null, error: null, ok: true }; },
@@ -196,7 +195,7 @@ test('consumeReviewerArtifacts retains composed configuration through provider c
   });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comments', 'comment', 'token', 'author', 'comments', 'review']);
+  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comments', 'comments', 'comment', 'token', 'author', 'comments', 'comments', 'review']);
 });
 
 test('consumeImplementerArtifacts retains composed configuration through human-note and provider consumers (px-0042.02 F10)', async () => {
@@ -207,19 +206,19 @@ test('consumeImplementerArtifacts retains composed configuration through human-n
     assert.strictEqual(received, configuration);
     consumers.push(consumer);
   };
-  const result = await consumeImplementerArtifacts('test-slug', 'test-implementer', {
+  const result = await consumeImplementerArtifacts('test-slug', 'codex', {
     executionContext: missionExecutionContext({ missionId: 'test-slug', missionWorktree: '/isolated/mission' }), providerEnabled: true, missionStore, configuration,
     output: { items: [], evidence: ['fixed'], disposition: 'CHANGES_MADE', resultingRevision: 'revision' },
     readReviewStateFn: () => ({ round: 1, phase: 'fixing' }),
     recordImplementerResolutionFn: async () => ({ outcome: 'recorded' as const }),
-    createEventFn: () => ({ ok: true as const, path: null }),
+    headRevisionFn: worktree => { assert.equal(worktree, '/isolated/mission'); return 'revision'; },
     readTokenFn: (_user, options) => { observe('token', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return 'token'; },
     getCommentsFn: async (_branch, _token, options) => { observe('comments', options?.configuration); assert.equal(options?.rootDir, '/isolated/mission'); return []; },
     postCommentFn: (_branch, _token, _message, options) => { observe('comment', options?.configuration); return { data: null, status: null, statusCode: null, stderr: null, error: null, ok: true }; },
     log: () => {}, error: message => assert.fail(message),
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comments', 'comment', 'token', 'comments', 'comment']);
+  assert.deepEqual(consumers, ['token', 'comments', 'token', 'comments', 'comments', 'comment', 'token', 'comments', 'comments', 'comment']);
 });
 
 // ============================================================================

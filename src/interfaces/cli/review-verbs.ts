@@ -184,9 +184,10 @@ Options: [--revision <sha>]
 
 Record the implementer's answer to every outstanding finding. Each --finding is
 answered by the --fixed or --disputed that follows it. There is no third answer:
-a finding is either delivered or argued with. --revision names the revision the
-fixes landed on; omitted, the current head is recorded. Read the result back
-with \`px status\`.
+a finding is either delivered or argued with. --revision reports the candidate
+revision for diagnostics; the recorded resolution and provider identity are
+reconciled to the current worktree HEAD. Omit it to report HEAD directly. Read
+the result back with \`px status\`.
 `.trimStart();
 
 /** Same slug convention as the Mission write verbs: `--slug`, else the worktree. */

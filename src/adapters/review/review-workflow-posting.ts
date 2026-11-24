@@ -4,6 +4,7 @@
  */
 
 import * as fmt from '../../application/presentation/cli-format.js';
+import { randomUUID } from 'node:crypto';
 import { missionBranchName } from '../filesystem/mission-utils.js';
 import { readReviewState, writeReviewState, resolveReviewIdentity } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
@@ -16,7 +17,9 @@ import type { LiveMissionExecutionContext } from '../../application/ports/missio
 import { missionId } from '../../domain/mission.js';
 import { currentReviewRound } from '../../domain/review.js';
 import {
+  claimReviewPublication,
   currentReviewPublication,
+  governReviewPublication,
   markReviewPublication,
   parseReviewPublication,
   reviewPublicationBody,
@@ -27,6 +30,8 @@ import {
 
 type PublicationPostingOptions = {
   publication?: ReviewPublicationIdentity;
+  /** Existing claim held by a compound provider operation such as approval withdrawal. */
+  publicationClaim?: string;
   publicationStoredBody?: boolean;
   getCommentsFn?: ReviewCommentsFn;
 };
@@ -41,14 +46,14 @@ function commentBody(comment: unknown): string {
 async function existingPublication(
   branch: string,
   token: string,
-  publication: ReviewPublicationIdentity,
+  publications: readonly ReviewPublicationIdentity[],
   getCommentsFn: ReviewCommentsFn,
   options: { rootDir: string; configuration?: ParallixConfiguration },
 ): Promise<boolean | null> {
   const comments = await getCommentsFn(branch, token, options);
   if (!Array.isArray(comments)) { return null; }
-  const marker = reviewPublicationMarker(reviewPublicationKey(publication));
-  return comments.some(comment => commentBody(comment).includes(marker));
+  const markers = publications.map(publication => reviewPublicationMarker(reviewPublicationKey(publication)));
+  return comments.some(comment => markers.some(marker => commentBody(comment).includes(marker)));
 }
 
 async function recordPublicationResult(
@@ -57,9 +62,42 @@ async function recordPublicationResult(
   missionStore: MissionStore | null | undefined,
   ok: boolean,
   error: string | null = null,
-): Promise<void> {
-  if (!publication || !missionStore) { return; }
-  await markReviewPublication(missionStore, slug, reviewPublicationKey(publication), ok ? 'completed' : 'failed', error);
+  claimToken?: string,
+  retainClaim = false,
+): Promise<boolean> {
+  if (!publication || !missionStore) { return true; }
+  return markReviewPublication(missionStore, slug, reviewPublicationKey(publication), ok ? 'completed' : 'failed', error, claimToken, retainClaim);
+}
+
+const CLAIM_CHANGED_ERROR = 'Review publication claim changed before its durable result could be recorded.';
+
+type PreparedPublication =
+  | { ok: true; body: string; published: boolean; publication?: ReviewPublicationIdentity; claimToken?: string }
+  | { ok: false; error: string };
+
+async function failedPreparation(
+  slug: string,
+  publication: ReviewPublicationIdentity,
+  missionStore: MissionStore | null | undefined,
+  error: string,
+  claimToken?: string,
+  retainClaim = false,
+): Promise<PreparedPublication> {
+  const recorded = await recordPublicationResult(slug, publication, missionStore, false, error, claimToken, retainClaim);
+  return { ok: false, error: recorded ? error : `${error} ${CLAIM_CHANGED_ERROR}` };
+}
+
+async function completedPreparation(
+  slug: string,
+  publication: ReviewPublicationIdentity,
+  missionStore: MissionStore | null | undefined,
+  body: string,
+  claimToken?: string,
+): Promise<PreparedPublication> {
+  const recorded = await recordPublicationResult(slug, publication, missionStore, true, null, claimToken);
+  return recorded
+    ? { ok: true, body, published: true, publication }
+    : { ok: false, error: CLAIM_CHANGED_ERROR };
 }
 
 async function preparePublication(
@@ -68,19 +106,49 @@ async function preparePublication(
   token: string,
   body: string,
   publication: ReviewPublicationIdentity | undefined,
-  options: { missionStore?: MissionStore | null; getCommentsFn?: ReviewCommentsFn; rootDir: string; configuration?: ParallixConfiguration },
-): Promise<{ ok: true; body: string; published: boolean } | { ok: false; error: string }> {
+  options: { missionStore?: MissionStore | null; getCommentsFn?: ReviewCommentsFn; rootDir: string; configuration?: ParallixConfiguration; publicationClaim?: string },
+): Promise<PreparedPublication> {
   if (!publication) { return { ok: true, body, published: false }; }
-  const tagged = reviewPublicationBody(body, publication);
-  const found = await existingPublication(branch, token, publication, options.getCommentsFn ?? getComments,
+  let governed = publication;
+  if (options.missionStore) {
+    const binding = await governReviewPublication(options.missionStore, slug, publication);
+    if (!binding.ok) { return { ok: false, error: binding.error }; }
+    governed = binding.identity;
+  }
+  const tagged = reviewPublicationBody(body, governed);
+  const identities = [publication, governed];
+  const found = await existingPublication(branch, token, identities, options.getCommentsFn ?? getComments,
     { rootDir: options.rootDir, configuration: options.configuration });
   if (found === null) {
     const error = 'Could not read existing PR discussion; refusing a publication that could duplicate an accepted event.';
-    await recordPublicationResult(slug, publication, options.missionStore, false, error);
-    return { ok: false, error };
+    return failedPreparation(slug, governed, options.missionStore, error, options.publicationClaim);
   }
-  if (found) { await recordPublicationResult(slug, publication, options.missionStore, true); }
-  return { ok: true, body: tagged, published: found };
+  if (found) {
+    return completedPreparation(slug, governed, options.missionStore, tagged, options.publicationClaim);
+  }
+  if (!options.missionStore) { return { ok: true, body: tagged, published: false, publication: governed }; }
+  const claimToken = options.publicationClaim ?? randomUUID();
+  const claim = await claimReviewPublication(options.missionStore, slug, governed, claimToken);
+  if (claim === 'completed') {
+    return { ok: true, body: tagged, published: true, publication: governed };
+  }
+  if (claim === 'busy') {
+    return { ok: false, error: 'Review publication is already in progress.' };
+  }
+  if (claim === 'missing') { return { ok: false, error: 'Durable review publication obligation disappeared before provider delivery.' }; }
+  // A failed predecessor may have been accepted by the provider before its
+  // acknowledgement was lost. Re-read after claim acquisition so a waiter
+  // that observed the earlier empty discussion cannot replay that mutation.
+  const reconciled = await existingPublication(branch, token, identities, options.getCommentsFn ?? getComments,
+    { rootDir: options.rootDir, configuration: options.configuration });
+  if (reconciled === null) {
+    const error = 'Could not recheck PR discussion after acquiring the publication claim.';
+    return failedPreparation(slug, governed, options.missionStore, error, claimToken, true);
+  }
+  if (reconciled) {
+    return completedPreparation(slug, governed, options.missionStore, tagged, claimToken);
+  }
+  return { ok: true, body: tagged, published: false, publication: governed, claimToken };
 }
 
 async function runProviderPublication(
@@ -89,21 +157,22 @@ async function runProviderPublication(
   missionStore: MissionStore | null | undefined,
   operation: () => ReturnType<typeof postComment>,
   failure: (_result: ReturnType<typeof postComment>) => string,
+  claimToken?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   let result: ReturnType<typeof postComment>;
   try { result = operation(); }
   catch (postError) {
     const error = postError instanceof Error ? postError.message : String(postError);
-    await recordPublicationResult(slug, publication, missionStore, false, error);
-    return { ok: false, error };
+    const recorded = await recordPublicationResult(slug, publication, missionStore, false, error, claimToken, true);
+    return { ok: false, error: recorded ? error : `${error} ${CLAIM_CHANGED_ERROR}` };
   }
   if (!result.ok) {
     const error = failure(result);
-    await recordPublicationResult(slug, publication, missionStore, false, error);
-    return { ok: false, error };
+    const recorded = await recordPublicationResult(slug, publication, missionStore, false, error, claimToken);
+    return { ok: false, error: recorded ? error : `${error} ${CLAIM_CHANGED_ERROR}` };
   }
-  await recordPublicationResult(slug, publication, missionStore, true);
-  return { ok: true };
+  const recorded = await recordPublicationResult(slug, publication, missionStore, true, null, claimToken);
+  return recorded ? { ok: true } : { ok: false, error: CLAIM_CHANGED_ERROR };
 }
 
 // =====================================================================
@@ -143,13 +212,14 @@ export async function postWorkflowComment(
   const storedBody = options.publicationStoredBody ? message
     : message + await Promise.resolve(buildMetadataFooterFn(slug, rootDir, options.missionStore ?? null));
   const prepared = await preparePublication(slug, branch, token, storedBody, options.publication,
-    { missionStore: options.missionStore, getCommentsFn: options.getCommentsFn, rootDir, configuration: options.configuration });
+    { missionStore: options.missionStore, getCommentsFn: options.getCommentsFn, rootDir,
+      configuration: options.configuration, publicationClaim: options.publicationClaim });
   if (!prepared.ok) { error(fmt.status('FAIL', prepared.error)); return prepared; }
   if (prepared.published) { return { ok: true }; }
   log(fmt.status('INFO', `Posting PR comment on ${branch} as ${reviewIdentity}...`));
-  const posted = await runProviderPublication(slug, options.publication, options.missionStore,
+  const posted = await runProviderPublication(slug, prepared.publication, options.missionStore,
     () => postCommentFn(branch, token, prepared.body, { forgejoUser: reviewIdentity, reviewIdentity, rootDir, configuration: options.configuration }),
-    result => providerError(result) || 'API error');
+    result => providerError(result) || 'API error', prepared.claimToken);
   if (!posted.ok) { error(fmt.status('FAIL', `Could not post comment: ${posted.error}`)); return posted; }
   log(fmt.status('PASS', `Comment posted on PR for ${branch}.`));
   return { ok: true };
@@ -245,12 +315,13 @@ async function postPreparedWorkflowReview(
   const storedBody = options.publicationStoredBody ? message
     : message + await Promise.resolve(buildMetadataFooterFn(slug, worktree, missionStore));
   const prepared = await preparePublication(slug, branch, token, storedBody, options.publication,
-    { missionStore, getCommentsFn: options.getCommentsFn, rootDir: worktree, configuration: options.configuration });
+    { missionStore, getCommentsFn: options.getCommentsFn, rootDir: worktree,
+      configuration: options.configuration, publicationClaim: options.publicationClaim });
   if (!prepared.ok || prepared.published) { return prepared.ok ? { ok: true } : prepared; }
   log(fmt.status('INFO', `Submitting review outcome "${outcome}" on ${branch} as ${reviewIdentity}...`));
-  const posted = await runProviderPublication(slug, options.publication, missionStore,
+  const posted = await runProviderPublication(slug, prepared.publication, missionStore,
     () => postReviewFn(branch, token, outcome, prepared.body, { forgejoUser: reviewIdentity, reviewIdentity, rootDir: worktree, configuration: options.configuration }),
-    describeProviderFailure);
+    describeProviderFailure, prepared.claimToken);
   if (!posted.ok) { error(fmt.status('FAIL', `Could not submit review: ${posted.error}`)); return posted; }
   log(fmt.status('PASS', `Review outcome "${outcome}" posted on PR for ${branch}.`));
   return { ok: true };
@@ -294,6 +365,18 @@ function postWorkflowReviewBindings(options: NonNullable<Parameters<typeof postW
   return { log, error, readTokenFn, postReviewFn, buildMetadataFooterFn, readReviewStateFn };
 }
 
+async function retireSupersededPublication(
+  slug: string,
+  identity: ReviewPublicationIdentity,
+  store: MissionStore,
+): Promise<boolean> {
+  const claimToken = randomUUID();
+  const claim = await claimReviewPublication(store, slug, identity, claimToken);
+  if (claim === 'completed') { return true; }
+  if (claim !== 'acquired') { return false; }
+  return markReviewPublication(store, slug, reviewPublicationKey(identity), 'completed', null, claimToken);
+}
+
 function providerHttpStatus(r: Record<string, unknown>) {
   const httpStatus = (r.statusCode !== null && Number(r.statusCode) > 0)
     ? r.statusCode
@@ -335,19 +418,23 @@ export async function recoverReviewPublications(
   });
   for (const event of pending) {
     const publication = parseReviewPublication(event.followUpReference)!;
-    if (!currentReviewPublication(slug, publication, event, round)) {
-      await markReviewPublication(options.missionStore, slug, publication.key, 'completed');
-      options.log?.(`Ignoring superseded review publication for round ${publication.round}; current round is ${round.number}.`);
-      continue;
-    }
     const identity: ReviewPublicationIdentity = {
       slug,
       round: publication.round,
       actor: publication.actor,
       revision: publication.revision,
+      ...(publication.attempt ? { attempt: publication.attempt } : {}),
       eventType: publication.eventType,
       target: publication.target,
     };
+    if (!currentReviewPublication(slug, publication, event, round)) {
+      if (!await retireSupersededPublication(slug, identity, options.missionStore)) {
+        options.error?.(`Could not retire superseded review publication: ${CLAIM_CHANGED_ERROR}`);
+        return { ok: false, pending: pending.length };
+      }
+      options.log?.(`Ignoring superseded review publication for round ${publication.round}; current round is ${round.number}.`);
+      continue;
+    }
     const common = {
       executionContext: options.executionContext,
       missionStore: options.missionStore,

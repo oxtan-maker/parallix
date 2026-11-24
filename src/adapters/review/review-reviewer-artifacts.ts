@@ -1,16 +1,14 @@
 import { failureReason, type FailureReason } from '../../domain/failure-reason.js';
 import { authorizeMissionWrite } from '../../application/ports/mission-write-authorization.js';
-import type { postComment, postReview, getPrAuthor, getComments } from './review-adapter.js';
+import { isEnabled, type postComment, type postReview, type getPrAuthor, type getComments } from './review-adapter.js';
 /**
  * Reviewer artifact consumption: resolve the reviewer artifact set, persist
  * reviewer events, and post the reviewer outcome to the provider.
  */
-
 import * as fmt from '../../application/presentation/cli-format.js';
 import { readReviewState, writeReviewState } from './review-state.js';
 import type { MissionStore } from '../../application/domain-ports.js';
 import { type ReviewFinding } from '../../domain/review.js';
-import { isEnabled } from './review-adapter.js';
 import { createEvent, consumeHumanNotes, CreateEventParams, CreateEventOptions, CreateEventResult } from './review-events.js';
 import { parseReviewFindings, recordRequestedChanges, recordApproval, approvalLegalDiagnostic, type ReviewRoundResult } from './review-round.js';
 import { incompleteReviewerArtifacts, invalidReviewerProcessResult } from './reviewer-artifact-admission.js';
@@ -20,9 +18,8 @@ import { reviewArtifactPath, staleReviewWrite, renderFindings, resolveArtifactRe
 import { postWorkflowComment, postWorkflowReview } from './review-workflow-posting.js';
 import type { ParallixConfiguration } from '../../application/ports/configuration.js';
 import type { LiveMissionExecutionContext } from '../../application/ports/mission-execution-context.js';
-import type { ReviewPublicationState } from './review-publication.js';
+import type { ReviewEventDraft, ReviewPublicationState } from './review-publication.js';
 import { persistReviewerPublicationEvents, publicationContextError, reviewerPublicationEventDrafts } from './review-artifact-publication.js';
-import type { ReviewEventDraft } from './review-publication.js';
 
 type ReviewerArtifactOptions = {
   executionContext: LiveMissionExecutionContext;
@@ -138,7 +135,7 @@ async function postReviewerToProvider(
     revision?: string;
     recordApprovalFn?: typeof recordApproval;
     configuration?: ParallixConfiguration;
-    round: number;
+    round: number; attempt?: string;
   },
 ): Promise<string | null> {
   const { log, error, readReviewStateFn } = context;
@@ -168,7 +165,7 @@ async function postReviewerToProvider(
     missionStore: context.missionStore,
     getCommentsFn: context.getCommentsFn,
     publication: context.revision ? {
-      slug, round: context.round, actor: reviewer, revision: context.revision,
+      slug, round: context.round, actor: reviewer, revision: context.revision, attempt: context.attempt,
       eventType: 'reviewer_findings', target: 'comment',
     } : undefined,
     configuration: context.configuration,
@@ -202,7 +199,7 @@ async function postReviewerToProvider(
     revision: context.revision,
     configuration: context.configuration,
     publication: context.revision ? {
-      slug, round: context.round, actor: reviewer, revision: context.revision,
+      slug, round: context.round, actor: reviewer, revision: context.revision, attempt: context.attempt,
       eventType: 'reviewer_outcome', target: 'review',
     } : undefined,
   });
@@ -313,6 +310,7 @@ export async function consumeReviewerArtifacts(
   const { reviewFindings, reviewOutcome, reviewVerdict, typedFindings } = prepared;
   options = prepared.options;
   const { round, phase, readReviewStateFn } = await reviewerArtifactRound(slug, worktree, options);
+  const publicationAttempt = options.processResult?.sessionId ?? options.processResult?.runId ?? undefined;
 
   const mirror = () => postReviewerToProvider(slug, reviewer, reviewVerdict, reviewFindings, reviewOutcome, {
       executionContext: options.executionContext, log, error, readReviewStateFn,
@@ -331,18 +329,20 @@ export async function consumeReviewerArtifacts(
       revision: options.revision,
       configuration: options.configuration,
       round: round!,
+      ...(publicationAttempt ? { attempt: publicationAttempt } : {}),
     });
   const persistEvents = async (publicationState: ReviewPublicationState) => {
     const persisted = await persistReviewerPublicationEvents({
       slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
-      createEventFn: options.createEventFn, executionContext: options.executionContext, log, error, verbose: Boolean(options.verbose),
+      createEventFn: options.createEventFn, missionStore: options.missionStore, attempt: publicationAttempt,
+      executionContext: options.executionContext, log, error, verbose: Boolean(options.verbose),
       providerEnabled: Boolean(providerEnabled), revision: options.revision ?? '', publicationState,
     });
     return persisted.ok ? null : { consumed: true as const, ok: false as const, failureReason: persisted.failureReason, diagnostic: persisted.diagnostic };
   };
-  const atomicEvents = options.missionStore && providerEnabled && options.revision && round !== undefined && phase !== undefined
-    ? reviewerPublicationEventDrafts({ slug, reviewer, round, phase, reviewFindings, reviewOutcome, reviewVerdict,
-      providerEnabled: true, revision: options.revision, publicationState: 'pending' })
+  const atomicEvents = [Boolean(options.missionStore), Boolean(providerEnabled), Boolean(options.revision), Number.isInteger(round), Boolean(phase)].every(Boolean)
+    ? reviewerPublicationEventDrafts({ slug, reviewer, round: round!, phase: phase!, reviewFindings, reviewOutcome, reviewVerdict,
+      providerEnabled: true, revision: options.revision!, publicationState: 'pending', attempt: publicationAttempt })
     : undefined;
   // Approval authority remains provider-first, but its publication obligation
   // must exist before the provider mutation. The controller ignores this

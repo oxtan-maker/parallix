@@ -139,19 +139,11 @@ function parseImplementerResolution(resolution: string, disposition: string): { 
 async function closeImplementerRound(slug: string, context: {
   disposition: string; itemDispositions: ReviewItemDisposition[]; worktree: string;
   implementer: string; round: number; phase: ReviewPhase; resolution: string; blockedReason: string | null; providerEnabled: boolean;
-  options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
+  revision: string; options: ImplementerArtifactOptions; log: (_msg: string) => void; error: (_msg: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
-  const { disposition, itemDispositions, worktree, options, log, error } = context;
+  const { disposition, itemDispositions, options, log, error } = context;
   const recordImplementerResolutionFn = options.recordImplementerResolutionFn || recordImplementerResolution;
-  const headRevisionFn = options.headRevisionFn || headRevision;
-  let resultingRevision: string;
-  try {
-    resultingRevision = options.output?.resultingRevision ?? headRevisionFn(worktree);
-  } catch (revisionError) {
-    const revErr = (revisionError as Error).message;
-    error(fmt.status('FAIL', `Could not record the implementer resolution for ${slug}: ${revErr}`));
-    return { failureReason: failureReason('infrastructure', 'review-preparation'), consumed: true, ok: false, diagnostic: `Implementer resolution persist failed: ${revErr}` };
-  }
+  const resultingRevision = context.revision;
   const recorded = await recordImplementerResolutionFn(slug, {
     itemDispositions,
     disposition,
@@ -239,6 +231,7 @@ async function persistImplementerEvents(params: {
   itemDispositions: ReviewItemDisposition[];
   blockedReason: string | null;
   createEventFn: RepoEventFn;
+  missionStore?: MissionStore | null;
   executionContext: LiveMissionExecutionContext;
   log: (_msg: string) => void;
   error: (_msg: string) => void;
@@ -254,7 +247,7 @@ async function persistImplementerEvents(params: {
     itemDispositions,
     ...(disposition === 'BLOCKED' && blockedReason ? { blockedReason } : {}),
     ...(publication('implementer_round_summary') ? { followUpReference: publication('implementer_round_summary')! } : {}),
-  }, { executionContext, skipGit: true, log: log, error });
+  }, { executionContext, missionStore: params.missionStore, skipGit: true, log: log, error });
 
   if (!summaryEventResult.ok) {
     const summaryErr = (summaryEventResult as { error?: string }).error;
@@ -265,7 +258,7 @@ async function persistImplementerEvents(params: {
   const dispositionEventResult = await createEventFn(slug, VALID_EVENT_TYPES.IMPLEMENTER_DISPOSITION, {
     content: `Autonomous review disposition: ${disposition}`, round, phase, actor: implementer, disposition,
     ...(publication('implementer_disposition') ? { followUpReference: publication('implementer_disposition')! } : {}),
-  }, { executionContext, skipGit: true, log: log, error });
+  }, { executionContext, missionStore: params.missionStore, skipGit: true, log: log, error });
 
   if (!dispositionEventResult.ok) {
     const dispErr = (dispositionEventResult as { error?: string }).error;
@@ -298,19 +291,15 @@ function prepareImplementerArtifacts(slug: string, options: ImplementerArtifactO
 async function publishImplementerArtifacts(context: {
   slug: string; implementer: string; round: number; phase: ReviewPhase; resolution: string; disposition: string;
   itemDispositions: ReviewItemDisposition[]; blockedReason: string | null; providerEnabled: boolean;
-  worktree: string; options: ImplementerArtifactOptions; log: (_message: string) => void; error: (_message: string) => void;
+  worktree: string; revision: string; options: ImplementerArtifactOptions; log: (_message: string) => void; error: (_message: string) => void;
 }): Promise<ImplementerArtifactFailure | null> {
   const { slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason,
-    providerEnabled, worktree, options, log, error } = context;
-  const publication = artifactPublicationRevision(providerEnabled, {
-    store: options.missionStore, explicit: options.output?.resultingRevision, worktree,
-    head: options.headRevisionFn ?? headRevision,
-  });
-  if (!publication.ok) { return { consumed: true, ok: false, diagnostic: publication.error }; }
+    providerEnabled, worktree, revision, options, log, error } = context;
   const persisted = await persistImplementerEvents({
     slug, implementer, round, phase, resolution, disposition, itemDispositions, blockedReason,
     createEventFn: options.createEventFn || createEvent, executionContext: options.executionContext, log, error,
-    providerEnabled, revision: publication.revision,
+    missionStore: options.missionStore,
+    providerEnabled, revision,
   });
   if (!persisted.ok) { return { consumed: true, ok: false, diagnostic: persisted.diagnostic }; }
   await consumeImplementerHumanNotes(slug, implementer, providerEnabled, worktree, options, log, error);
@@ -319,7 +308,7 @@ async function publishImplementerArtifacts(context: {
     return null;
   }
   return mirrorImplementerArtifacts(slug, {
-    resolution, disposition, implementer, round, revision: publication.revision, options, log, error,
+    resolution, disposition, implementer, round, revision, options, log, error,
   });
 }
 
@@ -347,6 +336,11 @@ export async function consumeImplementerArtifacts(
   const { itemDispositions, blockedReason } = options.output
     ? { itemDispositions: [...options.output.items], blockedReason: options.output.blockedReason ?? null }
     : parseImplementerResolution(artifacts.resolution, disposition);
+  const publication = artifactPublicationRevision(Boolean(providerEnabled), {
+    store: options.missionStore, explicit: options.output?.resultingRevision, worktree,
+    head: options.headRevisionFn ?? headRevision,
+  });
+  if (!publication.ok) { return { consumed: true, ok: false, diagnostic: publication.error }; }
 
   // Close the round on the aggregate. `ready-for-next-round` is the state the
   // next review preparation needs to open round N+1 on the same pull request.
@@ -359,14 +353,14 @@ export async function consumeImplementerArtifacts(
   if (disposition !== 'BLOCKED') {
     const closed = await closeImplementerRound(slug, {
       disposition, itemDispositions, worktree, implementer, round, phase, resolution: artifacts.resolution,
-      blockedReason, providerEnabled: Boolean(providerEnabled), options, log, error,
+      blockedReason, providerEnabled: Boolean(providerEnabled), revision: publication.revision, options, log, error,
     });
     if (closed) { return closed; }
   }
 
   const publicationFailure = await publishImplementerArtifacts({
     slug, implementer, round, phase, resolution: artifacts.resolution, disposition, itemDispositions, blockedReason,
-    providerEnabled: Boolean(providerEnabled), worktree, options, log, error,
+    providerEnabled: Boolean(providerEnabled), worktree, revision: publication.revision, options, log, error,
   });
   if (publicationFailure) { return publicationFailure; }
 

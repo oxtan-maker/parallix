@@ -18,6 +18,8 @@ import type { RevokeReviewDecisionRequest } from '../../../../src/application/re
 import { WorkflowOwnershipError } from '../../../../src/domain/workflow-operation.js';
 import { missionExecutionContext } from '../../../fixtures/mission-execution-context.js';
 import * as fmt from '../../../../src/application/presentation/cli-format.js';
+import { consumeImplementerArtifacts } from '../../../../src/adapters/review/review-artifacts.js';
+import { fixtureMission, inMemoryTransitionStore, requestedChangesReview } from '../../../fixtures/mission-builders.js';
 
 const EXECUTION_CONTEXT = missionExecutionContext({ missionId: 'task-2521.03', missionWorktree: '/tmp/worktree' });
 
@@ -257,6 +259,37 @@ describe("review verbs", { concurrency: false }, () => {
       'F2: disputed — out of scope',
     ]);
     assert.equal(output.output.blockedReason, null);
+  });
+
+  test('px resolve reconciles a reported revision to the governed worktree HEAD (TASK-2870.02)', async () => {
+    const slug = 'task-2870-cli-revision';
+    const store = inMemoryTransitionStore(fixtureMission(slug, {
+      status: 'active',
+      review: requestedChangesReview(slug, {
+        startedAt: '2026-11-23T10:00:00.000Z', decidedAt: '2026-11-23T10:01:00.000Z',
+      }),
+    }));
+    const { ports: p } = ports({
+      resolveSlug: explicit => explicit ?? slug,
+      resolveExecutionContext: () => ({
+        ok: true, context: missionExecutionContext({ missionId: slug, missionWorktree: '/tmp/worktree' }),
+      }),
+      readReviewState: async () => ({ round: 1, phase: 'fixing' as const }),
+      consumeImplementerOutput: (missionSlug, implementer, output, executionContext, expectedVersion) =>
+        consumeImplementerArtifacts(missionSlug, implementer, {
+          output, executionContext, expectedVersion, missionStore: store,
+          providerEnabled: false, headRevisionFn: () => 'governed-worktree-head',
+          readReviewStateFn: async () => ({ round: 1, phase: 'fixing' }),
+          log: () => {}, error: () => {},
+        }),
+    });
+
+    await createResolveCommand(p)([
+      '--slug', slug, '--actor', 'codex', '--revision', 'unresolvable-reported-revision',
+      '--finding', 'fixture-finding', '--fixed', 'test/unit/interfaces/cli/review-cli-dispatch-contract.test.ts',
+    ]);
+
+    assert.equal(store.mission().review?.rounds[0]?.response?.resultingRevision, 'governed-worktree-head');
   });
 
   test('px resolve rejects a finding left without an answer', async () => {

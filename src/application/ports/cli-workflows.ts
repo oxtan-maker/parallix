@@ -75,7 +75,7 @@ export interface StatusMissionData {
     readonly round: number;
     readonly actor: string;
     readonly revision: string;
-    readonly status: 'pending' | 'failed';
+    readonly status: 'pending' | 'publishing' | 'failed';
     readonly error: string | null;
   }[];
   /** Advisory approval debt recorded by the provider workflow. */

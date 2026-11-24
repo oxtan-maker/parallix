@@ -5,9 +5,11 @@ import { missionExecutionContext } from '../../../fixtures/mission-execution-con
 import { postWorkflowComment, recoverReviewPublications } from '../../../../src/adapters/review/review-workflow-posting.js';
 import { createEvent } from '../../../../src/adapters/review/review-events.js';
 import {
+  claimReviewPublication,
   parseReviewPublication,
   parseReviewPublicationBody,
   reviewPublicationBody,
+  reviewPublicationKey,
   reviewPublicationReference,
   type ReviewPublicationIdentity,
 } from '../../../../src/adapters/review/review-publication.js';
@@ -27,7 +29,12 @@ const publication: ReviewPublicationIdentity = {
 function publicationStore() {
   const pending = pendingReview(slug);
   const review = { ...pending, rounds: [{ ...pending.rounds[0]!, number: 11,
-    subject: { ...pending.rounds[0]!.subject, revision: changeRevision('abc123') } }] as typeof pending.rounds };
+    subject: { ...pending.rounds[0]!.subject, revision: changeRevision('abc123') },
+    reviewerPolicy: {
+      revision: changeRevision('abc123'), mode: 'two-independent' as const, requiredApprovals: 2 as const,
+      selected: [agentFamily('custom'), agentFamily('claude')], independentAvailable: 2,
+      unavailable: [], rerouted: [], fallbackReason: null,
+    } }] as typeof pending.rounds };
   return inMemoryTransitionStore(fixtureMission(slug, { review: {
     ...review,
     reviewEvents: [{
@@ -45,6 +52,34 @@ function publicationStore() {
       createdAt: '2026-11-13T00:00:00.000Z',
     }],
   } }));
+}
+
+function compareAndSwapPublicationStore() {
+  const store = publicationStore();
+  let priorSave = Promise.resolve();
+  return {
+    ...store,
+    async save(
+      mission: Parameters<typeof store.save>[0],
+      expectedVersion: Parameters<typeof store.save>[1],
+    ) {
+      const waitFor = priorSave;
+      let release!: () => void;
+      priorSave = new Promise<void>(resolve => { release = resolve; });
+      await waitFor;
+      try {
+        const current = await store.load();
+        if (expectedVersion !== current.version) {
+          const stale = new Error(`stale publication write: expected ${expectedVersion}, found ${current.version}`) as Error & { disposition: string };
+          stale.disposition = 'stale-write';
+          throw stale;
+        }
+        return await store.save(mission, expectedVersion);
+      } finally {
+        release();
+      }
+    },
+  };
 }
 
 function postingOptions(store: ReturnType<typeof publicationStore>, comments: { body: string }[]) {
@@ -102,6 +137,128 @@ test('accepted-then-interrupted publication recovers once from the provider mark
   assert.equal(posts, 1);
 });
 
+test('recovery settles the exact obligation when an earlier revision shares its coordinates (TASK-2870.02 F1)', async () => {
+  const store = publicationStore();
+  const loaded = await store.load();
+  const review = loaded.mission.review!;
+  const later = { ...publication, revision: 'reported-later' };
+  await store.save({ ...loaded.mission, review: { ...review, reviewEvents: [
+    { ...review.reviewEvents[0]!, followUpReference: reviewPublicationReference(publication, 'completed') },
+    { ...review.reviewEvents[0]!, position: 1, followUpReference: reviewPublicationReference(later) },
+  ] } }, loaded.version);
+  const comments = [{ body: reviewPublicationBody('## F1: provider gap', publication) }];
+  let posts = 0;
+  const options = {
+    ...postingOptions(store, comments),
+    postCommentFn: () => {
+      posts += 1;
+      return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+    },
+  };
+
+  assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 1 });
+  assert.equal(posts, 0, 'the accepted marker settles the calling obligation without another provider entry');
+  assert.equal(comments.length, 1);
+  const durable = store.mission().review!.reviewEvents.map(event => parseReviewPublication(event.followUpReference)!);
+  assert.deepEqual(durable.map(entry => entry.state), ['completed', 'completed']);
+  assert.deepEqual(durable.map(entry => entry.revision), ['abc123', 'abc123']);
+  assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 0 });
+});
+
+test('overlapping initial and recovery publishers share one durable claim after lost acknowledgement (TASK-2870.02)', async () => {
+  const store = compareAndSwapPublicationStore();
+  const comments: { body: string }[] = [];
+  let reads = 0;
+  let releaseReads!: () => void;
+  const bothReadersArrived = new Promise<void>(resolve => { releaseReads = resolve; });
+  const getCommentsFn = async () => {
+    reads += 1;
+    if (reads === 2) { releaseReads(); }
+    if (reads <= 2) { await bothReadersArrived; }
+    return [...comments];
+  };
+  let posts = 0;
+  const postCommentFn: NonNullable<Parameters<typeof postWorkflowComment>[2]['postCommentFn']> = (_branch, _token, body) => {
+    posts += 1;
+    comments.push({ body });
+    if (posts === 1) { throw new Error('connection closed after provider acceptance'); }
+    return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+  };
+  const options = { ...postingOptions(store, comments), getCommentsFn, postCommentFn };
+
+  const [initial, overlappingRecovery] = await Promise.all([
+    postWorkflowComment(slug, '## F1: provider gap', options),
+    recoverReviewPublications(slug, options),
+  ]);
+
+  assert.equal(initial.ok, false, 'a lost acknowledgement is not reported as provider success');
+  assert.equal(overlappingRecovery.ok, false, 'a busy claim is pending, not provider success');
+  assert.equal(posts, 1, 'overlap cannot pass the provider marker check twice');
+  assert.equal(comments.length, 1, 'the accepted event has one visible provider entry');
+
+  assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 1 });
+  assert.equal(posts, 1, 'the marker reconciles the lost acknowledgement without another post');
+  assert.equal(parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)?.state, 'completed');
+});
+
+test('a tokenless result cannot clear or complete another publisher claim (TASK-2870.02 F1)', async () => {
+  const store = publicationStore();
+  assert.equal(await claimReviewPublication(store, slug, publication, 'claim-owner'), 'acquired');
+
+  const unreadable = await postWorkflowComment(slug, '## F1: provider gap', {
+    ...postingOptions(store, []),
+    getCommentsFn: async () => null,
+  });
+  assert.equal(unreadable.ok, false);
+  assert.match(unreadable.error ?? '', /claim changed/);
+  let durable = parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)!;
+  assert.equal(durable.state, 'publishing');
+  assert.equal(durable.claim, 'claim-owner');
+
+  const accepted = await postWorkflowComment(slug, '## F1: provider gap', {
+    ...postingOptions(store, []),
+    getCommentsFn: async () => [{ body: reviewPublicationBody('accepted', publication) }],
+  });
+  assert.equal(accepted.ok, false);
+  assert.match(accepted.error ?? '', /claim changed/);
+  durable = parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)!;
+  assert.equal(durable.state, 'publishing');
+  assert.equal(durable.claim, 'claim-owner');
+});
+
+test('initial publication reconciles an ungoverned revision before identity creation (TASK-2870.02)', async () => {
+  const store = publicationStore();
+  const loaded = await store.load();
+  const review = loaded.mission.review!;
+  const ungoverned = { ...publication, revision: 'missing-revision' };
+  await store.save({ ...loaded.mission, review: {
+    ...review,
+    rounds: [{ ...review.rounds[0]!, reviewerPolicy: {
+      revision: changeRevision('governed-revision'), mode: 'two-independent', requiredApprovals: 2,
+      selected: [agentFamily('custom'), agentFamily('claude')], independentAvailable: 2,
+      unavailable: [], rerouted: [], fallbackReason: null,
+    } }] as typeof review.rounds,
+    reviewEvents: [{ ...review.reviewEvents[0]!, followUpReference: reviewPublicationReference(ungoverned) }],
+  } }, loaded.version);
+  const bodies: string[] = [];
+
+  const result = await postWorkflowComment(slug, '## F1: provider gap', {
+    ...postingOptions(store, []), publication: ungoverned,
+    postCommentFn: (_branch, _token, body) => {
+      bodies.push(body);
+      return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(bodies.length, 1);
+  assert.match(bodies[0]!, /revision governed-revision/);
+  assert.doesNotMatch(bodies[0]!, /missing-revision/);
+  const durable = parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)!;
+  assert.equal(durable.revision, 'governed-revision', 'the durable key is rebound to aggregate authority');
+  assert.equal(durable.state, 'completed');
+});
+
 test('publication recovery retires a superseded round without another provider mutation (TASK-2855)', async () => {
   const store = publicationStore();
   const loaded = await store.load();
@@ -120,6 +277,21 @@ test('publication recovery retires a superseded round without another provider m
   assert.equal(parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)?.state, 'completed');
   assert.deepEqual(await recoverReviewPublications(slug, options), { ok: true, pending: 0 });
   assert.equal(posts, 0, 'repeated recovery cannot replay the superseded verdict');
+});
+
+test('publication recovery cannot retire a superseded event under another live claim (TASK-2870.02 F1)', async () => {
+  const store = publicationStore();
+  assert.equal(await claimReviewPublication(store, slug, publication, 'claim-owner'), 'acquired');
+  const loaded = await store.load();
+  const review = loaded.mission.review!;
+  await store.save({ ...loaded.mission, review: { ...review, rounds: [{ ...review.rounds[0]!,
+    number: 12, subject: { ...review.rounds[0]!.subject, revision: changeRevision('new-head') },
+  }] as typeof review.rounds } }, loaded.version);
+
+  assert.deepEqual(await recoverReviewPublications(slug, postingOptions(store, [])), { ok: false, pending: 1 });
+  const durable = parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)!;
+  assert.equal(durable.state, 'publishing');
+  assert.equal(durable.claim, 'claim-owner');
 });
 
 test('publication recovery keeps a selected reviewer obligation when the primary reviewer differs (TASK-2855 F2)', async () => {
@@ -313,6 +485,38 @@ test('publication body carries visible round actor revision provenance and a sta
   });
   assert.equal(parseReviewPublicationBody(first.replace('actor custom', 'actor codex')), null,
     'visible provenance cannot contradict the durable marker');
+});
+
+test('publication identity preserves distinct native attempts and event types with identical prose (TASK-2870.02)', () => {
+  const firstAttempt = { ...publication, attempt: 'native-run-1' };
+  const secondAttempt = { ...publication, attempt: 'native-run-2' };
+  const outcome = { ...firstAttempt, eventType: 'reviewer_outcome' as const, target: 'review' as const };
+
+  assert.notEqual(reviewPublicationKey(firstAttempt), reviewPublicationKey(secondAttempt));
+  assert.notEqual(reviewPublicationKey(firstAttempt), reviewPublicationKey(outcome));
+  assert.equal(parseReviewPublication(reviewPublicationReference(firstAttempt))?.attempt, 'native-run-1');
+  assert.equal(reviewPublicationBody('identical prose', firstAttempt).startsWith('identical prose'), true);
+  assert.equal(reviewPublicationBody('identical prose', outcome).startsWith('identical prose'), true);
+});
+
+test('publication recovery retains the native attempt identity (TASK-2870.02)', async () => {
+  const store = publicationStore();
+  const loaded = await store.load();
+  const attempted = { ...publication, attempt: 'native-run-recovery' };
+  await store.save({ ...loaded.mission, review: { ...loaded.mission.review!, reviewEvents: [
+    { ...loaded.mission.review!.reviewEvents[0]!, followUpReference: reviewPublicationReference(attempted) },
+  ] } }, loaded.version);
+  const bodies: string[] = [];
+
+  assert.deepEqual(await recoverReviewPublications(slug, {
+    ...postingOptions(store, []),
+    postCommentFn: (_branch, _token, body) => {
+      bodies.push(body);
+      return { ok: true as const, data: null, status: 201, statusCode: 201, stderr: null, error: null };
+    },
+  }), { ok: true, pending: 1 });
+  assert.equal(parseReviewPublicationBody(bodies[0]!)?.attempt, 'native-run-recovery');
+  assert.equal(parseReviewPublication(store.mission().review!.reviewEvents[0]!.followUpReference)?.attempt, 'native-run-recovery');
 });
 
 test('repeated local persistence keeps one event for the publication identity (PX-0054.02)', async () => {
