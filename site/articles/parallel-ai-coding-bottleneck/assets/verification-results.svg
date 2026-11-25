@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="576pt" height="331.2pt" viewBox="0 0 576 331.2" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" aria-labelledby="title desc">
+<title id="title">Modeled time and cost of three check rules</title>
+<desc id="desc">The usual order is 100 percent. Moving tests ahead of human review uses 85.8 percent of modeled time and 85.2 percent of cost. The fastest action uses 78.3 percent of time in the duration-record scenario. The cheapest action uses 84.8 percent of cost.</desc>
+ <title>Modeled time and cost of three check rules</title>
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:title>Modeled time and cost of three check rules</dc:title>
+    <dc:date>2026-11-19T15:30:31.600746</dc:date>
+    <dc:description>The usual order is 100 percent. Moving tests ahead of human review uses 85.8 percent of modeled time and 85.2 percent of cost. The fastest action uses 78.3 percent of time in the duration-record scenario. The cheapest action uses 84.8 percent of cost.</dc:description>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 331.2
+L 576 331.2
+L 576 0
+L 0 0
+z
+" style="fill: #faf8f3"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 28.8 251.712
+L 259.2 251.712
+L 259.2 132.48
+L 28.8 132.48
+z
+" style="fill: #faf8f3"/>
+   </g>
+   <g id="LineCollection_1">
+    <path d="M 28.8 245.17874
+L 28.8 143.913205
+" clip-path="url(#pa4b0e93c45)" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+   </g>
+   <g id="LineCollection_2">
+    <path d="M 120.96 245.17874
+L 120.96 143.913205
+" clip-path="url(#pa4b0e93c45)" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+   </g>
+   <g id="LineCollection_3">
+    <path d="M 213.12 245.17874
+L 213.12 143.913205
+" clip-path="url(#pa4b0e93c45)" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1"/>
+     <g id="text_1">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="28.8" y="264.069422" transform="rotate(-0 28.8 264.069422)">0%</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2"/>
+     <g id="text_2">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="120.96" y="264.069422" transform="rotate(-0 120.96 264.069422)">50%</text>
+     </g>
+    </g>
+    <g id="xtick_3">
+     <g id="line2d_3"/>
+     <g id="text_3">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="213.12" y="264.069422" transform="rotate(-0 213.12 264.069422)">100%</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2"/>
+   <g id="patch_3">
+    <path d="M 28.8 162.206334
+L 213.12 162.206334
+L 213.12 151.753118
+L 28.8 151.753118
+z
+" clip-path="url(#pa4b0e93c45)" style="fill: #919e94"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 28.8 203.039211
+L 186.946560 203.039211
+L 186.946560 192.585995
+L 28.8 192.585995
+z
+" clip-path="url(#pa4b0e93c45)" style="fill: #7b9b89"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 28.8 243.872088
+L 173.122781 243.872088
+L 173.122781 233.418871
+L 28.8 233.418871
+z
+" clip-path="url(#pa4b0e93c45)" style="fill: #24604f"/>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="28.8" y="145.070466" transform="rotate(-0 28.8 145.070466)">Usual order</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="216.8064" y="159.967031" transform="rotate(-0 216.8064 159.967031)">100%</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="28.8" y="185.903343" transform="rotate(-0 28.8 185.903343)">Move tests before human review</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="190.632960" y="200.799907" transform="rotate(-0 190.632960 200.799907)">85.8%</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="28.8" y="226.73622" transform="rotate(-0 28.8 226.73622)">Fastest action</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="176.809181" y="241.632784" transform="rotate(-0 176.809181 241.632784)">78.3%</text>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_6">
+    <path d="M 316.8 251.712
+L 547.2 251.712
+L 547.2 132.48
+L 316.8 132.48
+z
+" style="fill: #faf8f3"/>
+   </g>
+   <g id="LineCollection_4">
+    <path d="M 316.8 245.17874
+L 316.8 143.913205
+" clip-path="url(#p4befc75f77)" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+   </g>
+   <g id="LineCollection_5">
+    <path d="M 408.96 245.17874
+L 408.96 143.913205
+" clip-path="url(#p4befc75f77)" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+   </g>
+   <g id="LineCollection_6">
+    <path d="M 501.12 245.17874
+L 501.12 143.913205
+" clip-path="url(#p4befc75f77)" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+   </g>
+   <g id="matplotlib.axis_3">
+    <g id="xtick_4">
+     <g id="line2d_4"/>
+     <g id="text_10">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="316.8" y="264.069422" transform="rotate(-0 316.8 264.069422)">0%</text>
+     </g>
+    </g>
+    <g id="xtick_5">
+     <g id="line2d_5"/>
+     <g id="text_11">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="408.96" y="264.069422" transform="rotate(-0 408.96 264.069422)">50%</text>
+     </g>
+    </g>
+    <g id="xtick_6">
+     <g id="line2d_6"/>
+     <g id="text_12">
+      <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="501.12" y="264.069422" transform="rotate(-0 501.12 264.069422)">100%</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_4"/>
+   <g id="patch_7">
+    <path d="M 316.8 162.206334
+L 501.12 162.206334
+L 501.12 151.753118
+L 316.8 151.753118
+z
+" clip-path="url(#p4befc75f77)" style="fill: #919e94"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 316.8 203.039211
+L 473.840640 203.039211
+L 473.840640 192.585995
+L 316.8 192.585995
+z
+" clip-path="url(#p4befc75f77)" style="fill: #7b9b89"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 316.8 243.872088
+L 473.103360 243.872088
+L 473.103360 233.418871
+L 316.8 233.418871
+z
+" clip-path="url(#p4befc75f77)" style="fill: #24604f"/>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="316.8" y="145.070466" transform="rotate(-0 316.8 145.070466)">Usual order</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="504.8064" y="159.967031" transform="rotate(-0 504.8064 159.967031)">100%</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="316.8" y="185.903343" transform="rotate(-0 316.8 185.903343)">Move tests before human review</text>
+   </g>
+   <g id="text_16">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="477.527040" y="200.799907" transform="rotate(-0 477.527040 200.799907)">85.2%</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="316.8" y="226.73622" transform="rotate(-0 316.8 226.73622)">Cheapest action</text>
+   </g>
+   <g id="text_18">
+    <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="476.789760" y="241.632784" transform="rotate(-0 476.789760 241.632784)">84.8%</text>
+   </g>
+  </g>
+  <g id="text_19">
+   <text style="font-size: 12px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="28.8" y="20.709187" transform="rotate(-0 28.8 20.709187)">Usual order = 100%</text>
+  </g>
+  <g id="text_20">
+   <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="28.8" y="52.992" transform="rotate(-0 28.8 52.992)">Time with recorded durations</text>
+  </g>
+  <g id="text_21">
+   <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #24604f" x="28.8" y="89.424" transform="rotate(-0 28.8 89.424)">21.7% less time</text>
+  </g>
+  <g id="text_23">
+   <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="316.8" y="52.992" transform="rotate(-0 316.8 52.992)">Cost objective</text>
+  </g>
+  <g id="text_24">
+   <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #24604f" x="316.8" y="89.424" transform="rotate(-0 316.8 89.424)">15.2% less cost</text>
+  </g>
+  <g id="text_26">
+   <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="28.8" y="319.608" transform="rotate(-0 28.8 319.608)">Same inputs and required checks; rounded to one decimal place, separate objectives.</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pa4b0e93c45">
+   <rect x="28.8" y="132.48" width="230.4" height="119.232"/>
+  </clipPath>
+  <clipPath id="p4befc75f77">
+   <rect x="316.8" y="132.48" width="230.4" height="119.232"/>
+  </clipPath>
+ </defs>
+</svg>

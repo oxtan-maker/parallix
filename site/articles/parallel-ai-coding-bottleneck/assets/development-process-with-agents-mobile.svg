@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="558" viewBox="0 0 360 558" role="img" aria-labelledby="title desc">
+<title id="title">Agents added to the development process</title>
+<desc id="desc">A coding agent implements and tests, an independent agent reviews and may also test, and a human reviews and tests before automated integration checks and a team-owned merge. Failed checks return work to implementation. The team coordinates the work and owns approval.</desc>
+<defs><marker id="forward" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#535e57" /></marker><marker id="return" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="#8d3925" /></marker></defs>
+<style>text { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; fill: #252b2a; } .heading { font-weight:650; } .role { fill:#535e57; } .flow { fill:none; stroke:#535e57; stroke-width:1.8; marker-end:url(#forward); } .rework { fill:none; stroke:#8d3925; stroke-width:1.8; } .rework-end { marker-end:url(#return); }</style>
+<text x="12" y="23" font-size="19" class="heading">Agents added to the process</text>
+<rect x="56" y="40" width="292" height="64" rx="8" fill="#eef1e9" stroke="#24604f" />
+<text x="76" y="65" font-size="19" class="heading">Implement and test</text>
+<text x="76" y="89" font-size="16.5" class="role">Coding agent</text>
+<g transform="translate(303 55)" fill="none" stroke="#252b2a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="28" height="22" rx="5" /><path d="M16 8V2M0 16H2M30 16H33M10 24H22" /><circle cx="10" cy="16" r="1.4" fill="#252b2a" /><circle cx="22" cy="16" r="1.4" fill="#252b2a" /></g>
+<path d="M202 104V122" class="flow" />
+<rect x="56" y="122" width="292" height="64" rx="8" fill="#eef1e9" stroke="#24604f" />
+<text x="76" y="147" font-size="19" class="heading">Review (and test)</text>
+<text x="76" y="171" font-size="16.5" class="role">Another agent</text>
+<g transform="translate(303 137)" fill="none" stroke="#252b2a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="8" width="28" height="22" rx="5" /><path d="M16 8V2M0 16H2M30 16H33M10 24H22" /><circle cx="10" cy="16" r="1.4" fill="#252b2a" /><circle cx="22" cy="16" r="1.4" fill="#252b2a" /></g>
+<path d="M202 186V204" class="flow" />
+<rect x="56" y="204" width="292" height="64" rx="8" fill="#f4e9de" stroke="#c7ccc3" />
+<text x="76" y="229" font-size="19" class="heading">Review and test</text>
+<text x="76" y="253" font-size="16.5" class="role">Human</text>
+<g transform="translate(303 219)" fill="none" stroke="#252b2a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="9" r="7" /><path d="M2 33v-4c0-13 28-13 28 0v4" /></g>
+<path d="M202 268V286" class="flow" />
+<rect x="56" y="286" width="292" height="64" rx="8" fill="#eef1e9" stroke="#c7ccc3" />
+<text x="76" y="311" font-size="19" class="heading">Integration checks</text>
+<text x="76" y="335" font-size="16.5" class="role">Automation</text>
+<g transform="translate(303 301)" fill="none" stroke="#252b2a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="27" height="29" rx="4" /><path d="M9 12l3 3 6-7M9 23l3 3 6-7M22 12h3M22 23h3" /></g>
+<path d="M202 350V368" class="flow" />
+<text x="212" y="363" font-size="12" style="fill:#24604f">End of measured time</text>
+<rect x="56" y="368" width="292" height="64" rx="8" fill="#f4e9de" stroke="#c7ccc3" />
+<text x="76" y="393" font-size="19" class="heading">Review and merge</text>
+<text x="76" y="417" font-size="16.5" class="role">Team</text>
+<g transform="translate(303 383)" fill="none" stroke="#252b2a" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="9" r="7" /><path d="M2 33v-4c0-13 28-13 28 0v4" /></g>
+<path d="M56 318H22V72H56" class="rework rework-end" />
+<path d="M56 154H22" class="rework" />
+<circle cx="22" cy="154" r="2.5" fill="#8d3925" />
+<path d="M56 236H22" class="rework" />
+<circle cx="22" cy="236" r="2.5" fill="#8d3925" />
+<text x="12" y="461" font-size="16" style="fill:#8d3925">Failed check → rework</text>
+<rect x="12" y="478" width="336" height="56" rx="7" fill="#faf8f3" stroke="#c7ccc3" stroke-dasharray="4 4" />
+<text x="24" y="501" font-size="16.5" class="heading">The team coordinates the work</text>
+<text x="24" y="522" font-size="16" class="role">and owns final approval.</text>
+</svg>

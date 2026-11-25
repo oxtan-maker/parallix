@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<svg width="576pt" height="318.0pt" viewBox="0 0 576 318.0" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" aria-labelledby="title desc">
+<title id="title">Modeled time saved by better test repairs</title>
+<desc id="desc">Total modeled time saved rises from 0 percent at the 38.8 percent repair success rate to 9.7, 16.3, 21.6, 25.9, 29.4 and 32.4 percent at 50 to 100 percent success. Each ten-point step saves less: 9.7, 7.3, 6.3, 5.4, 4.8 and 4.2 percent compared with the preceding level.</desc>
+ <defs><style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style></defs>
+ <rect x="0" y="0" width="576" height="318.0" style="fill: #faf8f3"/>
+ <text style="font-size: 12px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="28.80" y="20.71">Test repairs that pass all checks</text>
+ <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="28.80" y="52.99">Total time saved</text>
+ <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #24604f" x="28.80" y="89.39">Up to 32.4% less time</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="28.80" y="108.99">Even perfect repair leaves most of the time</text>
+ <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="316.80" y="52.99">Time saved in each step</text>
+ <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #24604f" x="316.80" y="89.39">Returns flatten</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="316.80" y="108.99">Each 10-point step saves less</text>
+ <path d="M 52.80 240.00 L 245.20 240.00" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="48.80" y="243.80">0%</text>
+ <path d="M 52.80 211.43 L 245.20 211.43" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="48.80" y="215.23">10%</text>
+ <path d="M 52.80 182.86 L 245.20 182.86" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="48.80" y="186.66">20%</text>
+ <path d="M 52.80 154.29 L 245.20 154.29" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="48.80" y="158.09">30%</text>
+ <path d="M 56.80 240.00 L 56.80 240.00 L 90.18 212.29 L 119.98 193.43 L 149.79 178.29 L 179.59 166.00 L 209.40 156.00 L 239.20 147.43 L 239.20 240.00 Z" style="fill: #e9ece6"/>
+ <path d="M 56.80 240.00 L 90.18 212.29 L 119.98 193.43 L 149.79 178.29 L 179.59 166.00 L 209.40 156.00 L 239.20 147.43" style="fill: none; stroke: #24604f; stroke-width: 2.2"/>
+ <circle cx="56.80" cy="240.00" r="2.8" style="fill: #24604f"/>
+ <circle cx="90.18" cy="212.29" r="2.8" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #24604f" x="90.18" y="206.29">9.7%</text>
+ <circle cx="119.98" cy="193.43" r="2.8" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #24604f" x="119.98" y="187.43">16.3%</text>
+ <circle cx="149.79" cy="178.29" r="2.8" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #24604f" x="149.79" y="172.29">21.6%</text>
+ <circle cx="179.59" cy="166.00" r="2.8" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #24604f" x="179.59" y="160.00">25.9%</text>
+ <circle cx="209.40" cy="156.00" r="2.8" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #24604f" x="209.40" y="150.00">29.4%</text>
+ <circle cx="239.20" cy="147.43" r="2.8" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #24604f" x="239.20" y="141.43">32.4%</text>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="52.80" y="255.00">38.8%</text>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="119.98" y="255.00">60%</text>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="179.59" y="255.00">80%</text>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="239.20" y="255.00">100%</text>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="148.00" y="270.00">Test-repair success</text>
+ <path d="M 340.80 240.00 L 541.20 240.00" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="336.80" y="243.80">0%</text>
+ <path d="M 340.80 194.55 L 541.20 194.55" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="336.80" y="198.35">5%</text>
+ <path d="M 340.80 149.09 L 541.20 149.09" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: end; fill: #535e57" x="336.80" y="152.89">10%</text>
+ <rect x="351.02" y="151.82" width="20.29" height="88.18" style="fill: #7b9b89"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #252b2a" x="361.17" y="147.82">9.7%</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="361.17" y="254.00">38.8→</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="361.17" y="265.00">50%</text>
+ <rect x="383.75" y="173.64" width="20.29" height="66.36" style="fill: #7b9b89"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #252b2a" x="393.90" y="169.64">7.3%</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="393.90" y="254.00">50→</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="393.90" y="265.00">60%</text>
+ <rect x="416.49" y="182.73" width="20.29" height="57.27" style="fill: #7b9b89"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #252b2a" x="426.63" y="178.73">6.3%</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="426.63" y="254.00">60→</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="426.63" y="265.00">70%</text>
+ <rect x="449.22" y="190.91" width="20.29" height="49.09" style="fill: #7b9b89"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #252b2a" x="459.37" y="186.91">5.4%</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="459.37" y="254.00">70→</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="459.37" y="265.00">80%</text>
+ <rect x="481.95" y="196.36" width="20.29" height="43.64" style="fill: #7b9b89"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #252b2a" x="492.10" y="192.36">4.8%</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="492.10" y="254.00">80→</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="492.10" y="265.00">90%</text>
+ <rect x="514.69" y="201.82" width="20.29" height="38.18" style="fill: #7b9b89"/>
+ <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #252b2a" x="524.83" y="197.82">4.2%</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="524.83" y="254.00">90→</text>
+ <text style="font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="524.83" y="265.00">100%</text>
+ <text style="font-size: 10.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="443.00" y="280.00">Repair-success step</text>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="28.80" y="306.00">Compared with 38.8% repair success and 581.1 modeled minutes.</text>
+</svg>

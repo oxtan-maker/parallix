@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Running reviews and integration tests together, instead of one after another, cut time until a change is ready for team review by 15–22%.">
+  <meta name="color-scheme" content="light">
+  <meta name="author" content="Magnus Ekdahl">
+  <title>Fix the process around coding agents before adding more of them — Magnus Ekdahl</title>
+  <link rel="canonical" href="https://oxtan-maker.github.io/parallix/articles/parallel-ai-coding-bottleneck/">
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Engineering notes">
+  <meta property="og:title" content="Fix the process around coding agents before adding more of them">
+  <meta property="og:description" content="Running reviews and integration tests together, instead of one after another, cut time until a change is ready for team review by 15–22%.">
+  <meta property="og:url" content="https://oxtan-maker.github.io/parallix/articles/parallel-ai-coding-bottleneck/">
+  <meta property="article:author" content="Magnus Ekdahl">
+  <meta property="article:published_time" content="2026-11-25">
+  <meta property="og:image" content="https://oxtan-maker.github.io/parallix/articles/parallel-ai-coding-bottleneck/assets/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="627">
+  <meta property="og:image:alt" content="Agent review, human review and integration checks run together on one revision before the change goes to team review and merge.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Fix the process around coding agents before adding more of them">
+  <meta name="twitter:description" content="Running reviews and integration tests together, instead of one after another, cut time until a change is ready for team review by 15–22%.">
+  <meta name="twitter:image" content="https://oxtan-maker.github.io/parallix/articles/parallel-ai-coding-bottleneck/assets/og-image.png">
+  <meta name="twitter:image:alt" content="Agent review, human review and integration checks run together on one revision before the change goes to team review and merge.">
+  <link rel="stylesheet" href="../fresh-context-recovery/styles.css">
+  <style>
+    .constraint-map { width: 100%; table-layout: fixed; }
+    .decision-matrix { width: 100%; table-layout: fixed; }
+    .decision-matrix th:first-child { width: 26%; }
+    .decision-matrix th:not(:first-child) { width: 37%; }
+    .constraint-map th:first-child { width: 44%; }
+    .constraint-map th:nth-child(2) { width: 21%; }
+    caption { text-align: left; font-weight: 650; padding-bottom: .7rem; }
+    code { font-size: .9em; overflow-wrap: anywhere; }
+    pre { white-space: pre-wrap; }
+    .tradeoff-figure img { max-width: 440px; margin-inline: auto; }
+    @media (max-width: 760px) {
+      .constraint-map, .decision-matrix { font-size: .8rem; }
+      .constraint-map th:first-child { width: 40%; }
+      .constraint-map th:nth-child(2) { width: 27%; }
+      .process-figure img { max-width: 420px; margin-inline: auto; }
+      .repair-savings-figure img { max-width: 440px; margin-inline: auto; }
+      .results-figure img { max-width: 440px; margin-inline: auto; }
+    }
+    @media (max-width: 360px) {
+      .decision-matrix th:first-child { width: 30%; }
+      .decision-matrix th:not(:first-child) { width: 35%; }
+    }
+    @media print { .constraint-map { min-width: 0; } }
+  </style>
+</head>
+<body>
+<a class="skip-link" href="#article">Skip to article</a>
+<header class="masthead"><a class="masthead-title" href="../../index.html">Engineering notes</a><span>Magnus Ekdahl</span></header>
+<main id="article" tabindex="-1">
+<article aria-labelledby="title">
+<header class="article-header">
+  <h1 id="title">Fix the process around coding agents before adding more of them</h1>
+  <p class="standfirst">Running reviews and integration tests together, instead of one after another, cut time until a change is ready for team review by 15–22%.</p>
+  <p class="byline">Magnus Ekdahl · <time datetime="2026-11-25">25 November 2026</time></p>
+</header>
+
+<p>Many teams added coding agents to the process they already had. An agent implements the change, another agent reviews it, a human reviews it, and integration tests run last. When the tests fail at the end, the repaired change goes back through both reviews. People still pass along diagnostics, ask for another review and restart work that has stopped. More agents raise output at one step, and reviews and coordination became the new bottleneck.</p>
+<figure class="article-figure process-figure" id="agents-added-process" aria-labelledby="agents-added-process-caption">
+  <picture>
+    <source media="(max-width: 760px)" srcset="assets/development-process-with-agents-mobile.svg?v=5" width="360" height="558">
+    <img src="assets/development-process-with-agents.svg?v=5" width="800" height="304" alt="The same process with a coding agent implementing and testing, an independent agent reviewing and possibly testing, then a human reviewing and testing before automated integration checks. Failed checks return work to implementation. The team still coordinates the work and owns final approval and merge.">
+  </picture>
+  <figcaption id="agents-added-process-caption"><strong>Before: agents added to the existing process.</strong> Checks run one after another, and a failed check sends the change back to implementation.</figcaption>
+</figure>
+<p>The fix is to change when the checks run, to shorten the time from implementation to team review. Agent review, human review and integration tests now start together. If an automated check fails, the human review request is withdrawn and an agent repairs the change straight away, without anyone passing the failure along. The quality bar is unchanged: all three checks must still pass before team review.</p>
+<figure class="article-figure process-figure" id="adaptive-process" aria-labelledby="adaptive-process-caption">
+  <picture>
+    <source media="(max-width: 760px)" srcset="assets/adaptive-development-process-mobile.svg?v=6" width="360" height="728">
+    <img src="assets/adaptive-development-process.svg?v=6" width="800" height="400" alt="Implementation is followed by agent review, human review and integration checks, which can overlap. Each result can change what runs next. Starting a repair cancels checks in progress. All three checks must pass the current revision before team review.">
+  </picture>
+  <figcaption id="adaptive-process-caption"><strong>After: the same checks run together.</strong> The process acts on the results it has so far. All three checks must pass the current revision before team review.</figcaption>
+</figure>
+<p>A model of the change predicted 22% less time from implementation to team review. In the first 24 changes afterwards, time fell 16% once differences in waits and stalls are removed.</p>
+
+<h2 id="repeated-work">Agents make a different order possible</h2>
+<p>Agents add an option the old process lacked: an agent can repair a failed integration test right away, without waiting for a person to pass along the diagnostics.</p>
+<p>Recording each check’s result, duration and model usage against the code revision also gives the probabilities that a check passes and that a repair succeeds. With those probabilities, a standard partially observable Markov decision process (POMDP) calculates the best action: which checks to run in parallel or when to repair. Partial observability here means that nobody knows whether the code meets the quality bar until integration tests, agent review and human review all agree.<sup><a href="#method-note" aria-label="The model, note 1">1</a></sup></p>
+
+<h2 id="capacity">What the pilot measured</h2>
+<figure class="article-figure results-figure" id="pilot-results" aria-labelledby="pilot-results-caption">
+  <picture>
+    <source media="(max-width: 760px)" srcset="assets/pilot-results-mobile.svg?v=11" width="360" height="956">
+    <img src="assets/pilot-results.svg?v=11" width="800" height="540" alt="Compared with the usual order, the model predicted 21.7% less time from implementation to team review for the fastest action. Measured, time was 15.7% less with waits and stalls removed and 49.7% less as recorded. The model predicted 9.9% more agent and test spending per change; measured with stall recovery removed at similar change sizes, spending was 12.7% less, a difference that is not statistically clear, and 45.7% less as recorded. Spending excludes human review.">
+  </picture>
+  <figcaption id="pilot-results-caption"><strong>Once waits and stalls are removed, time lands near the prediction. Spending didn’t rise as the model expected.</strong><sup><a href="#pilot-note" aria-label="Pilot measurement, note 2">2</a></sup></figcaption>
+</figure>
+<p>The pilot measured the fastest action. It requests all three checks together. Once the tests and agent review report, it withdraws any pending human review if either check failed and starts a repair, with both sets of findings if both failed. If both passed, it waits for the human verdict if it hasn’t arrived. All three checks still had to pass before team review.</p>
+<p>The model predicted 22% less time. As recorded, time from implementation to team review fell by half, but the earlier changes stalled more often: a failed command waiting for recovery, or a repaired change waiting for fresh approval. Review responses were also quicker during the pilot, an observer effect. Removing both differences leaves 16%, a little below the prediction. The records show the mechanism the model relies on: tests started before the first approval in every pilot change and in none of the earlier ones. Team review and merge come afterwards and weren’t measured, so the saving shortens total lead time only if team review takes no longer than before.<sup><a href="#pilot-note" aria-label="Pilot measurement, note 2">2</a></sup></p>
+<p>On cost, the model expected agent spending to rise by about 10%: more agent reviews, paid for by fewer human reviews. Agent review spending did rise. Repairs went the other way. When the tests and agent review both failed, the repair agent got both sets of findings at once. Counting such a combined repair as two fixes, the number of fixes stayed about the same, but each fix cost about 30% less. The model repairs one set of findings at a time, so it missed that saving. With stall recovery removed and at similar change sizes, agent and test spending came out about 13% lower, though that is within the uncertainty.<sup><a href="#pilot-note" aria-label="Pilot measurement, note 2">2</a></sup></p>
+
+<h3 id="results">A simpler first step: move tests ahead of human review</h3>
+<p>Moving tests ahead of human review, with nothing else changed, gets about two-thirds of the modeled time saving and nearly all of the cost saving: 14% less time and 15% less cost. That is the first step for any team, and adopting it needs no model. The model found it and put a number on it. Running the checks together adds the rest of the time saving, 22% against 14%.<sup><a href="#results-note" aria-label="Model results and cost, note 3">3</a></sup></p>
+
+<figure class="article-figure results-figure" id="policy-comparison" aria-labelledby="policy-comparison-caption">
+  <picture>
+    <source media="(max-width: 760px)" srcset="assets/verification-results-mobile.svg?v=6" width="360" height="720">
+    <img src="assets/verification-results.svg?v=6" width="800" height="460" alt="Compared with the usual process, moving tests ahead of human review saves 14.2% of modeled time and 14.8% of cost. The fastest action saves 21.7% of time. The cheapest action saves 15.2% of cost.">
+  </picture>
+  <figcaption id="policy-comparison-caption"><strong>Running the checks together adds the last third of the time saving, but almost nothing to the cost saving.</strong><sup><a href="#results-note" aria-label="Model results and cost, note 3">3</a></sup></figcaption>
+</figure>
+
+<p>The cost figures treat waiting as free: a change waiting for review, and the people waiting on it, cost nothing. Getting close to that takes a reviewer who works through reviews one after another with little context switching. Few organizations work like that, so the cost figures are a best case, and the process is optimized for time. The cost saving also depends on the reviewer. A review started on a change that is then withdrawn is wasted, and about 2.3 minutes of that per change cancels the modeled cost saving. A reviewer who would rather not be interrupted can wait until the tests and agent review pass. That costs the same, and the time saving drops from 22% to 17%. In a team, measure it by logging when a reviewer opens a change and comparing that with when its review request is withdrawn.<sup><a href="#reviewer-cost-note" aria-label="Model results and cost, note 3">3</a></sup></p>
+<p>The best action was chosen on early estimates. It did better than expected once checks could run together and repairs could combine findings. The larger reason to keep it is the model behind it: when an agent, a test suite or a review step changes, the time to team review can be re-estimated before deciding whether that engineering work is worth doing.</p>
+
+<h2 id="flow">Estimating the impact of the next engineering investment</h2>
+<p>The model also shows how improving one part of the process affects the time needed to complete a change.<sup><a href="#sensitivity-note" aria-label="Sensitivity, note 4">4</a></sup></p>
+<figure>
+  <div class="table-scroll" tabindex="0" role="region" aria-label="Sensitivity examples">
+    <table class="constraint-map">
+      <caption>Effect of a one-percentage-point change</caption>
+      <thead><tr><th scope="col">Outcome that becomes more likely</th><th scope="col">Example: +1 point</th><th scope="col">Modeled time</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Test repair passes all checks</th><td>38.8% → 39.8%</td><td><strong>1.0% less</strong></td></tr>
+        <tr><th scope="row">Test repair introduces a human-review problem</th><td>1.05% → 2.05%</td><td><strong>1.1% more</strong></td></tr>
+        <tr><th scope="row">First implementation passes all checks</th><td><a href="#first-pass-note" aria-label="First-pass rate, note 4">6% → 7%</a></td><td><strong>0.8% less</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+</figure>
+<p>Each row changes one assumption by one percentage point. That nearly doubles the 1.05% rate but changes the 38.8% rate by less than 3%, so the rows show where a point is worth most, not which problem is biggest. Improving one outcome can reduce the repeated work on which another improvement would act.</p>
+<p>Consider the first row: an integration test fails on code that would otherwise pass both reviews. Raising the chance that its repair produces code acceptable to all three checks from 38.8% to 39.8% yields <strong>nearly a full percent less time across the whole process for a one-point improvement in that repair outcome</strong>.</p>
+<figure class="article-figure repair-savings-figure" id="repair-success-sweep" aria-labelledby="repair-success-sweep-caption">
+  <picture>
+    <source media="(max-width: 760px)" srcset="assets/repair-time-savings-mobile.svg?v=2" width="360" height="789">
+    <img src="assets/repair-time-savings.svg?v=2" width="800" height="442" alt="Better test repairs show diminishing returns. Total modeled time saved rises to 32.4% at 100% repair success. Savings in each step decline from 9.7% for 38.8% to 50% success, to 4.2% for 90% to 100%.">
+  </picture>
+  <figcaption id="repair-success-sweep-caption"><strong>Total savings compare with the 38.8% success rate and 581.1 modeled minutes; step savings compare with the preceding success level.</strong><sup><a href="#repair-sweep-note" aria-label="Sensitivity, note 4">4</a></sup></figcaption>
+</figure>
+<p>The returns flatten in this sweep. Moving from 50% to 60% saves about <strong>38 minutes</strong>; moving from 90% to 100% saves about <strong>17 minutes</strong>. Even perfect repair in this one situation leaves about <strong>393 minutes</strong>. Other repairs, required checks and waiting still consume time. The investment question is how much the next improvement would save and what it would cost to achieve.</p>
+<p>In this example, improving test repair saves slightly more time than the same percentage-point increase in first-pass success. There is only one first implementation per change, but test repairs can happen repeatedly. Better repairs reduce the chance of sending work through another round of checks, repairs and waiting, so the improvement can save work more than once per change.</p>
+
+<h2 id="where-to-start">Where to start</h2>
+<p>Before adding more agents, look at what happens to a change from implementation to team review. The first step needs no model: move integration tests ahead of human review. That alone gets most of the time saving and nearly all of the cost saving. Running the checks together adds the rest.</p>
+<p>If the extra time saving matters to you, or you want to estimate the impact of an engineering improvement before you make it, the next step is a cost model of your own process. That takes more work: the model needs measured inputs for every check, repair and wait in the process.<sup><a href="#inputs-note" aria-label="Inputs for your own model, note 5">5</a></sup></p>
+<p>I run this process in <a href="https://github.com/oxtan-maker/parallix">Parallix</a>, the open-source tool I build for running coding agents in parallel. If you’re working on the same problem, <a href="https://www.linkedin.com/in/magnus-ekdahl-0311402b">I’d like to hear from you on LinkedIn</a>.</p>
+
+<footer class="article-footer" id="sources">
+<h2>Sources and methods</h2>
+<p>The model calculations are available <a href="https://www.linkedin.com/in/magnus-ekdahl-0311402b">on request</a>.</p>
+
+<details>
+  <summary>1. The model</summary>
+  <p id="method-note">The model follows one change from implementation to team review. After each check result or finished repair, it decides which checks to start or withdraw and whether to start a repair. An integration test failure can be a flake. A repair addresses one check’s findings at a time. The calculation compares every combination of check order and overlap across four rounds of checks and repairs. It doesn’t model changes competing for shared test machines or reviewers.</p>
+</details>
+
+<details>
+  <summary>2. Pilot measurement</summary>
+  <p id="pilot-note">The clock runs from the end of the first implementation, when the change goes to review, until the change is ready for team review, recorded as the squash merge into the developer’s branch, including waiting, reviews, tests and repairs. The pilot covers every change that went to review after the switch and was ready for team review by 24 November 2026, compared with 32 earlier changes chosen before the pilot. One change hit by an older approval bug and the study’s own changes are excluded. The comparison is before and after, not randomized.</p>
+  <p>Time per change fell from 7.71 to 3.88 hours as recorded (one-sided Welch test, p = 0.009). Adding back 54 minutes for faster review responses during the pilot gives 4.77 hours (p = 0.035). Both are statistically significant at the 5% level. Adding back the 1.73-hour difference in recorded stall time as well gives 6.50 hours, 15.7% less, or 14.1% at similar change sizes. That adjustment is conservative, since the new process may itself have avoided some of those stalls. The model counts minutes of work, not calendar hours, so compare percentages rather than absolute times.</p>
+  <p>Spending covers agent usage, priced at standard Claude Opus 5.5 rates whichever provider ran it, and integration test CPU. With stall recovery removed, it fell from $41.70 to $23.79 per change, or from $29.32 to $25.60 (12.7%) at similar change sizes. The 95% interval for that saving runs from −$9.35 to +$19.33 per change, so it isn’t statistically significant. The model predicted a rise from $25.37 to $27.87. Counting a combined repair as two fixes, fixes per change went from 4.42 to 4.47 and the cost per fix from $4.20 to $2.93. Active review minutes weren’t recorded; waiting for review is part of the measured time.</p>
+</details>
+
+<details>
+  <summary>3. Model results and cost</summary>
+  <p id="results-note">Modeled time and cost per change: the usual order takes 742 minutes and $42.97; moving tests ahead of human review, 637 minutes and $36.61; the best order without overlap, 627 minutes; the fastest action, 581 minutes; the cheapest action costs $36.44. The 581 minutes uses recorded check durations. Depending on how durations combine when checks overlap, it lies between 573 and 627 minutes.</p>
+  <p>Agent usage is priced at $4 per million input tokens, $0.20 per million cached input tokens and $20 per million output tokens. Human review is priced at an assumed 4.3 active minutes at $100 an hour. Waiting costs nothing.</p>
+  <p id="reviewer-cost-note">The fastest action costs $39.54 against $42.97, 7.98% less, or 9.07% less with measured test CPU costs, assuming the reviewer spends no time on withdrawn requests. Human reviews fall from 2.33 to 1.45 per change. The 2.3-minute break-even uses the measured test CPU costs. Requesting human review only after the tests and agent review pass takes 617 modeled minutes against 581.</p>
+</details>
+
+<details>
+  <summary>4. Sensitivity</summary>
+  <p id="sensitivity-note">Each row raises one probability by one percentage point, scales the other outcomes of that step down proportionally and recalculates the time for the fastest action. The rows are separate scenarios and don’t add up. The fastest action stays the same in every row and at every point of the sweep.</p>
+  <p id="first-pass-note">The 6% first-pass rate is 2 of 34 changes delivered 11–17 November 2026 that passed all checks without being sent back.</p>
+  <p id="repair-sweep-note">The sweep varies test-repair success for code that would otherwise pass both reviews. The first step spans 11.2 percentage points and the others 10. The 100% point is a theoretical limit.</p>
+</details>
+
+<details>
+  <summary>5. Inputs for your own model</summary>
+  <p id="inputs-note">For each check, you need how often it passes, fails or flakes, and how long it takes. For each repair, you need how often it succeeds and which checks it sends the change back through. You also need what each step costs. Here, integration tests averaged 6.1 minutes on 130 failed runs and 9.1 minutes on 117 passes, and 6 of 123 runs failed on revisions that also passed without a code change. Some repair probabilities are estimated rather than observed.</p>
+</details>
+
+</footer>
+<p class="author"><a href="https://www.linkedin.com/in/magnus-ekdahl-0311402b">Magnus Ekdahl</a> builds <a href="https://github.com/oxtan-maker/parallix">Parallix</a> and writes about engineering with coding agents.</p>
+</article>
+</main>
+</body>
+</html>

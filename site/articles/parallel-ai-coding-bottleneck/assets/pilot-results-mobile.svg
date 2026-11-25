@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<svg width="288pt" height="765.1pt" viewBox="0 0 288 765.1" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" aria-labelledby="title desc">
+<title id="title">Predicted and measured effect of the fastest action</title>
+<desc id="desc">The usual order is 100 percent. Time from implementation to team review: the model predicted 78.3 percent; measured, it was 84.3 percent with waits and stalls removed and 50.3 percent as recorded. Agent and test spending per change: the model predicted 109.9 percent; measured at similar change sizes with stall recovery removed, it was 87.3 percent, and 54.3 percent as recorded. The spending difference is not statistically clear. Spending excludes human review.</desc>
+ <defs><style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style></defs>
+ <rect x="0" y="0" width="288" height="765.1" style="fill: #faf8f3"/>
+ <text style="font-size: 12px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="29.277">Usual order = 100%</text>
+ <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="69.120">Implementation to team review</text>
+ <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #24604f" x="17.280" y="105.520">15.7% less time</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="125.120">Model predicted 21.7% less</text>
+ <path d="M 17.280 310.621 L 17.280 159.920 M 110.280 310.621 L 110.280 159.920 M 203.280 310.621 L 203.280 159.920" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="17.280" y="329.521">0%</text>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="110.280" y="329.521">50%</text>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="203.280" y="329.521">100%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="161.120">Usual order</text>
+ <rect x="17.280" y="167.820" width="186.000" height="11.11" style="fill: #919e94"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="207.280" y="176.730">100%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="204.517">Model prediction</text>
+ <rect x="17.280" y="211.217" width="145.638" height="11.11" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="166.918" y="220.127">78.3%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="247.914">Measured, waits and stalls removed</text>
+ <rect x="17.280" y="254.614" width="156.798" height="11.11" style="fill: #a8692c"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="178.078" y="263.524">84.3%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="291.311">Measured, as recorded</text>
+ <rect x="17.280" y="298.011" width="93.558" height="11.11" style="fill: #d2a36a"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="114.838" y="306.921">50.3%</text>
+ <text style="font-weight: 700; font-size: 13px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="381.521">Agent and test spending</text>
+ <text style="font-weight: 700; font-size: 18px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #24604f" x="17.280" y="417.921">No rise in spending</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="437.521">Model predicted 9.9% more</text>
+ <path d="M 17.280 623.022 L 17.280 472.321 M 110.280 623.022 L 110.280 472.321 M 203.280 623.022 L 203.280 472.321" style="fill: none; stroke: #c7ccc3; stroke-width: 0.65"/>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="17.280" y="641.922">0%</text>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="110.280" y="641.922">50%</text>
+ <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: middle; fill: #535e57" x="203.280" y="641.922">100%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="473.521">Usual order</text>
+ <rect x="17.280" y="480.221" width="186.000" height="11.11" style="fill: #919e94"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="207.280" y="489.131">100%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="516.918">Model prediction</text>
+ <rect x="17.280" y="523.618" width="204.414" height="11.11" style="fill: #24604f"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="225.694" y="532.528">109.9%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="560.315">Measured, stalls removed</text>
+ <rect x="17.280" y="567.015" width="162.378" height="11.11" style="fill: #a8692c"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="183.658" y="575.925">87.3%</text>
+ <text style="font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="17.280" y="603.712">Measured, as recorded</text>
+ <rect x="17.280" y="610.412" width="100.998" height="11.11" style="fill: #d2a36a"/>
+ <text style="font-weight: 700; font-size: 11.5px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #252b2a" x="122.278" y="619.322">54.3%</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="673.922">Model: the fastest action.</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="687.122">Measured: 24 changes against 32.</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="700.322">Stalls-removed spending is compared at</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="713.522">similar change sizes. The recorded time</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="726.722">reduction is statistically significant;</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="739.922">the spending difference is not.</text>
+ <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', sans-serif; text-anchor: start; fill: #535e57" x="17.280" y="753.122">Spending excludes human review.</text>
+</svg>
